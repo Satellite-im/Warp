@@ -1,0 +1,12 @@
+# Runtime Config Options
+
+debug = true               # Enable verbose logging
+
+[httpapi]
+enabled = false             # Enable HTTP API
+
+# Compilation Config Options
+
+[mod]
+filesystem = "disk"        # Which filesystem implementation to use
+cacher = "flatfile"        # Which cacher implementation to use
