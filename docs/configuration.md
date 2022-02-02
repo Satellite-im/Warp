@@ -5,6 +5,8 @@ Wormhole allows you to pick and choose how it operates. Because of how it's buil
 
 #### Example Configuration
 
+A configuration file will be generated for you automatically when you first run the project. If API keys are required for the modules you've chosen, the application will stop and ask you to fill them in. Wormhole does not require any API keys by default, however some module implementations might.
+
 ```toml
 # Runtime Config Options
 

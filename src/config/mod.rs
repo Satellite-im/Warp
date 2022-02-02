@@ -1,17 +1,16 @@
-use serde::{Deserialize};
+use serde::{Deserialize}; // https://docs.serde.rs/serde/
+
 
 // Acceptable module implementations for the FileSystem
 #[derive(Deserialize)]
-#[serde(rename_all="lowercase")]
 pub enum FileSystem {
-  Disk,
+  DISK,
 }
 
 // Acceptable module implementations for the Cache
 #[derive(Deserialize)]
-#[serde(rename_all="lowercase")]
 pub enum PocketDimension {
-  Flatfile
+  FLATFILE,
 }
 
 /// Represents options related to the REST API
