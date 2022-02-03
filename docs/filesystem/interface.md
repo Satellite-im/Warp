@@ -1,1 +1,3 @@
 # FileSystem Interface
+
+The FileSystem Interface is in charge of keeping track of all directories and files on the ecosystem. In addition it sends off the request to the module implementation to upload, clone, and delete files. The reasoning is that if we build a file structure in our service we do not need to worry about using one of the (very few) protocols which actually neatly keep track of files. Instead we can simply expect a location hash, or some other way to fetch the file while Warp does all the leg work for tracking and organazing the files. 
