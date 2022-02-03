@@ -1,5 +1,7 @@
-use serde::{Deserialize}; // https://docs.serde.rs/serde/
+pub mod error;
 
+use serde::Deserialize; // https://docs.serde.rs/serde/
+use crate::error::Error;
 
 // Acceptable module implementations for the FileSystem
 #[derive(Deserialize)]
@@ -39,8 +41,8 @@ pub struct Config {
 /// ```
 /// let cfg = warp_configuration::get().unwrap();
 /// ```
-pub fn get() -> Result<Config, Box<dyn std::error::Error>> {
+pub fn get() -> Result<Config, Error> {
     let local_config: String = std::fs::read_to_string("./Warp.toml")?;
-    let config: Config = toml::from_str(&local_config).unwrap();
+    let config: Config = toml::from_str(&local_config)?;
     return Ok(config);
 }
