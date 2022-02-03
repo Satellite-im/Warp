@@ -9,4 +9,6 @@ pub enum Error {
     TomlSerializeError(#[from] toml::ser::Error),
     #[error("{0}")]
     IoError(#[from] std::io::Error),
+    #[error("Configuration cannot be found or does not exist")]
+    ConfigNotFound
 }
