@@ -65,13 +65,13 @@ PocketDimension::get(Module::MESSAGING)::where(key: String, value: String, modif
 
 The `modifier` can be one of the following:
 
-**Filter::greater** - Where the `key` is greater than the `value`.
+**`Filter::GREATER`** - Where the `key` is greater than the `value`.
 
-**Filter::less** - Where the `key` is less than the `value`.
+**`Filter::LESS`** - Where the `key` is less than the `value`.
 
-**Filter::Equals** - Where the `key` equals the `value`.
+**`Filter::EQUALS`** - Where the `key` equals the `value`.
 
-**Filter::Not** - Where the `key` does not equal the `value`.
+**`Filter::NOT`** - Where the `key` does not equal the `value`.
 
 
 #### Query Chaining
