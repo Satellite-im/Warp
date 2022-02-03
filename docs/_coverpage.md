@@ -1,6 +1,6 @@
 <!-- _coverpage.md -->
 
-![logo](_media/Warp.png)
+![logo](_media/warp.png)
 
 # Warp <small>docs</small>
 
