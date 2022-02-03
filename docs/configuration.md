@@ -1,11 +1,11 @@
-## Configuring Wormhole
+## Configuring Warp
 
-Wormhole allows you to pick and choose how it operates. Because of how it's built you have many options on how it operates behind the scenes, from choosing which protocol to run on, to if you'd like to expose a local API server.
+Warp allows you to pick and choose how it operates. Because of how it's built you have many options on how it operates behind the scenes, from choosing which protocol to run on, to if you'd like to expose a local API server.
 
 
 #### Example Configuration
 
-A configuration file will be generated for you automatically when you first run the project. If API keys are required for the modules you've chosen, the application will stop and ask you to fill them in. Wormhole does not require any API keys by default, however some module implementations might.
+A configuration file will be generated for you automatically when you first run the project. If API keys are required for the modules you've chosen, the application will stop and ask you to fill them in. Warp does not require any API keys by default, however some module implementations might.
 
 ```toml
 # Runtime Config Options

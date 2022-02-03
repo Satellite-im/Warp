@@ -1,3 +1,3 @@
 # Constellation (FileSystem Module)
 
-The Constellation keeps track of files and folders in Wormhole.
+The Constellation keeps track of files and folders in Warp.

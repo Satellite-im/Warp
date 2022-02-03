@@ -1,8 +1,8 @@
 <!-- _coverpage.md -->
 
-![logo](_media/wormhole.png)
+![logo](_media/Warp.png)
 
-# Wormhole <small>docs</small>
+# Warp <small>docs</small>
 
 > Communicate freely and securely.
 
@@ -11,7 +11,7 @@
 - Distributed Encrypted Data
 - Run Anywhere (Web, Mobile, Metaverse, Toasters Probably)
 
-[Get Started](#Wormhole)
+[Get Started](#Warp)
 
 
 <!-- background color -->

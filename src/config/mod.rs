@@ -25,7 +25,7 @@ pub struct ModuleConfig {
   pub pocket_dimension: PocketDimension,
   pub file_system: FileSystem,
 }
-/// Represents the global config for Wormhole
+/// Represents the global config for Warp
 #[derive(Deserialize)]
 pub struct Config { 
   pub debug: bool,
@@ -33,7 +33,7 @@ pub struct Config {
   pub modules: ModuleConfig
 }
 
-/// Returns the parsed TOML config file for Wormhole
+/// Returns the parsed TOML config file for Warp
 /// # Examples
 ///
 /// ```
@@ -41,7 +41,7 @@ pub struct Config {
 /// let cfg = config::get().unwrap();
 /// ```
 pub fn get() -> Result<Config, Box<dyn std::error::Error>> {
-  let local_config: String = std::fs::read_to_string("./Wormhole.toml")?;
+  let local_config: String = std::fs::read_to_string("./Warp.toml")?;
   let config: Config = toml::from_str(&local_config).unwrap();
   return Ok(config);
 }
