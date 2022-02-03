@@ -12,9 +12,10 @@
   - [Interface](cacher/interface.md)
 - **Constellation (FS)**
   - [Overview](filesystem/overview.md)
-  - [Item](filesystem/interface.md)
-  - [File](filesystem/interface.md)
-  - [Folder](filesystem/interface.md)
+  - [Item](filesystem/item.md)
+  - [File](filesystem/file.md)
+  - [Folder](filesystem/folder.md)
+  - [Constellation](filesystem/filesystem.md)
 - **Mulit Pass (Identity)**
   - [Overview](identity/overview.md)
   - [Interface](identity/interface.md)

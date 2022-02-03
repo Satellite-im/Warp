@@ -1,5 +1,7 @@
 ## Configuring Warp
 
+**Lives At**: [Warp/warp-configuration](https://github.com/Satellite-im/Warp/tree/main/warp-configuration)
+
 Warp allows you to pick and choose how it operates. Because of how it's built you have many options on how it operates behind the scenes, from choosing which protocol to run on, to if you'd like to expose a local API server.
 
 
