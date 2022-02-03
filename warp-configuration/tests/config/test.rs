@@ -1,8 +1,7 @@
-pub mod config;
 
 #[cfg(test)]
 mod tests {
-  let cfg = config::get().unwrap();
+  let cfg = warp_configuration::get().unwrap();
 
   #[test]
   fn loads() {
