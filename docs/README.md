@@ -1,6 +1,8 @@
 # Warp
 
-Interface Driven Distributed Data Service
+Interface Driven Distributed Data Service.
+
+What should be clear if you take nothing else from this documentation... The aim of Warp, is to enable us to run the core tech requirements for Satellite without relying on any specific piece of tech behind the scenes, besides Warp. Meaning we can swap any Web3.0 tech for Web2.0 tech, evolve to WebX.0 and beyond. This should allow our users to chose how they want to run Satellite and give them true freedom to make their own decisions.
 
 #### Overview
 

@@ -11,7 +11,7 @@ pub struct ItemMeta {
 
 pub trait Item for ItemMeta {
   fn path(&self) -> String;                                          // Location of item inside the FileSystem
-  fn clone(&self) -> Boolean;                                        // Create a carbon copy, but with a new ID
+  fn clone(&self) -> Item;                                           // Create a carbon copy, but with a new ID
   fn set_name(&mut self, name: String) -> Result<String, Error>;     // Updates the name of the item
   fn set_parent(&mut self, parent: Directory) -> Result<(), Error>;  // Update the parent, effectivley moving the item
 }

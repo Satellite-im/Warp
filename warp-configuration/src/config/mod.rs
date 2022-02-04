@@ -1,13 +1,13 @@
 use serde::{Deserialize}; // https://docs.serde.rs/serde/
 
 
-// Acceptable module implementations for the FileSystem
+/// Acceptable module implementations for the FileSystem
 #[derive(Deserialize)]
 pub enum FileSystem {
   DISK,
 }
 
-// Acceptable module implementations for the Cache
+/// Acceptable module implementations for the Cache
 #[derive(Deserialize)]
 pub enum PocketDimension {
   FLATFILE,
@@ -25,6 +25,7 @@ pub struct ModuleConfig {
   pub pocket_dimension: PocketDimension,
   pub file_system: FileSystem,
 }
+
 /// Represents the global config for Warp
 #[derive(Deserialize)]
 pub struct Config { 
