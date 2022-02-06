@@ -4,7 +4,7 @@ use crate::directory::{Directory, DirectoryType};
 
 use crate::constellation::{Constellation, ConstellationVersion};
 
-/// `SimpleFileSystem
+/// `DummyFileSystem` is an example of how `Constellation` can be used and implemented
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DummyFileSystem {
     version: ConstellationVersion,
