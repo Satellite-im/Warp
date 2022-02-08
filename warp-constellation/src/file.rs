@@ -14,7 +14,7 @@ pub enum FileType {
     Archive
 }
 
-
+/// `File` represents the files uploaded to the FileSystem (`Constellation`).
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub struct File {
     #[serde(flatten)]

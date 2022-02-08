@@ -17,6 +17,7 @@ impl Default for DirectoryType {
     }
 }
 
+/// `Directory` handles folders and its contents.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct Directory {
     #[serde(flatten)]
