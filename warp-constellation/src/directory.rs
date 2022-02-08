@@ -179,8 +179,7 @@ impl Directory {
     pub fn get_child(&self, child_name: &str) -> Result<&Item, Error> {
         if !self.has_child(child_name) { return Err(Error::Other); }
         let index = self.get_child_index(child_name)?;
-        let child = self.children.get(index).ok_or(Error::Other)?;
-        Ok(child)
+        self.children.get(index).ok_or(Error::Other)
     }
 
     /// Used to remove the child within a `Directory`
@@ -202,7 +201,6 @@ impl Directory {
     pub fn remove_child(&mut self, child_name: &str) -> Result<Item, Error> {
         if !self.has_child(child_name) { return Err(Error::Other); }
         let index = self.get_child_index(child_name)?;
-        let item = self.children.remove(index);
-        Ok(item)
+        Ok(self.children.remove(index))
     }
 }
