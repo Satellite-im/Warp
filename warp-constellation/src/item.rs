@@ -44,8 +44,9 @@ pub enum Item {
 ///
 /// ```
 ///     use warp_constellation::{file::File, item::Item};
-///
-///     let _ = Item::from(File::new("test.txt", "", ""));
+///     let file = File::new("test.txt", "", "");
+///     let item = Item::from(file.clone());
+///     assert_eq!(item.name(), file.metadata.name.as_str());
 /// ```
 impl From<File> for Item {
     fn from(file: File) -> Self {
@@ -59,8 +60,9 @@ impl From<File> for Item {
 ///
 /// ```
 ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
-///
-///     let _ = Item::from(Directory::new("Test Directory", DirectoryType::Default));
+///     let dir = Directory::new("Test Directory", DirectoryType::Default);
+///     let item = Item::from(dir.clone());
+///     assert_eq!(item.name(), dir.metadata.name.as_str());
 /// ```
 impl From<Directory> for Item {
     fn from(directory: Directory) -> Self {

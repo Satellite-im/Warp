@@ -52,7 +52,9 @@ impl File {
     /// ```
     /// use warp_constellation::file::File;
     ///
-    /// let _ = File::new("test.txt", "test file", "");
+    /// let file = File::new("test.txt", "test file", "");
+    ///
+    /// assert_eq!(file.metadata.name, String::from("test.txt"));
     /// ```
     pub fn new(name: &str, description: &str, hash: &str) -> File {
         let mut file = File::default();
