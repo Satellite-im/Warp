@@ -49,7 +49,7 @@ impl File {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```
     /// use warp_constellation::file::File;
     ///
     /// let _ = File::new("test.txt", "test file", "");
@@ -69,7 +69,7 @@ impl File {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```
     /// use warp_constellation::{file::File, item::Item};
     ///
     /// let mut file = File::new("test.txt", "test file", "");

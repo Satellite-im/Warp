@@ -42,7 +42,7 @@ pub enum Item {
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```
 ///     use warp_constellation::{file::File, item::Item};
 ///
 ///     let _ = Item::from(File::new("test.txt", "", ""));
@@ -57,7 +57,7 @@ impl From<File> for Item {
 ///
 /// #Examples
 ///
-/// ```no_run
+/// ```
 ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
 ///
 ///     let _ = Item::from(Directory::new("Test Directory", DirectoryType::Default));

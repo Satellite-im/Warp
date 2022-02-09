@@ -79,7 +79,7 @@ impl Directory {
     ///
     /// #Examples
     ///
-    /// ```no_run
+    /// ```
     ///     use warp_constellation::{directory::{Directory, DirectoryType}};
     ///
     ///     let _ = Directory::new("Test Directory", DirectoryType::Default);
@@ -98,7 +98,7 @@ impl Directory {
     ///
     /// #Examples
     ///
-    /// ```no_run
+    /// ```
     ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
     ///
     ///     let mut root = Directory::new("Test Directory", DirectoryType::Default);
@@ -118,7 +118,7 @@ impl Directory {
     ///
     /// #Examples
     ///
-    /// ```no_run
+    /// ```
     ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
     ///
     ///     let mut root = Directory::new("Test Directory", DirectoryType::Default);
@@ -141,7 +141,7 @@ impl Directory {
     ///
     /// #Examples
     ///
-    /// ```no_run
+    /// ```
     ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
     ///     use warp_constellation::error::Error;
     ///
@@ -163,7 +163,7 @@ impl Directory {
     ///
     /// #Examples
     ///
-    /// ```no_run
+    /// ```
     ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
     ///     use warp_constellation::error::Error;
     ///
@@ -184,7 +184,7 @@ impl Directory {
     ///
     /// #Examples
     ///
-    /// ```no_run
+    /// ```
     ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item, file::File};
     ///     use warp_constellation::error::Error;
     ///
@@ -219,7 +219,7 @@ impl Directory {
     ///
     /// #Examples
     ///
-    /// ```no_run
+    /// ```
     ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
     ///     use warp_constellation::error::Error;
     ///
@@ -245,7 +245,7 @@ impl Directory {
     ///
     /// #Examples
     ///
-    /// ```no_run
+    /// ```
     ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
     ///     use warp_constellation::error::Error;
     ///
