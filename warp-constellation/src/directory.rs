@@ -150,8 +150,8 @@ impl Directory {
     ///     let sub2 = Directory::new("Sub2 Directory", DirectoryType::Default);
     ///     root.add_child(&Item::from(sub1)).unwrap();
     ///     root.add_child(&Item::from(sub2)).unwrap();
-    ///     assert_eq!(root.get_child_index("Sub1 Directory").unwrap(), 1);
-    ///     assert_eq!(root.get_child_index("Sub2 Directory").unwrap(), 2);
+    ///     assert_eq!(root.get_child_index("Sub1 Directory").unwrap(), 0);
+    ///     assert_eq!(root.get_child_index("Sub2 Directory").unwrap(), 1);
     ///     assert_eq!(root.get_child_index("Sub3 Directory").unwrap_err(), Error::ArrayPositionNotFound);
     ///
     /// ```
