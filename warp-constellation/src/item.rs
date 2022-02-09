@@ -2,6 +2,7 @@ use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 
 use crate::directory::Directory;
+use crate::error::Error;
 use crate::file::File;
 
 /// A object to handle the metadata of `File` or `Directory`
@@ -103,6 +104,38 @@ impl Item {
                 }
                 size
             }
+        }
+    }
+
+    /// Convert `Item` to `Directory`
+    pub fn get_directory(&self) -> Result<&Directory, Error> {
+        match self {
+            Item::File(_) => Err(Error::InvalidConversion),
+            Item::Directory(directory) => Ok(directory)
+        }
+    }
+
+    /// Convert `Item` to `File`
+    pub fn get_file(&self) -> Result<&File, Error> {
+        match self {
+            Item::File(file) => Ok(file),
+            Item::Directory(_) => Err(Error::InvalidConversion)
+        }
+    }
+
+    /// Convert `Item` to `Directory`
+    pub fn get_directory_mut(&mut self) -> Result<&mut Directory, Error> {
+        match self {
+            Item::File(_) => Err(Error::InvalidConversion),
+            Item::Directory(directory) => Ok(directory)
+        }
+    }
+
+    /// Convert `Item` to `File`
+    pub fn get_file_mut(&mut self) -> Result<&mut File, Error> {
+        match self {
+            Item::File(file) => Ok(file),
+            Item::Directory(_) => Err(Error::InvalidConversion)
         }
     }
 
