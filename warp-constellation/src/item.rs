@@ -107,6 +107,19 @@ impl Item {
         }
     }
 
+    /// Rename the name of `Item`
+    pub fn rename(&mut self, name: &str) -> Result<(), Error> {
+        let name = name.trim();
+        if self.name() == name { return Err(Error::DuplicateName); }
+
+        match self {
+            Item::File(file) => (*file).metadata.name = name.to_string(),
+            Item::Directory(directory) => (*directory).metadata.name = name.to_string()
+        };
+
+        Ok(())
+    }
+
     /// Convert `Item` to `Directory`
     pub fn get_directory(&self) -> Result<&Directory, Error> {
         match self {

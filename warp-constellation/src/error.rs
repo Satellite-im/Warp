@@ -24,6 +24,10 @@ pub enum Error {
     DirParentParadox,
     #[error("Directory cannot be found or is invalid")]
     DirInvalid,
+    #[error("Item cannot be found or is invalid")]
+    ItemInvalid,
+    #[error("Attempted conversion is invalid")]
+    InvalidConversion,
     #[error("Cannot find position of array content.")]
     ArrayPositionNotFound,
     #[error("Regex Error: {0}")]

@@ -108,12 +108,10 @@ impl Directory {
     ///     assert_eq!(root.has_child("Sub Directory"), true);
     /// ```
     pub fn has_child(&self, child_name: &str) -> bool {
-        for item in self.children.iter() {
-            if item.name() == child_name {
-                return true;
-            }
-        }
-        return false;
+        self.children
+            .iter()
+            .filter(|item| item.name() == child_name)
+            .collect::<Vec<_>>().len() == 1
     }
 
     /// Add an item to the `Directory`
@@ -177,9 +175,70 @@ impl Directory {
     ///     assert_eq!(child.name(), "Sub Directory");
     /// ```
     pub fn get_child(&self, child_name: &str) -> Result<&Item, Error> {
-        if !self.has_child(child_name) { return Err(Error::Other); }
+        if !self.has_child(child_name) { return Err(Error::ItemInvalid); }
         let index = self.get_child_index(child_name)?;
-        self.children.get(index).ok_or(Error::Other)
+        self.children.get(index).ok_or(Error::ItemInvalid)
+    }
+
+    /// Used to get the mutable child within a `Directory`
+    ///
+    /// #Examples
+    ///
+    /// ```no_run
+    ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item, file::File};
+    ///     use warp_constellation::error::Error;
+    ///
+    ///
+    ///     let mut root = Directory::new("Test Directory", DirectoryType::Default);
+    ///     let sub = Directory::new("Sub Directory", DirectoryType::Default);
+    ///     root.add_child(&Item::from(sub)).unwrap();
+    ///     assert_eq!(root.has_child("Sub Directory"), true);
+    ///     let child = root.get_child("Sub Directory").unwrap();
+    ///     assert_eq!(child.name(), "Sub Directory");
+    ///
+    ///     if let Ok(item) = root.get_child_mut("Sub Directory") {
+    ///         let mut dir = item.get_directory_mut().unwrap();
+    ///         let mut file = File::new("testFile.jpg", "Test file description", "0x0aef");
+    ///         dir.add_child(&Item::from(file)).unwrap();
+    ///         *item = Item::from(dir.clone())
+    ///     }
+    ///
+    ///     let dir = root.get_child("Sub Directory").unwrap().get_directory().unwrap();
+    ///
+    ///     assert_eq!(dir.has_child("testFile.jpg"), true);
+    ///     assert_eq!(dir.has_child("testFile.png"), false);
+    ///
+    /// ```
+    pub fn get_child_mut(&mut self, child_name: &str) -> Result<&mut Item, Error> {
+        if !self.has_child(child_name) { return Err(Error::ItemInvalid); }
+        let index = self.get_child_index(child_name)?;
+        self.children.get_mut(index).ok_or(Error::ItemInvalid)
+    }
+
+    /// Used to rename a child within a `Directory`
+    ///
+    /// #Examples
+    ///
+    /// ```no_run
+    ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
+    ///     use warp_constellation::error::Error;
+    ///
+    ///
+    ///     let mut root = Directory::new("Test Directory", DirectoryType::Default);
+    ///     let sub = Directory::new("Sub Directory", DirectoryType::Default);
+    ///     root.add_child(&Item::from(sub)).unwrap();
+    ///     assert_eq!(root.has_child("Sub Directory"), true);
+    ///
+    ///
+    /// ```
+    pub fn rename_child(&mut self, current_name: &str, new_name: &str) -> Result<(), Error> {
+        let current_name = current_name.trim();
+        let new_name = new_name.trim();
+
+        if current_name == new_name { return Err(Error::DuplicateName); }
+
+        self.get_child_mut(current_name)?
+            .rename(new_name)
     }
 
     /// Used to remove the child within a `Directory`

@@ -44,6 +44,11 @@ pub trait Constellation {
         self.current_directory().get_child(name)
     }
 
+    /// Used to get a mutable `Item` from the current directory
+    fn get_child_mut(&mut self, name: &str) -> Result<&mut Item, Error> {
+        self.current_directory_mut().get_child_mut(name)
+    }
+
     /// Checks to see if the current directory has a `Item`
     fn has_child(&self, child_name: &str) -> bool {
         self.current_directory().has_child(child_name)
@@ -55,27 +60,8 @@ pub trait Constellation {
     }
 
     /// Used to rename a child within current directory.
-    fn rename_child(&mut self, current_name: &str, new_name: &str) -> Result<Item, Error> {
-        let current_name = current_name.trim();
-        let new_name = new_name.trim();
-
-        if current_name == new_name { return Err(Error::DuplicateName); }
-
-        let item = match self.get_child(current_name)?.clone() {
-            Item::File(mut file) => {
-                file.metadata.name = new_name.to_string();
-                Item::from(file)
-            },
-            Item::Directory(mut directory) => {
-                directory.metadata.name = new_name.to_string();
-                Item::from(directory)
-            }
-        };
-
-        self.remove_child(current_name)?;
-        self.add_child(&item)?;
-
-        Ok(item)
+    fn rename_child(&mut self, current_name: &str, new_name: &str) -> Result<(), Error> {
+        self.current_directory_mut().rename_child(current_name, new_name)
     }
 
     fn open_directory(&self, _: &str) -> Result<Directory, Error> { unimplemented!() }

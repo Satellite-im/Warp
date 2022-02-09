@@ -11,7 +11,7 @@ repository = "https://github.com/Satellite-im/Warp"
 thiserror = "1.0"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 serde = { version = "1.0", features = ["derive"], optional = true }
-serde_json = { version = "1.0.78", optional = true }
+serde_json = { version = "1.0", optional = true }
 borsh = { version = "0.9", optional = true }
 regex = "1.5.4"
 chrono = { version = "0.4", features = ["serde"] }
