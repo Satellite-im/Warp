@@ -108,15 +108,36 @@ impl From<(i16, i16, i16)> for ConstellationVersion {
 impl ConstellationVersion {
 
     pub fn major(&self) -> i16 {
-        unimplemented!()
+        match self.0.contains(".") {
+            true => self.0
+                .split(".")
+                .filter_map(|v| v.parse().ok())
+                .collect::<Vec<_>>()
+                .get(0)
+                .map(|v| *v)
+                .unwrap_or_default(),
+            false => self.0.parse().unwrap_or_default()
+        }
     }
 
     pub fn minor(&self) -> i16 {
-        unimplemented!()
+        self.0
+            .split(".")
+            .filter_map(|v| v.parse().ok())
+            .collect::<Vec<_>>()
+            .get(1)
+            .map(|v| *v)
+            .unwrap_or_default()
     }
 
     pub fn patch(&self) -> i16 {
-        unimplemented!()
+        self.0
+            .split(".")
+            .filter_map(|v| v.parse().ok())
+            .collect::<Vec<_>>()
+            .get(2)
+            .map(|v| *v)
+            .unwrap_or_default()
     }
 
 }
