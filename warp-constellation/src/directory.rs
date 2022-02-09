@@ -126,7 +126,7 @@ impl Directory {
     ///     root.add_child(&Item::Directory(sub)).unwrap();
     /// ```
     pub fn add_child(&mut self, child: &Item) -> Result<(), Error> {
-        //TODO: Implement check to make sure that the Directory isnt being added to its parent
+        //TODO: Implement check to make sure that the Directory isnt being added to itself
 
         if self.has_child(child.name()) { return Err(Error::DuplicateName) }
 
@@ -301,5 +301,40 @@ impl Directory {
         self.get_child_mut(dst)?
             .get_directory_mut()?
             .add_child(&item)
+    }
+
+    /// Used to find an item throughout the `Directory` and its children
+    ///
+    /// #Examples
+    ///
+    /// ```
+    ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
+    ///     use warp_constellation::error::Error;
+    ///
+    ///     let mut root = Directory::new("Test Directory", DirectoryType::Default);
+    ///     let mut sub0 = Directory::new("Sub Directory 1", DirectoryType::Default);
+    ///     let sub1 = Directory::new("Sub Directory 2", DirectoryType::Default);
+    ///     sub0.add_child(&Item::from(sub1)).unwrap();
+    ///     root.add_child(&Item::from(sub0)).unwrap();
+    ///
+    ///     assert_eq!(root.has_child("Sub Directory 1"), true);
+    ///
+    ///     let item = root.find_item("Sub Directory 2").unwrap();
+    ///     assert_eq!(item.name(), "Sub Directory 2");
+    /// ```
+    pub fn find_item(&self, item_name: &str) -> Result<&Item, Error> {
+        for item in self.children.iter() {
+            if item.name().eq(item_name) {
+                return Ok(item);
+            }
+            if let Item::Directory(directory) = item {
+                match directory.find_item(item_name) {
+                    Ok(item) => return Ok(item),
+                    //Since we know the error will be `Error::ItemInvalid`, we can continue through the iteration until it ends
+                    Err(_) => continue
+                }
+            }
+        }
+        return Err(Error::ItemInvalid);
     }
 }
