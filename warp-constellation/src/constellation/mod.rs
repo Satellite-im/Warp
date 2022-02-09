@@ -64,6 +64,11 @@ pub trait Constellation {
         self.current_directory_mut().rename_child(current_name, new_name)
     }
 
+    /// Used to move a child from its current directory to another.
+    fn move_item_to(&mut self, child: &str, dst: &str) -> Result<(), Error> {
+        self.current_directory_mut().move_item_to(child, dst)
+    }
+
     fn open_directory(&self, _: &str) -> Result<Directory, Error> { unimplemented!() }
 
     fn go_back(&self) -> Option<Directory> { unimplemented!() }
@@ -73,8 +78,6 @@ pub trait Constellation {
     fn find_item(&self) { unimplemented!() }
 
     fn find_all_items(&self, _: Directory, _: &str) -> Vec<Item> { unimplemented!() }
-
-    fn move_item_to(&mut self, _: &str, _: Directory) -> Option<Directory> { unimplemented!() }
 
 }
 

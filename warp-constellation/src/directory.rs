@@ -262,4 +262,44 @@ impl Directory {
         let index = self.get_child_index(child_name)?;
         Ok(self.children.remove(index))
     }
+
+    /// Used to move the child to another `Directory`
+    ///
+    /// TODO: Implement directory path to be able to move an `Item` to
+    ///       a `Directory` on that path.
+    ///
+    /// #Examples
+    ///
+    /// ```
+    ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
+    ///     use warp_constellation::error::Error;
+    ///
+    ///     let mut root = Directory::new("Test Directory", DirectoryType::Default);
+    ///     let sub0 = Directory::new("Sub Directory 1", DirectoryType::Default);
+    ///     let sub1 = Directory::new("Sub Directory 2", DirectoryType::Default);
+    ///     root.add_child(&Item::from(sub0)).unwrap();
+    ///     root.add_child(&Item::from(sub1)).unwrap();
+    ///
+    ///     assert_eq!(root.has_child("Sub Directory 1"), true);
+    ///     assert_eq!(root.has_child("Sub Directory 2"), true);
+    ///
+    ///     root.move_item_to("Sub Directory 2", "Sub Directory 1").unwrap();
+    ///
+    ///     assert_ne!(root.has_child("Sub Directory 2"), true);
+    /// ```
+    pub fn move_item_to(&mut self, child: &str, dst: &str) -> Result<(), Error> {
+        let child = child.trim();
+        let dst = dst.trim();
+
+        if self.get_child(dst)?.get_file().is_ok() { return Err(Error::ItemNotDirectory); }
+
+        if self.get_child(dst)?.get_directory()?.has_child(child) { return Err(Error::DuplicateName); }
+
+        let item = self.remove_child(child)?;
+
+        // TODO: Implement check and restore item back to previous directory if there's an error
+        self.get_child_mut(dst)?
+            .get_directory_mut()?
+            .add_child(&item)
+    }
 }

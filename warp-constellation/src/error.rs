@@ -26,6 +26,10 @@ pub enum Error {
     DirInvalid,
     #[error("Item cannot be found or is invalid")]
     ItemInvalid,
+    #[error("Item is not a valid file")]
+    ItemNotFile,
+    #[error("Item is not a valid Directory")]
+    ItemNotDirectory,
     #[error("Attempted conversion is invalid")]
     InvalidConversion,
     #[error("Cannot find position of array content.")]
