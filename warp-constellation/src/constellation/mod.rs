@@ -69,9 +69,14 @@ pub trait Constellation {
         self.current_directory_mut().move_item_to(child, dst)
     }
 
-    /// Used to find an item within the filesystem
+    /// Used to find and return the first found item within the filesystem
     fn find_item(&self, item_name: &str) -> Result<&Item, Error> {
         self.current_directory().find_item(item_name)
+    }
+
+    /// Used to return a list of items across the filesystem
+    fn find_all_items(&self, item_names: &Vec<&str>) -> Vec<&Item> {
+        self.current_directory().find_all_items(item_names)
     }
 
     fn open_directory(&self, _: &str) -> Result<Directory, Error> { unimplemented!() }
@@ -79,8 +84,6 @@ pub trait Constellation {
     fn go_back(&self) -> Option<Directory> { unimplemented!() }
 
     fn go_back_to_directory(&mut self, _: &str) -> Option<Directory> { unimplemented!() }
-
-    fn find_all_items(&self, _: Directory, _: &str) -> Vec<Item> { unimplemented!() }
 
 }
 

@@ -337,4 +337,25 @@ impl Directory {
         }
         return Err(Error::ItemInvalid);
     }
+
+    /// Used to get a search for items listed and return a list of `Item` matching the terms
+    ///
+    /// #Examples
+    ///
+    /// TODO
+    pub fn find_all_items(&self, item_names: &Vec<&str>) -> Vec<&Item> {
+        let mut list = Vec::new();
+        for item in self.children.iter() {
+
+            for name in item_names.iter() {
+                if item.name().contains(name) { list.push(item); }
+            }
+
+            if let Item::Directory(directory) = item {
+                list.extend(directory.find_all_items(item_names));
+            }
+
+        }
+        list
+    }
 }
