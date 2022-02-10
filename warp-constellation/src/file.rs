@@ -67,6 +67,22 @@ impl File {
         file
     }
 
+    /// Set the hash of the file
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use warp_constellation::{file::File, item::Item};
+    ///
+    /// let mut file = File::new("test.txt", "test file", "");
+    /// file.set_hash("0xabcd");
+    ///
+    /// assert_eq!(file.hash.as_str(), "0xabcd");
+    /// ```
+    pub fn set_hash(&mut self, hash: &str) {
+        self.hash = hash.to_string();
+    }
+
     /// Set the size the file
     ///
     /// # Examples

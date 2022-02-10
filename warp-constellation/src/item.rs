@@ -95,17 +95,13 @@ impl Item {
         }
     }
 
-    /// Get size of `Item`
+    /// Get size of `Item`.
+    /// If `Item::File` it will return the size of the `File`.
+    /// If `Item::Directory` it will return the size of all files within the `Directory`, including files located within a sub directory
     pub fn size(&self) -> i64 {
         match self {
             Item::File(file) => file.metadata.size.unwrap_or_default(),
-            Item::Directory(directory) => {
-                let mut size = 0;
-                for item in directory.children.iter() {
-                    size = size + item.size();
-                }
-                size
-            }
+            Item::Directory(directory) => directory.children.iter().map(Item::size).sum()
         }
     }
 
@@ -151,6 +147,25 @@ impl Item {
         match self {
             Item::File(file) => Ok(file),
             Item::Directory(_) => Err(Error::InvalidConversion)
+        }
+    }
+
+    /// Set description of `Item`
+    pub fn set_description(&mut self, desc: &str) {
+        match self {
+            Item::File(file) => file.metadata.description = desc.to_string(),
+            Item::Directory(directory) => directory.metadata.description = desc.to_string()
+        }
+    }
+
+    /// Set size of `Item` if its a `File`
+    pub fn set_size(&mut self, size: i64) -> Result<(), Error>{
+        match self {
+            Item::File(file) => {
+                file.metadata.size = Some(size);
+                Ok(())
+            },
+            Item::Directory(_) => Err(Error::ItemNotFile)
         }
     }
 
