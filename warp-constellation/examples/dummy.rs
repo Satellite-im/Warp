@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use warp_constellation::constellation::Constellation;
+use warp_constellation::constellation::{Constellation, ConstellationVersion};
 use warp_constellation::directory::{Directory, DirectoryType};
 use warp_constellation::file::File;
 use warp_constellation::item::Item;
