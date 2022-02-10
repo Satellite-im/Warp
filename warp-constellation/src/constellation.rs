@@ -77,6 +77,12 @@ pub trait Constellation {
         self.current_directory().find_all_items(item_names)
     }
 
+    /// Use to upload file to the filesystem
+    fn put<R: std::io::Read>(&mut self, _name: &str, _reader: R) -> Result<(), Error> { todo!() }
+
+    /// Use to download a file from the filesystem
+    fn get<W: std::io::Write>(&self, _name: &str, _writer: &mut W) -> Result<(), Error> { todo!() }
+
     fn open_directory(&self, _: &str) -> Result<Directory, Error> { unimplemented!() }
 
     fn go_back(&self) -> Option<Directory> { unimplemented!() }
