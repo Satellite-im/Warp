@@ -2,5 +2,9 @@
 [workspace]
 members = [
     "warp-configuration",
-    "warp-constellation"
+    "warp-constellation",
+    "warp-pocket-dimension",
+    "warp-multipass",
+    "warp-messaging",
+    "warp"
 ]
