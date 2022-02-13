@@ -6,17 +6,7 @@ use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum Error {
-    #[error("Method not implemented.")]
-    MethodMissing,
-    #[error("RFM class is Abstract. It can only be extended")]
-    RfmAbstractOnly,
-    #[error("Item class is Abstract. It can only be extended")]
-    ItemAbstractOnly,
-    #[error("Item name must be a non empty string")]
-    NoEmptyString,
-    #[error("Item name contains invalid symbol")]
-    InvalidSymbol,
-    #[error("Item with name already exists in this directory")]
+    #[error("Item with name already exists in current directory")]
     DuplicateName,
     #[error("Directory cannot contain itself")]
     DirParadox,

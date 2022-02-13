@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::directory::DirectoryPath;
 use crate::item::ItemMeta;
 
 /// `FileType` describes all supported file types.
@@ -20,8 +19,8 @@ pub struct File {
     #[serde(flatten)]
     pub metadata: ItemMeta,
     pub file_type: FileType,
-    #[serde(flatten)]
-    pub parent: Option<DirectoryPath>,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
     pub hash: String,
 }
 
@@ -52,19 +51,31 @@ impl File {
     /// ```
     /// use warp_constellation::file::File;
     ///
-    /// let file = File::new("test.txt", "test file", "");
+    /// let file = File::new("test.txt");
     ///
     /// assert_eq!(file.metadata.name, String::from("test.txt"));
     /// ```
-    pub fn new(name: &str, description: &str, hash: &str) -> File {
+    pub fn new<S: AsRef<str>>(name: S) -> File {
         let mut file = File::default();
-
-        let name = name.trim();
+        let name = name.as_ref().trim();
         if name.len() != 0 { file.metadata.name = name.to_string(); }
-        file.metadata.description = description.to_string();
-        file.hash = hash.to_string();
-
         file
+    }
+
+    /// Set the description of the file
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use warp_constellation::{file::File, item::Item};
+    ///
+    /// let mut file = File::new("test.txt");
+    /// file.set_description("test file");
+    ///
+    /// assert_eq!(file.metadata.description.as_str(), "test file");
+    /// ```
+    pub fn set_description<S: AsRef<str>>(&mut self, desc: S) {
+        self.metadata.description = desc.as_ref().to_string();
     }
 
     /// Set the hash of the file
@@ -74,13 +85,13 @@ impl File {
     /// ```
     /// use warp_constellation::{file::File, item::Item};
     ///
-    /// let mut file = File::new("test.txt", "test file", "");
+    /// let mut file = File::new("test.txt");
     /// file.set_hash("0xabcd");
     ///
     /// assert_eq!(file.hash.as_str(), "0xabcd");
     /// ```
-    pub fn set_hash(&mut self, hash: &str) {
-        self.hash = hash.to_string();
+    pub fn set_hash<S: AsRef<str>>(&mut self, hash: S) {
+        self.hash = hash.as_ref().to_string();
     }
 
     /// Set the size the file
@@ -90,7 +101,7 @@ impl File {
     /// ```
     /// use warp_constellation::{file::File, item::Item};
     ///
-    /// let mut file = File::new("test.txt", "test file", "");
+    /// let mut file = File::new("test.txt");
     /// file.set_size(100000);
     ///
     /// assert_eq!(Item::from(file).size(), 100000);

@@ -44,7 +44,7 @@ pub enum Item {
 ///
 /// ```
 ///     use warp_constellation::{file::File, item::Item};
-///     let file = File::new("test.txt", "", "");
+///     let file = File::new("test.txt");
 ///     let item = Item::from(file.clone());
 ///     assert_eq!(item.name(), file.metadata.name.as_str());
 /// ```
@@ -60,7 +60,7 @@ impl From<File> for Item {
 ///
 /// ```
 ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
-///     let dir = Directory::new("Test Directory", DirectoryType::Default);
+///     let dir = Directory::new("Test Directory");
 ///     let item = Item::from(dir.clone());
 ///     assert_eq!(item.name(), dir.metadata.name.as_str());
 /// ```
@@ -106,10 +106,9 @@ impl Item {
     }
 
     /// Rename the name of `Item`
-    pub fn rename(&mut self, name: &str) -> Result<(), Error> {
-        let name = name.trim();
+    pub fn rename<S: AsRef<str>>(&mut self, name: S) -> Result<(), Error> {
+        let name = name.as_ref().trim();
         if self.name() == name { return Err(Error::DuplicateName); }
-
         match self {
             Item::File(file) => (*file).metadata.name = name.to_string(),
             Item::Directory(directory) => (*directory).metadata.name = name.to_string()
@@ -150,11 +149,27 @@ impl Item {
         }
     }
 
-    /// Set description of `Item`
-    pub fn set_description(&mut self, desc: &str) {
+    /// Check to see if `Item` is `Directory`
+    pub fn is_directory(&self) -> bool {
         match self {
-            Item::File(file) => file.metadata.description = desc.to_string(),
-            Item::Directory(directory) => directory.metadata.description = desc.to_string()
+            Item::File(_) => false,
+            Item::Directory(_) => true
+        }
+    }
+
+    /// Check to see if `Item` is `File`
+    pub fn is_file(&self) -> bool {
+        match self {
+            Item::File(_) => true,
+            Item::Directory(_) => false
+        }
+    }
+
+    /// Set description of `Item`
+    pub fn set_description<S: AsRef<str>>(&mut self, desc: S) {
+        match self {
+            Item::File(file) => file.metadata.description = desc.as_ref().to_string(),
+            Item::Directory(directory) => directory.metadata.description = desc.as_ref().to_string()
         }
     }
 

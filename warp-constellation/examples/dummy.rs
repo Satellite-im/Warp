@@ -1,9 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use warp_constellation::constellation::{Constellation, ConstellationVersion};
-use warp_constellation::directory::{Directory, DirectoryType};
+use warp_constellation::directory::Directory;
 use warp_constellation::file::File;
-use warp_constellation::item::Item;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DummyFileSystem {
@@ -18,8 +17,8 @@ impl Default for DummyFileSystem {
     fn default() -> Self {
         DummyFileSystem {
             version: ConstellationVersion::from((0, 1, 2)),
-            root_directory: Directory::new("root", DirectoryType::Default),
-            index: Directory::new("root", DirectoryType::Default),
+            root_directory: Directory::new("root"),
+            index: Directory::new("root"),
             modified: Utc::now()
         }
     }
@@ -39,6 +38,10 @@ impl Constellation for DummyFileSystem {
         &self.index
     }
 
+    fn root_directory_mut(&mut self) -> &mut Directory {
+        &mut self.index
+    }
+
     fn current_directory(&self) -> &Directory {
         &self.root_directory
     }
@@ -51,18 +54,18 @@ impl Constellation for DummyFileSystem {
 
 fn main() -> Result<(), warp_constellation::error::Error> {
     let mut dummy_fs = DummyFileSystem::default();
-    let mut file = File::new("testFile.png", "Test file description", "0x0aef");
+    let mut file = File::new("testFile.png");
     file.set_size(10000);
 
-    let mut directory = Directory::new("Test Directory", DirectoryType::Default);
-    directory.add_child(&Item::from(file.clone()))?;
+    let mut directory = Directory::new("Test Directory");
+    directory.add_child(file.clone())?;
 
-    let mut new_directory = Directory::new("Test Directory", DirectoryType::Default);
-    new_directory.add_child(&Item::from(file))?;
+    let mut new_directory = Directory::new("Test Directory");
+    new_directory.add_child(file)?;
 
-    directory.add_child(&Item::from(new_directory))?;
+    directory.add_child(new_directory)?;
 
-    dummy_fs.add_child(&Item::from(directory))?;
+    dummy_fs.add_child(directory)?;
 
     Ok(())
 }
