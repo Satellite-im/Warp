@@ -1,6 +1,6 @@
- 
 [workspace]
 members = [
-    "warp-configuration",
-    "warp-constellation"
+  "warp-configuration",
+  "warp-constellation",
+  "utils/warp-hooks",
 ]
