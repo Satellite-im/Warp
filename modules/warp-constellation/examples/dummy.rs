@@ -7,8 +7,6 @@ use warp_constellation::file::File;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DummyFileSystem {
     version: ConstellationVersion,
-    #[serde(skip_serializing)]
-    root_directory: Directory,
     index: Directory,
     modified: DateTime<Utc>
 }
@@ -17,7 +15,6 @@ impl Default for DummyFileSystem {
     fn default() -> Self {
         DummyFileSystem {
             version: ConstellationVersion::from((0, 1, 2)),
-            root_directory: Directory::new("root"),
             index: Directory::new("root"),
             modified: Utc::now()
         }
@@ -40,14 +37,6 @@ impl Constellation for DummyFileSystem {
 
     fn root_directory_mut(&mut self) -> &mut Directory {
         &mut self.index
-    }
-
-    fn current_directory(&self) -> &Directory {
-        &self.root_directory
-    }
-
-    fn current_directory_mut(&mut self) -> &mut Directory {
-        &mut self.root_directory
     }
 
 }
