@@ -82,9 +82,12 @@ pub trait Constellation {
 
     /// Returns a mutable directory from the filesystem
     fn open_directory<S: AsRef<str>>(&mut self, path: S) -> Result<&mut Directory, Error> {
-        self.root_directory_mut()
-            .get_child_mut_by_path(path)
-            .and_then(Item::get_directory_mut)
+        match path.as_ref().trim().is_empty() {
+            false => self.root_directory_mut()
+                .get_child_mut_by_path(path)
+                .and_then(Item::get_directory_mut),
+            true => Ok(self.root_directory_mut())
+        }
     }
 
     /// Use to upload file to the filesystem
