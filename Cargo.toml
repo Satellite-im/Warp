@@ -4,7 +4,8 @@ members = [
   "modules/warp-constellation",
   "modules/warp-pocket-dimension",
   "modules/warp-multipass",
-  "modules/warp-messaging",
+  "modules/warp-raygun",
   "utils/warp-hooks",
+  "utils/warp-data",
   "warp",
 ]
