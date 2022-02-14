@@ -1,5 +1,5 @@
 [package]
-name = "warp-messaging"
+name = "warp-raygun"
 version = "0.1.0"
 description = "TBD"
 # readme = "README.md"
