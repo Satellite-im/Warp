@@ -1,8 +1,0 @@
-debug = true
-
-[http_api]
-enabled = false
-
-[modules]
-pocket_dimension = "flatfile"
-file_system = "disk"
