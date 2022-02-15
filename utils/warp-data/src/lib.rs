@@ -1,5 +1,3 @@
-extern crate warp_module;
-
 use warp_module::Module;
 
 use chrono::{DateTime, Utc};

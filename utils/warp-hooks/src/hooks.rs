@@ -1,6 +1,3 @@
-extern crate warp_module;
-extern crate warp_data;
-
 use std::collections::HashMap;
 
 use crate::error::Error;

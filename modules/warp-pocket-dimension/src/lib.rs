@@ -1,7 +1,5 @@
-extern crate warp_module;
-
 use warp_module::Module;
-use crate::data::DataObject;
+use warp_data::DataObject;
 use crate::error::Error;
 
 pub mod error;

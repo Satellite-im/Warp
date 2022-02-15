@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-warp-module = { version = "0.1.0", path = "../utils/warp-module" }
-warp-data = { version = "0.1.0", path = "../utils/warp-data" }
+warp-module = { version = "0.1.0", path = "../warp-module" }
+warp-data = { version = "0.1.0", path = "../warp-data" }
 
 thiserror = "1.0"
