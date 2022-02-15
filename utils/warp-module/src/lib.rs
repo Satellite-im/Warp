@@ -1,4 +1,5 @@
 use std::fmt;
+use serde::{Deserialize, Serialize};
 
 //
 /// `Messaging` - Allows direct, and multi-user encrypted messaging with ownership rights added so only
@@ -12,7 +13,7 @@ use std::fmt;
 ///            This can include simple things like usernames and status messages, but may also
 ///            include permissions, friends, and more.
 ///
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Module {
     Messaging,
     FileSystem,
@@ -20,6 +21,11 @@ pub enum Module {
     Unknown,
 }
 
+impl Default for Module {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
 
 impl fmt::Display for Module {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
