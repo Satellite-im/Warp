@@ -34,7 +34,7 @@ impl fmt::Display for Module {
         Module::Messaging => write!(f, "MESSAGING"),
         Module::FileSystem => write!(f, "FILESYSTEM"),
         Module::Accounts => write!(f, "ACCOUNTS"),
-        Module::Other(module) => write!(f, "{module}")
+        Module::Other(module) => write!(f, "{module}"),
         Module::Unknown => write!(f, "UNKNOWN"),
       }
   }
