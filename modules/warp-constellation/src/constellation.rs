@@ -30,61 +30,64 @@ pub trait Constellation {
     fn root_directory_mut(&mut self) -> &mut Directory;
 
     /// Get current directory
-    fn current_directory(&self) -> &Directory;
+    fn current_directory(&self) -> &Directory { unimplemented!() }
 
     /// Get a current directory that is mutable.
-    fn current_directory_mut(&mut self) -> &mut Directory;
+    fn current_directory_mut(&mut self) -> &mut Directory { unimplemented!() }
 
     /// Add an `Item` to the current directory
     fn add_child<I: Into<Item>>(&mut self, item: I) -> Result<(), Error> {
-        self.current_directory_mut().add_child(item)
+        self.root_directory_mut().add_child(item)
     }
 
     /// Used to get an `Item` from the current directory
     fn get_child<S: AsRef<str>>(&self, name: S) -> Result<&Item, Error> {
-        self.current_directory().get_child(name)
+        self.root_directory().get_child(name)
     }
 
     /// Used to get a mutable `Item` from the current directory
     fn get_child_mut<S: AsRef<str>>(&mut self, name: S) -> Result<&mut Item, Error> {
-        self.current_directory_mut().get_child_mut(name)
+        self.root_directory_mut().get_child_mut(name)
     }
 
     /// Checks to see if the current directory has a `Item`
     fn has_child<S: AsRef<str>>(&self, child_name: S) -> bool {
-        self.current_directory().has_child(child_name)
+        self.root_directory().has_child(child_name)
     }
 
     /// Used to remove child from within the current directory
     fn remove_child<S: AsRef<str>>(&mut self, child_name: S) -> Result<Item, Error> {
-        self.current_directory_mut().remove_child(child_name)
+        self.root_directory_mut().remove_child(child_name)
     }
 
     /// Used to rename a child within current directory.
     fn rename_child<S: AsRef<str>>(&mut self, current_name: S, new_name: S) -> Result<(), Error> {
-        self.current_directory_mut().rename_child(current_name, new_name)
+        self.root_directory_mut().rename_child(current_name, new_name)
     }
 
     /// Used to move a child from its current directory to another.
     fn move_item_to(&mut self, child: &str, dst: &str) -> Result<(), Error> {
-        self.current_directory_mut().move_item_to(child, dst)
+        self.root_directory_mut().move_item_to(child, dst)
     }
 
     /// Used to find and return the first found item within the filesystem
     fn find_item<S: AsRef<str>>(&self, item_name: S) -> Result<&Item, Error> {
-        self.current_directory().find_item(item_name)
+        self.root_directory().find_item(item_name)
     }
 
     /// Used to return a list of items across the filesystem
     fn find_all_items(&self, item_names: &Vec<&str>) -> Vec<&Item> {
-        self.current_directory().find_all_items(item_names)
+        self.root_directory().find_all_items(item_names)
     }
 
     /// Returns a mutable directory from the filesystem
     fn open_directory<S: AsRef<str>>(&mut self, path: S) -> Result<&mut Directory, Error> {
-        self.root_directory_mut()
-            .get_child_mut_by_path(path)
-            .and_then(Item::get_directory_mut)
+        match path.as_ref().trim().is_empty() {
+            false => self.root_directory_mut()
+                .get_child_mut_by_path(path)
+                .and_then(Item::get_directory_mut),
+            true => Ok(self.root_directory_mut())
+        }
     }
 
     /// Use to upload file to the filesystem
