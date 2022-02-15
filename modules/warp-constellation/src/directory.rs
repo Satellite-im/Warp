@@ -59,7 +59,7 @@ impl Directory {
     pub fn new<S: AsRef<str>>(name: S) -> Self {
         let mut directory = Directory::default();
         let name = name.as_ref().trim();
-        if name.len() >= 1 { directory.metadata.name = name.to_string(); }
+        if !name.is_empty() { directory.metadata.name = name.to_string(); }
         directory
     }
 
@@ -86,7 +86,7 @@ impl Directory {
         self.child_list()
             .iter()
             .filter(|item| item.name() == child_name.as_ref())
-            .collect::<Vec<_>>().len() == 1
+            .count() == 1
     }
 
     /// Add an item to the `Directory`
@@ -340,7 +340,7 @@ impl Directory {
                 }
             }
         }
-        return Err(Error::ItemInvalid);
+        Err(Error::ItemInvalid)
     }
 
     /// Used to get a search for items listed and return a list of `Item` matching the terms
@@ -348,16 +348,16 @@ impl Directory {
     /// #Examples
     ///
     /// TODO
-    pub fn find_all_items(&self, item_names: &Vec<&str>) -> Vec<&Item> {
+    pub fn find_all_items<S: AsRef<str> + Clone>(&self, item_names: Vec<S>) -> Vec<&Item> {
         let mut list = Vec::new();
         for item in self.children.iter() {
 
-            for name in item_names.iter() {
+            for name in item_names.iter().map(|name| name.as_ref()) {
                 if item.name().contains(name) { list.push(item); }
             }
 
             if let Item::Directory(directory) = item {
-                list.extend(directory.find_all_items(item_names));
+                list.extend(directory.find_all_items(item_names.clone()));
             }
 
         }
@@ -370,20 +370,18 @@ impl Directory {
     ///
     /// TODO
     pub fn get_child_by_path<S: AsRef<str>>(&self, path: S) -> Result<&Item, Error> {
-        let mut path = path.as_ref().split("/").filter(|&s| !s.is_empty()).collect::<Vec<_>>();
-        loop {
-            if path.is_empty() { return Err(Error::ItemInvalid); } //TODO: Use a different error term
-            let name = path.remove(0);
-            let item = self.get_child(name)?;
-            return if !path.is_empty() {
-                if let Item::Directory(dir) = item {
-                    dir.get_child_by_path(path.join("/"))
-                } else {
-                    Ok(item)
-                }
+        let mut path = path.as_ref().split('/').filter(|&s| !s.is_empty()).collect::<Vec<_>>();
+        if path.is_empty() { return Err(Error::ItemInvalid); } //TODO: Use a different error term
+        let name = path.remove(0);
+        let item = self.get_child(name)?;
+        return if !path.is_empty() {
+            if let Item::Directory(dir) = item {
+                dir.get_child_by_path(path.join("/"))
             } else {
                 Ok(item)
             }
+        } else {
+            Ok(item)
         }
     }
 
@@ -393,20 +391,18 @@ impl Directory {
     ///
     /// TODO
     pub fn get_child_mut_by_path<S: AsRef<str>>(&mut self, path: S) -> Result<&mut Item, Error> {
-        let mut path = path.as_ref().split("/").filter(|&s| !s.is_empty()).collect::<Vec<_>>();
-        loop {
-            if path.is_empty() { return Err(Error::ItemInvalid); } //TODO: Use a different error term
-            let name = path.remove(0);
-            let item = self.get_child_mut(name)?;
-            return if !path.is_empty() {
-                if let Item::Directory(dir) = item {
-                    dir.get_child_mut_by_path(path.join("/"))
-                } else {
-                    Ok(item)
-                }
+        let mut path = path.as_ref().split('/').filter(|&s| !s.is_empty()).collect::<Vec<_>>();
+        if path.is_empty() { return Err(Error::ItemInvalid); } //TODO: Use a different error term
+        let name = path.remove(0);
+        let item = self.get_child_mut(name)?;
+        return if !path.is_empty() {
+            if let Item::Directory(dir) = item {
+                dir.get_child_mut_by_path(path.join("/"))
             } else {
                 Ok(item)
             }
+        } else {
+            Ok(item)
         }
     }
 }

@@ -58,7 +58,7 @@ impl File {
     pub fn new<S: AsRef<str>>(name: S) -> File {
         let mut file = File::default();
         let name = name.as_ref().trim();
-        if name.len() != 0 { file.metadata.name = name.to_string(); }
+        if !name.is_empty() { file.metadata.name = name.to_string(); }
         file
     }
 
