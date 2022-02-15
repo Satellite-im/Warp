@@ -6,5 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-uuid = { version = "0.8", features = ["serde", "v4"] }
-chrono = { version = "0.4", features = ["serde"] }
+warp-module = { version = "0.1.0", path = "../utils/warp-module" }
+warp-data = { version = "0.1.0", path = "../utils/warp-data" }
+
+thiserror = "1.0"

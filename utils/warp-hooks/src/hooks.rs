@@ -1,31 +1,60 @@
-use chrono::{DateTime, Utc};
-use uuid::Uuid;
-use crate::Module;
+extern crate warp_module;
+extern crate warp_data;
 
-// Placeholder for DataObject
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DataObject {
-    pub id: Uuid,
-    pub version: i32,
-    pub timestamp: DateTime<Utc>,
-    pub size: u64,
-    pub module: Module,
-    pub payload: (),
-}
+use std::collections::HashMap;
 
+use crate::error::Error;
+
+use warp_module::Module;
+use warp_data::DataObject;
+
+#[derive(Clone, PartialEq)]
 pub struct Hook {
   name: String,
+  module: Module,
+}
+
+pub struct HookData {
+  hook: Hook,
   data: DataObject,
 }
 
-/// Interface that would provide functionality to the hook utility.
-pub trait Hooks {
-  /// Returns the supported hooks
-  fn hooks(&self) -> Vec<String>;
-  // Registers a new hook for binding to
-  fn create(&self, name: &str, module: Module) -> Result<(), Error>;
-  // Trigger a hook given the supplied data object (which will be given to all subscribers on emission)
-  fn trigger(&self, name: &str, data: DataObject) -> Result<(), Error>;
-  // Subscribe to a new hook, the provided function (Subscriber) will be called when the hook is triggered
-  fn subscribe<Subscriber: Fn(Hook)>(&mut self, name: &str, f: Subscriber) -> Result<(), Error>;
+pub struct Hooks {
+  pub hooks: Vec<Hook>,
+  pub subscribers: HashMap<String, Vec<Box<dyn Fn(HookData)>>>,
+}
+
+pub fn hook_identifier(hook: &Hook) -> String {
+  format!("{}::{}", hook.module.to_string(), hook.name)
+}
+
+impl Hooks {
+
+  pub fn hooks(&self) -> Vec<Hook> {
+    self.hooks.clone()
+  }
+
+  pub fn create(&mut self, name: &str, module: Module) -> Result<(), Error> {
+    let hook = Hook {
+      name: name.to_string(),
+      module,
+    };
+  
+    if self.hooks.contains(&hook) {
+      return Err(Error::DuplicateHook);
+    }
+  
+    self.hooks.push(hook);
+
+    Ok(())
+  }
+
+  pub fn subscribe<C: 'static +  Fn(HookData)>(&mut self, hook: Hook, f: C) -> Result<(), Error> {
+    if let Some(val) = self.subscribers.get_mut(&hook_identifier(&hook)) {
+      val.push(Box::new(f))
+    } else {
+      self.subscribers.insert(hook_identifier(&hook), vec![Box::new(f)]);
+    }
+    Ok(())
+  }
 }

@@ -7,5 +7,6 @@ members = [
   "modules/warp-raygun",
   "utils/warp-hooks",
   "utils/warp-data",
+  "utils/warp-module",
   "warp",
 ]

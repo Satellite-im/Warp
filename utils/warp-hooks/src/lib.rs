@@ -1,3 +1,6 @@
+pub mod error;
+mod hooks;
+
 #[cfg(test)]
 mod tests {
   #[test]
