@@ -18,16 +18,18 @@ impl Hook {
     }
 }
 
+impl ToString for Hook {
+    fn to_string(&self) -> String {
+        format!("{}::{}", self.module, self.name)
+    }
+}
+
 pub type HookData = Box<dyn Fn(Hook, DataObject)>;
 
 #[derive(Default)]
 pub struct Hooks {
     pub hooks: Vec<Hook>,
     pub subscribers: HashMap<String, Vec<HookData>>,
-}
-
-pub fn hook_identifier(hook: &Hook) -> String {
-    format!("{}::{}", hook.module, hook.name)
 }
 
 impl Hooks {
@@ -53,11 +55,10 @@ impl Hooks {
         hook: &Hook,
         f: C,
     ) -> Result<(), Error> {
-        if let Some(val) = self.subscribers.get_mut(&hook_identifier(hook)) {
+        if let Some(val) = self.subscribers.get_mut(&hook.to_string()) {
             val.push(Box::new(f))
         } else {
-            self.subscribers
-                .insert(hook_identifier(hook), vec![Box::new(f)]);
+            self.subscribers.insert(hook.to_string(), vec![Box::new(f)]);
         }
         Ok(())
     }
