@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 ///            This can include simple things like usernames and status messages, but may also
 ///            include permissions, friends, and more.
 ///
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Module {
     Messaging,
     FileSystem,
