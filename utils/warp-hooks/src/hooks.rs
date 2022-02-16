@@ -7,8 +7,15 @@ use warp_module::Module;
 
 #[derive(Clone, PartialEq)]
 pub struct Hook {
-    name: String,
-    module: Module,
+    pub name: String,
+    pub module: Module,
+}
+
+impl Hook {
+    pub fn new<S: AsRef<str>>(name: S, module: Module) -> Self {
+        let name = name.as_ref().to_string();
+        Self { name, module }
+    }
 }
 
 pub type HookData = Box<dyn Fn(Hook, DataObject)>;
