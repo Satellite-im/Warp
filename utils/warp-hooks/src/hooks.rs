@@ -13,6 +13,7 @@ pub struct Hook {
 
 pub type HookData = Box<dyn Fn(Hook, DataObject)>;
 
+#[derive(Default)]
 pub struct Hooks {
     pub hooks: Vec<Hook>,
     pub subscribers: HashMap<String, Vec<HookData>>,
@@ -23,10 +24,6 @@ pub fn hook_identifier(hook: &Hook) -> String {
 }
 
 impl Hooks {
-    pub fn hooks(&self) -> Vec<Hook> {
-        self.hooks.clone()
-    }
-
     pub fn create<S: AsRef<str>>(&mut self, name: S, module: Module) -> Result<(), Error> {
         let name = name.as_ref().to_owned();
         let hook = Hook { name, module };
@@ -38,6 +35,10 @@ impl Hooks {
         self.hooks.push(hook);
 
         Ok(())
+    }
+
+    pub fn hooks(&self) -> Vec<Hook> {
+        self.hooks.clone()
     }
 
     pub fn subscribe<C: Fn(Hook, DataObject) + 'static>(
