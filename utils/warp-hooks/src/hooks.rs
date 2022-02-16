@@ -33,7 +33,7 @@ pub fn hook_identifier(hook: &Hook) -> String {
 impl Hooks {
     pub fn create<S: AsRef<str>>(&mut self, name: S, module: Module) -> Result<(), Error> {
         let name = name.as_ref().to_owned();
-        let hook = Hook { name, module };
+        let hook = Hook::new(name, module);
 
         if self.hooks.contains(&hook) {
             return Err(Error::DuplicateHook);
@@ -50,15 +50,23 @@ impl Hooks {
 
     pub fn subscribe<C: Fn(Hook, DataObject) + 'static>(
         &mut self,
-        hook: Hook,
+        hook: &Hook,
         f: C,
     ) -> Result<(), Error> {
-        if let Some(val) = self.subscribers.get_mut(&hook_identifier(&hook)) {
+        if let Some(val) = self.subscribers.get_mut(&hook_identifier(hook)) {
             val.push(Box::new(f))
         } else {
             self.subscribers
-                .insert(hook_identifier(&hook), vec![Box::new(f)]);
+                .insert(hook_identifier(hook), vec![Box::new(f)]);
         }
         Ok(())
+    }
+
+    pub fn emit<S: AsRef<str>>(&self, name: S, hook: &Hook, data: &DataObject) {
+        if let Some(subscribers) = self.subscribers.get(name.as_ref()) {
+            for subscriber in subscribers {
+                subscriber(hook.clone(), data.clone());
+            }
+        }
     }
 }
