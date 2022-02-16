@@ -1,8 +1,6 @@
 use thiserror::Error;
 
 /// Errors
-/// 
-
 
 #[derive(Error, Debug, PartialEq)]
 pub enum Error {
@@ -11,5 +9,5 @@ pub enum Error {
     #[error("Already subscribed to this hook")]
     AlreadySubscribed,
     #[error("Unknown error has occurred")]
-    Other
+    Other,
 }
