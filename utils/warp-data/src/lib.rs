@@ -35,10 +35,10 @@ impl Default for DataObject {
 impl DataObject {
     pub fn new<T>(module: &Module, payload: T) -> Result<Self, Error>
     where
-        T: Into<Value>,
+        T: Serialize,
     {
         let module = module.clone();
-        let payload = payload.into();
+        let payload = serde_json::to_value(payload)?;
         Ok(DataObject {
             module,
             payload,
