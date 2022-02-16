@@ -35,10 +35,10 @@ impl Default for DataObject {
 impl DataObject {
     pub fn new<T>(module: &Module, payload: T) -> Result<Self, Error>
     where
-        T: Serialize + DeserializeOwned,
+        T: Into<Value>,
     {
         let module = module.clone();
-        let payload = serde_json::to_value(payload)?;
+        let payload = payload.into();
         Ok(DataObject {
             module,
             payload,
@@ -48,7 +48,7 @@ impl DataObject {
 
     pub fn payload<T>(&self) -> Result<T, Error>
     where
-        T: Serialize + DeserializeOwned,
+        T: DeserializeOwned,
     {
         serde_json::from_value(self.payload.clone()).map_err(Error::from)
     }
