@@ -26,7 +26,6 @@ pub fn hook_identifier(hook: &Hook) -> String {
 }
 
 impl Hooks {
-
   pub fn hooks(&self) -> Vec<Hook> {
     self.hooks.clone()
   }

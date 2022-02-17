@@ -2,8 +2,6 @@
 
 ![logo](_media/warp.png)
 
-# Warp <small>docs</small>
-
 > Communicate freely and securely.
 
 - Interface First, Platform Agnostic
