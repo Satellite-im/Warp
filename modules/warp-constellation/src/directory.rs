@@ -1,12 +1,12 @@
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use crate::error::Error;
 use crate::item::{Item, ItemMeta};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// `DirectoryType` handles the supported types for the directory.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub enum DirectoryType {
-    Default
+    Default,
 }
 
 impl Default for DirectoryType {
@@ -27,21 +27,19 @@ pub struct Directory {
 }
 
 impl Default for Directory {
-
     fn default() -> Self {
         Self {
             metadata: ItemMeta {
                 id: Uuid::new_v4(),
                 name: String::from("un-named directory"),
                 description: String::new(),
-                size: None
+                size: None,
             },
             parent: None,
             directory_type: DirectoryType::Default,
-            children: Vec::new()
+            children: Vec::new(),
         }
     }
-
 }
 
 impl Directory {
@@ -59,15 +57,21 @@ impl Directory {
     pub fn new<S: AsRef<str>>(name: S) -> Self {
         let mut directory = Directory::default();
         let name = name.as_ref().trim();
-        if !name.is_empty() { directory.metadata.name = name.to_string(); }
+        if !name.is_empty() {
+            directory.metadata.name = name.to_string();
+        }
         directory
     }
 
     /// List all the `Item` within the `Directory`
-    pub fn child_list(&self) -> &Vec<Item> { &self.children }
+    pub fn child_list(&self) -> &Vec<Item> {
+        &self.children
+    }
 
     /// List all mutable `Item` within the `Directory`
-    pub fn child_list_mut(&mut self) -> &mut Vec<Item> { &mut self.children }
+    pub fn child_list_mut(&mut self) -> &mut Vec<Item> {
+        &mut self.children
+    }
 
     /// Checks to see if the `Directory` has a `Item`
     ///
@@ -86,7 +90,8 @@ impl Directory {
         self.child_list()
             .iter()
             .filter(|item| item.name() == child_name.as_ref())
-            .count() == 1
+            .count()
+            == 1
     }
 
     /// Add an item to the `Directory`
@@ -103,10 +108,14 @@ impl Directory {
     pub fn add_child<I: Into<Item>>(&mut self, child: I) -> Result<(), Error> {
         //TODO: Implement check to make sure that the Directory isnt being added to itself
         let child = &child.into();
-        if self.has_child(child.name()) { return Err(Error::DuplicateName) }
+        if self.has_child(child.name()) {
+            return Err(Error::DuplicateName);
+        }
 
         if let Item::Directory(directory) = child {
-            if directory == self { return Err(Error::DirParadox); }
+            if directory == self {
+                return Err(Error::DirParadox);
+            }
         }
         self.children.push(child.clone());
         Ok(())
@@ -131,7 +140,10 @@ impl Directory {
     ///
     /// ```
     pub fn get_child_index<S: AsRef<str>>(&self, child_name: S) -> Result<usize, Error> {
-        self.children.iter().position(|item| item.name() == child_name.as_ref()).ok_or(Error::ArrayPositionNotFound)
+        self.children
+            .iter()
+            .position(|item| item.name() == child_name.as_ref())
+            .ok_or(Error::ArrayPositionNotFound)
     }
 
     /// Used to get the child within a `Directory`
@@ -151,7 +163,9 @@ impl Directory {
     /// ```
     pub fn get_child<S: AsRef<str>>(&self, child_name: S) -> Result<&Item, Error> {
         let child_name = child_name.as_ref();
-        if !self.has_child(child_name) { return Err(Error::ItemInvalid); }
+        if !self.has_child(child_name) {
+            return Err(Error::ItemInvalid);
+        }
         let index = self.get_child_index(child_name)?;
         self.children.get(index).ok_or(Error::ItemInvalid)
     }
@@ -183,7 +197,9 @@ impl Directory {
     /// ```
     pub fn get_child_mut<S: AsRef<str>>(&mut self, child_name: S) -> Result<&mut Item, Error> {
         let child_name = child_name.as_ref();
-        if !self.has_child(child_name) { return Err(Error::ItemInvalid); }
+        if !self.has_child(child_name) {
+            return Err(Error::ItemInvalid);
+        }
         let index = self.get_child_index(child_name)?;
         self.children.get_mut(index).ok_or(Error::ItemInvalid)
     }
@@ -207,9 +223,12 @@ impl Directory {
     ///     assert_eq!(root.has_child("Test Directory"), true);
     ///
     /// ```
-    pub fn rename_child<S: AsRef<str>>(&mut self, current_name: S, new_name: S) -> Result<(), Error> {
-        self.get_child_mut_by_path(current_name)?
-            .rename(new_name)
+    pub fn rename_child<S: AsRef<str>>(
+        &mut self,
+        current_name: S,
+        new_name: S,
+    ) -> Result<(), Error> {
+        self.get_child_mut_by_path(current_name)?.rename(new_name)
     }
 
     /// Used to remove the child within a `Directory`
@@ -230,7 +249,9 @@ impl Directory {
     /// ```
     pub fn remove_child<S: AsRef<str>>(&mut self, child_name: S) -> Result<Item, Error> {
         let child_name = child_name.as_ref();
-        if !self.has_child(child_name) { return Err(Error::ItemInvalid); }
+        if !self.has_child(child_name) {
+            return Err(Error::ItemInvalid);
+        }
         let index = self.get_child_index(child_name)?;
         Ok(self.children.remove(index))
     }
@@ -266,7 +287,11 @@ impl Directory {
     ///
     ///         assert_eq!(root.get_child_by_path("Sub Directory 1/Sub Directory 2/Sub Directory 3").is_err(), true);
     /// ```
-    pub fn remove_child_from_path<S: AsRef<str>>(&mut self, directory: S, child: S) -> Result<Item, Error> {
+    pub fn remove_child_from_path<S: AsRef<str>>(
+        &mut self,
+        directory: S,
+        child: S,
+    ) -> Result<Item, Error> {
         self.get_child_mut_by_path(directory)?
             .get_directory_mut()?
             .remove_child(child)
@@ -295,9 +320,17 @@ impl Directory {
     pub fn move_item_to<S: AsRef<str>>(&mut self, child: S, dst: S) -> Result<(), Error> {
         let (child, dst) = (child.as_ref().trim(), dst.as_ref().trim());
 
-        if self.get_child_by_path(dst)?.is_file() { return Err(Error::ItemNotDirectory); }
+        if self.get_child_by_path(dst)?.is_file() {
+            return Err(Error::ItemNotDirectory);
+        }
 
-        if self.get_child_by_path(dst)?.get_directory()?.has_child(child) { return Err(Error::DuplicateName); }
+        if self
+            .get_child_by_path(dst)?
+            .get_directory()?
+            .has_child(child)
+        {
+            return Err(Error::DuplicateName);
+        }
 
         let item = self.remove_child(child)?;
 
@@ -336,7 +369,7 @@ impl Directory {
                 match directory.find_item(item_name) {
                     Ok(item) => return Ok(item),
                     //Since we know the error will be `Error::ItemInvalid`, we can continue through the iteration until it ends
-                    Err(_) => continue
+                    Err(_) => continue,
                 }
             }
         }
@@ -351,15 +384,15 @@ impl Directory {
     pub fn find_all_items<S: AsRef<str> + Clone>(&self, item_names: Vec<S>) -> Vec<&Item> {
         let mut list = Vec::new();
         for item in self.children.iter() {
-
             for name in item_names.iter().map(|name| name.as_ref()) {
-                if item.name().contains(name) { list.push(item); }
+                if item.name().contains(name) {
+                    list.push(item);
+                }
             }
 
             if let Item::Directory(directory) = item {
                 list.extend(directory.find_all_items(item_names.clone()));
             }
-
         }
         list
     }
@@ -370,8 +403,14 @@ impl Directory {
     ///
     /// TODO
     pub fn get_child_by_path<S: AsRef<str>>(&self, path: S) -> Result<&Item, Error> {
-        let mut path = path.as_ref().split('/').filter(|&s| !s.is_empty()).collect::<Vec<_>>();
-        if path.is_empty() { return Err(Error::ItemInvalid); } //TODO: Use a different error term
+        let mut path = path
+            .as_ref()
+            .split('/')
+            .filter(|&s| !s.is_empty())
+            .collect::<Vec<_>>();
+        if path.is_empty() {
+            return Err(Error::ItemInvalid);
+        } //TODO: Use a different error term
         let name = path.remove(0);
         let item = self.get_child(name)?;
         return if !path.is_empty() {
@@ -382,7 +421,7 @@ impl Directory {
             }
         } else {
             Ok(item)
-        }
+        };
     }
 
     /// Get a mutable `Item` from a path
@@ -391,8 +430,14 @@ impl Directory {
     ///
     /// TODO
     pub fn get_child_mut_by_path<S: AsRef<str>>(&mut self, path: S) -> Result<&mut Item, Error> {
-        let mut path = path.as_ref().split('/').filter(|&s| !s.is_empty()).collect::<Vec<_>>();
-        if path.is_empty() { return Err(Error::ItemInvalid); } //TODO: Use a different error term
+        let mut path = path
+            .as_ref()
+            .split('/')
+            .filter(|&s| !s.is_empty())
+            .collect::<Vec<_>>();
+        if path.is_empty() {
+            return Err(Error::ItemInvalid);
+        } //TODO: Use a different error term
         let name = path.remove(0);
         let item = self.get_child_mut(name)?;
         return if !path.is_empty() {
@@ -403,6 +448,6 @@ impl Directory {
             }
         } else {
             Ok(item)
-        }
+        };
     }
 }

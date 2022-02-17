@@ -10,3 +10,6 @@ warp-module = { version = "0.1.0", path = "../warp-module" }
 warp-data = { version = "0.1.0", path = "../warp-data" }
 
 thiserror = "1.0"
+
+[dev-dependencies]
+warp-constellation = { version = "0.1.0", path = "../../modules/warp-constellation" }
