@@ -7,7 +7,7 @@
 - Interface First, Platform Agnostic
 - Peer Driven Architecture
 - Distributed Encrypted Data
-- Run Anywhere (Web, Mobile, Metaverse, Toasters Probably)
+- Run Anywhere (Web, Mobile, Toasters Probably)
 
 [Get Started](#Warp)
 
