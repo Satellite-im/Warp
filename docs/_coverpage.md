@@ -1,6 +1,7 @@
 <!-- _coverpage.md -->
 
 ![logo](_media/warp.png)
+by Satellite.im
 
 > Communicate freely and securely.
 
