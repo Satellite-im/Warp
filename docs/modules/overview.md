@@ -4,7 +4,7 @@ Warp is built on top of modules. Each module registers itself with the service a
 
 Each module has it's own abstract interface, these interfaces are extended with module runners. Module runners can be swapped out without changes to the end products using the service, by design, because each runner will use the same interface. The runner is not, and should not, be important to the end user / service of Warp since it's abstracted behind the abstract interface.
 
-The goal of this is to allow Satellite.im to evolve as technology changes in the space and better options appear with very minimal additonal development outside of Warp for core functionalities.
+The goal of this is to allow Satellite.im to evolve as technology changes in the space and better options appear with very minimal additional development outside of Warp for core functionalities.
 
 #### Included Module Interfaces
 

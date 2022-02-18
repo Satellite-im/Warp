@@ -11,7 +11,7 @@ One last thing to note, data stored within a dimension is **never** mutated (onl
 
 Data can simply be dumped into a dimension, there is not much to worry about other than making sure you're storing the data in the correct dimension. Each module should have at least one of it's own dimensions, it's very rare that two or more modules will share a dimension. 
 
-Updating data is super easy, any time the **PocketDimension** recieves an object with an ID that already exists in the dimension, it will version the [Data Object](data/overview) and load it in. 
+Updating data is super easy, any time the **PocketDimension** receives an object with an ID that already exists in the dimension, it will version the [Data Object](data/overview) and load it in. 
 
 If we were to create the following data for example:
 
@@ -32,7 +32,7 @@ And store it in the dimension providing the `MESSAGING` dimension type, and the 
 PocketDimension::add(Module::MESSAGING, DataObject)
 ```
 
-It will simply be added to the dimension. If we then update the data we can simply call `PocketDimension::add(Module::MESSAGING, ...<DataObject>)` again. Retreiving the data via some query will return the expected object with `version: 1`, `version: 2`, for each iteration of the data in the dimension.
+It will simply be added to the dimension. If we then update the data we can simply call `PocketDimension::add(Module::MESSAGING, ...<DataObject>)` again. Retrieving the data via some query will return the expected object with `version: 1`, `version: 2`, for each iteration of the data in the dimension.
 
 
 #### Pulling Data
@@ -45,7 +45,7 @@ PocketDimension::get(Module::MESSAGING)
 
 #### Executing
 
-You **MUST** provide either a query method, or run the `PocketDimension::scan()` method to find data. This is to prevent un-nessisary querying of large amounts of data.
+You **MUST** provide either a query method, or run the `PocketDimension::scan()` method to find data. This is to prevent unnecessary querying of large amounts of data.
 
 #### Limiting
 
@@ -57,7 +57,7 @@ PocketDimension::get(Module::MESSAGING)::limit(3)
 
 #### Filtering
 
-You can filter down the results by [scanning](cacher/overview.md#executing) for specific key values comparitors. You'll provide the `key` the filter against, the `value` to expect, and the `modifier`. to filter by.
+You can filter down the results by [scanning](cacher/overview.md#executing) for specific key values comparators. You'll provide the `key` the filter against, the `value` to expect, and the `modifier`. to filter by.
 
 ```rust
 PocketDimension::get(Module::MESSAGING)::where(key: String, value: String, modifier: QueryModifier)
