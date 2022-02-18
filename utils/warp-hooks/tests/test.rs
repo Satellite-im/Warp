@@ -26,7 +26,7 @@ mod test {
         })?;
         let data = DataObject::new(&Module::FileSystem, file).map_err(|_| Error::Other)?;
 
-        system.emit("FILESYSTEM::NEW_FILE", &hook, &data);
+        system.trigger("FILESYSTEM::NEW_FILE", &hook, &data);
         Ok(())
     }
 }

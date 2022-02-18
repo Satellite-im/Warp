@@ -19,8 +19,10 @@
 - **Mulit Pass (Identity)**
   - [Overview](identity/overview.md)
   - [Interface](identity/interface.md)
-- **Messaging**
+- **Raygun (Messaging)**
   - [Overview](messaging/overview.md)
   - [Types](messaging/types.md)
+- **Hooks**
+  - [Overview](hooks/overview.md)
 - **API**
   - [Overview](api/overview.md)

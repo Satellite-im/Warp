@@ -1,0 +1,62 @@
+# Hooks
+
+Hooks allow us to create subscription points for extensions of the platform to listen upon to know when a module does something. They are simple to implement into your module as well as use for external APIs.
+
+#### Creating a Hook
+
+Each hook must be registered with the system, you can do so by calling the `create` method outlined below.
+
+```rust
+use warp_hooks::hooks::{Hook, Hooks};
+use warp_module::Module;
+
+let mut system = Hooks::default();
+system.create("NEW_FILE", Module::FileSystem)?;
+let hook = Hook::new("NEW_FILE", Module::FileSystem);
+```
+
+#### Triggering a Hook
+
+You can emit the hook to all subscribers by `triggering` the hook. Again shown below.
+
+```rust
+use warp_hooks::hooks::{Hook, Hooks};
+use warp_module::Module;
+
+let mut system = Hooks::default();
+system.create("NEW_FILE", Module::FileSystem)?;
+system.emit("FILESYSTEM::NEW_FILE", &hook, &data);
+```
+
+#### Subscribing to Hook Triggers
+
+You may subscribe to be notified via a `callback` when a hook is triggered as well.
+
+```rust
+use warp_hooks::error::Error;
+use warp_hooks::hooks::{Hook, Hooks};
+use warp_module::Module;
+
+let mut system = Hooks::default();
+system.create("NEW_FILE", Module::FileSystem)?;
+system.subscribe(&hook, |hook, data| {
+  ssert_eq!(hook.name.as_str(), "NEW_FILE");
+  assert_eq!(hook.module, Module::FileSystem);
+  assert_eq!(data.module, Module::FileSystem);
+  let file: File = data.payload().unwrap();
+  assert_eq!(file.metadata.name.as_str(), "test.txt");
+})?;
+```
+
+#### Getting Reigstered Hooks
+
+Lastly it can be useful to see which hooks are currently registered in the system. Getthing those is also very straightforward.
+
+```rust
+use warp_hooks::hooks::{Hook, Hooks};
+use warp_module::Module;
+
+let mut system = Hooks::default();
+system.create("NEW_FILE", Module::FileSystem)?;
+let hooks = Hooks::hooks();
+```
