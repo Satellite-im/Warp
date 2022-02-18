@@ -98,6 +98,10 @@ impl Hooks {
     ///
     ///     let mut system = Hooks::default();
     ///     let hook = system.create("NEW_FILE", Module::FileSystem).unwrap();
+    ///     //Check to see if hook already exist
+    ///     assert_eq!(system.create("NEW_FILE", Module::FileSystem).unwrap_err(), Error::DuplicateHook);
+    ///     //Check to see if hook havent been registered
+    ///     assert_eq!(system.subscribe(&Hook {name: "".to_string(),module: Default::default()}, |_, _|{}).unwrap_err(), Error::HookUnregistered);
     ///     system.subscribe(&hook, |hook, data| {
     ///         assert_eq!(hook.name.as_str(), "NEW_FILE");
     ///         assert_eq!(hook.module, Module::FileSystem);
@@ -113,6 +117,9 @@ impl Hooks {
         hook: &Hook,
         f: C,
     ) -> Result<(), Error> {
+        if !self.hooks.contains(&hook) {
+            return Err(Error::HookUnregistered);
+        }
         if let Some(val) = self.subscribers.get_mut(&hook.to_string()) {
             val.push(Box::new(f))
         } else {
