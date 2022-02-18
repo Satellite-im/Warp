@@ -44,7 +44,7 @@ system.subscribe(&hook, |hook, data| {
 })?;
 ```
 
-#### Getting Reigstered Hooks
+#### Getting Registered Hooks
 
 Lastly it can be useful to see which hooks are currently registered in the system. Getthing those is also very straightforward.
 
