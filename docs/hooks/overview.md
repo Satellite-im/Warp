@@ -40,11 +40,7 @@ use warp_module::Module;
 let mut system = Hooks::default();
 system.create("NEW_FILE", Module::FileSystem)?;
 system.subscribe(&hook, |hook, data| {
-  ssert_eq!(hook.name.as_str(), "NEW_FILE");
-  assert_eq!(hook.module, Module::FileSystem);
-  assert_eq!(data.module, Module::FileSystem);
-  let file: File = data.payload().unwrap();
-  assert_eq!(file.metadata.name.as_str(), "test.txt");
+  // Hook and Hook data provided in this scope
 })?;
 ```
 
