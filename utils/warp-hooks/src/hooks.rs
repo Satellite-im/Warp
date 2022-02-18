@@ -6,7 +6,7 @@ use warp_data::DataObject;
 use warp_module::Module;
 
 /// `Hook` contains identifying information about a given hook.
-#[derive(Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Hook {
     pub name: String,
     pub module: Module,
@@ -50,10 +50,10 @@ impl Hooks {
     ///     use warp_module::Module;
     ///
     ///     let mut system = Hooks::default();
-    ///     system.create("NEW_FILE", Module::FileSystem)?;
-    ///     let hook = Hook::new("NEW_FILE", Module::FileSystem);
+    ///     let hook = system.create("NEW_FILE", Module::FileSystem).unwrap();
+    ///     assert_eq!(hook, Hook::new("NEW_FILE", Module::FileSystem));
     /// ```
-    pub fn create<S: AsRef<str>>(&mut self, name: S, module: Module) -> Result<(), Error> {
+    pub fn create<S: AsRef<str>>(&mut self, name: S, module: Module) -> Result<Hook, Error> {
         let name = name.as_ref().to_owned();
         let hook = Hook::new(name, module);
 
@@ -61,9 +61,9 @@ impl Hooks {
             return Err(Error::DuplicateHook);
         }
 
-        self.hooks.push(hook);
+        self.hooks.push(hook.clone());
 
-        Ok(())
+        Ok(hook)
     }
 
     /// Get a list of hooks currently active in the system
@@ -77,8 +77,9 @@ impl Hooks {
     ///     use warp_module::Module;
     ///
     ///     let mut system = Hooks::default();
-    ///     system.create("NEW_FILE", Module::FileSystem)?;
-    ///     let hooks = Hook::hooks();
+    ///     let hook = system.create("NEW_FILE", Module::FileSystem).unwrap();
+    ///     let hooks = system.hooks();
+    ///     assert_eq!(hooks.get(0).unwrap(), &hook);
     /// ```
     pub fn hooks(&self) -> Vec<Hook> {
         self.hooks.clone()
@@ -93,16 +94,19 @@ impl Hooks {
     ///     use warp_hooks::error::Error;
     ///     use warp_hooks::hooks::{Hook, Hooks};
     ///     use warp_module::Module;
+    ///     use warp_constellation::file::File;
     ///
     ///     let mut system = Hooks::default();
-    ///     system.create("NEW_FILE", Module::FileSystem)?;
+    ///     let hook = system.create("NEW_FILE", Module::FileSystem).unwrap();
     ///     system.subscribe(&hook, |hook, data| {
-    ///         ssert_eq!(hook.name.as_str(), "NEW_FILE");
+    ///         assert_eq!(hook.name.as_str(), "NEW_FILE");
     ///         assert_eq!(hook.module, Module::FileSystem);
     ///         assert_eq!(data.module, Module::FileSystem);
     ///         let file: File = data.payload().unwrap();
     ///         assert_eq!(file.metadata.name.as_str(), "test.txt");
-    ///     })?;
+    ///     }).unwrap();
+    ///     let data = DataObject::new(&Module::FileSystem, File::new("test.txt")).map_err(|_| Error::Other).unwrap();
+    ///     system.trigger("FILESYSTEM::NEW_FILE", &hook, &data);
     /// ```
     pub fn subscribe<C: Fn(Hook, DataObject) + 'static>(
         &mut self,
@@ -126,10 +130,19 @@ impl Hooks {
     ///     use warp_hooks::error::Error;
     ///     use warp_hooks::hooks::{Hook, Hooks};
     ///     use warp_module::Module;
+    ///     use warp_constellation::file::File;
     ///
     ///     let mut system = Hooks::default();
-    ///     system.create("NEW_FILE", Module::FileSystem)?;
-    ///     system.emit("FILESYSTEM::NEW_FILE", &hook, &data);
+    ///     let hook = system.create("NEW_FILE", Module::FileSystem).unwrap();
+    ///     system.subscribe(&hook, |hook, data| {
+    ///         assert_eq!(hook.name.as_str(), "NEW_FILE");
+    ///         assert_eq!(hook.module, Module::FileSystem);
+    ///         assert_eq!(data.module, Module::FileSystem);
+    ///         let file: File = data.payload().unwrap();
+    ///         assert_eq!(file.metadata.name.as_str(), "test.txt");
+    ///     }).unwrap();
+    ///     let data = DataObject::new(&Module::FileSystem, File::new("test.txt")).map_err(|_| Error::Other).unwrap();
+    ///     system.trigger("FILESYSTEM::NEW_FILE", &hook, &data);
     /// ```
     pub fn trigger<S: AsRef<str>>(&self, name: S, hook: &Hook, data: &DataObject) {
         if let Some(subscribers) = self.subscribers.get(name.as_ref()) {
