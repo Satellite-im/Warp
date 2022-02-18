@@ -12,7 +12,7 @@ mod test {
 
         let hook = system.create("NEW_FILE", Module::FileSystem)?;
 
-        system.subscribe(&hook, |hook, data| {
+        system.subscribe(hook, |hook, data| {
             assert_eq!(hook.name.as_str(), "NEW_FILE");
             assert_eq!(hook.module, Module::FileSystem);
 
@@ -24,7 +24,7 @@ mod test {
         let data = DataObject::new(&Module::FileSystem, File::new("test.txt"))
             .map_err(|_| Error::Other)?;
 
-        system.trigger("FILESYSTEM::NEW_FILE", &hook, &data);
+        system.trigger("FILESYSTEM::NEW_FILE", "FILESYSTEM::NEW_FILE", &data);
         Ok(())
     }
 }

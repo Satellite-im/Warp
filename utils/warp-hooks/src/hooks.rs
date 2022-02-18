@@ -12,6 +12,21 @@ pub struct Hook {
     pub module: Module,
 }
 
+impl<A> From<A> for Hook
+where
+    A: AsRef<str>,
+{
+    fn from(hook: A) -> Self {
+        let mut hook = hook.as_ref().split("::");
+        let (module_name, name) = (
+            hook.next().unwrap_or_default(),
+            hook.next().unwrap_or_default().to_string(),
+        );
+        let module = Module::from(module_name);
+        Hook { name, module }
+    }
+}
+
 /// Allows for creation of a new hook
 impl Hook {
     pub fn new<S: AsRef<str>>(name: S, module: Module) -> Self {
@@ -101,8 +116,8 @@ impl Hooks {
     ///     //Check to see if hook already exist
     ///     assert_eq!(system.create("NEW_FILE", Module::FileSystem).unwrap_err(), Error::DuplicateHook);
     ///     //Check to see if hook havent been registered
-    ///     assert_eq!(system.subscribe(&Hook {name: "".to_string(),module: Default::default()}, |_, _|{}).unwrap_err(), Error::HookUnregistered);
-    ///     system.subscribe(&hook, |hook, data| {
+    ///     assert_eq!(system.subscribe(Hook::from("UNKNOWN::NEW_FILE"), |_, _|{}).unwrap_err(), Error::HookUnregistered);
+    ///     system.subscribe("FILESYSTEM::NEW_FILE", |hook, data| {
     ///         assert_eq!(hook.name.as_str(), "NEW_FILE");
     ///         assert_eq!(hook.module, Module::FileSystem);
     ///         assert_eq!(data.module, Module::FileSystem);
@@ -110,21 +125,21 @@ impl Hooks {
     ///         assert_eq!(file.metadata.name.as_str(), "test.txt");
     ///     }).unwrap();
     ///     let data = DataObject::new(&Module::FileSystem, File::new("test.txt")).map_err(|_| Error::Other).unwrap();
-    ///     system.trigger("FILESYSTEM::NEW_FILE", &hook, &data);
+    ///     system.trigger("FILESYSTEM::NEW_FILE", "FILESYSTEM::NEW_FILE", &data);
     /// ```
-    pub fn subscribe<C: Fn(Hook, DataObject) + 'static>(
-        &mut self,
-        hook: &Hook,
-        f: C,
-    ) -> Result<(), Error> {
+    pub fn subscribe<C, H>(&mut self, hook: H, f: C) -> Result<(), Error>
+    where
+        C: 'static + Fn(Hook, DataObject),
+        H: Into<Hook>,
+    {
+        let hook = hook.into();
         if !self.hooks.contains(&hook) {
             return Err(Error::HookUnregistered);
         }
-        if let Some(val) = self.subscribers.get_mut(&hook.to_string()) {
-            val.push(Box::new(f))
-        } else {
-            self.subscribers.insert(hook.to_string(), vec![Box::new(f)]);
-        }
+        self.subscribers
+            .entry(hook.to_string())
+            .or_insert(vec![])
+            .push(Box::new(Box::new(f)));
         Ok(())
     }
 
@@ -141,7 +156,7 @@ impl Hooks {
     ///
     ///     let mut system = Hooks::default();
     ///     let hook = system.create("NEW_FILE", Module::FileSystem).unwrap();
-    ///     system.subscribe(&hook, |hook, data| {
+    ///     system.subscribe("FILESYSTEM::NEW_FILE", |hook, data| {
     ///         assert_eq!(hook.name.as_str(), "NEW_FILE");
     ///         assert_eq!(hook.module, Module::FileSystem);
     ///         assert_eq!(data.module, Module::FileSystem);
@@ -149,9 +164,14 @@ impl Hooks {
     ///         assert_eq!(file.metadata.name.as_str(), "test.txt");
     ///     }).unwrap();
     ///     let data = DataObject::new(&Module::FileSystem, File::new("test.txt")).map_err(|_| Error::Other).unwrap();
-    ///     system.trigger("FILESYSTEM::NEW_FILE", &hook, &data);
+    ///     system.trigger("FILESYSTEM::NEW_FILE", "FILESYSTEM::NEW_FILE", &data);
     /// ```
-    pub fn trigger<S: AsRef<str>>(&self, name: S, hook: &Hook, data: &DataObject) {
+    pub fn trigger<S, H>(&self, name: S, hook: H, data: &DataObject)
+    where
+        S: AsRef<str>,
+        H: Into<Hook>,
+    {
+        let hook = hook.into();
         if let Some(subscribers) = self.subscribers.get(name.as_ref()) {
             for subscriber in subscribers {
                 subscriber(hook.clone(), data.clone());
