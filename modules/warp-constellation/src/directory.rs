@@ -411,8 +411,8 @@ impl Directory {
             .filter(|&s| !s.is_empty())
             .collect::<Vec<_>>();
         if path.is_empty() {
-            return Err(Error::ItemInvalid);
-        } //TODO: Use a different error term
+            return Err(Error::InvalidPath);
+        }
         let name = path.remove(0);
         let item = self.get_child(name)?;
         return if !path.is_empty() {
@@ -438,8 +438,8 @@ impl Directory {
             .filter(|&s| !s.is_empty())
             .collect::<Vec<_>>();
         if path.is_empty() {
-            return Err(Error::ItemInvalid);
-        } //TODO: Use a different error term
+            return Err(Error::InvalidPath);
+        }
         let name = path.remove(0);
         let item = self.get_child_mut(name)?;
         return if !path.is_empty() {

@@ -1,8 +1,7 @@
 use thiserror::Error;
 
 /// Errors
-/// 
-
+///
 
 #[derive(Error, Debug, PartialEq)]
 pub enum Error {
@@ -22,10 +21,12 @@ pub enum Error {
     ItemNotDirectory,
     #[error("Attempted conversion is invalid")]
     InvalidConversion,
+    #[error("Path supplied is invalid")]
+    InvalidPath,
     #[error("Cannot find position of array content.")]
     ArrayPositionNotFound,
     #[error("Regex Error: {0}")]
     RegexError(#[from] regex::Error),
     #[error("Unknown error has occurred")]
-    Other
+    Other,
 }
