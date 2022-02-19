@@ -1,5 +1,6 @@
 use crate::error::Error;
 use crate::item::{Item, ItemMeta};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -34,6 +35,7 @@ impl Default for Directory {
                 name: String::from("un-named directory"),
                 description: String::new(),
                 size: None,
+                creation: Utc::now(),
             },
             parent: None,
             directory_type: DirectoryType::Default,

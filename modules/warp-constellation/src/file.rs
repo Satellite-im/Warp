@@ -1,16 +1,17 @@
+use crate::item::ItemMeta;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::item::ItemMeta;
 
 /// `FileType` describes all supported file types.
 /// This will be useful for applying icons to the tree later on
 /// if we don't have a supported file type, we can just default to generic.
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
-#[serde(rename_all="lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum FileType {
     Generic,
     ImagePng,
-    Archive
+    Archive,
 }
 
 /// `File` represents the files uploaded to the FileSystem (`Constellation`).
@@ -25,7 +26,6 @@ pub struct File {
 }
 
 impl Default for File {
-
     fn default() -> Self {
         Self {
             metadata: ItemMeta {
@@ -33,17 +33,16 @@ impl Default for File {
                 name: String::from("un-named file"),
                 description: String::new(),
                 size: Some(0),
+                creation: Utc::now(),
             },
             file_type: FileType::Generic,
             hash: String::new(),
             parent: None,
         }
     }
-
 }
 
 impl File {
-
     /// Create a new `File` instance
     ///
     /// # Examples
@@ -58,7 +57,9 @@ impl File {
     pub fn new<S: AsRef<str>>(name: S) -> File {
         let mut file = File::default();
         let name = name.as_ref().trim();
-        if !name.is_empty() { file.metadata.name = name.to_string(); }
+        if !name.is_empty() {
+            file.metadata.name = name.to_string();
+        }
         file
     }
 
@@ -109,5 +110,4 @@ impl File {
     pub fn set_size(&mut self, size: i64) {
         self.metadata.size = Some(size);
     }
-
 }
