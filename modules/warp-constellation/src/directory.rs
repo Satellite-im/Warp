@@ -403,7 +403,21 @@ impl Directory {
     ///
     /// # Examples
     ///
-    /// TODO
+    /// ```
+    ///     use warp_constellation::{directory::Directory};
+    ///     let mut root = Directory::new("Test Directory");
+    ///     let mut sub0 = Directory::new("Sub Directory 1");
+    ///     let mut sub1 = Directory::new("Sub Directory 2");
+    ///     let sub2 = Directory::new("Sub Directory 3");
+    ///     sub1.add_child(sub2).unwrap();
+    ///     sub0.add_child(sub1).unwrap();
+    ///     root.add_child(sub0).unwrap();
+    ///
+    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/").is_ok(), true);
+    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/").is_ok(), true);
+    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory 3").is_ok(), true);
+    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory3/Another Dir").is_ok(), false);
+    /// ```
     pub fn get_child_by_path<S: AsRef<str>>(&self, path: S) -> Result<&Item, Error> {
         let mut path = path
             .as_ref()
@@ -430,7 +444,25 @@ impl Directory {
     ///
     /// # Examples
     ///
-    /// TODO
+    /// ```
+    ///     use warp_constellation::{directory::Directory};
+    ///     let mut root = Directory::new("Test Directory");
+    ///     let mut sub0 = Directory::new("Sub Directory 1");
+    ///     let mut sub1 = Directory::new("Sub Directory 2");
+    ///     let sub2 = Directory::new("Sub Directory 3");
+    ///     sub1.add_child(sub2).unwrap();
+    ///     sub0.add_child(sub1).unwrap();
+    ///     root.add_child(sub0).unwrap();
+    ///     
+    ///     root.get_child_mut_by_path("/Sub Directory 1/Sub Directory 2").unwrap()
+    ///         .get_directory_mut().unwrap()
+    ///         .add_child(Directory::new("Another Directory")).unwrap();    
+    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/").is_ok(), true);
+    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/").is_ok(), true);
+    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory 3").is_ok(), true);
+    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/Another Directory")
+    /// .is_ok(), true);
+    /// ```
     pub fn get_child_mut_by_path<S: AsRef<str>>(&mut self, path: S) -> Result<&mut Item, Error> {
         let mut path = path
             .as_ref()
