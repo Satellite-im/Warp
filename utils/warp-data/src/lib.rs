@@ -9,10 +9,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+pub type DataObject = Data;
+
 /// Standard DataObject used throughout warp.
 /// Unifies output from all modules
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct DataObject {
+pub struct Data {
     pub id: Uuid,
     pub version: i32,
     pub timestamp: DateTime<Utc>,
@@ -21,7 +23,7 @@ pub struct DataObject {
     pub payload: Value,
 }
 
-impl Default for DataObject {
+impl Default for Data {
     fn default() -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -34,14 +36,14 @@ impl Default for DataObject {
     }
 }
 
-impl DataObject {
+impl Data {
     pub fn new<T>(module: &Module, payload: T) -> Result<Self, Error>
     where
         T: Serialize,
     {
         let module = module.clone();
         let payload = serde_json::to_value(payload)?;
-        Ok(DataObject {
+        Ok(Data {
             module,
             payload,
             ..Default::default()
