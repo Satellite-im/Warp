@@ -76,7 +76,7 @@ Example:
 [
     {
       id: "c59dda79-f2db-4247-b768-b0e093c838d3",
-      version: 0,
+      version: 1,
       timestamp: 1643250387466,
       size: 387192,
       module: "MESSAGING",
@@ -84,7 +84,7 @@ Example:
     },
     {
       id: "c59dda79-f2db-4247-b768-b0e093c838d3",
-      version: 0,
+      version: 2,
       timestamp: 1643250387466,
       size: 387192,
       module: "MESSAGING",
