@@ -138,8 +138,8 @@ impl Hooks {
         }
         self.subscribers
             .entry(hook.to_string())
-            .or_insert(vec![])
-            .push(Box::new(Box::new(f)));
+            .or_insert_with(Vec::new)
+            .push(Box::new(f));
         Ok(())
     }
 
