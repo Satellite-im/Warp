@@ -16,7 +16,7 @@ pub type DataObject = Data;
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Data {
     pub id: Uuid,
-    pub version: i32,
+    pub version: u32,
     pub timestamp: DateTime<Utc>,
     pub size: u64,
     pub module: Module,
