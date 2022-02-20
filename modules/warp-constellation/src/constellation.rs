@@ -98,20 +98,6 @@ pub trait Constellation {
         }
     }
 
-    /// Use to upload file to the filesystem
-    fn put<R: std::io::Read, S: AsRef<str>>(&mut self, _name: S, _reader: R) -> Result<(), Error> {
-        todo!()
-    }
-
-    /// Use to download a file from the filesystem
-    fn get<W: std::io::Write, S: AsRef<str>>(
-        &self,
-        _name: S,
-        _writer: &mut W,
-    ) -> Result<(), Error> {
-        todo!()
-    }
-
     fn go_back(&self) -> Option<Directory> {
         unimplemented!()
     }
@@ -119,6 +105,66 @@ pub trait Constellation {
     fn go_back_to_directory(&mut self, _: &str) -> Option<Directory> {
         unimplemented!()
     }
+}
+
+#[cfg(not(feature = "use_tokio"))]
+pub trait ConstellationGetPut: Constellation {
+    /// Use to upload file to the filesystem
+    fn put<R: std::io::Read, S: AsRef<str>>(&mut self, name: S, reader: R) -> Result<(), Error>;
+
+    /// Use to download a file from the filesystem
+    fn get<W: std::io::Write, S: AsRef<str>>(&self, name: S, writer: &mut W) -> Result<(), Error>;
+}
+
+#[cfg(feature = "use_tokio")]
+#[async_trait::async_trait]
+pub trait ConstellationGetPut: Constellation {
+    /// Use to upload file to the filesystem
+    async fn put<R: tokio::io::AsyncRead + std::marker::Unpin, S: AsRef<str>>(
+        &mut self,
+        name: S,
+        reader: R,
+    ) -> Result<(), Error>;
+
+    /// Use to download a file from the filesystem
+    async fn get<W: tokio::io::AsyncWrite + std::marker::Unpin, S: AsRef<str>>(
+        &self,
+        name: S,
+        writer: &mut W,
+    ) -> Result<(), Error>;
+}
+
+#[cfg(not(feature = "use_tokio"))]
+pub trait ConstellationImportExport: Constellation {
+    fn export<I: Into<Item>, W: std::io::Write>(
+        &self,
+        item: I,
+        writer: &mut W,
+    ) -> Result<(), Error>;
+
+    fn export_all<W: std::io::Write>(&self, writer: &mut W) -> Result<(), Error>;
+
+    fn import<R: std::io::Read>(&mut self, reader: R) -> Result<(), Error>;
+}
+
+#[cfg(feature = "use_tokio")]
+#[async_trait::async_trait]
+pub trait ConstellationImportExport: Constellation {
+    async fn export<I: Into<Item>, W: tokio::io::AsyncWrite + std::marker::Unpin>(
+        &self,
+        item: I,
+        writer: &mut W,
+    ) -> Result<(), Error>;
+
+    async fn export_all<W: tokio::io::AsyncWrite + std::marker::Unpin>(
+        &self,
+        writer: &mut W,
+    ) -> Result<(), Error>;
+
+    async fn import<R: tokio::io::AsyncRead + std::marker::Unpin>(
+        &mut self,
+        reader: R,
+    ) -> Result<(), Error>;
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
