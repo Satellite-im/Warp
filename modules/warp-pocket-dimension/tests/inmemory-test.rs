@@ -25,7 +25,7 @@ impl PocketDimension for MemoryCache {
         let mut object = DataObject::new(&dimension, data)?;
         if let Some(val) = self.0.get_mut(&dimension) {
             let version = val.len();
-            object.version = version as i32;
+            object.version = version as u32;
             val.push(object.clone());
         } else {
             self.0.insert(dimension, vec![object.clone()]);
