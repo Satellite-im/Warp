@@ -1,22 +1,22 @@
 pub mod error;
 
+use crate::error::Error;
+use serde::{Deserialize, Serialize}; // https://docs.serde.rs/serde/
 use std::io::{Read, Write};
 use std::path::Path;
-use serde::{Serialize, Deserialize}; // https://docs.serde.rs/serde/
-use crate::error::Error;
 
 // Acceptable module implementations for the FileSystem
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all="lowercase")] // https://serde.rs/container-attrs.html
+#[serde(rename_all = "lowercase")] // https://serde.rs/container-attrs.html
 pub enum FileSystem {
     Disk,
     Textile,
-    WebTorrent
+    WebTorrent,
 }
 
 // Acceptable module implementations for the Cache
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all="lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum PocketDimension {
     FlatFile,
 }
@@ -38,7 +38,13 @@ pub struct ModuleConfig {
 pub struct Config {
     pub debug: bool,
     pub http_api: HTTPAPIConfig,
-    pub modules: ModuleConfig
+    pub modules: ModuleConfig,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // Implementation to create, load and save the config
@@ -53,13 +59,11 @@ impl Config {
     pub fn new() -> Config {
         Config {
             debug: true,
-            http_api: HTTPAPIConfig {
-                enabled: false
-            },
+            http_api: HTTPAPIConfig { enabled: false },
             modules: ModuleConfig {
                 pocket_dimension: PocketDimension::FlatFile,
-                file_system: FileSystem::Disk
-            }
+                file_system: FileSystem::Disk,
+            },
         }
     }
 
@@ -70,15 +74,14 @@ impl Config {
     /// use warp_configuration::Config;
     /// let config = Config::load("Warp.toml").unwrap();
     /// ```
-    pub fn load<P: AsRef<Path>>(
-        path: P
-    ) -> Result<Config, Error> {
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Config, Error> {
         let path = path.as_ref();
         if !path.exists() {
             return Err(Error::ConfigNotFound);
         }
-        let config_data = std::fs::read_to_string(path)?;
-        toml::from_str(&config_data).map_err(Error::from)
+        let mut file = std::fs::OpenOptions::new().read(true).open(path)?;
+
+        Self::from_reader(&mut file)
     }
 
     /// Loads and return the parsed TOML configuration from reader
@@ -92,9 +95,7 @@ impl Config {
     ///
     /// let config = Config::from_reader(&mut file).unwrap();
     /// ```
-    pub fn from_reader<R: Read>(
-        reader: &mut R
-    ) -> Result<Config, Error> {
+    pub fn from_reader<R: Read>(reader: &mut R) -> Result<Config, Error> {
         let mut data = String::new();
         reader.read_to_string(&mut data)?;
         toml::from_str(&data).map_err(Error::from)
@@ -108,13 +109,12 @@ impl Config {
     /// let config = Config::new();
     /// config.save("Warp.toml").unwrap();
     /// ```
-    pub fn save<P: AsRef<Path>>(
-        &self,
-        path: P
-    ) -> Result<(), Error> {
-        let config_data = toml::to_string(&self)?;
-        std::fs::write(path, config_data)?;
-        Ok(())
+    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(path)?;
+        self.save_to_writer(&mut file)
     }
 
     /// Saves the configuration to writer
