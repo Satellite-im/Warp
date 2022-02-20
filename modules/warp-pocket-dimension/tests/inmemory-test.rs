@@ -68,11 +68,15 @@ impl PocketDimension for MemoryCache {
             .map(|data| data.len() as i64)
     }
 
-    fn empty<I: Into<Module>>(&mut self, dimension: I) -> Result<Vec<DataObject>, Error> {
-        self.0
-            .get_mut(&dimension.into())
-            .map(|val| val.drain(..).collect())
-            .ok_or(Error::Other)
+    fn empty<I: Into<Module>>(&mut self, dimension: I) -> Result<(), Error> {
+        let dimension = dimension.into();
+        self.0.remove(&dimension);
+
+        if self.get_data(dimension, None).is_ok() {
+            return Err(Error::Other);
+        }
+
+        Ok(())
     }
 }
 

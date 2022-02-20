@@ -41,5 +41,5 @@ pub trait PocketDimension {
     ) -> Result<i64, Error>;
 
     /// Will empty and return the list of `DataObject` for `Module`.
-    fn empty<I: Into<Module>>(&mut self, dimension: I) -> Result<Vec<DataObject>, Error>;
+    fn empty<I: Into<Module>>(&mut self, dimension: I) -> Result<(), Error>;
 }
