@@ -20,8 +20,13 @@ impl MemoryCache {
 }
 
 impl PocketDimension for MemoryCache {
-    fn add_data<T: Serialize>(&mut self, dimension: Module, data: T) -> Result<DataObject, Error> {
+    fn add_data<T: Serialize, I: Into<Module>>(
+        &mut self,
+        dimension: I,
+        data: T,
+    ) -> Result<DataObject, Error> {
         //TODO: Determine size of payload for `DataObject::size`
+        let dimension = dimension.into();
         let mut object = DataObject::new(&dimension, data)?;
         if let Some(val) = self.0.get_mut(&dimension) {
             let version = val.len();
@@ -33,31 +38,39 @@ impl PocketDimension for MemoryCache {
         Ok(object)
     }
 
-    fn get_data(
+    fn get_data<I: Into<Module>>(
         &self,
-        dimension: Module,
+        dimension: I,
         query: Option<&QueryBuilder>,
     ) -> Result<Vec<DataObject>, Error> {
-        let data = self.0.get(&dimension).ok_or(Error::Other)?;
+        let data = self.0.get(&dimension.into()).ok_or(Error::Other)?;
         match query {
             Some(query) => execute(data, query),
             None => Ok(data.clone()),
         }
     }
 
-    fn size(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<i64, Error> {
+    fn size<I: Into<Module>>(
+        &self,
+        dimension: I,
+        query: Option<&QueryBuilder>,
+    ) -> Result<i64, Error> {
         self.get_data(dimension, query)
             .map(|data| data.iter().map(|i| i.size as i64).sum())
     }
 
-    fn count(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<i64, Error> {
+    fn count<I: Into<Module>>(
+        &self,
+        dimension: I,
+        query: Option<&QueryBuilder>,
+    ) -> Result<i64, Error> {
         self.get_data(dimension, query)
             .map(|data| data.len() as i64)
     }
 
-    fn empty(&mut self, dimension: Module) -> Result<Vec<DataObject>, Error> {
+    fn empty<I: Into<Module>>(&mut self, dimension: I) -> Result<Vec<DataObject>, Error> {
         self.0
-            .get_mut(&dimension)
+            .get_mut(&dimension.into())
             .map(|val| val.drain(..).collect())
             .ok_or(Error::Other)
     }

@@ -13,21 +13,33 @@ use warp_module::Module;
 /// results.
 pub trait PocketDimension {
     /// Used to add data to `PocketDimension` for `Module`
-    fn add_data<T: Serialize>(&mut self, dimension: Module, data: T) -> Result<DataObject, Error>;
+    fn add_data<T: Serialize, I: Into<Module>>(
+        &mut self,
+        dimension: I,
+        data: T,
+    ) -> Result<DataObject, Error>;
 
     /// Used to obtain a list of `DataObject` for `Module`
-    fn get_data(
+    fn get_data<I: Into<Module>>(
         &self,
-        dimension: Module,
+        dimension: I,
         query: Option<&QueryBuilder>,
     ) -> Result<Vec<DataObject>, Error>;
 
     /// Returns the total size within the `Module`
-    fn size(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<i64, Error>;
+    fn size<I: Into<Module>>(
+        &self,
+        dimension: I,
+        query: Option<&QueryBuilder>,
+    ) -> Result<i64, Error>;
 
     /// Returns an total amount of `DataObject` for `Module`
-    fn count(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<i64, Error>;
+    fn count<I: Into<Module>>(
+        &self,
+        dimension: I,
+        query: Option<&QueryBuilder>,
+    ) -> Result<i64, Error>;
 
     /// Will empty and return the list of `DataObject` for `Module`.
-    fn empty(&mut self, dimension: Module) -> Result<Vec<DataObject>, Error>;
+    fn empty<I: Into<Module>>(&mut self, dimension: I) -> Result<Vec<DataObject>, Error>;
 }
