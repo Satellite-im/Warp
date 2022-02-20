@@ -10,9 +10,11 @@ Each hook must be registered with the system, you can do so by calling the `crea
 use warp_hooks::hooks::{Hook, Hooks};
 use warp_module::Module;
 
-let mut system = Hooks::default();
-system.create("NEW_FILE", Module::FileSystem)?;
-let hook = Hook::new("NEW_FILE", Module::FileSystem);
+fn main() {
+    let mut system = Hooks::default();
+    system.create("NEW_FILE", Module::FileSystem).unwrap();
+    let hook = Hook::new("NEW_FILE", Module::FileSystem);
+}
 ```
 
 #### Triggering a Hook
@@ -23,25 +25,29 @@ You can emit the hook to all subscribers by `triggering` the hook. Again shown b
 use warp_hooks::hooks::{Hook, Hooks};
 use warp_module::Module;
 
-let mut system = Hooks::default();
-system.create("NEW_FILE", Module::FileSystem)?;
-system.emit("FILESYSTEM::NEW_FILE", &hook, &data);
+fn main() {
+    let mut system = Hooks::default();
+    let hook = system.create("NEW_FILE", Module::FileSystem).unwrap();
+    system.trigger("FILESYSTEM::NEW_FILE", &hook, &data);
+}
 ```
 
 #### Subscribing to Hook Triggers
 
-You may subscribe to be notified via a `callback` when a hook is triggered as well.
+You may subscribe to be notified via a `callback` or closure when a hook is triggered as well.
 
 ```rust
 use warp_hooks::error::Error;
 use warp_hooks::hooks::{Hook, Hooks};
 use warp_module::Module;
 
-let mut system = Hooks::default();
-system.create("NEW_FILE", Module::FileSystem)?;
-system.subscribe(&hook, |hook, data| {
-  // Hook and Hook data provided in this scope
-})?;
+fn main() {
+    let mut system = Hooks::default();
+    system.create("NEW_FILE", Module::FileSystem).unwrap();
+    system.subscribe("FILESYSTEM::NEW_FILE", |hook, data| {
+        // Hook and Hook data provided in this scope
+    })?;
+}
 ```
 
 #### Getting Registered Hooks
@@ -52,7 +58,9 @@ Lastly it can be useful to see which hooks are currently registered in the syste
 use warp_hooks::hooks::{Hook, Hooks};
 use warp_module::Module;
 
-let mut system = Hooks::default();
-system.create("NEW_FILE", Module::FileSystem)?;
-let hooks = Hooks::hooks();
+fn main() {
+    let mut system = Hooks::default();
+    system.create("NEW_FILE", Module::FileSystem).unwrap();
+    let hooks = system.hooks();
+}
 ```

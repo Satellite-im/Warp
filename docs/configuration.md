@@ -14,12 +14,12 @@ A configuration file will be generated for you automatically when you first run 
 
 debug = true               # Enable verbose logging
 
-[httpapi]
+[http_api]
 enabled = false             # Enable HTTP API
 
 # Compilation Config Options
 
-[mod]
-filesystem = "disk"        # Which filesystem implementation to use
-cacher = "flatfile"        # Which cacher implementation to use
+[modules]
+file_system = "disk"        # Which filesystem implementation to use
+pocket_dimension = "flatfile"        # Which cacher implementation to use
 ```
