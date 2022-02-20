@@ -40,6 +40,6 @@ pub trait PocketDimension {
         query: Option<&QueryBuilder>,
     ) -> Result<i64, Error>;
 
-    /// Will empty and return the list of `DataObject` for `Module`.
+    /// Will flush out the data related to `Module`.
     fn empty<I: Into<Module>>(&mut self, dimension: I) -> Result<(), Error>;
 }
