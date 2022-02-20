@@ -17,6 +17,7 @@ pub type DataObject = Data;
 pub struct Data {
     pub id: Uuid,
     pub version: u32,
+    #[serde(with = "chrono::serde::ts_seconds")]
     pub timestamp: DateTime<Utc>,
     pub size: u64,
     pub module: Module,

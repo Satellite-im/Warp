@@ -15,6 +15,7 @@ pub struct ItemMeta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<i64>,
     pub description: String,
+    #[serde(with = "chrono::serde::ts_seconds")]
     pub creation: DateTime<Utc>,
 }
 
