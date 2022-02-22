@@ -6,6 +6,7 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use warp_pocket_dimension::PocketDimension;
 
 /// Interface that would provide functionality around the filesystem.
 pub trait Constellation {
@@ -41,6 +42,13 @@ pub trait Constellation {
         unimplemented!()
     }
 
+    fn get_index(&self) -> &Directory {
+        self.root_directory()
+    }
+
+    fn get_index_mut(&mut self) -> &mut Directory {
+        self.root_directory_mut()
+    }
     /// Add an `Item` to the current directory
     fn add_child<I: Into<Item>>(&mut self, item: I) -> Result<(), Error> {
         self.root_directory_mut().add_child(item)
@@ -107,36 +115,26 @@ pub trait Constellation {
     }
 }
 
-#[cfg(not(feature = "use_tokio"))]
 pub trait ConstellationGetPut: Constellation {
     /// Use to upload file to the filesystem
-    fn put<R: std::io::Read, S: AsRef<str>>(&mut self, name: S, reader: R) -> Result<(), Error>;
-
-    /// Use to download a file from the filesystem
-    fn get<W: std::io::Write, S: AsRef<str>>(&self, name: S, writer: &mut W) -> Result<(), Error>;
-}
-
-#[cfg(feature = "use_tokio")]
-#[async_trait::async_trait]
-pub trait ConstellationGetPut: Constellation {
-    /// Use to upload file to the filesystem
-    async fn put<R: tokio::io::AsyncRead + std::marker::Unpin, S: AsRef<str>>(
+    fn put<R: std::io::Read, S: AsRef<str>, C: PocketDimension>(
         &mut self,
         name: S,
-        reader: R,
+        cache: C,
+        reader: &mut R,
     ) -> Result<(), Error>;
 
     /// Use to download a file from the filesystem
-    async fn get<W: tokio::io::AsyncWrite + std::marker::Unpin, S: AsRef<str>>(
+    fn get<W: std::io::Write, S: AsRef<str>, C: PocketDimension>(
         &self,
         name: S,
+        cache: C,
         writer: &mut W,
     ) -> Result<(), Error>;
 }
 
-#[cfg(not(feature = "use_tokio"))]
 pub trait ConstellationImportExport: Constellation {
-    fn export<I: Into<Item>, W: std::io::Write>(
+    fn export<I: Into<Item>, W: std::io::Write, C: PocketDimension>(
         &self,
         item: I,
         writer: &mut W,
@@ -145,26 +143,6 @@ pub trait ConstellationImportExport: Constellation {
     fn export_all<W: std::io::Write>(&self, writer: &mut W) -> Result<(), Error>;
 
     fn import<R: std::io::Read>(&mut self, reader: R) -> Result<(), Error>;
-}
-
-#[cfg(feature = "use_tokio")]
-#[async_trait::async_trait]
-pub trait ConstellationImportExport: Constellation {
-    async fn export<I: Into<Item>, W: tokio::io::AsyncWrite + std::marker::Unpin>(
-        &self,
-        item: I,
-        writer: &mut W,
-    ) -> Result<(), Error>;
-
-    async fn export_all<W: tokio::io::AsyncWrite + std::marker::Unpin>(
-        &self,
-        writer: &mut W,
-    ) -> Result<(), Error>;
-
-    async fn import<R: tokio::io::AsyncRead + std::marker::Unpin>(
-        &mut self,
-        reader: R,
-    ) -> Result<(), Error>;
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
