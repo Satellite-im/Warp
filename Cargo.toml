@@ -6,6 +6,7 @@ members = [
   "modules/warp-multipass",
   "modules/warp-raygun",
   "utils/warp-hooks",
+  "utils/warp-common",
   "utils/warp-data",
   "utils/warp-module",
   "warp",
