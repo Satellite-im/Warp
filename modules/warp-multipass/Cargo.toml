@@ -10,10 +10,8 @@ repository = "https://github.com/Satellite-im/Warp"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-thiserror = "1.0"
-uuid = { version = "0.8", features = ["serde", "v4"] }
-serde = { version = "1.0", features = ["derive"], optional = true }
-serde_json = { version = "1.0.78", optional = true }
-borsh = { version = "0.9", optional = true }
-regex = "1.5.4"
-chrono = { version = "0.4", features = ["serde"] }
+warp-common = { path = "../../utils/warp-common" }
+warp-data = { path = "../../utils/warp-data" }
+warp-pocket-dimension = { path = "../warp-pocket-dimension" }
+warp-module = { path = "../../utils/warp-module" }
+warp-hooks = { path = "../../utils/warp-hooks" }
