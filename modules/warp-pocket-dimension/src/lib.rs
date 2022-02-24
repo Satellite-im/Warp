@@ -1,9 +1,8 @@
-pub mod error;
 pub mod query;
 
-use crate::error::Error;
 use crate::query::QueryBuilder;
-use serde::Serialize;
+use warp_common::serde::Serialize;
+use warp_common::Result;
 use warp_data::DataObject;
 use warp_module::Module;
 
@@ -17,29 +16,21 @@ pub trait PocketDimension {
         &mut self,
         dimension: I,
         data: T,
-    ) -> Result<DataObject, Error>;
+    ) -> Result<DataObject>;
 
     /// Used to obtain a list of `DataObject` for `Module`
     fn get_data<I: Into<Module>>(
         &self,
         dimension: I,
         query: Option<&QueryBuilder>,
-    ) -> Result<Vec<DataObject>, Error>;
+    ) -> Result<Vec<DataObject>>;
 
     /// Returns the total size within the `Module`
-    fn size<I: Into<Module>>(
-        &self,
-        dimension: I,
-        query: Option<&QueryBuilder>,
-    ) -> Result<i64, Error>;
+    fn size<I: Into<Module>>(&self, dimension: I, query: Option<&QueryBuilder>) -> Result<i64>;
 
     /// Returns an total amount of `DataObject` for `Module`
-    fn count<I: Into<Module>>(
-        &self,
-        dimension: I,
-        query: Option<&QueryBuilder>,
-    ) -> Result<i64, Error>;
+    fn count<I: Into<Module>>(&self, dimension: I, query: Option<&QueryBuilder>) -> Result<i64>;
 
     /// Will flush out the data related to `Module`.
-    fn empty<I: Into<Module>>(&mut self, dimension: I) -> Result<(), Error>;
+    fn empty<I: Into<Module>>(&mut self, dimension: I) -> Result<()>;
 }

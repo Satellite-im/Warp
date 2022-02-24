@@ -1,23 +1,23 @@
-pub mod error;
-
 use warp_module::Module;
 
-use crate::error::Error;
-use chrono::{DateTime, Utc};
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use uuid::Uuid;
+use warp_common::chrono::{DateTime, Utc};
+use warp_common::error::Error;
+use warp_common::serde::de::DeserializeOwned;
+use warp_common::serde::{Deserialize, Serialize};
+use warp_common::serde_json;
+use warp_common::serde_json::Value;
+use warp_common::uuid::Uuid;
 
 pub type DataObject = Data;
 
 /// Standard DataObject used throughout warp.
 /// Unifies output from all modules
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(crate = "warp_common::serde")]
 pub struct Data {
     pub id: Uuid,
     pub version: u32,
-    #[serde(with = "chrono::serde::ts_seconds")]
+    #[serde(with = "warp_common::chrono::serde::ts_seconds")]
     pub timestamp: DateTime<Utc>,
     pub size: u64,
     pub module: Module,

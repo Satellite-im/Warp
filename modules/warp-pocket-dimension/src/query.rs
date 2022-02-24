@@ -1,6 +1,6 @@
-use crate::Error;
-use serde::Serialize;
-use serde_json::Value;
+use warp_common::serde::Serialize;
+use warp_common::serde_json::{self, Value};
+use warp_common::{error::Error, Result};
 
 #[derive(Debug)]
 pub enum Comparator {
@@ -20,7 +20,7 @@ pub struct QueryBuilder {
 }
 
 impl QueryBuilder {
-    pub fn r#where<S, I>(&mut self, key: S, value: I) -> Result<&mut Self, Error>
+    pub fn r#where<S, I>(&mut self, key: S, value: I) -> Result<&mut Self>
     where
         S: AsRef<str>,
         I: Serialize,
@@ -30,12 +30,7 @@ impl QueryBuilder {
         Ok(self)
     }
 
-    pub fn filter<S, I>(
-        &mut self,
-        compatator: Comparator,
-        key: S,
-        value: I,
-    ) -> Result<&mut Self, Error>
+    pub fn filter<S, I>(&mut self, compatator: Comparator, key: S, value: I) -> Result<&mut Self>
     where
         S: AsRef<str>,
         I: Serialize,

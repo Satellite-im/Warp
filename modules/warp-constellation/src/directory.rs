@@ -1,11 +1,12 @@
-use crate::error::Error;
 use crate::item::{Item, ItemMeta};
-use chrono::Utc;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use warp_common::chrono::Utc;
+use warp_common::serde::{Deserialize, Serialize};
+use warp_common::uuid::Uuid;
+use warp_common::{error::Error, Result};
 
 /// `DirectoryType` handles the supported types for the directory.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[serde(crate = "warp_common::serde")]
 pub enum DirectoryType {
     Default,
 }
@@ -18,6 +19,7 @@ impl Default for DirectoryType {
 
 /// `Directory` handles folders and its contents.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[serde(crate = "warp_common::serde")]
 pub struct Directory {
     #[serde(flatten)]
     pub metadata: ItemMeta,
@@ -107,7 +109,7 @@ impl Directory {
     ///     let sub = Directory::new("Sub Directory");
     ///     root.add_child(sub).unwrap();
     /// ```
-    pub fn add_child<I: Into<Item>>(&mut self, child: I) -> Result<(), Error> {
+    pub fn add_child<I: Into<Item>>(&mut self, child: I) -> Result<()> {
         //TODO: Implement check to make sure that the Directory isnt being added to itself
         let child = &child.into();
         if self.has_child(child.name()) {
@@ -129,7 +131,7 @@ impl Directory {
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory}};
-    ///     use warp_constellation::error::Error;
+    ///     use warp_common::error::Error;
     ///
     ///     let mut root = Directory::new("Test Directory");
     ///     let sub1 = Directory::new("Sub1 Directory");
@@ -138,10 +140,10 @@ impl Directory {
     ///     root.add_child(sub2).unwrap();
     ///     assert_eq!(root.get_child_index("Sub1 Directory").unwrap(), 0);
     ///     assert_eq!(root.get_child_index("Sub2 Directory").unwrap(), 1);
-    ///     assert_eq!(root.get_child_index("Sub3 Directory").unwrap_err(), Error::ArrayPositionNotFound);
+    ///     assert_eq!(root.get_child_index("Sub3 Directory").is_err(), true);
     ///
     /// ```
-    pub fn get_child_index<S: AsRef<str>>(&self, child_name: S) -> Result<usize, Error> {
+    pub fn get_child_index<S: AsRef<str>>(&self, child_name: S) -> Result<usize> {
         self.children
             .iter()
             .position(|item| item.name() == child_name.as_ref())
@@ -154,7 +156,6 @@ impl Directory {
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory}};
-    ///     use warp_constellation::error::Error;
     ///
     ///     let mut root = Directory::new("Test Directory");
     ///     let sub = Directory::new("Sub Directory");
@@ -163,7 +164,7 @@ impl Directory {
     ///     let child = root.get_child("Sub Directory").unwrap();
     ///     assert_eq!(child.name(), "Sub Directory");
     /// ```
-    pub fn get_child<S: AsRef<str>>(&self, child_name: S) -> Result<&Item, Error> {
+    pub fn get_child<S: AsRef<str>>(&self, child_name: S) -> Result<&Item> {
         let child_name = child_name.as_ref();
         if !self.has_child(child_name) {
             return Err(Error::ItemInvalid);
@@ -178,7 +179,6 @@ impl Directory {
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory},file::File};
-    ///     use warp_constellation::error::Error;
     ///
     ///     let mut root = Directory::new("Test Directory");
     ///     let sub = Directory::new("Sub Directory");
@@ -197,7 +197,7 @@ impl Directory {
     ///     assert_eq!(dir.has_child("testFile.png"), false);
     ///
     /// ```
-    pub fn get_child_mut<S: AsRef<str>>(&mut self, child_name: S) -> Result<&mut Item, Error> {
+    pub fn get_child_mut<S: AsRef<str>>(&mut self, child_name: S) -> Result<&mut Item> {
         let child_name = child_name.as_ref();
         if !self.has_child(child_name) {
             return Err(Error::ItemInvalid);
@@ -212,7 +212,6 @@ impl Directory {
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory}};
-    ///     use warp_constellation::error::Error;
     ///
     ///
     ///     let mut root = Directory::new("Test Directory");
@@ -225,11 +224,7 @@ impl Directory {
     ///     assert_eq!(root.has_child("Test Directory"), true);
     ///
     /// ```
-    pub fn rename_child<S: AsRef<str>>(
-        &mut self,
-        current_name: S,
-        new_name: S,
-    ) -> Result<(), Error> {
+    pub fn rename_child<S: AsRef<str>>(&mut self, current_name: S, new_name: S) -> Result<()> {
         self.get_child_mut_by_path(current_name)?.rename(new_name)
     }
 
@@ -239,7 +234,6 @@ impl Directory {
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory}};
-    ///     use warp_constellation::error::Error;
     ///
     ///     let mut root = Directory::new("Test Directory");
     ///     let sub = Directory::new("Sub Directory");
@@ -249,7 +243,7 @@ impl Directory {
     ///     let _ = root.remove_child("Sub Directory").unwrap();
     ///     assert_eq!(root.has_child("Sub Directory"), false);
     /// ```
-    pub fn remove_child<S: AsRef<str>>(&mut self, child_name: S) -> Result<Item, Error> {
+    pub fn remove_child<S: AsRef<str>>(&mut self, child_name: S) -> Result<Item> {
         let child_name = child_name.as_ref();
         if !self.has_child(child_name) {
             return Err(Error::ItemInvalid);
@@ -293,7 +287,7 @@ impl Directory {
         &mut self,
         directory: S,
         child: S,
-    ) -> Result<Item, Error> {
+    ) -> Result<Item> {
         self.get_child_mut_by_path(directory)?
             .get_directory_mut()?
             .remove_child(child)
@@ -304,7 +298,6 @@ impl Directory {
     ///
     /// ```
     ///     use warp_constellation::{directory::Directory};
-    ///     use warp_constellation::error::Error;
     ///
     ///     let mut root = Directory::new("Test Directory");
     ///     let sub0 = Directory::new("Sub Directory 1");
@@ -319,7 +312,7 @@ impl Directory {
     ///
     ///     assert_ne!(root.has_child("Sub Directory 2"), true);
     /// ```
-    pub fn move_item_to<S: AsRef<str>>(&mut self, child: S, dst: S) -> Result<(), Error> {
+    pub fn move_item_to<S: AsRef<str>>(&mut self, child: S, dst: S) -> Result<()> {
         let (child, dst) = (child.as_ref().trim(), dst.as_ref().trim());
 
         if self.get_child_by_path(dst)?.is_file() {
@@ -348,7 +341,6 @@ impl Directory {
     ///
     /// ```
     ///     use warp_constellation::{directory::Directory};
-    ///     use warp_constellation::error::Error;
     ///
     ///     let mut root = Directory::new("Test Directory");
     ///     let mut sub0 = Directory::new("Sub Directory 1");
@@ -361,7 +353,7 @@ impl Directory {
     ///     let item = root.find_item("Sub Directory 2").unwrap();
     ///     assert_eq!(item.name(), "Sub Directory 2");
     /// ```
-    pub fn find_item<S: AsRef<str>>(&self, item_name: S) -> Result<&Item, Error> {
+    pub fn find_item<S: AsRef<str>>(&self, item_name: S) -> Result<&Item> {
         let item_name = item_name.as_ref();
         for item in self.children.iter() {
             if item.name().eq(item_name) {
@@ -418,7 +410,7 @@ impl Directory {
     ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory 3").is_ok(), true);
     ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory3/Another Dir").is_ok(), false);
     /// ```
-    pub fn get_child_by_path<S: AsRef<str>>(&self, path: S) -> Result<&Item, Error> {
+    pub fn get_child_by_path<S: AsRef<str>>(&self, path: S) -> Result<&Item> {
         let mut path = path
             .as_ref()
             .split('/')
@@ -460,10 +452,9 @@ impl Directory {
     ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/").is_ok(), true);
     ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/").is_ok(), true);
     ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory 3").is_ok(), true);
-    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/Another Directory")
-    /// .is_ok(), true);
+    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/Another Directory").is_ok(), true);
     /// ```
-    pub fn get_child_mut_by_path<S: AsRef<str>>(&mut self, path: S) -> Result<&mut Item, Error> {
+    pub fn get_child_mut_by_path<S: AsRef<str>>(&mut self, path: S) -> Result<&mut Item> {
         let mut path = path
             .as_ref()
             .split('/')

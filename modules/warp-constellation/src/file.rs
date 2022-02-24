@@ -1,12 +1,13 @@
 use crate::item::ItemMeta;
-use chrono::Utc;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use warp_common::chrono::Utc;
+use warp_common::serde::{Deserialize, Serialize};
+use warp_common::uuid::Uuid;
 
 /// `FileType` describes all supported file types.
 /// This will be useful for applying icons to the tree later on
 /// if we don't have a supported file type, we can just default to generic.
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[serde(crate = "warp_common::serde")]
 #[serde(rename_all = "lowercase")]
 pub enum FileType {
     Generic,
@@ -16,6 +17,7 @@ pub enum FileType {
 
 /// `File` represents the files uploaded to the FileSystem (`Constellation`).
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[serde(crate = "warp_common::serde")]
 pub struct File {
     #[serde(flatten)]
     pub metadata: ItemMeta,

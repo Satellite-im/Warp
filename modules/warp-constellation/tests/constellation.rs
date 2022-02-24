@@ -1,11 +1,12 @@
 #[cfg(test)]
 mod tests {
-    use chrono::{DateTime, Utc};
-    use serde::{Deserialize, Serialize};
+    use warp_common::chrono::{DateTime, Utc};
+    use warp_common::serde::{Deserialize, Serialize};
     use warp_constellation::constellation::{Constellation, ConstellationVersion};
     use warp_constellation::directory::{Directory, DirectoryType};
 
     #[derive(Serialize, Deserialize, Clone, Debug)]
+    #[serde(crate = "warp_common::serde")]
     pub struct DummyFileSystem {
         version: ConstellationVersion,
         index: Directory,
@@ -41,7 +42,7 @@ mod tests {
     }
 
     #[test]
-    fn test() -> Result<(), warp_constellation::error::Error> {
+    fn test() -> warp_common::Result<()> {
         let mut filesystem = DummyFileSystem::default();
 
         filesystem.create_file("testFile.png")?;

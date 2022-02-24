@@ -1,10 +1,11 @@
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
+use warp_common::error::Error;
+use warp_common::serde::{Deserialize, Serialize};
+use warp_common::serde_json::Value;
 use warp_data::DataObject;
 use warp_module::Module;
 use warp_pocket_dimension::query::{Comparator, QueryBuilder};
-use warp_pocket_dimension::{error::Error, PocketDimension};
+use warp_pocket_dimension::PocketDimension;
 
 // MemoryCache instance will hold a map of both module and dataobject "in memory".
 // There is little functionality to it for testing purchase outside of `PocketDimension` interface
@@ -179,6 +180,7 @@ fn execute(data: &Vec<DataObject>, query: &QueryBuilder) -> Result<Vec<DataObjec
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "warp_common::serde")]
 pub struct SomeData {
     pub name: String,
     pub age: i64,
@@ -202,28 +204,21 @@ impl SomeData {
     }
 }
 
-fn generate_data(amount: i64) -> Vec<SomeData> {
-    let mut list = Vec::new();
+fn generate_data(system: &mut MemoryCache, amount: i64) {
     for i in 0..amount {
-        list.push({
-            let mut data = SomeData::default();
-            data.set_name(&format!("Test Subject {i}"));
-            data.set_age(18 + i);
-            data
-        });
+        let mut data = SomeData::default();
+        data.set_name(&format!("Test Subject {i}"));
+        data.set_age(18 + i);
+
+        system.add_data(Module::Accounts, data).unwrap();
     }
-    list
 }
 
 #[test]
 fn if_count_eq_five() -> Result<(), Error> {
     let mut memory = MemoryCache::default();
 
-    let list = generate_data(100);
-
-    for data in list {
-        memory.add_data(Module::Accounts, data)?;
-    }
+    generate_data(&mut memory, 100);
 
     let mut query = QueryBuilder::default();
     query.filter(Comparator::Gte, "age", 19)?;
@@ -240,11 +235,7 @@ fn if_count_eq_five() -> Result<(), Error> {
 fn data_test() -> Result<(), Error> {
     let mut memory = MemoryCache::default();
 
-    let list = generate_data(100);
-
-    for data in list {
-        memory.add_data(Module::Accounts, data)?;
-    }
+    generate_data(&mut memory, 100);
 
     let mut query = QueryBuilder::default();
     query.r#where("age", 21)?;

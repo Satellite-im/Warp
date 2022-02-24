@@ -1,7 +1,7 @@
 use warp_constellation::directory::Directory;
 use warp_constellation::file::File;
 
-fn main() -> Result<(), warp_constellation::error::Error> {
+fn main() -> warp_common::Result<()> {
     // Create file with 10000 bytes.
     let mut file = File::new("testFile.png");
     file.set_size(10000);
