@@ -5,7 +5,6 @@ pub use chrono;
 pub use regex;
 pub use serde;
 pub use serde_json;
-pub use thiserror;
 pub use uuid;
 
 #[cfg(not(target_os = "wasm32"))]
