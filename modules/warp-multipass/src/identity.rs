@@ -4,36 +4,58 @@ use warp_common::serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "warp_common::serde")]
 pub struct Role {
-    name: String,
-    level: u8,
+    pub name: String,
+    pub level: u8,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "warp_common::serde")]
 pub struct Badge {
-    name: String,
-    icon: String,
+    pub name: String,
+    pub icon: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "warp_common::serde")]
 pub struct Graphics {
-    profile_picture: String,
-    profile_banner: String,
+    /// Hash to profile picture
+    pub profile_picture: String,
+
+    /// Hash to profile banner
+    pub profile_banner: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "warp_common::serde")]
 pub struct Identity {
-    username: String,
-    short_id: u16,
-    public_key: Vec<u8>,
-    graphics: Graphics,
-    status_message: Option<String>,
-    roles: Vec<Role>,
-    available_badges: Vec<Badge>,
-    active_badge: Badge,
-    linked_accounts: HashMap<String, String>,
+    pub username: String,
+    pub short_id: u16,
+    #[serde(flatten)]
+    pub public_key: PublicKey,
+    pub graphics: Graphics,
+    pub status_message: Option<String>,
+    pub roles: Vec<Role>,
+    pub available_badges: Vec<Badge>,
+    pub active_badge: Badge,
+    pub linked_accounts: HashMap<String, String>,
 }
 
-pub enum IdentityUpdate {}
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "warp_common::serde")]
+pub struct PublicKey(Vec<u8>);
+
+#[derive(Debug, Clone)]
+pub enum Identifier {
+    /// Select identity based on public key
+    PublicKey(PublicKey),
+
+    /// Select identity based on Username (eg `Username#0000`)
+    Username(String),
+
+    /// Select own identity.
+    Own,
+}
+
+pub enum IdentityUpdate {
+    Username(String),
+}
