@@ -3,34 +3,15 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("{0}")]
-    HookError(#[from] HookError),
-    #[error("{0}")]
-    ConstellationError(#[from] ConstellationError),
-    #[error("{0}")]
-    SerdeJsonError(#[from] serde_json::Error),
-    #[error("{0}")]
-    RegexError(#[from] regex::Error),
-    #[error(transparent)]
-    Any(#[from] anyhow::Error),
-    #[error("{0}")]
-    IoError(#[from] std::io::Error),
-    #[error("An unknown error has occurred")]
-    Other,
-}
-
-#[derive(Error, Debug, PartialEq)]
-pub enum HookError {
+    //Hook Errors
     #[error("Hook is not registered")]
     HookUnregistered,
     #[error("Hook with this name already registered")]
     DuplicateHook,
     #[error("Already subscribed to this hook")]
     AlreadySubscribed,
-}
 
-#[derive(Error, Debug, PartialEq)]
-pub enum ConstellationError {
+    //Constellation Errors
     #[error("Item with name already exists in current directory")]
     DuplicateName,
     #[error("Directory cannot contain itself")]
@@ -51,4 +32,18 @@ pub enum ConstellationError {
     InvalidPath,
     #[error("Cannot find position of array content.")]
     ArrayPositionNotFound,
+    //PocketDimension Errors
+    //TODO
+
+    //Misc
+    #[error("{0}")]
+    SerdeJsonError(#[from] serde_json::Error),
+    #[error("{0}")]
+    RegexError(#[from] regex::Error),
+    #[error(transparent)]
+    Any(#[from] anyhow::Error),
+    #[error("{0}")]
+    IoError(#[from] std::io::Error),
+    #[error("An unknown error has occurred")]
+    Other,
 }
