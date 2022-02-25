@@ -9,3 +9,6 @@ cache
 written in rust. This 
 allows for in-memory caching.
 
+## warp-pd-flatfile
+
+Flatfile implementation for Pocket Dimension to cache data to disk. 
