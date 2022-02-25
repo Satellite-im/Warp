@@ -46,7 +46,7 @@ Multipass::getIdentity(id: PublicKey | "Username#short_id");
 Multipass::getOwnIdentity(); // Returns Identity
 ```
 
-The response will be returned, wrapped in the `DataObject` with the payload representing the `Identity` Struct.
+The response will be returned, wrapped in the `DataObject` with the payload representing the `Identity` Struct. After each fetch of an identity a new version of the identity will be stored in cache automatically.
 
 #### Updating Own Identity
 
@@ -56,9 +56,11 @@ Allows user to update mutable identity variables such as their `Username`, `Grap
 Multipass::updateOwnIdentity(id: PublicKey | "Username#short_id", PartialIdentity);
 ```
 
+The cache is updated to reflect our profile changes. This allows us to optimistically update UIs without waiting for on chain transactions to process.
+
 #### Create Identity
 
-This should only be called once, this is used to create a new account on the system. Calling this will store the encrypted PrivateKey on disk. Calling again will overwrite the previous account which cannot be retrieved unless the PrivateKey was backed up.
+This should only be called once, this is used to create a new account on the system. Calling this will store the encrypted PrivateKey on disk. Calling again will overwrite the previous account which cannot be retrieved unless the PrivateKey was backed up. The PrivateKey will be encrypted by the supplied `passphrase` so that it's not readable on disk.
 
 ```rs
 Multipass::createIdentity(passphrase: String, identity: Identity) // Returns PublicKey, stores encrypted private key

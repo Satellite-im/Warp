@@ -1,6 +1,10 @@
 # Hooks
 
+## Overview
+
 Hooks allow us to create subscription points for extensions of the platform to listen upon to know when a module does something. They are simple to implement into your module as well as use for external APIs.
+
+## Usage
 
 #### Creating a Hook
 

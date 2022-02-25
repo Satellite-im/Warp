@@ -1,5 +1,7 @@
 # Data Standard
 
+## Overview
+
 Warp sends and receives all data in a standardized "Data Object". **Data Objects** which are not formatted in the 
 correct way will be rejected by the service. This allows a very predictable way to send **Data Objects** in and out 
 of the service while keeping the specific implementations of each module agnostic. We can expect the same type of 
@@ -9,6 +11,8 @@ disk, using IPFS, WebTorrent, or any other implementation. You should reference 
 TypeScript, a JSON object from the API, or some other method for your specific programming language. The **Data Object** should always be a precursor to any module specific data, even if the data is coming straight from the module itself.
 
 Lastly, to maintain data types, Warp uses the [Serde](https://serde.rs/) to serialize data.
+
+## Usage
 
 ### Data Structure
 
