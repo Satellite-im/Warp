@@ -2,7 +2,7 @@
 
 #### Structs
 
-```rs
+```rust
 pub struct Role {
   name: String,
   level: u8,
@@ -38,11 +38,11 @@ Getting an identity requires an identifier to fetch by, this can either be one o
 Example identity retrieval:
 
 
-```rs
+```rust
 Multipass::getIdentity(id: PublicKey | "Username#short_id");
 ```
 
-```rs
+```rust
 Multipass::getOwnIdentity(); // Returns Identity
 ```
 
@@ -52,7 +52,7 @@ The response will be returned, wrapped in the `DataObject` with the payload repr
 
 Allows user to update mutable identity variables such as their `Username`, `Graphics`, `stats_msg` and more. Other values like the global `roles`, `available_badges` and more are only mutable by outside entities such as `Satellite`. These represent global applicaiton identity traits.
 
-```rs
+```rust
 Multipass::updateOwnIdentity(id: PublicKey | "Username#short_id", PartialIdentity);
 ```
 
@@ -62,7 +62,7 @@ The cache is updated to reflect our profile changes. This allows us to optimisti
 
 This should only be called once, this is used to create a new account on the system. Calling this will store the encrypted PrivateKey on disk. Calling again will overwrite the previous account which cannot be retrieved unless the PrivateKey was backed up. The PrivateKey will be encrypted by the supplied `passphrase` so that it's not readable on disk.
 
-```rs
+```rust
 Multipass::createIdentity(passphrase: String, identity: Identity) // Returns PublicKey, stores encrypted private key
 ```
 
@@ -70,7 +70,7 @@ Multipass::createIdentity(passphrase: String, identity: Identity) // Returns Pub
 
 Decrypts the stored PrivateKey given a passphrase to allow interactions with the account such as on chain transactions.
 
-```rs
+```rust
 Multipass::decryptPrivateKey(passphrase: String);
 ```
 
@@ -78,6 +78,6 @@ Multipass::decryptPrivateKey(passphrase: String);
 
 Dumps local cache data for Identities ONLY. This is useful for bulk updating the cache in instances of global updates, etc.
 
-```rs
+```rust
 Multipass::refreshCache();
 ````
