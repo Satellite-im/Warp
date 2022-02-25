@@ -1,14 +1,15 @@
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use warp_common::chrono::{DateTime, Utc};
+use warp_common::serde::{Deserialize, Serialize};
 use warp_constellation::constellation::{Constellation, ConstellationVersion};
 use warp_constellation::directory::Directory;
 use warp_constellation::file::File;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(crate = "warp_common::serde")]
 pub struct DummyFileSystem {
     version: ConstellationVersion,
     index: Directory,
-    modified: DateTime<Utc>
+    modified: DateTime<Utc>,
 }
 
 impl Default for DummyFileSystem {
@@ -16,13 +17,12 @@ impl Default for DummyFileSystem {
         DummyFileSystem {
             version: ConstellationVersion::from((0, 1, 2)),
             index: Directory::new("root"),
-            modified: Utc::now()
+            modified: Utc::now(),
         }
     }
 }
 
 impl Constellation for DummyFileSystem {
-
     fn version(&self) -> &ConstellationVersion {
         &self.version
     }
@@ -38,10 +38,9 @@ impl Constellation for DummyFileSystem {
     fn root_directory_mut(&mut self) -> &mut Directory {
         &mut self.index
     }
-
 }
 
-fn main() -> Result<(), warp_constellation::error::Error> {
+fn main() -> warp_common::Result<()> {
     let mut dummy_fs = DummyFileSystem::default();
     let mut file = File::new("testFile.png");
     file.set_size(10000);

@@ -1,9 +1,8 @@
-
 #[cfg(test)]
 mod tests {
 
     #[test]
-    fn test() -> Result<(), warp_constellation::error::Error>{
+    fn test() -> warp_common::Result<()> {
         //TODO
         Ok(())
     }

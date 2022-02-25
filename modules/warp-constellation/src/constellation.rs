@@ -1,11 +1,12 @@
 use crate::{
     directory::{Directory, DirectoryType},
-    error::Error,
     file::File,
     item::Item,
 };
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use warp_common::chrono::{DateTime, Utc};
+use warp_common::serde::{Deserialize, Serialize};
+use warp_common::Result;
+use warp_pocket_dimension::PocketDimension;
 
 /// Interface that would provide functionality around the filesystem.
 pub trait Constellation {
@@ -16,12 +17,12 @@ pub trait Constellation {
     fn modified(&self) -> DateTime<Utc>;
 
     /// Creates a `File` in the current directory.
-    fn create_file<S: AsRef<str>>(&mut self, file_name: S) -> Result<(), Error> {
+    fn create_file<S: AsRef<str>>(&mut self, file_name: S) -> Result<()> {
         self.add_child(File::new(file_name))
     }
 
     /// Creates a `Directory` in the current directory.
-    fn create_directory(&mut self, directory_name: &str, _: DirectoryType) -> Result<(), Error> {
+    fn create_directory(&mut self, directory_name: &str, _: DirectoryType) -> Result<()> {
         self.add_child(Directory::new(directory_name))
     }
 
@@ -41,18 +42,25 @@ pub trait Constellation {
         unimplemented!()
     }
 
+    fn get_index(&self) -> &Directory {
+        self.root_directory()
+    }
+
+    fn get_index_mut(&mut self) -> &mut Directory {
+        self.root_directory_mut()
+    }
     /// Add an `Item` to the current directory
-    fn add_child<I: Into<Item>>(&mut self, item: I) -> Result<(), Error> {
+    fn add_child<I: Into<Item>>(&mut self, item: I) -> Result<()> {
         self.root_directory_mut().add_child(item)
     }
 
     /// Used to get an `Item` from the current directory
-    fn get_child<S: AsRef<str>>(&self, name: S) -> Result<&Item, Error> {
+    fn get_child<S: AsRef<str>>(&self, name: S) -> Result<&Item> {
         self.root_directory().get_child(name)
     }
 
     /// Used to get a mutable `Item` from the current directory
-    fn get_child_mut<S: AsRef<str>>(&mut self, name: S) -> Result<&mut Item, Error> {
+    fn get_child_mut<S: AsRef<str>>(&mut self, name: S) -> Result<&mut Item> {
         self.root_directory_mut().get_child_mut(name)
     }
 
@@ -62,23 +70,23 @@ pub trait Constellation {
     }
 
     /// Used to remove child from within the current directory
-    fn remove_child<S: AsRef<str>>(&mut self, child_name: S) -> Result<Item, Error> {
+    fn remove_child<S: AsRef<str>>(&mut self, child_name: S) -> Result<Item> {
         self.root_directory_mut().remove_child(child_name)
     }
 
     /// Used to rename a child within current directory.
-    fn rename_child<S: AsRef<str>>(&mut self, current_name: S, new_name: S) -> Result<(), Error> {
+    fn rename_child<S: AsRef<str>>(&mut self, current_name: S, new_name: S) -> Result<()> {
         self.root_directory_mut()
             .rename_child(current_name, new_name)
     }
 
     /// Used to move a child from its current directory to another.
-    fn move_item_to(&mut self, child: &str, dst: &str) -> Result<(), Error> {
+    fn move_item_to(&mut self, child: &str, dst: &str) -> Result<()> {
         self.root_directory_mut().move_item_to(child, dst)
     }
 
     /// Used to find and return the first found item within the filesystem
-    fn find_item<S: AsRef<str>>(&self, item_name: S) -> Result<&Item, Error> {
+    fn find_item<S: AsRef<str>>(&self, item_name: S) -> Result<&Item> {
         self.root_directory().find_item(item_name)
     }
 
@@ -88,7 +96,7 @@ pub trait Constellation {
     }
 
     /// Returns a mutable directory from the filesystem
-    fn open_directory<S: AsRef<str>>(&mut self, path: S) -> Result<&mut Directory, Error> {
+    fn open_directory<S: AsRef<str>>(&mut self, path: S) -> Result<&mut Directory> {
         match path.as_ref().trim().is_empty() {
             false => self
                 .root_directory_mut()
@@ -107,67 +115,38 @@ pub trait Constellation {
     }
 }
 
-#[cfg(not(feature = "use_tokio"))]
 pub trait ConstellationGetPut: Constellation {
     /// Use to upload file to the filesystem
-    fn put<R: std::io::Read, S: AsRef<str>>(&mut self, name: S, reader: R) -> Result<(), Error>;
-
-    /// Use to download a file from the filesystem
-    fn get<W: std::io::Write, S: AsRef<str>>(&self, name: S, writer: &mut W) -> Result<(), Error>;
-}
-
-#[cfg(feature = "use_tokio")]
-#[async_trait::async_trait]
-pub trait ConstellationGetPut: Constellation {
-    /// Use to upload file to the filesystem
-    async fn put<R: tokio::io::AsyncRead + std::marker::Unpin, S: AsRef<str>>(
+    fn put<R: std::io::Read, S: AsRef<str>, C: PocketDimension>(
         &mut self,
         name: S,
-        reader: R,
-    ) -> Result<(), Error>;
+        cache: C,
+        reader: &mut R,
+    ) -> Result<()>;
 
     /// Use to download a file from the filesystem
-    async fn get<W: tokio::io::AsyncWrite + std::marker::Unpin, S: AsRef<str>>(
+    fn get<W: std::io::Write, S: AsRef<str>, C: PocketDimension>(
         &self,
         name: S,
+        cache: C,
         writer: &mut W,
-    ) -> Result<(), Error>;
+    ) -> Result<()>;
 }
 
-#[cfg(not(feature = "use_tokio"))]
 pub trait ConstellationImportExport: Constellation {
-    fn export<I: Into<Item>, W: std::io::Write>(
+    fn export<I: Into<Item>, W: std::io::Write, C: PocketDimension>(
         &self,
         item: I,
         writer: &mut W,
-    ) -> Result<(), Error>;
+    ) -> Result<()>;
 
-    fn export_all<W: std::io::Write>(&self, writer: &mut W) -> Result<(), Error>;
+    fn export_all<W: std::io::Write>(&self, writer: &mut W) -> Result<()>;
 
-    fn import<R: std::io::Read>(&mut self, reader: R) -> Result<(), Error>;
-}
-
-#[cfg(feature = "use_tokio")]
-#[async_trait::async_trait]
-pub trait ConstellationImportExport: Constellation {
-    async fn export<I: Into<Item>, W: tokio::io::AsyncWrite + std::marker::Unpin>(
-        &self,
-        item: I,
-        writer: &mut W,
-    ) -> Result<(), Error>;
-
-    async fn export_all<W: tokio::io::AsyncWrite + std::marker::Unpin>(
-        &self,
-        writer: &mut W,
-    ) -> Result<(), Error>;
-
-    async fn import<R: tokio::io::AsyncRead + std::marker::Unpin>(
-        &mut self,
-        reader: R,
-    ) -> Result<(), Error>;
+    fn import<R: std::io::Read>(&mut self, reader: R) -> Result<()>;
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[serde(crate = "warp_common::serde")]
 pub struct ConstellationVersion(String);
 
 impl From<i16> for ConstellationVersion {

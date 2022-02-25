@@ -1,26 +1,28 @@
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use uuid::Uuid;
+use warp_common::chrono::{DateTime, Utc};
+use warp_common::serde::{Deserialize, Serialize};
+use warp_common::uuid::Uuid;
+use warp_common::{error::Error, Result};
 
 use crate::directory::Directory;
-use crate::error::Error;
 use crate::file::File;
 
 /// A object to handle the metadata of `File` or `Directory`
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "warp_common::serde")]
 pub struct ItemMeta {
     pub id: Uuid,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<i64>,
     pub description: String,
-    #[serde(with = "chrono::serde::ts_seconds")]
+    #[serde(with = "warp_common::chrono::serde::ts_seconds")]
     pub creation: DateTime<Utc>,
 }
 
 /// `Item` is a type that handles both `File` and `Directory`
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(crate = "warp_common::serde")]
 #[serde(untagged)]
 pub enum Item {
     File(File),
@@ -103,7 +105,7 @@ impl Item {
     }
 
     /// Rename the name of `Item`
-    pub fn rename<S: AsRef<str>>(&mut self, name: S) -> Result<(), Error> {
+    pub fn rename<S: AsRef<str>>(&mut self, name: S) -> Result<()> {
         let name = name.as_ref().trim();
         if self.name() == name {
             return Err(Error::DuplicateName);
@@ -117,7 +119,7 @@ impl Item {
     }
 
     /// Convert `Item` to `Directory`
-    pub fn get_directory(&self) -> Result<&Directory, Error> {
+    pub fn get_directory(&self) -> Result<&Directory> {
         match self {
             Item::File(_) => Err(Error::InvalidConversion),
             Item::Directory(directory) => Ok(directory),
@@ -125,7 +127,7 @@ impl Item {
     }
 
     /// Convert `Item` to `File`
-    pub fn get_file(&self) -> Result<&File, Error> {
+    pub fn get_file(&self) -> Result<&File> {
         match self {
             Item::File(file) => Ok(file),
             Item::Directory(_) => Err(Error::InvalidConversion),
@@ -133,7 +135,7 @@ impl Item {
     }
 
     /// Convert `Item` to `Directory`
-    pub fn get_directory_mut(&mut self) -> Result<&mut Directory, Error> {
+    pub fn get_directory_mut(&mut self) -> Result<&mut Directory> {
         match self {
             Item::File(_) => Err(Error::InvalidConversion),
             Item::Directory(directory) => Ok(directory),
@@ -141,7 +143,7 @@ impl Item {
     }
 
     /// Convert `Item` to `File`
-    pub fn get_file_mut(&mut self) -> Result<&mut File, Error> {
+    pub fn get_file_mut(&mut self) -> Result<&mut File> {
         match self {
             Item::File(file) => Ok(file),
             Item::Directory(_) => Err(Error::InvalidConversion),
@@ -175,7 +177,7 @@ impl Item {
     }
 
     /// Set size of `Item` if its a `File`
-    pub fn set_size(&mut self, size: i64) -> Result<(), Error> {
+    pub fn set_size(&mut self, size: i64) -> Result<()> {
         match self {
             Item::File(file) => {
                 file.metadata.size = Some(size);

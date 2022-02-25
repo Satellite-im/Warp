@@ -1,10 +1,17 @@
+/// Errors that would host custom errors for modules, utilities, etc.
 use thiserror::Error;
 
-/// Errors
-///
-
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug)]
 pub enum Error {
+    //Hook Errors
+    #[error("Hook is not registered")]
+    HookUnregistered,
+    #[error("Hook with this name already registered")]
+    DuplicateHook,
+    #[error("Already subscribed to this hook")]
+    AlreadySubscribed,
+
+    //Constellation Errors
     #[error("Item with name already exists in current directory")]
     DuplicateName,
     #[error("Directory cannot contain itself")]
@@ -25,8 +32,18 @@ pub enum Error {
     InvalidPath,
     #[error("Cannot find position of array content.")]
     ArrayPositionNotFound,
-    #[error("Regex Error: {0}")]
+    //PocketDimension Errors
+    //TODO
+
+    //Misc
+    #[error("{0}")]
+    SerdeJsonError(#[from] serde_json::Error),
+    #[error("{0}")]
     RegexError(#[from] regex::Error),
-    #[error("Unknown error has occurred")]
+    #[error(transparent)]
+    Any(#[from] anyhow::Error),
+    #[error("{0}")]
+    IoError(#[from] std::io::Error),
+    #[error("An unknown error has occurred")]
     Other,
 }

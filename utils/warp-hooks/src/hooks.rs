@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use crate::error::Error;
+use warp_common::error::Error;
+use warp_common::Result;
 
 use warp_data::DataObject;
 use warp_module::Module;
@@ -60,7 +61,6 @@ impl Hooks {
     ///
     /// ```
     ///     use warp_data::DataObject;
-    ///     use warp_hooks::error::Error;
     ///     use warp_hooks::hooks::{Hook, Hooks};
     ///     use warp_module::Module;
     ///
@@ -68,7 +68,7 @@ impl Hooks {
     ///     let hook = system.create("NEW_FILE", Module::FileSystem).unwrap();
     ///     assert_eq!(hook, Hook::new("NEW_FILE", Module::FileSystem));
     /// ```
-    pub fn create<S: AsRef<str>>(&mut self, name: S, module: Module) -> Result<Hook, Error> {
+    pub fn create<S: AsRef<str>>(&mut self, name: S, module: Module) -> Result<Hook> {
         let name = name.as_ref().to_owned();
         let hook = Hook::new(name, module);
 
@@ -87,7 +87,6 @@ impl Hooks {
     ///
     /// ```
     ///     use warp_data::DataObject;
-    ///     use warp_hooks::error::Error;
     ///     use warp_hooks::hooks::{Hook, Hooks};
     ///     use warp_module::Module;
     ///
@@ -106,7 +105,6 @@ impl Hooks {
     ///
     /// ```
     ///     use warp_data::DataObject;
-    ///     use warp_hooks::error::Error;
     ///     use warp_hooks::hooks::{Hook, Hooks};
     ///     use warp_module::Module;
     ///     use warp_constellation::file::File;
@@ -114,9 +112,9 @@ impl Hooks {
     ///     let mut system = Hooks::default();
     ///     let hook = system.create("NEW_FILE", Module::FileSystem).unwrap();
     ///     //Check to see if hook already exist
-    ///     assert_eq!(system.create("NEW_FILE", Module::FileSystem).unwrap_err(), Error::DuplicateHook);
+    ///     assert_eq!(system.create("NEW_FILE", Module::FileSystem).is_err(), true);
     ///     //Check to see if hook havent been registered
-    ///     assert_eq!(system.subscribe(Hook::from("UNKNOWN::NEW_FILE"), |_, _|{}).unwrap_err(), Error::HookUnregistered);
+    ///     assert_eq!(system.subscribe(Hook::from("UNKNOWN::NEW_FILE"), |_, _|{}).is_err(), true);
     ///     system.subscribe("FILESYSTEM::NEW_FILE", |hook, data| {
     ///         assert_eq!(hook.name.as_str(), "NEW_FILE");
     ///         assert_eq!(hook.module, Module::FileSystem);
@@ -124,10 +122,10 @@ impl Hooks {
     ///         let file: File = data.payload().unwrap();
     ///         assert_eq!(file.metadata.name.as_str(), "test.txt");
     ///     }).unwrap();
-    ///     let data = DataObject::new(&Module::FileSystem, File::new("test.txt")).map_err(|_| Error::Other).unwrap();
+    ///     let data = DataObject::new(&Module::FileSystem, File::new("test.txt")).unwrap();
     ///     system.trigger("FILESYSTEM::NEW_FILE", "FILESYSTEM::NEW_FILE", &data);
     /// ```
-    pub fn subscribe<C, H>(&mut self, hook: H, f: C) -> Result<(), Error>
+    pub fn subscribe<C, H>(&mut self, hook: H, f: C) -> Result<()>
     where
         C: 'static + Fn(Hook, DataObject),
         H: Into<Hook>,
@@ -149,7 +147,6 @@ impl Hooks {
     ///
     /// ```
     ///     use warp_data::DataObject;
-    ///     use warp_hooks::error::Error;
     ///     use warp_hooks::hooks::{Hook, Hooks};
     ///     use warp_module::Module;
     ///     use warp_constellation::file::File;
@@ -163,7 +160,7 @@ impl Hooks {
     ///         let file: File = data.payload().unwrap();
     ///         assert_eq!(file.metadata.name.as_str(), "test.txt");
     ///     }).unwrap();
-    ///     let data = DataObject::new(&Module::FileSystem, File::new("test.txt")).map_err(|_| Error::Other).unwrap();
+    ///     let data = DataObject::new(&Module::FileSystem, File::new("test.txt")).unwrap();
     ///     system.trigger("FILESYSTEM::NEW_FILE", "FILESYSTEM::NEW_FILE", &data);
     /// ```
     pub fn trigger<S, H>(&self, name: S, hook: H, data: &DataObject)
