@@ -56,6 +56,19 @@ pub enum Identifier {
     Own,
 }
 
+impl From<PublicKey> for Identifier {
+    fn from(pubkey: PublicKey) -> Self {
+        Identifier::PublicKey(pubkey)
+    }
+}
+
+impl<S: AsRef<str>> From<S> for Identifier {
+    fn from(username: S) -> Self {
+        Identifier::Username(username.as_ref().to_string())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum IdentityUpdate {
     Username(String),
 }
