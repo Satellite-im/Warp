@@ -20,7 +20,7 @@ pub trait MultiPass {
         option: Vec<IdentityUpdate>,
     ) -> Result<()>;
 
-    fn create_identity(&mut self, identity: Identity, passphrase: String) -> Result<PublicKey>;
+    fn create_identity(&mut self, identity: &Identity, passphrase: String) -> Result<PublicKey>;
 
     fn decrypt_private_key(&self, passphrase: String) -> Result<Vec<u8>>;
 

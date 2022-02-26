@@ -71,4 +71,6 @@ impl<S: AsRef<str>> From<S> for Identifier {
 #[derive(Debug, Clone)]
 pub enum IdentityUpdate {
     Username(String),
+    Graphics(Graphics),
+    StatusMessage(String),
 }
