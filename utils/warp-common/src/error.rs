@@ -37,6 +37,8 @@ pub enum Error {
 
     //Misc
     #[error("{0}")]
+    BincodeError(#[from] bincode::Error),
+    #[error("{0}")]
     SerdeJsonError(#[from] serde_json::Error),
     #[error("{0}")]
     RegexError(#[from] regex::Error),
