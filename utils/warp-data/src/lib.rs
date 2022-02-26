@@ -7,6 +7,7 @@ use warp_common::serde::{Deserialize, Serialize};
 use warp_common::serde_json;
 use warp_common::serde_json::Value;
 use warp_common::uuid::Uuid;
+use warp_common::Result;
 
 pub type DataObject = Data;
 
@@ -38,7 +39,7 @@ impl Default for Data {
 }
 
 impl Data {
-    pub fn new<T>(module: &Module, payload: T) -> Result<Self, Error>
+    pub fn new<T>(module: &Module, payload: T) -> Result<Self>
     where
         T: Serialize,
     {
@@ -51,7 +52,7 @@ impl Data {
         })
     }
 
-    pub fn payload<T>(&self) -> Result<T, Error>
+    pub fn payload<T>(&self) -> Result<T>
     where
         T: DeserializeOwned,
     {
