@@ -3,21 +3,33 @@
 #### Structs
 
 ```rust
+/// `Role` is a representation of user-immutable data provided by a remote resource managed by the 
+/// creator of the stack, this holds global roles that can be represented across the application useful
+/// for validating identities of global staff members, moderators, etc.
 pub struct Role {
   name: String,
   level: u8,
 }
 
+/// `Badge` is a representation of user-immutable data provided by the remote resource
+/// it represents a graphical badge delegated to the user by the global authority of the app which
+/// allows validating identities and participation within the global scope of the app
 pub struct Badge {
   name: String,
   icon: String,
 }
 
+
+/// `Graphics` are user mutable hashes pointing to remote locations housing the users preffered
+/// profile picture as well as the profile banner.
 pub struct Graphics {
   profile_picture: String,
   profile_banner: String,
 }
 
+/// `Identity` encompasses all of the users identifiying information shared with the public.
+/// some of this data is mutable by the user while other data within is automatically generated
+/// or set by a remote authority such as Satellite.im when it comes to setting global applicaiton roles & badges.
 pub struct Identity {
   username: String,
   short_id: u16,
@@ -63,7 +75,7 @@ The cache is updated to reflect our profile changes. This allows us to optimisti
 This should only be called once, this is used to create a new account on the system. Calling this will store the encrypted PrivateKey on disk. Calling again will overwrite the previous account which cannot be retrieved unless the PrivateKey was backed up. The PrivateKey will be encrypted by the supplied `passphrase` so that it's not readable on disk.
 
 ```rust
-Multipass::createIdentity(passphrase: String, identity: Identity) // Returns PublicKey, stores encrypted private key
+Multipass::createIdentity(passphrase: String, identity: Identity); // Returns PublicKey, stores encrypted private key
 ```
 
 #### Decrypt Private Key
