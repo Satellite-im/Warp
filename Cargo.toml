@@ -5,7 +5,7 @@ members = [
   "modules/warp-pocket-dimension",
   "modules/warp-multipass",
   "modules/warp-raygun",
-  "plugins/warp-pd-stretto",
+  "extensions/warp-pd-stretto",
   "utils/warp-hooks",
   "utils/warp-common",
   "utils/warp-data",
