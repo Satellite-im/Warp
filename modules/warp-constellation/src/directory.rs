@@ -1,4 +1,4 @@
-use crate::item::Item;
+use crate::item::{Item, Metadata};
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::uuid::Uuid;
@@ -471,5 +471,27 @@ impl Directory {
         } else {
             Ok(item)
         };
+    }
+}
+
+impl Metadata for Directory {
+    fn id(&self) -> &Uuid {
+        &self.id
+    }
+
+    fn name(&self) -> String {
+        self.name.to_owned()
+    }
+
+    fn description(&self) -> String {
+        self.description.to_owned()
+    }
+
+    fn size(&self) -> i64 {
+        self.children.iter().map(Metadata::size).sum()
+    }
+
+    fn creation(&self) -> DateTime<Utc> {
+        self.creation
     }
 }

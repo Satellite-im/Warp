@@ -16,6 +16,19 @@ pub enum Item {
     Directory(Directory),
 }
 
+/// Provides basic information about `Item`, `File`, or `Directory`
+pub trait Metadata {
+    fn id(&self) -> &Uuid;
+
+    fn name(&self) -> String;
+
+    fn description(&self) -> String;
+
+    fn size(&self) -> i64;
+
+    fn creation(&self) -> DateTime<Utc>;
+}
+
 /// Used to convert `File` to `Item`
 ///
 /// # Examples
@@ -170,5 +183,27 @@ impl Item {
             }
             Item::Directory(_) => Err(Error::ItemNotFile),
         }
+    }
+}
+
+impl Metadata for Item {
+    fn id(&self) -> &Uuid {
+        self.id()
+    }
+
+    fn name(&self) -> String {
+        self.name().to_string()
+    }
+
+    fn description(&self) -> String {
+        self.description().to_string()
+    }
+
+    fn size(&self) -> i64 {
+        self.size()
+    }
+
+    fn creation(&self) -> DateTime<Utc> {
+        self.creation()
     }
 }

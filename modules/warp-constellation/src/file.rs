@@ -1,3 +1,4 @@
+use crate::item::Metadata;
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::uuid::Uuid;
@@ -109,5 +110,27 @@ impl File {
     /// ```
     pub fn set_size(&mut self, size: i64) {
         self.size = size;
+    }
+}
+
+impl Metadata for File {
+    fn id(&self) -> &Uuid {
+        &self.id
+    }
+
+    fn name(&self) -> String {
+        self.name.to_owned()
+    }
+
+    fn description(&self) -> String {
+        self.description.to_owned()
+    }
+
+    fn size(&self) -> i64 {
+        self.size
+    }
+
+    fn creation(&self) -> DateTime<Utc> {
+        self.creation
     }
 }
