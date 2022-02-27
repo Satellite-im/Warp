@@ -2,6 +2,7 @@ pub mod error;
 
 #[cfg(not(target_os = "wasm32"))]
 pub use anyhow;
+#[cfg(feature = "bincode_opt")]
 #[cfg(not(target_os = "wasm32"))]
 pub use bincode;
 pub use chrono;
