@@ -24,8 +24,6 @@ pub struct Directory {
     #[serde(flatten)]
     pub metadata: ItemMeta,
     pub directory_type: DirectoryType,
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub parent: Option<String>,
     pub children: Vec<Item>,
 }
 
@@ -39,7 +37,6 @@ impl Default for Directory {
                 size: None,
                 creation: Utc::now(),
             },
-            parent: None,
             directory_type: DirectoryType::Default,
             children: Vec::new(),
         }

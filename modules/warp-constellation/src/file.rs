@@ -22,8 +22,6 @@ pub struct File {
     #[serde(flatten)]
     pub metadata: ItemMeta,
     pub file_type: FileType,
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub parent: Option<String>,
     pub hash: String,
 }
 
@@ -39,7 +37,6 @@ impl Default for File {
             },
             file_type: FileType::Generic,
             hash: String::new(),
-            parent: None,
         }
     }
 }
