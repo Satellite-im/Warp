@@ -7,19 +7,6 @@ use warp_common::{error::Error, Result};
 use crate::directory::Directory;
 use crate::file::File;
 
-/// A object to handle the metadata of `File` or `Directory`
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(crate = "warp_common::serde")]
-pub struct ItemMeta {
-    pub id: Uuid,
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub size: Option<i64>,
-    pub description: String,
-    #[serde(with = "warp_common::chrono::serde::ts_seconds")]
-    pub creation: DateTime<Utc>,
-}
-
 /// `Item` is a type that handles both `File` and `Directory`
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(crate = "warp_common::serde")]
@@ -37,7 +24,7 @@ pub enum Item {
 ///     use warp_constellation::{file::File, item::Item};
 ///     let file = File::new("test.txt");
 ///     let item = Item::from(file.clone());
-///     assert_eq!(item.name(), file.metadata.name.as_str());
+///     assert_eq!(item.name(), file.name.as_str());
 /// ```
 impl From<File> for Item {
     fn from(file: File) -> Self {
@@ -53,7 +40,7 @@ impl From<File> for Item {
 ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
 ///     let dir = Directory::new("Test Directory");
 ///     let item = Item::from(dir.clone());
-///     assert_eq!(item.name(), dir.metadata.name.as_str());
+///     assert_eq!(item.name(), dir.name.as_str());
 /// ```
 impl From<Directory> for Item {
     fn from(directory: Directory) -> Self {
@@ -65,32 +52,32 @@ impl Item {
     /// Get id of `Item`
     pub fn id(&self) -> &Uuid {
         match self {
-            Item::File(file) => &file.metadata.id,
-            Item::Directory(directory) => &directory.metadata.id,
+            Item::File(file) => &file.id,
+            Item::Directory(directory) => &directory.id,
         }
     }
 
     /// Get string of `Item`
     pub fn name(&self) -> &str {
         match self {
-            Item::File(file) => &file.metadata.name,
-            Item::Directory(directory) => &directory.metadata.name,
+            Item::File(file) => &file.name,
+            Item::Directory(directory) => &directory.name,
         }
     }
 
     /// Get description of `Item`
     pub fn description(&self) -> &str {
         match self {
-            Item::File(file) => &file.metadata.description,
-            Item::Directory(directory) => &directory.metadata.description,
+            Item::File(file) => &file.description,
+            Item::Directory(directory) => &directory.description,
         }
     }
 
     /// Get the creation date of `Item`
     pub fn creation(&self) -> DateTime<Utc> {
         match self {
-            Item::File(file) => file.metadata.creation,
-            Item::Directory(directory) => directory.metadata.creation,
+            Item::File(file) => file.creation,
+            Item::Directory(directory) => directory.creation,
         }
     }
 
@@ -99,7 +86,7 @@ impl Item {
     /// If `Item::Directory` it will return the size of all files within the `Directory`, including files located within a sub directory
     pub fn size(&self) -> i64 {
         match self {
-            Item::File(file) => file.metadata.size.unwrap_or_default(),
+            Item::File(file) => file.size,
             Item::Directory(directory) => directory.children.iter().map(Item::size).sum(),
         }
     }
@@ -111,8 +98,8 @@ impl Item {
             return Err(Error::DuplicateName);
         }
         match self {
-            Item::File(file) => (*file).metadata.name = name.to_string(),
-            Item::Directory(directory) => (*directory).metadata.name = name.to_string(),
+            Item::File(file) => (*file).name = name.to_string(),
+            Item::Directory(directory) => (*directory).name = name.to_string(),
         };
 
         Ok(())
@@ -169,10 +156,8 @@ impl Item {
     /// Set description of `Item`
     pub fn set_description<S: AsRef<str>>(&mut self, desc: S) {
         match self {
-            Item::File(file) => file.metadata.description = desc.as_ref().to_string(),
-            Item::Directory(directory) => {
-                directory.metadata.description = desc.as_ref().to_string()
-            }
+            Item::File(file) => file.description = desc.as_ref().to_string(),
+            Item::Directory(directory) => directory.description = desc.as_ref().to_string(),
         }
     }
 
@@ -180,7 +165,7 @@ impl Item {
     pub fn set_size(&mut self, size: i64) -> Result<()> {
         match self {
             Item::File(file) => {
-                file.metadata.size = Some(size);
+                file.size = size;
                 Ok(())
             }
             Item::Directory(_) => Err(Error::ItemNotFile),
