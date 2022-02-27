@@ -1,13 +1,14 @@
-use warp_module::Module;
-
+#[cfg(feature = "bincode_opt2")]
+use warp_common::bincode;
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::error::Error;
 use warp_common::serde::de::DeserializeOwned;
 use warp_common::serde::{Deserialize, Serialize};
-use warp_common::serde_json;
-use warp_common::serde_json::Value;
+#[cfg(not(feature = "bincode_opt2"))]
+use warp_common::serde_json::{self, Value};
 use warp_common::uuid::Uuid;
 use warp_common::Result;
+use warp_module::Module;
 
 pub type DataObject = Data;
 
@@ -22,7 +23,55 @@ pub struct Data {
     pub timestamp: DateTime<Utc>,
     pub size: u64,
     pub module: Module,
-    pub payload: Value,
+    pub payload: Payload,
+}
+
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(crate = "warp_common::serde")]
+#[cfg(feature = "bincode_opt2")]
+pub struct Payload(Vec<u8>);
+
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(crate = "warp_common::serde")]
+#[cfg(not(feature = "bincode_opt2"))]
+pub struct Payload(Value);
+
+impl Payload {
+    #[cfg(feature = "bincode_opt2")]
+    pub fn new(data: Vec<u8>) -> Self {
+        Payload(data)
+    }
+
+    #[cfg(not(feature = "bincode_opt2"))]
+    pub fn new(data: Value) -> Self {
+        Payload(data)
+    }
+
+    #[cfg(feature = "bincode_opt2")]
+    pub fn new_from_ser<T: Serialize>(payload: T) -> Result<Self> {
+        bincode::serialize(&payload)
+            .map(Self::new)
+            .map_err(Error::from)
+    }
+
+    #[cfg(not(feature = "bincode_opt2"))]
+    pub fn new_from_ser<T: Serialize>(payload: T) -> Result<Self> {
+        serde_json::to_value(payload)
+            .map(Self::new)
+            .map_err(Error::from)
+    }
+
+    #[cfg(feature = "bincode_opt2")]
+    pub fn to_type<T: DeserializeOwned>(&self) -> Result<T> {
+        let inner = bincode::deserialize(&self.0[..])?;
+        Ok(inner)
+    }
+
+    #[cfg(not(feature = "bincode_opt2"))]
+    pub fn to_type<T: DeserializeOwned>(&self) -> Result<T> {
+        let inner = serde_json::from_value(self.0.clone())?;
+        Ok(inner)
+    }
 }
 
 impl Default for Data {
@@ -33,7 +82,7 @@ impl Default for Data {
             timestamp: Utc::now(),
             size: 0,
             module: Module::default(),
-            payload: Value::Null,
+            payload: Payload::default(),
         }
     }
 }
@@ -44,7 +93,7 @@ impl Data {
         T: Serialize,
     {
         let module = module.clone();
-        let payload = serde_json::to_value(payload)?;
+        let payload = Payload::new_from_ser(payload)?;
         Ok(Data {
             module,
             payload,
@@ -56,7 +105,7 @@ impl Data {
     where
         T: DeserializeOwned,
     {
-        serde_json::from_value(self.payload.clone()).map_err(Error::from)
+        self.payload.to_type()
     }
 
     pub fn timestamp(&self) -> i64 {
