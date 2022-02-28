@@ -1,5 +1,5 @@
-use crate::item::{Item, ItemMeta};
-use warp_common::chrono::Utc;
+use crate::item::{Item, Metadata};
+use warp_common::chrono::{DateTime, Utc};
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::uuid::Uuid;
 use warp_common::{error::Error, Result};
@@ -21,25 +21,22 @@ impl Default for DirectoryType {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[serde(crate = "warp_common::serde")]
 pub struct Directory {
-    #[serde(flatten)]
-    pub metadata: ItemMeta,
+    pub id: Uuid,
+    pub name: String,
+    pub description: String,
+    #[serde(with = "warp_common::chrono::serde::ts_seconds")]
+    pub creation: DateTime<Utc>,
     pub directory_type: DirectoryType,
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    pub parent: Option<String>,
     pub children: Vec<Item>,
 }
 
 impl Default for Directory {
     fn default() -> Self {
         Self {
-            metadata: ItemMeta {
-                id: Uuid::new_v4(),
-                name: String::from("un-named directory"),
-                description: String::new(),
-                size: None,
-                creation: Utc::now(),
-            },
-            parent: None,
+            id: Uuid::new_v4(),
+            name: String::from("un-named directory"),
+            description: String::new(),
+            creation: Utc::now(),
             directory_type: DirectoryType::Default,
             children: Vec::new(),
         }
@@ -56,13 +53,13 @@ impl Directory {
     ///     use warp_constellation::{directory::Directory};
     ///
     ///     let dir = Directory::new("Test Directory");
-    ///     assert_eq!(dir.metadata.name, String::from("Test Directory"));
+    ///     assert_eq!(dir.name, String::from("Test Directory"));
     /// ```
     pub fn new<S: AsRef<str>>(name: S) -> Self {
         let mut directory = Directory::default();
         let name = name.as_ref().trim();
         if !name.is_empty() {
-            directory.metadata.name = name.to_string();
+            directory.name = name.to_string();
         }
         directory
     }
@@ -474,5 +471,27 @@ impl Directory {
         } else {
             Ok(item)
         };
+    }
+}
+
+impl Metadata for Directory {
+    fn id(&self) -> &Uuid {
+        &self.id
+    }
+
+    fn name(&self) -> String {
+        self.name.to_owned()
+    }
+
+    fn description(&self) -> String {
+        self.description.to_owned()
+    }
+
+    fn size(&self) -> i64 {
+        self.children.iter().map(Metadata::size).sum()
+    }
+
+    fn creation(&self) -> DateTime<Utc> {
+        self.creation
     }
 }

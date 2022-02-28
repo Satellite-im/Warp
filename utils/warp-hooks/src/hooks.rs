@@ -120,7 +120,7 @@ impl Hooks {
     ///         assert_eq!(hook.module, Module::FileSystem);
     ///         assert_eq!(data.module, Module::FileSystem);
     ///         let file: File = data.payload().unwrap();
-    ///         assert_eq!(file.metadata.name.as_str(), "test.txt");
+    ///         assert_eq!(file.name.as_str(), "test.txt");
     ///     }).unwrap();
     ///     let data = DataObject::new(&Module::FileSystem, File::new("test.txt")).unwrap();
     ///     system.trigger("FILESYSTEM::NEW_FILE", "FILESYSTEM::NEW_FILE", &data);
@@ -158,7 +158,7 @@ impl Hooks {
     ///         assert_eq!(hook.module, Module::FileSystem);
     ///         assert_eq!(data.module, Module::FileSystem);
     ///         let file: File = data.payload().unwrap();
-    ///         assert_eq!(file.metadata.name.as_str(), "test.txt");
+    ///         assert_eq!(file.name.as_str(), "test.txt");
     ///     }).unwrap();
     ///     let data = DataObject::new(&Module::FileSystem, File::new("test.txt")).unwrap();
     ///     system.trigger("FILESYSTEM::NEW_FILE", "FILESYSTEM::NEW_FILE", &data);

@@ -8,3 +8,7 @@ edition = "2021"
 [dependencies]
 warp-module = { version = "0.1.0", path = "../warp-module" }
 warp-common = { version = "0.1.0", path = "../warp-common" }
+
+[features]
+default = []
+bincode_opt2 = ["warp-common/bincode_opt"]

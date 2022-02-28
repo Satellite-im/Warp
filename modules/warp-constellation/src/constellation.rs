@@ -120,7 +120,7 @@ pub trait ConstellationGetPut: Constellation {
     fn put<R: std::io::Read, S: AsRef<str>, C: PocketDimension>(
         &mut self,
         name: S,
-        cache: C,
+        cache: &mut C,
         reader: &mut R,
     ) -> Result<()>;
 

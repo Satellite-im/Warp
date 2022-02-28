@@ -9,6 +9,6 @@ use warp_constellation::file::File;
     
 fn main() { 
     let file = File::new("test.txt");
-    assert_eq!(file.metadata.name.as_str(), "test.txt");
+    assert_eq!(file.name.as_str(), "test.txt");
 }
 ```
