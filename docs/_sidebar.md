@@ -1,5 +1,7 @@
-* [Warp](README.md)
-* [Configuration](configuration.md)
+- **Warp**
+  - [Overview](README.md)
+  - [Ethos](ethos.md)
+  - [Configuration](configuration.md)
 - **Data**
   - [Overview](data/overview.md)
 - **Modules**
@@ -24,5 +26,7 @@
   - [Types](raygun/types.md)
 - **Hooks**
   - [Overview](hooks/overview.md)
+- **Tesseract**
+  - [Overview](tesseract/overview.md)
 - **API**
   - [Overview](api/overview.md)
