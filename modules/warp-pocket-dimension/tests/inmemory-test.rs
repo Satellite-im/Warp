@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use warp_common::error::Error;
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::serde_json::Value;
+use warp_common::Result;
 use warp_data::DataObject;
 use warp_module::Module;
 use warp_pocket_dimension::query::{Comparator, QueryBuilder};
@@ -21,29 +22,44 @@ impl MemoryCache {
 }
 
 impl PocketDimension for MemoryCache {
-    fn add_data<T: Serialize, I: Into<Module>>(
-        &mut self,
-        dimension: I,
-        data: T,
-    ) -> Result<DataObject, Error> {
+    fn add_data<I: Into<Module>>(&mut self, dimension: I, data: &DataObject) -> Result<()> {
         //TODO: Determine size of payload for `DataObject::size`
         let dimension = dimension.into();
-        let mut object = DataObject::new(&dimension, data)?;
-        if let Some(val) = self.0.get_mut(&dimension) {
-            let version = val.len();
-            object.version = version as u32;
-            val.push(object.clone());
-        } else {
-            self.0.insert(dimension, vec![object.clone()]);
+        let mut object = data.clone();
+
+        if object.module != dimension {
+            return Err(Error::Other);
         }
-        Ok(object)
+
+        if let Some(val) = self.0.get_mut(&dimension) {
+            let objects = val
+                .iter()
+                .filter(|item| item.id == data.id)
+                .collect::<Vec<&DataObject>>();
+
+            if objects.contains(&data) {
+                return Err(Error::DataObjectExist);
+            }
+
+            let version = objects.len() as u32;
+            object.version = version;
+            val.push(object);
+        } else {
+            self.0.insert(dimension, vec![object]);
+        }
+        Ok(())
+    }
+
+    fn has_data<I: Into<Module>>(&mut self, dimension: I, query: &QueryBuilder) -> Result<()> {
+        let data = self.0.get(&dimension.into()).ok_or(Error::Other)?;
+        execute(data, query).map(|_| ())
     }
 
     fn get_data<I: Into<Module>>(
         &self,
         dimension: I,
         query: Option<&QueryBuilder>,
-    ) -> Result<Vec<DataObject>, Error> {
+    ) -> Result<Vec<DataObject>> {
         let data = self.0.get(&dimension.into()).ok_or(Error::Other)?;
         match query {
             Some(query) => execute(data, query),
@@ -51,25 +67,17 @@ impl PocketDimension for MemoryCache {
         }
     }
 
-    fn size<I: Into<Module>>(
-        &self,
-        dimension: I,
-        query: Option<&QueryBuilder>,
-    ) -> Result<i64, Error> {
+    fn size<I: Into<Module>>(&self, dimension: I, query: Option<&QueryBuilder>) -> Result<i64> {
         self.get_data(dimension, query)
             .map(|data| data.iter().map(|i| i.size as i64).sum())
     }
 
-    fn count<I: Into<Module>>(
-        &self,
-        dimension: I,
-        query: Option<&QueryBuilder>,
-    ) -> Result<i64, Error> {
+    fn count<I: Into<Module>>(&self, dimension: I, query: Option<&QueryBuilder>) -> Result<i64> {
         self.get_data(dimension, query)
             .map(|data| data.len() as i64)
     }
 
-    fn empty<I: Into<Module>>(&mut self, dimension: I) -> Result<(), Error> {
+    fn empty<I: Into<Module>>(&mut self, dimension: I) -> Result<()> {
         let dimension = dimension.into();
         self.0.remove(&dimension);
 
@@ -82,7 +90,7 @@ impl PocketDimension for MemoryCache {
 }
 
 //Cheap "filter"
-fn execute(data: &Vec<DataObject>, query: &QueryBuilder) -> Result<Vec<DataObject>, Error> {
+fn execute(data: &Vec<DataObject>, query: &QueryBuilder) -> Result<Vec<DataObject>> {
     let mut list = Vec::new();
     for data in data.iter() {
         let object = data.payload::<Value>()?;
@@ -205,24 +213,27 @@ impl SomeData {
 }
 
 fn generate_data(system: &mut MemoryCache, amount: i64) {
+    let mut object = DataObject::default();
+    object.module = Module::Accounts;
+
     for i in 0..amount {
         let mut data = SomeData::default();
         data.set_name(&format!("Test Subject {i}"));
         data.set_age(18 + i);
 
-        system.add_data(Module::Accounts, data).unwrap();
+        object.set_payload(data).unwrap();
+        system.add_data(Module::Accounts, &object).unwrap();
     }
 }
 
 #[test]
-fn if_count_eq_five() -> Result<(), Error> {
+fn if_count_eq_five() -> Result<()> {
     let mut memory = MemoryCache::default();
 
     generate_data(&mut memory, 100);
 
     let mut query = QueryBuilder::default();
-    query.filter(Comparator::Gte, "age", 19)?;
-    query.limit(5);
+    query.filter(Comparator::Gte, "age", 19)?.limit(5);
 
     let count = memory.count(Module::Accounts, Some(&query))?;
 
@@ -232,7 +243,7 @@ fn if_count_eq_five() -> Result<(), Error> {
 }
 
 #[test]
-fn data_test() -> Result<(), Error> {
+fn data_test() -> Result<()> {
     let mut memory = MemoryCache::default();
 
     generate_data(&mut memory, 100);

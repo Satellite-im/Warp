@@ -1,10 +1,16 @@
 pub mod query;
 
 use crate::query::QueryBuilder;
-use warp_common::serde::Serialize;
 use warp_common::Result;
 use warp_data::DataObject;
 use warp_module::Module;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DimensionDataType {
+    Json,
+    String,
+    Buffer,
+}
 
 /// PocketDimension interface will allow `Module` to store data for quick indexing and searching later on. This would be useful
 /// for caching frequently used data so that request can be made faster. This makes it easy by sorting the data per module, as well
@@ -12,11 +18,10 @@ use warp_module::Module;
 /// results.
 pub trait PocketDimension {
     /// Used to add data to `PocketDimension` for `Module`
-    fn add_data<T: Serialize, I: Into<Module>>(
-        &mut self,
-        dimension: I,
-        data: T,
-    ) -> Result<DataObject>;
+    fn add_data<I: Into<Module>>(&mut self, dimension: I, data: &DataObject) -> Result<()>;
+
+    /// Used to check to see if data exist within `PocketDimension`
+    fn has_data<I: Into<Module>>(&mut self, dimension: I, query: &QueryBuilder) -> Result<()>;
 
     /// Used to obtain a list of `DataObject` for `Module`
     fn get_data<I: Into<Module>>(
