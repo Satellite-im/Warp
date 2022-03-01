@@ -101,6 +101,14 @@ impl Data {
         })
     }
 
+    pub fn set_payload<T>(&mut self, payload: T) -> Result<()>
+    where
+        T: Serialize,
+    {
+        self.payload = Payload::new_from_ser(payload)?;
+        Ok(())
+    }
+
     pub fn payload<T>(&self) -> Result<T>
     where
         T: DeserializeOwned,
