@@ -33,8 +33,10 @@ pub enum Error {
     InvalidPath,
     #[error("Cannot find position of array content.")]
     ArrayPositionNotFound,
+
     //PocketDimension Errors
-    //TODO
+    #[error("Data module supplied does not match dimension module")]
+    DimensionMismatch,
 
     //Misc
     #[error("{0}")]
@@ -83,8 +85,10 @@ pub enum Error {
     InvalidPath,
     #[error("Cannot find position of array content.")]
     ArrayPositionNotFound,
+
     //PocketDimension Errors
-    //TODO
+    #[error("Data module supplied does not match dimension module")]
+    DimensionMismatch,
 
     //Misc
     #[error("{0}")]
