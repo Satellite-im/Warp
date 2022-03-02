@@ -37,6 +37,8 @@ pub enum Error {
     //PocketDimension Errors
     #[error("Data module supplied does not match dimension module")]
     DimensionMismatch,
+    #[error("Data object provided already exist within the dimension")]
+    DataObjectExist,
 
     //Misc
     #[error("{0}")]
@@ -89,6 +91,8 @@ pub enum Error {
     //PocketDimension Errors
     #[error("Data module supplied does not match dimension module")]
     DimensionMismatch,
+    #[error("Data object provided already exist within the dimension")]
+    DataObjectExist,
 
     //Misc
     #[error("{0}")]
