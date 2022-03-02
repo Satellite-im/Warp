@@ -1,0 +1,24 @@
+[package]
+name = "warp-tui"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+tui = {version = "0.17", features = ["crossterm"]}
+tui-logger = "0.7"
+crossterm = "0.23"
+
+anyhow = "1.0"
+tokio = { version = "1", features = ["full"] }
+
+warp-constellation = { path = "../../modules/warp-constellation" }
+warp-pocket-dimension = { path = "../../modules/warp-pocket-dimension" }
+warp-multipass = { path = "../../modules/warp-multipass" }
+warp-raygun = { path = "../../modules/warp-raygun" }
+warp-hooks = { path = "../../utils/warp-hooks" }
+warp-module = { path = "../../utils/warp-module" }
+warp-data = { path = "../../utils/warp-data" }
+warp-common = { path = "../../utils/warp-common" }

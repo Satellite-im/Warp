@@ -23,7 +23,7 @@ mod test {
         })?;
         let data = DataObject::new(&Module::FileSystem, File::new("test.txt"))?;
 
-        system.trigger("FILESYSTEM::NEW_FILE", "FILESYSTEM::NEW_FILE", &data);
+        system.trigger("FILESYSTEM::NEW_FILE", &data);
         Ok(())
     }
 }

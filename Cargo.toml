@@ -7,6 +7,7 @@ members = [
   "modules/warp-raygun",
   "extensions/warp-pd-stretto",
   "extensions/warp-pd-flatfile",
+  "misc/warp-tui",
   "utils/warp-hooks",
   "utils/warp-common",
   "utils/warp-data",

@@ -123,7 +123,7 @@ impl Hooks {
     ///         assert_eq!(file.name.as_str(), "test.txt");
     ///     }).unwrap();
     ///     let data = DataObject::new(&Module::FileSystem, File::new("test.txt")).unwrap();
-    ///     system.trigger("FILESYSTEM::NEW_FILE", "FILESYSTEM::NEW_FILE", &data);
+    ///     system.trigger("FILESYSTEM::NEW_FILE", &data);
     /// ```
     pub fn subscribe<C, H>(&mut self, hook: H, f: C) -> Result<()>
     where
@@ -161,15 +161,15 @@ impl Hooks {
     ///         assert_eq!(file.name.as_str(), "test.txt");
     ///     }).unwrap();
     ///     let data = DataObject::new(&Module::FileSystem, File::new("test.txt")).unwrap();
-    ///     system.trigger("FILESYSTEM::NEW_FILE", "FILESYSTEM::NEW_FILE", &data);
+    ///     system.trigger("FILESYSTEM::NEW_FILE", &data);
     /// ```
-    pub fn trigger<S, H>(&self, name: S, hook: H, data: &DataObject)
+    pub fn trigger<S>(&self, name: S, data: &DataObject)
     where
         S: AsRef<str>,
-        H: Into<Hook>,
     {
-        let hook = hook.into();
-        if let Some(subscribers) = self.subscribers.get(name.as_ref()) {
+        let name = name.as_ref();
+        let hook = Hook::from(name);
+        if let Some(subscribers) = self.subscribers.get(name) {
             for subscriber in subscribers {
                 subscriber(hook.clone(), data.clone());
             }
