@@ -8,7 +8,7 @@
   - [Overview](modules/overview)
   - [Types](modules/types.md)
   - [Creating](modules/create.md)
-  - [Interfacing](modules/interfacing.md)
+  - [Interface](modules/interfacing.md)
 - **Pocket Dimension (Cache)**
   - [Overview](pocketdimension/overview.md)
   - [Interface](pocketdimension/interface.md)
@@ -23,7 +23,7 @@
   - [Interface](identity/interface.md)
 - **Raygun (Messaging)**
   - [Overview](raygun/overview.md)
-  - [Types](raygun/types.md)
+  - [Interface](raygun/interface.md)
 - **Hooks**
   - [Overview](hooks/overview.md)
 - **Tesseract**

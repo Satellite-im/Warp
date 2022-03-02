@@ -1,3 +1,3 @@
-# Messaging Module
+# RayGun (Messaging)
 
-***TODO***
+RayGun manages messaging users in the application. RayGun depends on an underlying decentralized storage protocol to operate. On it's own RayGun is simply an interface with some core functionality bound to caching and key managment. Messages should ALWAYS be encrypted when using RayGun, if they are not encrypted by the underlying protocol we should be sure to enable the `secure` flag in RayGun to enable [ECDH (Elliptic Curve Diffie Helman)](https://en.wikipedia.org/wiki/Elliptic-curve_Diffie%E2%80%93Hellman]) encryption provided by RayGun. This will generate a shared secret for usage between two users in P2P chat. For group messages where there are many recipients [AES](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard) symmetric encryption is used. You can enable this flag regaurdless but it may be pointless if your underlying protocol already supports encryption.
