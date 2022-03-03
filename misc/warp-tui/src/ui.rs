@@ -1,30 +1,168 @@
 use crate::WarpApp;
 use tui::backend::Backend;
-use tui::layout::{Alignment, Constraint, Direction, Layout};
-use tui::style::{Color, Style};
-use tui::widgets::{Block, BorderType, Borders, Paragraph};
+use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use tui::style::{Color, Modifier, Style};
+use tui::text::{Span, Spans};
+use tui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Tabs, Wrap};
 use tui::Frame;
+use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget};
 
-impl WarpApp {
-    pub fn draw_ui<B: Backend>(&self, rect: &mut Frame<B>) {
-        let size = rect.size();
+impl<'a> WarpApp<'a> {
+    pub fn draw_ui<B: Backend>(&mut self, frame: &mut Frame<B>) {
+        // let size = frame.size();
+        //
+        // let block = Block::default()
+        //     .borders(Borders::ALL)
+        //     .title(self.title)
+        //     .title_alignment(Alignment::Center)
+        //     .border_type(BorderType::Rounded)
+        //     .border_style(Style::default().fg(Color::White).bg(Color::White));
+        // frame.render_widget(block, size);
 
         let layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1)].as_ref())
-            .split(size);
+            .constraints(vec![Constraint::Length(3), Constraint::Min(0)])
+            .split(frame.size());
 
-        let title = Paragraph::new(self.title.as_ref())
-            .style(Style::default().fg(Color::Green))
-            .alignment(Alignment::Center)
+        let titles = self
+            .tabs
+            .titles
+            .iter()
+            .map(|t| Spans::from(Span::styled(*t, Style::default().fg(Color::Green))))
+            .collect();
+
+        let tabs = Tabs::new(titles)
+            .block(Block::default().borders(Borders::ALL).title("Menu"))
+            .highlight_style(Style::default().fg(Color::Yellow))
+            .select(self.tabs.index);
+
+        frame.render_widget(tabs, layout[0]);
+
+        match self.tabs.index {
+            0 => self.draw_main(frame, layout[1]),
+            _ => {}
+        };
+    }
+
+    pub fn draw_main<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
+        let layout = Layout::default()
+            .constraints(vec![Constraint::Percentage(80), Constraint::Percentage(20)])
+            .split(area);
+        self.draw_middle(frame, layout[0]);
+        self.draw_logs(frame, layout[1])
+    }
+
+    pub fn draw_middle<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
+        let layout = Layout::default()
+            .constraints(vec![Constraint::Percentage(50), Constraint::Percentage(50)])
+            .direction(Direction::Horizontal)
+            .split(area);
+
+        {
+            let layout = Layout::default()
+                .constraints(vec![Constraint::Percentage(50), Constraint::Percentage(50)])
+                .split(layout[0]);
+            self.draw_hooks(frame, layout[0]);
+            self.draw_tools(frame, layout[1]);
+        }
+        self.draw_extensions(frame, layout[1]);
+    }
+
+    pub fn draw_loop<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {
+        //TODO
+    }
+
+    pub fn draw_hooks<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {
+        let layout = Layout::default()
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
+            .direction(Direction::Horizontal)
+            .split(area);
+
+        let hooks: Vec<ListItem> = self
+            .hook_system
+            .hooks()
+            .iter()
+            .map(|i| ListItem::new(vec![Spans::from(Span::from(i.to_string()))]))
+            .collect();
+
+        let list = List::new(hooks).block(Block::default().borders(Borders::ALL).title("Hooks"));
+
+        frame.render_widget(list, layout[1]);
+    }
+
+    pub fn draw_tools<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
+        let layout = Layout::default()
+            .constraints([Constraint::Percentage(100)].as_ref())
+            .direction(Direction::Horizontal)
+            .split(area);
+
+        let hooks: Vec<ListItem> = self
+            .tools
+            .list
+            .iter()
+            .map(|i| ListItem::new(vec![Spans::from(Span::from(i.to_string()))]))
+            .collect();
+
+        let list = List::new(hooks)
+            .block(Block::default().borders(Borders::ALL).title("Tools"))
+            .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+            .highlight_symbol(">> ");
+
+        frame.render_stateful_widget(list, layout[0], &mut self.tools.state);
+    }
+    pub fn draw_modules<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {
+        let layout = Layout::default()
+            .constraints([Constraint::Percentage(100)].as_ref())
+            .direction(Direction::Horizontal)
+            .split(area);
+
+        let hooks: Vec<ListItem> = vec![""]
+            .iter()
+            .map(|i| ListItem::new(vec![Spans::from(Span::from(i.to_string()))]))
+            .collect();
+
+        let list = List::new(hooks)
+            .block(Block::default().borders(Borders::ALL).title("Extensions"))
+            .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+            .highlight_symbol(">> ");
+
+        frame.render_widget(list, layout[0]);
+    }
+
+    pub fn draw_extensions<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {
+        let layout = Layout::default()
+            .constraints([Constraint::Percentage(100)].as_ref())
+            .direction(Direction::Horizontal)
+            .split(area);
+
+        let hooks: Vec<ListItem> = vec![""]
+            .iter()
+            .map(|i| ListItem::new(vec![Spans::from(Span::from(i.to_string()))]))
+            .collect();
+
+        let list = List::new(hooks)
+            .block(Block::default().borders(Borders::ALL).title("Extensions"))
+            .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+            .highlight_symbol(">> ");
+
+        frame.render_widget(list, layout[0]);
+    }
+
+    pub fn draw_logs<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {
+        let tui_logger: TuiLoggerWidget = TuiLoggerWidget::default()
             .block(
                 Block::default()
-                    .borders(Borders::ALL)
-                    .style(Style::default().fg(Color::Green))
-                    .border_type(BorderType::Plain),
-            );
-
-        rect.render_widget(title, layout[0]);
+                    .title("Logs")
+                    .border_style(Style::default().fg(Color::White).bg(Color::Black))
+                    .borders(Borders::ALL),
+            )
+            .output_separator('|')
+            .output_timestamp(Some("%F %H:%M:%S%.3f".to_string()))
+            .output_level(Some(TuiLoggerLevelOutput::Long))
+            .output_target(false)
+            .output_file(false)
+            .output_line(false)
+            .style(Style::default().fg(Color::White).bg(Color::Black));
+        frame.render_widget(tui_logger, area);
     }
 
     pub fn main_ui(&self) -> anyhow::Result<()> {
