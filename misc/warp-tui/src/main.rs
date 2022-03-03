@@ -14,14 +14,15 @@ use tui::Terminal;
 use tui_logger::{init_logger, set_default_level};
 use warp_hooks::hooks::Hooks;
 use warp_module::Module;
+use warp_pd_stretto::StrettoClient;
 use warp_pocket_dimension::PocketDimension;
 
 #[derive(Default)]
 pub struct WarpApp<'a> {
     pub title: &'a str,
     pub hook_system: Hooks,
-    //TODO: Implement cacher
-    // pub cache: Option<Box<dyn PocketDimension>>,
+    //TODO: Implement cacher through a trait object
+    pub cache: Option<StrettoClient>,
     pub modules: Modules,
     pub tools: Tools,
     pub tabs: Tabs<'a>,
@@ -148,6 +149,7 @@ impl<'a> WarpApp<'a> {
         );
 
         app.modules = Modules::new();
+        app.cache = Some(StrettoClient::new()?);
         Ok(app)
     }
 
@@ -175,7 +177,21 @@ impl<'a> WarpApp<'a> {
                             info!(target:"Warp", "Loading data...")
                         }
                         "Clear Cache" => {
-                            info!(target:"Warp", "Clearing cache...")
+                            info!(target:"Warp", "Clearing cache...");
+                            match self.cache.as_mut() {
+                                Some(cache) => {
+                                    for (module, active) in self.modules.modules.iter() {
+                                        if *active {
+                                            info!(target:"Warp", "Clearing {} from cache", module);
+                                            if let Err(e) = cache.empty(module.clone()) {
+                                                error!(target:"Error", "Error attempting to clear {} from cache: {}", module, e);
+                                            }
+                                        }
+                                    }
+                                    info!(target:"Warp", "Cache cleared");
+                                }
+                                None => warn!(target:"Warp", "Cache is unavailable"),
+                            }
                         }
                         other => {
                             error!(target:"Error", "'{}' is currently disabled or not a valid option", other)

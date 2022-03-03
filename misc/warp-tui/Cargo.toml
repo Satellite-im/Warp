@@ -23,3 +23,6 @@ warp-hooks = { path = "../../utils/warp-hooks" }
 warp-module = { path = "../../utils/warp-module" }
 warp-data = { path = "../../utils/warp-data" }
 warp-common = { path = "../../utils/warp-common" }
+
+# Extensions
+warp-pd-stretto = { path = "../../extensions/warp-pd-stretto" }
