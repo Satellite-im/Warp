@@ -1,6 +1,5 @@
 pub mod error;
 
-use warp_common::serde::Serialize;
 use warp_data::DataObject;
 use warp_module::Module;
 
@@ -25,28 +24,47 @@ impl StrettoClient {
 }
 
 impl PocketDimension for StrettoClient {
-    fn add_data<T: Serialize, I: Into<Module>>(
+    fn add_data<I: Into<Module>>(
         &mut self,
         dimension: I,
-        data: T,
-    ) -> std::result::Result<DataObject, warp_common::error::Error> {
+        data: &DataObject,
+    ) -> std::result::Result<(), warp_common::error::Error> {
         let dimension = dimension.into();
-        let mut data =
-            DataObject::new(&dimension, data).map_err(|_| warp_common::error::Error::Other)?;
+        let mut data = data.clone();
+        if data.module != dimension {
+            return Err(warp_common::error::Error::Other);
+        }
         if let Some(mut value) = self.client.get_mut(&dimension) {
-            let version = value.value().len();
-            data.version = version as u32;
-            (*value.value_mut()).push(data.clone());
+            let objects = value
+                .value()
+                .iter()
+                .filter(|item| item.id == data.id)
+                .collect::<Vec<&DataObject>>();
+            let version = objects.len() as u32;
+            data.version = version;
+            (*value.value_mut()).push(data);
             self.client
                 .wait()
                 .map_err(|_| warp_common::error::Error::Other)?;
         } else {
-            self.client.insert(dimension, vec![data.clone()], 1);
+            self.client.insert(dimension, vec![data], 1);
             self.client
                 .wait()
                 .map_err(|_| warp_common::error::Error::Other)?;
         }
-        Ok(data)
+        Ok(())
+    }
+
+    fn has_data<I: Into<Module>>(
+        &mut self,
+        dimension: I,
+        query: &QueryBuilder,
+    ) -> warp_common::Result<()> {
+        let data = self
+            .client
+            .get(&dimension.into())
+            .ok_or(warp_common::error::Error::Other)?;
+        execute(data.value(), query).map(|_| ())
     }
 
     fn get_data<I: Into<Module>>(
@@ -57,8 +75,7 @@ impl PocketDimension for StrettoClient {
         let data = self
             .client
             .get(&dimension.into())
-            .ok_or(warp_common::error::Error::Other)
-            .map_err(|_| warp_common::error::Error::Other)?;
+            .ok_or(warp_common::error::Error::Other)?;
 
         let data = data.value();
         match query {
@@ -91,11 +108,12 @@ impl PocketDimension for StrettoClient {
     ) -> std::result::Result<(), warp_common::error::Error> {
         // Note, since stretto doesnt clear base on key, we will clear everything when this is
         // call for now.
-        // TODO: Implement a direct clear for the dimension
+        // TODO: Implement a direct clear or mutation for the dimension
 
         self.client
             .clear()
             .map_err(|_| warp_common::error::Error::Other)?;
+
         self.client
             .wait()
             .map_err(|_| warp_common::error::Error::Other)
@@ -207,6 +225,7 @@ mod test {
     use crate::StrettoClient;
     use warp_common::error::Error;
     use warp_common::serde::{Deserialize, Serialize};
+    use warp_data::DataObject;
     use warp_module::Module;
     use warp_pocket_dimension::query::{Comparator, QueryBuilder};
     use warp_pocket_dimension::PocketDimension;
@@ -237,12 +256,16 @@ mod test {
     }
 
     fn generate_data(system: &mut StrettoClient, amount: i64) {
+        let mut object = DataObject::default();
+        object.module = Module::Accounts;
+
         for i in 0..amount {
             let mut data = SomeData::default();
             data.set_name(&format!("Test Subject {i}"));
             data.set_age(18 + i);
 
-            system.add_data(Module::Accounts, data).unwrap();
+            object.set_payload(data).unwrap();
+            system.add_data(Module::Accounts, &object).unwrap();
         }
     }
 
@@ -253,8 +276,7 @@ mod test {
         generate_data(&mut memory, 100);
 
         let mut query = QueryBuilder::default();
-        query.filter(Comparator::Gte, "age", 19)?;
-        query.limit(5);
+        query.filter(Comparator::Gte, "age", 19)?.limit(5);
 
         let count = memory.count(Module::Accounts, Some(&query))?;
 

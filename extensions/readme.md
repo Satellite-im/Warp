@@ -1,6 +1,6 @@
 # Plugins
 
-These are implementation using warp modules. Some of the plugins written are examples to show how it can be used. 
+These are implementation using warp modules. Some plugins written are examples to show how it can be used. 
 
 ## warp-pd-stretto
 
