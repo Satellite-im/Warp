@@ -70,7 +70,12 @@ impl<S: AsRef<str>> From<S> for Identifier {
 
 #[derive(Debug, Clone)]
 pub enum IdentityUpdate {
+    /// Update Username
     Username(String),
+
+    /// Update graphics
     Graphics(Graphics),
+
+    /// Update status message
     StatusMessage(String),
 }
