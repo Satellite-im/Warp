@@ -21,6 +21,10 @@ impl StrettoClient {
         let client = Cache::new(12960, 1e6 as i64)?;
         Ok(Self { client })
     }
+
+    pub fn client(&self) -> &Cache<Module, Vec<DataObject>> {
+        &self.client
+    }
 }
 
 impl PocketDimension for StrettoClient {
