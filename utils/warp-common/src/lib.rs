@@ -23,3 +23,13 @@ pub mod wasm {
 
 #[cfg(target_os = "wasm32")]
 pub use wasm::Result;
+
+pub trait ExtensionInfo {
+    fn name(&self) -> String;
+    fn description(&self) -> String {
+        format!(
+            "{} is an extension that is designed to be used for module",
+            self.name()
+        )
+    }
+}
