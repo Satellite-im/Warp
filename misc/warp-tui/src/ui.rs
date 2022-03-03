@@ -10,20 +10,27 @@ use warp_pocket_dimension::PocketDimension;
 
 impl<'a> WarpApp<'a> {
     pub fn draw_ui<B: Backend>(&mut self, frame: &mut Frame<B>) {
-        let size = frame.size();
+        let layout = match std::env::args().collect::<Vec<String>>().get(1) {
+            Some(arg) if arg.eq("--no-border") => Layout::default()
+                .constraints(vec![Constraint::Length(3), Constraint::Min(0)])
+                .split(frame.size()),
+            None | _ => {
+                let size = frame.size();
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(self.title)
-            .title_alignment(Alignment::Center)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::White).bg(Color::Black));
-        frame.render_widget(block, size);
+                let block = Block::default()
+                    .borders(Borders::ALL)
+                    .title(self.title)
+                    .title_alignment(Alignment::Center)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::White).bg(Color::Black));
+                frame.render_widget(block, size);
 
-        let layout = Layout::default()
-            .margin(4)
-            .constraints(vec![Constraint::Length(3), Constraint::Min(0)])
-            .split(frame.size());
+                Layout::default()
+                    .margin(4)
+                    .constraints(vec![Constraint::Length(3), Constraint::Min(0)])
+                    .split(frame.size())
+            }
+        };
 
         let titles = self
             .tabs
@@ -174,24 +181,7 @@ impl<'a> WarpApp<'a> {
         self.draw_cache(frame, layout[1])
     }
 
-    pub fn draw_modules<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {
-        let layout = Layout::default()
-            .constraints([Constraint::Percentage(100)].as_ref())
-            .direction(Direction::Horizontal)
-            .split(area);
-
-        let hooks: Vec<ListItem> = vec![""]
-            .iter()
-            .map(|i| ListItem::new(vec![Spans::from(Span::from(i.to_string()))]))
-            .collect();
-
-        let list = List::new(hooks)
-            .block(Block::default().borders(Borders::ALL).title("Extensions"))
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-            .highlight_symbol(">> ");
-
-        frame.render_widget(list, layout[0]);
-    }
+    pub fn draw_modules<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {}
 
     pub fn draw_extensions<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {
         let layout = Layout::default()
