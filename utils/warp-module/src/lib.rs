@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::fmt::write;
 
 //
 /// `Messaging` - Allows direct, and multi-user encrypted messaging with ownership rights added so only

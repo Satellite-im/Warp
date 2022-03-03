@@ -53,8 +53,50 @@ pub struct Hooks {
     pub subscribers: HashMap<String, Vec<HookData>>,
 }
 
+/// Create a new `Hook` registered to the system.
+///
+/// # Examples
+///
+/// ```
+///     use warp_data::DataObject;
+///     use warp_hooks::hooks::{Hook, Hooks};
+///     use warp_module::Module;
+///
+///     let systems = Hooks::from(vec!["FILESYSTEM::NEW_FILE"]);
+///     assert_eq!(systems.hooks(), vec![Hook::from("FILESYSTEM::NEW_FILE")])
+/// ```
+impl<A: AsRef<str>> From<Vec<A>> for Hooks {
+    fn from(h: Vec<A>) -> Self {
+        let hooks = h.iter().map(|h| Hook::from(h)).collect();
+        Hooks {
+            hooks,
+            subscribers: HashMap::new(),
+        }
+    }
+}
+
 /// General methods for using hooks throughout the platform.
 impl Hooks {
+    pub fn new() -> Self {
+        Hooks::default()
+    }
+
+    /// Create `Hooks` instance from an array of `Hook` in string format
+    ///
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///     use warp_data::DataObject;
+    ///     use warp_hooks::hooks::{Hook, Hooks};
+    ///     use warp_module::Module;
+    ///
+    ///     let systems = Hooks::from(vec!["FILESYSTEM::NEW_FILE"]);
+    ///     assert_eq!(systems.hooks(), vec![Hook::from("FILESYSTEM::NEW_FILE")])
+    pub fn new_from_vec(list: Vec<&str>) -> Self {
+        Hooks::from(list)
+    }
+
     /// Create a new `Hook` registered to the system.
     ///
     /// # Examples
