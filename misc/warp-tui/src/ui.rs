@@ -39,6 +39,7 @@ impl<'a> WarpApp<'a> {
 
         match self.tabs.index {
             0 => self.draw_main(frame, layout[1]),
+            1 => self.draw_config(frame, layout[1]),
             _ => {}
         };
     }
@@ -48,6 +49,37 @@ impl<'a> WarpApp<'a> {
             .constraints(vec![Constraint::Percentage(80), Constraint::Percentage(20)])
             .split(area);
         self.draw_middle(frame, layout[0]);
+        self.draw_logs(frame, layout[1])
+    }
+
+    pub fn draw_config<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
+        let layout = Layout::default()
+            .constraints(vec![Constraint::Percentage(80), Constraint::Percentage(20)])
+            .split(area);
+        {
+            let layout = Layout::default()
+                .constraints([Constraint::Percentage(20), Constraint::Percentage(80)].as_ref())
+                .direction(Direction::Horizontal)
+                .split(layout[0]);
+
+            let hooks: Vec<ListItem> = self
+                .config
+                .menu()
+                .iter()
+                .map(|i| ListItem::new(vec![Spans::from(Span::from(i.to_string()))]))
+                .collect();
+
+            let list = List::new(hooks)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Configuration"),
+                )
+                .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+                .highlight_symbol(">> ");
+
+            frame.render_stateful_widget(list, layout[0], &mut self.config.state);
+        }
         self.draw_logs(frame, layout[1])
     }
 
@@ -61,7 +93,7 @@ impl<'a> WarpApp<'a> {
             let layout = Layout::default()
                 .constraints(vec![Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(layout[0]);
-            self.draw_hooks(frame, layout[0]);
+            self.draw_modules_and_hooks(frame, layout[0]);
             self.draw_tools(frame, layout[1]);
         }
         self.draw_extensions(frame, layout[1]);
@@ -71,11 +103,33 @@ impl<'a> WarpApp<'a> {
         //TODO
     }
 
-    pub fn draw_hooks<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {
+    pub fn draw_modules_and_hooks<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {
         let layout = Layout::default()
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
             .direction(Direction::Horizontal)
             .split(area);
+
+        let modules: Vec<ListItem> = self
+            .modules
+            .modules
+            .iter()
+            .map(|m| {
+                let (module, active) = m;
+                let style = match active {
+                    true => Style::default().fg(Color::Green),
+                    false => Style::default().fg(Color::Red),
+                };
+                ListItem::new(vec![Spans::from(Span::styled(
+                    format!("{:<9}", module.to_string()),
+                    style,
+                ))])
+            })
+            .collect();
+
+        let modules_list =
+            List::new(modules).block(Block::default().borders(Borders::ALL).title("Modules"));
+
+        frame.render_widget(modules_list, layout[0]);
 
         let hooks: Vec<ListItem> = self
             .hook_system
@@ -84,9 +138,13 @@ impl<'a> WarpApp<'a> {
             .map(|i| ListItem::new(vec![Spans::from(Span::from(i.to_string()))]))
             .collect();
 
-        let list = List::new(hooks).block(Block::default().borders(Borders::ALL).title("Hooks"));
+        let hooks_list = List::new(hooks).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Registered Hooks"),
+        );
 
-        frame.render_widget(list, layout[1]);
+        frame.render_widget(hooks_list, layout[1]);
     }
 
     pub fn draw_tools<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {

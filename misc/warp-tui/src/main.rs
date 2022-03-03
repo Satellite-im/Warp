@@ -5,7 +5,7 @@ use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use log::{error, info, warn, LevelFilter};
+use log::{error, info, trace, warn, LevelFilter};
 use std::io;
 use std::time::{Duration, Instant};
 use tui::backend::{Backend, CrosstermBackend};
@@ -24,6 +24,7 @@ pub struct WarpApp<'a> {
     //TODO: Implement cacher through a trait object
     pub cache: Option<StrettoClient>,
     pub modules: Modules,
+    pub config: Config,
     pub tools: Tools,
     pub tabs: Tabs<'a>,
     pub exit: bool,
@@ -41,6 +42,55 @@ impl Tools {
             list,
             ..Default::default()
         }
+    }
+
+    pub fn next(&mut self) {
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i >= self.list.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.state.select(Some(i));
+    }
+
+    pub fn previous(&mut self) {
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.list.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.state.select(Some(i));
+    }
+}
+
+#[derive(Default)]
+pub struct Config {
+    pub state: ListState,
+    pub list: Vec<(Module, bool)>,
+}
+
+impl Config {
+    pub fn menu(&mut self) -> Vec<String> {
+        self.list
+            .iter()
+            .map(|(module, active)| {
+                format!(
+                    "{} {}",
+                    if *active { "Disable" } else { "Enable" },
+                    module.to_string().to_lowercase()
+                )
+            })
+            .collect()
     }
 
     pub fn next(&mut self) {
@@ -150,14 +200,24 @@ impl<'a> WarpApp<'a> {
 
         app.modules = Modules::new();
         app.cache = Some(StrettoClient::new()?);
+        app.config.list = app.modules.modules.clone();
         Ok(app)
     }
 
+    //TODO: Implement a clean reference to tabs
     pub fn up(&mut self) {
-        self.tools.previous()
+        match self.tabs.index {
+            0 => self.tools.previous(),
+            1 => self.config.previous(),
+            _ => {}
+        }
     }
     pub fn down(&mut self) {
-        self.tools.next()
+        match self.tabs.index {
+            0 => self.tools.next(),
+            1 => self.config.next(),
+            _ => {}
+        }
     }
     pub fn left(&mut self) {
         self.tabs.previous()
@@ -166,40 +226,106 @@ impl<'a> WarpApp<'a> {
         self.tabs.next()
     }
     pub fn select(&mut self) {
-        if self.tabs.index != 0 {
-            return;
-        }
-        match self.tools.state.selected() {
-            Some(selected) => {
-                if let Some(item) = self.tools.list.get(selected).map(|item| item.as_str()) {
-                    match item {
-                        "Load Mock Data" => {
-                            info!(target:"Warp", "Loading data...")
-                        }
-                        "Clear Cache" => {
-                            info!(target:"Warp", "Clearing cache...");
-                            match self.cache.as_mut() {
-                                Some(cache) => {
-                                    for (module, active) in self.modules.modules.iter() {
-                                        if *active {
-                                            info!(target:"Warp", "Clearing {} from cache", module);
-                                            if let Err(e) = cache.empty(module.clone()) {
-                                                error!(target:"Error", "Error attempting to clear {} from cache: {}", module, e);
+        match self.tabs.index {
+            0 => match self.tools.state.selected() {
+                Some(selected) => {
+                    if let Some(item) = self.tools.list.get(selected).map(|item| item.as_str()) {
+                        match item {
+                            "Load Mock Data" => {
+                                info!(target:"Warp", "Loading data...")
+                            }
+                            "Clear Cache" => {
+                                info!(target:"Warp", "Clearing cache...");
+                                match self.cache.as_mut() {
+                                    Some(cache) => {
+                                        for (module, active) in self.modules.modules.iter() {
+                                            if *active {
+                                                info!(target:"Warp", "Clearing {} from cache", module);
+                                                if let Err(e) = cache.empty(module.clone()) {
+                                                    error!(target:"Error", "Error attempting to clear {} from cache: {}", module, e);
+                                                }
                                             }
                                         }
+                                        info!(target:"Warp", "Cache cleared");
                                     }
-                                    info!(target:"Warp", "Cache cleared");
+                                    None => warn!(target:"Warp", "Cache is unavailable"),
                                 }
-                                None => warn!(target:"Warp", "Cache is unavailable"),
                             }
-                        }
-                        other => {
-                            error!(target:"Error", "'{}' is currently disabled or not a valid option", other)
+                            other => {
+                                error!(target:"Error", "'{}' is currently disabled or not a valid option", other)
+                            }
                         }
                     }
                 }
+                None => error!(target:"Error", "State is invalid"),
+            },
+            1 => {
+                trace!(target:"", "Here");
+                match self.config.state.selected() {
+                    Some(selected) => {
+                        if let Some((module, active)) = self.config.list.get_mut(selected) {
+                            //first get position for both config
+                            //TODO: *REMOVE `.unwrap()`*
+                            match module {
+                                Module::Messaging | Module::Accounts => {
+                                    warn!(target:"Warp", "{} cannot be {} at this time", module, if *active { "enabled" } else { "disabled" });
+                                    return;
+                                }
+                                _ => {}
+                            };
+                            let module_index = self
+                                .modules
+                                .modules
+                                .iter()
+                                .position(|(m, _)| m == module)
+                                .unwrap();
+
+                            let (_, active_ref) =
+                                self.modules.modules.get_mut(module_index).unwrap();
+
+                            if *active {
+                                *active = false
+                            } else {
+                                *active = true
+                            }
+                            if *active_ref {
+                                *active_ref = false
+                            } else {
+                                *active_ref = true
+                            }
+
+                            info!(target:"Warp", "{} is now {}", module, if *active { "enabled" } else { "disabled" })
+                            // match item {
+                            //     "Load Mock Data" => {
+                            //         info!(target:"Warp", "Loading data...")
+                            //     }
+                            //     "Clear Cache" => {
+                            //         info!(target:"Warp", "Clearing cache...");
+                            //         match self.cache.as_mut() {
+                            //             Some(cache) => {
+                            //                 for (module, active) in self.modules.modules.iter() {
+                            //                     if *active {
+                            //                         info!(target:"Warp", "Clearing {} from cache", module);
+                            //                         if let Err(e) = cache.empty(module.clone()) {
+                            //                             error!(target:"Error", "Error attempting to clear {} from cache: {}", module, e);
+                            //                         }
+                            //                     }
+                            //                 }
+                            //                 info!(target:"Warp", "Cache cleared");
+                            //             }
+                            //             None => warn!(target:"Warp", "Cache is unavailable"),
+                            //         }
+                            //     }
+                            //     other => {
+                            //         error!(target:"Error", "'{}' is currently disabled or not a valid option", other)
+                            //     }
+                            // }
+                        }
+                    }
+                    None => error!(target:"Error", "State is invalid"),
+                }
             }
-            None => error!(target:"Error", "State is invalid"),
+            _ => {}
         }
     }
     pub fn key_press(&mut self, key: char) {
@@ -270,6 +396,7 @@ async fn run_loop<'a, B: Backend>(
             }
         }
         if last_tick.elapsed() >= tick_rate {
+            app.config.list = app.modules.modules.clone();
             //perform any updates during this tick
             last_tick = Instant::now();
         }
