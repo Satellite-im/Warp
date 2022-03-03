@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::fmt::write;
 
 //
 /// `Messaging` - Allows direct, and multi-user encrypted messaging with ownership rights added so only
@@ -35,6 +36,7 @@ impl fmt::Display for Module {
             Module::Messaging => write!(f, "MESSAGING"),
             Module::FileSystem => write!(f, "FILESYSTEM"),
             Module::Accounts => write!(f, "ACCOUNTS"),
+            Module::Cache => write!(f, "CACHE"),
             Module::Other(module) => write!(f, "{module}"),
             Module::Unknown => write!(f, "UNKNOWN"),
         }
@@ -50,6 +52,7 @@ where
             "MESSAGING" => Module::Messaging,
             "FILESYSTEM" => Module::FileSystem,
             "ACCOUNTS" => Module::Accounts,
+            "CACHE" => Module::Cache,
             "UNKNOWN" => Module::Unknown,
             other => Module::Other(other.to_string()),
         }
