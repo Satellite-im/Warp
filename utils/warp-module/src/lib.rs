@@ -18,6 +18,7 @@ pub enum Module {
     Messaging,
     FileSystem,
     Accounts,
+    Cache,
     Other(String),
     Unknown,
 }
