@@ -271,7 +271,6 @@ impl<'a> WarpApp<'a> {
                 None => error!(target:"Error", "State is invalid"),
             },
             1 => {
-                trace!(target:"", "Here");
                 match self.config.state.selected() {
                     Some(selected) => {
                         if let Some((module, active)) = self.config.list.get_mut(selected) {
@@ -279,7 +278,7 @@ impl<'a> WarpApp<'a> {
                             //TODO: *REMOVE `.unwrap()`*
                             match module {
                                 Module::Messaging | Module::Accounts => {
-                                    warn!(target:"Warp", "{} cannot be {} at this time", module, if *active { "enabled" } else { "disabled" });
+                                    warn!(target:"Warp", "{} cannot be {} at this time", module, if *active { "disabled" } else { "enabled" });
                                     return;
                                 }
                                 _ => {}
