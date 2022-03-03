@@ -3,23 +3,25 @@ use tui::backend::Backend;
 use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use tui::style::{Color, Modifier, Style};
 use tui::text::{Span, Spans};
-use tui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Tabs, Wrap};
+use tui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Row, Table, Tabs, Wrap};
 use tui::Frame;
 use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget};
+use warp_pocket_dimension::PocketDimension;
 
 impl<'a> WarpApp<'a> {
     pub fn draw_ui<B: Backend>(&mut self, frame: &mut Frame<B>) {
-        // let size = frame.size();
-        //
-        // let block = Block::default()
-        //     .borders(Borders::ALL)
-        //     .title(self.title)
-        //     .title_alignment(Alignment::Center)
-        //     .border_type(BorderType::Rounded)
-        //     .border_style(Style::default().fg(Color::White).bg(Color::White));
-        // frame.render_widget(block, size);
+        let size = frame.size();
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(self.title)
+            .title_alignment(Alignment::Center)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::White).bg(Color::Black));
+        frame.render_widget(block, size);
 
         let layout = Layout::default()
+            .margin(4)
             .constraints(vec![Constraint::Length(3), Constraint::Min(0)])
             .split(frame.size());
 
@@ -94,7 +96,7 @@ impl<'a> WarpApp<'a> {
                 .constraints(vec![Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(layout[0]);
             self.draw_modules_and_hooks(frame, layout[0]);
-            self.draw_tools(frame, layout[1]);
+            self.draw_tools_and_cache(frame, layout[1]);
         }
         self.draw_extensions(frame, layout[1]);
     }
@@ -109,27 +111,30 @@ impl<'a> WarpApp<'a> {
             .direction(Direction::Horizontal)
             .split(area);
 
-        let modules: Vec<ListItem> = self
-            .modules
-            .modules
-            .iter()
-            .map(|m| {
-                let (module, active) = m;
-                let style = match active {
-                    true => Style::default().fg(Color::Green),
-                    false => Style::default().fg(Color::Red),
-                };
-                ListItem::new(vec![Spans::from(Span::styled(
-                    format!("{:<9}", module.to_string()),
-                    style,
-                ))])
-            })
-            .collect();
+        let rows = self.modules.modules.iter().map(|m| {
+            let (module, active) = m;
+            let style = match active {
+                true => Style::default().fg(Color::Green),
+                false => Style::default().fg(Color::Red),
+            };
 
-        let modules_list =
-            List::new(modules).block(Block::default().borders(Borders::ALL).title("Modules"));
+            Row::new(vec![
+                module.to_string().to_lowercase(),
+                format!("{}", active),
+            ])
+            .style(style)
+        });
 
-        frame.render_widget(modules_list, layout[0]);
+        let table = Table::new(rows)
+            .header(
+                Row::new(vec!["Module Name", "Active"])
+                    .style(Style::default().fg(Color::White))
+                    .bottom_margin(1),
+            )
+            .block(Block::default().title("Modules").borders(Borders::ALL))
+            .widths(&[Constraint::Length(15), Constraint::Length(15)]);
+
+        frame.render_widget(table, layout[0]);
 
         let hooks: Vec<ListItem> = self
             .hook_system
@@ -147,26 +152,28 @@ impl<'a> WarpApp<'a> {
         frame.render_widget(hooks_list, layout[1]);
     }
 
-    pub fn draw_tools<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
+    pub fn draw_tools_and_cache<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
         let layout = Layout::default()
-            .constraints([Constraint::Percentage(100)].as_ref())
+            .constraints([Constraint::Percentage(20), Constraint::Percentage(80)].as_ref())
             .direction(Direction::Horizontal)
             .split(area);
 
-        let hooks: Vec<ListItem> = self
+        let list: Vec<ListItem> = self
             .tools
             .list
             .iter()
             .map(|i| ListItem::new(vec![Spans::from(Span::from(i.to_string()))]))
             .collect();
 
-        let list = List::new(hooks)
+        let list = List::new(list)
             .block(Block::default().borders(Borders::ALL).title("Tools"))
             .highlight_style(Style::default().add_modifier(Modifier::BOLD))
             .highlight_symbol(">> ");
 
         frame.render_stateful_widget(list, layout[0], &mut self.tools.state);
+        self.draw_cache(frame, layout[1])
     }
+
     pub fn draw_modules<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {
         let layout = Layout::default()
             .constraints([Constraint::Percentage(100)].as_ref())
@@ -205,6 +212,44 @@ impl<'a> WarpApp<'a> {
         frame.render_widget(list, layout[0]);
     }
 
+    pub fn draw_cache<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
+        let layout = Layout::default()
+            .constraints([Constraint::Percentage(100)].as_ref())
+            .direction(Direction::Horizontal)
+            .split(area);
+
+        let cache = match self.cache.as_ref() {
+            Some(cache) => cache,
+            None => return,
+        };
+
+        let rows = self
+            .modules
+            .modules
+            .iter()
+            .filter(|(_, active)| *active == true)
+            .map(|(module, _)| module)
+            .map(|module| {
+                let data = cache.get_data(module.clone(), None).unwrap_or_default();
+                Row::new(vec![
+                    module.to_string().to_lowercase(),
+                    format!("{}", data.len()),
+                ])
+                .style(Style::default().fg(Color::Green))
+            });
+
+        let table = Table::new(rows)
+            .header(
+                Row::new(vec!["Module", "Amount Cached"])
+                    .style(Style::default().fg(Color::White))
+                    .bottom_margin(1),
+            )
+            .block(Block::default().title("Cache").borders(Borders::ALL))
+            .widths(&[Constraint::Length(15), Constraint::Length(15)]);
+
+        frame.render_widget(table, layout[0]);
+    }
+
     pub fn draw_logs<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {
         let tui_logger: TuiLoggerWidget = TuiLoggerWidget::default()
             .block(
@@ -223,7 +268,5 @@ impl<'a> WarpApp<'a> {
         frame.render_widget(tui_logger, area);
     }
 
-    pub fn main_ui(&self) -> anyhow::Result<()> {
-        Ok(())
-    }
+    pub fn main_ui<B: Backend>(&mut self, frame: &mut Frame<B>) {}
 }

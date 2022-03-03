@@ -12,6 +12,7 @@ use tui::backend::{Backend, CrosstermBackend};
 use tui::widgets::ListState;
 use tui::Terminal;
 use tui_logger::{init_logger, set_default_level};
+use warp_data::DataObject;
 use warp_hooks::hooks::Hooks;
 use warp_module::Module;
 use warp_pd_stretto::StrettoClient;
@@ -232,7 +233,16 @@ impl<'a> WarpApp<'a> {
                     if let Some(item) = self.tools.list.get(selected).map(|item| item.as_str()) {
                         match item {
                             "Load Mock Data" => {
-                                info!(target:"Warp", "Loading data...")
+                                info!(target:"Warp", "Loading data...");
+
+                                //self.load_mock_data(Module::FileSystem);
+                                let mut data = DataObject::default();
+                                data.module = Module::FileSystem;
+                                self.cache
+                                    .as_mut()
+                                    .unwrap()
+                                    .add_data(Module::FileSystem, &data)
+                                    .unwrap();
                             }
                             "Clear Cache" => {
                                 info!(target:"Warp", "Clearing cache...");
@@ -240,6 +250,7 @@ impl<'a> WarpApp<'a> {
                                     Some(cache) => {
                                         for (module, active) in self.modules.modules.iter() {
                                             if *active {
+                                                info!(target:"Warp", "{} cached for {}", cache.count(module.clone(), None).unwrap_or_default(), module.to_string().to_lowercase());
                                                 info!(target:"Warp", "Clearing {} from cache", module);
                                                 if let Err(e) = cache.empty(module.clone()) {
                                                     error!(target:"Error", "Error attempting to clear {} from cache: {}", module, e);
@@ -374,8 +385,6 @@ async fn run_loop<'a, B: Backend>(
     let mut last_tick = Instant::now();
     let tick_rate = Duration::from_secs(250);
     loop {
-        // Workaround. TODO: Investigate why terminal is not clearing
-        terminal.clear()?;
         terminal.draw(|f| app.draw_ui(f))?;
 
         let timeout = tick_rate
