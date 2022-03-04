@@ -1,7 +1,7 @@
 use crate::HOOKS;
+use blake2::{Blake2b512, Digest};
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
-use std::ops::Index;
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::error::Error;
 use warp_common::serde::{Deserialize, Serialize};
@@ -84,11 +84,17 @@ impl ConstellationGetPut for BasicFileSystem {
 
         self.memory.0.insert(name.to_string(), buf.clone());
 
+        let mut hasher = Blake2b512::new();
+        hasher.update(&buf[..]);
+        let res = hasher.finalize().to_vec();
+
         let mut data = DataObject::new(&Module::FileSystem, (name.to_string(), buf))?;
         data.size = size as u64;
 
         let mut file = File::new(name);
         file.set_size(size as i64);
+        file.set_hash(hex::encode(res));
+
         self.open_directory("")?.add_child(file)?;
         cache.add_data(Module::FileSystem, &data)?;
         HOOKS.lock().unwrap().trigger("FILESYSTEM::NEW_FILE", &data);
@@ -128,7 +134,7 @@ impl ConstellationGetPut for BasicFileSystem {
                     return Ok(());
                 }
             }
-            Err(e) => {}
+            Err(_) => {}
         }
 
         let data = self.memory.0.get(name).ok_or(Error::Other)?;

@@ -1,4 +1,4 @@
-use crate::{WarpApp, HOOKS};
+use crate::WarpApp;
 use tui::backend::Backend;
 use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use tui::style::{Color, Modifier, Style};
@@ -6,6 +6,7 @@ use tui::text::{Span, Spans};
 use tui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Row, Table, Tabs, Wrap};
 use tui::Frame;
 use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget};
+use warp_constellation::item::Item;
 use warp_pocket_dimension::PocketDimension;
 
 impl<'a> WarpApp<'a> {
@@ -109,7 +110,7 @@ impl<'a> WarpApp<'a> {
         self.draw_filesystem(frame, layout[1]);
     }
 
-    pub fn draw_loop<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {
+    pub fn draw_loop<B: Backend>(&self, _: &mut Frame<B>, _: Rect) {
         //TODO
     }
 
@@ -144,19 +145,17 @@ impl<'a> WarpApp<'a> {
 
         frame.render_widget(table, layout[0]);
 
-        let hooks: Vec<ListItem> = HOOKS
+        let hooks: Vec<ListItem> = self
+            .hooks_trigger
+            .clone()
             .lock()
             .unwrap()
-            .hooks()
             .iter()
             .map(|i| ListItem::new(vec![Spans::from(Span::from(i.to_string()))]))
             .collect();
 
-        let hooks_list = List::new(hooks).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Registered Hooks"),
-        );
+        let hooks_list =
+            List::new(hooks).block(Block::default().borders(Borders::ALL).title("Hooks"));
 
         frame.render_widget(hooks_list, layout[1]);
     }
@@ -183,7 +182,7 @@ impl<'a> WarpApp<'a> {
         self.draw_cache(frame, layout[1])
     }
 
-    pub fn draw_modules<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {}
+    pub fn draw_modules<B: Backend>(&self, _: &mut Frame<B>, _: Rect) {}
 
     pub fn draw_filesystem<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {
         let layout = Layout::default()
@@ -191,20 +190,45 @@ impl<'a> WarpApp<'a> {
             .direction(Direction::Vertical)
             .split(area);
 
-        let hooks: Vec<ListItem> = self
+        let rows = self
             .filesystem
             .index
             .child_list()
             .iter()
-            .map(|i| ListItem::new(vec![Spans::from(Span::from(i.name().to_string()))]))
-            .collect();
+            // .filter(|item| item.is_file())
+            .map(|item| {
+                Row::new(vec![
+                    format!("{}", item.name()),
+                    format!("{}", item.size()),
+                    format!("{}", item.creation()),
+                    if item.is_file() {
+                        if let Item::File(file) = item {
+                            file.hash.clone()
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    },
+                ])
+                .style(Style::default().fg(Color::Green))
+            });
 
-        let list = List::new(hooks)
-            .block(Block::default().borders(Borders::ALL).title("Filesystem"))
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-            .highlight_symbol(">> ");
+        let table = Table::new(rows)
+            .header(
+                Row::new(vec!["Name", "Size", "Date", "Hash"])
+                    .style(Style::default().fg(Color::White))
+                    .bottom_margin(1),
+            )
+            .block(Block::default().title("Filesystem").borders(Borders::ALL))
+            .widths(&[
+                Constraint::Length(15),
+                Constraint::Length(10),
+                Constraint::Length(35),
+                Constraint::Length(65),
+            ]);
 
-        frame.render_widget(list, layout[0]);
+        frame.render_widget(table, layout[0]);
     }
 
     pub fn draw_cache<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
@@ -316,5 +340,5 @@ impl<'a> WarpApp<'a> {
         self.draw_logs(frame, layout[1])
     }
 
-    pub fn main_ui<B: Backend>(&mut self, frame: &mut Frame<B>) {}
+    pub fn main_ui<B: Backend>(&mut self, _: &mut Frame<B>) {}
 }

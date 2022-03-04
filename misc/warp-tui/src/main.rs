@@ -7,7 +7,7 @@ use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use log::{error, info, trace, warn, LevelFilter};
+use log::{error, info, warn, LevelFilter};
 use std::io;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -17,7 +17,6 @@ use tui::Terminal;
 use tui_logger::{init_logger, set_default_level};
 use warp_common::ExtensionInfo;
 use warp_constellation::constellation::ConstellationGetPut;
-use warp_data::DataObject;
 use warp_hooks::hooks::Hooks;
 use warp_module::Module;
 use warp_pd_stretto::StrettoClient;
@@ -36,6 +35,7 @@ pub struct WarpApp<'a> {
     pub filesystem: BasicFileSystem,
     pub modules: Modules,
     pub extensions: Extensions,
+    pub hooks_trigger: Arc<Mutex<Vec<String>>>,
     pub config: Config,
     pub tools: Tools,
     pub tabs: Tabs<'a>,
@@ -242,8 +242,12 @@ impl<'a> WarpApp<'a> {
         // pocketdimension hooks
         //TODO
 
-        hook_system.subscribe("FILESYSTEM::NEW_FILE", |hook, data| {
-            info!(target:"Warp", "{} was created", data.payload::<(String, Vec<u8>)>().unwrap().0);
+        app.hooks_trigger = Arc::new(Mutex::new(Vec::new()));
+
+        let trigger_list = app.hooks_trigger.clone();
+        hook_system.subscribe("FILESYSTEM::NEW_FILE", move |hook, data| {
+            info!(target:"Warp", "{}, with {} bytes, was uploaded to the filesystem", data.payload::<(String, Vec<u8>)>().unwrap().0, data.size);
+            trigger_list.lock().unwrap().push(format!("{}", hook.to_string()))
         })?;
 
         app.tabs = Tabs::new(vec!["Main", "Extensions", "Config"]);
@@ -312,7 +316,7 @@ impl<'a> WarpApp<'a> {
                                     Some(cache) => {
                                         for (module, active) in self.modules.modules.iter() {
                                             if *active {
-                                                info!(target:"Warp", "{} cached for {}", cache.count(module.clone(), None).unwrap_or_default(), module.to_string().to_lowercase());
+                                                info!(target:"Warp", "{} items cached for {}", cache.count(module.clone(), None).unwrap_or_default(), module.to_string().to_lowercase());
                                                 info!(target:"Warp", "Clearing {} from cache", module);
                                                 if let Err(e) = cache.empty(module.clone()) {
                                                     error!(target:"Error", "Error attempting to clear {} from cache: {}", module, e);
@@ -332,10 +336,10 @@ impl<'a> WarpApp<'a> {
                 }
                 None => error!(target:"Error", "State is invalid"),
             },
-            1 => match self.extensions.state.selected() {
-                Some(selected) => {}
-                None => error!(target:"Error", "State is invalid"),
-            },
+            // 1 => match self.extensions.state.selected() {
+            //     Some(selected) => {}
+            //     None => error!(target:"Error", "State is invalid"),
+            // },
             2 => {
                 match self.config.state.selected() {
                     Some(selected) => {
@@ -388,7 +392,7 @@ impl<'a> WarpApp<'a> {
         }
     }
 
-    //TODO: have it return a `Result` instead
+    //TODO: have it return a `Result` instead and load additional data
     pub fn load_mock_data(&mut self) {
         let mut cargo_file = (
             "Cargo.toml".to_string(),
@@ -406,7 +410,7 @@ impl<'a> WarpApp<'a> {
             "basic_fs.rs".to_string(),
             std::io::Cursor::new(include_bytes!("basic_fs.rs").to_vec()),
         );
-        let mut cache = self.cache.as_mut().unwrap();
+        let cache = self.cache.as_mut().unwrap();
 
         match self
             .filesystem
