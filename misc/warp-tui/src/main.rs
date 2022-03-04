@@ -307,25 +307,35 @@ impl<'a> WarpApp<'a> {
                         match item {
                             "Load Mock Data" => {
                                 info!(target:"Warp", "Loading data...");
-                                self.load_mock_data();
-                                info!(target:"Warp", "Loading Complete");
+                                if self.modules.modules.contains(&(Module::Cache, true))
+                                    && self.modules.modules.contains(&(Module::FileSystem, true))
+                                {
+                                    self.load_mock_data();
+                                    info!(target:"Warp", "Loading Complete");
+                                } else {
+                                    error!(target:"Error", "You are required to have both the filesystem and cache modules enabled");
+                                }
                             }
                             "Clear Cache" => {
-                                info!(target:"Warp", "Clearing cache...");
-                                match self.cache.as_mut() {
-                                    Some(cache) => {
-                                        for (module, active) in self.modules.modules.iter() {
-                                            if *active {
-                                                info!(target:"Warp", "{} items cached for {}", cache.count(module.clone(), None).unwrap_or_default(), module.to_string().to_lowercase());
-                                                info!(target:"Warp", "Clearing {} from cache", module);
-                                                if let Err(e) = cache.empty(module.clone()) {
-                                                    error!(target:"Error", "Error attempting to clear {} from cache: {}", module, e);
+                                if self.modules.modules.contains(&(Module::Cache, true)) {
+                                    info!(target:"Warp", "Clearing cache...");
+                                    match self.cache.as_mut() {
+                                        Some(cache) => {
+                                            for (module, active) in self.modules.modules.iter() {
+                                                if *active {
+                                                    info!(target:"Warp", "{} items cached for {}", cache.count(module.clone(), None).unwrap_or_default(), module.to_string().to_lowercase());
+                                                    info!(target:"Warp", "Clearing {} from cache", module);
+                                                    if let Err(e) = cache.empty(module.clone()) {
+                                                        error!(target:"Error", "Error attempting to clear {} from cache: {}", module, e);
+                                                    }
                                                 }
                                             }
+                                            info!(target:"Warp", "Cache cleared");
                                         }
-                                        info!(target:"Warp", "Cache cleared");
+                                        None => warn!(target:"Warp", "Cache is unavailable"),
                                     }
-                                    None => warn!(target:"Warp", "Cache is unavailable"),
+                                } else {
+                                    error!(target:"Error", "You are required to have the cache module enabled");
                                 }
                             }
                             other => {
