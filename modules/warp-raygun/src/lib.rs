@@ -52,7 +52,7 @@ pub enum EmbedState {
 }
 
 pub trait RayGun {
-    /// Retreive all messages
+    /// Retreive all messages from a conversation
     fn get_messages(
         &self,
         conversation_id: Uuid,
@@ -60,6 +60,7 @@ pub trait RayGun {
         callback: Option<Callback>,
     ) -> Result<Vec<Message>>;
 
+    /// Sends a message to a conversation. If `message_id` is provided, it will override the selected message
     fn send_message(
         &mut self,
         conversation_id: Uuid,
@@ -67,8 +68,10 @@ pub trait RayGun {
         message: Vec<String>,
     ) -> Result<()>;
 
+    /// Delete message from a conversation
     fn delete_message(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()>;
 
+    /// React to a message
     fn react(
         &mut self,
         conversation_id: Uuid,
@@ -77,6 +80,7 @@ pub trait RayGun {
         emoji: Option<String>,
     ) -> Result<()>;
 
+    /// Pin a message within a conversation
     fn pin_message(
         &mut self,
         conversation_id: Uuid,
@@ -84,6 +88,7 @@ pub trait RayGun {
         state: PinState,
     ) -> Result<()>;
 
+    /// Reply to a message within a conversation
     fn reply(
         &mut self,
         conversation_id: Uuid,
