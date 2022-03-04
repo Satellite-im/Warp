@@ -87,9 +87,8 @@ impl ConstellationGetPut for BasicFileSystem {
         let mut data = DataObject::new(&Module::FileSystem, (name.to_string(), buf))?;
         data.size = size as u64;
 
-        cache.add_data(Module::FileSystem, &data)?;
-
         self.open_directory("")?.add_child(File::new(name))?;
+        cache.add_data(Module::FileSystem, &data)?;
         HOOKS.lock().unwrap().trigger("FILESYSTEM::NEW_FILE", &data);
         Ok(())
     }

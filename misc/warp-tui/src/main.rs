@@ -16,6 +16,7 @@ use tui::widgets::ListState;
 use tui::Terminal;
 use tui_logger::{init_logger, set_default_level};
 use warp_common::ExtensionInfo;
+use warp_constellation::constellation::ConstellationGetPut;
 use warp_data::DataObject;
 use warp_hooks::hooks::Hooks;
 use warp_module::Module;
@@ -241,6 +242,10 @@ impl<'a> WarpApp<'a> {
         // pocketdimension hooks
         //TODO
 
+        hook_system.subscribe("FILESYSTEM::NEW_FILE", |hook, data| {
+            info!(target:"Warp", "{} was created", data.payload::<(String, Vec<u8>)>().unwrap().0);
+        })?;
+
         app.tabs = Tabs::new(vec!["Main", "Extensions", "Config"]);
         app.tools = Tools::new(
             vec!["Load Mock Data", "Clear Cache", "Start", "Stop", "Restart"]
@@ -298,15 +303,8 @@ impl<'a> WarpApp<'a> {
                         match item {
                             "Load Mock Data" => {
                                 info!(target:"Warp", "Loading data...");
-
-                                //self.load_mock_data(Module::FileSystem);
-                                let mut data = DataObject::default();
-                                data.module = Module::FileSystem;
-                                self.cache
-                                    .as_mut()
-                                    .unwrap()
-                                    .add_data(Module::FileSystem, &data)
-                                    .unwrap();
+                                self.load_mock_data();
+                                info!(target:"Warp", "Loading Complete");
                             }
                             "Clear Cache" => {
                                 info!(target:"Warp", "Clearing cache...");
@@ -390,8 +388,65 @@ impl<'a> WarpApp<'a> {
         }
     }
 
-    pub fn load_mock_data(&mut self, module: Module) {
-        // let
+    //TODO: have it return a `Result` instead
+    pub fn load_mock_data(&mut self) {
+        let mut cargo_file = (
+            "Cargo.toml".to_string(),
+            std::io::Cursor::new(include_bytes!("../Cargo.toml").to_vec()),
+        );
+        let mut main_file = (
+            "main.rs".to_string(),
+            std::io::Cursor::new(include_bytes!("main.rs").to_vec()),
+        );
+        let mut ui_file = (
+            "ui.rs".to_string(),
+            std::io::Cursor::new(include_bytes!("ui.rs").to_vec()),
+        );
+        let mut basic_file = (
+            "basic_fs.rs".to_string(),
+            std::io::Cursor::new(include_bytes!("basic_fs.rs").to_vec()),
+        );
+        let mut cache = self.cache.as_mut().unwrap();
+
+        match self
+            .filesystem
+            .put(cargo_file.0.clone(), cache, &mut cargo_file.1)
+        {
+            Ok(()) => {}
+            Err(e) => {
+                error!(target:"Error", "Error has occurred while uploading {}: {}", cargo_file.0, e)
+            }
+        };
+
+        match self
+            .filesystem
+            .put(main_file.0.clone(), cache, &mut main_file.1)
+        {
+            Ok(()) => {}
+            Err(e) => {
+                error!(target:"Error", "Error has occurred while uploading {}: {}", main_file.0, e)
+            }
+        };
+
+        match self
+            .filesystem
+            .put(ui_file.0.clone(), cache, &mut ui_file.1)
+        {
+            Ok(()) => {}
+            Err(e) => {
+                error!(target:"Error", "Error has occurred while uploading {}: {}", ui_file.0, e)
+            }
+        };
+
+        match self
+            .filesystem
+            .put(basic_file.0.clone(), cache, &mut basic_file.1)
+        {
+            Ok(()) => {}
+            Err(e) => {
+                error!(target:"Error", "Error has occurred while uploading {}: {}", basic_file.0, e)
+            }
+        };
     }
 }
 
