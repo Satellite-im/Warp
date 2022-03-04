@@ -128,7 +128,7 @@ pub trait ConstellationGetPut: Constellation {
     fn get<W: std::io::Write, S: AsRef<str>, C: PocketDimension>(
         &self,
         name: S,
-        cache: C,
+        cache: &C,
         writer: &mut W,
     ) -> Result<()>;
 }
