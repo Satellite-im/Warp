@@ -12,3 +12,4 @@ warp-common = { version = "0.1.0", path = "../warp-common" }
 
 [dev-dependencies]
 warp-constellation = { version = "0.1.0", path = "../../modules/warp-constellation" }
+lazy_static = "1.4"

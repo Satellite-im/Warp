@@ -1,14 +1,20 @@
 #[cfg(test)]
 mod test {
+    use lazy_static::lazy_static;
+    use std::sync::{Arc, Mutex};
     use warp_common::Result;
     use warp_constellation::file::File;
     use warp_data::DataObject;
     use warp_hooks::hooks::Hooks;
     use warp_module::Module;
 
+    lazy_static! {
+        pub static ref HOOKS: Arc<Mutex<Hooks>> = Arc::new(Mutex::new(Hooks::default()));
+    }
+
     #[test]
     fn test() -> Result<()> {
-        let mut system = Hooks::default();
+        let mut system = HOOKS.lock().unwrap();
 
         let hook = system.create("NEW_FILE", Module::FileSystem)?;
 
