@@ -1,5 +1,7 @@
+pub mod basic_fs;
 pub mod ui;
 
+use crate::basic_fs::BasicFileSystem;
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -7,28 +9,80 @@ use crossterm::terminal::{
 };
 use log::{error, info, trace, warn, LevelFilter};
 use std::io;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tui::backend::{Backend, CrosstermBackend};
 use tui::widgets::ListState;
 use tui::Terminal;
 use tui_logger::{init_logger, set_default_level};
+use warp_common::ExtensionInfo;
 use warp_data::DataObject;
 use warp_hooks::hooks::Hooks;
 use warp_module::Module;
 use warp_pd_stretto::StrettoClient;
 use warp_pocket_dimension::PocketDimension;
 
+//Using lazy static to handle global hooks for the time being
+lazy_static::lazy_static! {
+    pub static ref HOOKS: Arc<Mutex<Hooks>> = Arc::new(Mutex::new(Hooks::default()));
+}
+
 #[derive(Default)]
 pub struct WarpApp<'a> {
     pub title: &'a str,
-    pub hook_system: Hooks,
     //TODO: Implement cacher through a trait object
     pub cache: Option<StrettoClient>,
+    pub filesystem: BasicFileSystem,
     pub modules: Modules,
+    pub extensions: Extensions,
     pub config: Config,
     pub tools: Tools,
     pub tabs: Tabs<'a>,
     pub exit: bool,
+}
+
+#[derive(Default)]
+pub struct Extensions {
+    pub list: Vec<Box<dyn ExtensionInfo>>,
+    pub state: ListState,
+}
+
+impl Extensions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register(&mut self, info: Box<dyn ExtensionInfo>) {
+        self.list.push(info);
+    }
+
+    pub fn next(&mut self) {
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i >= self.list.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.state.select(Some(i));
+    }
+
+    pub fn previous(&mut self) {
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.list.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.state.select(Some(i));
+    }
 }
 
 #[derive(Default)]
@@ -171,37 +225,45 @@ impl<'a> WarpApp<'a> {
         let mut app = WarpApp::default();
         app.title = title.as_ref();
 
-        app.hook_system = {
-            let mut hook_system = Hooks::default();
+        let mut hook_system = HOOKS.lock().unwrap();
 
-            // Register different qualified hooks TODO: Implement a function to register multiple hooks from a vector
-            // filesystem hooks
-            hook_system.create("NEW_FILE", Module::FileSystem)?;
-            hook_system.create("NEW_DIRECTORY", Module::FileSystem)?;
-            hook_system.create("DELETE_FILE", Module::FileSystem)?;
-            hook_system.create("DELETE_DIRECTORY", Module::FileSystem)?;
-            hook_system.create("MOVE_FILE", Module::FileSystem)?;
-            hook_system.create("MOVE_DIRECTORY", Module::FileSystem)?;
-            hook_system.create("RENAME_FILE", Module::FileSystem)?;
-            hook_system.create("RENAME_DIRECTORY", Module::FileSystem)?;
+        // Register different qualified hooks TODO: Implement a function to register multiple hooks from a vector
+        // filesystem hooks
+        hook_system.create("NEW_FILE", Module::FileSystem)?;
+        hook_system.create("NEW_DIRECTORY", Module::FileSystem)?;
+        hook_system.create("DELETE_FILE", Module::FileSystem)?;
+        hook_system.create("DELETE_DIRECTORY", Module::FileSystem)?;
+        hook_system.create("MOVE_FILE", Module::FileSystem)?;
+        hook_system.create("MOVE_DIRECTORY", Module::FileSystem)?;
+        hook_system.create("RENAME_FILE", Module::FileSystem)?;
+        hook_system.create("RENAME_DIRECTORY", Module::FileSystem)?;
 
-            // pocketdimension hooks
-            //TODO
+        // pocketdimension hooks
+        //TODO
 
-            hook_system
-        };
-
-        app.tabs = Tabs::new(vec!["Main", "Config"]);
+        app.tabs = Tabs::new(vec!["Main", "Extensions", "Config"]);
         app.tools = Tools::new(
             vec!["Load Mock Data", "Clear Cache", "Start", "Stop", "Restart"]
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
         );
+        let mut ext = Extensions::new();
 
+        let cache = StrettoClient::new()?;
+
+        ext.register(Box::new(cache.clone()));
         app.modules = Modules::new();
-        app.cache = Some(StrettoClient::new()?);
+        app.cache = Some(cache);
         app.config.list = app.modules.modules.clone();
+
+        let fs = BasicFileSystem::default();
+
+        ext.register(Box::new(fs.clone()));
+
+        app.filesystem = fs;
+
+        app.extensions = ext;
         Ok(app)
     }
 
@@ -209,14 +271,16 @@ impl<'a> WarpApp<'a> {
     pub fn up(&mut self) {
         match self.tabs.index {
             0 => self.tools.previous(),
-            1 => self.config.previous(),
+            1 => self.extensions.previous(),
+            2 => self.config.previous(),
             _ => {}
         }
     }
     pub fn down(&mut self) {
         match self.tabs.index {
             0 => self.tools.next(),
-            1 => self.config.next(),
+            1 => self.extensions.next(),
+            2 => self.config.next(),
             _ => {}
         }
     }
@@ -270,7 +334,11 @@ impl<'a> WarpApp<'a> {
                 }
                 None => error!(target:"Error", "State is invalid"),
             },
-            1 => {
+            1 => match self.extensions.state.selected() {
+                Some(selected) => {}
+                None => error!(target:"Error", "State is invalid"),
+            },
+            2 => {
                 match self.config.state.selected() {
                     Some(selected) => {
                         if let Some((module, active)) = self.config.list.get_mut(selected) {
@@ -305,31 +373,6 @@ impl<'a> WarpApp<'a> {
                             }
 
                             info!(target:"Warp", "{} is now {}", module, if *active { "enabled" } else { "disabled" })
-                            // match item {
-                            //     "Load Mock Data" => {
-                            //         info!(target:"Warp", "Loading data...")
-                            //     }
-                            //     "Clear Cache" => {
-                            //         info!(target:"Warp", "Clearing cache...");
-                            //         match self.cache.as_mut() {
-                            //             Some(cache) => {
-                            //                 for (module, active) in self.modules.modules.iter() {
-                            //                     if *active {
-                            //                         info!(target:"Warp", "Clearing {} from cache", module);
-                            //                         if let Err(e) = cache.empty(module.clone()) {
-                            //                             error!(target:"Error", "Error attempting to clear {} from cache: {}", module, e);
-                            //                         }
-                            //                     }
-                            //                 }
-                            //                 info!(target:"Warp", "Cache cleared");
-                            //             }
-                            //             None => warn!(target:"Warp", "Cache is unavailable"),
-                            //         }
-                            //     }
-                            //     other => {
-                            //         error!(target:"Error", "'{}' is currently disabled or not a valid option", other)
-                            //     }
-                            // }
                         }
                     }
                     None => error!(target:"Error", "State is invalid"),
@@ -345,6 +388,10 @@ impl<'a> WarpApp<'a> {
                 warn!(target:"Warn", "Key '{}' is invalid", k)
             }
         }
+    }
+
+    pub fn load_mock_data(&mut self, module: Module) {
+        // let
     }
 }
 

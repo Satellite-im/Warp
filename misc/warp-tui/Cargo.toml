@@ -26,3 +26,4 @@ warp-common = { path = "../../utils/warp-common" }
 
 # Extensions
 warp-pd-stretto = { path = "../../extensions/warp-pd-stretto" }
+lazy_static = "1.4"

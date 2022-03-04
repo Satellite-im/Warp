@@ -1,5 +1,6 @@
+use crate::HOOKS;
 use std::collections::HashMap;
-use std::io::{Cursor, ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::ops::Index;
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::error::Error;
@@ -10,7 +11,6 @@ use warp_constellation::directory::Directory;
 use warp_constellation::file::File;
 use warp_data::DataObject;
 use warp_module::Module;
-use warp_pd_stretto::StrettoClient;
 use warp_pocket_dimension::query::QueryBuilder;
 
 #[derive(Debug, Default, Clone)]
@@ -90,6 +90,7 @@ impl ConstellationGetPut for BasicFileSystem {
         cache.add_data(Module::FileSystem, &data)?;
 
         self.open_directory("")?.add_child(File::new(name))?;
+        HOOKS.lock().unwrap().trigger("FILESYSTEM::NEW_FILE", &data);
         Ok(())
     }
 
@@ -135,32 +136,4 @@ impl ConstellationGetPut for BasicFileSystem {
         writer.flush()?;
         Ok(())
     }
-}
-
-fn main() {
-    let mut cacher = StrettoClient::new().unwrap();
-    let mut fs = BasicFileSystem::default();
-    let mut cursor = Cursor::<Vec<u8>>::new(Vec::new());
-    cursor
-        .write_all(&vec![1, 2, 3, 4, 5, 6, 7, 89, 9, 8, 74, 5, 1, 5])
-        .unwrap();
-    cursor.set_position(0);
-    fs.put("test", &mut cacher, &mut cursor).unwrap();
-    cursor.set_position(0);
-    cursor.write_all(&vec![1, 2, 3, 4, 5]).unwrap();
-    fs.put("info", &mut cacher, &mut cursor).unwrap();
-    cursor.set_position(0);
-    println!("{:?}", fs.index);
-
-    let mut buf = Cursor::<Vec<u8>>::new(Vec::new());
-
-    fs.get("test", &cacher, &mut buf).unwrap();
-
-    println!("{:?}", buf.into_inner());
-
-    let mut buf = Cursor::<Vec<u8>>::new(Vec::new());
-
-    fs.get("info", &cacher, &mut buf).unwrap();
-
-    println!("{:?}", buf.into_inner());
 }

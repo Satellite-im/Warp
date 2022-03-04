@@ -1,4 +1,4 @@
-use crate::WarpApp;
+use crate::{WarpApp, HOOKS};
 use tui::backend::Backend;
 use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use tui::style::{Color, Modifier, Style};
@@ -48,7 +48,8 @@ impl<'a> WarpApp<'a> {
 
         match self.tabs.index {
             0 => self.draw_main(frame, layout[1]),
-            1 => self.draw_config(frame, layout[1]),
+            1 => self.draw_extensions(frame, layout[1]),
+            2 => self.draw_config(frame, layout[1]),
             _ => {}
         };
     }
@@ -105,7 +106,7 @@ impl<'a> WarpApp<'a> {
             self.draw_modules_and_hooks(frame, layout[0]);
             self.draw_tools_and_cache(frame, layout[1]);
         }
-        self.draw_extensions(frame, layout[1]);
+        self.draw_filesystem(frame, layout[1]);
     }
 
     pub fn draw_loop<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {
@@ -143,8 +144,9 @@ impl<'a> WarpApp<'a> {
 
         frame.render_widget(table, layout[0]);
 
-        let hooks: Vec<ListItem> = self
-            .hook_system
+        let hooks: Vec<ListItem> = HOOKS
+            .lock()
+            .unwrap()
             .hooks()
             .iter()
             .map(|i| ListItem::new(vec![Spans::from(Span::from(i.to_string()))]))
@@ -183,19 +185,22 @@ impl<'a> WarpApp<'a> {
 
     pub fn draw_modules<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {}
 
-    pub fn draw_extensions<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {
+    pub fn draw_filesystem<B: Backend>(&self, frame: &mut Frame<B>, area: Rect) {
         let layout = Layout::default()
-            .constraints([Constraint::Percentage(100)].as_ref())
-            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(90), Constraint::Percentage(10)].as_ref())
+            .direction(Direction::Vertical)
             .split(area);
 
-        let hooks: Vec<ListItem> = vec![""]
+        let hooks: Vec<ListItem> = self
+            .filesystem
+            .index
+            .child_list()
             .iter()
-            .map(|i| ListItem::new(vec![Spans::from(Span::from(i.to_string()))]))
+            .map(|i| ListItem::new(vec![Spans::from(Span::from(i.name().to_string()))]))
             .collect();
 
         let list = List::new(hooks)
-            .block(Block::default().borders(Borders::ALL).title("Extensions"))
+            .block(Block::default().borders(Borders::ALL).title("Filesystem"))
             .highlight_style(Style::default().add_modifier(Modifier::BOLD))
             .highlight_symbol(">> ");
 
@@ -256,6 +261,59 @@ impl<'a> WarpApp<'a> {
             .output_line(false)
             .style(Style::default().fg(Color::White).bg(Color::Black));
         frame.render_widget(tui_logger, area);
+    }
+
+    pub fn draw_extensions<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
+        let layout = Layout::default()
+            .constraints(vec![Constraint::Percentage(80), Constraint::Percentage(20)])
+            .split(area);
+        {
+            let layout = Layout::default()
+                .constraints([Constraint::Percentage(20), Constraint::Percentage(80)].as_ref())
+                .direction(Direction::Horizontal)
+                .split(layout[0]);
+
+            let ext: Vec<ListItem> = self
+                .extensions
+                .list
+                .iter()
+                .map(|i| ListItem::new(vec![Spans::from(Span::from(i.name()))]))
+                .collect();
+
+            let list = List::new(ext)
+                .block(Block::default().borders(Borders::ALL).title("Extensions"))
+                .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+                .highlight_symbol(">> ");
+
+            frame.render_stateful_widget(list, layout[0], &mut self.extensions.state);
+            let text = match self
+                .extensions
+                .state
+                .selected()
+                .and_then(|index| self.extensions.list.get(index))
+                .and_then(|info| Some((info.name(), info.description())))
+            {
+                Some((name, desc)) => {
+                    vec![
+                        Spans::from(""),
+                        Spans::from(format!("Extension name: {}", name)),
+                        Spans::from(format!("Description: {}", desc)),
+                    ]
+                }
+                None => Vec::new(),
+            };
+
+            let block = Block::default().borders(Borders::ALL).title(Span::styled(
+                "Extension Information",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: true });
+
+            frame.render_widget(paragraph, layout[1]);
+        }
+        self.draw_logs(frame, layout[1])
     }
 
     pub fn main_ui<B: Backend>(&mut self, frame: &mut Frame<B>) {}
