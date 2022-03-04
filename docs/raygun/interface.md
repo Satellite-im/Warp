@@ -1,26 +1,128 @@
 # RayGun Interface
 
-The `RayGun` interface is used to send, find, and interact with messages on the system.  
+## Overview
+
+The `RayGun` interface is used to send, find, and interact with messages on the system.  It also provides hooks to read messages from specific conversation groups. Each conversation group will be stored inside it's own dimension so that we can easily, and rapidly retrieve messages on the fly. `RayGun` will automatically check for new messages after fetching and if required it will deploy two responses over the hook. The first will contain the cached data, the second will contain any updated data. This allows us to update the UI in a optimistic fashion. 
+
+## Methods
+
+#### Retrieving Messages
+
+RayGun will retrieve messages in two steps, if enabled, the cache will be queried first. Secondly we will check to make sure the message ID we have locally matches with the latest message ID remotely. If they do not match RayGun will return a second set of messages containing the updated list. You can also pass the `smart` flag in so that instead of recieving the entire list again it will return only the updated messages which makes it easier to update in the UI. You can also provide a `date_range` to get messages between two ranges. You can also provide two IDs via the `id_range` to get all the messages between two ids. Lastly you can provide a `limit` to avoid getting too many messages. For paginated results you can also add a `skip` parameter along with the limit.
 
 
-### Convert from and to `Item` for both `File` and `Directory`
+```rust
+struct GetOptions {
+    smart: bool,
+    date_range: [i32, i32],
+    id_range: [UUID, UUID],
+    limit: i32,
+    skip: i32,
+}
 
-Both `File` and `Directory` can be converted into an `Item` due to it being the base. 
+RayGun::get<F: fn()>(conversation_id: UUID, callback: F, opts: GetOptions);
+```
 
-get messages
+#### Sending Messages
 
-send message
+RayGun, by default, does not send any messages. However, it requires an extension to be used to power storing of messages. This will always be proxied through the `RayGun::send_message` method.
 
-edit message
+```rust
+struct Message {
+    // ...
+    id: "ABC-123"
+}
 
-delete message
+RayGun::send(conversation_id: UUID, message: Message); // OK()
+```
 
-react(add/remove, unicode, message)
 
-pin
+#### Editing Messages
 
-unpin
+Editing messages also derives its functionality, much like the rest of the methods on this page, you can utilize it by simply sending the same message to the pipeline, RayGun will handle versioning automatically.
 
-reply
+```rust
+struct Message {
+    // ...
+    id: "ABC-123"
+}
 
-remove-embeds
+RayGun::send(conversation_id: UUID, message: Message); // OK()
+```
+
+
+#### Deleting Messages
+
+The extent at which messages are scrubbed from existance depends on the extensions implementation, however you only need to call delete on a message.
+
+```rust
+RayGun::delete(message: Message);
+```
+
+#### Reacting to a Message
+
+Reacting adds a unicode emoji reaction to a message, reactions from all users are compiled when getting a message and the count, as well as a list of who reacted will be provided on the message.
+
+```rust
+enum ReactionState {
+    Add,
+    Remove,
+}
+
+struct Message {
+    // ...
+    id: "ABC-123"
+}
+
+RayGun::react(state: ReactionState::Add, emoji: 🔭, message: Message);
+```
+
+#### Pinning a Message
+
+Pinning requires you to have the correct role in the conversation group to pin. By default P2P chats and group chats allow anyone to pin. However for community servers you will need the correct permission to pin the message.
+
+```rust
+enum PinState {
+    Pin,
+    Unpin,
+}
+
+struct Message {
+    // ...
+    id: "ABC-123",
+}
+
+RayGun::pin(state: PinState, message: Message);
+```
+
+#### Reply
+
+Replying to a message simply takes two message payloads. The first, `reaction` being the message that you're replying with. Second, should be the message that you're replying to.
+
+```rust
+
+struct Message {
+    // ...
+    id: "ABC-123",
+}
+
+RayGun::reply(reaction: Message, message: Message);
+```
+
+#### Remove Embeds
+
+Removing embeds simply flags messages in the UI to not auto expand embeds.
+
+```rust
+enum EmbedState {
+    Enabled,
+    Disabled,
+}
+
+struct Message {
+    // ...
+    id: "ABC-123",
+}
+
+RayGun::embeds(state: EmbedState, message: Message);
+```
