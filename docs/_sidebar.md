@@ -4,6 +4,8 @@
   - [Configuration](configuration.md)
 - **Data**
   - [Overview](data/overview.md)
+- **Hooks**
+  - [Overview](hooks/overview.md)
 - **Modules**
   - [Overview](modules/overview)
   - [Types](modules/types.md)
@@ -24,9 +26,9 @@
 - **Raygun (Messaging)**
   - [Overview](raygun/overview.md)
   - [Interface](raygun/interface.md)
-- **Hooks**
-  - [Overview](hooks/overview.md)
-- **Tesseract**
+- **Tesseract (KeyStore)**
   - [Overview](tesseract/overview.md)
+- **Quantum Entanglement (P2P)**
+  - [Overview](qep2p/Overview.md)
 - **API**
   - [Overview](api/overview.md)
