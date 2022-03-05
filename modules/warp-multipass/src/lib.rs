@@ -8,15 +8,15 @@ use warp_pocket_dimension::PocketDimension;
 use crate::identity::{Identifier, Identity, IdentityUpdate, PublicKey};
 
 pub trait MultiPass {
-    fn get_identity<I: Into<Identifier>>(&self, id: I) -> Result<DataObject>;
+    fn get_identity(&self, id: Identifier) -> Result<DataObject>;
 
     fn get_own_identity(&self) -> Result<DataObject> {
         self.get_identity(Identifier::Own)
     }
 
-    fn update_identity<I: Into<Identifier>>(
+    fn update_identity(
         &mut self,
-        id: I,
+        id: Identifier,
         option: Vec<IdentityUpdate>,
     ) -> Result<()>;
 
