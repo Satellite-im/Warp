@@ -61,7 +61,7 @@ pub trait RayGun {
     ) -> Result<Vec<Message>>;
 
     /// Sends a message to a conversation. If `message_id` is provided, it will override the selected message
-    fn send_message(
+    fn send(
         &mut self,
         conversation_id: Uuid,
         message_id: Option<Uuid>,
@@ -69,7 +69,7 @@ pub trait RayGun {
     ) -> Result<()>;
 
     /// Delete message from a conversation
-    fn delete_message(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()>;
+    fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()>;
 
     /// React to a message
     fn react(
@@ -81,12 +81,7 @@ pub trait RayGun {
     ) -> Result<()>;
 
     /// Pin a message within a conversation
-    fn pin_message(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: PinState,
-    ) -> Result<()>;
+    fn pin(&mut self, conversation_id: Uuid, message_id: Uuid, state: PinState) -> Result<()>;
 
     /// Reply to a message within a conversation
     fn reply(
