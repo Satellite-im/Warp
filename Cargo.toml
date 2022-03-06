@@ -12,5 +12,6 @@ members = [
   "utils/warp-common",
   "utils/warp-data",
   "utils/warp-module",
+  "wapi",
   "warp",
 ]
