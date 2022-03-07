@@ -12,6 +12,13 @@ repository = "https://github.com/Satellite-im/Warp"
 [dependencies]
 uuid = { version = "0.8", features = ["serde", "v4"] }
 
+clap = { version = "3.1", features = ["derive"] }
+
+tui = {version = "0.17", features = ["crossterm"], optional = true}
+tui-logger = { version = "0.7", optional = true}
+rustyline = { version = "9.1", optional = true}
+
+warp-configuration = { path = "../config/warp-configuration" }
 warp-constellation = { path = "../modules/warp-constellation" }
 warp-pocket-dimension = { path = "../modules/warp-pocket-dimension" }
 warp-multipass = { path = "../modules/warp-multipass" }
@@ -19,5 +26,13 @@ warp-raygun = { path = "../modules/warp-raygun" }
 warp-hooks = { path = "../utils/warp-hooks" }
 warp-module = { path = "../utils/warp-module" }
 warp-data = { path = "../utils/warp-data" }
-warp-common = { path = "../utils/warp-common" }
-warp-pd-stretto = { path = "../extensions/warp-pd-stretto" }
+warp-common = { path = "../utils/warp-common", features = ["async"]}
+
+axum = { version = "0.4", optional = true }
+rocket = { version = "0.5.0-rc.1", git = "https://github.com/SergioBenitez/Rocket", optional = true }
+
+
+[features]
+default = ["http_rocket"]
+http_rocket = ["rocket"]
+http_axum = ["axum"]
