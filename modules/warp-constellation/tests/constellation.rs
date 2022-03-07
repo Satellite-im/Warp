@@ -3,7 +3,7 @@ mod tests {
     use warp_common::chrono::{DateTime, Utc};
     use warp_common::serde::{Deserialize, Serialize};
     use warp_constellation::constellation::{Constellation, ConstellationVersion};
-    use warp_constellation::directory::{Directory, DirectoryType};
+    use warp_constellation::directory::{Directory};
 
     #[derive(Serialize, Deserialize, Clone, Debug)]
     #[serde(crate = "warp_common::serde")]
@@ -49,7 +49,7 @@ mod tests {
         filesystem.create_file("testPng2.png")?;
         filesystem.create_file("abc.png")?;
         filesystem.create_file("cc123.png")?;
-        filesystem.create_directory("Test Directory", DirectoryType::Default)?;
+        filesystem.create_directory("Test Directory")?;
 
         assert_eq!(filesystem.has_child("testFile.png"), true);
         assert_eq!(filesystem.has_child("testPng2.png"), true);

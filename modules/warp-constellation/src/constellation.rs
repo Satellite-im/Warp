@@ -1,5 +1,5 @@
 use crate::{
-    directory::{Directory, DirectoryType},
+    directory::Directory,
     file::File,
     item::Item,
 };
@@ -22,7 +22,7 @@ pub trait Constellation {
     }
 
     /// Creates a `Directory` in the current directory.
-    fn create_directory(&mut self, directory_name: &str, _: DirectoryType) -> Result<()> {
+    fn create_directory(&mut self, directory_name: &str) -> Result<()> {
         self.add_child(Directory::new(directory_name))
     }
 
@@ -55,27 +55,27 @@ pub trait Constellation {
     }
 
     /// Used to get an `Item` from the current directory
-    fn get_child<S: AsRef<str>>(&self, name: S) -> Result<&Item> {
+    fn get_child(&self, name: &str) -> Result<&Item> {
         self.root_directory().get_child(name)
     }
 
     /// Used to get a mutable `Item` from the current directory
-    fn get_child_mut<S: AsRef<str>>(&mut self, name: S) -> Result<&mut Item> {
+    fn get_child_mut(&mut self, name: &str) -> Result<&mut Item> {
         self.root_directory_mut().get_child_mut(name)
     }
 
     /// Checks to see if the current directory has a `Item`
-    fn has_child<S: AsRef<str>>(&self, child_name: S) -> bool {
+    fn has_child(&self, child_name: &str) -> bool {
         self.root_directory().has_child(child_name)
     }
 
     /// Used to remove child from within the current directory
-    fn remove_child<S: AsRef<str>>(&mut self, child_name: S) -> Result<Item> {
+    fn remove_child(&mut self, child_name: &str) -> Result<Item> {
         self.root_directory_mut().remove_child(child_name)
     }
 
     /// Used to rename a child within current directory.
-    fn rename_child<S: AsRef<str>>(&mut self, current_name: S, new_name: S) -> Result<()> {
+    fn rename_child(&mut self, current_name: &str, new_name: &str) -> Result<()> {
         self.root_directory_mut()
             .rename_child(current_name, new_name)
     }
@@ -86,18 +86,18 @@ pub trait Constellation {
     }
 
     /// Used to find and return the first found item within the filesystem
-    fn find_item<S: AsRef<str>>(&self, item_name: S) -> Result<&Item> {
+    fn find_item(&self, item_name: &str) -> Result<&Item> {
         self.root_directory().find_item(item_name)
     }
 
     /// Used to return a list of items across the filesystem
-    fn find_all_items<S: AsRef<str> + Clone>(&self, item_names: Vec<S>) -> Vec<&Item> {
+    fn find_all_items(&self, item_names: Vec<String>) -> Vec<&Item> {
         self.root_directory().find_all_items(item_names)
     }
 
     /// Returns a mutable directory from the filesystem
-    fn open_directory<S: AsRef<str>>(&mut self, path: S) -> Result<&mut Directory> {
-        match path.as_ref().trim().is_empty() {
+    fn open_directory(&mut self, path: &str) -> Result<&mut Directory> {
+        match path.trim().is_empty() {
             false => self
                 .root_directory_mut()
                 .get_child_mut_by_path(path)
