@@ -11,6 +11,18 @@ pub use serde;
 pub use serde_json;
 pub use uuid;
 
+#[cfg(feature = "async")]
+#[cfg(not(target_os = "wasm32"))]
+pub use tokio;
+
+#[cfg(feature = "async")]
+#[cfg(not(target_os = "wasm32"))]
+pub use tokio_util;
+
+#[cfg(feature = "async")]
+#[cfg(not(target_os = "wasm32"))]
+pub use async_trait;
+
 #[cfg(not(target_os = "wasm32"))]
 pub type Result<T> = std::result::Result<T, crate::error::Error>;
 
