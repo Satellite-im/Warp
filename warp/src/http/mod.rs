@@ -1,9 +1,8 @@
 
 use warp_common::anyhow;
 
-use rocket::{self, Rocket, Request, Build, routes, catchers, get};
-use rocket::response::{content, status};
-use rocket::http::Status;
+#[allow(unused_imports)]
+use rocket::{self, Rocket, Request, Build, routes, catchers, get, response::{content, status}, http::Status};
 
 #[get("/")]
 fn index() -> String {
