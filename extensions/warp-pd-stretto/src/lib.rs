@@ -39,12 +39,11 @@ impl StrettoClient {
 }
 
 impl PocketDimension for StrettoClient {
-    fn add_data<I: Into<Module>>(
+    fn add_data(
         &mut self,
-        dimension: I,
+        dimension: Module,
         data: &DataObject,
     ) -> std::result::Result<(), warp_common::error::Error> {
-        let dimension = dimension.into();
         let mut data = data.clone();
         if data.module != dimension {
             return Err(warp_common::error::Error::Other);
@@ -70,9 +69,9 @@ impl PocketDimension for StrettoClient {
         Ok(())
     }
 
-    fn has_data<I: Into<Module>>(
+    fn has_data(
         &mut self,
-        dimension: I,
+        dimension: Module,
         query: &QueryBuilder,
     ) -> warp_common::Result<()> {
         let data = self
@@ -82,9 +81,9 @@ impl PocketDimension for StrettoClient {
         execute(data.value(), query).map(|_| ())
     }
 
-    fn get_data<I: Into<Module>>(
+    fn get_data(
         &self,
-        dimension: I,
+        dimension: Module,
         query: Option<&QueryBuilder>,
     ) -> std::result::Result<Vec<DataObject>, warp_common::error::Error> {
         let data = self
@@ -99,27 +98,27 @@ impl PocketDimension for StrettoClient {
         }
     }
 
-    fn size<I: Into<Module>>(
+    fn size(
         &self,
-        dimension: I,
+        dimension: Module,
         query: Option<&QueryBuilder>,
     ) -> std::result::Result<i64, warp_common::error::Error> {
         self.get_data(dimension, query)
             .map(|data| data.iter().map(|i| i.size as i64).sum())
     }
 
-    fn count<I: Into<Module>>(
+    fn count(
         &self,
-        dimension: I,
+        dimension: Module,
         query: Option<&QueryBuilder>,
     ) -> std::result::Result<i64, warp_common::error::Error> {
         self.get_data(dimension, query)
             .map(|data| data.len() as i64)
     }
 
-    fn empty<I: Into<Module>>(
+    fn empty(
         &mut self,
-        _: I,
+        _: Module,
     ) -> std::result::Result<(), warp_common::error::Error> {
         // Note, since stretto doesnt clear base on key, we will clear everything when this is
         // call for now.

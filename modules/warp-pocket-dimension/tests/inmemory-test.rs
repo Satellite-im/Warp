@@ -22,9 +22,8 @@ impl MemoryCache {
 }
 
 impl PocketDimension for MemoryCache {
-    fn add_data<I: Into<Module>>(&mut self, dimension: I, data: &DataObject) -> Result<()> {
+    fn add_data(&mut self, dimension: Module, data: &DataObject) -> Result<()> {
         //TODO: Determine size of payload for `DataObject::size`
-        let dimension = dimension.into();
         let mut object = data.clone();
 
         if object.module != dimension {
@@ -50,35 +49,34 @@ impl PocketDimension for MemoryCache {
         Ok(())
     }
 
-    fn has_data<I: Into<Module>>(&mut self, dimension: I, query: &QueryBuilder) -> Result<()> {
-        let data = self.0.get(&dimension.into()).ok_or(Error::Other)?;
+    fn has_data(&mut self, dimension: Module, query: &QueryBuilder) -> Result<()> {
+        let data = self.0.get(&dimension).ok_or(Error::Other)?;
         execute(data, query).map(|_| ())
     }
 
-    fn get_data<I: Into<Module>>(
+    fn get_data(
         &self,
-        dimension: I,
+        dimension: Module,
         query: Option<&QueryBuilder>,
     ) -> Result<Vec<DataObject>> {
-        let data = self.0.get(&dimension.into()).ok_or(Error::Other)?;
+        let data = self.0.get(&dimension).ok_or(Error::Other)?;
         match query {
             Some(query) => execute(data, query),
             None => Ok(data.clone()),
         }
     }
 
-    fn size<I: Into<Module>>(&self, dimension: I, query: Option<&QueryBuilder>) -> Result<i64> {
+    fn size(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<i64> {
         self.get_data(dimension, query)
             .map(|data| data.iter().map(|i| i.size as i64).sum())
     }
 
-    fn count<I: Into<Module>>(&self, dimension: I, query: Option<&QueryBuilder>) -> Result<i64> {
+    fn count(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<i64> {
         self.get_data(dimension, query)
             .map(|data| data.len() as i64)
     }
 
-    fn empty<I: Into<Module>>(&mut self, dimension: I) -> Result<()> {
-        let dimension = dimension.into();
+    fn empty(&mut self, dimension: Module) -> Result<()> {
         self.0.remove(&dimension);
 
         if self.get_data(dimension, None).is_ok() {

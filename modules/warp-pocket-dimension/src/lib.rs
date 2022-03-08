@@ -18,24 +18,24 @@ pub enum DimensionDataType {
 /// results.
 pub trait PocketDimension {
     /// Used to add data to `PocketDimension` for `Module`
-    fn add_data<I: Into<Module>>(&mut self, dimension: I, data: &DataObject) -> Result<()>;
+    fn add_data(&mut self, dimension: Module, data: &DataObject) -> Result<()>;
 
     /// Used to check to see if data exist within `PocketDimension`
-    fn has_data<I: Into<Module>>(&mut self, dimension: I, query: &QueryBuilder) -> Result<()>;
+    fn has_data(&mut self, dimension: Module, query: &QueryBuilder) -> Result<()>;
 
     /// Used to obtain a list of `DataObject` for `Module`
-    fn get_data<I: Into<Module>>(
+    fn get_data(
         &self,
-        dimension: I,
+        dimension: Module,
         query: Option<&QueryBuilder>,
     ) -> Result<Vec<DataObject>>;
 
     /// Returns the total size within the `Module`
-    fn size<I: Into<Module>>(&self, dimension: I, query: Option<&QueryBuilder>) -> Result<i64>;
+    fn size(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<i64>;
 
     /// Returns an total amount of `DataObject` for `Module`
-    fn count<I: Into<Module>>(&self, dimension: I, query: Option<&QueryBuilder>) -> Result<i64>;
+    fn count(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<i64>;
 
     /// Will flush out the data related to `Module`.
-    fn empty<I: Into<Module>>(&mut self, dimension: I) -> Result<()>;
+    fn empty(&mut self, dimension: Module) -> Result<()>;
 }
