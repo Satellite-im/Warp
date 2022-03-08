@@ -15,7 +15,7 @@ use tui::backend::{Backend, CrosstermBackend};
 use tui::widgets::ListState;
 use tui::Terminal;
 use tui_logger::{init_logger, set_default_level};
-use warp_common::ExtensionInfo;
+use warp_common::Extension;
 use warp_constellation::constellation::ConstellationGetPut;
 use warp_hooks::hooks::Hooks;
 use warp_module::Module;
@@ -44,7 +44,7 @@ pub struct WarpApp<'a> {
 
 #[derive(Default)]
 pub struct Extensions {
-    pub list: Vec<Box<dyn ExtensionInfo>>,
+    pub list: Vec<Box<dyn Extension>>,
     pub state: ListState,
 }
 
@@ -53,7 +53,7 @@ impl Extensions {
         Self::default()
     }
 
-    pub fn register(&mut self, info: Box<dyn ExtensionInfo>) {
+    pub fn register(&mut self, info: Box<dyn Extension>) {
         self.list.push(info);
     }
 

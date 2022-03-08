@@ -6,7 +6,7 @@ use warp_module::Module;
 use stretto::Cache;
 
 use error::Error;
-use warp_common::{serde_json, ExtensionInfo};
+use warp_common::{serde_json, Extension};
 use warp_pocket_dimension::query::{Comparator, QueryBuilder};
 use warp_pocket_dimension::PocketDimension;
 
@@ -17,7 +17,7 @@ pub struct StrettoClient {
     client: Cache<Module, Vec<DataObject>>,
 }
 
-impl ExtensionInfo for StrettoClient {
+impl Extension for StrettoClient {
     fn name(&self) -> String {
         String::from("warp-pd-stretto")
     }

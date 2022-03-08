@@ -36,7 +36,9 @@ pub mod wasm {
 #[cfg(target_os = "wasm32")]
 pub use wasm::Result;
 
-pub trait ExtensionInfo {
+
+pub trait Extension {
+    fn id(&self) -> String { self.name() }
     fn name(&self) -> String;
     fn description(&self) -> String {
         format!(

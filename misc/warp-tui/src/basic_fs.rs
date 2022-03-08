@@ -5,7 +5,7 @@ use std::io::{ErrorKind, Read, Write};
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::error::Error;
 use warp_common::serde::{Deserialize, Serialize};
-use warp_common::ExtensionInfo;
+use warp_common::Extension;
 use warp_constellation::constellation::{Constellation, ConstellationGetPut, ConstellationVersion};
 use warp_constellation::directory::Directory;
 use warp_constellation::file::File;
@@ -16,7 +16,7 @@ use warp_pocket_dimension::query::QueryBuilder;
 #[derive(Debug, Default, Clone)]
 pub struct BasicSystemInternal(HashMap<String, Vec<u8>>);
 
-impl ExtensionInfo for BasicFileSystem {
+impl Extension for BasicFileSystem {
     fn name(&self) -> String {
         String::from("Basic Filesystem")
     }
