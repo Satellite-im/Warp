@@ -50,7 +50,7 @@ pub trait Constellation {
         self.root_directory_mut()
     }
     /// Add an `Item` to the current directory
-    fn add_child<I: Into<Item>>(&mut self, item: I) -> Result<()> {
+    fn add_child(&mut self, item: Item) -> Result<()> {
         self.root_directory_mut().add_child(item)
     }
 
