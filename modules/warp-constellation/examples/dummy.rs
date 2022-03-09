@@ -53,7 +53,7 @@ fn main() -> warp_common::Result<()> {
 
     directory.add_child(new_directory)?;
 
-    dummy_fs.add_child(directory)?;
+    dummy_fs.root_directory_mut().add_child(directory)?;
 
     Ok(())
 }

@@ -3,7 +3,7 @@ mod tests {
     use warp_common::chrono::{DateTime, Utc};
     use warp_common::serde::{Deserialize, Serialize};
     use warp_constellation::constellation::{Constellation, ConstellationVersion};
-    use warp_constellation::directory::{Directory};
+    use warp_constellation::{directory::{Directory}, file::File};
 
     #[derive(Serialize, Deserialize, Clone, Debug)]
     #[serde(crate = "warp_common::serde")]
@@ -45,18 +45,20 @@ mod tests {
     fn test() -> warp_common::Result<()> {
         let mut filesystem = DummyFileSystem::default();
 
-        filesystem.create_file("testFile.png")?;
-        filesystem.create_file("testPng2.png")?;
-        filesystem.create_file("abc.png")?;
-        filesystem.create_file("cc123.png")?;
-        filesystem.create_directory("Test Directory")?;
-
-        assert_eq!(filesystem.has_child("testFile.png"), true);
-        assert_eq!(filesystem.has_child("testPng2.png"), true);
-        assert_eq!(filesystem.has_child("abc.png"), true);
-        assert_eq!(filesystem.has_child("cc123.png"), true);
-
         let root = filesystem.open_directory("")?;
+
+        root.add_child(File::new("testFile.png"))?;
+        root.add_child(File::new("testPng2.png"))?;
+        root.add_child(File::new("abc.png"))?;
+        root.add_child(File::new("cc123.png"))?;
+        root.add_child(Directory::new("Test Directory"))?;
+
+        assert_eq!(root.has_child("testFile.png"), true);
+        assert_eq!(root.has_child("testPng2.png"), true);
+        assert_eq!(root.has_child("abc.png"), true);
+        assert_eq!(root.has_child("cc123.png"), true);
+
+        
 
         root.rename_child("abc.png", "test.png")?;
 

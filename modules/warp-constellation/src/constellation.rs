@@ -1,6 +1,5 @@
 use crate::{
     directory::Directory,
-    file::File,
     item::Item,
 };
 use warp_common::chrono::{DateTime, Utc};
@@ -15,16 +14,6 @@ pub trait Constellation {
 
     /// Provides the timestamp of when the file system was modified
     fn modified(&self) -> DateTime<Utc>;
-
-    /// Creates a `File` in the current directory.
-    fn create_file<S: AsRef<str>>(&mut self, file_name: S) -> Result<()> {
-        self.add_child(File::new(file_name))
-    }
-
-    /// Creates a `Directory` in the current directory.
-    fn create_directory(&mut self, directory_name: &str) -> Result<()> {
-        self.add_child(Directory::new(directory_name))
-    }
 
     /// Get root directory
     fn root_directory(&self) -> &Directory;
