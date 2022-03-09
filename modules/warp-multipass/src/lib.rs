@@ -24,7 +24,5 @@ pub trait MultiPass {
 
     fn decrypt_private_key(&self, passphrase: String) -> Result<Vec<u8>>;
 
-    fn refresh_cache(&mut self, cache: &mut impl PocketDimension) -> Result<()> {
-        cache.empty(Module::Accounts)
-    }
+    fn refresh_cache(&mut self) -> Result<()>;
 }
