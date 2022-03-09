@@ -45,6 +45,7 @@ impl PocketDimension for StrettoClient {
         data: &DataObject,
     ) -> std::result::Result<(), warp_common::error::Error> {
         let mut data = data.clone();
+        data.set_module(&dimension);
         if data.module != dimension {
             return Err(warp_common::error::Error::Other);
         }
