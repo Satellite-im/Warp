@@ -113,6 +113,10 @@ impl Data {
         Ok(())
     }
 
+    pub fn set_size(&mut self, size: u64) {
+        self.size = size;
+    }
+
     pub fn payload<T>(&self) -> Result<T>
     where
         T: DeserializeOwned,
