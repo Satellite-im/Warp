@@ -8,6 +8,8 @@ members = [
   "extensions/warp-pd-stretto",
   "extensions/warp-pd-flatfile",
   "extensions/warp-fs-memory",
+  "extensions/warp-fs-textile",
+  "extensions/warp-fs-ipfs",
   "misc/warp-tui",
   "utils/warp-hooks",
   "utils/warp-common",
