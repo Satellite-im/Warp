@@ -1,0 +1,18 @@
+[package]
+name = "warp-fs-memory"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+warp-constellation = { path = "../../modules/warp-constellation" }
+warp-pocket-dimension = { path = "../../modules/warp-pocket-dimension" }
+warp-hooks = { path = "../../utils/warp-hooks" }
+warp-module = { path = "../../utils/warp-module" }
+warp-data = { path = "../../utils/warp-data" }
+warp-common = { path = "../../utils/warp-common" }
+
+thiserror = "1.0"
+dyn-clone = "1.0"
+blake2 = "0.10"
