@@ -34,11 +34,6 @@ pub trait Item: DynClone + Debug {
 
     fn to_file_mut(&mut self) -> crate::Result<&mut File>;
 }
-
-pub trait ItemContent: Item {
-    
-}
-
 pub trait ItemMut: Item {
     fn as_mut(&mut self) -> &mut Self;
 }
