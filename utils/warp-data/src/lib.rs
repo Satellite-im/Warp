@@ -101,6 +101,10 @@ impl Data {
         })
     }
 
+    pub fn set_module(&mut self, module: &Module) {
+        self.module = module.clone();
+    }
+
     pub fn set_payload<T>(&mut self, payload: T) -> Result<()>
     where
         T: Serialize,
