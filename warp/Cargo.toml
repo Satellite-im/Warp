@@ -19,10 +19,10 @@ tui-logger = { version = "0.7", optional = true}
 rustyline = { version = "9.1", optional = true}
 
 warp-configuration = { path = "../config/warp-configuration" }
-warp-constellation = { path = "../modules/warp-constellation" }
-warp-pocket-dimension = { path = "../modules/warp-pocket-dimension" }
-warp-multipass = { path = "../modules/warp-multipass" }
-warp-raygun = { path = "../modules/warp-raygun" }
+warp-constellation = { path = "../modules/warp-constellation", optional = true}
+warp-pocket-dimension = { path = "../modules/warp-pocket-dimension", optional = true}
+warp-multipass = { path = "../modules/warp-multipass", optional = true}
+warp-raygun = { path = "../modules/warp-raygun", optional = true}
 warp-hooks = { path = "../utils/warp-hooks" }
 warp-module = { path = "../utils/warp-module" }
 warp-data = { path = "../utils/warp-data" }
@@ -33,6 +33,11 @@ rocket = { version = "0.5.0-rc.1", git = "https://github.com/SergioBenitez/Rocke
 
 
 [features]
-default = ["http_rocket"]
+default = ["http_rocket", "warp-pocket-dimension", "warp-constellation", "warp-multipass", "warp-raygun"]
 http_rocket = ["rocket"]
 http_axum = ["axum"]
+
+pocket_dimension = ["warp-pocket-dimension"]
+constellation = ["warp-constellation"]
+multipass = ["warp-multipass"]
+raygun = ["warp-raygun"]
