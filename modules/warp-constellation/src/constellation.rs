@@ -53,20 +53,21 @@ pub trait Constellation {
 }
 
 /// Interface that handles uploading and downloading
+#[warp_common::async_trait::async_trait]
 pub trait ConstellationGetPut: Constellation {
 
     /// Use to upload file to the filesystem
-    fn put<R: std::io::Read>(
+    async fn put(
         &mut self,
         name: &str,
-        reader: &mut R,
+        path: &str,
     ) -> Result<()>;
 
     /// Use to download a file from the filesystem
-    fn get<W: std::io::Write>(
+    async fn get(
         &self,
         name: &str,
-        writer: &mut W,
+        path: &str,
     ) -> Result<()>;
 
 }

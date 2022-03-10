@@ -7,7 +7,7 @@ use warp_common::error::Error;
 use warp_data::DataObject;
 use warp_pocket_dimension::PocketDimension;
 use warp_pocket_dimension::query::QueryBuilder;
-use std::io::{Read, Write, ErrorKind};
+use std::io::{ErrorKind};
 use std::sync::{Arc, Mutex};
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::serde::{Deserialize, Serialize};
@@ -54,7 +54,7 @@ impl Default for MemorySystem {
 impl MemorySystem {
     pub fn new(cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>) -> Self{
         let mut mem = MemorySystem::default();
-        mem.cache = cache;
+        // mem.cache = cache;
         mem
     }
 }
@@ -83,16 +83,18 @@ impl Constellation for MemorySystem {
     }
 }
 
+
+#[warp_common::async_trait::async_trait]
 impl ConstellationGetPut for MemorySystem {
-    fn put<R: Read>(
+    async fn put(
         &mut self,
         name: &str,
-        reader: &mut R,
+        path: &str,
     ) -> std::result::Result<(), warp_common::error::Error> {
         //TODO: Autocreate directories if there is a path used and directories are non-existent
 
         let mut internal_file = item::file::File::new(name.as_ref());
-        let bytes = internal_file.insert_stream(reader).unwrap();
+        let bytes = internal_file.insert_from_path(path).unwrap();
         self.internal.0.insert(internal_file.clone()).map_err(|_| Error::Other)?;
         let mut data = DataObject::default();
         data.set_size(bytes as u64);
@@ -110,10 +112,10 @@ impl ConstellationGetPut for MemorySystem {
         Ok(())
     }
 
-    fn get<W: Write>(
+    async fn get(
         &self,
         name: &str,
-        writer: &mut W,
+        path: &str,
     ) -> std::result::Result<(), warp_common::error::Error> {
 
         //temporarily make it mutable
@@ -136,21 +138,18 @@ impl ConstellationGetPut for MemorySystem {
                         let (in_name, buf) = obj.payload::<(String, Vec<u8>)>()?;
                         if name != in_name {
                             return Err(Error::Other);// mismatch with names
-                        } 
-                        writer.write_all(&buf)?;
-                        writer.flush()?;
+                        }
+                        std::fs::write(path, &buf)?;
                         return Ok(());
                     }
                 }
                 Err(_) => {}
             }
         }
-
-        let file = self.internal.0.get_item_from_path(name.to_string()).map_err(|_| Error::Other)?;
-
-        writer.write_all(&file.data())?;
-        writer.flush()?;
         
+        let file = self.internal.0.get_item_from_path(name.to_string()).map_err(|_| Error::Other)?;
+        
+        std::fs::write(path, file.data())?;
         Ok(())
     }
 }

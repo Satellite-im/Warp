@@ -25,6 +25,10 @@ pub use tokio_util;
 #[cfg(not(target_os = "wasm32"))]
 pub use async_trait;
 
+#[cfg(feature = "async")]
+#[cfg(not(target_os = "wasm32"))]
+pub use futures;
+
 #[cfg(not(target_os = "wasm32"))]
 pub type Result<T> = std::result::Result<T, crate::error::Error>;
 

@@ -13,7 +13,7 @@ pub enum ItemType {
     Directory,
 }
 
-pub trait Item: DynClone + Debug {
+pub trait Item: DynClone + Debug + Sync + Send {
     fn name(&self) -> String;
 
     fn r#type(&self) -> ItemType;
@@ -34,6 +34,7 @@ pub trait Item: DynClone + Debug {
 
     fn to_file_mut(&mut self) -> crate::Result<&mut File>;
 }
+
 pub trait ItemMut: Item {
     fn as_mut(&mut self) -> &mut Self;
 }

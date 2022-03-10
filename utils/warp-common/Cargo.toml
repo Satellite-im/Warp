@@ -35,4 +35,4 @@ js-sys = "0.3"
 [features]
 default = []
 bincode_opt = ["bincode"]
-async = ["tokio", "tokio-util", "async-trait"]
+async = ["tokio", "tokio-util", "async-trait", "futures"]
