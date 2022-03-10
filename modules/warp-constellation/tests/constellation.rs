@@ -2,7 +2,7 @@
 mod tests {
     use warp_common::chrono::{DateTime, Utc};
     use warp_common::serde::{Deserialize, Serialize};
-    use warp_constellation::constellation::{Constellation, ConstellationVersion};
+    use warp_constellation::constellation::{Constellation, ConstellationVersion, ConstellationImportExport, ConstellationInOutType};
     use warp_constellation::{directory::{Directory}, file::File};
 
     #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -41,6 +41,9 @@ mod tests {
         }
     }
 
+
+    impl ConstellationImportExport for DummyFileSystem {}
+
     #[test]
     fn test() -> warp_common::Result<()> {
         let mut filesystem = DummyFileSystem::default();
@@ -72,7 +75,51 @@ mod tests {
                 .is_ok(),
             true
         );
-        //TODO: Complete test
+        
+
+        Ok(())
+    }
+
+    #[test]
+    fn can_import_export() -> warp_common::Result<()> {
+        let mut filesystem = DummyFileSystem::default();
+
+        let root = filesystem.open_directory("")?;
+
+        root.add_child(File::new("testFile.png"))?;
+        root.add_child(File::new("testPng2.png"))?;
+        root.add_child(File::new("abc.png"))?;
+        root.add_child(File::new("cc123.png"))?;
+
+        assert_eq!(root.has_child("testFile.png"), true);
+        assert_eq!(root.has_child("testPng2.png"), true);
+        assert_eq!(root.has_child("abc.png"), true);
+        assert_eq!(root.has_child("cc123.png"), true);
+
+        // Json
+        {
+            let data = filesystem.export(ConstellationInOutType::Json)?;
+            let mut new_fs = DummyFileSystem::default();
+            new_fs.import(ConstellationInOutType::Json, data)?;
+            assert_eq!(filesystem.root_directory().has_child("testPng2.png"), true);
+        }
+
+        // Yaml
+        {
+            let data = filesystem.export(ConstellationInOutType::Yaml)?;
+            let mut new_fs = DummyFileSystem::default();
+            new_fs.import(ConstellationInOutType::Yaml, data)?;
+            assert_eq!(filesystem.root_directory().has_child("testFile.png"), true);
+        }
+
+        // Toml
+        {
+            let data = filesystem.export(ConstellationInOutType::Toml)?;
+            let mut new_fs = DummyFileSystem::default();
+            new_fs.import(ConstellationInOutType::Toml, data)?;
+            assert_eq!(filesystem.root_directory().has_child("abc.png"), true);
+        }
+
         Ok(())
     }
 }
