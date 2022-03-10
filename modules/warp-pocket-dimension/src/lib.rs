@@ -16,7 +16,7 @@ pub enum DimensionDataType {
 /// for caching frequently used data so that request can be made faster. This makes it easy by sorting the data per module, as well
 /// as allowing querying by specific information stored inside the payload of the `DataObject` for a quick turnaround for search
 /// results.
-pub trait PocketDimension {
+pub trait PocketDimension: Send + Sync {
     /// Used to add data to `PocketDimension` for `Module`
     fn add_data(&mut self, dimension: Module, data: &DataObject) -> Result<()>;
 

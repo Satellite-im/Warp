@@ -51,7 +51,7 @@ pub enum EmbedState {
     Disable,
 }
 
-pub trait RayGun {
+pub trait RayGun: Sync + Send {
     /// Retreive all messages from a conversation
     fn get_messages(
         &self,

@@ -5,7 +5,7 @@ use warp_data::DataObject;
 
 use crate::identity::{Identifier, Identity, IdentityUpdate, PublicKey};
 
-pub trait MultiPass {
+pub trait MultiPass: Sync +  {
     fn get_identity(&self, id: Identifier) -> Result<DataObject>;
 
     fn get_own_identity(&self) -> Result<DataObject> {
