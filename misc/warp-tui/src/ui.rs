@@ -6,8 +6,7 @@ use tui::text::{Span, Spans};
 use tui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Row, Table, Tabs, Wrap};
 use tui::Frame;
 use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget};
-use warp_constellation::item::Item;
-use warp_pocket_dimension::PocketDimension;
+use warp_constellation::{item::Item, constellation::Constellation};
 
 impl<'a> WarpApp<'a> {
     pub fn draw_ui<B: Backend>(&mut self, frame: &mut Frame<B>) {
@@ -192,7 +191,7 @@ impl<'a> WarpApp<'a> {
 
         let rows = self
             .filesystem
-            .index
+            .root_directory()
             .child_list()
             .iter()
             // .filter(|item| item.is_file())
@@ -238,7 +237,7 @@ impl<'a> WarpApp<'a> {
             .split(area);
 
         let cache = match self.cache.as_ref() {
-            Some(cache) => cache,
+            Some(cache) => cache.lock().unwrap(),
             None => return,
         };
 

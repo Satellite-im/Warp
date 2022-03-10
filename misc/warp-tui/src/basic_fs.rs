@@ -1,12 +1,14 @@
 use crate::HOOKS;
 use blake2::{Blake2b512, Digest};
+use warp_pocket_dimension::PocketDimension;
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
+use std::sync::{Arc, Mutex};
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::error::Error;
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::Extension;
-use warp_constellation::constellation::{Constellation, ConstellationGetPut, ConstellationVersion};
+use warp_constellation::constellation::{Constellation, ConstellationGetPut, ConstellationVersion, ConstellationImportExport};
 use warp_constellation::directory::Directory;
 use warp_constellation::file::File;
 use warp_data::DataObject;
@@ -26,7 +28,7 @@ impl Extension for BasicFileSystem {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(crate = "warp_common::serde")]
 pub struct BasicFileSystem {
     pub version: ConstellationVersion,
@@ -34,6 +36,8 @@ pub struct BasicFileSystem {
     pub modified: DateTime<Utc>,
     #[serde(skip)]
     pub memory: BasicSystemInternal,
+    #[serde(skip)]
+    pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>
 }
 
 impl Default for BasicFileSystem {
@@ -43,6 +47,20 @@ impl Default for BasicFileSystem {
             index: Directory::new("root"),
             modified: Utc::now(),
             memory: BasicSystemInternal::default(),
+            cache: None,
+        }
+    }
+}
+
+
+impl BasicFileSystem {
+    pub fn new(cache: Arc<Mutex<Box<dyn PocketDimension>>>) -> Self {
+        BasicFileSystem {
+            version: ConstellationVersion::from((0, 1, 2)),
+            index: Directory::new("root"),
+            modified: Utc::now(),
+            memory: BasicSystemInternal::default(),
+            cache: Some(cache)
         }
     }
 }
@@ -66,13 +84,11 @@ impl Constellation for BasicFileSystem {
 }
 
 impl ConstellationGetPut for BasicFileSystem {
-    fn put<R: Read, S: AsRef<str>, C: warp_pocket_dimension::PocketDimension>(
+    fn put<R: Read>(
         &mut self,
-        name: S,
-        cache: &mut C,
+        name: &str,
         reader: &mut R,
     ) -> std::result::Result<(), warp_common::error::Error> {
-        let name = name.as_ref();
         let mut buf = vec![];
 
         let size = reader.read_to_end(&mut buf)?;
@@ -96,18 +112,16 @@ impl ConstellationGetPut for BasicFileSystem {
         file.set_hash(hex::encode(res));
 
         self.open_directory("")?.add_child(file)?;
-        cache.add_data(Module::FileSystem, &data)?;
+        self.cache.as_ref().unwrap().lock().unwrap().add_data(Module::FileSystem, &data)?;
         HOOKS.lock().unwrap().trigger("FILESYSTEM::NEW_FILE", &data);
         Ok(())
     }
 
-    fn get<W: Write, S: AsRef<str>, C: warp_pocket_dimension::PocketDimension>(
+    fn get<W: Write>(
         &self,
-        name: S,
-        cache: &C,
+        name: &str,
         writer: &mut W,
     ) -> std::result::Result<(), warp_common::error::Error> {
-        let name = name.as_ref();
 
         //temporarily make it mutable
         if !self.root_directory().has_child(name) {
@@ -119,7 +133,7 @@ impl ConstellationGetPut for BasicFileSystem {
         let mut query = QueryBuilder::default();
         query.r#where("name", name.to_string())?;
 
-        match cache.get_data(Module::FileSystem, Some(&query)) {
+        match self.cache.as_ref().unwrap().lock().unwrap().get_data(Module::FileSystem, Some(&query)) {
             Ok(d) => {
                 //get last
                 if !d.is_empty() {
@@ -144,3 +158,5 @@ impl ConstellationGetPut for BasicFileSystem {
         Ok(())
     }
 }
+
+impl ConstellationImportExport for BasicFileSystem {}

@@ -29,3 +29,4 @@ lazy_static = "1.4"
 hex = "0.4"
 # Extensions
 warp-pd-stretto = { path = "../../extensions/warp-pd-stretto" }
+warp-fs-memory = { path = "../../extensions/warp-fs-memory" }

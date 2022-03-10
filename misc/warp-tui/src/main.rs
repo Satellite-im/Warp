@@ -16,11 +16,12 @@ use tui::widgets::ListState;
 use tui::Terminal;
 use tui_logger::{init_logger, set_default_level};
 use warp_common::Extension;
-use warp_constellation::constellation::ConstellationGetPut;
+use warp_constellation::constellation::{ConstellationGetPut, ConstellationImpl};
 use warp_hooks::hooks::Hooks;
 use warp_module::Module;
 use warp_pd_stretto::StrettoClient;
 use warp_pocket_dimension::PocketDimension;
+use warp_fs_memory::MemorySystem;
 
 //Using lazy static to handle global hooks for the time being
 lazy_static::lazy_static! {
@@ -31,8 +32,8 @@ lazy_static::lazy_static! {
 pub struct WarpApp<'a> {
     pub title: &'a str,
     //TODO: Implement cacher through a trait object
-    pub cache: Option<StrettoClient>,
-    pub filesystem: BasicFileSystem,
+    pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    pub filesystem: MemorySystem, //TODO: Make `ConstellationGetPut` object safe
     pub modules: Modules,
     pub extensions: Extensions,
     pub hooks_trigger: Arc<Mutex<Vec<String>>>,
@@ -262,11 +263,15 @@ impl<'a> WarpApp<'a> {
         let cache = StrettoClient::new()?;
 
         ext.register(Box::new(cache.clone()));
+
+        let cache: Arc<Mutex<Box<dyn PocketDimension>>> = Arc::new(Mutex::new(Box::new(cache)));
+        
         app.modules = Modules::new();
-        app.cache = Some(cache);
+        
         app.config.list = app.modules.modules.clone();
 
-        let fs = BasicFileSystem::default();
+        let fs = MemorySystem::new(Some(cache.clone()));
+        app.cache = Some(cache);
 
         ext.register(Box::new(fs.clone()));
 
@@ -321,6 +326,7 @@ impl<'a> WarpApp<'a> {
                                     info!(target:"Warp", "Clearing cache...");
                                     match self.cache.as_mut() {
                                         Some(cache) => {
+                                            let mut cache = cache.lock().unwrap();
                                             for (module, active) in self.modules.modules.iter() {
                                                 if *active {
                                                     info!(target:"Warp", "{} items cached for {}", cache.count(module.clone(), None).unwrap_or_default(), module.to_string().to_lowercase());
@@ -420,11 +426,11 @@ impl<'a> WarpApp<'a> {
             "basic_fs.rs".to_string(),
             std::io::Cursor::new(include_bytes!("basic_fs.rs").to_vec()),
         );
-        let cache = self.cache.as_mut().unwrap();
+        // let cache = self.cache.as_mut().unwrap();
 
         match self
             .filesystem
-            .put(cargo_file.0.clone(), cache, &mut cargo_file.1)
+            .put(cargo_file.0.as_str(), &mut cargo_file.1)
         {
             Ok(()) => {}
             Err(e) => {
@@ -434,7 +440,7 @@ impl<'a> WarpApp<'a> {
 
         match self
             .filesystem
-            .put(main_file.0.clone(), cache, &mut main_file.1)
+            .put(main_file.0.as_str(), &mut main_file.1)
         {
             Ok(()) => {}
             Err(e) => {
@@ -444,7 +450,7 @@ impl<'a> WarpApp<'a> {
 
         match self
             .filesystem
-            .put(ui_file.0.clone(), cache, &mut ui_file.1)
+            .put(ui_file.0.as_str(), &mut ui_file.1)
         {
             Ok(()) => {}
             Err(e) => {
@@ -454,7 +460,7 @@ impl<'a> WarpApp<'a> {
 
         match self
             .filesystem
-            .put(basic_file.0.clone(), cache, &mut basic_file.1)
+            .put(basic_file.0.as_str(),&mut basic_file.1)
         {
             Ok(()) => {}
             Err(e) => {
