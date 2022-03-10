@@ -8,7 +8,8 @@ use warp_common::serde::{Deserialize, Serialize};
 use warp_common::Result;
 
 /// Interface that would provide functionality around the filesystem.
-pub trait Constellation {
+#[warp_common::async_trait::async_trait]
+pub trait Constellation: Sync + Send {
     /// Returns the version for `Constellation`
     fn version(&self) -> &ConstellationVersion;
 
@@ -50,59 +51,42 @@ pub trait Constellation {
         }
     }
 
-}
-
-/// Interface that handles uploading and downloading
-#[warp_common::async_trait::async_trait]
-pub trait ConstellationGetPut: Constellation {
-
     /// Use to upload file to the filesystem
     async fn put(
         &mut self,
-        name: &str,
-        path: &str,
-    ) -> Result<()>;
+        _: &str,
+        _: &str,
+    ) -> Result<()> {
+        Err(Error::Unimplemented)
+    }
 
     /// Use to download a file from the filesystem
     async fn get(
         &self,
-        name: &str,
-        path: &str,
-    ) -> Result<()>;
+        _: &str,
+        _: &str,
+    ) -> Result<()> {
+        Err(Error::Unimplemented)
+    }
 
-}
-
-#[warp_common::async_trait::async_trait]
-pub trait ConstellationIoBuffer: Constellation {
-
-    /// Use to upload file to the filesystem
+    /// Use to upload file to the filesystem with data from buffer
     async fn from_buffer(
         &mut self,
-        name: &str,
-        buf: &Vec<u8>,
-    ) -> Result<()>;
+        _: &str,
+        _: &Vec<u8>,
+    ) -> Result<()> {
+        Err(Error::Unimplemented)
+    }
 
-    /// Use to download a file from the filesystem
+    /// Use to download data from the filesystem into a buffer
     async fn to_buffer(
         &self,
-        name: &str,
-        buf: &mut Vec<u8>,
-    ) -> Result<()>;
+        _: &str,
+        _: &mut Vec<u8>,
+    ) -> Result<()> {
+        Err(Error::Unimplemented)
+    }
 
-}
-
-/// Types that would be used for import and export
-/// Currently only support `Json`, `Yaml`, and `Toml`. 
-/// Implementation can override these functions for their own
-/// types to be use for import and export.
-pub enum ConstellationInOutType {
-    Json,
-    Yaml,
-    Toml
-}
-
-/// Interface that handles the conversion from and to `ConstellationInOutType`
-pub trait ConstellationImportExport: Constellation {
 
     fn export(&self, r#type: ConstellationInOutType) -> Result<String>{
         match r#type {
@@ -123,9 +107,19 @@ pub trait ConstellationImportExport: Constellation {
 
         Ok(())
     }
+
 }
 
-pub trait ConstellationImpl: Constellation + ConstellationImportExport + ConstellationGetPut + ConstellationIoBuffer {}
+/// Types that would be used for import and export
+/// Currently only support `Json`, `Yaml`, and `Toml`. 
+/// Implementation can override these functions for their own
+/// types to be use for import and export.
+pub enum ConstellationInOutType {
+    Json,
+    Yaml,
+    Toml
+}
+
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 #[serde(crate = "warp_common::serde")]
