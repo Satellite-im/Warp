@@ -39,73 +39,22 @@ pub trait Constellation {
         self.root_directory_mut()
     }
 
-    /// Add an `Item` to the current directory
-    fn add_child(&mut self, item: Item) -> Result<()> {
-        self.root_directory_mut().add_child(item)
-    }
-
-    /// Used to get an `Item` from the current directory
-    fn get_child(&self, name: &str) -> Result<&Item> {
-        self.root_directory().get_child(name)
-    }
-
-    /// Used to get a mutable `Item` from the current directory
-    fn get_child_mut(&mut self, name: &str) -> Result<&mut Item> {
-        self.root_directory_mut().get_child_mut(name)
-    }
-
-    /// Checks to see if the current directory has a `Item`
-    fn has_child(&self, child_name: &str) -> bool {
-        self.root_directory().has_child(child_name)
-    }
-
-    /// Used to remove child from within the current directory
-    fn remove_child(&mut self, child_name: &str) -> Result<Item> {
-        self.root_directory_mut().remove_child(child_name)
-    }
-
-    /// Used to rename a child within current directory.
-    fn rename_child(&mut self, current_name: &str, new_name: &str) -> Result<()> {
-        self.root_directory_mut()
-            .rename_child(current_name, new_name)
-    }
-
-    /// Used to move a child from its current directory to another.
-    fn move_item_to(&mut self, child: &str, dst: &str) -> Result<()> {
-        self.root_directory_mut().move_item_to(child, dst)
-    }
-
-    /// Used to find and return the first found item within the filesystem
-    fn find_item(&self, item_name: &str) -> Result<&Item> {
-        self.root_directory().find_item(item_name)
-    }
-
-    /// Used to return a list of items across the filesystem
-    fn find_all_items(&self, item_names: Vec<String>) -> Vec<&Item> {
-        self.root_directory().find_all_items(item_names)
-    }
-
     /// Returns a mutable directory from the filesystem
     fn open_directory(&mut self, path: &str) -> Result<&mut Directory> {
         match path.trim().is_empty() {
+            true => Ok(self.root_directory_mut()),
             false => self
                 .root_directory_mut()
                 .get_child_mut_by_path(path)
-                .and_then(Item::get_directory_mut),
-            true => Ok(self.root_directory_mut()),
+                .and_then(Item::get_directory_mut)
         }
     }
 
-    fn go_back(&self) -> Option<Directory> {
-        unimplemented!()
-    }
-
-    fn go_back_to_directory(&mut self, _: &str) -> Option<Directory> {
-        unimplemented!()
-    }
 }
 
+/// Interface that handles uploading and downloading
 pub trait ConstellationGetPut: Constellation {
+
     /// Use to upload file to the filesystem
     fn put<R: std::io::Read>(
         &mut self,
@@ -119,15 +68,22 @@ pub trait ConstellationGetPut: Constellation {
         name: &str,
         writer: &mut W,
     ) -> Result<()>;
+
 }
 
+/// Types that would be used for import and export
+/// Currently only support `Json`, `Yaml`, and `Toml`. 
+/// Implementation can override these functions for their own
+/// types to be use for import and export.
 pub enum ConstellationInOutType {
     Json,
     Yaml,
     Toml
 }
 
+/// Interface that handles the conversion from and to `ConstellationInOutType`
 pub trait ConstellationImportExport: Constellation {
+
     fn export(&self, r#type: ConstellationInOutType) -> Result<String>{
         match r#type {
             ConstellationInOutType::Json => warp_common::serde_json::to_string(self.root_directory()).map_err(Error::from),
@@ -138,7 +94,7 @@ pub trait ConstellationImportExport: Constellation {
 
     fn import(&mut self, r#type: ConstellationInOutType, data: String) -> Result<()> {
         let directory: Directory = match r#type {
-            ConstellationInOutType::Json => warp_common::serde_json::from_str(&data.as_str())?,
+            ConstellationInOutType::Json => warp_common::serde_json::from_str(data.as_str())?,
             ConstellationInOutType::Yaml => warp_common::serde_yaml::from_str(data.as_str())?,
             ConstellationInOutType::Toml => warp_common::toml::from_str(data.as_str())?
         };
