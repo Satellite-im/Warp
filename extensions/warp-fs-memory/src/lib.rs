@@ -11,8 +11,8 @@ use std::io::{ErrorKind};
 use std::sync::{Arc, Mutex};
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::serde::{Deserialize, Serialize};
-use warp_common::tokio;
-use warp_constellation::constellation::{Constellation, ConstellationGetPut, ConstellationVersion, ConstellationImportExport, ConstellationIoBuffer};
+
+use warp_constellation::constellation::{Constellation, ConstellationVersion};
 use warp_constellation::directory::Directory;
 use warp_module::Module;
 
@@ -66,6 +66,8 @@ impl MemorySystemInternal {
     }
 }
 
+#[warp_common::async_trait::async_trait]
+
 impl Constellation for MemorySystem {
     fn version(&self) -> &ConstellationVersion {
         &self.version
@@ -82,32 +84,8 @@ impl Constellation for MemorySystem {
     fn root_directory_mut(&mut self) -> &mut Directory {
         &mut self.index
     }
-}
 
-//TODO: Implement an error about not being implemented
-#[warp_common::async_trait::async_trait]
-impl ConstellationGetPut for MemorySystem {
-    async fn put(
-        &mut self,
-        _: &str,
-        _: &str,
-    ) -> std::result::Result<(), warp_common::error::Error> {
-        Ok(())
-    }
-
-    async fn get(
-        &self,
-        _: &str,
-        _: &str,
-    ) -> std::result::Result<(), warp_common::error::Error> {
-        Ok(())
-    }
-}
-
-#[warp_common::async_trait::async_trait]
-impl ConstellationIoBuffer for MemorySystem {
-        /// Use to upload file to the filesystem
-    async fn from_buffer(
+      async fn from_buffer(
         &mut self,
         name: &str,
         buf: &Vec<u8>,
@@ -172,8 +150,6 @@ impl ConstellationIoBuffer for MemorySystem {
     }
 }
 
-
-impl ConstellationImportExport for MemorySystem {}
 
 impl Extension for MemorySystem {
     fn name(&self) -> String {

@@ -6,7 +6,7 @@ use tui::text::{Span, Spans};
 use tui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Row, Table, Tabs, Wrap};
 use tui::Frame;
 use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget};
-use warp_constellation::{item::Item, constellation::Constellation};
+use warp_constellation::item::Item;
 
 impl<'a> WarpApp<'a> {
     pub fn draw_ui<B: Backend>(&mut self, frame: &mut Frame<B>) {
@@ -191,6 +191,8 @@ impl<'a> WarpApp<'a> {
 
         let rows = self
             .filesystem
+            .as_ref()
+            .unwrap()
             .root_directory()
             .child_list()
             .iter()

@@ -1,11 +1,9 @@
-pub mod basic_fs;
 pub mod ui;
 
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
-use crossterm::execute;
-use crossterm::terminal::{
+use crossterm::{terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
+}, execute};
 use log::{error, info, warn, LevelFilter};
 use std::io;
 use std::sync::{Arc, Mutex};
@@ -15,7 +13,7 @@ use tui::widgets::ListState;
 use tui::Terminal;
 use tui_logger::{init_logger, set_default_level};
 use warp_common::Extension;
-use warp_constellation::constellation::{ConstellationGetPut, ConstellationImpl, ConstellationIoBuffer};
+use warp_constellation::constellation::Constellation;
 use warp_hooks::hooks::Hooks;
 use warp_module::Module;
 use warp_pd_stretto::StrettoClient;
@@ -32,7 +30,7 @@ pub struct WarpApp<'a> {
     pub title: &'a str,
     //TODO: Implement cacher through a trait object
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-    pub filesystem: MemorySystem, //TODO: Make `ConstellationGetPut` object safe
+    pub filesystem: Option<Box<dyn Constellation>>, //TODO: Make `ConstellationGetPut` object safe
     pub modules: Modules,
     pub extensions: Extensions,
     pub hooks_trigger: Arc<Mutex<Vec<String>>>,
@@ -274,7 +272,7 @@ impl<'a> WarpApp<'a> {
 
         ext.register(Box::new(fs.clone()));
 
-        app.filesystem = fs;
+        app.filesystem = Some(Box::new(fs));
 
         app.extensions = ext;
         Ok(app)
@@ -418,11 +416,10 @@ impl<'a> WarpApp<'a> {
         let ui_file = (
             "ui.rs".to_string(), include_bytes!("ui.rs").to_vec(),
         );
-        let basic_file = (
-            "basic_fs.rs".to_string(), include_bytes!("basic_fs.rs").to_vec()); 
 
         match self
-            .filesystem
+            .filesystem.as_mut()
+            .unwrap()
             .from_buffer(cargo_file.0.as_str(), &cargo_file.1).await
         {
             Ok(()) => {}
@@ -432,7 +429,7 @@ impl<'a> WarpApp<'a> {
         };
 
         match self
-            .filesystem
+            .filesystem.as_mut().unwrap()
             .from_buffer(main_file.0.as_str(), &main_file.1).await
         {
             Ok(()) => {}
@@ -442,7 +439,7 @@ impl<'a> WarpApp<'a> {
         };
 
         match self
-            .filesystem
+            .filesystem.as_mut().unwrap()
             .from_buffer(ui_file.0.as_str(), &ui_file.1).await
         {
             Ok(()) => {}
@@ -451,15 +448,6 @@ impl<'a> WarpApp<'a> {
             }
         };
 
-        match self
-            .filesystem
-            .from_buffer(basic_file.0.as_str(),&basic_file.1).await
-        {
-            Ok(()) => {}
-            Err(e) => {
-                error!(target:"Error", "Error has occurred while uploading {}: {}", basic_file.0, e)
-            }
-        };
     }
 }
 

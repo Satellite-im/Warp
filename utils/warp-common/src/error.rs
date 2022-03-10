@@ -55,6 +55,8 @@ pub enum Error {
     Any(#[from] anyhow::Error),
     #[error("{0}")]
     IoError(#[from] std::io::Error),
+    #[error("Functionality is not yet implemented")]
+    Unimplemented,
     #[error("An unknown error has occurred")]
     Other,
 }
