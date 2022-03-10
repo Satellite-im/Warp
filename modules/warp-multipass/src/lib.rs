@@ -2,8 +2,6 @@ pub mod identity;
 
 use warp_common::Result;
 use warp_data::DataObject;
-use warp_module::Module;
-use warp_pocket_dimension::PocketDimension;
 
 use crate::identity::{Identifier, Identity, IdentityUpdate, PublicKey};
 
