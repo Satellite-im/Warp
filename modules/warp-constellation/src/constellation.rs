@@ -3,9 +3,9 @@ use crate::{
     item::Item,
 };
 use warp_common::chrono::{DateTime, Utc};
+use warp_common::error::Error;
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::Result;
-use warp_pocket_dimension::PocketDimension;
 
 /// Interface that would provide functionality around the filesystem.
 pub trait Constellation {
@@ -38,6 +38,7 @@ pub trait Constellation {
     fn get_index_mut(&mut self) -> &mut Directory {
         self.root_directory_mut()
     }
+
     /// Add an `Item` to the current directory
     fn add_child(&mut self, item: Item) -> Result<()> {
         self.root_directory_mut().add_child(item)
@@ -106,33 +107,49 @@ pub trait Constellation {
 
 pub trait ConstellationGetPut: Constellation {
     /// Use to upload file to the filesystem
-    fn put<R: std::io::Read, S: AsRef<str>, C: PocketDimension>(
+    fn put<R: std::io::Read>(
         &mut self,
-        name: S,
-        cache: &mut C,
+        name: &str,
         reader: &mut R,
     ) -> Result<()>;
 
     /// Use to download a file from the filesystem
-    fn get<W: std::io::Write, S: AsRef<str>, C: PocketDimension>(
+    fn get<W: std::io::Write>(
         &self,
-        name: S,
-        cache: &C,
+        name: &str,
         writer: &mut W,
     ) -> Result<()>;
+}
+
+pub enum ConstellationInOutType {
+    Json,
+    Yaml,
+    Toml
 }
 
 pub trait ConstellationImportExport: Constellation {
-    fn export<I: Into<Item>, W: std::io::Write, C: PocketDimension>(
-        &self,
-        item: I,
-        writer: &mut W,
-    ) -> Result<()>;
+    fn export(&self, r#type: ConstellationInOutType) -> Result<String>{
+        match r#type {
+            ConstellationInOutType::Json => warp_common::serde_json::to_string(self.root_directory()).map_err(Error::from),
+            ConstellationInOutType::Yaml => warp_common::serde_yaml::to_string(self.root_directory()).map_err(Error::from),
+            ConstellationInOutType::Toml => warp_common::toml::to_string(self.root_directory()).map_err(Error::from)
+        }
+    }
 
-    fn export_all<W: std::io::Write>(&self, writer: &mut W) -> Result<()>;
+    fn import(&mut self, r#type: ConstellationInOutType, data: String) -> Result<()> {
+        let directory: Directory = match r#type {
+            ConstellationInOutType::Json => warp_common::serde_json::from_str(&data.as_str())?,
+            ConstellationInOutType::Yaml => warp_common::serde_yaml::from_str(data.as_str())?,
+            ConstellationInOutType::Toml => warp_common::toml::from_str(data.as_str())?
+        };
+        //TODO: create a function to override directory children.
+        self.open_directory("")?.children = directory.children;
 
-    fn import<R: std::io::Read>(&mut self, reader: R) -> Result<()>;
+        Ok(())
+    }
 }
+
+pub trait ConstellationImpl: Constellation + ConstellationImportExport + ConstellationGetPut {}
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 #[serde(crate = "warp_common::serde")]
