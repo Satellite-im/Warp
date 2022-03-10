@@ -113,7 +113,6 @@ impl File {
             Ok(()) => {}
             Err(e) => {
                 self.data.clear();
-                size = 0;
                 return Err(e);
             }
         };
