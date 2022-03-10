@@ -33,11 +33,11 @@ rocket = { version = "0.5.0-rc.1", git = "https://github.com/SergioBenitez/Rocke
 
 
 [features]
-default = ["http_rocket", "warp-pocket-dimension", "warp-constellation", "warp-multipass", "warp-raygun"]
+default = ["http_rocket", "pocket-dimension", "constellation", "multipass", "raygun"]
 http_rocket = ["rocket"]
 http_axum = ["axum"]
 
-pocket_dimension = ["warp-pocket-dimension"]
+pocket-dimension = ["warp-pocket-dimension"]
 constellation = ["warp-constellation"]
 multipass = ["warp-multipass"]
 raygun = ["warp-raygun"]
