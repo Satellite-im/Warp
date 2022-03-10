@@ -1,7 +1,6 @@
 pub mod basic_fs;
 pub mod ui;
 
-use crate::basic_fs::BasicFileSystem;
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -16,7 +15,7 @@ use tui::widgets::ListState;
 use tui::Terminal;
 use tui_logger::{init_logger, set_default_level};
 use warp_common::Extension;
-use warp_constellation::constellation::{ConstellationGetPut, ConstellationImpl};
+use warp_constellation::constellation::{ConstellationGetPut, ConstellationImpl, ConstellationIoBuffer};
 use warp_hooks::hooks::Hooks;
 use warp_module::Module;
 use warp_pd_stretto::StrettoClient;
@@ -304,7 +303,7 @@ impl<'a> WarpApp<'a> {
     pub fn right(&mut self) {
         self.tabs.next()
     }
-    pub fn select(&mut self) {
+    pub async fn select(&mut self) {
         match self.tabs.index {
             0 => match self.tools.state.selected() {
                 Some(selected) => {
@@ -315,7 +314,7 @@ impl<'a> WarpApp<'a> {
                                 if self.modules.modules.contains(&(Module::Cache, true))
                                     && self.modules.modules.contains(&(Module::FileSystem, true))
                                 {
-                                    self.load_mock_data();
+                                    self.load_mock_data().await;
                                     info!(target:"Warp", "Loading Complete");
                                 } else {
                                     error!(target:"Error", "You are required to have both the filesystem and cache modules enabled");
@@ -409,28 +408,22 @@ impl<'a> WarpApp<'a> {
     }
 
     //TODO: have it return a `Result` instead and load additional data
-    pub fn load_mock_data(&mut self) {
-        let mut cargo_file = (
-            "Cargo.toml".to_string(),
-            std::io::Cursor::new(include_bytes!("../Cargo.toml").to_vec()),
+    pub async fn load_mock_data(&mut self) {
+        let cargo_file = (
+            "Cargo.toml".to_string(), include_bytes!("../Cargo.toml").to_vec(),
         );
-        let mut main_file = (
-            "main.rs".to_string(),
-            std::io::Cursor::new(include_bytes!("main.rs").to_vec()),
+        let main_file = (
+            "main.rs".to_string(), include_bytes!("main.rs").to_vec(),
         );
-        let mut ui_file = (
-            "ui.rs".to_string(),
-            std::io::Cursor::new(include_bytes!("ui.rs").to_vec()),
+        let ui_file = (
+            "ui.rs".to_string(), include_bytes!("ui.rs").to_vec(),
         );
-        let mut basic_file = (
-            "basic_fs.rs".to_string(),
-            std::io::Cursor::new(include_bytes!("basic_fs.rs").to_vec()),
-        );
-        // let cache = self.cache.as_mut().unwrap();
+        let basic_file = (
+            "basic_fs.rs".to_string(), include_bytes!("basic_fs.rs").to_vec()); 
 
         match self
             .filesystem
-            .put(cargo_file.0.as_str(), &mut cargo_file.1)
+            .from_buffer(cargo_file.0.as_str(), &cargo_file.1).await
         {
             Ok(()) => {}
             Err(e) => {
@@ -440,7 +433,7 @@ impl<'a> WarpApp<'a> {
 
         match self
             .filesystem
-            .put(main_file.0.as_str(), &mut main_file.1)
+            .from_buffer(main_file.0.as_str(), &main_file.1).await
         {
             Ok(()) => {}
             Err(e) => {
@@ -450,7 +443,7 @@ impl<'a> WarpApp<'a> {
 
         match self
             .filesystem
-            .put(ui_file.0.as_str(), &mut ui_file.1)
+            .from_buffer(ui_file.0.as_str(), &ui_file.1).await
         {
             Ok(()) => {}
             Err(e) => {
@@ -460,7 +453,7 @@ impl<'a> WarpApp<'a> {
 
         match self
             .filesystem
-            .put(basic_file.0.as_str(),&mut basic_file.1)
+            .from_buffer(basic_file.0.as_str(),&basic_file.1).await
         {
             Ok(()) => {}
             Err(e) => {
@@ -519,7 +512,7 @@ async fn run_loop<'a, B: Backend>(
                     KeyCode::Up => app.up(),
                     KeyCode::Right => app.right(),
                     KeyCode::Down => app.down(),
-                    KeyCode::Enter => app.select(),
+                    KeyCode::Enter => app.select().await,
                     KeyCode::Esc => return Ok(()),
                     _ => {}
                 }

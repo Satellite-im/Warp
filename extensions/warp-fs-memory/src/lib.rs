@@ -11,7 +11,8 @@ use std::io::{ErrorKind};
 use std::sync::{Arc, Mutex};
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::serde::{Deserialize, Serialize};
-use warp_constellation::constellation::{Constellation, ConstellationGetPut, ConstellationVersion, ConstellationImportExport};
+use warp_common::tokio;
+use warp_constellation::constellation::{Constellation, ConstellationGetPut, ConstellationVersion, ConstellationImportExport, ConstellationIoBuffer};
 use warp_constellation::directory::Directory;
 use warp_module::Module;
 
@@ -54,7 +55,7 @@ impl Default for MemorySystem {
 impl MemorySystem {
     pub fn new(cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>) -> Self{
         let mut mem = MemorySystem::default();
-        // mem.cache = cache;
+        mem.cache = cache;
         mem
     }
 }
@@ -83,18 +84,36 @@ impl Constellation for MemorySystem {
     }
 }
 
-
+//TODO: Implement an error about not being implemented
 #[warp_common::async_trait::async_trait]
 impl ConstellationGetPut for MemorySystem {
     async fn put(
         &mut self,
-        name: &str,
-        path: &str,
+        _: &str,
+        _: &str,
     ) -> std::result::Result<(), warp_common::error::Error> {
-        //TODO: Autocreate directories if there is a path used and directories are non-existent
+        Ok(())
+    }
 
+    async fn get(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> std::result::Result<(), warp_common::error::Error> {
+        Ok(())
+    }
+}
+
+#[warp_common::async_trait::async_trait]
+impl ConstellationIoBuffer for MemorySystem {
+        /// Use to upload file to the filesystem
+    async fn from_buffer(
+        &mut self,
+        name: &str,
+        buf: &Vec<u8>,
+    ) -> std::result::Result<(), warp_common::error::Error> {
         let mut internal_file = item::file::File::new(name.as_ref());
-        let bytes = internal_file.insert_from_path(path).unwrap();
+        let bytes = internal_file.insert_buffer(buf.clone()).unwrap();
         self.internal.0.insert(internal_file.clone()).map_err(|_| Error::Other)?;
         let mut data = DataObject::default();
         data.set_size(bytes as u64);
@@ -112,13 +131,12 @@ impl ConstellationGetPut for MemorySystem {
         Ok(())
     }
 
-    async fn get(
+    /// Use to download a file from the filesystem
+    async fn to_buffer(
         &self,
         name: &str,
-        path: &str,
+        buf: &mut Vec<u8>,
     ) -> std::result::Result<(), warp_common::error::Error> {
-
-        //temporarily make it mutable
         if !self.root_directory().has_child(name) {
             return Err(warp_common::error::Error::IoError(std::io::Error::from(
                 ErrorKind::InvalidData,
@@ -135,11 +153,11 @@ impl ConstellationGetPut for MemorySystem {
                     if !d.is_empty() {
                         let mut list = d.clone();
                         let obj = list.pop().unwrap();
-                        let (in_name, buf) = obj.payload::<(String, Vec<u8>)>()?;
+                        let (in_name, in_buf) = obj.payload::<(String, Vec<u8>)>()?;
                         if name != in_name {
                             return Err(Error::Other);// mismatch with names
                         }
-                        std::fs::write(path, &buf)?;
+                        *buf = in_buf;
                         return Ok(());
                     }
                 }
@@ -149,10 +167,11 @@ impl ConstellationGetPut for MemorySystem {
         
         let file = self.internal.0.get_item_from_path(name.to_string()).map_err(|_| Error::Other)?;
         
-        std::fs::write(path, file.data())?;
+        *buf = file.data();
         Ok(())
     }
 }
+
 
 impl ConstellationImportExport for MemorySystem {}
 
