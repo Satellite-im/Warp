@@ -2,6 +2,7 @@ pub mod error;
 pub mod item;
 
 use item::Item;
+use warp_common::Extension;
 use warp_common::error::Error;
 use warp_data::DataObject;
 use warp_pocket_dimension::PocketDimension;
@@ -16,7 +17,7 @@ use warp_module::Module;
 
 pub type Result<T> = std::result::Result<T, error::Error>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MemorySystemInternal(item::directory::Directory);
 
 
@@ -25,7 +26,7 @@ impl Default for MemorySystemInternal {
         MemorySystemInternal(item::directory::Directory::new("root"))
     }
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(crate = "warp_common::serde")]
 pub struct MemorySystem {
     version: ConstellationVersion,
@@ -155,3 +156,13 @@ impl ConstellationGetPut for MemorySystem {
 }
 
 impl ConstellationImportExport for MemorySystem {}
+
+impl Extension for MemorySystem {
+    fn name(&self) -> String {
+        String::from("Basic In-Memory FileSystem")
+    }
+
+    fn description(&self) -> String {
+        String::from("Basic In-Memory Filesystem extension")
+    }
+}
