@@ -9,6 +9,8 @@ pub use chrono;
 pub use regex;
 pub use serde;
 pub use serde_json;
+pub use toml;
+pub use serde_yaml;
 pub use uuid;
 
 #[cfg(feature = "async")]

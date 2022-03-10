@@ -44,6 +44,12 @@ pub enum Error {
     #[error("{0}")]
     SerdeJsonError(#[from] serde_json::Error),
     #[error("{0}")]
+    SerdeYamlError(#[from] serde_yaml::Error),
+    #[error("Cannot deserialize: {0}")]
+    TomlDeserializeError(#[from] toml::de::Error),
+    #[error("Cannot serialize: {0}")]
+    TomlSerializeError(#[from] toml::ser::Error),
+    #[error("{0}")]
     RegexError(#[from] regex::Error),
     #[error(transparent)]
     Any(#[from] anyhow::Error),
