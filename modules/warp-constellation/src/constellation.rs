@@ -72,6 +72,25 @@ pub trait ConstellationGetPut: Constellation {
 
 }
 
+#[warp_common::async_trait::async_trait]
+pub trait ConstellationIoBuffer: Constellation {
+
+    /// Use to upload file to the filesystem
+    async fn from_buffer(
+        &mut self,
+        name: &str,
+        buf: &Vec<u8>,
+    ) -> Result<()>;
+
+    /// Use to download a file from the filesystem
+    async fn to_buffer(
+        &self,
+        name: &str,
+        buf: &mut Vec<u8>,
+    ) -> Result<()>;
+
+}
+
 /// Types that would be used for import and export
 /// Currently only support `Json`, `Yaml`, and `Toml`. 
 /// Implementation can override these functions for their own
@@ -106,7 +125,7 @@ pub trait ConstellationImportExport: Constellation {
     }
 }
 
-pub trait ConstellationImpl: Constellation + ConstellationImportExport + ConstellationGetPut {}
+pub trait ConstellationImpl: Constellation + ConstellationImportExport + ConstellationGetPut + ConstellationIoBuffer {}
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 #[serde(crate = "warp_common::serde")]
