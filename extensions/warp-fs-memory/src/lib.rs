@@ -85,7 +85,7 @@ impl Constellation for MemorySystem {
         &mut self.index
     }
 
-      async fn from_buffer(
+    async fn from_buffer(
         &mut self,
         name: &str,
         buf: &Vec<u8>,

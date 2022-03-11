@@ -6,3 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+rust-s3 = {version = "0.30.0" }
+
+warp-constellation = { path = "../../modules/warp-constellation" }
+warp-pocket-dimension = { path = "../../modules/warp-pocket-dimension" }
+warp-module = { path = "../../utils/warp-module" }
+warp-data = { path = "../../utils/warp-data" }
+warp-common = { path = "../../utils/warp-common", features = ["async"]}
