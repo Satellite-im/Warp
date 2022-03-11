@@ -19,17 +19,27 @@ tui-logger = { version = "0.7", optional = true}
 rustyline = { version = "9.1", optional = true}
 
 warp-configuration = { path = "../config/warp-configuration" }
+
+#modules 
 warp-constellation = { path = "../modules/warp-constellation", optional = true}
 warp-pocket-dimension = { path = "../modules/warp-pocket-dimension", optional = true}
 warp-multipass = { path = "../modules/warp-multipass", optional = true}
 warp-raygun = { path = "../modules/warp-raygun", optional = true}
+
+#utils
 warp-hooks = { path = "../utils/warp-hooks" }
 warp-module = { path = "../utils/warp-module" }
 warp-data = { path = "../utils/warp-data" }
 warp-common = { path = "../utils/warp-common", features = ["async"]}
 
+#extensions
+warp-fs-memory = { path = "../extensions/warp-fs-memory", optional = true }
+warp-fs-storj = { path = "../extensions/warp-fs-storj", optional = true }
+warp-pd-stretto = { path = "../extensions/warp-pd-stretto", optional = true }
+
+#servers
 axum = { version = "0.4", optional = true }
-rocket = { version = "0.5.0-rc.1", git = "https://github.com/SergioBenitez/Rocket", optional = true }
+rocket = { version = "0.5.0-rc.1", git = "https://github.com/SergioBenitez/Rocket", optional = true, features = ["json"]} #TODO: do not use git directly but for now use it for development
 
 
 [features]
@@ -37,7 +47,7 @@ default = ["http_rocket", "pocket-dimension", "constellation", "multipass", "ray
 http_rocket = ["rocket"]
 http_axum = ["axum"]
 
-pocket-dimension = ["warp-pocket-dimension"]
-constellation = ["warp-constellation"]
+pocket-dimension = ["warp-pocket-dimension", "warp-pd-stretto"]
+constellation = ["warp-constellation", "warp-fs-memory", "warp-fs-storj"]
 multipass = ["warp-multipass"]
 raygun = ["warp-raygun"]

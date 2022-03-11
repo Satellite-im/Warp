@@ -1,6 +1,9 @@
 
 #[cfg(feature = "constellation")]
 pub use warp_constellation::{self, constellation::{Constellation, ConstellationInOutType, ConstellationVersion}};
+#[cfg(feature = "constellation")]
+pub use warp_fs_memory::MemorySystem;
+
 #[cfg(feature = "pocket-dimension")]
 pub use warp_pocket_dimension::{PocketDimension, DimensionDataType, query::{QueryBuilder, Comparator}};
 #[cfg(feature = "multipass")]
