@@ -10,8 +10,11 @@ use warp_common::Result;
 /// Interface that would provide functionality around the filesystem.
 #[warp_common::async_trait::async_trait]
 pub trait Constellation: Sync + Send {
+    
     /// Returns the version for `Constellation`
-    fn version(&self) -> &ConstellationVersion;
+    fn version(&self) -> ConstellationVersion {
+        ConstellationVersion::from((0,1,0))
+    }
 
     /// Provides the timestamp of when the file system was modified
     fn modified(&self) -> DateTime<Utc>;

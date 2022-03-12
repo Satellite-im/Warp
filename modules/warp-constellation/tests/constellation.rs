@@ -8,7 +8,6 @@ mod tests {
     #[derive(Serialize, Deserialize, Clone, Debug)]
     #[serde(crate = "warp_common::serde")]
     pub struct DummyFileSystem {
-        version: ConstellationVersion,
         index: Directory,
         modified: DateTime<Utc>,
     }
@@ -16,7 +15,6 @@ mod tests {
     impl Default for DummyFileSystem {
         fn default() -> Self {
             DummyFileSystem {
-                version: ConstellationVersion::from((0, 1, 2)),
                 index: Directory::new("root"),
                 modified: Utc::now(),
             }
@@ -24,9 +22,6 @@ mod tests {
     }
 
     impl Constellation for DummyFileSystem {
-        fn version(&self) -> &ConstellationVersion {
-            &self.version
-        }
 
         fn modified(&self) -> DateTime<Utc> {
             self.modified

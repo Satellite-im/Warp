@@ -30,7 +30,6 @@ impl Default for MemorySystemInternal {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(crate = "warp_common::serde")]
 pub struct MemorySystem {
-    version: ConstellationVersion,
     index: Directory,
     modified: DateTime<Utc>,
     #[serde(skip)]
@@ -42,7 +41,6 @@ pub struct MemorySystem {
 impl Default for MemorySystem {
     fn default() -> Self {
         Self {
-            version: ConstellationVersion::from((0, 1, 2)),
             index: Directory::new("root"),
             modified: Utc::now(),
             internal: MemorySystemInternal::default(),
@@ -69,9 +67,6 @@ impl MemorySystemInternal {
 #[warp_common::async_trait::async_trait]
 
 impl Constellation for MemorySystem {
-    fn version(&self) -> &ConstellationVersion {
-        &self.version
-    }
 
     fn modified(&self) -> DateTime<Utc> {
         self.modified
