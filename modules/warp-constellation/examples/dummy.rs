@@ -1,6 +1,6 @@
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::serde::{Deserialize, Serialize};
-use warp_constellation::constellation::{Constellation, ConstellationVersion};
+use warp_constellation::constellation::Constellation;
 use warp_constellation::directory::Directory;
 use warp_constellation::file::File;
 
@@ -21,7 +21,6 @@ impl Default for DummyFileSystem {
 }
 
 impl Constellation for DummyFileSystem {
-
     fn modified(&self) -> DateTime<Utc> {
         self.modified
     }

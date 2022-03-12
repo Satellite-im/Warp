@@ -2,8 +2,8 @@
 mod tests {
     use warp_common::chrono::{DateTime, Utc};
     use warp_common::serde::{Deserialize, Serialize};
-    use warp_constellation::constellation::{Constellation, ConstellationVersion, ConstellationInOutType};
-    use warp_constellation::{directory::{Directory}, file::File};
+    use warp_constellation::constellation::{Constellation, ConstellationInOutType};
+    use warp_constellation::{directory::Directory, file::File};
 
     #[derive(Serialize, Deserialize, Clone, Debug)]
     #[serde(crate = "warp_common::serde")]
@@ -22,7 +22,6 @@ mod tests {
     }
 
     impl Constellation for DummyFileSystem {
-
         fn modified(&self) -> DateTime<Utc> {
             self.modified
         }
@@ -53,8 +52,6 @@ mod tests {
         assert_eq!(root.has_child("abc.png"), true);
         assert_eq!(root.has_child("cc123.png"), true);
 
-        
-
         root.rename_child("abc.png", "test.png")?;
 
         assert_eq!(root.has_child("abc.png"), false);
@@ -67,7 +64,6 @@ mod tests {
                 .is_ok(),
             true
         );
-        
 
         Ok(())
     }

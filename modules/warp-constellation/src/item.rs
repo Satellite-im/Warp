@@ -27,6 +27,8 @@ pub trait Metadata {
     fn size(&self) -> i64;
 
     fn creation(&self) -> DateTime<Utc>;
+
+    fn modified(&self) -> DateTime<Utc>;
 }
 
 /// Used to convert `File` to `Item`
@@ -94,6 +96,14 @@ impl Item {
         }
     }
 
+    /// Get the modified date of `Item`
+    pub fn modified(&self) -> DateTime<Utc> {
+        match self {
+            Item::File(file) => file.modified,
+            Item::Directory(directory) => directory.modified,
+        }
+    }
+
     /// Get size of `Item`.
     /// If `Item::File` it will return the size of the `File`.
     /// If `Item::Directory` it will return the size of all files within the `Directory`, including files located within a sub directory
@@ -111,8 +121,14 @@ impl Item {
             return Err(Error::DuplicateName);
         }
         match self {
-            Item::File(file) => (*file).name = name.to_string(),
-            Item::Directory(directory) => (*directory).name = name.to_string(),
+            Item::File(file) => {
+                (*file).name = name.to_string();
+                (*file).modified = Utc::now();
+            }
+            Item::Directory(directory) => {
+                (*directory).name = name.to_string();
+                (*directory).modified = Utc::now();
+            }
         };
 
         Ok(())
@@ -169,8 +185,14 @@ impl Item {
     /// Set description of `Item`
     pub fn set_description<S: AsRef<str>>(&mut self, desc: S) {
         match self {
-            Item::File(file) => file.description = desc.as_ref().to_string(),
-            Item::Directory(directory) => directory.description = desc.as_ref().to_string(),
+            Item::File(file) => {
+                file.description = desc.as_ref().to_string();
+                file.modified = Utc::now();
+            }
+            Item::Directory(directory) => {
+                directory.description = desc.as_ref().to_string();
+                directory.modified = Utc::now();
+            }
         }
     }
 
@@ -179,6 +201,7 @@ impl Item {
         match self {
             Item::File(file) => {
                 file.size = size;
+                file.modified = Utc::now();
                 Ok(())
             }
             Item::Directory(_) => Err(Error::ItemNotFile),
@@ -205,5 +228,9 @@ impl Metadata for Item {
 
     fn creation(&self) -> DateTime<Utc> {
         self.creation()
+    }
+
+    fn modified(&self) -> DateTime<Utc> {
+        self.modified()
     }
 }

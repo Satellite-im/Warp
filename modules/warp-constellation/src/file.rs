@@ -25,18 +25,22 @@ pub struct File {
     pub description: String,
     #[serde(with = "warp_common::chrono::serde::ts_seconds")]
     pub creation: DateTime<Utc>,
+    #[serde(with = "warp_common::chrono::serde::ts_seconds")]
+    pub modified: DateTime<Utc>,
     pub file_type: FileType,
     pub hash: String,
 }
 
 impl Default for File {
     fn default() -> Self {
+        let timestamp = Utc::now();
         Self {
             id: Uuid::new_v4(),
             name: String::from("un-named file"),
             description: String::new(),
             size: 0,
-            creation: Utc::now(),
+            creation: timestamp,
+            modified: timestamp,
             file_type: FileType::Generic,
             hash: String::new(),
         }
@@ -78,6 +82,7 @@ impl File {
     /// ```
     pub fn set_description<S: AsRef<str>>(&mut self, desc: S) {
         self.description = desc.as_ref().to_string();
+        self.modified = Utc::now()
     }
 
     /// Set the hash of the file
@@ -94,6 +99,7 @@ impl File {
     /// ```
     pub fn set_hash<S: AsRef<str>>(&mut self, hash: S) {
         self.hash = hash.as_ref().to_string();
+        self.modified = Utc::now();
     }
 
     /// Set the size the file
@@ -110,6 +116,7 @@ impl File {
     /// ```
     pub fn set_size(&mut self, size: i64) {
         self.size = size;
+        self.modified = Utc::now();
     }
 }
 
@@ -132,5 +139,9 @@ impl Metadata for File {
 
     fn creation(&self) -> DateTime<Utc> {
         self.creation
+    }
+
+    fn modified(&self) -> DateTime<Utc> {
+        self.modified
     }
 }

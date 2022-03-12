@@ -26,17 +26,21 @@ pub struct Directory {
     pub description: String,
     #[serde(with = "warp_common::chrono::serde::ts_seconds")]
     pub creation: DateTime<Utc>,
+    #[serde(with = "warp_common::chrono::serde::ts_seconds")]
+    pub modified: DateTime<Utc>,
     pub directory_type: DirectoryType,
     pub children: Vec<Item>,
 }
 
 impl Default for Directory {
     fn default() -> Self {
+        let timestamp = Utc::now();
         Self {
             id: Uuid::new_v4(),
             name: String::from("un-named directory"),
             description: String::new(),
-            creation: Utc::now(),
+            creation: timestamp,
+            modified: timestamp,
             directory_type: DirectoryType::Default,
             children: Vec::new(),
         }
@@ -119,6 +123,7 @@ impl Directory {
             }
         }
         self.children.push(child.clone());
+        self.modified = Utc::now();
         Ok(())
     }
 
@@ -246,7 +251,9 @@ impl Directory {
             return Err(Error::ItemInvalid);
         }
         let index = self.get_child_index(child_name)?;
-        Ok(self.children.remove(index))
+        let item = self.children.remove(index);
+        self.modified = Utc::now();
+        Ok(item)
     }
 
     /// Used to remove the child within a `Directory` path
@@ -493,5 +500,9 @@ impl Metadata for Directory {
 
     fn creation(&self) -> DateTime<Utc> {
         self.creation
+    }
+
+    fn modified(&self) -> DateTime<Utc> {
+        self.modified
     }
 }
