@@ -70,29 +70,32 @@ pub trait Constellation: Sync + Send {
         Err(Error::Unimplemented)
     }
 
+    /// Use to remove data from the filesystem
     async fn remove(&mut self, _: &str) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
-    fn export(&self, r#type: ConstellationInOutType) -> Result<String> {
+    /// Use to export the filesystem to a specific structure. Currently supports `Json`, `Toml`, and `Yaml`
+    fn export(&self, r#type: ConstellationDataType) -> Result<String> {
         match r#type {
-            ConstellationInOutType::Json => {
+            ConstellationDataType::Json => {
                 warp_common::serde_json::to_string(self.root_directory()).map_err(Error::from)
             }
-            ConstellationInOutType::Yaml => {
+            ConstellationDataType::Yaml => {
                 warp_common::serde_yaml::to_string(self.root_directory()).map_err(Error::from)
             }
-            ConstellationInOutType::Toml => {
+            ConstellationDataType::Toml => {
                 warp_common::toml::to_string(self.root_directory()).map_err(Error::from)
             }
         }
     }
 
-    fn import(&mut self, r#type: ConstellationInOutType, data: String) -> Result<()> {
+    /// Used to import data into the filesystem. This would override current contents.
+    fn import(&mut self, r#type: ConstellationDataType, data: String) -> Result<()> {
         let directory: Directory = match r#type {
-            ConstellationInOutType::Json => warp_common::serde_json::from_str(data.as_str())?,
-            ConstellationInOutType::Yaml => warp_common::serde_yaml::from_str(data.as_str())?,
-            ConstellationInOutType::Toml => warp_common::toml::from_str(data.as_str())?,
+            ConstellationDataType::Json => warp_common::serde_json::from_str(data.as_str())?,
+            ConstellationDataType::Yaml => warp_common::serde_yaml::from_str(data.as_str())?,
+            ConstellationDataType::Toml => warp_common::toml::from_str(data.as_str())?,
         };
         //TODO: create a function to override directory children.
         self.open_directory("")?.children = directory.children;
@@ -105,7 +108,7 @@ pub trait Constellation: Sync + Send {
 /// Currently only support `Json`, `Yaml`, and `Toml`.
 /// Implementation can override these functions for their own
 /// types to be use for import and export.
-pub enum ConstellationInOutType {
+pub enum ConstellationDataType {
     Json,
     Yaml,
     Toml,

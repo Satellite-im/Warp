@@ -2,7 +2,7 @@
 mod tests {
     use warp_common::chrono::{DateTime, Utc};
     use warp_common::serde::{Deserialize, Serialize};
-    use warp_constellation::constellation::{Constellation, ConstellationInOutType};
+    use warp_constellation::constellation::{Constellation, ConstellationDataType};
     use warp_constellation::{directory::Directory, file::File};
 
     #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -86,25 +86,25 @@ mod tests {
 
         // Json
         {
-            let data = filesystem.export(ConstellationInOutType::Json)?;
+            let data = filesystem.export(ConstellationDataType::Json)?;
             let mut new_fs = DummyFileSystem::default();
-            new_fs.import(ConstellationInOutType::Json, data)?;
+            new_fs.import(ConstellationDataType::Json, data)?;
             assert_eq!(filesystem.root_directory().has_child("testPng2.png"), true);
         }
 
         // Yaml
         {
-            let data = filesystem.export(ConstellationInOutType::Yaml)?;
+            let data = filesystem.export(ConstellationDataType::Yaml)?;
             let mut new_fs = DummyFileSystem::default();
-            new_fs.import(ConstellationInOutType::Yaml, data)?;
+            new_fs.import(ConstellationDataType::Yaml, data)?;
             assert_eq!(filesystem.root_directory().has_child("testFile.png"), true);
         }
 
         // Toml
         {
-            let data = filesystem.export(ConstellationInOutType::Toml)?;
+            let data = filesystem.export(ConstellationDataType::Toml)?;
             let mut new_fs = DummyFileSystem::default();
-            new_fs.import(ConstellationInOutType::Toml, data)?;
+            new_fs.import(ConstellationDataType::Toml, data)?;
             assert_eq!(filesystem.root_directory().has_child("abc.png"), true);
         }
 

@@ -2,17 +2,17 @@ pub mod error;
 pub mod item;
 
 use item::Item;
-use warp_common::Extension;
-use warp_common::error::Error;
-use warp_data::DataObject;
-use warp_pocket_dimension::PocketDimension;
-use warp_pocket_dimension::query::QueryBuilder;
-use std::io::{ErrorKind};
+use std::io::ErrorKind;
 use std::sync::{Arc, Mutex};
 use warp_common::chrono::{DateTime, Utc};
+use warp_common::error::Error;
 use warp_common::serde::{Deserialize, Serialize};
+use warp_common::Extension;
+use warp_data::DataObject;
+use warp_pocket_dimension::query::QueryBuilder;
+use warp_pocket_dimension::PocketDimension;
 
-use warp_constellation::constellation::{Constellation, ConstellationVersion};
+use warp_constellation::constellation::Constellation;
 use warp_constellation::directory::Directory;
 use warp_module::Module;
 
@@ -20,7 +20,6 @@ pub type Result<T> = std::result::Result<T, error::Error>;
 
 #[derive(Debug, Clone)]
 pub struct MemorySystemInternal(item::directory::Directory);
-
 
 impl Default for MemorySystemInternal {
     fn default() -> Self {
@@ -35,7 +34,7 @@ pub struct MemorySystem {
     #[serde(skip)]
     internal: MemorySystemInternal,
     #[serde(skip)]
-    cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>
+    cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
 }
 
 impl Default for MemorySystem {
@@ -49,9 +48,8 @@ impl Default for MemorySystem {
     }
 }
 
-
 impl MemorySystem {
-    pub fn new(cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>) -> Self{
+    pub fn new(cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>) -> Self {
         let mut mem = MemorySystem::default();
         mem.cache = cache;
         mem
@@ -67,7 +65,6 @@ impl MemorySystemInternal {
 #[warp_common::async_trait::async_trait]
 
 impl Constellation for MemorySystem {
-
     fn modified(&self) -> DateTime<Utc> {
         self.modified
     }
@@ -87,7 +84,10 @@ impl Constellation for MemorySystem {
     ) -> std::result::Result<(), warp_common::error::Error> {
         let mut internal_file = item::file::File::new(name.as_ref());
         let bytes = internal_file.insert_buffer(buf.clone()).unwrap();
-        self.internal.0.insert(internal_file.clone()).map_err(|_| Error::Other)?;
+        self.internal
+            .0
+            .insert(internal_file.clone())
+            .map_err(|_| Error::Other)?;
         let mut data = DataObject::default();
         data.set_size(bytes as u64);
         data.set_payload((name.to_string(), internal_file.data()))?;
@@ -128,7 +128,7 @@ impl Constellation for MemorySystem {
                         let obj = list.pop().unwrap();
                         let (in_name, in_buf) = obj.payload::<(String, Vec<u8>)>()?;
                         if name != in_name {
-                            return Err(Error::Other);// mismatch with names
+                            return Err(Error::Other); // mismatch with names
                         }
                         *buf = in_buf;
                         return Ok(());
@@ -137,14 +137,17 @@ impl Constellation for MemorySystem {
                 Err(_) => {}
             }
         }
-        
-        let file = self.internal.0.get_item_from_path(name.to_string()).map_err(|_| Error::Other)?;
-        
+
+        let file = self
+            .internal
+            .0
+            .get_item_from_path(name.to_string())
+            .map_err(|_| Error::Other)?;
+
         *buf = file.data();
         Ok(())
     }
 }
-
 
 impl Extension for MemorySystem {
     fn name(&self) -> String {
