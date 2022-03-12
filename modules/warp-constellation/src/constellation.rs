@@ -1,7 +1,4 @@
-use crate::{
-    directory::Directory,
-    item::Item,
-};
+use crate::{directory::Directory, item::Item};
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::error::Error;
 use warp_common::serde::{Deserialize, Serialize};
@@ -10,10 +7,9 @@ use warp_common::Result;
 /// Interface that would provide functionality around the filesystem.
 #[warp_common::async_trait::async_trait]
 pub trait Constellation: Sync + Send {
-    
     /// Returns the version for `Constellation`
     fn version(&self) -> ConstellationVersion {
-        ConstellationVersion::from((0,1,0))
+        ConstellationVersion::from((0, 1, 0))
     }
 
     /// Provides the timestamp of when the file system was modified
@@ -50,52 +46,45 @@ pub trait Constellation: Sync + Send {
             false => self
                 .root_directory_mut()
                 .get_child_mut_by_path(path)
-                .and_then(Item::get_directory_mut)
+                .and_then(Item::get_directory_mut),
         }
     }
 
     /// Use to upload file to the filesystem
-    async fn put(
-        &mut self,
-        _: &str,
-        _: &str,
-    ) -> Result<()> {
+    async fn put(&mut self, _: &str, _: &str) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
     /// Use to download a file from the filesystem
-    async fn get(
-        &self,
-        _: &str,
-        _: &str,
-    ) -> Result<()> {
+    async fn get(&self, _: &str, _: &str) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
     /// Use to upload file to the filesystem with data from buffer
-    async fn from_buffer(
-        &mut self,
-        _: &str,
-        _: &Vec<u8>,
-    ) -> Result<()> {
+    async fn from_buffer(&mut self, _: &str, _: &Vec<u8>) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
     /// Use to download data from the filesystem into a buffer
-    async fn to_buffer(
-        &self,
-        _: &str,
-        _: &mut Vec<u8>,
-    ) -> Result<()> {
+    async fn to_buffer(&self, _: &str, _: &mut Vec<u8>) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
+    async fn remove(&mut self, _: &str) -> Result<()> {
+        Err(Error::Unimplemented)
+    }
 
-    fn export(&self, r#type: ConstellationInOutType) -> Result<String>{
+    fn export(&self, r#type: ConstellationInOutType) -> Result<String> {
         match r#type {
-            ConstellationInOutType::Json => warp_common::serde_json::to_string(self.root_directory()).map_err(Error::from),
-            ConstellationInOutType::Yaml => warp_common::serde_yaml::to_string(self.root_directory()).map_err(Error::from),
-            ConstellationInOutType::Toml => warp_common::toml::to_string(self.root_directory()).map_err(Error::from)
+            ConstellationInOutType::Json => {
+                warp_common::serde_json::to_string(self.root_directory()).map_err(Error::from)
+            }
+            ConstellationInOutType::Yaml => {
+                warp_common::serde_yaml::to_string(self.root_directory()).map_err(Error::from)
+            }
+            ConstellationInOutType::Toml => {
+                warp_common::toml::to_string(self.root_directory()).map_err(Error::from)
+            }
         }
     }
 
@@ -103,26 +92,24 @@ pub trait Constellation: Sync + Send {
         let directory: Directory = match r#type {
             ConstellationInOutType::Json => warp_common::serde_json::from_str(data.as_str())?,
             ConstellationInOutType::Yaml => warp_common::serde_yaml::from_str(data.as_str())?,
-            ConstellationInOutType::Toml => warp_common::toml::from_str(data.as_str())?
+            ConstellationInOutType::Toml => warp_common::toml::from_str(data.as_str())?,
         };
         //TODO: create a function to override directory children.
         self.open_directory("")?.children = directory.children;
 
         Ok(())
     }
-
 }
 
 /// Types that would be used for import and export
-/// Currently only support `Json`, `Yaml`, and `Toml`. 
+/// Currently only support `Json`, `Yaml`, and `Toml`.
 /// Implementation can override these functions for their own
 /// types to be use for import and export.
 pub enum ConstellationInOutType {
     Json,
     Yaml,
-    Toml
+    Toml,
 }
-
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 #[serde(crate = "warp_common::serde")]
