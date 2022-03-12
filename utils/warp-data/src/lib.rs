@@ -101,6 +101,14 @@ impl Data {
         })
     }
 
+    pub fn update_time(&mut self) {
+        self.timestamp = Utc::now();
+    }
+
+    pub fn update_version(&mut self, version: u32) {
+        self.version = version;
+    }
+
     pub fn set_module(&mut self, module: &Module) {
         self.module = module.clone();
     }
