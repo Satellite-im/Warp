@@ -22,29 +22,51 @@ pub enum PocketDimension {
 }
 
 /// Represents options related to the REST API
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct HTTPAPIConfig {
     pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
 }
 
 /// Defines which implementations to load for each module
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ModuleConfig {
-    pub pocket_dimension: PocketDimension,
-    pub file_system: FileSystem,
+    pub constellation: bool,
+    pub pocket_dimension: bool,
+    pub multipass: bool,
+    pub raygun: bool
 }
+
+impl Default for ModuleConfig {
+    fn default() -> Self {
+        Self {
+            constellation: true,
+            pocket_dimension: true,
+            multipass: false,
+            raygun: false,
+        }
+    }
+}
+
+/// Define extensions to use at runtime
+#[derive(Default, Debug, Serialize, Deserialize)]
+pub struct ExtensionConfig {
+    pub constellation: Vec<String>,
+    pub pocket_dimension: Vec<String>,
+    pub multipass: Vec<String>,
+    pub raygun: Vec<String>
+}
+
 /// Represents the global config for Warp
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Config {
     pub debug: bool,
     pub http_api: HTTPAPIConfig,
     pub modules: ModuleConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub extensions: ExtensionConfig,
 }
 
 // Implementation to create, load and save the config
@@ -59,18 +81,14 @@ impl Config {
     pub fn new() -> Config {
         Config {
             debug: true,
-            http_api: HTTPAPIConfig { enabled: false },
-            modules: ModuleConfig {
-                pocket_dimension: PocketDimension::FlatFile,
-                file_system: FileSystem::Disk,
-            },
+            ..Default::default()
         }
     }
 
     /// Loads and return the parsed TOML configuration file for Warp
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use warp_configuration::Config;
     /// let config = Config::load("Warp.toml").unwrap();
     /// ```
@@ -87,7 +105,7 @@ impl Config {
     /// Loads and return the parsed TOML configuration from reader
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use warp_configuration::Config;
     /// use std::fs::File;
     ///
@@ -104,7 +122,7 @@ impl Config {
     /// Saves the configuration to disk
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use warp_configuration::Config;
     /// let config = Config::new();
     /// config.save("Warp.toml").unwrap();
@@ -120,7 +138,7 @@ impl Config {
     /// Saves the configuration to writer
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use warp_configuration::Config;
     /// use std::fs::File;
     ///

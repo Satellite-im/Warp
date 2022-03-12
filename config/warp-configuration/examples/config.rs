@@ -18,6 +18,6 @@ fn main() -> Result<(), warp_configuration::error::Error> {
     assert_eq!(config.debug, false);
     enable_debug(&mut config)?;
     assert_eq!(config.debug, true);
-    std::fs::remove_file("Warp.test.toml")?;
+    // std::fs::remove_file("Warp.test.toml")?;
     Ok(())
 }
