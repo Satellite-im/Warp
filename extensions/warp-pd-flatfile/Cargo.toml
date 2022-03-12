@@ -10,5 +10,7 @@ warp-pocket-dimension = { path = "../../modules/warp-pocket-dimension" }
 warp-hooks = { path = "../../utils/warp-hooks" }
 warp-module = { path = "../../utils/warp-module" }
 warp-data = { path = "../../utils/warp-data" }
-warp-common = { path = "../../utils/warp-common" }
+warp-common = { path = "../../utils/warp-common", features = ["async"] }
 thiserror = "1.0"
+walkdir = "2.3"
+blake2 = "0.10"
