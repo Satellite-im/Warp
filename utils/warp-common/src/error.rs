@@ -41,6 +41,12 @@ pub enum Error {
     DataObjectExist,
 
     //Misc
+    #[error("TBD")]
+    FileNotFound,
+    #[error("TBD")]
+    DirectoryNotFound,
+    #[error("To be determined")]
+    ToBeDetermined,
     #[error("{0}")]
     SerdeJsonError(#[from] serde_json::Error),
     #[error("{0}")]
@@ -103,6 +109,12 @@ pub enum Error {
     DataObjectExist,
 
     //Misc
+    #[error("TBD")]
+    FileNotFound,
+    #[error("TBD")]
+    DirectoryNotFound,
+    #[error("TBD")]
+    ToBeDetermined,
     #[error("{0}")]
     BincodeError(#[from] bincode::Error),
     #[error("{0}")]
@@ -113,6 +125,8 @@ pub enum Error {
     Any(#[from] anyhow::Error),
     #[error("{0}")]
     IoError(#[from] std::io::Error),
+    #[error("Functionality is not yet implemented")]
+    Unimplemented,
     #[error("An unknown error has occurred")]
     Other,
 }
