@@ -7,6 +7,8 @@ edition = "2021"
 
 [dependencies]
 rust-s3 = {version = "0.30.0" }
+blake2 = "0.10"
+hex = "0.4"
 
 warp-constellation = { path = "../../modules/warp-constellation" }
 warp-pocket-dimension = { path = "../../modules/warp-pocket-dimension" }

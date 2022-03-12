@@ -1,3 +1,4 @@
+use blake2::{Blake2b512, Digest};
 use std::sync::{Arc, Mutex};
 
 use warp_common::{
@@ -15,7 +16,7 @@ use s3::creds::Credentials;
 use s3::region::Region;
 use s3::BucketConfiguration;
 
-use warp_constellation::item::{Item, Metadata};
+use warp_constellation::item::Item;
 
 #[derive(Debug, Clone)]
 pub struct StorjClient {
@@ -156,7 +157,7 @@ impl Constellation for StorjFilesystem {
 
         let mut fs = tokio::fs::File::open(path).await?;
         let size = fs.metadata().await?.len();
-        //TODO: Allow for custom bucket name
+
         let client = self.client.as_ref().ok_or(Error::Other)?;
         let code = client
             .bucket(bucket, true)
@@ -170,6 +171,7 @@ impl Constellation for StorjFilesystem {
 
         let mut file = warp_constellation::file::File::new(in_name);
         file.set_size(size as i64);
+        file.set_hash(hash_file(path).await?);
 
         self.open_directory("")?.add_child(file)?;
         //TODO: Mutate/update the modified date.
@@ -197,12 +199,10 @@ impl Constellation for StorjFilesystem {
         let (bucket, out_name) = (name.get(0).unwrap(), name.get(1).unwrap());
 
         //TODO: Implement cache
-
-        let _file_size = self
+        let file = self
             .root_directory()
             .get_child_by_path(out_name)
-            .and_then(Item::get_file)?
-            .size();
+            .and_then(Item::get_file)?;
 
         let mut fs = tokio::fs::File::create(path).await?;
         let client = self.client.as_ref().ok_or(Error::Other)?;
@@ -213,7 +213,15 @@ impl Constellation for StorjFilesystem {
             .await?;
 
         if code != 200 {
+            tokio::fs::remove_file(path).await?;
             return Err(warp_common::error::Error::Other);
+        }
+
+        let hash = hash_file(path).await?;
+
+        if file.hash != hash {
+            tokio::fs::remove_file(path).await?;
+            return Err(Error::DataObjectExist);
         }
 
         Ok(())
@@ -242,6 +250,7 @@ impl Constellation for StorjFilesystem {
 
         let mut file = warp_constellation::file::File::new(in_name);
         file.set_size(buffer.len() as i64);
+        file.set_hash(hash_data(buffer));
 
         self.open_directory("")?.add_child(file)?;
         //TODO: Mutate/update the modified date.
@@ -266,11 +275,10 @@ impl Constellation for StorjFilesystem {
 
         //TODO: Implement cache
 
-        let _file_size = self
+        let file = self
             .root_directory()
             .get_child_by_path(out_name)
-            .and_then(Item::get_file)?
-            .size();
+            .and_then(Item::get_file)?;
 
         let client = self.client.as_ref().ok_or(Error::Other)?;
         let code = client
@@ -282,8 +290,53 @@ impl Constellation for StorjFilesystem {
         if code.1 != 200 {
             return Err(warp_common::error::Error::Other);
         }
+
+        let hash = hash_data(&code.0);
+
+        if file.hash != hash {
+            return Err(Error::DataObjectExist);
+        }
+
         *buffer = code.0;
 
         Ok(())
     }
+
+    async fn remove(&mut self, path: &str) -> warp_common::Result<()> {
+        let name = path.split("://").collect::<Vec<&str>>();
+
+        if name.len() != 2 {
+            return Err(warp_common::error::Error::Other);
+        }
+
+        let (bucket, name) = (name.get(0).unwrap(), name.get(1).unwrap());
+
+        let client = self.client.as_ref().ok_or(Error::Other)?;
+
+        let code = client
+            .bucket(bucket, false)
+            .await?
+            .delete_object(name)
+            .await?;
+
+        if code.1 != 204 {
+            return Err(warp_common::error::Error::Other);
+        }
+
+        self.root_directory_mut().remove_child(name)?;
+
+        Ok(())
+    }
+}
+
+async fn hash_file<S: AsRef<str>>(file: S) -> anyhow::Result<String> {
+    let data = tokio::fs::read(file.as_ref()).await?;
+    Ok(hash_data(data))
+}
+
+fn hash_data<S: AsRef<[u8]>>(data: S) -> String {
+    let mut hasher = Blake2b512::new();
+    hasher.update(&data.as_ref());
+    let res = hasher.finalize().to_vec();
+    hex::encode(res)
 }
