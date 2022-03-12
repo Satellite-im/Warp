@@ -150,15 +150,18 @@ impl Constellation for StorjFilesystem {
         let name = name.split("://").collect::<Vec<&str>>();
 
         if name.len() != 2 {
-            return Err(warp_common::error::Error::Other);
+            return Err(Error::ToBeDetermined);
         }
 
-        let (bucket, in_name) = (name.get(0).unwrap(), name.get(1).unwrap());
+        let (bucket, in_name) = (
+            name.get(0).ok_or(Error::ToBeDetermined)?,
+            name.get(1).ok_or(Error::ToBeDetermined)?,
+        );
 
         let mut fs = tokio::fs::File::open(path).await?;
         let size = fs.metadata().await?.len();
 
-        let client = self.client.as_ref().ok_or(Error::Other)?;
+        let client = self.client.as_ref().ok_or(Error::ToBeDetermined)?;
         let code = client
             .bucket(bucket, true)
             .await?
@@ -166,7 +169,7 @@ impl Constellation for StorjFilesystem {
             .await?;
 
         if code != 200 {
-            return Err(warp_common::error::Error::Other);
+            return Err(Error::ToBeDetermined);
         }
 
         let mut file = warp_constellation::file::File::new(in_name);
@@ -174,7 +177,8 @@ impl Constellation for StorjFilesystem {
         file.set_hash(hash_file(path).await?);
 
         self.open_directory("")?.add_child(file)?;
-        //TODO: Mutate/update the modified date.
+
+        self.modified = Utc::now();
 
         //TODO: Deal with caching that can be more adaptive any ext of pd
         //Note: Since caching extensions may have different methods of handling
@@ -193,10 +197,13 @@ impl Constellation for StorjFilesystem {
         let name = name.split("://").collect::<Vec<&str>>();
 
         if name.len() != 2 {
-            return Err(warp_common::error::Error::Other);
+            return Err(Error::ToBeDetermined);
         }
 
-        let (bucket, out_name) = (name.get(0).unwrap(), name.get(1).unwrap());
+        let (bucket, out_name) = (
+            name.get(0).ok_or(Error::ToBeDetermined)?,
+            name.get(1).ok_or(Error::ToBeDetermined)?,
+        );
 
         //TODO: Implement cache
         let file = self
@@ -205,7 +212,7 @@ impl Constellation for StorjFilesystem {
             .and_then(Item::get_file)?;
 
         let mut fs = tokio::fs::File::create(path).await?;
-        let client = self.client.as_ref().ok_or(Error::Other)?;
+        let client = self.client.as_ref().ok_or(Error::ToBeDetermined)?;
         let code = client
             .bucket(bucket, false)
             .await?
@@ -214,14 +221,14 @@ impl Constellation for StorjFilesystem {
 
         if code != 200 {
             tokio::fs::remove_file(path).await?;
-            return Err(warp_common::error::Error::Other);
+            return Err(Error::ToBeDetermined);
         }
 
         let hash = hash_file(path).await?;
 
         if file.hash != hash {
             tokio::fs::remove_file(path).await?;
-            return Err(Error::DataObjectExist);
+            return Err(Error::ToBeDetermined);
         }
 
         Ok(())
@@ -231,10 +238,13 @@ impl Constellation for StorjFilesystem {
         let name = name.split("://").collect::<Vec<&str>>();
 
         if name.len() != 2 {
-            return Err(warp_common::error::Error::Other);
+            return Err(Error::ToBeDetermined);
         }
 
-        let (bucket, in_name) = (name.get(0).unwrap(), name.get(1).unwrap());
+        let (bucket, in_name) = (
+            name.get(0).ok_or(Error::ToBeDetermined)?,
+            name.get(1).ok_or(Error::ToBeDetermined)?,
+        );
 
         //TODO: Allow for custom bucket name
         let client = self.client.as_ref().ok_or(Error::Other)?;
@@ -268,10 +278,13 @@ impl Constellation for StorjFilesystem {
         let name = name.split("://").collect::<Vec<&str>>();
 
         if name.len() != 2 {
-            return Err(warp_common::error::Error::Other);
+            return Err(Error::ToBeDetermined);
         }
 
-        let (bucket, out_name) = (name.get(0).unwrap(), name.get(1).unwrap());
+        let (bucket, out_name) = (
+            name.get(0).ok_or(Error::ToBeDetermined)?,
+            name.get(1).ok_or(Error::ToBeDetermined)?,
+        );
 
         //TODO: Implement cache
 
@@ -280,7 +293,7 @@ impl Constellation for StorjFilesystem {
             .get_child_by_path(out_name)
             .and_then(Item::get_file)?;
 
-        let client = self.client.as_ref().ok_or(Error::Other)?;
+        let client = self.client.as_ref().ok_or(Error::ToBeDetermined)?;
         let code = client
             .bucket(bucket, false)
             .await?
@@ -288,13 +301,13 @@ impl Constellation for StorjFilesystem {
             .await?;
 
         if code.1 != 200 {
-            return Err(warp_common::error::Error::Other);
+            return Err(Error::ToBeDetermined);
         }
 
         let hash = hash_data(&code.0);
 
         if file.hash != hash {
-            return Err(Error::DataObjectExist);
+            return Err(Error::ToBeDetermined);
         }
 
         *buffer = code.0;
@@ -306,10 +319,13 @@ impl Constellation for StorjFilesystem {
         let name = path.split("://").collect::<Vec<&str>>();
 
         if name.len() != 2 {
-            return Err(warp_common::error::Error::Other);
+            return Err(Error::ToBeDetermined);
         }
 
-        let (bucket, name) = (name.get(0).unwrap(), name.get(1).unwrap());
+        let (bucket, name) = (
+            name.get(0).ok_or(Error::ToBeDetermined)?,
+            name.get(1).ok_or(Error::ToBeDetermined)?,
+        );
 
         let client = self.client.as_ref().ok_or(Error::Other)?;
 
@@ -320,7 +336,7 @@ impl Constellation for StorjFilesystem {
             .await?;
 
         if code.1 != 204 {
-            return Err(warp_common::error::Error::Other);
+            return Err(Error::ToBeDetermined);
         }
 
         self.root_directory_mut().remove_child(name)?;
