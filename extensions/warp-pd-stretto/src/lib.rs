@@ -25,6 +25,10 @@ impl Extension for StrettoClient {
     fn description(&self) -> String {
         format!("Pocket Dimension implementation with Stretto, a high performance thread-safe memory cache written in rust.")
     }
+
+    fn module(&self) -> Module {
+        Module::FileSystem
+    }
 }
 
 impl StrettoClient {
@@ -70,11 +74,7 @@ impl PocketDimension for StrettoClient {
         Ok(())
     }
 
-    fn has_data(
-        &mut self,
-        dimension: Module,
-        query: &QueryBuilder,
-    ) -> warp_common::Result<()> {
+    fn has_data(&mut self, dimension: Module, query: &QueryBuilder) -> warp_common::Result<()> {
         let data = self
             .client
             .get(&dimension.into())
@@ -117,10 +117,7 @@ impl PocketDimension for StrettoClient {
             .map(|data| data.len() as i64)
     }
 
-    fn empty(
-        &mut self,
-        _: Module,
-    ) -> std::result::Result<(), warp_common::error::Error> {
+    fn empty(&mut self, _: Module) -> std::result::Result<(), warp_common::error::Error> {
         // Note, since stretto doesnt clear base on key, we will clear everything when this is
         // call for now.
         // TODO: Implement a direct clear or mutation for the dimension

@@ -157,4 +157,7 @@ impl Extension for MemorySystem {
     fn description(&self) -> String {
         String::from("Basic In-Memory Filesystem extension")
     }
+    fn module(&self) -> Module {
+        Module::FileSystem
+    }
 }

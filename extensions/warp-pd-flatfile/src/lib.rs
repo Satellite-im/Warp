@@ -1,8 +1,9 @@
 use std::{
-    fs::{OpenOptions},
-    path::{Path, PathBuf}, io::{Read, ErrorKind, Write},
+    fs::OpenOptions,
+    io::{ErrorKind, Read, Write},
+    path::{Path, PathBuf},
 };
-use warp_common::{error::Error, uuid::Uuid};
+use warp_common::{error::Error, uuid::Uuid, Extension};
 use warp_data::DataObject;
 use warp_module::Module;
 use warp_pocket_dimension::PocketDimension;
@@ -25,6 +26,16 @@ pub struct FlatfileStorage {
     index: FlatfileIndex,
 }
 
+impl Extension for FlatfileStorage {
+    fn name(&self) -> String {
+        format!("Flatfile Cache Storage")
+    }
+
+    fn module(&self) -> Module {
+        Module::Cache
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct FlatfileIndex(Vec<DataObject>);
 
@@ -44,18 +55,20 @@ impl FlatfileIndex {
     }
 
     pub fn insert(&mut self, data: DataObject) -> warp_common::Result<()> {
-        if self.0.contains(&data) { return Err(Error::Other) }
+        if self.0.contains(&data) {
+            return Err(Error::Other);
+        }
         self.0.push(data);
         Ok(())
     }
 
     pub fn remove_by_id(&mut self, id: Uuid) -> warp_common::Result<DataObject> {
         //get index of said dataobject
-        let index = self.0
+        let index = self
+            .0
             .iter()
             .position(|item| item.id == id)
             .ok_or(Error::ArrayPositionNotFound)?;
-
 
         let object = self.0.remove(index);
 
@@ -65,8 +78,6 @@ impl FlatfileIndex {
     pub fn build_index(&mut self) -> warp_common::Result<()> {
         Ok(())
     }
-
-
 
     pub fn build_index_from_file<P: AsRef<Path>>(&mut self, file: P) -> warp_common::Result<()> {
         let file = std::fs::File::open(file)?;
@@ -106,7 +117,7 @@ impl FlatfileStorage {
     pub fn create_directory(&self, all: bool) -> warp_common::Result<()> {
         match all {
             true => std::fs::create_dir_all(&self.directory)?,
-            false => std::fs::create_dir(&self.directory)?
+            false => std::fs::create_dir(&self.directory)?,
         }
         Ok(())
     }
@@ -143,19 +154,26 @@ impl From<DataObject> for FilePointer {
 }
 
 impl FilePointer {
-
     pub fn new<P: AsRef<Path>>(path: P) -> warp_common::Result<Self> {
         let path = path.as_ref().to_path_buf();
-        if !path.is_file() { return Err(warp_common::error::Error::ItemNotFile) } 
+        if !path.is_file() {
+            return Err(warp_common::error::Error::ItemNotFile);
+        }
         let mut data = DataObject::new(&Module::FileSystem, &path)?;
         data.size = std::fs::metadata(path)?.len();
         Ok(FilePointer::from(data))
     }
 
     pub fn file_path(&self) -> warp_common::Result<PathBuf> {
-        if self.0.module != Module::FileSystem { return Err(warp_common::error::Error::Other) }
+        if self.0.module != Module::FileSystem {
+            return Err(warp_common::error::Error::Other);
+        }
         let path = self.0.payload::<PathBuf>()?;
-        if !path.is_file() { return Err(warp_common::error::Error::IoError(std::io::Error::from(ErrorKind::InvalidInput))) }
+        if !path.is_file() {
+            return Err(warp_common::error::Error::IoError(std::io::Error::from(
+                ErrorKind::InvalidInput,
+            )));
+        }
         Ok(path)
     }
 
@@ -171,7 +189,9 @@ impl FilePointer {
         let mut fs = std::fs::File::open(path)?;
         let size = fs.read(&mut buf[..])?;
         if size != self.0.size as usize {
-            return Err(warp_common::error::Error::IoError(std::io::Error::from(ErrorKind::InvalidData)));
+            return Err(warp_common::error::Error::IoError(std::io::Error::from(
+                ErrorKind::InvalidData,
+            )));
         }
         Ok(())
     }
@@ -182,7 +202,9 @@ impl FilePointer {
         let size = std::io::copy(reader, &mut fs)?;
         if size != self.0.size {
             std::fs::remove_file(&path)?;
-            return Err(warp_common::error::Error::IoError(std::io::Error::from(ErrorKind::InvalidData)));
+            return Err(warp_common::error::Error::IoError(std::io::Error::from(
+                ErrorKind::InvalidData,
+            )));
         }
         Ok(())
     }
@@ -195,11 +217,12 @@ impl FilePointer {
         let size = std::fs::metadata(&path)?.len();
         if size != self.0.size {
             std::fs::remove_file(&path)?;
-            return Err(warp_common::error::Error::IoError(std::io::Error::from(ErrorKind::InvalidData)));
+            return Err(warp_common::error::Error::IoError(std::io::Error::from(
+                ErrorKind::InvalidData,
+            )));
         }
         Ok(())
     }
-
 }
 
 impl PocketDimension for FlatfileStorage {
@@ -209,8 +232,10 @@ impl PocketDimension for FlatfileStorage {
         data: &warp_data::DataObject,
     ) -> warp_common::Result<()> {
         let mut data = data.clone();
-        if data.module != dimension {  data.set_module(&dimension); }
-        
+        if data.module != dimension {
+            data.set_module(&dimension);
+        }
+
         Err(Error::Unimplemented)
     }
 

@@ -16,6 +16,7 @@ toml = "0.5"
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1.5.4"
 futures = { version = "0.3", optional = true }
+warp-module = { version = "0.1.0", path = "../warp-module" }
 
 [target.'cfg(not(all(target_arch = "wasm32", not(any(target_os = "emscripten", target_os = "wasi")))))'.dependencies]
 uuid = { version = "0.8", features = ["serde", "v4"] }

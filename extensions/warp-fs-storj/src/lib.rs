@@ -1,5 +1,6 @@
 use blake2::{Blake2b512, Digest};
 use std::sync::{Arc, Mutex};
+use warp_module::Module;
 
 use warp_common::{
     anyhow,
@@ -88,6 +89,9 @@ impl Extension for StorjFilesystem {
 
     fn description(&self) -> String {
         String::from("TBD")
+    }
+    fn module(&self) -> Module {
+        Module::FileSystem
     }
 }
 

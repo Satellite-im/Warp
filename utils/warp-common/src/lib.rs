@@ -1,5 +1,7 @@
 pub mod error;
 
+pub use warp_module::Module;
+
 #[cfg(not(target_os = "wasm32"))]
 pub use anyhow;
 #[cfg(feature = "bincode_opt")]
@@ -9,8 +11,8 @@ pub use chrono;
 pub use regex;
 pub use serde;
 pub use serde_json;
-pub use toml;
 pub use serde_yaml;
+pub use toml;
 pub use uuid;
 
 #[cfg(feature = "async")]
@@ -42,9 +44,10 @@ pub mod wasm {
 #[cfg(target_os = "wasm32")]
 pub use wasm::Result;
 
-
 pub trait Extension {
-    fn id(&self) -> String { self.name() }
+    fn id(&self) -> String {
+        self.name()
+    }
     fn name(&self) -> String;
     fn description(&self) -> String {
         format!(
@@ -52,4 +55,5 @@ pub trait Extension {
             self.name()
         )
     }
+    fn module(&self) -> Module;
 }
