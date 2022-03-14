@@ -49,10 +49,12 @@ impl Default for MemorySystem {
 }
 
 impl MemorySystem {
-    pub fn new(cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>) -> Self {
-        let mut mem = MemorySystem::default();
-        mem.cache = cache;
-        mem
+    pub fn new() -> Self {
+        MemorySystem::default()
+    }
+
+    pub fn set_cache(&mut self, cache: Arc<Mutex<Box<dyn PocketDimension>>>) {
+        self.cache = Some(cache);
     }
 }
 
