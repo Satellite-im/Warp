@@ -1,5 +1,6 @@
 #[cfg(feature = "bincode_opt2")]
 use warp_common::bincode;
+use warp_common::cfg_if::cfg_if;
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::error::Error;
 use warp_common::serde::de::DeserializeOwned;
@@ -8,6 +9,7 @@ use warp_common::serde::{Deserialize, Serialize};
 use warp_common::serde_json::{self, Value};
 use warp_common::uuid::Uuid;
 use warp_common::Result;
+
 use warp_module::Module;
 
 pub type DataObject = Data;
@@ -26,51 +28,51 @@ pub struct Data {
     pub payload: Payload,
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(crate = "warp_common::serde")]
-#[cfg(feature = "bincode_opt2")]
-pub struct Payload(Vec<u8>);
-
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(crate = "warp_common::serde")]
-#[cfg(not(feature = "bincode_opt2"))]
-pub struct Payload(Value);
+cfg_if! {
+    if #[cfg(feature = "bincode_opt2")] {
+        #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+        #[serde(crate = "warp_common::serde")]
+        pub struct Payload(Vec<u8>);
+    } else {
+        #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+        #[serde(crate = "warp_common::serde")]
+        pub struct Payload(Value);
+    }
+}
 
 impl Payload {
-    #[cfg(feature = "bincode_opt2")]
-    pub fn new(data: Vec<u8>) -> Self {
-        Payload(data)
-    }
+    cfg_if! {
+        if #[cfg(feature = "bincode_opt2")] {
+            pub fn new(data: Vec<u8>) -> Self {
+                Payload(data)
+            }
 
-    #[cfg(not(feature = "bincode_opt2"))]
-    pub fn new(data: Value) -> Self {
-        Payload(data)
-    }
+            pub fn new_from_ser<T: Serialize>(payload: T) -> Result<Self> {
+                bincode::serialize(&payload)
+                    .map(Self::new)
+                    .map_err(Error::from)
+            }
 
-    #[cfg(feature = "bincode_opt2")]
-    pub fn new_from_ser<T: Serialize>(payload: T) -> Result<Self> {
-        bincode::serialize(&payload)
-            .map(Self::new)
-            .map_err(Error::from)
-    }
+            pub fn to_type<T: DeserializeOwned>(&self) -> Result<T> {
+                let inner = bincode::deserialize(&self.0[..])?;
+                Ok(inner)
+            }
+        } else {
+            pub fn new(data: Value) -> Self {
+                Payload(data)
+            }
 
-    #[cfg(not(feature = "bincode_opt2"))]
-    pub fn new_from_ser<T: Serialize>(payload: T) -> Result<Self> {
-        serde_json::to_value(payload)
-            .map(Self::new)
-            .map_err(Error::from)
-    }
+            pub fn new_from_ser<T: Serialize>(payload: T) -> Result<Self> {
+                serde_json::to_value(payload)
+                    .map(Self::new)
+                    .map_err(Error::from)
+            }
 
-    #[cfg(feature = "bincode_opt2")]
-    pub fn to_type<T: DeserializeOwned>(&self) -> Result<T> {
-        let inner = bincode::deserialize(&self.0[..])?;
-        Ok(inner)
-    }
-
-    #[cfg(not(feature = "bincode_opt2"))]
-    pub fn to_type<T: DeserializeOwned>(&self) -> Result<T> {
-        let inner = serde_json::from_value(self.0.clone())?;
-        Ok(inner)
+            pub fn to_type<T: DeserializeOwned>(&self) -> Result<T> {
+                let inner = serde_json::from_value(self.0.clone())?;
+                Ok(inner)
+            }
+        }
     }
 }
 
