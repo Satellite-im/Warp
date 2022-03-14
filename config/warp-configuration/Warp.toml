@@ -4,5 +4,13 @@ debug = true
 enabled = false
 
 [modules]
-pocket_dimension = "flatfile"
-file_system = "disk"
+pocket_dimension = true
+constellation = true
+multipass = false
+raygun = false
+
+[extensions]
+constellation = ["warp-fs-storj", "warp-fs-memory"]
+pocket_dimension = ["warp-pd-stretto"]
+raygun = []
+multipass = []
