@@ -12,7 +12,7 @@ repository = "https://github.com/Satellite-im/Warp"
 [dependencies]
 uuid = { version = "0.8", features = ["serde", "v4"] }
 
-clap = { version = "3.1", features = ["derive"] }
+clap = { version = "3.1", features = ["derive"], optional = true}
 
 tui = {version = "0.17", features = ["crossterm"], optional = true}
 tui-logger = { version = "0.7", optional = true}
@@ -43,7 +43,7 @@ rocket = { version = "0.5.0-rc.1", git = "https://github.com/SergioBenitez/Rocke
 
 
 [features]
-default = ["http_rocket", "pocket-dimension", "constellation", "multipass", "raygun"]
+default = ["http_rocket", "pocket-dimension", "constellation", "multipass", "raygun", "ui", "cli"]
 http_rocket = ["rocket"]
 http_axum = ["axum"]
 
@@ -51,3 +51,6 @@ pocket-dimension = ["warp-pocket-dimension", "warp-pd-stretto"]
 constellation = ["warp-constellation", "warp-fs-memory", "warp-fs-storj"]
 multipass = ["warp-multipass"]
 raygun = ["warp-raygun"]
+
+ui = ["tui", "tui-logger"]
+cli = ["rustyline", "clap"]
