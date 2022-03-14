@@ -4,6 +4,8 @@ use crate::error::Error;
 use serde::{Deserialize, Serialize}; // https://docs.serde.rs/serde/
 use std::io::{Read, Write};
 use std::path::Path;
+#[allow(unused_imports)]
+use warp_common::cfg_if::cfg_if;
 
 // Acceptable module implementations for the FileSystem
 #[derive(Debug, Serialize, Deserialize)]
@@ -37,7 +39,7 @@ pub struct ModuleConfig {
     pub constellation: bool,
     pub pocket_dimension: bool,
     pub multipass: bool,
-    pub raygun: bool
+    pub raygun: bool,
 }
 
 impl Default for ModuleConfig {
@@ -57,7 +59,7 @@ pub struct ExtensionConfig {
     pub constellation: Vec<String>,
     pub pocket_dimension: Vec<String>,
     pub multipass: Vec<String>,
-    pub raygun: Vec<String>
+    pub raygun: Vec<String>,
 }
 
 /// Represents the global config for Warp

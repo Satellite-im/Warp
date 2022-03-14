@@ -12,4 +12,9 @@ repository = "https://github.com/Satellite-im/Warp"
 [dependencies]
 toml = "0.5"
 serde = { version = "1.0", features = ["derive"] }
+warp-common = { path = "../../utils/warp-common", features = ["async"]}
 thiserror = "1.0"
+
+[features]
+default = []
+async = []
