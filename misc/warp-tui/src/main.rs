@@ -1,9 +1,10 @@
 pub mod ui;
 
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
-use crossterm::{terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-}, execute};
+use crossterm::{
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use log::{error, info, warn, LevelFilter};
 use std::io;
 use std::sync::{Arc, Mutex};
@@ -14,11 +15,11 @@ use tui::Terminal;
 use tui_logger::{init_logger, set_default_level};
 use warp_common::Extension;
 use warp_constellation::constellation::Constellation;
+use warp_fs_memory::MemorySystem;
 use warp_hooks::hooks::Hooks;
 use warp_module::Module;
 use warp_pd_stretto::StrettoClient;
 use warp_pocket_dimension::PocketDimension;
-use warp_fs_memory::MemorySystem;
 
 //Using lazy static to handle global hooks for the time being
 lazy_static::lazy_static! {
@@ -262,12 +263,14 @@ impl<'a> WarpApp<'a> {
         ext.register(Box::new(cache.clone()));
 
         let cache: Arc<Mutex<Box<dyn PocketDimension>>> = Arc::new(Mutex::new(Box::new(cache)));
-        
+
         app.modules = Modules::new();
-        
+
         app.config.list = app.modules.modules.clone();
 
-        let fs = MemorySystem::new(Some(cache.clone()));
+        let mut fs = MemorySystem::new();
+        fs.set_cache(cache.clone());
+
         app.cache = Some(cache);
 
         ext.register(Box::new(fs.clone()));
@@ -408,19 +411,18 @@ impl<'a> WarpApp<'a> {
     //TODO: have it return a `Result` instead and load additional data
     pub async fn load_mock_data(&mut self) {
         let cargo_file = (
-            "Cargo.toml".to_string(), include_bytes!("../Cargo.toml").to_vec(),
+            "Cargo.toml".to_string(),
+            include_bytes!("../Cargo.toml").to_vec(),
         );
-        let main_file = (
-            "main.rs".to_string(), include_bytes!("main.rs").to_vec(),
-        );
-        let ui_file = (
-            "ui.rs".to_string(), include_bytes!("ui.rs").to_vec(),
-        );
+        let main_file = ("main.rs".to_string(), include_bytes!("main.rs").to_vec());
+        let ui_file = ("ui.rs".to_string(), include_bytes!("ui.rs").to_vec());
 
         match self
-            .filesystem.as_mut()
+            .filesystem
+            .as_mut()
             .unwrap()
-            .from_buffer(cargo_file.0.as_str(), &cargo_file.1).await
+            .from_buffer(cargo_file.0.as_str(), &cargo_file.1)
+            .await
         {
             Ok(()) => {}
             Err(e) => {
@@ -429,8 +431,11 @@ impl<'a> WarpApp<'a> {
         };
 
         match self
-            .filesystem.as_mut().unwrap()
-            .from_buffer(main_file.0.as_str(), &main_file.1).await
+            .filesystem
+            .as_mut()
+            .unwrap()
+            .from_buffer(main_file.0.as_str(), &main_file.1)
+            .await
         {
             Ok(()) => {}
             Err(e) => {
@@ -439,15 +444,17 @@ impl<'a> WarpApp<'a> {
         };
 
         match self
-            .filesystem.as_mut().unwrap()
-            .from_buffer(ui_file.0.as_str(), &ui_file.1).await
+            .filesystem
+            .as_mut()
+            .unwrap()
+            .from_buffer(ui_file.0.as_str(), &ui_file.1)
+            .await
         {
             Ok(()) => {}
             Err(e) => {
                 error!(target:"Error", "Error has occurred while uploading {}: {}", ui_file.0, e)
             }
         };
-
     }
 }
 
