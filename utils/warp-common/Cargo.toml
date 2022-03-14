@@ -17,6 +17,10 @@ chrono = { version = "0.4", features = ["serde"] }
 regex = "1.5.4"
 futures = { version = "0.3", optional = true }
 warp-module = { version = "0.1.0", path = "../warp-module" }
+cfg-if = "1.0"
+
+[target.'cfg(not(all(target_arch = "wasm32", not(any(target_os = "emscripten", target_os = "wasi", target_os="android")))))'.dependencies]
+dirs = "4.0"
 
 [target.'cfg(not(all(target_arch = "wasm32", not(any(target_os = "emscripten", target_os = "wasi")))))'.dependencies]
 uuid = { version = "0.8", features = ["serde", "v4"] }
@@ -24,7 +28,6 @@ tokio = { version = "1", features = ["full"], optional = true }
 tokio-util = { version = "0.6", features = ["full"], optional = true }
 async-trait = { version = "0.1", optional = true }
 bincode = { version = "1.3.3", optional = true }
-
 
 [target.'cfg(all(target_arch = "wasm32", not(any(target_os = "emscripten", target_os = "wasi"))))'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
