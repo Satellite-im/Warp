@@ -16,6 +16,7 @@ use s3::bucket::Bucket;
 use s3::creds::Credentials;
 use s3::region::Region;
 use s3::BucketConfiguration;
+use warp_common::anyhow::bail;
 
 use warp_constellation::item::Item;
 
@@ -127,8 +128,8 @@ impl StorjFilesystem {
         system
     }
 
-    pub fn set_cache(&mut self, cache: impl PocketDimension + 'static) {
-        self.cache = Some(Arc::new(Mutex::new(Box::new(cache))));
+    pub fn set_cache(&mut self, cache: Arc<Mutex<Box<dyn PocketDimension>>>) {
+        self.cache = Some(cache);
     }
 }
 
@@ -151,16 +152,7 @@ impl Constellation for StorjFilesystem {
     ///       directories.
     /// TODO: Implement cache
     async fn put(&mut self, name: &str, path: &str) -> warp_common::Result<()> {
-        let name = name.split("://").collect::<Vec<&str>>();
-
-        if name.len() != 2 {
-            return Err(Error::ToBeDetermined);
-        }
-
-        let (bucket, in_name) = (
-            name.get(0).ok_or(Error::ToBeDetermined)?,
-            name.get(1).ok_or(Error::ToBeDetermined)?,
-        );
+        let (bucket, name) = split_for(name)?;
 
         let mut fs = tokio::fs::File::open(path).await?;
         let size = fs.metadata().await?.len();
@@ -169,14 +161,14 @@ impl Constellation for StorjFilesystem {
         let code = client
             .bucket(bucket, true)
             .await?
-            .put_object_stream(&mut fs, in_name)
+            .put_object_stream(&mut fs, &name)
             .await?;
 
         if code != 200 {
             return Err(Error::ToBeDetermined);
         }
 
-        let mut file = warp_constellation::file::File::new(in_name);
+        let mut file = warp_constellation::file::File::new(&name);
         file.set_size(size as i64);
         file.set_hash(hash_file(path).await?);
 
@@ -198,21 +190,12 @@ impl Constellation for StorjFilesystem {
     ///       directories.
     /// TODO: Implement cache
     async fn get(&self, name: &str, path: &str) -> warp_common::Result<()> {
-        let name = name.split("://").collect::<Vec<&str>>();
-
-        if name.len() != 2 {
-            return Err(Error::ToBeDetermined);
-        }
-
-        let (bucket, out_name) = (
-            name.get(0).ok_or(Error::ToBeDetermined)?,
-            name.get(1).ok_or(Error::ToBeDetermined)?,
-        );
+        let (bucket, name) = split_for(name)?;
 
         //TODO: Implement cache
         let file = self
             .root_directory()
-            .get_child_by_path(out_name)
+            .get_child_by_path(&name)
             .and_then(Item::get_file)?;
 
         let mut fs = tokio::fs::File::create(path).await?;
@@ -220,7 +203,7 @@ impl Constellation for StorjFilesystem {
         let code = client
             .bucket(bucket, false)
             .await?
-            .get_object_stream(out_name, &mut fs)
+            .get_object_stream(&name, &mut fs)
             .await?;
 
         if code != 200 {
@@ -239,30 +222,21 @@ impl Constellation for StorjFilesystem {
     }
 
     async fn from_buffer(&mut self, name: &str, buffer: &Vec<u8>) -> warp_common::Result<()> {
-        let name = name.split("://").collect::<Vec<&str>>();
-
-        if name.len() != 2 {
-            return Err(Error::ToBeDetermined);
-        }
-
-        let (bucket, in_name) = (
-            name.get(0).ok_or(Error::ToBeDetermined)?,
-            name.get(1).ok_or(Error::ToBeDetermined)?,
-        );
+        let (bucket, name) = split_for(name)?;
 
         //TODO: Allow for custom bucket name
         let client = self.client.as_ref().ok_or(Error::Other)?;
         let code = client
             .bucket(bucket, true)
             .await?
-            .put_object(in_name, &buffer)
+            .put_object(&name, &buffer)
             .await?;
 
         if code.1 != 200 {
             return Err(warp_common::error::Error::Other);
         }
 
-        let mut file = warp_constellation::file::File::new(in_name);
+        let mut file = warp_constellation::file::File::new(&name);
         file.set_size(buffer.len() as i64);
         file.set_hash(hash_data(buffer));
 
@@ -279,29 +253,20 @@ impl Constellation for StorjFilesystem {
     }
 
     async fn to_buffer(&self, name: &str, buffer: &mut Vec<u8>) -> warp_common::Result<()> {
-        let name = name.split("://").collect::<Vec<&str>>();
-
-        if name.len() != 2 {
-            return Err(Error::ToBeDetermined);
-        }
-
-        let (bucket, out_name) = (
-            name.get(0).ok_or(Error::ToBeDetermined)?,
-            name.get(1).ok_or(Error::ToBeDetermined)?,
-        );
+        let (bucket, name) = split_for(name)?;
 
         //TODO: Implement cache
 
         let file = self
             .root_directory()
-            .get_child_by_path(out_name)
+            .get_child_by_path(&name)
             .and_then(Item::get_file)?;
 
         let client = self.client.as_ref().ok_or(Error::ToBeDetermined)?;
         let code = client
             .bucket(bucket, false)
             .await?
-            .get_object(out_name)
+            .get_object(&name)
             .await?;
 
         if code.1 != 200 {
@@ -320,30 +285,21 @@ impl Constellation for StorjFilesystem {
     }
 
     async fn remove(&mut self, path: &str) -> warp_common::Result<()> {
-        let name = path.split("://").collect::<Vec<&str>>();
-
-        if name.len() != 2 {
-            return Err(Error::ToBeDetermined);
-        }
-
-        let (bucket, name) = (
-            name.get(0).ok_or(Error::ToBeDetermined)?,
-            name.get(1).ok_or(Error::ToBeDetermined)?,
-        );
+        let (bucket, name) = split_for(path)?;
 
         let client = self.client.as_ref().ok_or(Error::Other)?;
 
         let code = client
             .bucket(bucket, false)
             .await?
-            .delete_object(name)
+            .delete_object(&name)
             .await?;
 
         if code.1 != 204 {
             return Err(Error::ToBeDetermined);
         }
 
-        self.root_directory_mut().remove_child(name)?;
+        self.root_directory_mut().remove_child(&name)?;
 
         Ok(())
     }
@@ -359,4 +315,28 @@ fn hash_data<S: AsRef<[u8]>>(data: S) -> String {
     hasher.update(&data.as_ref());
     let res = hasher.finalize().to_vec();
     hex::encode(res)
+}
+
+fn split_for<S: AsRef<str>>(name: S) -> anyhow::Result<(String, String)> {
+    let name = name.as_ref();
+    let split = if name.contains("://") {
+        let name = name.split("://").collect::<Vec<&str>>();
+
+        if name.len() != 2 {
+            bail!(Error::ToBeDetermined);
+        }
+
+        (
+            name.get(0)
+                .ok_or(Error::ToBeDetermined)
+                .map(|s| s.to_string())?,
+            name.get(1)
+                .ok_or(Error::ToBeDetermined)
+                .map(|s| s.to_string())?,
+        )
+    } else {
+        ("root".to_string(), name.to_string())
+    };
+
+    Ok(split)
 }
