@@ -45,7 +45,7 @@ fn fs_export(state: &State<FsSystem>) -> Json<Value> {
     Json(root)
 }
 
-pub async fn http_main(manage: ModuleManager) -> anyhow::Result<()> {
+pub async fn http_main(manage: &ModuleManager) -> anyhow::Result<()> {
     //TODO: This is temporary as things are setup
     let fs = manage.get_filesystem()?;
     let cache = manage.get_cache()?;

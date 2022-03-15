@@ -38,6 +38,8 @@ pub enum Error {
     DimensionMismatch,
     #[error("Data object provided already exist within the dimension")]
     DataObjectExist,
+    #[error("Data object does not exist within tje dimension")]
+    DataObjectNotFound,
 
     //Misc
     #[error(transparent)]

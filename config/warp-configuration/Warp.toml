@@ -1,7 +1,7 @@
 debug = true
 
 [http_api]
-enabled = false
+enabled = true
 
 [modules]
 pocket_dimension = true
