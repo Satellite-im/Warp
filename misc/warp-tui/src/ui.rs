@@ -14,7 +14,7 @@ impl<'a> WarpApp<'a> {
             Some(arg) if arg.eq("--no-border") => Layout::default()
                 .constraints(vec![Constraint::Length(3), Constraint::Min(0)])
                 .split(frame.size()),
-            None | _ => {
+            _ => {
                 let size = frame.size();
 
                 let block = Block::default()
@@ -199,7 +199,7 @@ impl<'a> WarpApp<'a> {
             // .filter(|item| item.is_file())
             .map(|item| {
                 Row::new(vec![
-                    format!("{}", item.name()),
+                    item.name().to_string(),
                     format!("{}", item.size()),
                     format!("{}", item.creation()),
                     if item.is_file() {
@@ -247,7 +247,7 @@ impl<'a> WarpApp<'a> {
             .modules
             .modules
             .iter()
-            .filter(|(_, active)| *active == true)
+            .filter(|(_, active)| *active)
             .map(|(module, _)| module)
             .map(|module| {
                 let data = cache.get_data(module.clone(), None).unwrap_or_default();
@@ -316,7 +316,7 @@ impl<'a> WarpApp<'a> {
                 .state
                 .selected()
                 .and_then(|index| self.extensions.list.get(index))
-                .and_then(|info| Some((info.name(), info.description())))
+                .map(|info| (info.name(), info.description()))
             {
                 Some((name, desc)) => {
                     vec![

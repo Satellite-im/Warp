@@ -69,7 +69,7 @@ impl StorjClient {
                 let config = BucketConfiguration::default();
                 let create_bucket_response =
                     Bucket::create(bucket.as_ref(), region.clone(), creds.clone(), config).await?;
-                return Ok(create_bucket_response.bucket);
+                Ok(create_bucket_response.bucket)
             }
             false => {
                 let bucket = Bucket::new(bucket.as_ref(), region, creds)?;
@@ -81,7 +81,7 @@ impl StorjClient {
 
 impl Extension for StorjFilesystem {
     fn id(&self) -> String {
-        format!("warp-fs-storj")
+        String::from("warp-fs-storj")
     }
 
     fn name(&self) -> String {
@@ -229,7 +229,7 @@ impl Constellation for StorjFilesystem {
         let code = client
             .bucket(bucket, true)
             .await?
-            .put_object(&name, &buffer)
+            .put_object(&name, buffer)
             .await?;
 
         if code.1 != 200 {

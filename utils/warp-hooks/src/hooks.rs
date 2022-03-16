@@ -67,7 +67,7 @@ pub struct Hooks {
 /// ```
 impl<A: AsRef<str>> From<Vec<A>> for Hooks {
     fn from(h: Vec<A>) -> Self {
-        let hooks = h.iter().map(|h| Hook::from(h)).collect();
+        let hooks = h.iter().map(Hook::from).collect();
         Hooks {
             hooks,
             subscribers: HashMap::new(),

@@ -113,7 +113,7 @@ async fn main() -> anyhow::Result<()> {
     // If cache is abled, check cache for filesystem structure and import it into constellation
     if let Ok(cache) = manager.get_cache() {
         if let Ok(fs) = manager.get_filesystem() {
-            if let Err(_) = import_from_cache(cache.clone(), fs.clone()) {
+            if import_from_cache(cache.clone(), fs.clone()).is_err() {
                 println!("Warning: No structure available from cache; Skip importing");
             }
         }

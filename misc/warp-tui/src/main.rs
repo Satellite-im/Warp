@@ -208,22 +208,21 @@ pub struct Modules {
 
 impl Modules {
     pub fn new() -> Self {
-        let mut modules = Modules::default();
-        //Default values
-        modules.modules = vec![
+        let modules = vec![
             (Module::FileSystem, true),
             (Module::Cache, true),
             (Module::Accounts, false),
             (Module::Messaging, false),
         ];
-        modules
+
+        Modules { modules }
     }
 }
 
 impl<'a> WarpApp<'a> {
     pub fn new(title: &'a str) -> anyhow::Result<Self> {
         let mut app = WarpApp::default();
-        app.title = title.as_ref();
+        app.title = title;
 
         let mut hook_system = HOOKS.lock().unwrap();
 
@@ -246,7 +245,7 @@ impl<'a> WarpApp<'a> {
         let trigger_list = app.hooks_trigger.clone();
         hook_system.subscribe("FILESYSTEM::NEW_FILE", move |hook, data| {
             info!(target:"Warp", "{}, with {} bytes, was uploaded to the filesystem", data.payload::<(String, Vec<u8>)>().unwrap().0, data.size);
-            trigger_list.lock().unwrap().push(format!("{}", hook.to_string()))
+            trigger_list.lock().unwrap().push(hook.to_string())
         })?;
 
         app.tabs = Tabs::new(vec!["Main", "Extensions", "Config"]);

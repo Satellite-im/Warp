@@ -34,7 +34,7 @@ use crate::manager::ModuleManager;
 
 #[get("/")]
 fn index() -> String {
-    format!("Hello, World!")
+    String::from("Hello, World!")
 }
 
 #[get("/fs/export")]

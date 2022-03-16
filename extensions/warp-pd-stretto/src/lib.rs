@@ -23,7 +23,7 @@ impl Extension for StrettoClient {
     }
 
     fn description(&self) -> String {
-        format!("Pocket Dimension implementation with Stretto, a high performance thread-safe memory cache written in rust.")
+        String::from("Pocket Dimension implementation with Stretto, a high performance thread-safe memory cache written in rust.")
     }
 
     fn module(&self) -> Module {
@@ -54,12 +54,11 @@ impl PocketDimension for StrettoClient {
             return Err(warp_common::error::Error::Other);
         }
         if let Some(mut value) = self.client.get_mut(&dimension) {
-            let objects = value
+            let version = value
                 .value()
                 .iter()
                 .filter(|item| item.id == data.id)
-                .collect::<Vec<&DataObject>>();
-            let version = objects.len() as u32;
+                .count() as u32;
             data.version = version;
             (*value.value_mut()).push(data);
             self.client
@@ -77,7 +76,7 @@ impl PocketDimension for StrettoClient {
     fn has_data(&mut self, dimension: Module, query: &QueryBuilder) -> warp_common::Result<()> {
         let data = self
             .client
-            .get(&dimension.into())
+            .get(&dimension)
             .ok_or(warp_common::error::Error::Other)?;
         execute(data.value(), query).map(|_| ())
     }
@@ -89,7 +88,7 @@ impl PocketDimension for StrettoClient {
     ) -> std::result::Result<Vec<DataObject>, warp_common::error::Error> {
         let data = self
             .client
-            .get(&dimension.into())
+            .get(&dimension)
             .ok_or(warp_common::error::Error::Other)?;
 
         let data = data.value();
@@ -155,7 +154,7 @@ pub(crate) fn execute(
                 Comparator::Eq => {
                     if let Some(result) = object.get(key) {
                         if result == val {
-                            if list.contains(&data) {
+                            if list.contains(data) {
                                 continue;
                             }
                             list.push(data.clone());
@@ -165,7 +164,7 @@ pub(crate) fn execute(
                 Comparator::Ne => {
                     if let Some(result) = object.get(key) {
                         if result != val {
-                            if list.contains(&data) {
+                            if list.contains(data) {
                                 continue;
                             }
                             list.push(data.clone());
@@ -177,7 +176,7 @@ pub(crate) fn execute(
                         let result = result.as_i64().unwrap();
                         let val = val.as_i64().unwrap();
                         if result >= val {
-                            if list.contains(&data) {
+                            if list.contains(data) {
                                 continue;
                             }
                             list.push(data.clone());
@@ -189,7 +188,7 @@ pub(crate) fn execute(
                         let result = result.as_i64().unwrap();
                         let val = val.as_i64().unwrap();
                         if result > val {
-                            if list.contains(&data) {
+                            if list.contains(data) {
                                 continue;
                             }
                             list.push(data.clone());
@@ -201,7 +200,7 @@ pub(crate) fn execute(
                         let result = result.as_i64().unwrap();
                         let val = val.as_i64().unwrap();
                         if result <= val {
-                            if list.contains(&data) {
+                            if list.contains(data) {
                                 continue;
                             }
                             list.push(data.clone());
@@ -213,7 +212,7 @@ pub(crate) fn execute(
                         let result = result.as_i64().unwrap();
                         let val = val.as_i64().unwrap();
                         if result < val {
-                            if list.contains(&data) {
+                            if list.contains(data) {
                                 continue;
                             }
                             list.push(data.clone());

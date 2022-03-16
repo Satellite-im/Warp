@@ -55,10 +55,10 @@ impl IpfsFileSystem {
 
 impl Extension for IpfsFileSystem {
     fn id(&self) -> String {
-        format!("warp-fs-ipfs")
+        String::from("warp-fs-ipfs")
     }
     fn name(&self) -> String {
-        format!("IPFS FileSystem")
+        String::from("IPFS FileSystem")
     }
 
     fn module(&self) -> Module {
