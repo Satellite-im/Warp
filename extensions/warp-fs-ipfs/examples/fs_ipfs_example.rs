@@ -16,17 +16,17 @@ async fn main() -> warp_common::anyhow::Result<()> {
         include_bytes!("fs_ipfs_example.rs").to_vec()
     };
 
-    system.from_buffer("/testfile", &file).await?;
+    system.from_buffer("testfile", &file).await?;
 
     println!("Debug results: {:?}", system.root_directory());
 
     let mut buffer: Vec<u8> = vec![];
 
-    system.to_buffer("/testfile", &mut buffer).await?;
+    system.to_buffer("testfile", &mut buffer).await?;
 
     println!("Output: {}", String::from_utf8_lossy(&buffer).to_string());
 
-    system.remove("/testfile").await?;
+    system.remove("testfile").await?;
 
     println!("Debug results: {:?}", system.root_directory());
     Ok(())

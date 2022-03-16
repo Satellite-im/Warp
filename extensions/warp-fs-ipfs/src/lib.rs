@@ -88,22 +88,20 @@ impl Constellation for IpfsFileSystem {
             )));
         }
 
-        if !name.starts_with('/') {
-            return Err(Error::InvalidPath);
-        };
+        let name = affix_root(name);
 
         let fs = std::fs::File::open(path)?;
         let size = fs.metadata()?.len();
 
         self.client
-            .files_write(name, true, true, fs)
+            .files_write(&name, true, true, fs)
             .await
             .map_err(|_| Error::ToBeDetermined)?;
 
         // Get the file stat from ipfs
         let stat = self
             .client
-            .files_stat(name)
+            .files_stat(&name)
             .await
             .map_err(|_| Error::ToBeDetermined)?;
 
@@ -112,7 +110,7 @@ impl Constellation for IpfsFileSystem {
         if stat.size != size {
             //Delete from ipfs
             self.client
-                .files_rm(name, false)
+                .files_rm(&name, false)
                 .await
                 .map_err(|_| Error::ToBeDetermined)?;
 
@@ -153,45 +151,63 @@ impl Constellation for IpfsFileSystem {
         //     )));
         // }
 
-        if !name.starts_with('/') {
-            return Err(Error::InvalidPath);
-        };
+        let name = affix_root(name);
 
-        // let file = self
-        //     .root_directory()
-        //     .get_child_by_path(&name)
-        //     .and_then(Item::get_file)?;
+        let file = self
+            .root_directory()
+            .get_child_by_path(&name)
+            .and_then(Item::get_file)?;
 
         let mut fs = tokio::fs::File::create(path).await?;
 
         let stream = self
             .client
-            .files_read(name)
+            .files_read(&name)
             .map_err(|_| std::io::Error::from(ErrorKind::Other));
 
         let mut reader_stream = StreamReader::new(stream);
 
         tokio::io::copy(&mut reader_stream, &mut fs).await?;
 
+        //Compare size though here we should compare hash instead.
+
+        let size = tokio::fs::metadata(path).await?.len();
+
+        let stat = self
+            .client
+            .files_stat(&name)
+            .await
+            .map_err(|_| Error::ToBeDetermined)?;
+
+        //check and compare size and if its different from local size to error
+
+        if stat.size != size {
+            //Delete from ipfs
+            self.client
+                .files_rm(&name, false)
+                .await
+                .map_err(|_| Error::ToBeDetermined)?;
+
+            return Err(Error::ToBeDetermined);
+        }
+
         Ok(())
     }
 
     async fn from_buffer(&mut self, name: &str, buffer: &Vec<u8>) -> warp_common::Result<()> {
-        if !name.starts_with('/') {
-            return Err(Error::InvalidPath);
-        };
+        let name = affix_root(name);
 
         let fs = std::io::Cursor::new(buffer.clone());
-
+        println!("{name}");
         self.client
-            .files_write(name, true, true, fs)
+            .files_write(&name, true, true, fs)
             .await
             .map_err(|_| Error::ToBeDetermined)?;
-
+        println!("here");
         // Get the file stat from ipfs
         let stat = self
             .client
-            .files_stat(name)
+            .files_stat(&name)
             .await
             .map_err(|_| Error::ToBeDetermined)?;
 
@@ -201,7 +217,7 @@ impl Constellation for IpfsFileSystem {
         if stat.size != size {
             //Delete from ipfs
             self.client
-                .files_rm(name, false)
+                .files_rm(&name, false)
                 .await
                 .map_err(|_| Error::ToBeDetermined)?;
 
@@ -231,9 +247,7 @@ impl Constellation for IpfsFileSystem {
     }
 
     async fn to_buffer(&self, name: &str, buffer: &mut Vec<u8>) -> warp_common::Result<()> {
-        if !name.starts_with('/') {
-            return Err(Error::InvalidPath);
-        };
+        let name = affix_root(name);
 
         let _file = self
             .root_directory()
@@ -242,7 +256,7 @@ impl Constellation for IpfsFileSystem {
 
         let stream = self
             .client
-            .files_read(name)
+            .files_read(&name)
             .map_err(|_| std::io::Error::from(ErrorKind::Other));
 
         let mut reader_stream = StreamReader::new(stream);
@@ -252,9 +266,7 @@ impl Constellation for IpfsFileSystem {
     }
 
     async fn remove(&mut self, name: &str) -> warp_common::Result<()> {
-        if !name.starts_with('/') {
-            return Err(Error::InvalidPath);
-        };
+        let name = affix_root(name);
 
         //TODO: Resolve to full directory
         if !self.root_directory().has_child(&name[1..]) {
@@ -264,11 +276,21 @@ impl Constellation for IpfsFileSystem {
         }
 
         self.client
-            .files_rm(name, false)
+            .files_rm(&name, false)
             .await
             .map_err(|_| Error::ToBeDetermined)?;
 
         self.root_directory_mut().remove_child(&name[1..])?;
         Ok(())
     }
+}
+
+fn affix_root<S: AsRef<str>>(name: S) -> String {
+    let name = String::from(name.as_ref());
+    let name = match name.starts_with('/') {
+        true => name,
+        false => format!("/{}", name),
+    };
+
+    name
 }
