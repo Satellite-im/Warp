@@ -122,6 +122,7 @@ async fn main() -> anyhow::Result<()> {
     //TODO: Implement configuration and have it be linked up with any flags
 
     match (cli.ui, cli.cli, cli.http) {
+        //<TUI> <CLI> <HTTP>
         (true, false, false) => todo!(),
         (false, true, false) => todo!(),
         (false, false, true) => http::http_main(&manager).await?,
