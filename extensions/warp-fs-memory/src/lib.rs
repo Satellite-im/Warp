@@ -65,7 +65,6 @@ impl MemorySystemInternal {
 }
 
 #[warp_common::async_trait::async_trait]
-
 impl Constellation for MemorySystem {
     fn modified(&self) -> DateTime<Utc> {
         self.modified
@@ -152,6 +151,9 @@ impl Constellation for MemorySystem {
 }
 
 impl Extension for MemorySystem {
+    fn id(&self) -> String {
+        format!("warp-fs-memory")
+    }
     fn name(&self) -> String {
         String::from("Basic In-Memory FileSystem")
     }

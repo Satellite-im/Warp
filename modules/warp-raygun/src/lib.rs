@@ -1,7 +1,7 @@
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::uuid::Uuid;
-use warp_common::Result;
+use warp_common::{Extension, Result};
 
 pub type Callback = Box<dyn Fn()>;
 
@@ -51,7 +51,7 @@ pub enum EmbedState {
     Disable,
 }
 
-pub trait RayGun: Sync + Send {
+pub trait RayGun: Extension {
     /// Retreive all messages from a conversation
     fn get_messages(
         &self,

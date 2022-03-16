@@ -27,7 +27,7 @@ impl Extension for StrettoClient {
     }
 
     fn module(&self) -> Module {
-        Module::FileSystem
+        Module::Cache
     }
 }
 

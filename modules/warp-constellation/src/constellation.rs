@@ -2,11 +2,11 @@ use crate::{directory::Directory, item::Item};
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::error::Error;
 use warp_common::serde::{Deserialize, Serialize};
+use warp_common::Extension;
 use warp_common::Result;
-
 /// Interface that would provide functionality around the filesystem.
 #[warp_common::async_trait::async_trait]
-pub trait Constellation: Sync + Send {
+pub trait Constellation: Extension + Sync + Send {
     /// Returns the version for `Constellation`
     fn version(&self) -> ConstellationVersion {
         ConstellationVersion::from((0, 1, 0))
