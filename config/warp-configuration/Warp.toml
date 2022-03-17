@@ -10,7 +10,7 @@ multipass = false
 raygun = false
 
 [extensions]
-constellation = ["warp-fs-storj", "warp-fs-memory"]
+constellation = ["warp-fs-ipfs", "warp-fs-storj", "warp-fs-memory"]
 pocket_dimension = ["warp-pd-stretto"]
 raygun = []
 multipass = []

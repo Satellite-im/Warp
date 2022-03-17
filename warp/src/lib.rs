@@ -9,6 +9,9 @@ pub use warp_fs_memory::MemorySystem;
 #[cfg(feature = "constellation")]
 pub use warp_fs_storj::{StorjClient, StorjFilesystem};
 
+#[cfg(feature = "constellation")]
+pub use warp_fs_ipfs::IpfsFileSystem;
+
 #[cfg(feature = "multipass")]
 pub use warp_multipass::{identity::*, MultiPass};
 

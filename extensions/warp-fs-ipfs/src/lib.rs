@@ -157,7 +157,7 @@ impl Constellation for IpfsFileSystem {
 
         let name = affix_root(name);
 
-        let file = self
+        let _file = self
             .root_directory()
             .get_child_by_path(&name)
             .and_then(Item::get_file)?;

@@ -18,7 +18,8 @@ tui = {version = "0.17", features = ["crossterm"], optional = true}
 tui-logger = { version = "0.7", optional = true}
 rustyline = { version = "9.1", optional = true}
 
-warp-configuration = { path = "../config/warp-configuration" }
+warp-tesseract = { path = "../utils/warp-tesseract" }
+warp-configuration = { path = "../config/warp-configuration", features = ["async"] }
 
 #modules 
 warp-constellation = { path = "../modules/warp-constellation", optional = true}
@@ -33,6 +34,7 @@ warp-data = { path = "../utils/warp-data" }
 warp-common = { path = "../utils/warp-common", features = ["async"]}
 
 #extensions
+warp-fs-ipfs = { path = "../extensions/warp-fs-ipfs", optional = true}
 warp-fs-memory = { path = "../extensions/warp-fs-memory", optional = true }
 warp-fs-storj = { path = "../extensions/warp-fs-storj", optional = true }
 warp-pd-stretto = { path = "../extensions/warp-pd-stretto", optional = true }
@@ -48,7 +50,7 @@ http_rocket = ["rocket"]
 http_axum = ["axum"]
 
 pocket-dimension = ["warp-pocket-dimension", "warp-pd-stretto"]
-constellation = ["warp-constellation", "warp-fs-memory", "warp-fs-storj"]
+constellation = ["warp-constellation", "warp-fs-memory", "warp-fs-storj", "warp-fs-ipfs"]
 multipass = ["warp-multipass"]
 raygun = ["warp-raygun"]
 
