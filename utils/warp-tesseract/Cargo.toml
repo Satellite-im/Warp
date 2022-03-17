@@ -12,7 +12,7 @@ aes-gcm = { version = "0.9", optional = true }
 rand = { version = "0.8", optional = true }
 
 [features]
-default = ["use_aes_gcm"]
+default = ["async", "use_aes_gcm"]
 async = ["warp-common/async"]
 use_botan = ["botan"]
 use_aes_gcm = ["aes-gcm", "rand"]
