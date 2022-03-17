@@ -22,3 +22,17 @@ allow for storage of both `File` and `Directory`.
 
 [More about Directory](constellation/directory.md)...
 
+
+## Extensions
+
+<img src="http://i.imgur.com/L2Un17b.png" alt="IPFS" height="50"/>
+
+Running with IPFS for the backbone of remote storage, you can enable this native extension to automatically upload files to the IPFS ecosystem as well as remotely store your index files on chain. Remote pinning managed courtesy of Satellite.
+
+More info here: [IPFS Extension](extensions/ipfs)
+
+<img src="https://assets-global.website-files.com/602eda09fc78afc76e9706b6/606dd3c96f177cf1635d2284_Storj%20Logo%20-%20White.svg" alt="STORJ" height="50">
+
+Running with Storj for the backbone of remote storage, you can enable this native extension to automatically upload files to the Storj ecosystem as well as remotely store your index files on chain. Remote pinning managed courtesy of Satellite. Storj includes a [150GB Free Tier](https://www.storj.io/pricing) which is handy for development.
+
+More info here: [IPFS Extension](extensions/ipfs)
