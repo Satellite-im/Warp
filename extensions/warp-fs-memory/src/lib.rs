@@ -65,7 +65,6 @@ impl MemorySystemInternal {
 }
 
 #[warp_common::async_trait::async_trait]
-
 impl Constellation for MemorySystem {
     fn modified(&self) -> DateTime<Utc> {
         self.modified
@@ -84,7 +83,7 @@ impl Constellation for MemorySystem {
         name: &str,
         buf: &Vec<u8>,
     ) -> std::result::Result<(), warp_common::error::Error> {
-        let mut internal_file = item::file::File::new(name.as_ref());
+        let mut internal_file = item::file::File::new(name);
         let bytes = internal_file.insert_buffer(buf.clone()).unwrap();
         self.internal
             .0
@@ -122,28 +121,24 @@ impl Constellation for MemorySystem {
             let cache = cache.lock().unwrap();
             let mut query = QueryBuilder::default();
             query.r#where("name", name.to_string())?;
-            match cache.get_data(Module::FileSystem, Some(&query)) {
-                Ok(d) => {
-                    //get last
-                    if !d.is_empty() {
-                        let mut list = d.clone();
-                        let obj = list.pop().unwrap();
-                        let (in_name, in_buf) = obj.payload::<(String, Vec<u8>)>()?;
-                        if name != in_name {
-                            return Err(Error::Other); // mismatch with names
-                        }
-                        *buf = in_buf;
-                        return Ok(());
+            if let Ok(list) = cache.get_data(Module::FileSystem, Some(&query)) {
+                //get last
+                if !list.is_empty() {
+                    let obj = list.last().unwrap();
+                    let (in_name, in_buf) = obj.payload::<(String, Vec<u8>)>()?;
+                    if name != in_name {
+                        return Err(Error::Other); // mismatch with names
                     }
+                    *buf = in_buf;
+                    return Ok(());
                 }
-                Err(_) => {}
             }
         }
 
         let file = self
             .internal
             .0
-            .get_item_from_path(name.to_string())
+            .get_item_from_path(String::from(name))
             .map_err(|_| Error::Other)?;
 
         *buf = file.data();
@@ -152,6 +147,9 @@ impl Constellation for MemorySystem {
 }
 
 impl Extension for MemorySystem {
+    fn id(&self) -> String {
+        String::from("warp-fs-memory")
+    }
     fn name(&self) -> String {
         String::from("Basic In-Memory FileSystem")
     }

@@ -27,8 +27,12 @@ pub struct FlatfileStorage {
 }
 
 impl Extension for FlatfileStorage {
+    fn id(&self) -> String {
+        String::from("warp-pd-flatfile")
+    }
+
     fn name(&self) -> String {
-        format!("Flatfile Cache Storage")
+        String::from("Flatfile Cache Storage")
     }
 
     fn module(&self) -> Module {

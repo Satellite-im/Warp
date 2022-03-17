@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use warp_common::error::Error;
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::serde_json::Value;
-use warp_common::Result;
+use warp_common::{Extension, Result};
 use warp_data::DataObject;
 use warp_module::Module;
 use warp_pocket_dimension::query::{Comparator, QueryBuilder};
@@ -18,6 +18,16 @@ pub struct MemoryCache(HashMap<Module, Vec<DataObject>>);
 impl MemoryCache {
     pub fn flush(&mut self) {
         let _ = self.0.drain().collect::<Vec<_>>();
+    }
+}
+
+impl Extension for MemoryCache {
+    fn name(&self) -> String {
+        "MemoryCache".to_string()
+    }
+
+    fn module(&self) -> Module {
+        Module::Cache
     }
 }
 
@@ -50,11 +60,7 @@ impl PocketDimension for MemoryCache {
         execute(data, query).map(|_| ())
     }
 
-    fn get_data(
-        &self,
-        dimension: Module,
-        query: Option<&QueryBuilder>,
-    ) -> Result<Vec<DataObject>> {
+    fn get_data(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<Vec<DataObject>> {
         let data = self.0.get(&dimension).ok_or(Error::Other)?;
         match query {
             Some(query) => execute(data, query),

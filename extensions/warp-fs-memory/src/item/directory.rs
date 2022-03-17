@@ -45,7 +45,6 @@ impl Item for Directory {
     fn to_file_mut(&mut self) -> crate::Result<&mut File> {
         Err(Error::Other)
     }
-
 }
 
 impl ItemMut for Directory {

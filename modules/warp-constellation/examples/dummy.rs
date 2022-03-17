@@ -1,5 +1,6 @@
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::serde::{Deserialize, Serialize};
+use warp_common::{Extension, Module};
 use warp_constellation::constellation::Constellation;
 use warp_constellation::directory::Directory;
 use warp_constellation::file::File;
@@ -17,6 +18,16 @@ impl Default for DummyFileSystem {
             index: Directory::new("root"),
             modified: Utc::now(),
         }
+    }
+}
+
+impl Extension for DummyFileSystem {
+    fn name(&self) -> String {
+        "Dummy Filesystem".to_string()
+    }
+
+    fn module(&self) -> Module {
+        Module::FileSystem
     }
 }
 

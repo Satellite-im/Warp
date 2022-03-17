@@ -1,12 +1,14 @@
 pub mod http;
 pub mod manager;
-pub mod terminal;
+// pub mod terminal;
 
 use crate::anyhow::bail;
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use manager::ModuleManager;
 use std::sync::{Arc, Mutex};
 use warp::StrettoClient;
+#[allow(unused_imports)]
+use warp_common::dirs;
 use warp_common::error::Error;
 use warp_common::{anyhow, tokio};
 use warp_configuration::Config;
@@ -14,12 +16,15 @@ use warp_constellation::constellation::{Constellation, ConstellationDataType};
 use warp_data::DataObject;
 use warp_module::Module;
 use warp_pocket_dimension::PocketDimension;
+use warp_tesseract::{generate, Tesseract};
 
 #[derive(Debug, Parser)]
 #[clap(version, about, long_about = None)]
 struct CommandArgs {
     #[clap(short, long)]
     verbose: bool,
+    #[clap(subcommand)]
+    command: Option<Command>,
     //TODO: Make into a separate subcommand
     #[clap(long)]
     http: bool,
@@ -29,6 +34,13 @@ struct CommandArgs {
     cli: bool,
     #[clap(short, long)]
     config: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    Import { key: String, value: String },
+    Export { key: String },
+    Init { path: Option<String> },
 }
 
 fn default_config() -> warp_configuration::Config {
@@ -46,7 +58,7 @@ fn default_config() -> warp_configuration::Config {
             raygun: false,
         },
         extensions: warp_configuration::ExtensionConfig {
-            constellation: vec!["warp-fs-memory", "warp-fs-storj"]
+            constellation: vec!["warp-fs-ipfs", "warp-fs-memory", "warp-fs-storj"]
                 .iter()
                 .map(|e| e.to_string())
                 .collect(),
@@ -86,13 +98,20 @@ async fn main() -> anyhow::Result<()> {
         for extension in config.extensions.constellation {
             //TODO: Implement a cfg check to determine that the feature is enabled for module and extension.
             let cache = manager.get_cache()?;
+            if extension.eq("warp-fs-ipfs") {
+                let mut handle = warp::IpfsFileSystem::new();
 
-            if extension.eq("warp-fs-storj") {
+                if config.modules.pocket_dimension {
+                    handle.set_cache(cache.clone());
+                }
+                manager.set_filesystem(handle);
+                break;
+            } else if extension.eq("warp-fs-storj") {
                 //TODO: Use keys from configuration rather than depend on enviroment variables
                 let env_akey = std::env::var("STORJ_ACCESS_KEY")?;
                 let env_skey = std::env::var("STORJ_SECRET_KEY")?;
 
-                let mut handle = warp_fs_storj::StorjFilesystem::new(env_akey, env_skey);
+                let mut handle = warp::StorjFilesystem::new(env_akey, env_skey);
 
                 if config.modules.pocket_dimension {
                     handle.set_cache(cache.clone());
@@ -100,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
                 manager.set_filesystem(handle);
                 break;
             } else if extension.eq("warp-fs-memory") {
-                let mut handle = warp_fs_memory::MemorySystem::new();
+                let mut handle = warp::MemorySystem::new();
                 if config.modules.pocket_dimension {
                     handle.set_cache(cache.clone());
                 }
@@ -113,7 +132,7 @@ async fn main() -> anyhow::Result<()> {
     // If cache is abled, check cache for filesystem structure and import it into constellation
     if let Ok(cache) = manager.get_cache() {
         if let Ok(fs) = manager.get_filesystem() {
-            if let Err(_) = import_from_cache(cache.clone(), fs.clone()) {
+            if import_from_cache(cache.clone(), fs.clone()).is_err() {
                 println!("Warning: No structure available from cache; Skip importing");
             }
         }
@@ -121,15 +140,40 @@ async fn main() -> anyhow::Result<()> {
 
     //TODO: Implement configuration and have it be linked up with any flags
 
-    match (cli.ui, cli.cli, cli.http) {
-        (true, false, false) => todo!(),
-        (false, true, false) => todo!(),
-        (false, false, true) => http::http_main(&manager).await?,
-        (false, false, false) => {
+    match (cli.ui, cli.cli, cli.http, cli.command) {
+        //<TUI> <CLI> <HTTP>
+        (true, false, false, None) => todo!(),
+        (false, true, false, None) => todo!(),
+        (false, false, true, None) => http::http_main(&manager).await?,
+        (false, false, false, None) => {
             if config.http_api.enabled {
                 http::http_main(&manager).await?
             }
         }
+        //TODO: Store keyfile and datastore in a specific path.
+        (false, false, false, Some(command)) => match command {
+            Command::Import { key, value } => {
+                let mut key_file = tokio::fs::read("keyfile").await?;
+                let mut tesseract = Tesseract::load_from_file("datastore")
+                    .await
+                    .unwrap_or_default();
+                tesseract.set(&key_file, &key, &value)?;
+                tesseract.save_to_file("datastore").await?;
+                key_file.clear();
+            }
+            Command::Export { key } => {
+                let mut key_file = tokio::fs::read("keyfile").await?;
+                let tesseract = Tesseract::load_from_file("datastore").await?;
+                let data = tesseract.retrieve(&key_file, &key)?;
+                println!("Value of: {}", data);
+                key_file.clear();
+            }
+            Command::Init { .. } => {
+                //TODO: Do more initializing and rely on path
+                let key = generate(28)?;
+                tokio::fs::write("keyfile", key).await?;
+            }
+        },
         _ => println!("You can only select one option"),
     };
 

@@ -1,7 +1,7 @@
 pub mod query;
 
 use crate::query::QueryBuilder;
-use warp_common::Result;
+use warp_common::{Extension, Result};
 use warp_data::DataObject;
 use warp_module::Module;
 
@@ -16,7 +16,7 @@ pub enum DimensionDataType {
 /// for caching frequently used data so that request can be made faster. This makes it easy by sorting the data per module, as well
 /// as allowing querying by specific information stored inside the payload of the `DataObject` for a quick turnaround for search
 /// results.
-pub trait PocketDimension: Send + Sync {
+pub trait PocketDimension: Extension + Send + Sync {
     /// Used to add data to `PocketDimension` for `Module`
     fn add_data(&mut self, dimension: Module, data: &DataObject) -> Result<()>;
 
@@ -24,11 +24,7 @@ pub trait PocketDimension: Send + Sync {
     fn has_data(&mut self, dimension: Module, query: &QueryBuilder) -> Result<()>;
 
     /// Used to obtain a list of `DataObject` for `Module`
-    fn get_data(
-        &self,
-        dimension: Module,
-        query: Option<&QueryBuilder>,
-    ) -> Result<Vec<DataObject>>;
+    fn get_data(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<Vec<DataObject>>;
 
     /// Returns the total size within the `Module`
     fn size(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<i64>;

@@ -24,6 +24,10 @@ pub use tokio;
 
 #[cfg(feature = "async")]
 #[cfg(not(target_family = "wasm"))]
+pub use tokio_stream;
+
+#[cfg(feature = "async")]
+#[cfg(not(target_family = "wasm"))]
 pub use tokio_util;
 
 #[cfg(feature = "async")]

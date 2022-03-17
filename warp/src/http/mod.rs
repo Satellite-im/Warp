@@ -28,7 +28,7 @@ use crate::manager::ModuleManager;
 
 #[get("/")]
 fn index() -> String {
-    format!("Hello, World!")
+    String::from("Hello, World!")
 }
 
 pub async fn http_main(manage: &ModuleManager) -> anyhow::Result<()> {
