@@ -51,6 +51,10 @@ impl IpfsFileSystem {
         system.client = client;
         Ok(system)
     }
+
+    pub fn set_cache(&mut self, cache: Arc<Mutex<Box<dyn PocketDimension>>>) {
+        self.cache = Some(cache);
+    }
 }
 
 impl Extension for IpfsFileSystem {
@@ -198,12 +202,10 @@ impl Constellation for IpfsFileSystem {
         let name = affix_root(name);
 
         let fs = std::io::Cursor::new(buffer.clone());
-        println!("{name}");
         self.client
             .files_write(&name, true, true, fs)
             .await
             .map_err(|_| Error::ToBeDetermined)?;
-        println!("here");
         // Get the file stat from ipfs
         let stat = self
             .client
