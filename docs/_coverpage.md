@@ -10,7 +10,7 @@ by Satellite.im
 - Distributed Encrypted Data
 - Run Anywhere (Web, Mobile, Toasters Probably)
 
-[Get Started](#Warp)
+[>>> Jump](#Warp)
 
 
 <!-- background color -->

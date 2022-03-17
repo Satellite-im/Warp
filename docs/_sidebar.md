@@ -6,11 +6,8 @@
   - [Overview](data/overview.md)
 - **Hooks**
   - [Overview](hooks/overview.md)
-- **Modules**
-  - [Overview](modules/overview)
-  - [Types](modules/types.md)
-  - [Creating](modules/create.md)
-  - [Interface](modules/interfacing.md)
+- **Extensions**
+  - [Overview](extensions/overview)
 - **Pocket Dimension (Cache)**
   - [Overview](pocketdimension/overview.md)
   - [Interface](pocketdimension/interface.md)
@@ -30,5 +27,5 @@
   - [Overview](tesseract/overview.md)
 - **Quantum Entanglement (P2P)**
   - [Overview](qep2p/Overview.md)
-- **API**
+- **Retro Relay**
   - [Overview](api/overview.md)
