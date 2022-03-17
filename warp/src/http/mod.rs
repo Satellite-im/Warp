@@ -1,14 +1,8 @@
 use std::sync::{Arc, Mutex};
-use warp::{Constellation, ConstellationDataType, PocketDimension};
+use warp::{PocketDimension};
 use warp_common::anyhow;
 
-pub struct FsSystem(Arc<Mutex<Box<dyn Constellation>>>);
-
-impl AsRef<Arc<Mutex<Box<dyn Constellation>>>> for FsSystem {
-    fn as_ref(&self) -> &Arc<Mutex<Box<dyn Constellation>>> {
-        &self.0
-    }
-}
+mod hconstellation;
 
 pub struct CacheSystem(Arc<Mutex<Box<dyn PocketDimension>>>);
 
@@ -37,14 +31,6 @@ fn index() -> String {
     format!("Hello, World!")
 }
 
-#[get("/fs/export")]
-fn fs_export(state: &State<FsSystem>) -> Json<Value> {
-    let fs = state.as_ref().lock().unwrap();
-    let data = fs.export(ConstellationDataType::Json).unwrap_or_default();
-    let root = warp_common::serde_json::from_str(&data).unwrap_or_default();
-    Json(root)
-}
-
 pub async fn http_main(manage: &ModuleManager) -> anyhow::Result<()> {
     //TODO: This is temporary as things are setup
     let fs = manage.get_filesystem()?;
@@ -60,8 +46,14 @@ pub async fn http_main(manage: &ModuleManager) -> anyhow::Result<()> {
         .await?;
 
     rocket::build()
-        .mount("/", routes![index, fs_export])
-        .manage(FsSystem(fs.clone()))
+        .mount(
+            "/v1",
+            routes![
+                index,
+                hconstellation::export,
+            ]
+        )
+        .manage(hconstellation::FsSystem(fs.clone()))
         .manage(CacheSystem(cache.clone()))
         .launch()
         .await?;

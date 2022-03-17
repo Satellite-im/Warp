@@ -19,6 +19,7 @@ pub enum Module {
     FileSystem,
     Accounts,
     Cache,
+    Http,
     Other(String),
     Unknown,
 }
@@ -36,6 +37,7 @@ impl fmt::Display for Module {
             Module::FileSystem => write!(f, "FILESYSTEM"),
             Module::Accounts => write!(f, "ACCOUNTS"),
             Module::Cache => write!(f, "CACHE"),
+            Module::Http => write!(f, "HTTP"),
             Module::Other(module) => write!(f, "{module}"),
             Module::Unknown => write!(f, "UNKNOWN"),
         }
@@ -52,6 +54,7 @@ where
             "FILESYSTEM" => Module::FileSystem,
             "ACCOUNTS" => Module::Accounts,
             "CACHE" => Module::Cache,
+            "HTTP" => Module::Http,
             "UNKNOWN" => Module::Unknown,
             other => Module::Other(other.to_string()),
         }

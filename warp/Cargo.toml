@@ -12,6 +12,8 @@ repository = "https://github.com/Satellite-im/Warp"
 [dependencies]
 uuid = { version = "0.8", features = ["serde", "v4"] }
 
+base64 = { version = "0.13.0" }
+
 clap = { version = "3.1", features = ["derive"], optional = true}
 
 tui = {version = "0.17", features = ["crossterm"], optional = true}

@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::{directory::Directory, item::Item};
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::error::Error;
@@ -108,10 +110,21 @@ pub trait Constellation: Sync + Send {
 /// Currently only support `Json`, `Yaml`, and `Toml`.
 /// Implementation can override these functions for their own
 /// types to be use for import and export.
+#[derive(Debug, PartialEq)]
 pub enum ConstellationDataType {
     Json,
     Yaml,
     Toml,
+}
+
+impl <S: AsRef<str>> From<S> for ConstellationDataType {
+    fn from(input: S) -> ConstellationDataType {
+        match input.as_ref().to_uppercase().as_str() {
+            "YAML"      => ConstellationDataType::Yaml,
+            "TOML"      => ConstellationDataType::Toml,
+            "JSON" | _  => ConstellationDataType::Json,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
