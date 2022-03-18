@@ -1,8 +1,8 @@
+use base64;
 use std::sync::{Arc, Mutex};
 use warp::{Constellation, ConstellationDataType};
 use warp_common::Module;
 use warp_data::DataObject;
-use base64;
 
 pub struct FsSystem(pub Arc<Mutex<Box<dyn Constellation>>>);
 
@@ -13,23 +13,20 @@ impl AsRef<Arc<Mutex<Box<dyn Constellation>>>> for FsSystem {
 }
 
 use rocket::{
-    self,
-    get,
+    self, get,
     serde::json::{Json, Value},
     State,
 };
 
-
 #[get("/constellation/export/<format>")]
-pub fn export(state: &State<FsSystem>, format: &str) -> Json<Value> {
+pub fn export(state: &State<FsSystem>, format: &str) -> Json<DataObject> {
     let fs = state.as_ref().lock().unwrap();
     let data = fs
         .export(ConstellationDataType::from(format))
         .unwrap_or_default();
 
     let data_object = match ConstellationDataType::from(format) {
-        ConstellationDataType::Yaml | 
-        ConstellationDataType::Toml => DataObject::new(
+        ConstellationDataType::Yaml | ConstellationDataType::Toml => DataObject::new(
             &Module::Http,
             base64::encode(&data), // We'll encode the data to keep white space retained neatly for future use
         ),
@@ -39,5 +36,5 @@ pub fn export(state: &State<FsSystem>, format: &str) -> Json<Value> {
         ),
     };
 
-    Json(warp_common::serde_json::to_value(data_object.unwrap()).unwrap_or_default())
+    Json(data_object.unwrap_or_default())
 }
