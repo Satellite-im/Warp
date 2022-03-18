@@ -18,8 +18,11 @@ pub struct StrettoClient {
 }
 
 impl Extension for StrettoClient {
-    fn name(&self) -> String {
+    fn id(&self) -> String {
         String::from("warp-pd-stretto")
+    }
+    fn name(&self) -> String {
+        String::from("Stretto Caching System")
     }
 
     fn description(&self) -> String {
