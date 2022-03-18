@@ -9,7 +9,10 @@ use warp_module::Module;
 /// `Hook` contains identifying information about a given hook.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hook {
+    /// Name of the hook/event
     pub name: String,
+
+    /// Module in which the hook is meant for
     pub module: Module,
 }
 
@@ -49,7 +52,10 @@ pub type HookData = Box<dyn Fn(Hook, DataObject) + Sync + Send>;
 /// Lists all of the hooks registered
 #[derive(Default)]
 pub struct Hooks {
+    /// List of hooks.
     pub hooks: Vec<Hook>,
+
+    /// A map of hooks with an array of executable functions
     pub subscribers: HashMap<String, Vec<HookData>>,
 }
 

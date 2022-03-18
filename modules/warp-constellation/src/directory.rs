@@ -21,14 +21,28 @@ impl Default for DirectoryType {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[serde(crate = "warp_common::serde")]
 pub struct Directory {
+    /// ID of the `Directory`
     pub id: Uuid,
+    
+    /// Name of the `Directory`
     pub name: String,
+    
+    /// Description of the `Directory`
+    /// TODO: Make this optional
     pub description: String,
+    
+    /// Timestamp of the creation of the directory
     #[serde(with = "warp_common::chrono::serde::ts_seconds")]
     pub creation: DateTime<Utc>,
+    
+    /// Timestamp of the `Directory` when it is modified
     #[serde(with = "warp_common::chrono::serde::ts_seconds")]
     pub modified: DateTime<Utc>,
+    
+    /// Type of `Directory`
     pub directory_type: DirectoryType,
+    
+    /// List of `Item`, which would represents either `File` or `Directory`
     pub children: Vec<Item>,
 }
 

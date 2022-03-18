@@ -51,16 +51,25 @@ pub mod wasm {
 #[cfg(target_os = "wasm32")]
 pub use wasm::Result;
 
+/// Functions that provide information about extensions that iterates around a Module
 pub trait Extension {
+    /// Returns an id of the extension. Should be the crate name (eg in a `warp-module-ext` format)
     fn id(&self) -> String {
         self.name()
     }
+
+    /// Returns the name of an extension
     fn name(&self) -> String;
+
+    /// Returns the description of the extension
     fn description(&self) -> String {
         format!(
-            "{} is an extension that is designed to be used for module",
-            self.name()
+            "{} is an extension that is designed to be used for {}",
+            self.name(),
+            self.module()
         )
     }
+
+    /// Returns the module type the extension is meant to be used for
     fn module(&self) -> Module;
 }

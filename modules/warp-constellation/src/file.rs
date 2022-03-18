@@ -19,15 +19,30 @@ pub enum FileType {
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(crate = "warp_common::serde")]
 pub struct File {
+    /// ID of the `File`
     pub id: Uuid,
+
+    /// Name of the `File`
     pub name: String,
+
+    /// Size of the `File`.
     pub size: i64,
+
+    /// Description of the `File`. TODO: Make this optional
     pub description: String,
+
+    /// Timestamp of the creation of the `File`
     #[serde(with = "warp_common::chrono::serde::ts_seconds")]
     pub creation: DateTime<Utc>,
+
+    /// Timestamp of the `File` when it is modified
     #[serde(with = "warp_common::chrono::serde::ts_seconds")]
     pub modified: DateTime<Utc>,
+
+    /// Type of the `File`.
     pub file_type: FileType,
+
+    /// Hash of the `File`
     pub hash: String,
 }
 

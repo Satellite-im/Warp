@@ -4,14 +4,20 @@ use warp_common::serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "warp_common::serde")]
 pub struct Role {
+    /// Name of the role
     pub name: String,
+
+    /// TBD
     pub level: u8,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "warp_common::serde")]
 pub struct Badge {
+    /// TBD
     pub name: String,
+
+    /// TBD
     pub icon: String,
 }
 
@@ -28,15 +34,32 @@ pub struct Graphics {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "warp_common::serde")]
 pub struct Identity {
+    /// Username of the identity
     pub username: String,
+
+    /// Short 4-digit numeric id to be used along side `Identity::username` (eg `Username#0000`)
     pub short_id: u16,
+
+    /// Public key for the identity
     #[serde(flatten)]
     pub public_key: PublicKey,
+
+    /// TBD
     pub graphics: Graphics,
+
+    /// Status message
     pub status_message: Option<String>,
+
+    /// List of roles
     pub roles: Vec<Role>,
+
+    /// List of available badges
     pub available_badges: Vec<Badge>,
+
+    /// Active badge for identity
     pub active_badge: Badge,
+
+    /// TBD
     pub linked_accounts: HashMap<String, String>,
 }
 

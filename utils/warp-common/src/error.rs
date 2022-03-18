@@ -42,8 +42,10 @@ pub enum Error {
     DataObjectNotFound,
 
     //Misc
-    #[error(transparent)]
-    OtherError(#[from] OptionalError),
+    #[error("TBD")]
+    ObjectNotFound,
+    #[error("TBD")]
+    InvalidKeyLength,
     #[error("TBD")]
     FileNotFound,
     #[error("TBD")]
@@ -60,6 +62,8 @@ pub enum Error {
     TomlSerializeError(#[from] toml::ser::Error),
     #[error("{0}")]
     RegexError(#[from] regex::Error),
+    #[error(transparent)]
+    OtherError(#[from] OptionalError),
     #[error(transparent)]
     Any(#[from] anyhow::Error),
     #[error("{0}")]

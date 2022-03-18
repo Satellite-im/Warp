@@ -11,7 +11,7 @@ use warp_common::error::Error;
 
 cfg_if! {
     if #[cfg(feature = "async")] {
-        use warp_common::tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+        use warp_common::tokio::{fs::File, io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt}};
     } else {
         use std::io::prelude::*;
     }
@@ -27,6 +27,7 @@ cfg_if! {
     }
 }
 
+/// The key store that holds encrypted strings that can be used for later use.
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq, Eq)]
 #[serde(crate = "warp_common::serde")]
 pub struct Tesseract {
@@ -36,9 +37,16 @@ pub struct Tesseract {
 impl Tesseract {
     cfg_if! {
         if #[cfg(feature = "async")] {
+            /// Loads the keystore from a file
+            ///
+            /// # Example
+            /// TODO
+            /// ```
+            ///
+            /// ```
             pub async fn load_from_file<S: AsRef<Path>>(file: S) -> Result<Self> {
                 let mut store = Tesseract::default();
-                let mut fs = warp_common::tokio::fs::File::open(file).await?;
+                let mut fs = File::open(file).await?;
                 let mut data = vec![];
                 fs.read_to_end(&mut data).await?;
 
@@ -47,6 +55,13 @@ impl Tesseract {
                 Ok(store)
             }
 
+            /// Loads the keystore from a stream
+            ///
+            /// # Example
+            /// TODO
+            /// ```
+            ///
+            /// ```
             pub async fn load_from_stream<S: AsyncRead + Unpin>(reader: &mut S) -> Result<Self> {
                 let mut store = Tesseract::default();
                 let mut data = vec![];
@@ -57,15 +72,29 @@ impl Tesseract {
                 Ok(store)
             }
 
+            /// Save the keystore to a file
+            ///
+            /// # Example
+            /// TODO
+            /// ```
+            ///
+            /// ```
             pub async fn save_to_file<S: AsRef<Path>>(&self, path: S) -> Result<()> {
                 let data = warp_common::serde_json::to_vec(&self.internal)?;
 
-                let mut fs = warp_common::tokio::fs::File::create(path).await?;
+                let mut fs = File::create(path).await?;
                 fs.write_all(&data[..]).await?;
                 fs.flush().await?;
                 Ok(())
             }
 
+            /// Save the keystore from stream
+            ///
+            /// # Example
+            /// TODO
+            /// ```
+            ///
+            /// ```
             pub async fn save_to_stream<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<()> {
                 let data = warp_common::serde_json::to_vec(&self.internal)?;
                 writer.write_all(&data[..]).await?;
@@ -73,6 +102,13 @@ impl Tesseract {
                 Ok(())
             }
         } else {
+            /// Loads the keystore from a file
+            ///
+            /// # Example
+            /// TODO
+            /// ```
+            ///
+            /// ```
             pub fn load_from_file<S: AsRef<Path>>(file: S) -> Result<Self> {
                 let mut store = Tesseract::default();
                 let mut fs = std::fs::File::open(file)?;
@@ -84,6 +120,13 @@ impl Tesseract {
                 Ok(store)
             }
 
+            /// Loads the keystore from a stream
+            ///
+            /// # Example
+            /// TODO
+            /// ```
+            ///
+            /// ```
             pub fn load_from_stream<S: Read>(reader: &mut S) -> Result<Self> {
                 let mut store = Tesseract::default();
                 let data = serde_json::from_reader(reader)?;
@@ -91,6 +134,13 @@ impl Tesseract {
                 Ok(store)
             }
 
+            /// Save the keystore to a file
+            ///
+            /// # Example
+            /// TODO
+            /// ```
+            ///
+            /// ```
             pub fn save_to_file<S: AsRef<Path>>(&self, path: S) -> Result<()> {
                 let data = warp_common::serde_json::to_vec(&self.internal)?;
 
@@ -100,6 +150,13 @@ impl Tesseract {
                 Ok(())
             }
 
+            /// Save the keystore from stream
+            ///
+            /// # Example
+            /// TODO
+            /// ```
+            ///
+            /// ```
             pub fn save_to_stream<W: Write>(&self, writer: &mut W) -> Result<()> {
                 serde_json::to_writer(writer, &self.internal)?;
                 Ok(())
@@ -107,32 +164,54 @@ impl Tesseract {
         }
     }
 
+    /// To store a value to be encrypted into the keystore. If the key already exist, it
+    /// will be overwritten.
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp_tesseract::Tesseract::default();
+    ///  let key = warp_tesseract::generate(28).unwrap();
+    ///  tesseract.set(&key, "API", "MYKEY").unwrap();
+    ///  assert_eq!(tesseract.exist("API"), true);
+    /// ```
     pub fn set(&mut self, passkey: &[u8], key: &str, value: &str) -> Result<()> {
         let data = self.encrypt(passkey, value.to_string())?;
         self.internal.insert(key.to_string(), data);
         Ok(())
     }
 
+    /// Check to see if the key store contains the key
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp_tesseract::Tesseract::default();
+    ///  let key = warp_tesseract::generate(28).unwrap();
+    ///  tesseract.set(&key, "API", "MYKEY").unwrap();
+    ///  assert_eq!(tesseract.exist("API"), true);
+    ///  assert_eq!(tesseract.exist("NOT_API"), false);
+    /// ```
     pub fn exist(&self, key: &str) -> bool {
         self.internal.contains_key(key)
     }
 
+    /// Used to retreive and decrypt the value stored for the key
     pub fn retrieve(&self, passkey: &[u8], key: &str) -> Result<String> {
         if !self.exist(key) {
-            bail!(warp_common::error::Error::Other)
+            bail!(Error::ObjectNotFound)
         }
-        let data = self
-            .internal
-            .get(key)
-            .ok_or(warp_common::error::Error::Other)?;
+        let data = self.internal.get(key).ok_or(Error::ObjectNotFound)?;
         self.decrypt(passkey, data)
     }
 
+    /// Used to delete the value from the keystore
     pub fn delete(&mut self, key: &str) -> Result<()> {
         self.internal.remove(key);
         Ok(())
     }
 
+    /// Used to clear the whole keystore.
     pub fn clear(&mut self) -> Result<()> {
         self.internal.clear();
         Ok(())
@@ -140,6 +219,7 @@ impl Tesseract {
 
     cfg_if! {
         if #[cfg(feature = "use_botan")] {
+            /// Internal function that deals with encryption using Botan implementation of AES-128 GCM.
             fn encrypt(&mut self, key: &[u8], data: String) -> Result<Vec<u8>> {
                 anyhow::ensure!(key.len() == 28, botan::ErrorType::InvalidKeyLength);
 
@@ -153,6 +233,7 @@ impl Tesseract {
                 Ok(data)
             }
 
+            /// Internal function that deals with decryption using Botan implementation of AES-128 GCM.
             fn decrypt(&self, key: &[u8], data: &[u8]) -> Result<String> {
                 anyhow::ensure!(key.len() == 28, botan::ErrorType::InvalidKeyLength);
 
@@ -166,6 +247,7 @@ impl Tesseract {
                 Ok(results)
             }
         } else if #[cfg(feature = "use_aes_gcm")] {
+            /// Internal function that deals with encryption using rust native implementation of AES-128 GCM.
             fn encrypt(&mut self, key: &[u8], data: String) -> Result<Vec<u8>> {
                 anyhow::ensure!(key.len() == 28, Error::Other);
                 let e_key = &key[0..16];
@@ -178,6 +260,8 @@ impl Tesseract {
                 let etext = cipher.encrypt(nonce, data.as_bytes()).map_err(|_| Error::Other)?;
                 Ok(etext)
             }
+
+            /// Internal function that deals with decryption using rust native implementation of AES-128 GCM.
             fn decrypt(&self, key: &[u8], data: &[u8]) -> Result<String> {
                 anyhow::ensure!(key.len() == 28, Error::Other);
                 let e_key = &key[0..16];
@@ -187,7 +271,7 @@ impl Tesseract {
                 let nonce = aes_gcm::Nonce::from_slice(nonce);
 
                 let cipher = Aes128Gcm::new(key);
-                let plaintext = cipher.decrypt(nonce, data).map_err(|_| Error::Other)?;
+                let plaintext = cipher.decrypt(nonce, data).map_err(|e| anyhow::anyhow!("{}", e))?;
                 Ok(String::from_utf8_lossy(&plaintext).to_string())
             }
         }
@@ -196,12 +280,14 @@ impl Tesseract {
 
 cfg_if! {
         if #[cfg(feature = "use_botan")] {
+            /// Generates random bytes using botan random number generator
             pub fn generate(limit: usize) -> Result<Vec<u8>> {
                 let mut rng = botan::RandomNumberGenerator::new_system()?;
                 let data = rng.read(limit)?;
                 Ok(data)
             }
         } else if #[cfg(feature = "use_aes_gcm")] {
+            /// Generate random bytes using rand number generator
             pub fn generate(limit: usize) -> Result<Vec<u8>> {
                 let mut key = vec![0u8; limit];
                 OsRng.fill_bytes(&mut key);

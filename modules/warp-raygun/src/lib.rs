@@ -17,19 +17,35 @@ pub struct MessageOptions<'a> {
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(crate = "warp_common::serde")]
 pub struct Message {
+    /// ID of the Message
     pub id: Uuid,
+
+    /// Conversion id where `Message` is associated with.
     pub conversation_id: Uuid,
+
+    /// ID of the sender of the message
     pub sender: Uuid,
+
+    /// Timestamp of the message
     pub date: DateTime<Utc>,
+
+    /// TBD
     pub pinned: bool,
+
+    /// List of the reactions for the `Message`
     pub reactions: Vec<Reaction>,
+
+    /// Message context for `Message`
     pub value: Vec<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(crate = "warp_common::serde")]
 pub struct Reaction {
+    /// Emoji unicode for `Reaction`
     pub emoji: String,
+
+    /// ID of the user who reacted to `Message`
     pub users: Vec<Uuid>,
 }
 

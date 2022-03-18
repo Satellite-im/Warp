@@ -12,22 +12,31 @@ use crate::file::File;
 #[serde(crate = "warp_common::serde")]
 #[serde(untagged)]
 pub enum Item {
+    /// Instance of `File`
     File(File),
+
+    /// Instance of `Directory`
     Directory(Directory),
 }
 
 /// Provides basic information about `Item`, `File`, or `Directory`
 pub trait Metadata {
+    /// ID of the instance
     fn id(&self) -> &Uuid;
 
+    /// Name of the instance
     fn name(&self) -> String;
 
+    /// Description of the instance
     fn description(&self) -> String;
 
+    /// Size of the instance
     fn size(&self) -> i64;
 
+    /// Timestamp of the creation of the instance
     fn creation(&self) -> DateTime<Utc>;
 
+    /// Timestamp that represents the time in which the instance is modified
     fn modified(&self) -> DateTime<Utc>;
 }
 

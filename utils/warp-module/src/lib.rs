@@ -15,12 +15,28 @@ use std::fmt;
 ///
 #[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Module {
+    /// Allows for direct, and multi-user encrypted messaging with ownership
     Messaging,
+
+    /// Facilitates the creation of files and directories within a central directory tree. This tree, which is an index,
+    /// is managed internally and traversal of the directory as well as full listings, deletion, and creation provided within
+    /// this module by an extension in addition to uploading files to the filesystem.
     FileSystem,
+
+    /// Creates a unique user account used to store core information about the user, which can include usernames, status messages, permissions, etc.
     Accounts,
+
+    /// Allow for storing of data for faster access at a later point in time. Additionally, it may allow for caching of frequently used (or accessed) data
+    /// so that request can be made faster.
     Cache,
+
+    /// TBD
     Http,
+
+    /// Manual Defining of a module
     Other(String),
+
+    /// Unknown module. Should be used by default where a module cannot be identified for any specific reason.
     Unknown,
 }
 
