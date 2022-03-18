@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use warp::{PocketDimension};
+use warp::PocketDimension;
 use warp_common::anyhow;
 
 mod hconstellation;
@@ -31,7 +31,12 @@ fn index() -> String {
     String::from("Hello, World!")
 }
 
-pub async fn http_main(manage: &ModuleManager) -> anyhow::Result<()> {
+#[catch(default)]
+fn _error() -> Json<Value> {
+    Json(warp_common::serde_json::json!({"message": "An error as occurred with your request"}))
+}
+
+pub async fn http_main(manage: &mut ModuleManager) -> anyhow::Result<()> {
     //TODO: This is temporary as things are setup
     let fs = manage.get_filesystem()?;
     let cache = manage.get_cache()?;
@@ -46,13 +51,8 @@ pub async fn http_main(manage: &ModuleManager) -> anyhow::Result<()> {
         .await?;
 
     rocket::build()
-        .mount(
-            "/v1",
-            routes![
-                index,
-                hconstellation::export,
-            ]
-        )
+        .mount("/v1", routes![index, hconstellation::export])
+        .register("/", catchers![_error])
         .manage(hconstellation::FsSystem(fs.clone()))
         .manage(CacheSystem(cache.clone()))
         .launch()

@@ -3,7 +3,7 @@ pub mod manager;
 // pub mod terminal;
 
 use crate::anyhow::bail;
-use clap::{Args, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use manager::ModuleManager;
 use std::sync::{Arc, Mutex};
 use warp::StrettoClient;
@@ -58,7 +58,7 @@ fn default_config() -> warp_configuration::Config {
             raygun: false,
         },
         extensions: warp_configuration::ExtensionConfig {
-            constellation: vec!["warp-fs-ipfs", "warp-fs-memory", "warp-fs-storj"]
+            constellation: vec!["warp-fs-memory"]
                 .iter()
                 .map(|e| e.to_string())
                 .collect(),
@@ -86,46 +86,31 @@ async fn main() -> anyhow::Result<()> {
     //TODO: Have the module manager handle the checks
 
     if config.modules.pocket_dimension {
-        for extension in config.extensions.pocket_dimension {
+        for extension in &config.extensions.pocket_dimension {
             if extension.eq("warp-pd-stretto") {
                 let cache = StrettoClient::new()?;
                 manager.set_cache(cache);
+                manager.enable_cache("warp-pd-stretto")?;
             }
         }
     }
 
+    register_fs_ext(&config, &mut manager)?;
+
     if config.modules.constellation {
+        let mut fs_enable: bool = false;
         for extension in config.extensions.constellation {
-            //TODO: Implement a cfg check to determine that the feature is enabled for module and extension.
-            let cache = manager.get_cache()?;
-            if extension.eq("warp-fs-ipfs") {
-                let mut handle = warp::IpfsFileSystem::new();
-
-                if config.modules.pocket_dimension {
-                    handle.set_cache(cache.clone());
+            match manager.enable_filesystem(extension.as_str()) {
+                Ok(()) => {
+                    fs_enable = true;
+                    break;
                 }
-                manager.set_filesystem(handle);
-                break;
-            } else if extension.eq("warp-fs-storj") {
-                //TODO: Use keys from configuration rather than depend on enviroment variables
-                let env_akey = std::env::var("STORJ_ACCESS_KEY")?;
-                let env_skey = std::env::var("STORJ_SECRET_KEY")?;
+                Err(_) => {}
+            };
+        }
 
-                let mut handle = warp::StorjFilesystem::new(env_akey, env_skey);
-
-                if config.modules.pocket_dimension {
-                    handle.set_cache(cache.clone());
-                }
-                manager.set_filesystem(handle);
-                break;
-            } else if extension.eq("warp-fs-memory") {
-                let mut handle = warp::MemorySystem::new();
-                if config.modules.pocket_dimension {
-                    handle.set_cache(cache.clone());
-                }
-                manager.set_filesystem(handle);
-                break;
-            }
+        if !fs_enable {
+            println!("Warning: Constellation does not have an active module.");
         }
     }
 
@@ -144,10 +129,10 @@ async fn main() -> anyhow::Result<()> {
         //<TUI> <CLI> <HTTP>
         (true, false, false, None) => todo!(),
         (false, true, false, None) => todo!(),
-        (false, false, true, None) => http::http_main(&manager).await?,
+        (false, false, true, None) => http::http_main(&mut manager).await?,
         (false, false, false, None) => {
             if config.http_api.enabled {
-                http::http_main(&manager).await?
+                http::http_main(&mut manager).await?
             }
         }
         //TODO: Store keyfile and datastore in a specific path.
@@ -224,5 +209,45 @@ fn export_to_cache(
     //TODO: Determine if this warrants a custom module name
     cache.add_data(Module::Other("fsexport".to_string()), &object)?;
 
+    Ok(())
+}
+
+//TODO: Rewrite this
+fn register_fs_ext(config: &Config, manager: &mut ModuleManager) -> anyhow::Result<()> {
+    let m = Arc::new(Mutex::new(manager));
+
+    {
+        let mut manager = m.lock().unwrap();
+        let cache = manager.get_cache()?;
+        //TODO: Have `IpfsFileSystem` provide a custom initialization
+        let mut fs = warp::IpfsFileSystem::new();
+
+        if config.modules.pocket_dimension {
+            fs.set_cache(cache.clone());
+        }
+        manager.set_filesystem(fs);
+    }
+
+    {
+        let mut manager = m.lock().unwrap();
+        let cache = manager.get_cache()?;
+        // //TODO
+        let mut handle = warp::StorjFilesystem::new("", "");
+
+        if config.modules.pocket_dimension {
+            handle.set_cache(cache.clone());
+        }
+        manager.set_filesystem(handle);
+    }
+
+    {
+        let mut manager = m.lock().unwrap();
+        let cache = manager.get_cache()?;
+        let mut handle = warp::MemorySystem::new();
+        if config.modules.pocket_dimension {
+            handle.set_cache(cache.clone());
+        }
+        manager.set_filesystem(handle);
+    }
     Ok(())
 }
