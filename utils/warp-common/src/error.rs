@@ -42,13 +42,13 @@ pub enum Error {
     DataObjectNotFound,
 
     //Misc
-    #[error("TBD")]
+    #[error("Object is not found")]
     ObjectNotFound,
-    #[error("TBD")]
+    #[error("The length of the key is invalid")]
     InvalidKeyLength,
-    #[error("TBD")]
+    #[error("File is not found")]
     FileNotFound,
-    #[error("TBD")]
+    #[error("Directory is not found")]
     DirectoryNotFound,
     #[error("To be determined")]
     ToBeDetermined,
