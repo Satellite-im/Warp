@@ -4,7 +4,7 @@ mod test {
     use std::sync::{Arc, Mutex};
     use warp_common::Result;
     use warp_constellation::file::File;
-    use warp_data::DataObject;
+    use warp_data::{DataObject, DataType};
     use warp_hooks::hooks::Hooks;
     use warp_module::Module;
 
@@ -20,9 +20,9 @@ mod test {
 
         system.subscribe(hook, |hook, data| {
             assert_eq!(hook.name.as_str(), "NEW_FILE");
-            assert_eq!(hook.module, Module::FileSystem);
+            assert_eq!(hook.data_type, DataType::Module(Module::FileSystem));
 
-            assert_eq!(data.module, Module::FileSystem);
+            assert_eq!(data.data_type, DataType::Module(Module::FileSystem));
 
             let file: File = data.payload().unwrap(); //TODO: Implement Result for `Fn`
             assert_eq!(file.name.as_str(), "test.txt");

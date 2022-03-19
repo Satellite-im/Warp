@@ -35,7 +35,7 @@ impl PocketDimension for MemoryCache {
     fn add_data(&mut self, dimension: Module, data: &DataObject) -> Result<()> {
         //TODO: Determine size of payload for `DataObject::size`
         let mut object = data.clone();
-        object.set_module(&dimension);
+        object.set_data_type(&dimension);
         if let Some(val) = self.0.get_mut(&dimension) {
             let objects = val
                 .iter()
@@ -214,7 +214,6 @@ impl SomeData {
 
 fn generate_data(system: &mut MemoryCache, amount: i64) {
     let mut object = DataObject::default();
-    object.module = Module::Accounts;
 
     for i in 0..amount {
         let mut data = SomeData::default();

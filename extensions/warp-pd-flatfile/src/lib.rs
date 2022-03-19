@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use warp_common::{error::Error, uuid::Uuid, Extension};
-use warp_data::DataObject;
+use warp_data::{DataObject, DataType};
 use warp_module::Module;
 use warp_pocket_dimension::PocketDimension;
 
@@ -169,7 +169,7 @@ impl FilePointer {
     }
 
     pub fn file_path(&self) -> warp_common::Result<PathBuf> {
-        if self.0.module != Module::FileSystem {
+        if self.0.data_type != DataType::Module(Module::FileSystem) {
             return Err(warp_common::error::Error::Other);
         }
         let path = self.0.payload::<PathBuf>()?;
@@ -236,9 +236,7 @@ impl PocketDimension for FlatfileStorage {
         data: &warp_data::DataObject,
     ) -> warp_common::Result<()> {
         let mut data = data.clone();
-        if data.module != dimension {
-            data.set_module(&dimension);
-        }
+        data.set_data_type(&dimension);
 
         Err(Error::Unimplemented)
     }

@@ -1,3 +1,4 @@
+use std::fmt;
 #[cfg(feature = "bincode_opt2")]
 use warp_common::bincode;
 use warp_common::cfg_if::cfg_if;
@@ -33,10 +34,44 @@ pub struct Data {
     pub size: u64,
 
     /// Module that the Data Object and payload is utilizing
-    pub module: Module,
+    #[serde(rename = "type")]
+    pub data_type: DataType,
 
     /// Data that is stored for the Data Object.
     pub payload: Payload,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(crate = "warp_common::serde")]
+#[serde(rename_all = "lowercase")]
+pub enum DataType {
+    Module(Module),
+    Http,
+    DataExport,
+    Unknown,
+}
+
+impl fmt::Display for DataType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            DataType::Module(module) => write!(f, "{}", module),
+            DataType::Http => write!(f, "http"),
+            DataType::DataExport => write!(f, "data_export"),
+            DataType::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
+impl Default for DataType {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+impl From<Module> for DataType {
+    fn from(module: Module) -> Self {
+        DataType::Module(module)
+    }
 }
 
 cfg_if! {
@@ -61,12 +96,14 @@ impl Payload {
             pub fn new_from_ser<T: Serialize>(payload: T) -> Result<Self> {
                 bincode::serialize(&payload)
                     .map(Self::new)
-                    .map_err(OptionalError::BincodeError)
+                    .map_err(warp_common::error::OptionalError::BincodeError)
                     .map_err(Error::from)
             }
 
             pub fn to_type<T: DeserializeOwned>(&self) -> Result<T> {
-                let inner = bincode::deserialize(&self.0[..])?;
+                let inner = bincode::deserialize(&self.0[..])
+                    .map_err(warp_common::error::OptionalError::BincodeError)
+                    .map_err(Error::from)?;
                 Ok(inner)
             }
         } else {
@@ -95,7 +132,7 @@ impl Default for Data {
             version: 0,
             timestamp: Utc::now(),
             size: 0,
-            module: Module::default(),
+            data_type: DataType::default(),
             payload: Payload::default(),
         }
     }
@@ -103,14 +140,14 @@ impl Default for Data {
 
 impl Data {
     /// Creates a instance of `Data` with `Module` and `Payload`
-    pub fn new<T>(module: &Module, payload: T) -> Result<Self>
+    pub fn new<T, I: Into<DataType> + Clone>(data_type: &I, payload: T) -> Result<Self>
     where
         T: Serialize,
     {
-        let module = module.clone();
+        let data_type = data_type.clone().into();
         let payload = Payload::new_from_ser(payload)?;
         Ok(Data {
-            module,
+            data_type,
             payload,
             ..Default::default()
         })
@@ -127,8 +164,8 @@ impl Data {
     }
 
     /// Set the `Module` for `Data`
-    pub fn set_module(&mut self, module: &Module) {
-        self.module = module.clone();
+    pub fn set_data_type<I: Into<DataType> + Clone>(&mut self, data_type: &I) {
+        self.data_type = data_type.clone().into();
     }
 
     /// Set the payload for `Data`

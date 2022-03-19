@@ -52,10 +52,8 @@ impl PocketDimension for StrettoClient {
         data: &DataObject,
     ) -> std::result::Result<(), warp_common::error::Error> {
         let mut data = data.clone();
-        data.set_module(&dimension);
-        if data.module != dimension {
-            return Err(warp_common::error::Error::Other);
-        }
+        data.set_data_type(&dimension);
+
         if let Some(mut value) = self.client.get_mut(&dimension) {
             let version = value
                 .value()
@@ -271,7 +269,6 @@ mod test {
 
     fn generate_data(system: &mut StrettoClient, amount: i64) {
         let mut object = DataObject::default();
-        object.module = Module::Accounts;
 
         for i in 0..amount {
             let mut data = SomeData::default();

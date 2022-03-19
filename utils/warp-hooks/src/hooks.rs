@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use warp_common::error::Error;
 use warp_common::Result;
 
-use warp_data::DataObject;
+use warp_data::{DataObject, DataType};
 use warp_module::Module;
 
 /// `Hook` contains identifying information about a given hook.
@@ -12,8 +12,8 @@ pub struct Hook {
     /// Name of the hook/event
     pub name: String,
 
-    /// Module in which the hook is meant for
-    pub module: Module,
+    /// Type in which the hook is meant for
+    pub data_type: DataType,
 }
 
 impl<A> From<A> for Hook
@@ -26,8 +26,8 @@ where
             hook.next().unwrap_or_default(),
             hook.next().unwrap_or_default().to_string(),
         );
-        let module = Module::from(module_name);
-        Hook { name, module }
+        let data_type = DataType::from(Module::from(module_name));
+        Hook { name, data_type }
     }
 }
 
@@ -35,14 +35,17 @@ where
 impl Hook {
     pub fn new<S: AsRef<str>>(name: S, module: Module) -> Self {
         let name = name.as_ref().to_string();
-        Self { name, module }
+        Self {
+            name,
+            data_type: DataType::from(module),
+        }
     }
 }
 
 /// Formats the Hook into a unique, human readable, identifier
 impl ToString for Hook {
     fn to_string(&self) -> String {
-        format!("{}::{}", self.module, self.name)
+        format!("{}::{}", self.data_type, self.name)
     }
 }
 
@@ -152,7 +155,7 @@ impl Hooks {
     /// # Examples
     ///
     /// ```
-    ///     use warp_data::DataObject;
+    ///     use warp_data::{DataObject, DataType};
     ///     use warp_hooks::hooks::{Hook, Hooks};
     ///     use warp_module::Module;
     ///     use warp_constellation::file::File;
@@ -165,8 +168,7 @@ impl Hooks {
     ///     assert_eq!(system.subscribe(Hook::from("UNKNOWN::NEW_FILE"), |_, _|{}).is_err(), true);
     ///     system.subscribe("FILESYSTEM::NEW_FILE", |hook, data| {
     ///         assert_eq!(hook.name.as_str(), "NEW_FILE");
-    ///         assert_eq!(hook.module, Module::FileSystem);
-    ///         assert_eq!(data.module, Module::FileSystem);
+    ///         assert_eq!(hook.data_type, DataType::Module(Module::FileSystem));
     ///         let file: File = data.payload().unwrap();
     ///         assert_eq!(file.name.as_str(), "test.txt");
     ///     }).unwrap();
@@ -194,7 +196,7 @@ impl Hooks {
     /// # Examples
     ///
     /// ```
-    ///     use warp_data::DataObject;
+    ///     use warp_data::{DataObject, DataType};
     ///     use warp_hooks::hooks::{Hook, Hooks};
     ///     use warp_module::Module;
     ///     use warp_constellation::file::File;
@@ -203,8 +205,7 @@ impl Hooks {
     ///     let hook = system.create("NEW_FILE", Module::FileSystem).unwrap();
     ///     system.subscribe("FILESYSTEM::NEW_FILE", |hook, data| {
     ///         assert_eq!(hook.name.as_str(), "NEW_FILE");
-    ///         assert_eq!(hook.module, Module::FileSystem);
-    ///         assert_eq!(data.module, Module::FileSystem);
+    ///         assert_eq!(hook.data_type, DataType::Module(Module::FileSystem));
     ///         let file: File = data.payload().unwrap();
     ///         assert_eq!(file.name.as_str(), "test.txt");
     ///     }).unwrap();
