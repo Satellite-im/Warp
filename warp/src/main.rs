@@ -100,12 +100,9 @@ async fn main() -> anyhow::Result<()> {
     if config.modules.constellation {
         let mut fs_enable: bool = false;
         for extension in config.extensions.constellation {
-            match manager.enable_filesystem(extension.as_str()) {
-                Ok(()) => {
-                    fs_enable = true;
-                    break;
-                }
-                Err(_) => {}
+            if let Ok(()) = manager.enable_filesystem(extension.as_str()) {
+                fs_enable = true;
+                break;
             };
         }
 

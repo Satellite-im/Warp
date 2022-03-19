@@ -197,7 +197,7 @@ impl ModuleManager {
         let index = self
             .filesystem
             .iter()
-            .position(|item| item.active == true)
+            .position(|item| item.active)
             .ok_or(Error::ArrayPositionNotFound)?;
 
         let fs = self
@@ -212,7 +212,7 @@ impl ModuleManager {
         let index = self
             .cache
             .iter()
-            .position(|item| item.active == true)
+            .position(|item| item.active)
             .ok_or(Error::ArrayPositionNotFound)?;
 
         let cs = self
