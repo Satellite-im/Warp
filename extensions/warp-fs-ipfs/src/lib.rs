@@ -1,4 +1,3 @@
-use http::uri::Scheme;
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
 use std::io::ErrorKind;
 use std::sync::{Arc, Mutex};
@@ -25,7 +24,7 @@ pub struct IpfsFileSystem {
     pub index: Directory,
     pub modified: DateTime<Utc>,
     #[serde(skip)]
-    pub client: IpfsClient,
+    pub client: IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>,
     #[serde(skip)]
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
 }
@@ -45,9 +44,13 @@ impl IpfsFileSystem {
     pub fn new() -> Self {
         IpfsFileSystem::default()
     }
-    pub fn new_with_host<S: AsRef<str>>(host: S, port: u16) -> anyhow::Result<Self> {
+
+    pub fn new_with_uri<S: AsRef<str>>(uri: S) -> anyhow::Result<Self> {
         let mut system = IpfsFileSystem::default();
-        let client = IpfsClient::from_host_and_port(Scheme::HTTP, host.as_ref(), port)?;
+        let client =
+            IpfsClient::<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>::from_str(
+                uri.as_ref(),
+            )?;
         system.client = client;
         Ok(system)
     }
