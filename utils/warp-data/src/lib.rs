@@ -41,12 +41,13 @@ pub struct Data {
     pub payload: Payload,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(crate = "warp_common::serde")]
 #[serde(rename_all = "lowercase")]
 pub enum DataType {
     Module(Module),
     Http,
+    File,
     DataExport,
     Unknown,
 }
@@ -57,6 +58,7 @@ impl fmt::Display for DataType {
             DataType::Module(module) => write!(f, "{}", module),
             DataType::Http => write!(f, "http"),
             DataType::DataExport => write!(f, "data_export"),
+            DataType::File => write!(f, "file"),
             DataType::Unknown => write!(f, "unknown"),
         }
     }
@@ -101,10 +103,9 @@ impl Payload {
             }
 
             pub fn to_type<T: DeserializeOwned>(&self) -> Result<T> {
-                let inner = bincode::deserialize(&self.0[..])
+                bincode::deserialize(&self.0[..])
                     .map_err(warp_common::error::OptionalError::BincodeError)
-                    .map_err(Error::from)?;
-                Ok(inner)
+                    .map_err(Error::from)
             }
         } else {
             pub fn new(data: Value) -> Self {
@@ -118,8 +119,7 @@ impl Payload {
             }
 
             pub fn to_type<T: DeserializeOwned>(&self) -> Result<T> {
-                let inner = serde_json::from_value(self.0.clone())?;
-                Ok(inner)
+                serde_json::from_value(self.0.clone()).map_err(Error::from)
             }
         }
     }

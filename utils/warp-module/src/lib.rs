@@ -14,6 +14,7 @@ use std::fmt;
 ///            include permissions, friends, and more.
 ///
 #[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
 pub enum Module {
     /// Allows for direct, and multi-user encrypted messaging with ownership
     Messaging,
