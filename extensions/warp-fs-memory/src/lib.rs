@@ -8,7 +8,7 @@ use warp_common::chrono::{DateTime, Utc};
 use warp_common::error::Error;
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::Extension;
-use warp_data::DataObject;
+use warp_data::{DataObject, DataType};
 use warp_pocket_dimension::query::QueryBuilder;
 use warp_pocket_dimension::PocketDimension;
 
@@ -100,7 +100,7 @@ impl Constellation for MemorySystem {
         self.open_directory("")?.add_child(file)?;
         if let Some(cache) = &self.cache {
             let mut cache = cache.lock().unwrap();
-            cache.add_data(Module::FileSystem, &data)?;
+            cache.add_data(DataType::Module(Module::FileSystem), &data)?;
         }
         Ok(())
     }
@@ -121,7 +121,7 @@ impl Constellation for MemorySystem {
             let cache = cache.lock().unwrap();
             let mut query = QueryBuilder::default();
             query.r#where("name", name.to_string())?;
-            if let Ok(list) = cache.get_data(Module::FileSystem, Some(&query)) {
+            if let Ok(list) = cache.get_data(DataType::Module(Module::FileSystem), Some(&query)) {
                 //get last
                 if !list.is_empty() {
                     let obj = list.last().unwrap();

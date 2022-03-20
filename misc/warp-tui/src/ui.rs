@@ -7,6 +7,7 @@ use tui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Row, T
 use tui::Frame;
 use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget};
 use warp_constellation::item::Item;
+use warp_data::DataType;
 
 impl<'a> WarpApp<'a> {
     pub fn draw_ui<B: Backend>(&mut self, frame: &mut Frame<B>) {
@@ -250,7 +251,9 @@ impl<'a> WarpApp<'a> {
             .filter(|(_, active)| *active)
             .map(|(module, _)| module)
             .map(|module| {
-                let data = cache.get_data(module.clone(), None).unwrap_or_default();
+                let data = cache
+                    .get_data(DataType::Module(module.clone()), None)
+                    .unwrap_or_default();
                 Row::new(vec![
                     module.to_string().to_lowercase(),
                     format!("{}", data.len()),

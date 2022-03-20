@@ -112,11 +112,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // If cache is abled, check cache for filesystem structure and import it into constellation
+    let mut data = DataObject::default();
+
     if let Ok(cache) = manager.get_cache() {
         if let Ok(fs) = manager.get_filesystem() {
-            if import_from_cache(cache.clone(), fs.clone()).is_err() {
-                println!("Warning: No structure available from cache; Skip importing");
-            }
+            match import_from_cache(cache.clone(), fs.clone()) {
+                Ok(d) => data = d.clone(),
+                Err(_) => println!("Warning: No structure available from cache; Skip importing"),
+            };
         }
     }
 
@@ -166,7 +169,7 @@ async fn main() -> anyhow::Result<()> {
     //       from memory to disk.
     if let Ok(cache) = manager.get_cache() {
         if let Ok(fs) = manager.get_filesystem() {
-            export_to_cache(cache.clone(), fs.clone())?;
+            export_to_cache(&data, cache.clone(), fs.clone())?;
         }
     }
 
@@ -176,21 +179,23 @@ async fn main() -> anyhow::Result<()> {
 fn import_from_cache(
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
     handle: Arc<Mutex<Box<dyn Constellation>>>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<DataObject> {
     let mut handle = handle.lock().unwrap();
     let cache = cache.lock().unwrap();
-    let obj = cache.get_data(Module::Other("fsexport".to_string()), None)?;
+    let obj = cache.get_data(warp_data::DataType::File, None)?;
 
     if !obj.is_empty() {
         if let Some(data) = obj.last() {
             let inner = data.payload::<String>()?;
             handle.import(ConstellationDataType::Json, inner)?;
+            return Ok(data.clone());
         }
     };
     bail!(Error::ToBeDetermined)
 }
 
 fn export_to_cache(
+    dataobject: &DataObject,
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
     handle: Arc<Mutex<Box<dyn Constellation>>>,
 ) -> anyhow::Result<()> {
@@ -199,12 +204,11 @@ fn export_to_cache(
 
     let data = handle.export(ConstellationDataType::Json)?;
 
-    let mut object = DataObject::default();
+    let mut object = dataobject.clone();
     object.set_size(data.len() as u64);
     object.set_payload(data)?;
 
-    //TODO: Determine if this warrants a custom module name
-    cache.add_data(Module::Other("fsexport".to_string()), &object)?;
+    cache.add_data(warp_data::DataType::File, &object)?;
 
     Ok(())
 }

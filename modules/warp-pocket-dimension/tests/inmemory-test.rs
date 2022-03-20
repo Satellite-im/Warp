@@ -3,7 +3,7 @@ use warp_common::error::Error;
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::serde_json::Value;
 use warp_common::{Extension, Result};
-use warp_data::DataObject;
+use warp_data::{DataObject, DataType};
 use warp_module::Module;
 use warp_pocket_dimension::query::{Comparator, QueryBuilder};
 use warp_pocket_dimension::PocketDimension;
@@ -13,7 +13,7 @@ use warp_pocket_dimension::PocketDimension;
 // Note: This `MemoryCache` is a cheap and dirty way of testing currently.
 //      Such code here should not really be used in production
 #[derive(Default)]
-pub struct MemoryCache(HashMap<Module, Vec<DataObject>>);
+pub struct MemoryCache(HashMap<DataType, Vec<DataObject>>);
 
 impl MemoryCache {
     pub fn flush(&mut self) {
@@ -32,7 +32,7 @@ impl Extension for MemoryCache {
 }
 
 impl PocketDimension for MemoryCache {
-    fn add_data(&mut self, dimension: Module, data: &DataObject) -> Result<()> {
+    fn add_data(&mut self, dimension: DataType, data: &DataObject) -> Result<()> {
         //TODO: Determine size of payload for `DataObject::size`
         let mut object = data.clone();
         object.set_data_type(&dimension);
@@ -55,12 +55,16 @@ impl PocketDimension for MemoryCache {
         Ok(())
     }
 
-    fn has_data(&mut self, dimension: Module, query: &QueryBuilder) -> Result<()> {
+    fn has_data(&mut self, dimension: DataType, query: &QueryBuilder) -> Result<()> {
         let data = self.0.get(&dimension).ok_or(Error::Other)?;
         execute(data, query).map(|_| ())
     }
 
-    fn get_data(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<Vec<DataObject>> {
+    fn get_data(
+        &self,
+        dimension: DataType,
+        query: Option<&QueryBuilder>,
+    ) -> Result<Vec<DataObject>> {
         let data = self.0.get(&dimension).ok_or(Error::Other)?;
         match query {
             Some(query) => execute(data, query),
@@ -68,17 +72,17 @@ impl PocketDimension for MemoryCache {
         }
     }
 
-    fn size(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<i64> {
+    fn size(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
         self.get_data(dimension, query)
             .map(|data| data.iter().map(|i| i.size as i64).sum())
     }
 
-    fn count(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<i64> {
+    fn count(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
         self.get_data(dimension, query)
             .map(|data| data.len() as i64)
     }
 
-    fn empty(&mut self, dimension: Module) -> Result<()> {
+    fn empty(&mut self, dimension: DataType) -> Result<()> {
         self.0.remove(&dimension);
 
         if self.get_data(dimension, None).is_ok() {
@@ -221,7 +225,9 @@ fn generate_data(system: &mut MemoryCache, amount: i64) {
         data.set_age(18 + i);
 
         object.set_payload(data).unwrap();
-        system.add_data(Module::Accounts, &object).unwrap();
+        system
+            .add_data(DataType::Module(Module::Accounts), &object)
+            .unwrap();
     }
 }
 
@@ -234,7 +240,7 @@ fn if_count_eq_five() -> Result<()> {
     let mut query = QueryBuilder::default();
     query.filter(Comparator::Gte, "age", 19)?.limit(5);
 
-    let count = memory.count(Module::Accounts, Some(&query))?;
+    let count = memory.count(DataType::Module(Module::Accounts), Some(&query))?;
 
     assert_eq!(count, 5);
 
@@ -250,7 +256,7 @@ fn data_test() -> Result<()> {
     let mut query = QueryBuilder::default();
     query.r#where("age", 21)?;
 
-    let data = memory.get_data(Module::Accounts, Some(&query))?;
+    let data = memory.get_data(DataType::Module(Module::Accounts), Some(&query))?;
 
     assert_eq!(data.get(0).unwrap().payload::<SomeData>().unwrap().age, 21);
 

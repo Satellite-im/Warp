@@ -2,8 +2,7 @@ pub mod query;
 
 use crate::query::QueryBuilder;
 use warp_common::{Extension, Result};
-use warp_data::DataObject;
-use warp_module::Module;
+use warp_data::{DataObject, DataType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DimensionDataType {
@@ -18,20 +17,24 @@ pub enum DimensionDataType {
 /// results.
 pub trait PocketDimension: Extension + Send + Sync {
     /// Used to add data to `PocketDimension` for `Module`
-    fn add_data(&mut self, dimension: Module, data: &DataObject) -> Result<()>;
+    fn add_data(&mut self, dimension: DataType, data: &DataObject) -> Result<()>;
 
     /// Used to check to see if data exist within `PocketDimension`
-    fn has_data(&mut self, dimension: Module, query: &QueryBuilder) -> Result<()>;
+    fn has_data(&mut self, dimension: DataType, query: &QueryBuilder) -> Result<()>;
 
     /// Used to obtain a list of `DataObject` for `Module`
-    fn get_data(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<Vec<DataObject>>;
+    fn get_data(
+        &self,
+        dimension: DataType,
+        query: Option<&QueryBuilder>,
+    ) -> Result<Vec<DataObject>>;
 
     /// Returns the total size within the `Module`
-    fn size(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<i64>;
+    fn size(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64>;
 
     /// Returns an total amount of `DataObject` for `Module`
-    fn count(&self, dimension: Module, query: Option<&QueryBuilder>) -> Result<i64>;
+    fn count(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64>;
 
     /// Will flush out the data related to `Module`.
-    fn empty(&mut self, dimension: Module) -> Result<()>;
+    fn empty(&mut self, dimension: DataType) -> Result<()>;
 }

@@ -15,6 +15,7 @@ use tui::Terminal;
 use tui_logger::{init_logger, set_default_level};
 use warp_common::Extension;
 use warp_constellation::constellation::Constellation;
+use warp_data::DataType;
 use warp_fs_memory::MemorySystem;
 use warp_hooks::hooks::Hooks;
 use warp_module::Module;
@@ -328,9 +329,11 @@ impl<'a> WarpApp<'a> {
                                             let mut cache = cache.lock().unwrap();
                                             for (module, active) in self.modules.modules.iter() {
                                                 if *active {
-                                                    info!(target:"Warp", "{} items cached for {}", cache.count(module.clone(), None).unwrap_or_default(), module.to_string().to_lowercase());
+                                                    info!(target:"Warp", "{} items cached for {}", cache.count(DataType::Module(module.clone()), None).unwrap_or_default(), module.to_string().to_lowercase());
                                                     info!(target:"Warp", "Clearing {} from cache", module);
-                                                    if let Err(e) = cache.empty(module.clone()) {
+                                                    if let Err(e) = cache
+                                                        .empty(DataType::Module(module.clone()))
+                                                    {
                                                         error!(target:"Error", "Error attempting to clear {} from cache: {}", module, e);
                                                     }
                                                 }

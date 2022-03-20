@@ -1,6 +1,6 @@
 pub mod error;
 
-use warp_data::DataObject;
+use warp_data::{DataObject, DataType};
 use warp_module::Module;
 
 use stretto::Cache;
@@ -14,13 +14,14 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone)]
 pub struct StrettoClient {
-    client: Cache<Module, Vec<DataObject>>,
+    client: Cache<DataType, Vec<DataObject>>,
 }
 
 impl Extension for StrettoClient {
     fn id(&self) -> String {
         String::from("warp-pd-stretto")
     }
+
     fn name(&self) -> String {
         String::from("Stretto Caching System")
     }
@@ -40,7 +41,7 @@ impl StrettoClient {
         Ok(Self { client })
     }
 
-    pub fn client(&self) -> &Cache<Module, Vec<DataObject>> {
+    pub fn client(&self) -> &Cache<DataType, Vec<DataObject>> {
         &self.client
     }
 }
@@ -48,7 +49,7 @@ impl StrettoClient {
 impl PocketDimension for StrettoClient {
     fn add_data(
         &mut self,
-        dimension: Module,
+        dimension: DataType,
         data: &DataObject,
     ) -> std::result::Result<(), warp_common::error::Error> {
         let mut data = data.clone();
@@ -64,33 +65,32 @@ impl PocketDimension for StrettoClient {
             (*value.value_mut()).push(data);
             self.client
                 .wait()
-                .map_err(|_| warp_common::error::Error::Other)?;
+                .map_err(|_| warp_common::error::Error::DataObjectNotFound)?;
         } else {
             self.client.insert(dimension, vec![data], 1);
             self.client
                 .wait()
-                .map_err(|_| warp_common::error::Error::Other)?;
+                .map_err(|_| warp_common::error::Error::DataObjectNotFound)?;
         }
         Ok(())
     }
 
-    fn has_data(&mut self, dimension: Module, query: &QueryBuilder) -> warp_common::Result<()> {
-        let data = self
-            .client
+    fn has_data(&mut self, dimension: DataType, query: &QueryBuilder) -> warp_common::Result<()> {
+        self.client
             .get(&dimension)
-            .ok_or(warp_common::error::Error::Other)?;
-        execute(data.value(), query).map(|_| ())
+            .ok_or(warp_common::error::Error::DataObjectNotFound)
+            .and_then(|data| execute(data.value(), query).map(|_| ()))
     }
 
     fn get_data(
         &self,
-        dimension: Module,
+        dimension: DataType,
         query: Option<&QueryBuilder>,
     ) -> std::result::Result<Vec<DataObject>, warp_common::error::Error> {
         let data = self
             .client
             .get(&dimension)
-            .ok_or(warp_common::error::Error::Other)?;
+            .ok_or(warp_common::error::Error::DataObjectNotFound)?;
 
         let data = data.value();
         match query {
@@ -101,7 +101,7 @@ impl PocketDimension for StrettoClient {
 
     fn size(
         &self,
-        dimension: Module,
+        dimension: DataType,
         query: Option<&QueryBuilder>,
     ) -> std::result::Result<i64, warp_common::error::Error> {
         self.get_data(dimension, query)
@@ -110,14 +110,14 @@ impl PocketDimension for StrettoClient {
 
     fn count(
         &self,
-        dimension: Module,
+        dimension: DataType,
         query: Option<&QueryBuilder>,
     ) -> std::result::Result<i64, warp_common::error::Error> {
         self.get_data(dimension, query)
             .map(|data| data.len() as i64)
     }
 
-    fn empty(&mut self, _: Module) -> std::result::Result<(), warp_common::error::Error> {
+    fn empty(&mut self, _: DataType) -> std::result::Result<(), warp_common::error::Error> {
         // Note, since stretto doesnt clear base on key, we will clear everything when this is
         // call for now.
         // TODO: Implement a direct clear or mutation for the dimension
@@ -133,7 +133,7 @@ impl PocketDimension for StrettoClient {
 }
 
 pub(crate) fn execute(
-    data: &Vec<DataObject>,
+    data: &[DataObject],
     query: &QueryBuilder,
 ) -> std::result::Result<Vec<DataObject>, warp_common::error::Error> {
     let mut list = Vec::new();
@@ -237,7 +237,7 @@ mod test {
     use crate::StrettoClient;
     use warp_common::error::Error;
     use warp_common::serde::{Deserialize, Serialize};
-    use warp_data::DataObject;
+    use warp_data::{DataObject, DataType};
     use warp_module::Module;
     use warp_pocket_dimension::query::{Comparator, QueryBuilder};
     use warp_pocket_dimension::PocketDimension;
@@ -276,7 +276,9 @@ mod test {
             data.set_age(18 + i);
 
             object.set_payload(data).unwrap();
-            system.add_data(Module::Accounts, &object).unwrap();
+            system
+                .add_data(DataType::from(Module::Accounts), &object)
+                .unwrap();
         }
     }
 
@@ -289,7 +291,7 @@ mod test {
         let mut query = QueryBuilder::default();
         query.filter(Comparator::Gte, "age", 19)?.limit(5);
 
-        let count = memory.count(Module::Accounts, Some(&query))?;
+        let count = memory.count(DataType::from(Module::Accounts), Some(&query))?;
 
         assert_eq!(count, 5);
 
