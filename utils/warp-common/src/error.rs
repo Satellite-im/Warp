@@ -42,6 +42,8 @@ pub enum Error {
     DataObjectNotFound,
 
     //Misc
+    #[error("Invalid data type")]
+    InvalidDataType,
     #[error("Object is not found")]
     ObjectNotFound,
     #[error("The length of the key is invalid")]
