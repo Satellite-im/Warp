@@ -44,6 +44,10 @@ pub struct File {
 
     /// Hash of the `File`
     pub hash: String,
+
+    /// External reference
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
 }
 
 impl Default for File {
@@ -58,6 +62,7 @@ impl Default for File {
             modified: timestamp,
             file_type: FileType::Generic,
             hash: String::new(),
+            reference: None,
         }
     }
 }
@@ -114,6 +119,23 @@ impl File {
     /// ```
     pub fn set_hash<S: AsRef<str>>(&mut self, hash: S) {
         self.hash = hash.as_ref().to_string();
+        self.modified = Utc::now();
+    }
+    /// Set the reference of the file
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use warp_constellation::{file::File, item::Item};
+    ///
+    /// let mut file = File::new("test.txt");
+    /// file.set_ref("test_file.txt");
+    ///
+    /// assert_eq!(file.reference.is_some(), true);
+    /// assert_eq!(file.reference.unwrap().as_str(), "test_file.txt");
+    /// ```
+    pub fn set_ref<S: AsRef<str>>(&mut self, reference: S) {
+        self.reference = Some(reference.as_ref().to_string());
         self.modified = Utc::now();
     }
 
