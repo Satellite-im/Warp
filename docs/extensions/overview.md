@@ -11,8 +11,7 @@ The goal of this is to allow Satellite.im to evolve as technology changes in the
 **Constellation** - Facilitates the creation of files and folders within a central directory tree (Index). This 
 index is managed internally and traversal of the directory as well as full listings, deletion, and creation is provided within this  extension. Additionally, uploading files to the filesystem.
 
-**PocketDimension** - Store data for quick indexing and searching, which may be useful to cache frequently used data 
-so that request can be made faster.
+**PocketDimension** - Store data for quick indexing and searching, which may be useful to cache frequently used data so that request can be made faster.
 
 **Messaging** - Allows direct, and multi-user encrypted messaging with ownership rights added so only the expected users can edit, and delete messages. 
 

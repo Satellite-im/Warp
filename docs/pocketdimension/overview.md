@@ -21,7 +21,7 @@ If we were to create the following data for example:
   version: 0,
   timestamp: 1643250387466,
   size: 387192,
-  module: "MESSAGING",
+  type: {module: "messaging"},
   payload: ...,
 }
 ```
@@ -29,7 +29,7 @@ If we were to create the following data for example:
 And store it in the dimension providing the `MESSAGING` dimension type, and the [Data Object](data/overview)...
 
 ```rust
-PocketDimension::add_data(Module::MESSAGING, DataObject)
+PocketDimension::add_data(DataType::Module(Module::MESSAGING), DataObject)
 ```
 
 It will simply be added to the dimension. If we then update the data we can simply call `PocketDimension::add_data(Module::MESSAGING, ...<DataObject>)` again. Retrieving the data via some query will return the expected object with `version: 1`, `version: 2`, for each iteration of the data in the dimension.
@@ -40,7 +40,7 @@ It will simply be added to the dimension. If we then update the data we can simp
 Data can then be retrieved by providing a query using **TODO SYNTAX**.
 
 ```rust
-PocketDimension::get_data(Module::MESSAGING, None)
+PocketDimension::get_data(DataType::Module(Module::MESSAGING), None)
 ```
 
 #### Executing
@@ -79,7 +79,7 @@ Example:
       version: 1,
       timestamp: 1643250387466,
       size: 387192,
-      module: "MESSAGING",
+      type: {module: "messaging"},
       payload: ...,
     },
     {
@@ -87,7 +87,7 @@ Example:
       version: 2,
       timestamp: 1643250387466,
       size: 387192,
-      module: "MESSAGING",
+      type: {module: "messaging"},
       payload: ...,
     }
 ]

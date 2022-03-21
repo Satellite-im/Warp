@@ -79,6 +79,22 @@ pub enum Identifier {
     Own,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "warp_common::serde")]
+pub enum Username {
+    Full(String),
+    Format(String, u16),
+}
+
+impl Username {
+    pub fn valid(&self) -> bool {
+        match self {
+            Username::Full(..) => true,
+            Username::Format(..) => true,
+        }
+    }
+}
+
 impl From<PublicKey> for Identifier {
     fn from(pubkey: PublicKey) -> Self {
         Identifier::PublicKey(pubkey)

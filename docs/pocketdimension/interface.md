@@ -19,7 +19,7 @@ Dimension queries support the following query types...**TODO**
 
 `PocketDimension::get_data` Used to obtain list of **Data** in relation to the [Modules](modules/overview).
 
-`PocketDimension::size` Returns the total size of **DatA** in relation to the [Modules](modules/overview).
+`PocketDimension::size` Returns the total size of **Data** in relation to the [Modules](modules/overview).
 
 `PocketDimension::count` Returns the count of **Data** in relation to the [Modules](modules/overview) within **PocketDimension**.
 

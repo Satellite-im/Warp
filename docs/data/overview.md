@@ -35,9 +35,9 @@ This is simply an **EPOCH** timestamp which denotes the exact moment the **Data 
 Each **Data Object** will contain the size of the total data payload in **bytes**. This can be useful for tracking local network throughput or resource usage of 
 each module and the way you're using it.
 
-#### Module
+#### DataType
 
-The module value denotes the creator of this data and the associated payload. Each module is required to have a unique [Module](modules/core_types) identifier attached 
+The data type represents the associated payload. Each module is required to have a unique [Module](modules/core_types) identifier attached 
 to the data. You can get a list of the available module types by checking the API.
 
 #### Payload

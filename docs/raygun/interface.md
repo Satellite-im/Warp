@@ -12,15 +12,16 @@ RayGun will retrieve messages in two steps, if enabled, the cache will be querie
 
 
 ```rust
-struct GetOptions {
-    smart: bool,
-    date_range: [i32, i32],
-    id_range: [UUID, UUID],
-    limit: i32,
-    skip: i32,
+#[derive(Clone, PartialEq, Eq)]
+pub struct MessageOptions<'a> {
+    pub smart: Option<bool>,
+    pub date_range: Option<&'a [DateTime<Utc>; 2]>,
+    pub id_range: Option<&'a [Uuid; 2]>,
+    pub limit: Option<i64>,
+    pub skip: Option<i64>,
 }
 
-RayGun::get<F: fn()>(conversation_id: UUID, callback: F, opts: GetOptions);
+RayGun::get_messages(&self, conversation_id: Uuid, options: MessageOptions, callback: Option<Callback>) -> Result<Vec<Message>>;
 ```
 
 #### Sending Messages
@@ -33,7 +34,7 @@ struct Message {
     id: "ABC-123"
 }
 
-RayGun::send(conversation_id: UUID, message: Message); // OK()
+RayGun::send(&mut self, conversation_id: Uuid, message_id: Option<Uuid>, message: Vec<String>) -> Result<()>;
 ```
 
 
@@ -47,7 +48,7 @@ struct Message {
     id: "ABC-123"
 }
 
-RayGun::send(conversation_id: UUID, message: Message); // OK()
+RayGun::send(&mut self, conversation_id: Uuid, message_id: Option<Uuid>, message: Vec<String>) -> Result<()>;
 ```
 
 
@@ -56,7 +57,7 @@ RayGun::send(conversation_id: UUID, message: Message); // OK()
 The extent at which messages are scrubbed from existance depends on the extensions implementation, however you only need to call delete on a message.
 
 ```rust
-RayGun::delete(message: Message);
+RayGun::delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()>;
 ```
 
 #### Reacting to a Message
@@ -74,7 +75,7 @@ struct Message {
     id: "ABC-123"
 }
 
-RayGun::react(state: ReactionState::Add, emoji: 🔭, message: Message);
+RayGun::react(&mut self, conversation_id: Uuid, message_id: Uuid, state: ReactionState, emoji: Option<String>) -> Result<()>;
 ```
 
 #### Pinning a Message
@@ -92,7 +93,7 @@ struct Message {
     id: "ABC-123",
 }
 
-RayGun::pin(state: PinState, message: Message);
+RayGun::pin(&mut self, conversation_id: Uuid, message_id: Uuid, state: PinState) -> Result<()>;
 ```
 
 #### Reply
@@ -106,7 +107,7 @@ struct Message {
     id: "ABC-123",
 }
 
-RayGun::reply(reaction: Message, message: Message);
+RayGun::reply(&mut self, conversation_id: Uuid, message_id: Uuid, message: Vec<String>) -> Result<()>;
 ```
 
 #### Remove Embeds
@@ -124,5 +125,5 @@ struct Message {
     id: "ABC-123",
 }
 
-RayGun::embeds(state: EmbedState, message: Message);
+RayGun::embeds(&mut self, conversation_id: Uuid, message_id: Uuid, state: EmbedState) -> Result<()>;
 ```
