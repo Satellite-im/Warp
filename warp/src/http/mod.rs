@@ -30,7 +30,8 @@ pub enum ApiStatus {
 pub struct ApiResponse {
     status: ApiStatus,
     code: u16,
-    data: Payload,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<Payload>,
 }
 
 impl Default for ApiResponse {
@@ -38,7 +39,7 @@ impl Default for ApiResponse {
         Self {
             status: ApiStatus::SUCCESS,
             code: 200,
-            data: Payload::default(),
+            data: None,
         }
     }
 }
@@ -49,6 +50,16 @@ impl ApiResponse {
         response.status = status;
         response.code = code;
         response
+    }
+
+    pub fn set_status(&mut self, code: u16) {
+        self.code = code;
+    }
+
+    pub fn set_data<T: Serialize>(&mut self, data: T) -> anyhow::Result<()> {
+        let payload = Payload::new_from_ser(data)?;
+        self.data = Some(payload);
+        Ok(())
     }
 }
 

@@ -27,7 +27,7 @@ use rocket::{
 /// ```no_run
 /// {
 ///     "id": "504f0c3d-4ec7-4bb2-9784-7910f27b55ff",
-///     "module": "Http",
+///     "type": "Http",
 ///     "payload": {
 ///         "children": [
 ///             {
