@@ -12,6 +12,7 @@ members = [
   "extensions/warp-fs-ipfs",
   "extensions/warp-fs-storj",
   "extensions/warp-rg-ipfs",
+  "extensions/warp-rg-textile",
   "extensions/warp-mp-solana",
   "misc/warp-tui",
   "utils/warp-hooks",
