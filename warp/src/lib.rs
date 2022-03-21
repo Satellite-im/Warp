@@ -24,5 +24,8 @@ pub use warp_pocket_dimension::{
 #[cfg(feature = "pocket-dimension")]
 pub use warp_pd_stretto::StrettoClient;
 
+#[cfg(feature = "pocket-dimension")]
+pub use warp_pd_flatfile::FlatfileStorage;
+
 #[cfg(feature = "raygun")]
 pub use warp_raygun::{self, RayGun};

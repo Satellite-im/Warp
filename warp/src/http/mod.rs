@@ -40,15 +40,20 @@ pub async fn http_main(manage: &mut ModuleManager) -> anyhow::Result<()> {
     //TODO: This is temporary as things are setup
     let fs = manage.get_filesystem()?;
     let cache = manage.get_cache()?;
-    fs.lock()
+    //TODO: Remove
+    if let Err(_) = fs
+        .lock()
         .unwrap()
         .from_buffer("Cargo.toml", &include_bytes!("../../Cargo.toml").to_vec())
-        .await?;
+        .await
+    {}
 
-    fs.lock()
+    if let Err(_) = fs
+        .lock()
         .unwrap()
         .from_buffer("lib.rs", &include_bytes!("../lib.rs").to_vec())
-        .await?;
+        .await
+    {}
 
     rocket::build()
         .mount("/v1", routes![index, hconstellation::export])

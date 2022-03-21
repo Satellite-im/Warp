@@ -40,6 +40,7 @@ warp-fs-ipfs = { path = "../extensions/warp-fs-ipfs", optional = true}
 warp-fs-memory = { path = "../extensions/warp-fs-memory", optional = true }
 warp-fs-storj = { path = "../extensions/warp-fs-storj", optional = true }
 warp-pd-stretto = { path = "../extensions/warp-pd-stretto", optional = true }
+warp-pd-flatfile = { path = "../extensions/warp-pd-flatfile", optional = true }
 
 #servers
 axum = { version = "0.4", optional = true }
@@ -51,7 +52,7 @@ default = ["http_rocket", "pocket-dimension", "constellation", "multipass", "ray
 http_rocket = ["rocket"]
 http_axum = ["axum"]
 
-pocket-dimension = ["warp-pocket-dimension", "warp-pd-stretto"]
+pocket-dimension = ["warp-pocket-dimension", "warp-pd-stretto", "warp-pd-flatfile"]
 constellation = ["warp-constellation", "warp-fs-memory", "warp-fs-storj", "warp-fs-ipfs"]
 multipass = ["warp-multipass"]
 raygun = ["warp-raygun"]

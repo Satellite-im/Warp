@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 warp-pocket-dimension = { path = "../../modules/warp-pocket-dimension" }
+warp-constellation = { path = "../../modules/warp-constellation" }
 warp-hooks = { path = "../../utils/warp-hooks" }
 warp-module = { path = "../../utils/warp-module" }
 warp-data = { path = "../../utils/warp-data" }
@@ -14,3 +15,8 @@ warp-common = { path = "../../utils/warp-common", features = ["async"] }
 thiserror = "1.0"
 walkdir = "2.3"
 blake2 = "0.10"
+hex = "0.4"
+libflate = "1"
+[features]
+default = []
+async = ["warp-common/async"]

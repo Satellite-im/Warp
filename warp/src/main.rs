@@ -14,7 +14,6 @@ use warp_common::{anyhow, tokio};
 use warp_configuration::Config;
 use warp_constellation::constellation::{Constellation, ConstellationDataType};
 use warp_data::DataObject;
-use warp_module::Module;
 use warp_pocket_dimension::PocketDimension;
 use warp_tesseract::{generate, Tesseract};
 
@@ -62,7 +61,7 @@ fn default_config() -> warp_configuration::Config {
                 .iter()
                 .map(|e| e.to_string())
                 .collect(),
-            pocket_dimension: vec!["warp-pd-stretto"]
+            pocket_dimension: vec!["warp-pd-flatfile"]
                 .iter()
                 .map(|e| e.to_string())
                 .collect(),
@@ -86,15 +85,30 @@ async fn main() -> anyhow::Result<()> {
     //TODO: Have the module manager handle the checks
 
     if config.modules.pocket_dimension {
-        for extension in &config.extensions.pocket_dimension {
-            if extension.eq("warp-pd-stretto") {
-                let cache = StrettoClient::new()?;
-                manager.set_cache(cache);
-                manager.enable_cache("warp-pd-stretto")?;
-            }
+        // for extension in &config.extensions.pocket_dimension {
+        // if extension.eq("warp-pd-flatfile") {
+        {
+            let cache = StrettoClient::new()?;
+            manager.set_cache(cache);
         }
+        {
+            //TODO: Have the configuration point to the cache directory, or if not define to use system local directory
+            let mut root = std::env::temp_dir();
+            root.push("warp-cache");
+
+            let index = {
+                let mut index = std::path::PathBuf::new();
+                index.push("cache-index");
+                index
+            };
+
+            let storage = warp::FlatfileStorage::new_with_index_file(root, index)?;
+            manager.set_cache(storage);
+        }
+        // }
     }
 
+    manager.enable_cache("warp-pd-flatfile")?;
     register_fs_ext(&config, &mut manager)?;
 
     if config.modules.constellation {
@@ -113,7 +127,6 @@ async fn main() -> anyhow::Result<()> {
 
     // If cache is abled, check cache for filesystem structure and import it into constellation
     let mut data = DataObject::default();
-
     if let Ok(cache) = manager.get_cache() {
         if let Ok(fs) = manager.get_filesystem() {
             match import_from_cache(cache.clone(), fs.clone()) {
@@ -180,14 +193,23 @@ fn import_from_cache(
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
     handle: Arc<Mutex<Box<dyn Constellation>>>,
 ) -> anyhow::Result<DataObject> {
+    println!("import");
+
     let mut handle = handle.lock().unwrap();
     let cache = cache.lock().unwrap();
     let obj = cache.get_data(warp_data::DataType::File, None)?;
+    println!("import");
 
     if !obj.is_empty() {
         if let Some(data) = obj.last() {
+            println!("import");
+
             let inner = data.payload::<String>()?;
+            println!("import");
+
             handle.import(ConstellationDataType::Json, inner)?;
+            println!("import");
+
             return Ok(data.clone());
         }
     };
@@ -243,11 +265,11 @@ fn register_fs_ext(config: &Config, manager: &mut ModuleManager) -> anyhow::Resu
 
     {
         let mut manager = m.lock().unwrap();
-        let cache = manager.get_cache()?;
-        let mut handle = warp::MemorySystem::new();
-        if config.modules.pocket_dimension {
-            handle.set_cache(cache.clone());
-        }
+        // let cache = manager.get_cache()?;
+        let handle = warp::MemorySystem::new();
+        // if config.modules.pocket_dimension {
+        //     // handle.set_cache(cache.clone());
+        // }
         manager.set_filesystem(handle);
     }
     Ok(())
