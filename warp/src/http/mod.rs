@@ -1,8 +1,57 @@
 use std::sync::{Arc, Mutex};
 use warp::PocketDimension;
 use warp_common::anyhow;
+use warp_common::serde::{Deserialize, Serialize};
+use crate::manager::ModuleManager;
+
+#[allow(unused_imports)]
+use rocket::{
+    self, catch, catchers,
+    data::{Data, ToByteUnit},
+    get,
+    response::{content, status},
+    routes,
+    serde::json::{json, Json, Value},
+    Build, Request, Rocket, State,
+};
+
 
 mod hconstellation;
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[serde(crate = "warp_common::serde")]
+pub enum ApiStatus {
+    SUCCESS,
+    FAIL
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[serde(crate = "warp_common::serde")]
+pub struct ApiResponse {
+    status: ApiStatus,
+    code: u16,
+    data: Payload
+}
+
+impl Default for ApiResponse {
+    fn default() -> Self {
+        Self {
+            status: ApiStatus::SUCCESS,
+            code: 200,
+            data: ""
+        }
+    }
+}
+
+
+impl ApiResponse {
+    pub fn new(status: ApiStatus, code: u16) -> Self {
+        let mut response = ApiResponse::default();
+        response.status = status;
+        response.code = code;
+        response
+    }
+}
 
 pub struct CacheSystem(Arc<Mutex<Box<dyn PocketDimension>>>);
 
@@ -12,19 +61,6 @@ impl AsRef<Arc<Mutex<Box<dyn PocketDimension>>>> for CacheSystem {
     }
 }
 
-#[allow(unused_imports)]
-use rocket::{
-    self, catch, catchers,
-    data::{Data, ToByteUnit},
-    get,
-    http::Status,
-    response::{content, status},
-    routes,
-    serde::json::{json, Json, Value},
-    Build, Request, Rocket, State,
-};
-
-use crate::manager::ModuleManager;
 
 #[get("/")]
 fn index() -> String {
@@ -56,7 +92,12 @@ pub async fn http_main(manage: &mut ModuleManager) -> anyhow::Result<()> {
     {}
 
     rocket::build()
-        .mount("/v1", routes![index, hconstellation::export])
+        .mount("/v1", 
+            routes![
+                index, hconstellation::export,
+                hconstellation::create_folder
+            ]
+        )
         .register("/", catchers![_error])
         .manage(hconstellation::FsSystem(fs.clone()))
         .manage(CacheSystem(cache.clone()))
