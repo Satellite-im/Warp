@@ -1,8 +1,7 @@
 use std::sync::{Arc, Mutex};
 use warp::{Constellation, ConstellationDataType};
-use warp_common::Module;
-use warp_data::DataObject;
 use warp_constellation::directory::Directory;
+use warp_data::{DataObject, DataType};
 
 use base64;
 
@@ -15,20 +14,17 @@ impl AsRef<Arc<Mutex<Box<dyn Constellation>>>> for FsSystem {
 }
 
 use rocket::{
-    self,
-    get,
-    put,
+    self, get, put,
     serde::json::{Json, Value},
     State,
 };
-
 
 /// Export the current in-memory filesystem index
 ///
 /// # Examples
 ///
 /// **Route:** `v1/constellation/export/json`
-/// ```
+/// ```no_run
 /// {
 ///     "id": "504f0c3d-4ec7-4bb2-9784-7910f27b55ff",
 ///     "module": "Http",
@@ -75,20 +71,18 @@ pub fn export(state: &State<FsSystem>, format: &str) -> Json<Value> {
         .unwrap_or_default();
 
     let data_object = match ConstellationDataType::from(format) {
-        ConstellationDataType::Yaml | 
-        ConstellationDataType::Toml => DataObject::new(
-            &Module::Http,
+        ConstellationDataType::Yaml | ConstellationDataType::Toml => DataObject::new(
+            &DataType::Http,
             base64::encode(&data), // We'll encode the data to keep white space retained neatly for future use
         ),
         ConstellationDataType::Json => DataObject::new(
-            &Module::Http,
+            &DataType::Http,
             warp_common::serde_json::from_str::<Value>(&data).unwrap_or_default(),
         ),
     };
 
     Json(warp_common::serde_json::to_value(data_object.unwrap()).unwrap_or_default())
 }
-
 
 #[put("/constellation/create/folder/<name>")]
 pub fn create_folder(state: &State<FsSystem>, name: &str) -> Json<Value> {
@@ -97,9 +91,9 @@ pub fn create_folder(state: &State<FsSystem>, name: &str) -> Json<Value> {
 
     let status = match fs.root_directory_mut().add_child(directory) {
         Ok(_) => super::ApiResponse::default(),
-        Err(_) => super::ApiResponse::new(super::ApiStatus::FAIL, 304)
+        Err(_) => super::ApiResponse::new(super::ApiStatus::FAIL, 304),
     };
-    
-    let data_object = DataObject::new(&Module::Http, status);
+
+    let data_object = DataObject::new(&DataType::Http, status);
     Json(warp_common::serde_json::to_value(data_object.unwrap()).unwrap_or_default())
 }

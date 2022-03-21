@@ -31,9 +31,6 @@ pub enum Module {
     /// so that request can be made faster.
     Cache,
 
-    /// General identifier for the HTTP module
-    Http,
-
     /// Manual Defining of a module
     Other(String),
 
@@ -54,7 +51,6 @@ impl fmt::Display for Module {
             Module::FileSystem => write!(f, "FILESYSTEM"),
             Module::Accounts => write!(f, "ACCOUNTS"),
             Module::Cache => write!(f, "CACHE"),
-            Module::Http => write!(f, "HTTP"),
             Module::Other(module) => write!(f, "{module}"),
             Module::Unknown => write!(f, "UNKNOWN"),
         }

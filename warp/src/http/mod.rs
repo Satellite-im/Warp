@@ -1,8 +1,9 @@
+use crate::manager::ModuleManager;
 use std::sync::{Arc, Mutex};
 use warp::PocketDimension;
 use warp_common::anyhow;
 use warp_common::serde::{Deserialize, Serialize};
-use crate::manager::ModuleManager;
+use warp_data::Payload;
 
 #[allow(unused_imports)]
 use rocket::{
@@ -15,14 +16,13 @@ use rocket::{
     Build, Request, Rocket, State,
 };
 
-
 mod hconstellation;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 #[serde(crate = "warp_common::serde")]
 pub enum ApiStatus {
     SUCCESS,
-    FAIL
+    FAIL,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
@@ -30,7 +30,7 @@ pub enum ApiStatus {
 pub struct ApiResponse {
     status: ApiStatus,
     code: u16,
-    data: Payload
+    data: Payload,
 }
 
 impl Default for ApiResponse {
@@ -38,11 +38,10 @@ impl Default for ApiResponse {
         Self {
             status: ApiStatus::SUCCESS,
             code: 200,
-            data: ""
+            data: Payload::default(),
         }
     }
 }
-
 
 impl ApiResponse {
     pub fn new(status: ApiStatus, code: u16) -> Self {
@@ -60,7 +59,6 @@ impl AsRef<Arc<Mutex<Box<dyn PocketDimension>>>> for CacheSystem {
         &self.0
     }
 }
-
 
 #[get("/")]
 fn index() -> String {
@@ -92,11 +90,9 @@ pub async fn http_main(manage: &mut ModuleManager) -> anyhow::Result<()> {
     {}
 
     rocket::build()
-        .mount("/v1", 
-            routes![
-                index, hconstellation::export,
-                hconstellation::create_folder
-            ]
+        .mount(
+            "/v1",
+            routes![index, hconstellation::export, hconstellation::create_folder],
         )
         .register("/", catchers![_error])
         .manage(hconstellation::FsSystem(fs.clone()))
