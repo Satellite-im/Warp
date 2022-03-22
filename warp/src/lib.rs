@@ -18,7 +18,7 @@ pub use warp_multipass::{identity::*, MultiPass};
 #[cfg(feature = "pocket-dimension")]
 pub use warp_pocket_dimension::{
     query::{Comparator, QueryBuilder},
-    DimensionDataType, PocketDimension,
+    DimensionData, PocketDimension,
 };
 
 #[cfg(feature = "pocket-dimension")]

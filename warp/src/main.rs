@@ -3,6 +3,7 @@ pub mod manager;
 // pub mod terminal;
 
 use crate::anyhow::bail;
+use crate::serde_json::Value;
 use clap::{Parser, Subcommand};
 use manager::ModuleManager;
 use std::sync::{Arc, Mutex};
@@ -10,7 +11,7 @@ use warp::StrettoClient;
 #[allow(unused_imports)]
 use warp_common::dirs;
 use warp_common::error::Error;
-use warp_common::{anyhow, tokio};
+use warp_common::{anyhow, serde_json, tokio};
 use warp_configuration::Config;
 use warp_constellation::constellation::{Constellation, ConstellationDataType};
 use warp_data::DataObject;
@@ -57,10 +58,7 @@ fn default_config() -> warp_configuration::Config {
             raygun: false,
         },
         extensions: warp_configuration::ExtensionConfig {
-            constellation: vec!["warp-fs-memory"]
-                .iter()
-                .map(|e| e.to_string())
-                .collect(),
+            constellation: vec!["warp-fs-ipfs"].iter().map(|e| e.to_string()).collect(),
             pocket_dimension: vec!["warp-pd-flatfile"]
                 .iter()
                 .map(|e| e.to_string())
@@ -82,6 +80,18 @@ async fn main() -> anyhow::Result<()> {
 
     let mut manager = ModuleManager::default();
 
+    let warp_directory = warp_common::dirs::home_dir()
+        .map(|directory| {
+            let mut directory = directory;
+            directory.push(".warp");
+            directory
+        })
+        .ok_or(Error::DirectoryNotFound)?;
+
+    if !warp_directory.exists() {
+        tokio::fs::create_dir(&warp_directory).await?;
+    }
+
     //TODO: Have the module manager handle the checks
 
     if config.modules.pocket_dimension {
@@ -93,8 +103,8 @@ async fn main() -> anyhow::Result<()> {
         }
         {
             //TODO: Have the configuration point to the cache directory, or if not define to use system local directory
-            let mut root = std::env::temp_dir();
-            root.push("warp-cache");
+            let mut cache_dir = warp_directory.clone();
+            cache_dir.push("cache");
 
             let index = {
                 let mut index = std::path::PathBuf::new();
@@ -102,7 +112,7 @@ async fn main() -> anyhow::Result<()> {
                 index
             };
 
-            let storage = warp::FlatfileStorage::new_with_index_file(root, index)?;
+            let storage = warp::FlatfileStorage::new_with_index_file(cache_dir, index)?;
             manager.set_cache(storage);
         }
         // }
@@ -130,7 +140,7 @@ async fn main() -> anyhow::Result<()> {
     if let Ok(cache) = manager.get_cache() {
         if let Ok(fs) = manager.get_filesystem() {
             match import_from_cache(cache.clone(), fs.clone()) {
-                Ok(d) => data = d.clone(),
+                Ok(d) => data = d,
                 Err(_) => println!("Warning: No structure available from cache; Skip importing"),
             };
         }
@@ -193,22 +203,15 @@ fn import_from_cache(
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
     handle: Arc<Mutex<Box<dyn Constellation>>>,
 ) -> anyhow::Result<DataObject> {
-    println!("import");
-
     let mut handle = handle.lock().unwrap();
     let cache = cache.lock().unwrap();
     let obj = cache.get_data(warp_data::DataType::File, None)?;
-    println!("import");
 
     if !obj.is_empty() {
         if let Some(data) = obj.last() {
-            println!("import");
-
-            let inner = data.payload::<String>()?;
-            println!("import");
-
+            let inner = data.payload::<Value>()?;
+            let inner = serde_json::to_string(&inner)?;
             handle.import(ConstellationDataType::Json, inner)?;
-            println!("import");
 
             return Ok(data.clone());
         }
@@ -228,7 +231,7 @@ fn export_to_cache(
 
     let mut object = dataobject.clone();
     object.set_size(data.len() as u64);
-    object.set_payload(data)?;
+    object.set_payload(warp_common::serde_json::from_str::<Value>(&data)?)?;
 
     cache.add_data(warp_data::DataType::File, &object)?;
 

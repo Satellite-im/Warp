@@ -21,7 +21,7 @@ use warp_data::{DataObject, DataType};
 use warp_module::Module;
 use warp_pocket_dimension::{
     query::{Comparator, QueryBuilder},
-    PocketDimension,
+    DimensionData, PocketDimension,
 };
 
 cfg_if! {
@@ -72,78 +72,34 @@ impl AsRef<Vec<DataObject>> for FlatfileIndex {
 }
 
 impl FlatfileIndex {
-    cfg_if! {
-        if #[cfg(feature = "async")] {
+    pub fn from_path<P: AsRef<Path>>(path: P) -> warp_common::Result<Self> {
+        let path = path.as_ref();
+        let mut index = Self::default();
 
-            pub async fn from_path<P: AsRef<Path>>(path: P) -> warp_common::Result<Self> {
-                let path = path.as_ref();
-                let mut index = Self::default();
-
-                if path.is_dir() {
-                    index.build_index()?;
-                } else {
-                    let file = path.to_string_lossy().to_string();
-                    index.build_index_from_file(file).await?;
-                }
-
-                Ok(index)
-            }
-
-
-            pub async fn build_index_from_file<P: AsRef<Path>>(&mut self, file: P) -> warp_common::Result<()> {
-                let mut file = warp_common::tokio::fs::File::open(file).await?;
-                let mut buf = vec![];
-                file.read_to_end(&mut buf).await?;
-                self.0 = warp_common::serde_json::from_slice(&buf)?;
-
-                Ok(())
-            }
-
-            pub async fn export_index_to_file<P: AsRef<Path>>(&self, path: P) -> warp_common::Result<()> {
-                let mut file = warp_common::tokio::fs::File::create(path).await?;
-                let buf = warp_common::serde_json::to_vec(&self.0)?;
-                file.write_all(&buf).await?;
-                file.flush().await?;
-                Ok(())
-            }
-
-            pub async fn export_index_to_multifile<P: AsRef<Path>>(&self, _: P) -> warp_common::Result<()> {
-                Err(Error::Unimplemented)
-            }
+        if path.is_dir() {
+            index.build_index()?;
         } else {
-
-            pub fn from_path<P: AsRef<Path>>(path: P) -> warp_common::Result<Self> {
-                let path = path.as_ref();
-                let mut index = Self::default();
-
-                if path.is_dir() {
-                    index.build_index()?;
-                } else {
-                    let file = path.to_string_lossy().to_string();
-                    index.build_index_from_file(file)?;
-                }
-
-                Ok(index)
-            }
-
-
-            pub fn build_index_from_file<P: AsRef<Path>>(&mut self, file: P) -> warp_common::Result<()> {
-                let file = std::fs::File::open(file)?;
-                self.0 = warp_common::serde_json::from_reader(file)?;
-                Ok(())
-            }
-
-            pub fn export_index_to_file<P: AsRef<Path>>(&self, path: P) -> warp_common::Result<()> {
-                let fs = OpenOptions::new().create(true).write(true).open(path)?;
-                warp_common::serde_json::to_writer(fs, &self.0)?;
-                Ok(())
-            }
-
-            pub fn export_index_to_multifile<P: AsRef<Path>>(&self, _: P) -> warp_common::Result<()> {
-                Err(Error::Unimplemented)
-            }
+            let file = path.to_string_lossy().to_string();
+            index.build_index_from_file(file)?;
         }
 
+        Ok(index)
+    }
+
+    pub fn build_index_from_file<P: AsRef<Path>>(&mut self, file: P) -> warp_common::Result<()> {
+        let file = std::fs::File::open(file)?;
+        self.0 = warp_common::serde_json::from_reader(file)?;
+        Ok(())
+    }
+
+    pub fn export_index_to_file<P: AsRef<Path>>(&self, path: P) -> warp_common::Result<()> {
+        let fs = OpenOptions::new().create(true).write(true).open(path)?;
+        warp_common::serde_json::to_writer(fs, &self.0)?;
+        Ok(())
+    }
+
+    pub fn export_index_to_multifile<P: AsRef<Path>>(&self, _: P) -> warp_common::Result<()> {
+        Err(Error::Unimplemented)
     }
 
     pub fn insert(&mut self, data: DataObject) -> warp_common::Result<()> {
@@ -259,103 +215,6 @@ impl FlatfileStorage {
     }
 }
 
-pub struct FilePointer(pub DataObject);
-
-impl AsRef<DataObject> for FilePointer {
-    fn as_ref(&self) -> &DataObject {
-        &self.0
-    }
-}
-
-impl From<DataObject> for FilePointer {
-    fn from(data: DataObject) -> Self {
-        FilePointer(data)
-    }
-}
-
-impl FilePointer {
-    pub fn new<P: AsRef<Path>>(path: P) -> warp_common::Result<Self> {
-        let path = path.as_ref().to_path_buf();
-        if !path.is_file() {
-            return Err(warp_common::error::Error::ItemNotFile);
-        }
-        let mut data = DataObject::new(&Module::FileSystem, &path)?;
-        data.size = std::fs::metadata(path)?.len();
-        Ok(FilePointer::from(data))
-    }
-
-    pub fn file_path(&self) -> warp_common::Result<PathBuf> {
-        if self.0.data_type != DataType::Module(Module::FileSystem) {
-            return Err(warp_common::error::Error::Other);
-        }
-        let path = self.0.payload::<PathBuf>()?;
-        if !path.is_file() {
-            return Err(warp_common::error::Error::IoError(std::io::Error::from(
-                ErrorKind::InvalidInput,
-            )));
-        }
-
-        Ok(path)
-    }
-
-    cfg_if! {
-        if #[cfg(feature = "async")] {
-            pub async fn get_file_stream(&self) -> warp_common::Result<Box<dyn AsyncRead + Send + 'static>> {//BoxStream<Box<dyn AsyncRead + Sync + Unpin + 'static>> {
-                let path = self.file_path()?;
-                let fs = tokio::fs::File::open(path).await?;
-
-                Ok(Box::new(fs))
-            }
-        } else {
-            pub fn get_file_stream(&self) -> warp_common::Result<Box<dyn std::io::Read + Sync + 'static>> {
-                let path = self.file_path()?;
-                let fs = std::fs::File::open(path)?;
-                Ok(Box::new(fs))
-            }
-        }
-    }
-
-    pub fn file_buffer(&self, buf: &mut Vec<u8>) -> warp_common::Result<()> {
-        let path = self.file_path()?;
-        let mut fs = std::fs::File::open(path)?;
-        let size = fs.read(&mut buf[..])?;
-        if size != self.0.size as usize {
-            return Err(warp_common::error::Error::IoError(std::io::Error::from(
-                ErrorKind::InvalidData,
-            )));
-        }
-        Ok(())
-    }
-
-    pub fn put_file_from_stream<R: Read>(&mut self, reader: &mut R) -> warp_common::Result<()> {
-        let path = self.file_path()?;
-        let mut fs = std::fs::File::create(&path)?;
-        let size = std::io::copy(reader, &mut fs)?;
-        if size != self.0.size {
-            std::fs::remove_file(&path)?;
-            return Err(warp_common::error::Error::IoError(std::io::Error::from(
-                ErrorKind::InvalidData,
-            )));
-        }
-        Ok(())
-    }
-
-    pub fn put_file_from_buffer(&mut self, buffer: &Vec<u8>) -> warp_common::Result<()> {
-        let path = self.file_path()?;
-        let mut fs = std::fs::File::create(&path)?;
-        fs.write_all(buffer)?;
-        fs.flush()?;
-        let size = std::fs::metadata(&path)?.len();
-        if size != self.0.size {
-            std::fs::remove_file(&path)?;
-            return Err(warp_common::error::Error::IoError(std::io::Error::from(
-                ErrorKind::InvalidData,
-            )));
-        }
-        Ok(())
-    }
-}
-
 impl PocketDimension for FlatfileStorage {
     fn add_data(
         &mut self,
@@ -376,51 +235,75 @@ impl PocketDimension for FlatfileStorage {
 
         match dimension {
             DataType::Module(module) if Module::FileSystem == module => {
-                let old_path = data.payload::<PathBuf>()?;
+                match data.payload::<DimensionData>()? {
+                    DimensionData::Path { name, path } => {
+                        let old_path = path;
+                        if !old_path.is_file() {
+                            return Err(Error::ItemNotFile);
+                        }
+                        let size = std::fs::metadata(&old_path)?.len();
 
-                if !old_path.is_file() {
-                    return Err(Error::ItemNotFile);
-                }
+                        let filename = name.ok_or(Error::FileNotFound)?;
 
-                let size = std::fs::metadata(&old_path)?.len();
-                let filename = old_path
-                    .file_name()
-                    .ok_or(Error::FileNotFound)?
-                    .to_string_lossy()
-                    .to_string();
+                        data.set_size(size);
 
-                data.set_size(size);
-                let mut constellation_file = warp_constellation::file::File::new(filename);
-                constellation_file.set_size(size as i64);
+                        let new_path = {
+                            let mut path = self.directory.clone();
+                            path.push(Uuid::new_v4().to_string());
+                            path
+                        };
 
-                let mut file = std::fs::File::open(&old_path)?;
+                        data.set_payload(DimensionData::Path {
+                            name: Some(filename),
+                            path: new_path.clone(),
+                        })?;
+                        let mut writer = std::fs::File::create(&new_path)?;
 
-                let res = hash(&mut file)?;
+                        //TODO: Have a gzip encoder compress data
+                        // let mut writer = gzip::Encoder::new(writer)?;
+                        let mut reader = std::fs::File::open(old_path)?;
+                        std::io::copy(&mut reader, &mut writer)?;
+                        writer.flush()?;
 
-                constellation_file.set_hash(hex::encode(res));
+                        if let Err(e) = self.index.insert(data) {
+                            std::fs::remove_file(new_path)?;
+                            return Err(e);
+                        }
+                    }
+                    DimensionData::Buffer { name, buffer } => {
+                        //
+                        let size = buffer.len();
+                        data.set_size(size as u64);
 
-                let new_name = Uuid::new_v4().to_string();
+                        let new_path = {
+                            let mut path = self.directory.clone();
+                            path.push(Uuid::new_v4().to_string());
+                            path
+                        };
 
-                constellation_file.set_ref(&new_name);
-                data.set_payload(constellation_file)?;
+                        data.set_payload(DimensionData::Path {
+                            name: Some(name),
+                            path: new_path.clone(),
+                        })?;
 
-                let new_path = format!(
-                    "{}/{}",
-                    self.directory.as_path().as_os_str().to_string_lossy(),
-                    new_name
-                );
+                        let mut writer = std::fs::File::create(&new_path)?;
 
-                let mut writer = std::fs::File::create(&new_path)?;
+                        //TODO: Have a gzip encoder compress data
+                        // let mut writer = gzip::Encoder::new(writer)?;
+                        let mut reader = std::io::Cursor::new(buffer);
+                        std::io::copy(&mut reader, &mut writer)?;
+                        writer.flush()?;
 
-                //TODO: Have a gzip encoder compress data
-                // let mut writer = gzip::Encoder::new(writer)?;
-                let mut reader = std::fs::File::open(old_path)?;
-                std::io::copy(&mut reader, &mut writer)?;
-                writer.flush()?;
-
-                if let Err(e) = self.index.insert(data) {
-                    std::fs::remove_file(new_path)?;
-                    return Err(e);
+                        if let Err(e) = self.index.insert(data) {
+                            std::fs::remove_file(new_path)?;
+                            return Err(e);
+                        }
+                    }
+                    DimensionData::BufferNoFile { internal, .. } => {
+                        let size = internal.len();
+                        data.set_size(size as u64);
+                        self.index.insert(data)?
+                    }
                 }
             }
             _ => self.index.insert(data)?,
@@ -584,6 +467,7 @@ fn execute(data: &[DataObject], query: &QueryBuilder) -> warp_common::Result<Vec
     Ok(list)
 }
 
+#[allow(dead_code)]
 fn hash<R: Read>(reader: &mut R) -> std::io::Result<Vec<u8>> {
     let mut buf = vec![0; 2014];
     let mut hasher = Blake2b512::new();
@@ -594,5 +478,13 @@ fn hash<R: Read>(reader: &mut R) -> std::io::Result<Vec<u8>> {
         }
         hasher.update(&buf[..count]);
     }
+    Ok(hasher.finalize().to_vec())
+}
+
+#[allow(dead_code)]
+fn hash_buffer<R: AsRef<[u8]>>(buffer: &R) -> std::io::Result<Vec<u8>> {
+    let buffer = buffer.as_ref();
+    let mut hasher = Blake2b512::new();
+    hasher.update(buffer);
     Ok(hasher.finalize().to_vec())
 }
