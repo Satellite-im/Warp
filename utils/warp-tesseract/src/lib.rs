@@ -17,15 +17,11 @@ cfg_if! {
     }
 }
 
-cfg_if! {
-    if #[cfg(feature = "use_aes_gcm")] {
-        use aes_gcm::{
-            aead::{Aead, NewAead},
-            Aes128Gcm,
-        };
-        use rand::{rngs::OsRng, RngCore};
-    }
-}
+use aes_gcm::{
+    aead::{Aead, NewAead},
+    Aes128Gcm,
+};
+use rand::{rngs::OsRng, RngCore};
 
 /// The key store that holds encrypted strings that can be used for later use.
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq, Eq)]
@@ -217,83 +213,47 @@ impl Tesseract {
         Ok(())
     }
 
-    cfg_if! {
-        if #[cfg(feature = "use_botan")] {
-            /// Internal function that deals with encryption using Botan implementation of AES-128 GCM.
-            fn encrypt(&mut self, key: &[u8], data: String) -> Result<Vec<u8>> {
-                anyhow::ensure!(key.len() == 28, botan::ErrorType::InvalidKeyLength);
+    /// Internal function that deals with encryption using rust native implementation of AES-128 GCM.
+    fn encrypt<U: AsRef<[u8]>>(&mut self, key: U, data: String) -> Result<Vec<u8>> {
+        let key = key.as_ref();
+        anyhow::ensure!(key.len() == 28, Error::Other);
+        let e_key = &key[0..16];
+        let nonce = &key[16..28];
 
-                let e_key = &key[0..16];
-                let nonce = &key[16..28]; //TODO: Have this be unique per encryption
+        let key = aes_gcm::Key::from_slice(e_key);
+        let nonce = aes_gcm::Nonce::from_slice(nonce);
 
-                let mut cipher = botan::Cipher::new("AES-128/GCM", botan::CipherDirection::Encrypt)?;
-                cipher.set_key(e_key)?;
-                let inner_data = serde_json::to_vec(&data)?;
-                let data = cipher.process(nonce, &inner_data)?;
-                Ok(data)
-            }
+        let cipher = Aes128Gcm::new(key);
+        cipher
+            .encrypt(nonce, data.as_bytes())
+            .map_err(|e| anyhow::anyhow!("{}", e))
+    }
 
-            /// Internal function that deals with decryption using Botan implementation of AES-128 GCM.
-            fn decrypt(&self, key: &[u8], data: &[u8]) -> Result<String> {
-                anyhow::ensure!(key.len() == 28, botan::ErrorType::InvalidKeyLength);
+    /// Internal function that deals with decryption using rust native implementation of AES-128 GCM.
+    fn decrypt<U: AsRef<[u8]>>(&self, key: U, data: U) -> Result<String> {
+        let key = key.as_ref();
+        let data = data.as_ref();
 
-                let e_key = &key[0..16];
-                let nonce = &key[16..28];
+        anyhow::ensure!(key.len() == 28, Error::Other);
+        let e_key = &key[0..16];
+        let nonce = &key[16..28];
 
-                let mut cipher = botan::Cipher::new("AES-128/GCM", botan::CipherDirection::Decrypt)?;
-                cipher.set_key(e_key)?;
-                let ptext = cipher.process(nonce, data)?;
-                let results = serde_json::from_slice(&ptext[..])?;
-                Ok(results)
-            }
-        } else if #[cfg(feature = "use_aes_gcm")] {
-            /// Internal function that deals with encryption using rust native implementation of AES-128 GCM.
-            fn encrypt(&mut self, key: &[u8], data: String) -> Result<Vec<u8>> {
-                anyhow::ensure!(key.len() == 28, Error::Other);
-                let e_key = &key[0..16];
-                let nonce = &key[16..28];
+        let key = aes_gcm::Key::from_slice(e_key);
+        let nonce = aes_gcm::Nonce::from_slice(nonce);
 
-                let key = aes_gcm::Key::from_slice(e_key);
-                let nonce = aes_gcm::Nonce::from_slice(nonce);
-
-                let cipher = Aes128Gcm::new(key);
-                let etext = cipher.encrypt(nonce, data.as_bytes()).map_err(|_| Error::Other)?;
-                Ok(etext)
-            }
-
-            /// Internal function that deals with decryption using rust native implementation of AES-128 GCM.
-            fn decrypt(&self, key: &[u8], data: &[u8]) -> Result<String> {
-                anyhow::ensure!(key.len() == 28, Error::Other);
-                let e_key = &key[0..16];
-                let nonce = &key[16..28];
-
-                let key = aes_gcm::Key::from_slice(e_key);
-                let nonce = aes_gcm::Nonce::from_slice(nonce);
-
-                let cipher = Aes128Gcm::new(key);
-                let plaintext = cipher.decrypt(nonce, data).map_err(|e| anyhow::anyhow!("{}", e))?;
-                Ok(String::from_utf8_lossy(&plaintext).to_string())
-            }
-        }
+        let cipher = Aes128Gcm::new(key);
+        cipher
+            .decrypt(nonce, data)
+            .map(|pt| String::from_utf8_lossy(&pt[..]).to_string())
+            .map_err(|e| anyhow::anyhow!(e))
     }
 }
 
-cfg_if! {
-        if #[cfg(feature = "use_botan")] {
-            /// Generates random bytes using botan random number generator
-            pub fn generate(limit: usize) -> Result<Vec<u8>> {
-                let mut rng = botan::RandomNumberGenerator::new_system()?;
-                let data = rng.read(limit)?;
-                Ok(data)
-            }
-        } else if #[cfg(feature = "use_aes_gcm")] {
-            /// Generate random bytes using rand number generator
-            pub fn generate(limit: usize) -> Result<Vec<u8>> {
-                let mut key = vec![0u8; limit];
-                OsRng.fill_bytes(&mut key);
-                Ok(key)
-            }
-        }
+/// Generate random bytes using rand number generator
+pub fn generate(limit: usize) -> Result<Vec<u8>> {
+    let mut key = vec![0u8; limit];
+    OsRng.fill_bytes(&mut key);
+    Ok(key)
 }
 
 #[cfg(test)]
