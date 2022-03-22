@@ -1,5 +1,6 @@
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
 use std::io::ErrorKind;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 // use warp_common::futures::TryStreamExt;
 use warp_module::Module;
@@ -16,7 +17,9 @@ use warp_common::{
 };
 use warp_constellation::item::Item;
 use warp_constellation::{constellation::Constellation, directory::Directory};
-use warp_pocket_dimension::PocketDimension;
+use warp_data::{DataObject, DataType};
+use warp_pocket_dimension::query::QueryBuilder;
+use warp_pocket_dimension::{DimensionData, PocketDimension};
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(crate = "warp_common::serde")]
@@ -145,6 +148,16 @@ impl Constellation for IpfsFileSystem {
         self.open_directory("")?.add_child(file)?;
 
         self.modified = Utc::now();
+
+        if let Some(cache) = &self.cache {
+            let mut cache = cache.lock().unwrap();
+            let object = DataObject::new(
+                &DataType::Module(Module::FileSystem),
+                DimensionData::from_path(path),
+            )?;
+            cache.add_data(DataType::Module(Module::FileSystem), &object)?;
+        }
+
         Ok(())
     }
 
@@ -159,6 +172,31 @@ impl Constellation for IpfsFileSystem {
         // }
 
         let name = affix_root(name);
+
+        if let Some(cache) = &self.cache {
+            let cache = cache.lock().unwrap();
+
+            let name = Path::new(&name)
+                .file_name()
+                .ok_or(Error::Other)?
+                .to_string_lossy()
+                .to_string();
+
+            let mut query = QueryBuilder::default();
+            query.r#where("name", &name)?;
+            if let Ok(list) = cache.get_data(DataType::Module(Module::FileSystem), Some(&query)) {
+                //get last
+                if !list.is_empty() {
+                    let obj = list.last().unwrap();
+                    if let Ok(data) = obj.payload::<DimensionData>() {
+                        if let Ok(mut file) = std::fs::File::create(path) {
+                            data.write_from_path(&mut file)?;
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
 
         let _file = self
             .root_directory()
@@ -248,11 +286,50 @@ impl Constellation for IpfsFileSystem {
         self.open_directory("")?.add_child(file)?;
 
         self.modified = Utc::now();
+
+        if let Some(cache) = &self.cache {
+            let mut cache = cache.lock().unwrap();
+
+            let name = Path::new(&name)
+                .file_name()
+                .ok_or(Error::Other)?
+                .to_string_lossy()
+                .to_string();
+
+            let object = DataObject::new(
+                &DataType::Module(Module::FileSystem),
+                DimensionData::from_buffer(name, buffer),
+            )?;
+            cache.add_data(DataType::Module(Module::FileSystem), &object)?;
+        }
         Ok(())
     }
 
     async fn to_buffer(&self, name: &str, buffer: &mut Vec<u8>) -> warp_common::Result<()> {
         let name = affix_root(name);
+
+        if let Some(cache) = &self.cache {
+            let cache = cache.lock().unwrap();
+
+            let name = Path::new(&name)
+                .file_name()
+                .ok_or(Error::Other)?
+                .to_string_lossy()
+                .to_string();
+
+            let mut query = QueryBuilder::default();
+            query.r#where("name", &name)?;
+            if let Ok(list) = cache.get_data(DataType::Module(Module::FileSystem), Some(&query)) {
+                //get last
+                if !list.is_empty() {
+                    let obj = list.last().unwrap();
+                    if let Ok(data) = obj.payload::<DimensionData>() {
+                        data.write_from_path(buffer)?;
+                        return Ok(());
+                    }
+                }
+            }
+        }
 
         let _file = self
             .root_directory()
