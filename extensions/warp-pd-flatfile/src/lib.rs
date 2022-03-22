@@ -16,7 +16,7 @@ use warp_common::{
 };
 
 #[allow(unused_imports)]
-use libflate::gzip;
+use warp_common::libflate::gzip;
 use warp_data::{DataObject, DataType};
 use warp_module::Module;
 use warp_pocket_dimension::{

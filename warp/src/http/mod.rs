@@ -1,3 +1,4 @@
+mod constellation;
 use crate::manager::ModuleManager;
 use std::sync::{Arc, Mutex};
 use warp::PocketDimension;
@@ -15,8 +16,6 @@ use rocket::{
     serde::json::{json, Json, Value},
     Build, Request, Rocket, State,
 };
-
-mod hconstellation;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 #[serde(crate = "warp_common::serde")]
@@ -113,7 +112,7 @@ pub async fn http_main(manage: &mut ModuleManager) -> anyhow::Result<()> {
             routes![index, hconstellation::export, hconstellation::create_folder],
         )
         .register("/", catchers![_error])
-        .manage(hconstellation::FsSystem(fs.clone()))
+        .manage(constellation::FsSystem(fs.clone()))
         .manage(CacheSystem(cache.clone()))
         .launch()
         .await?;

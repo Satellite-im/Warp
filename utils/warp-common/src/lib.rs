@@ -11,6 +11,8 @@ pub use cfg_if;
 pub use chrono;
 #[cfg(not(any(target_os = "android", target_os = "ios", target_family = "wasm")))]
 pub use dirs;
+pub use libflate;
+pub use log;
 pub use regex;
 pub use serde;
 pub use serde_json;
@@ -18,25 +20,15 @@ pub use serde_yaml;
 pub use toml;
 pub use uuid;
 
-#[cfg(feature = "async")]
-#[cfg(not(target_family = "wasm"))]
-pub use tokio;
-
-#[cfg(feature = "async")]
-#[cfg(not(target_family = "wasm"))]
-pub use tokio_stream;
-
-#[cfg(feature = "async")]
-#[cfg(not(target_family = "wasm"))]
-pub use tokio_util;
-
-#[cfg(feature = "async")]
-#[cfg(not(target_family = "wasm"))]
-pub use async_trait;
-
-#[cfg(feature = "async")]
-#[cfg(not(target_family = "wasm"))]
-pub use futures;
+cfg_if::cfg_if! {
+    if #[cfg(all(feature = "async", not(any(target_family = "wasm", target_os = "emscripten", target_os = "wasi"))))] {
+        pub use tokio;
+        pub use tokio_stream;
+        pub use tokio_util;
+        pub use async_trait;
+        pub use futures;
+    }
+}
 
 #[cfg(not(target_family = "wasm"))]
 pub type Result<T> = std::result::Result<T, crate::error::Error>;
