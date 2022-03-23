@@ -1,11 +1,12 @@
 pub mod http;
 pub mod manager;
-// pub mod terminal;
+pub mod terminal;
 
 use crate::anyhow::bail;
 use crate::serde_json::Value;
 use clap::{Parser, Subcommand};
 use manager::ModuleManager;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use warp::StrettoClient;
 #[allow(unused_imports)]
@@ -81,11 +82,7 @@ async fn main() -> anyhow::Result<()> {
     let mut manager = ModuleManager::default();
 
     let warp_directory = warp_common::dirs::home_dir()
-        .map(|directory| {
-            let mut directory = directory;
-            directory.push(".warp");
-            directory
-        })
+        .map(|directory| Path::new(&directory).join(".warp"))
         .ok_or(Error::DirectoryNotFound)?;
 
     if !warp_directory.exists() {
@@ -103,16 +100,12 @@ async fn main() -> anyhow::Result<()> {
         }
         {
             //TODO: Have the configuration point to the cache directory, or if not define to use system local directory
-            let mut cache_dir = warp_directory.clone();
-            cache_dir.push("cache");
+            let cache_dir = Path::new(&warp_directory).join("cache");
 
-            let index = {
-                let mut index = std::path::PathBuf::new();
-                index.push("cache-index");
-                index
-            };
+            let index = Path::new("cache-index");
 
-            let storage = warp::FlatfileStorage::new_with_index_file(cache_dir, index)?;
+            let storage =
+                warp::FlatfileStorage::new_with_index_file(cache_dir, index.to_path_buf())?;
             manager.set_cache(storage);
         }
         // }
