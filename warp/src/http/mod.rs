@@ -109,7 +109,7 @@ pub async fn http_main(manage: &mut ModuleManager) -> anyhow::Result<()> {
     rocket::build()
         .mount(
             "/v1",
-            routes![index, hconstellation::export, hconstellation::create_folder],
+            routes![index, constellation::export, constellation::create_folder],
         )
         .register("/", catchers![_error])
         .manage(constellation::FsSystem(fs.clone()))
