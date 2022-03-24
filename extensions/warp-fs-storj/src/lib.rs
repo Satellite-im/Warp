@@ -23,6 +23,7 @@ use warp_common::anyhow::bail;
 
 use warp_constellation::item::Item;
 use warp_data::{DataObject, DataType};
+use warp_hooks::hooks::Hooks;
 
 #[derive(Debug, Clone)]
 pub struct StorjClient {
@@ -111,6 +112,8 @@ pub struct StorjFilesystem {
     pub client: Option<StorjClient>,
     #[serde(skip)]
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    #[serde(skip)]
+    pub hooks: Option<Arc<Mutex<Hooks>>>,
 }
 
 impl Default for StorjFilesystem {
@@ -122,6 +125,7 @@ impl Default for StorjFilesystem {
             modified: Utc::now(),
             client: None,
             cache: None,
+            hooks: None,
         }
     }
 }
@@ -138,6 +142,10 @@ impl StorjFilesystem {
 
     pub fn set_cache(&mut self, cache: Arc<Mutex<Box<dyn PocketDimension>>>) {
         self.cache = Some(cache);
+    }
+
+    pub fn set_hook(&mut self, hook: Arc<Mutex<Hooks>>) {
+        self.hooks = Some(hook)
     }
 }
 
@@ -167,16 +175,17 @@ impl Constellation for StorjFilesystem {
         self.path = path;
     }
 
-    fn get_path(&self) -> PathBuf {
-        self.path.clone()
+    fn get_path(&self) -> &PathBuf {
+        &self.path
     }
+
     fn get_path_mut(&mut self) -> &mut PathBuf {
         &mut self.path
     }
+
     /// Uploads file from path with the name format being `bucket_name://path/to/file`
     /// Note: This only supports uploading of files. This has not implemented creation of
     ///       directories.
-    /// TODO: Implement cache
     async fn put(&mut self, name: &str, path: &str) -> warp_common::Result<()> {
         let (bucket, name) = split_for(name)?;
 
@@ -198,7 +207,7 @@ impl Constellation for StorjFilesystem {
         file.set_size(size as i64);
         file.set_hash(hash_file(path).await?);
 
-        self.open_directory("")?.add_child(file)?;
+        self.open_directory("")?.add_child(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -210,13 +219,18 @@ impl Constellation for StorjFilesystem {
             )?;
             cache.add_data(DataType::Module(Module::FileSystem), &object)?;
         }
+
+        if let Some(hook) = &self.hooks {
+            let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
+            let hook = hook.lock().unwrap();
+            hook.trigger("FILESYSTEM::NEW_FILE", &object)
+        }
         Ok(())
     }
 
     /// Download file to path with the name format being `bucket_name://path/to/file`
     /// Note: This only supports uploading of files. This has not implemented creation of
     ///       directories.
-    /// TODO: Implement cache
     async fn get(&self, name: &str, path: &str) -> warp_common::Result<()> {
         let (bucket, name) = split_for(name)?;
 
@@ -285,14 +299,10 @@ impl Constellation for StorjFilesystem {
         file.set_size(buffer.len() as i64);
         file.set_hash(hash_data(&buffer));
 
-        self.open_directory("")?.add_child(file)?;
-        //TODO: Mutate/update the modified date.
+        self.open_directory("")?.add_child(file.clone())?;
 
-        //TODO: Deal with caching that can be more adaptive any ext of pd
-        //Note: Since caching extensions may have different methods of handling
-        //      and storing of data, we would need to look into a streamline
-        //      way of providing data to cache without buffering large amount
-        //      of data to memory.
+        self.modified = Utc::now();
+
         if let Some(cache) = &self.cache {
             let mut cache = cache.lock().unwrap();
             let object = DataObject::new(
@@ -300,6 +310,12 @@ impl Constellation for StorjFilesystem {
                 DimensionData::from_buffer(name, &buffer),
             )?;
             cache.add_data(DataType::Module(Module::FileSystem), &object)?;
+        }
+
+        if let Some(hook) = &self.hooks {
+            let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
+            let hook = hook.lock().unwrap();
+            hook.trigger("FILESYSTEM::NEW_FILE", &object)
         }
         Ok(())
     }
@@ -364,8 +380,16 @@ impl Constellation for StorjFilesystem {
             return Err(Error::ToBeDetermined);
         }
 
-        self.root_directory_mut().remove_child(&name)?;
-
+        let item = self.root_directory_mut().remove_child(&name)?;
+        if let Some(hook) = &self.hooks {
+            let object = DataObject::new(&DataType::Module(Module::FileSystem), &item)?;
+            let hook = hook.lock().unwrap();
+            let hook_name = match item {
+                Item::Directory(_) => "FILESYSTEM::REMOVE_DIRECTORY",
+                Item::File(_) => "FILESYSTEM::REMOVE_FILE",
+            };
+            hook.trigger(hook_name, &object);
+        }
         Ok(())
     }
 }
@@ -388,15 +412,15 @@ fn split_for<S: AsRef<str>>(name: S) -> anyhow::Result<(String, String)> {
         let name = name.split("://").collect::<Vec<&str>>();
 
         if name.len() != 2 {
-            bail!(Error::ToBeDetermined);
+            bail!(Error::InvalidPath);
         }
 
         (
             name.get(0)
-                .ok_or(Error::ToBeDetermined)
+                .ok_or(Error::InvalidConversion)
                 .map(|s| s.to_string())?,
             name.get(1)
-                .ok_or(Error::ToBeDetermined)
+                .ok_or(Error::InvalidConversion)
                 .map(|s| s.to_string())?,
         )
     } else {

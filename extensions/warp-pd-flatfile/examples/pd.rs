@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use warp_common::error::Error;
 use warp_common::{anyhow, Module};

@@ -15,6 +15,7 @@ use warp_pocket_dimension::{DimensionData, PocketDimension};
 
 use warp_constellation::constellation::Constellation;
 use warp_constellation::directory::Directory;
+use warp_hooks::hooks::Hooks;
 use warp_module::Module;
 
 pub type Result<T> = std::result::Result<T, error::Error>;
@@ -38,6 +39,8 @@ pub struct MemorySystem {
     internal: MemorySystemInternal,
     #[serde(skip)]
     cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    #[serde(skip)]
+    pub hooks: Option<Arc<Mutex<Hooks>>>,
 }
 
 impl Default for MemorySystem {
@@ -49,6 +52,7 @@ impl Default for MemorySystem {
             modified: Utc::now(),
             internal: MemorySystemInternal::default(),
             cache: None,
+            hooks: None,
         }
     }
 }
@@ -60,6 +64,10 @@ impl MemorySystem {
 
     pub fn set_cache(&mut self, cache: Arc<Mutex<Box<dyn PocketDimension>>>) {
         self.cache = Some(cache);
+    }
+
+    pub fn set_hook(&mut self, hook: Arc<Mutex<Hooks>>) {
+        self.hooks = Some(hook)
     }
 }
 
@@ -95,12 +103,14 @@ impl Constellation for MemorySystem {
         self.path = path;
     }
 
-    fn get_path(&self) -> PathBuf {
-        self.path.clone()
+    fn get_path(&self) -> &PathBuf {
+        &self.path
     }
+
     fn get_path_mut(&mut self) -> &mut PathBuf {
         &mut self.path
     }
+
     async fn from_buffer(
         &mut self,
         name: &str,
@@ -117,7 +127,7 @@ impl Constellation for MemorySystem {
         file.set_size(bytes as i64);
         file.set_hash(hex::encode(internal_file.hash()));
 
-        self.open_directory("")?.add_child(file)?;
+        self.open_directory("")?.add_child(file.clone())?;
         if let Some(cache) = &self.cache {
             let mut cache = cache.lock().unwrap();
 
@@ -126,6 +136,12 @@ impl Constellation for MemorySystem {
             data.set_payload(DimensionData::from_buffer(&name, &buf))?;
 
             cache.add_data(DataType::Module(Module::FileSystem), &data)?;
+        }
+
+        if let Some(hook) = &self.hooks {
+            let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
+            let hook = hook.lock().unwrap();
+            hook.trigger("FILESYSTEM::NEW_FILE", &object)
         }
         Ok(())
     }

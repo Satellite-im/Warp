@@ -18,6 +18,7 @@ use warp_common::{
 use warp_constellation::item::Item;
 use warp_constellation::{constellation::Constellation, directory::Directory};
 use warp_data::{DataObject, DataType};
+use warp_hooks::hooks::Hooks;
 use warp_pocket_dimension::query::QueryBuilder;
 use warp_pocket_dimension::{DimensionData, PocketDimension};
 
@@ -32,6 +33,8 @@ pub struct IpfsFileSystem {
     pub client: IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>,
     #[serde(skip)]
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    #[serde(skip)]
+    pub hooks: Option<Arc<Mutex<Hooks>>>,
 }
 
 impl Default for IpfsFileSystem {
@@ -43,6 +46,7 @@ impl Default for IpfsFileSystem {
             modified: Utc::now(),
             client: IpfsClient::default(),
             cache: None,
+            hooks: None,
         }
     }
 }
@@ -64,6 +68,10 @@ impl IpfsFileSystem {
 
     pub fn set_cache(&mut self, cache: Arc<Mutex<Box<dyn PocketDimension>>>) {
         self.cache = Some(cache);
+    }
+
+    pub fn set_hook(&mut self, hook: Arc<Mutex<Hooks>>) {
+        self.hooks = Some(hook)
     }
 }
 
@@ -151,7 +159,7 @@ impl Constellation for IpfsFileSystem {
         file.set_size(size as i64);
         file.set_hash(hash);
 
-        self.open_directory("")?.add_child(file)?;
+        self.open_directory("")?.add_child(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -162,6 +170,12 @@ impl Constellation for IpfsFileSystem {
                 DimensionData::from_path(path),
             )?;
             cache.add_data(DataType::Module(Module::FileSystem), &object)?;
+        }
+
+        if let Some(hook) = &self.hooks {
+            let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
+            let hook = hook.lock().unwrap();
+            hook.trigger("FILESYSTEM::NEW_FILE", &object)
         }
 
         Ok(())
@@ -289,7 +303,7 @@ impl Constellation for IpfsFileSystem {
         file.set_size(size as i64);
         file.set_hash(hash);
 
-        self.open_directory("")?.add_child(file)?;
+        self.open_directory("")?.add_child(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -308,6 +322,13 @@ impl Constellation for IpfsFileSystem {
             )?;
             cache.add_data(DataType::Module(Module::FileSystem), &object)?;
         }
+
+        if let Some(hook) = &self.hooks {
+            let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
+            let hook = hook.lock().unwrap();
+            hook.trigger("FILESYSTEM::NEW_FILE", &object)
+        }
+
         Ok(())
     }
 
@@ -369,6 +390,14 @@ impl Constellation for IpfsFileSystem {
             .map_err(|_| Error::ToBeDetermined)?;
 
         self.root_directory_mut().remove_child(&name[1..])?;
+
+        //TODO: Remove from cache
+
+        if let Some(hook) = &self.hooks {
+            let object = DataObject::new(&DataType::Module(Module::FileSystem), ())?;
+            let hook = hook.lock().unwrap();
+            hook.trigger("FILESYSTEM::REMOVE_FILE", &object)
+        }
         Ok(())
     }
 
@@ -384,8 +413,8 @@ impl Constellation for IpfsFileSystem {
         self.path = path;
     }
 
-    fn get_path(&self) -> PathBuf {
-        self.path.clone()
+    fn get_path(&self) -> &PathBuf {
+        &self.path
     }
 }
 
