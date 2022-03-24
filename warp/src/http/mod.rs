@@ -71,11 +71,6 @@ impl AsRef<Arc<Mutex<Box<dyn PocketDimension>>>> for CacheSystem {
     }
 }
 
-#[get("/")]
-fn index() -> String {
-    String::from("Hello, World!")
-}
-
 #[catch(default)]
 fn _error() -> Json<Value> {
     Json(warp_common::serde_json::json!({"message": "An error as occurred with your request"}))
@@ -103,7 +98,12 @@ pub async fn http_main(manage: &mut ModuleManager) -> anyhow::Result<()> {
     rocket::build()
         .mount(
             "/v1",
-            routes![index, hconstellation::export, hconstellation::create_folder],
+            routes![
+                hconstellation::version,
+                hconstellation::export,
+                hconstellation::create_directory,
+                hconstellation::go_to,
+            ],
         )
         .register("/", catchers![_error])
         .manage(hconstellation::FsSystem(fs.clone()))
