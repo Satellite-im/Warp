@@ -1,3 +1,4 @@
+mod constellation;
 use crate::manager::ModuleManager;
 use std::sync::{Arc, Mutex};
 use warp::PocketDimension;
@@ -15,8 +16,6 @@ use rocket::{
     serde::json::{json, Json, Value},
     Build, Request, Rocket, State,
 };
-
-mod hconstellation;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 #[serde(crate = "warp_common::serde")]
@@ -46,13 +45,18 @@ impl Default for ApiResponse {
 
 impl ApiResponse {
     pub fn new(status: ApiStatus, code: u16) -> Self {
-        let mut response = ApiResponse::default();
-        response.status = status;
-        response.code = code;
-        response
+        ApiResponse {
+            status,
+            code,
+            ..Default::default()
+        }
     }
 
-    pub fn set_status(&mut self, code: u16) {
+    pub fn set_status(&mut self, status: ApiStatus) {
+        self.status = status;
+    }
+
+    pub fn set_code(&mut self, code: u16) {
         self.code = code;
     }
 
@@ -81,32 +85,34 @@ pub async fn http_main(manage: &mut ModuleManager) -> anyhow::Result<()> {
     let fs = manage.get_filesystem()?;
     let cache = manage.get_cache()?;
     //TODO: Remove
-    if let Err(_) = fs
+    if (fs
         .lock()
         .unwrap()
         .from_buffer("Cargo.toml", &include_bytes!("../../Cargo.toml").to_vec())
-        .await
+        .await)
+        .is_err()
     {}
 
-    if let Err(_) = fs
+    if (fs
         .lock()
         .unwrap()
         .from_buffer("lib.rs", &include_bytes!("../lib.rs").to_vec())
-        .await
+        .await)
+        .is_err()
     {}
 
     rocket::build()
         .mount(
             "/v1",
             routes![
-                hconstellation::version,
-                hconstellation::export,
-                hconstellation::create_directory,
-                hconstellation::go_to,
+                constellation::version,
+                constellation::export,
+                constellation::create_directory,
+                constellation::go_to,
             ],
         )
         .register("/", catchers![_error])
-        .manage(hconstellation::FsSystem(fs.clone()))
+        .manage(constellation::FsSystem(fs.clone()))
         .manage(CacheSystem(cache.clone()))
         .launch()
         .await?;

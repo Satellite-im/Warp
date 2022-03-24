@@ -10,7 +10,7 @@ use warp_common::{
     tokio, Extension,
 };
 use warp_constellation::{constellation::Constellation, directory::Directory};
-use warp_pocket_dimension::PocketDimension;
+use warp_pocket_dimension::{query::QueryBuilder, DimensionData, PocketDimension};
 
 use s3::bucket::Bucket;
 use s3::creds::Credentials;
@@ -19,6 +19,7 @@ use s3::BucketConfiguration;
 use warp_common::anyhow::bail;
 
 use warp_constellation::item::Item;
+use warp_data::{DataObject, DataType};
 
 #[derive(Debug, Clone)]
 pub struct StorjClient {
@@ -154,7 +155,7 @@ impl Constellation for StorjFilesystem {
     async fn put(&mut self, name: &str, path: &str) -> warp_common::Result<()> {
         let (bucket, name) = split_for(name)?;
 
-        let mut fs = tokio::fs::File::open(path).await?;
+        let mut fs = tokio::fs::File::open(&path).await?;
         let size = fs.metadata().await?.len();
 
         let client = self.client.as_ref().ok_or(Error::ToBeDetermined)?;
@@ -176,12 +177,14 @@ impl Constellation for StorjFilesystem {
 
         self.modified = Utc::now();
 
-        //TODO: Deal with caching that can be more adaptive any ext of pd
-        //Note: Since caching extensions may have different methods of handling
-        //      and storing of data, we would need to look into a streamline
-        //      way of providing data to cache without buffering large amount
-        //      of data to memory.
-
+        if let Some(cache) = &self.cache {
+            let mut cache = cache.lock().unwrap();
+            let object = DataObject::new(
+                &DataType::Module(Module::FileSystem),
+                DimensionData::from_path(path),
+            )?;
+            cache.add_data(DataType::Module(Module::FileSystem), &object)?;
+        }
         Ok(())
     }
 
@@ -192,7 +195,24 @@ impl Constellation for StorjFilesystem {
     async fn get(&self, name: &str, path: &str) -> warp_common::Result<()> {
         let (bucket, name) = split_for(name)?;
 
-        //TODO: Implement cache
+        if let Some(cache) = &self.cache {
+            let cache = cache.lock().unwrap();
+            let mut query = QueryBuilder::default();
+            query.r#where("name", &name)?;
+            if let Ok(list) = cache.get_data(DataType::Module(Module::FileSystem), Some(&query)) {
+                //get last
+                if !list.is_empty() {
+                    let obj = list.last().unwrap();
+                    if let Ok(data) = obj.payload::<DimensionData>() {
+                        if let Ok(mut file) = std::fs::File::create(path) {
+                            data.write_from_path(&mut file)?;
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+
         let file = self
             .root_directory()
             .get_child_by_path(&name)
@@ -238,7 +258,7 @@ impl Constellation for StorjFilesystem {
 
         let mut file = warp_constellation::file::File::new(&name);
         file.set_size(buffer.len() as i64);
-        file.set_hash(hash_data(buffer));
+        file.set_hash(hash_data(&buffer));
 
         self.open_directory("")?.add_child(file)?;
         //TODO: Mutate/update the modified date.
@@ -248,14 +268,34 @@ impl Constellation for StorjFilesystem {
         //      and storing of data, we would need to look into a streamline
         //      way of providing data to cache without buffering large amount
         //      of data to memory.
-
+        if let Some(cache) = &self.cache {
+            let mut cache = cache.lock().unwrap();
+            let object = DataObject::new(
+                &DataType::Module(Module::FileSystem),
+                DimensionData::from_buffer(name, &buffer),
+            )?;
+            cache.add_data(DataType::Module(Module::FileSystem), &object)?;
+        }
         Ok(())
     }
 
     async fn to_buffer(&self, name: &str, buffer: &mut Vec<u8>) -> warp_common::Result<()> {
         let (bucket, name) = split_for(name)?;
 
-        //TODO: Implement cache
+        if let Some(cache) = &self.cache {
+            let cache = cache.lock().unwrap();
+            let mut query = QueryBuilder::default();
+            query.r#where("name", &name)?;
+            if let Ok(list) = cache.get_data(DataType::Module(Module::FileSystem), Some(&query)) {
+                if !list.is_empty() {
+                    let obj = list.last().ok_or(Error::ArrayPositionNotFound)?;
+                    if let Ok(data) = obj.payload::<DimensionData>() {
+                        data.write_from_path(buffer)?;
+                        return Ok(());
+                    }
+                }
+            }
+        }
 
         let file = self
             .root_directory()
@@ -263,23 +303,23 @@ impl Constellation for StorjFilesystem {
             .and_then(Item::get_file)?;
 
         let client = self.client.as_ref().ok_or(Error::ToBeDetermined)?;
-        let code = client
+        let (buf, code) = client
             .bucket(bucket, false)
             .await?
             .get_object(&name)
             .await?;
 
-        if code.1 != 200 {
+        if code != 200 {
             return Err(Error::ToBeDetermined);
         }
 
-        let hash = hash_data(&code.0);
+        let hash = hash_data(&buffer);
 
         if file.hash != hash {
             return Err(Error::ToBeDetermined);
         }
 
-        *buffer = code.0;
+        *buffer = buf;
 
         Ok(())
     }
@@ -289,13 +329,13 @@ impl Constellation for StorjFilesystem {
 
         let client = self.client.as_ref().ok_or(Error::Other)?;
 
-        let code = client
+        let (_, code) = client
             .bucket(bucket, false)
             .await?
             .delete_object(&name)
             .await?;
 
-        if code.1 != 204 {
+        if code != 204 {
             return Err(Error::ToBeDetermined);
         }
 

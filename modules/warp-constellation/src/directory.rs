@@ -6,7 +6,7 @@ use warp_common::{error::Error, Result};
 
 /// `DirectoryType` handles the supported types for the directory.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
-#[serde(crate = "warp_common::serde")]
+#[serde(crate = "warp_common::serde", rename_all = "lowercase")]
 pub enum DirectoryType {
     Default,
 }
@@ -23,25 +23,25 @@ impl Default for DirectoryType {
 pub struct Directory {
     /// ID of the `Directory`
     pub id: Uuid,
-    
+
     /// Name of the `Directory`
     pub name: String,
-    
+
     /// Description of the `Directory`
     /// TODO: Make this optional
     pub description: String,
-    
+
     /// Timestamp of the creation of the directory
     #[serde(with = "warp_common::chrono::serde::ts_seconds")]
     pub creation: DateTime<Utc>,
-    
+
     /// Timestamp of the `Directory` when it is modified
     #[serde(with = "warp_common::chrono::serde::ts_seconds")]
     pub modified: DateTime<Utc>,
-    
+
     /// Type of `Directory`
     pub directory_type: DirectoryType,
-    
+
     /// List of `Item`, which would represents either `File` or `Directory`
     pub children: Vec<Item>,
 }

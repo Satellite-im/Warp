@@ -125,7 +125,8 @@ impl<S: AsRef<str>> From<S> for ConstellationDataType {
         match input.as_ref().to_uppercase().as_str() {
             "YAML" => ConstellationDataType::Yaml,
             "TOML" => ConstellationDataType::Toml,
-            "JSON" | _ => ConstellationDataType::Json,
+            "JSON" => ConstellationDataType::Json,
+            _ => ConstellationDataType::Json,
         }
     }
 }

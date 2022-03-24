@@ -10,7 +10,7 @@ use warp_common::serde::{Deserialize, Serialize};
 use warp_common::Extension;
 use warp_data::{DataObject, DataType};
 use warp_pocket_dimension::query::QueryBuilder;
-use warp_pocket_dimension::PocketDimension;
+use warp_pocket_dimension::{DimensionData, PocketDimension};
 
 use warp_constellation::constellation::Constellation;
 use warp_constellation::directory::Directory;
@@ -89,17 +89,19 @@ impl Constellation for MemorySystem {
             .0
             .insert(internal_file.clone())
             .map_err(|_| Error::Other)?;
-        let mut data = DataObject::default();
-        data.set_size(bytes as u64);
-        data.set_payload((name.to_string(), internal_file.data()))?;
 
-        let mut file = warp_constellation::file::File::new(name);
+        let mut file = warp_constellation::file::File::new(&name);
         file.set_size(bytes as i64);
         file.set_hash(hex::encode(internal_file.hash()));
 
         self.open_directory("")?.add_child(file)?;
         if let Some(cache) = &self.cache {
             let mut cache = cache.lock().unwrap();
+
+            let mut data = DataObject::default();
+            data.set_size(bytes as u64);
+            data.set_payload(DimensionData::from_buffer(&name, &buf))?;
+
             cache.add_data(DataType::Module(Module::FileSystem), &data)?;
         }
         Ok(())
@@ -125,12 +127,11 @@ impl Constellation for MemorySystem {
                 //get last
                 if !list.is_empty() {
                     let obj = list.last().unwrap();
-                    let (in_name, in_buf) = obj.payload::<(String, Vec<u8>)>()?;
-                    if name != in_name {
-                        return Err(Error::Other); // mismatch with names
+
+                    if let Ok(data) = obj.payload::<DimensionData>() {
+                        data.write_from_path(buf)?;
+                        return Ok(());
                     }
-                    *buf = in_buf;
-                    return Ok(());
                 }
             }
         }

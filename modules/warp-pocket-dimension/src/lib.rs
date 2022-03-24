@@ -1,14 +1,71 @@
 pub mod query;
 
+use std::io::Write;
+use std::path::PathBuf;
+
 use crate::query::QueryBuilder;
-use warp_common::{Extension, Result};
+use warp_common::error::Error;
+use warp_common::{serde::Deserialize, serde::Serialize, Extension, Result};
 use warp_data::{DataObject, DataType};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DimensionDataType {
-    Json,
-    String,
-    Buffer,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(crate = "warp_common::serde", untagged)]
+pub enum DimensionData {
+    Buffer { name: String, buffer: Vec<u8> },
+    BufferNoFile { name: String, internal: Vec<u8> },
+    Path { name: Option<String>, path: PathBuf },
+}
+
+impl DimensionData {
+    pub fn from_path<P: AsRef<std::path::Path>>(path: P) -> Self {
+        let path = path.as_ref().to_path_buf();
+        let name = path.file_name().map(|s| s.to_string_lossy().to_string());
+        DimensionData::Path { name, path }
+    }
+
+    pub fn from_buffer<S: AsRef<str>, U: AsRef<[u8]>>(name: S, buffer: U) -> Self {
+        let name = name.as_ref().to_string();
+        let buffer = buffer.as_ref().to_vec();
+        DimensionData::Buffer { name, buffer }
+    }
+
+    pub fn from_buffer_nofile<S: AsRef<str>, U: AsRef<[u8]>>(name: S, internal: U) -> Self {
+        let name = name.as_ref().to_string();
+        let internal = internal.as_ref().to_vec();
+        DimensionData::BufferNoFile { name, internal }
+    }
+
+    pub fn name(&self) -> warp_common::Result<String> {
+        match self {
+            DimensionData::Buffer { name, .. } => Ok(name.clone()),
+            DimensionData::BufferNoFile { name, .. } => Ok(name.clone()),
+            DimensionData::Path { name, .. } => name.clone().ok_or(Error::Other),
+        }
+    }
+
+    pub fn path(&self) -> warp_common::Result<PathBuf> {
+        match self {
+            DimensionData::Path { path, .. } => Ok(path.clone()),
+            _ => Err(Error::Other),
+        }
+    }
+
+    pub fn write_from_path<W: Write>(&self, writer: &mut W) -> warp_common::Result<()> {
+        match self {
+            DimensionData::Path { name, path } if name.is_some() => {
+                let mut file = std::fs::File::open(path)?;
+                std::io::copy(&mut file, writer)?;
+                return Ok(());
+            }
+            DimensionData::BufferNoFile { internal, .. } => {
+                let mut cursor = std::io::Cursor::new(internal);
+                std::io::copy(&mut cursor, writer)?;
+                return Ok(());
+            }
+            _ => {}
+        }
+        Err(Error::Other)
+    }
 }
 
 /// PocketDimension interface will allow `Module` to store data for quick indexing and searching later on. This would be useful
