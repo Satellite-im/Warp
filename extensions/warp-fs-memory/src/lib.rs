@@ -3,6 +3,7 @@ pub mod item;
 
 use item::Item;
 use std::io::ErrorKind;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::error::Error;
@@ -30,6 +31,8 @@ impl Default for MemorySystemInternal {
 #[serde(crate = "warp_common::serde")]
 pub struct MemorySystem {
     index: Directory,
+    current: Directory,
+    path: PathBuf,
     modified: DateTime<Utc>,
     #[serde(skip)]
     internal: MemorySystemInternal,
@@ -41,6 +44,8 @@ impl Default for MemorySystem {
     fn default() -> Self {
         Self {
             index: Directory::new("root"),
+            current: Directory::new("root"),
+            path: PathBuf::new(),
             modified: Utc::now(),
             internal: MemorySystemInternal::default(),
             cache: None,
@@ -78,6 +83,24 @@ impl Constellation for MemorySystem {
         &mut self.index
     }
 
+    fn current_directory(&self) -> &Directory {
+        &self.current
+    }
+
+    fn set_current_directory(&mut self, directory: Directory) {
+        self.current = directory;
+    }
+
+    fn set_path(&mut self, path: PathBuf) {
+        self.path = path;
+    }
+
+    fn get_path(&self) -> PathBuf {
+        self.path.clone()
+    }
+    fn get_path_mut(&mut self) -> &mut PathBuf {
+        &mut self.path
+    }
     async fn from_buffer(
         &mut self,
         name: &str,

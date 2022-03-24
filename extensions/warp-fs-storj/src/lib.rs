@@ -1,5 +1,8 @@
 use blake2::{Blake2b512, Digest};
-use std::sync::{Arc, Mutex};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use warp_module::Module;
 
 use warp_common::{
@@ -102,6 +105,8 @@ impl Extension for StorjFilesystem {
 pub struct StorjFilesystem {
     pub index: Directory,
     pub modified: DateTime<Utc>,
+    current: Directory,
+    path: PathBuf,
     #[serde(skip)]
     pub client: Option<StorjClient>,
     #[serde(skip)]
@@ -112,6 +117,8 @@ impl Default for StorjFilesystem {
     fn default() -> StorjFilesystem {
         StorjFilesystem {
             index: Directory::new("root"),
+            current: Directory::new("root"),
+            path: PathBuf::new(),
             modified: Utc::now(),
             client: None,
             cache: None,
@@ -148,6 +155,24 @@ impl Constellation for StorjFilesystem {
         &mut self.index
     }
 
+    fn current_directory(&self) -> &Directory {
+        &self.current
+    }
+
+    fn set_current_directory(&mut self, directory: Directory) {
+        self.current = directory;
+    }
+
+    fn set_path(&mut self, path: PathBuf) {
+        self.path = path;
+    }
+
+    fn get_path(&self) -> PathBuf {
+        self.path.clone()
+    }
+    fn get_path_mut(&mut self) -> &mut PathBuf {
+        &mut self.path
+    }
     /// Uploads file from path with the name format being `bucket_name://path/to/file`
     /// Note: This only supports uploading of files. This has not implemented creation of
     ///       directories.

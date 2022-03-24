@@ -1,6 +1,6 @@
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
 use std::io::ErrorKind;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 // use warp_common::futures::TryStreamExt;
 use warp_module::Module;
@@ -25,6 +25,8 @@ use warp_pocket_dimension::{DimensionData, PocketDimension};
 #[serde(crate = "warp_common::serde")]
 pub struct IpfsFileSystem {
     pub index: Directory,
+    pub current: Directory,
+    path: PathBuf,
     pub modified: DateTime<Utc>,
     #[serde(skip)]
     pub client: IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>,
@@ -36,6 +38,8 @@ impl Default for IpfsFileSystem {
     fn default() -> IpfsFileSystem {
         IpfsFileSystem {
             index: Directory::new("root"),
+            current: Directory::new("root"),
+            path: PathBuf::new(),
             modified: Utc::now(),
             client: IpfsClient::default(),
             cache: None,
@@ -89,7 +93,9 @@ impl Constellation for IpfsFileSystem {
     fn root_directory_mut(&mut self) -> &mut Directory {
         &mut self.index
     }
-
+    fn get_path_mut(&mut self) -> &mut PathBuf {
+        &mut self.path
+    }
     async fn put(&mut self, name: &str, path: &str) -> warp_common::Result<()> {
         //TODO: Implement a remote check along with a check within constellation to determine if the file exist
         if self.root_directory().get_child_by_path(name).is_ok() {
@@ -364,6 +370,22 @@ impl Constellation for IpfsFileSystem {
 
         self.root_directory_mut().remove_child(&name[1..])?;
         Ok(())
+    }
+
+    fn current_directory(&self) -> &Directory {
+        &self.current
+    }
+
+    fn set_current_directory(&mut self, directory: Directory) {
+        self.current = directory;
+    }
+
+    fn set_path(&mut self, path: PathBuf) {
+        self.path = path;
+    }
+
+    fn get_path(&self) -> PathBuf {
+        self.path.clone()
     }
 }
 
