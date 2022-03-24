@@ -50,7 +50,7 @@ impl ToString for Hook {
 }
 
 /// Wraps the data from a given hook in the standard DataObject
-pub type HookData = Box<dyn Fn(Hook, DataObject) + Sync + Send>;
+pub type HookData = Box<dyn Fn(&Hook, &DataObject) + Sync + Send>;
 
 /// Lists all of the hooks registered
 #[derive(Default)]
@@ -177,7 +177,7 @@ impl Hooks {
     /// ```
     pub fn subscribe<C, H>(&mut self, hook: H, f: C) -> Result<()>
     where
-        C: 'static + Fn(Hook, DataObject) + Sync + Send,
+        C: 'static + Fn(&Hook, &DataObject) + Sync + Send,
         H: Into<Hook>,
     {
         let hook = hook.into();
@@ -220,7 +220,7 @@ impl Hooks {
         let hook = Hook::from(name);
         if let Some(subscribers) = self.subscribers.get(name) {
             for subscriber in subscribers {
-                subscriber(hook.clone(), data.clone());
+                subscriber(&hook, &data);
             }
         }
     }
