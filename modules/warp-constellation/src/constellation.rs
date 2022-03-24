@@ -30,10 +30,10 @@ pub trait Constellation: Extension + Sync + Send {
         let path = Path::new(path).to_path_buf();
         let current_pathbuf = self.get_path();
 
-        if current_pathbuf == path {
+        if current_pathbuf == &path {
             return Err(Error::Other);
         }
-        let new_path = Path::new(&current_pathbuf).join(path);
+        let new_path = Path::new(current_pathbuf).join(path);
         self.set_path(new_path);
         let directory = self
             .root_directory()
@@ -48,7 +48,7 @@ pub trait Constellation: Extension + Sync + Send {
 
     fn set_path(&mut self, _: PathBuf);
 
-    fn get_path(&self) -> PathBuf;
+    fn get_path(&self) -> &PathBuf;
 
     fn go_back(&mut self) -> Result<()> {
         if !self.get_path_mut().pop() {
@@ -67,7 +67,7 @@ pub trait Constellation: Extension + Sync + Send {
 
     /// Get a current directory that is mutable.
     fn current_directory_mut(&mut self) -> Result<&mut Directory> {
-        self.open_directory(&self.get_path().to_string_lossy())
+        self.open_directory(&self.get_path().clone().to_string_lossy())
     }
 
     /// Returns a mutable directory from the filesystem
