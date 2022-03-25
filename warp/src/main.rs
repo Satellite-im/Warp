@@ -92,8 +92,6 @@ async fn main() -> anyhow::Result<()> {
     //TODO: Have the module manager handle the checks
 
     if config.modules.pocket_dimension {
-        // for extension in &config.extensions.pocket_dimension {
-        // if extension.eq("warp-pd-flatfile") {
         {
             let cache = StrettoClient::new()?;
             manager.set_cache(cache);
@@ -102,15 +100,14 @@ async fn main() -> anyhow::Result<()> {
             //TODO: Have the configuration point to the cache directory, or if not define to use system local directory
             let cache_dir = Path::new(&warp_directory).join("cache");
 
-            let index = Path::new("cache-index");
+            let index = Path::new("cache-index").to_path_buf();
 
-            let storage =
-                warp::FlatfileStorage::new_with_index_file(cache_dir, index.to_path_buf())?;
+            let storage = warp::FlatfileStorage::new_with_index_file(cache_dir, index)?;
             manager.set_cache(storage);
         }
-        // }
     }
 
+    //TODO: Let config pick the caching module
     manager.enable_cache("warp-pd-flatfile")?;
     register_fs_ext(&config, &mut manager)?;
 
@@ -209,7 +206,7 @@ fn import_from_cache(
             return Ok(data.clone());
         }
     };
-    bail!(Error::ToBeDetermined)
+    bail!(Error::DataObjectNotFound)
 }
 
 fn export_to_cache(

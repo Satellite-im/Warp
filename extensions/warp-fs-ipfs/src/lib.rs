@@ -1,6 +1,6 @@
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
 use std::io::ErrorKind;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 // use warp_common::futures::TryStreamExt;
 use warp_module::Module;
@@ -18,6 +18,7 @@ use warp_common::{
 use warp_constellation::item::Item;
 use warp_constellation::{constellation::Constellation, directory::Directory};
 use warp_data::{DataObject, DataType};
+use warp_hooks::hooks::Hooks;
 use warp_pocket_dimension::query::QueryBuilder;
 use warp_pocket_dimension::{DimensionData, PocketDimension};
 
@@ -25,20 +26,27 @@ use warp_pocket_dimension::{DimensionData, PocketDimension};
 #[serde(crate = "warp_common::serde")]
 pub struct IpfsFileSystem {
     pub index: Directory,
+    pub current: Directory,
+    path: PathBuf,
     pub modified: DateTime<Utc>,
     #[serde(skip)]
     pub client: IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>,
     #[serde(skip)]
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    #[serde(skip)]
+    pub hooks: Option<Arc<Mutex<Hooks>>>,
 }
 
 impl Default for IpfsFileSystem {
     fn default() -> IpfsFileSystem {
         IpfsFileSystem {
             index: Directory::new("root"),
+            current: Directory::new("root"),
+            path: PathBuf::new(),
             modified: Utc::now(),
             client: IpfsClient::default(),
             cache: None,
+            hooks: None,
         }
     }
 }
@@ -60,6 +68,10 @@ impl IpfsFileSystem {
 
     pub fn set_cache(&mut self, cache: Arc<Mutex<Box<dyn PocketDimension>>>) {
         self.cache = Some(cache);
+    }
+
+    pub fn set_hook(&mut self, hook: Arc<Mutex<Hooks>>) {
+        self.hooks = Some(hook)
     }
 }
 
@@ -89,7 +101,9 @@ impl Constellation for IpfsFileSystem {
     fn root_directory_mut(&mut self) -> &mut Directory {
         &mut self.index
     }
-
+    fn get_path_mut(&mut self) -> &mut PathBuf {
+        &mut self.path
+    }
     async fn put(&mut self, name: &str, path: &str) -> warp_common::Result<()> {
         //TODO: Implement a remote check along with a check within constellation to determine if the file exist
         if self.root_directory().get_child_by_path(name).is_ok() {
@@ -145,7 +159,7 @@ impl Constellation for IpfsFileSystem {
         file.set_size(size as i64);
         file.set_hash(hash);
 
-        self.open_directory("")?.add_child(file)?;
+        self.open_directory("")?.add_child(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -156,6 +170,12 @@ impl Constellation for IpfsFileSystem {
                 DimensionData::from_path(path),
             )?;
             cache.add_data(DataType::Module(Module::FileSystem), &object)?;
+        }
+
+        if let Some(hook) = &self.hooks {
+            let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
+            let hook = hook.lock().unwrap();
+            hook.trigger("FILESYSTEM::NEW_FILE", &object)
         }
 
         Ok(())
@@ -283,7 +303,7 @@ impl Constellation for IpfsFileSystem {
         file.set_size(size as i64);
         file.set_hash(hash);
 
-        self.open_directory("")?.add_child(file)?;
+        self.open_directory("")?.add_child(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -302,6 +322,13 @@ impl Constellation for IpfsFileSystem {
             )?;
             cache.add_data(DataType::Module(Module::FileSystem), &object)?;
         }
+
+        if let Some(hook) = &self.hooks {
+            let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
+            let hook = hook.lock().unwrap();
+            hook.trigger("FILESYSTEM::NEW_FILE", &object)
+        }
+
         Ok(())
     }
 
@@ -363,7 +390,31 @@ impl Constellation for IpfsFileSystem {
             .map_err(|_| Error::ToBeDetermined)?;
 
         self.root_directory_mut().remove_child(&name[1..])?;
+
+        //TODO: Remove from cache
+
+        if let Some(hook) = &self.hooks {
+            let object = DataObject::new(&DataType::Module(Module::FileSystem), ())?;
+            let hook = hook.lock().unwrap();
+            hook.trigger("FILESYSTEM::REMOVE_FILE", &object)
+        }
         Ok(())
+    }
+
+    fn current_directory(&self) -> &Directory {
+        &self.current
+    }
+
+    fn set_current_directory(&mut self, directory: Directory) {
+        self.current = directory;
+    }
+
+    fn set_path(&mut self, path: PathBuf) {
+        self.path = path;
+    }
+
+    fn get_path(&self) -> &PathBuf {
+        &self.path
     }
 }
 

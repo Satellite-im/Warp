@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use crate::{directory::Directory, item::Item};
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::error::Error;
@@ -22,21 +24,50 @@ pub trait Constellation: Extension + Sync + Send {
     fn root_directory_mut(&mut self) -> &mut Directory;
 
     /// Get current directory
-    fn current_directory(&self) -> &Directory {
-        unimplemented!()
+    fn current_directory(&self) -> &Directory;
+
+    fn select(&mut self, path: &str) -> Result<()> {
+        let path = Path::new(path).to_path_buf();
+        let current_pathbuf = self.get_path();
+
+        if current_pathbuf == &path {
+            return Err(Error::Other);
+        }
+        let new_path = Path::new(current_pathbuf).join(path);
+        self.set_path(new_path);
+        let directory = self
+            .root_directory()
+            .get_child_by_path(&self.get_path().to_string_lossy())
+            .and_then(Item::get_directory)?
+            .clone();
+        self.set_current_directory(directory);
+        Ok(())
     }
+
+    fn set_current_directory(&mut self, _: Directory);
+
+    fn set_path(&mut self, _: PathBuf);
+
+    fn get_path(&self) -> &PathBuf;
+
+    fn go_back(&mut self) -> Result<()> {
+        if !self.get_path_mut().pop() {
+            return Err(Error::DirectoryNotFound);
+        }
+        let directory = self
+            .root_directory()
+            .get_child_by_path(&self.get_path().to_string_lossy())
+            .and_then(Item::get_directory)?
+            .clone();
+        self.set_current_directory(directory);
+        Ok(())
+    }
+
+    fn get_path_mut(&mut self) -> &mut PathBuf;
 
     /// Get a current directory that is mutable.
-    fn current_directory_mut(&mut self) -> &mut Directory {
-        unimplemented!()
-    }
-
-    fn get_index(&self) -> &Directory {
-        self.root_directory()
-    }
-
-    fn get_index_mut(&mut self) -> &mut Directory {
-        self.root_directory_mut()
+    fn current_directory_mut(&mut self) -> Result<&mut Directory> {
+        self.open_directory(&self.get_path().clone().to_string_lossy())
     }
 
     /// Returns a mutable directory from the filesystem
