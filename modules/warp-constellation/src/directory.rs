@@ -65,7 +65,7 @@ impl Directory {
     /// Create a `Directory` instance
     ///
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::Directory};
@@ -94,7 +94,7 @@ impl Directory {
 
     /// Checks to see if the `Directory` has a `Item`
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
@@ -115,7 +115,7 @@ impl Directory {
 
     /// Add an item to the `Directory`
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
@@ -143,7 +143,7 @@ impl Directory {
 
     /// Used to get the position of a child within a `Directory`
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory}};
@@ -168,7 +168,7 @@ impl Directory {
 
     /// Used to get the child within a `Directory`
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory}};
@@ -191,7 +191,7 @@ impl Directory {
 
     /// Used to get the mutable child within a `Directory`
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory},file::File};
@@ -224,7 +224,7 @@ impl Directory {
 
     /// Used to rename a child within a `Directory`
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory}};
@@ -246,7 +246,7 @@ impl Directory {
 
     /// Used to remove the child within a `Directory`
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory}};
@@ -274,7 +274,7 @@ impl Directory {
     ///
     /// TODO: Implement within `Directory::remove_child` in a single path
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///         use warp_constellation::directory::{Directory};
@@ -312,7 +312,7 @@ impl Directory {
     }
     /// Used to move the child to another `Directory`
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::Directory};
@@ -355,7 +355,7 @@ impl Directory {
 
     /// Used to find an item throughout the `Directory` and its children
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::Directory};
@@ -390,7 +390,7 @@ impl Directory {
 
     /// Used to get a search for items listed and return a list of `Item` matching the terms
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// TODO
     pub fn find_all_items<S: AsRef<str> + Clone>(&self, item_names: Vec<S>) -> Vec<&Item> {
