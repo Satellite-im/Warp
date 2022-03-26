@@ -1,8 +1,8 @@
-use std::fmt;
 #[cfg(feature = "bincode_opt2")]
 use warp_common::bincode;
 use warp_common::cfg_if::cfg_if;
 use warp_common::chrono::{DateTime, Utc};
+use warp_common::derive_more::Display;
 use warp_common::error::Error;
 use warp_common::serde::de::DeserializeOwned;
 use warp_common::serde::{Deserialize, Serialize};
@@ -10,7 +10,6 @@ use warp_common::serde::{Deserialize, Serialize};
 use warp_common::serde_json::{self, Value};
 use warp_common::uuid::Uuid;
 use warp_common::Result;
-
 use warp_module::Module;
 
 pub type DataObject = Data;
@@ -41,27 +40,20 @@ pub struct Data {
     pub payload: Payload,
 }
 
-#[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Display)]
 #[serde(crate = "warp_common::serde")]
 #[serde(rename_all = "lowercase")]
 pub enum DataType {
+    #[display(fmt = "{}", "_0")]
     Module(Module),
+    #[display(fmt = "http")]
     Http,
+    #[display(fmt = "file")]
     File,
+    #[display(fmt = "data_export")]
     DataExport,
+    #[display(fmt = "unknown")]
     Unknown,
-}
-
-impl fmt::Display for DataType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            DataType::Module(module) => write!(f, "{}", module),
-            DataType::Http => write!(f, "http"),
-            DataType::DataExport => write!(f, "data_export"),
-            DataType::File => write!(f, "file"),
-            DataType::Unknown => write!(f, "unknown"),
-        }
-    }
 }
 
 impl Default for DataType {

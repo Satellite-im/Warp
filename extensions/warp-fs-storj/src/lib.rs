@@ -223,7 +223,7 @@ impl Constellation for StorjFilesystem {
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
-            hook.trigger("FILESYSTEM::NEW_FILE", &object)
+            hook.trigger("filesystem::new_file", &object)
         }
         Ok(())
     }
@@ -315,7 +315,7 @@ impl Constellation for StorjFilesystem {
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
-            hook.trigger("FILESYSTEM::NEW_FILE", &object)
+            hook.trigger("filesystem::new_file", &object)
         }
         Ok(())
     }
@@ -385,8 +385,8 @@ impl Constellation for StorjFilesystem {
             let object = DataObject::new(&DataType::Module(Module::FileSystem), &item)?;
             let hook = hook.lock().unwrap();
             let hook_name = match item {
-                Item::Directory(_) => "FILESYSTEM::REMOVE_DIRECTORY",
-                Item::File(_) => "FILESYSTEM::REMOVE_FILE",
+                Item::Directory(_) => "filesystem::remove_directory",
+                Item::File(_) => "filesystem::remove_file",
             };
             hook.trigger(hook_name, &object);
         }

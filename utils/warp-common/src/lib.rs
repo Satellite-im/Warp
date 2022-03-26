@@ -9,6 +9,7 @@ pub use anyhow;
 pub use bincode;
 pub use cfg_if;
 pub use chrono;
+pub use derive_more;
 #[cfg(not(any(target_os = "android", target_os = "ios", target_family = "wasm")))]
 pub use dirs;
 pub use libflate;

@@ -1,5 +1,5 @@
+use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 //
 /// `Messaging` - Allows direct, and multi-user encrypted messaging with ownership rights added so only
@@ -13,28 +13,34 @@ use std::fmt;
 ///            This can include simple things like usernames and status messages, but may also
 ///            include permissions, friends, and more.
 ///
-#[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 pub enum Module {
     /// Allows for direct, and multi-user encrypted messaging with ownership
+    #[display(fmt = "messaging")]
     Messaging,
 
     /// Facilitates the creation of files and directories within a central directory tree. This tree, which is an index,
     /// is managed internally and traversal of the directory as well as full listings, deletion, and creation provided within
     /// this module by an extension in addition to uploading files to the filesystem.
+    #[display(fmt = "filesystem")]
     FileSystem,
 
     /// Creates a unique user account used to store core information about the user, which can include usernames, status messages, permissions, etc.
+    #[display(fmt = "accounts")]
     Accounts,
 
     /// Allow for storing of data for faster access at a later point in time. Additionally, it may allow for caching of frequently used (or accessed) data
     /// so that request can be made faster.
+    #[display(fmt = "cache")]
     Cache,
 
     /// Manual Defining of a module
+    #[display(fmt = "{}", "_0")]
     Other(String),
 
     /// Unknown module. Should be used by default where a module cannot be identified for any specific reason.
+    #[display(fmt = "unknown")]
     Unknown,
 }
 
@@ -44,30 +50,17 @@ impl Default for Module {
     }
 }
 
-impl fmt::Display for Module {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Module::Messaging => write!(f, "MESSAGING"),
-            Module::FileSystem => write!(f, "FILESYSTEM"),
-            Module::Accounts => write!(f, "ACCOUNTS"),
-            Module::Cache => write!(f, "CACHE"),
-            Module::Other(module) => write!(f, "{module}"),
-            Module::Unknown => write!(f, "UNKNOWN"),
-        }
-    }
-}
-
 impl<A> From<A> for Module
 where
     A: AsRef<str>,
 {
     fn from(module: A) -> Self {
         match module.as_ref() {
-            "MESSAGING" => Module::Messaging,
-            "FILESYSTEM" => Module::FileSystem,
-            "ACCOUNTS" => Module::Accounts,
-            "CACHE" => Module::Cache,
-            "UNKNOWN" => Module::Unknown,
+            "messaging" => Module::Messaging,
+            "filesystem" => Module::FileSystem,
+            "accounts" => Module::Accounts,
+            "cache" => Module::Cache,
+            "unknown" => Module::Unknown,
             other => Module::Other(other.to_string()),
         }
     }

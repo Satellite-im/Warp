@@ -227,7 +227,7 @@ impl Constellation for IpfsFileSystem {
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
-            hook.trigger("FILESYSTEM::NEW_FILE", &object)
+            hook.trigger("filesystem::new_file", &object)
         }
 
         Ok(())
@@ -391,7 +391,7 @@ impl Constellation for IpfsFileSystem {
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
-            hook.trigger("FILESYSTEM::NEW_FILE", &object)
+            hook.trigger("filesystem::new_file", &object)
         }
 
         Ok(())
@@ -469,7 +469,7 @@ impl Constellation for IpfsFileSystem {
                 if let Some(hook) = &self.hooks {
                     let object = DataObject::new(&DataType::Module(Module::FileSystem), ())?;
                     let hook = hook.lock().unwrap();
-                    hook.trigger("FILESYSTEM::REMOVE_FILE", &object)
+                    hook.trigger("filesystem::remove_file", &object)
                 }
             }
             _ => return Err(Error::Unimplemented),

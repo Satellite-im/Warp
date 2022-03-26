@@ -141,7 +141,7 @@ impl Constellation for MemorySystem {
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
-            hook.trigger("FILESYSTEM::NEW_FILE", &object)
+            hook.trigger("filesystem::new_file", &object)
         }
         Ok(())
     }

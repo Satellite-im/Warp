@@ -107,7 +107,7 @@ pub trait Constellation: Extension + Sync + Send {
     }
 
     /// Use to move data within the filesystem
-    async fn mv(&mut self, _: &str, _: &str) -> Result<()> {
+    async fn move_item(&mut self, _: &str, _: &str) -> Result<()> {
         Err(Error::Unimplemented)
     }
 

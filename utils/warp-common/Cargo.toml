@@ -20,6 +20,7 @@ warp-module = { version = "0.1.0", path = "../warp-module" }
 cfg-if = "1.0"
 libflate = "1"
 log = "0.4"
+derive_more = "0.99"
 
 [target.'cfg(not(all(target_arch = "wasm32", not(any(target_os = "emscripten", target_os = "wasi", target_os="android")))))'.dependencies]
 dirs = "4.0"

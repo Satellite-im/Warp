@@ -1,13 +1,14 @@
 use crate::item::{Item, Metadata};
 use warp_common::chrono::{DateTime, Utc};
+use warp_common::derive_more::Display;
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::uuid::Uuid;
 use warp_common::{error::Error, Result};
-
 /// `DirectoryType` handles the supported types for the directory.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug, Display)]
 #[serde(crate = "warp_common::serde", rename_all = "lowercase")]
 pub enum DirectoryType {
+    #[display(fmt = "default")]
     Default,
 }
 
@@ -15,6 +16,19 @@ impl Default for DirectoryType {
     fn default() -> Self {
         Self::Default
     }
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug, Display)]
+#[serde(crate = "warp_common::serde", rename_all = "lowercase")]
+pub enum DirectoryHookType {
+    #[display(fmt = "create")]
+    Create,
+    #[display(fmt = "delete")]
+    Delete,
+    #[display(fmt = "rename")]
+    Rename,
+    #[display(fmt = "move")]
+    Move,
 }
 
 /// `Directory` handles folders and its contents.
