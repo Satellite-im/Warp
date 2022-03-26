@@ -30,11 +30,57 @@ pub struct IpfsFileSystem {
     path: PathBuf,
     pub modified: DateTime<Utc>,
     #[serde(skip)]
-    pub client: IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>,
+    pub client: IpfsInternalClient,
     #[serde(skip)]
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     #[serde(skip)]
     pub hooks: Option<Arc<Mutex<Hooks>>>,
+}
+
+#[derive(Default, Clone)]
+pub struct IpfsInternalClient {
+    pub client: IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>,
+    pub option: IpfsOption,
+}
+
+#[derive(Clone)]
+pub enum IpfsOption {
+    Mfs,
+    Object,
+}
+
+impl Default for IpfsOption {
+    fn default() -> Self {
+        Self::Mfs
+    }
+}
+
+impl IpfsInternalClient {
+    pub fn new(
+        client: IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>,
+        option: IpfsOption,
+    ) -> Self {
+        Self { client, option }
+    }
+}
+
+impl AsRef<IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>>
+    for IpfsInternalClient
+{
+    fn as_ref(&self) -> &IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>> {
+        &self.client
+    }
+}
+
+impl From<IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>>
+    for IpfsInternalClient
+{
+    fn from(client: IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>) -> Self {
+        Self {
+            client,
+            ..Default::default()
+        }
+    }
 }
 
 impl Default for IpfsFileSystem {
@@ -44,7 +90,7 @@ impl Default for IpfsFileSystem {
             current: Directory::new("root"),
             path: PathBuf::new(),
             modified: Utc::now(),
-            client: IpfsClient::default(),
+            client: IpfsInternalClient::default(),
             cache: None,
             hooks: None,
         }
@@ -62,7 +108,7 @@ impl IpfsFileSystem {
             IpfsClient::<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>::from_str(
                 uri.as_ref(),
             )?;
-        system.client = client;
+        system.client = IpfsInternalClient::from(client);
         Ok(system)
     }
 
@@ -116,44 +162,50 @@ impl Constellation for IpfsFileSystem {
 
         let fs = std::fs::File::open(path)?;
         let size = fs.metadata()?.len();
+        let client = self.client.as_ref();
 
-        self.client
-            .files_write(&name, true, true, fs)
-            .await
-            .map_err(|_| Error::ToBeDetermined)?;
+        let hash = match self.client.option {
+            IpfsOption::Mfs => {
+                client
+                    .files_write(&name, true, true, fs)
+                    .await
+                    .map_err(|_| Error::ToBeDetermined)?;
 
-        // Get the file stat from ipfs
-        let stat = self
-            .client
-            .files_stat(&name)
-            .await
-            .map_err(|_| Error::ToBeDetermined)?;
+                // Get the file stat from ipfs
+                let stat = client
+                    .files_stat(&name)
+                    .await
+                    .map_err(|_| Error::ToBeDetermined)?;
 
-        //check and compare size and if its different from local size to error
+                //check and compare size and if its different from local size to error
 
-        if stat.size != size {
-            //Delete from ipfs
-            self.client
-                .files_rm(&name, false)
-                .await
-                .map_err(|_| Error::ToBeDetermined)?;
+                if stat.size != size {
+                    //Delete from ipfs
+                    client
+                        .files_rm(&name, false)
+                        .await
+                        .map_err(|_| Error::ToBeDetermined)?;
 
-            return Err(Error::ToBeDetermined);
-        }
+                    return Err(Error::ToBeDetermined);
+                }
 
-        let hash = stat.hash;
+                let hash = stat.hash;
 
-        //pin file since ipfs mfs doesnt do it automatically
+                //pin file since ipfs mfs doesnt do it automatically
 
-        let res = self
-            .client
-            .pin_add(&hash, true)
-            .await
-            .map_err(|_| Error::ToBeDetermined)?;
+                let res = client
+                    .pin_add(&hash, true)
+                    .await
+                    .map_err(|_| Error::ToBeDetermined)?;
 
-        if !res.pins.contains(&hash) {
-            //TODO: Error?
-        }
+                if !res.pins.contains(&hash) {
+                    //TODO: Error?
+                }
+
+                hash
+            }
+            _ => return Err(Error::Unimplemented),
+        };
 
         let mut file = warp_constellation::file::File::new(&name[1..]);
         file.set_size(size as i64);
@@ -225,36 +277,41 @@ impl Constellation for IpfsFileSystem {
 
         let mut fs = tokio::fs::File::create(path).await?;
 
-        let stream = self
-            .client
-            .files_read(&name)
-            .map_err(|_| std::io::Error::from(ErrorKind::Other));
+        let client = self.client.as_ref();
 
-        let mut reader_stream = StreamReader::new(stream);
+        match self.client.option {
+            IpfsOption::Mfs => {
+                let stream = client
+                    .files_read(&name)
+                    .map_err(|_| std::io::Error::from(ErrorKind::Other));
 
-        tokio::io::copy(&mut reader_stream, &mut fs).await?;
+                let mut reader_stream = StreamReader::new(stream);
 
-        //Compare size though here we should compare hash instead.
+                tokio::io::copy(&mut reader_stream, &mut fs).await?;
 
-        let size = tokio::fs::metadata(path).await?.len();
+                //Compare size though here we should compare hash instead.
 
-        let stat = self
-            .client
-            .files_stat(&name)
-            .await
-            .map_err(|_| Error::ToBeDetermined)?;
+                let size = tokio::fs::metadata(path).await?.len();
 
-        //check and compare size and if its different from local size to error
+                let stat = client
+                    .files_stat(&name)
+                    .await
+                    .map_err(|_| Error::ToBeDetermined)?;
 
-        if stat.size != size {
-            //Delete from ipfs
-            self.client
-                .files_rm(&name, false)
-                .await
-                .map_err(|_| Error::ToBeDetermined)?;
+                //check and compare size and if its different from local size to error
 
-            return Err(Error::ToBeDetermined);
-        }
+                if stat.size != size {
+                    //Delete from ipfs
+                    client
+                        .files_rm(&name, false)
+                        .await
+                        .map_err(|_| Error::ToBeDetermined)?;
+
+                    return Err(Error::ToBeDetermined);
+                }
+            }
+            _ => return Err(Error::Unimplemented),
+        };
 
         Ok(())
     }
@@ -263,45 +320,53 @@ impl Constellation for IpfsFileSystem {
         let name = affix_root(name);
 
         let fs = std::io::Cursor::new(buffer.clone());
-        self.client
-            .files_write(&name, true, true, fs)
-            .await
-            .map_err(|_| Error::ToBeDetermined)?;
-        // Get the file stat from ipfs
-        let stat = self
-            .client
-            .files_stat(&name)
-            .await
-            .map_err(|_| Error::ToBeDetermined)?;
-
-        //check and compare size and if its different from local size to error
-        let size = buffer.len() as u64;
-
-        if stat.size != size {
-            //Delete from ipfs
-            self.client
-                .files_rm(&name, false)
-                .await
-                .map_err(|_| Error::ToBeDetermined)?;
-
-            return Err(Error::ToBeDetermined);
-        }
-
-        let hash = stat.hash;
-
-        let res = self
-            .client
-            .pin_add(&hash, true)
-            .await
-            .map_err(|_| Error::ToBeDetermined)?;
-
-        if !res.pins.contains(&hash) {
-            //TODO: Error?
-        }
+        let client = self.client.as_ref();
 
         let mut file = warp_constellation::file::File::new(&name[1..]);
-        file.set_size(size as i64);
-        file.set_hash(hash);
+
+        let hash = match self.client.option {
+            IpfsOption::Mfs => {
+                client
+                    .files_write(&name, true, true, fs)
+                    .await
+                    .map_err(|_| Error::ToBeDetermined)?;
+                // Get the file stat from ipfs
+                let stat = client
+                    .files_stat(&name)
+                    .await
+                    .map_err(|_| Error::ToBeDetermined)?;
+
+                //check and compare size and if its different from local size to error
+                let size = buffer.len() as u64;
+
+                if stat.size != size {
+                    //Delete from ipfs
+                    client
+                        .files_rm(&name, false)
+                        .await
+                        .map_err(|_| Error::ToBeDetermined)?;
+
+                    return Err(Error::ToBeDetermined);
+                }
+                file.set_size(size as i64);
+
+                let hash = stat.hash;
+
+                let res = client
+                    .pin_add(&hash, true)
+                    .await
+                    .map_err(|_| Error::ToBeDetermined)?;
+
+                if !res.pins.contains(&hash) {
+                    //TODO: Error?
+                }
+
+                hash
+            }
+            _ => return Err(Error::Unimplemented),
+        };
+
+        file.set_hash(&hash);
 
         self.open_directory("")?.add_child(file.clone())?;
 
@@ -363,14 +428,20 @@ impl Constellation for IpfsFileSystem {
             .get_child(&name[1..])
             .and_then(Item::get_file)?;
 
-        let stream = self
-            .client
-            .files_read(&name)
-            .map_err(|_| std::io::Error::from(ErrorKind::Other));
+        let client = self.client.as_ref();
+        match self.client.option {
+            IpfsOption::Mfs => {
+                let stream = client
+                    .files_read(&name)
+                    .map_err(|_| std::io::Error::from(ErrorKind::Other));
 
-        let mut reader_stream = StreamReader::new(stream);
+                let mut reader_stream = StreamReader::new(stream);
 
-        tokio::io::copy(&mut reader_stream, buffer).await?;
+                tokio::io::copy(&mut reader_stream, buffer).await?;
+            }
+            _ => return Err(Error::Unimplemented),
+        }
+
         Ok(())
     }
 
@@ -383,21 +454,27 @@ impl Constellation for IpfsFileSystem {
                 ErrorKind::NotFound,
             )));
         }
+        let client = self.client.as_ref();
+        match self.client.option {
+            IpfsOption::Mfs => {
+                client
+                    .files_rm(&name, false)
+                    .await
+                    .map_err(|_| Error::ToBeDetermined)?;
 
-        self.client
-            .files_rm(&name, false)
-            .await
-            .map_err(|_| Error::ToBeDetermined)?;
+                self.root_directory_mut().remove_child(&name[1..])?;
 
-        self.root_directory_mut().remove_child(&name[1..])?;
+                //TODO: Remove from cache
 
-        //TODO: Remove from cache
+                if let Some(hook) = &self.hooks {
+                    let object = DataObject::new(&DataType::Module(Module::FileSystem), ())?;
+                    let hook = hook.lock().unwrap();
+                    hook.trigger("FILESYSTEM::REMOVE_FILE", &object)
+                }
+            }
+            _ => return Err(Error::Unimplemented),
+        };
 
-        if let Some(hook) = &self.hooks {
-            let object = DataObject::new(&DataType::Module(Module::FileSystem), ())?;
-            let hook = hook.lock().unwrap();
-            hook.trigger("FILESYSTEM::REMOVE_FILE", &object)
-        }
         Ok(())
     }
 
