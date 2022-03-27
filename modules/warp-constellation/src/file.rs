@@ -6,6 +6,8 @@ use warp_common::uuid::Uuid;
 /// `FileType` describes all supported file types.
 /// This will be useful for applying icons to the tree later on
 /// if we don't have a supported file type, we can just default to generic.
+///
+/// TODO: Use mime to define the filetype
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display)]
 #[serde(crate = "warp_common::serde")]
 #[serde(rename_all = "lowercase")]

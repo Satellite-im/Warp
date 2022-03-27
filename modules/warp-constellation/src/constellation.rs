@@ -26,6 +26,7 @@ pub trait Constellation: Extension + Sync + Send {
     /// Get current directory
     fn current_directory(&self) -> &Directory;
 
+    /// Select a directory within the filesystem
     fn select(&mut self, path: &str) -> Result<()> {
         let path = Path::new(path).to_path_buf();
         let current_pathbuf = self.get_path();
@@ -44,12 +45,16 @@ pub trait Constellation: Extension + Sync + Send {
         Ok(())
     }
 
+    /// Set current directory
     fn set_current_directory(&mut self, _: Directory);
 
+    /// Set path to current directory
     fn set_path(&mut self, _: PathBuf);
 
+    /// Get path of current directory
     fn get_path(&self) -> &PathBuf;
 
+    /// Go back to the previous directory
     fn go_back(&mut self) -> Result<()> {
         if !self.get_path_mut().pop() {
             return Err(Error::DirectoryNotFound);
@@ -63,6 +68,7 @@ pub trait Constellation: Extension + Sync + Send {
         Ok(())
     }
 
+    /// Obtain a mutable reference of the current directory path
     fn get_path_mut(&mut self) -> &mut PathBuf;
 
     /// Get a current directory that is mutable.
