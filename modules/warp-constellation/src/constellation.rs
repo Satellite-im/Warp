@@ -117,6 +117,11 @@ pub trait Constellation: Extension + Sync + Send {
         Err(Error::Unimplemented)
     }
 
+    /// Use to create a directory within the filesystem.
+    async fn create_directory(&mut self, _: &str, _: bool) -> Result<()> {
+        Err(Error::Unimplemented)
+    }
+
     /// Use to export the filesystem to a specific structure. Currently supports `Json`, `Toml`, and `Yaml`
     fn export(&self, r#type: ConstellationDataType) -> Result<String> {
         match r#type {

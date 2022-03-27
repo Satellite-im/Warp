@@ -96,6 +96,46 @@ impl Directory {
         directory
     }
 
+    /// Recurseively create child `Directory` with each instance is a child to the previous
+    ///
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///     use warp_constellation::{directory::Directory, item::Item};
+    ///
+    ///     let root = Directory::new_recursive("/root/test/test2").unwrap();
+    ///     assert_eq!(root.has_child("test"), true);
+    ///     let test = root.get_child("test").and_then(Item::get_directory).unwrap();
+    ///     assert_eq!(test.has_child("test2"), true);
+    /// ```
+    pub fn new_recursive<S: AsRef<str>>(path: S) -> Result<Self> {
+        let path = path.as_ref();
+
+        // Check to determine if the string is initially empty
+        if path.is_empty() {
+            return Err(Error::InvalidPath);
+        }
+
+        let mut path = path
+            .split('/')
+            .filter(|&s| !s.is_empty())
+            .collect::<Vec<_>>();
+
+        // checl to determine if the array is empty
+        if path.is_empty() {
+            return Err(Error::InvalidPath);
+        }
+
+        let name = path.remove(0);
+        let mut directory = Self::new(name);
+        if !path.is_empty() {
+            let sub = Self::new_recursive(path.join("/"))?;
+            directory.add_child(sub)?;
+        }
+        Ok(directory)
+    }
+
     /// List all the `Item` within the `Directory`
     pub fn child_list(&self) -> &Vec<Item> {
         &self.children
