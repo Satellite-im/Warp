@@ -72,6 +72,7 @@ impl StorjClient {
         match create {
             true => {
                 let config = BucketConfiguration::default();
+
                 let create_bucket_response =
                     Bucket::create(bucket.as_ref(), region.clone(), creds.clone(), config).await?;
                 Ok(create_bucket_response.bucket)
@@ -106,7 +107,6 @@ impl Extension for StorjFilesystem {
 pub struct StorjFilesystem {
     pub index: Directory,
     pub modified: DateTime<Utc>,
-    current: Directory,
     path: PathBuf,
     #[serde(skip)]
     pub client: Option<StorjClient>,
@@ -120,7 +120,6 @@ impl Default for StorjFilesystem {
     fn default() -> StorjFilesystem {
         StorjFilesystem {
             index: Directory::new("root"),
-            current: Directory::new("root"),
             path: PathBuf::new(),
             modified: Utc::now(),
             client: None,
@@ -161,14 +160,6 @@ impl Constellation for StorjFilesystem {
 
     fn root_directory_mut(&mut self) -> &mut Directory {
         &mut self.index
-    }
-
-    fn current_directory(&self) -> &Directory {
-        &self.current
-    }
-
-    fn set_current_directory(&mut self, directory: Directory) {
-        self.current = directory;
     }
 
     fn set_path(&mut self, path: PathBuf) {
@@ -253,8 +244,8 @@ impl Constellation for StorjFilesystem {
         }
 
         let file = self
-            .root_directory()
-            .get_child_by_path(&name)
+            .current_directory()
+            .get_child(&name)
             .and_then(Item::get_file)?;
 
         let mut fs = tokio::fs::File::create(path).await?;
@@ -299,7 +290,7 @@ impl Constellation for StorjFilesystem {
         file.set_size(buffer.len() as i64);
         file.set_hash(hash_data(&buffer));
 
-        self.open_directory("")?.add_child(file.clone())?;
+        self.current_directory_mut()?.add_child(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -365,7 +356,7 @@ impl Constellation for StorjFilesystem {
         Ok(())
     }
 
-    async fn remove(&mut self, path: &str) -> warp_common::Result<()> {
+    async fn remove(&mut self, path: &str, _: bool) -> warp_common::Result<()> {
         let (bucket, name) = split_for(path)?;
 
         let client = self.client.as_ref().ok_or(Error::Other)?;
@@ -380,7 +371,7 @@ impl Constellation for StorjFilesystem {
             return Err(Error::ToBeDetermined);
         }
 
-        let item = self.root_directory_mut().remove_child(&name)?;
+        let item = self.current_directory_mut()?.remove_child(&name)?;
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(&DataType::Module(Module::FileSystem), &item)?;
             let hook = hook.lock().unwrap();

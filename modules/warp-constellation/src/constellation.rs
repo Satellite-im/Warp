@@ -24,7 +24,13 @@ pub trait Constellation: Extension + Sync + Send {
     fn root_directory_mut(&mut self) -> &mut Directory;
 
     /// Get current directory
-    fn current_directory(&self) -> &Directory;
+    fn current_directory(&self) -> &Directory {
+        let current_pathbuf = self.get_path().to_string_lossy().to_string();
+        self.root_directory()
+            .get_child_by_path(current_pathbuf)
+            .and_then(Item::get_directory)
+            .unwrap_or(self.root_directory())
+    }
 
     /// Select a directory within the filesystem
     fn select(&mut self, path: &str) -> Result<()> {
@@ -36,17 +42,8 @@ pub trait Constellation: Extension + Sync + Send {
         }
         let new_path = Path::new(current_pathbuf).join(path);
         self.set_path(new_path);
-        let directory = self
-            .root_directory()
-            .get_child_by_path(&self.get_path().to_string_lossy())
-            .and_then(Item::get_directory)?
-            .clone();
-        self.set_current_directory(directory);
         Ok(())
     }
-
-    /// Set current directory
-    fn set_current_directory(&mut self, _: Directory);
 
     /// Set path to current directory
     fn set_path(&mut self, _: PathBuf);
@@ -59,12 +56,6 @@ pub trait Constellation: Extension + Sync + Send {
         if !self.get_path_mut().pop() {
             return Err(Error::DirectoryNotFound);
         }
-        let directory = self
-            .root_directory()
-            .get_child_by_path(&self.get_path().to_string_lossy())
-            .and_then(Item::get_directory)?
-            .clone();
-        self.set_current_directory(directory);
         Ok(())
     }
 
@@ -108,7 +99,7 @@ pub trait Constellation: Extension + Sync + Send {
     }
 
     /// Use to remove data from the filesystem
-    async fn remove(&mut self, _: &str) -> Result<()> {
+    async fn remove(&mut self, _: &str, _: bool) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
@@ -145,7 +136,7 @@ pub trait Constellation: Extension + Sync + Send {
             ConstellationDataType::Toml => warp_common::toml::from_str(data.as_str())?,
         };
         //TODO: create a function to override directory children.
-        self.open_directory("")?.children = directory.children;
+        self.root_directory_mut().children = directory.children;
 
         Ok(())
     }

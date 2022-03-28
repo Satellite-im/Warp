@@ -401,10 +401,23 @@ impl Directory {
 
         let item = self.remove_child(child)?;
 
-        // TODO: Implement check and restore item back to previous directory if there's an error
-        self.get_child_mut_by_path(dst)?
-            .get_directory_mut()?
-            .add_child(item)
+        // If there is an error, place the item back into the current directory
+        match self
+            .get_child_mut_by_path(dst)
+            .and_then(Item::get_directory_mut)
+        {
+            Ok(directory) => {
+                if let Err(e) = directory.add_child(item.clone()) {
+                    self.add_child(item)?;
+                    return Err(e);
+                }
+            }
+            Err(e) => {
+                self.add_child(item)?;
+                return Err(e);
+            }
+        }
+        Ok(())
     }
 
     /// Used to find an item throughout the `Directory` and its children

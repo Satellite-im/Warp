@@ -3,9 +3,9 @@ use crate::error::Error;
 use crate::item::file::File;
 use crate::item::{ItemMut, ItemType};
 use crate::Item;
+use warp_common::anyhow::{self, bail};
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::uuid::Uuid;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Directory {
     pub id: Uuid,
@@ -67,6 +67,32 @@ impl Directory {
             create: Utc::now(),
             content: Vec::new(),
         }
+    }
+    pub fn new_recursive<S: AsRef<str>>(path: S) -> anyhow::Result<Self> {
+        let path = path.as_ref();
+
+        // Check to determine if the string is initially empty
+        if path.is_empty() {
+            bail!("Path provided is invalid");
+        }
+
+        let mut path = path
+            .split('/')
+            .filter(|&s| !s.is_empty())
+            .collect::<Vec<_>>();
+
+        // checl to determine if the array is empty
+        if path.is_empty() {
+            bail!("Path provided is invalid");
+        }
+
+        let name = path.remove(0);
+        let mut directory = Self::new(name);
+        if !path.is_empty() {
+            let sub = Self::new_recursive(path.join("/"))?;
+            directory.insert(sub)?;
+        }
+        Ok(directory)
     }
 
     pub fn get_content(&self) -> &Vec<Box<dyn Item>> {
@@ -140,6 +166,27 @@ impl Directory {
         } else {
             Ok(item)
         };
+    }
+
+    pub fn move_item_to<S: AsRef<str>>(&mut self, child: S, dst: S) -> anyhow::Result<()> {
+        let (child, dst) = (child.as_ref().trim(), dst.as_ref().trim());
+
+        if self.get_item_from_path(dst)?.r#type() == ItemType::File {
+            bail!("Destination is not a directory");
+        }
+
+        if self.get_item_from_path(dst)?.to_directory()?.exist(child) {
+            bail!("Item exist in destination");
+        }
+
+        let item = self.remove(child)?;
+
+        // TODO: Implement check and restore item back to previous directory if there's an error
+        self.get_item_mut_from_path(dst)
+            .and_then(|item| item.to_directory_mut())?
+            .insert(item)?;
+
+        Ok(())
     }
 
     pub fn get_item_mut(&mut self, name: &str) -> crate::Result<&mut Box<dyn Item>> {

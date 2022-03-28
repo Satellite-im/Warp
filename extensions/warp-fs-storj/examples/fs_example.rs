@@ -27,7 +27,9 @@ async fn main() -> warp_common::anyhow::Result<()> {
         .await?;
 
     println!("Deleting from filesystem");
-    system.remove(&format!("root://{}", file.as_str())).await?;
+    system
+        .remove(&format!("root://{}", file.as_str()), false)
+        .await?;
 
     println!("Deleting from disk");
     tokio::fs::remove_file(&format!("{}.returned", file.as_str())).await?;

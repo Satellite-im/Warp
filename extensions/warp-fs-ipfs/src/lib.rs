@@ -26,7 +26,6 @@ use warp_pocket_dimension::{DimensionData, PocketDimension};
 #[serde(crate = "warp_common::serde")]
 pub struct IpfsFileSystem {
     pub index: Directory,
-    pub current: Directory,
     path: PathBuf,
     pub modified: DateTime<Utc>,
     #[serde(skip)]
@@ -87,7 +86,6 @@ impl Default for IpfsFileSystem {
     fn default() -> IpfsFileSystem {
         IpfsFileSystem {
             index: Directory::new("root"),
-            current: Directory::new("root"),
             path: PathBuf::new(),
             modified: Utc::now(),
             client: IpfsInternalClient::default(),
@@ -204,7 +202,24 @@ impl Constellation for IpfsFileSystem {
 
                 hash
             }
-            _ => return Err(Error::Unimplemented),
+            IpfsOption::Object => {
+                let res = client.add(fs).await.map_err(|_| Error::ToBeDetermined)?;
+
+                //pin file since ipfs mfs doesnt do it automatically
+                let hash = res.hash;
+                //TODO: Give a choice to pin file or not
+
+                // let res = client
+                //     .pin_add(&hash, true)
+                //     .await
+                //     .map_err(|_| Error::ToBeDetermined)?;
+                //
+                // if !res.pins.contains(&hash) {
+                //     //TODO: Error?
+                // }
+
+                hash
+            }
         };
 
         let mut file = warp_constellation::file::File::new(&name[1..]);
@@ -271,7 +286,7 @@ impl Constellation for IpfsFileSystem {
         }
 
         let _file = self
-            .root_directory()
+            .current_directory()
             .get_child_by_path(&name)
             .and_then(Item::get_file)?;
 
@@ -368,7 +383,7 @@ impl Constellation for IpfsFileSystem {
 
         file.set_hash(&hash);
 
-        self.open_directory("")?.add_child(file.clone())?;
+        self.current_directory_mut()?.add_child(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -424,7 +439,7 @@ impl Constellation for IpfsFileSystem {
         }
 
         let _file = self
-            .root_directory()
+            .current_directory()
             .get_child(&name[1..])
             .and_then(Item::get_file)?;
 
@@ -445,11 +460,11 @@ impl Constellation for IpfsFileSystem {
         Ok(())
     }
 
-    async fn remove(&mut self, name: &str) -> warp_common::Result<()> {
+    async fn remove(&mut self, name: &str, recursive: bool) -> warp_common::Result<()> {
         let name = affix_root(name);
 
         //TODO: Resolve to full directory
-        if !self.root_directory().has_child(&name[1..]) {
+        if !self.current_directory().has_child(&name[1..]) {
             return Err(warp_common::error::Error::IoError(std::io::Error::from(
                 ErrorKind::NotFound,
             )));
@@ -458,32 +473,66 @@ impl Constellation for IpfsFileSystem {
         match self.client.option {
             IpfsOption::Mfs => {
                 client
-                    .files_rm(&name, false)
+                    .files_rm(&name, recursive)
                     .await
                     .map_err(|_| Error::ToBeDetermined)?;
 
-                self.root_directory_mut().remove_child(&name[1..])?;
-
-                //TODO: Remove from cache
-
-                if let Some(hook) = &self.hooks {
-                    let object = DataObject::new(&DataType::Module(Module::FileSystem), ())?;
-                    let hook = hook.lock().unwrap();
-                    hook.trigger("filesystem::remove_file", &object)
-                }
+                self.current_directory_mut()?.remove_child(&name[1..])?
             }
             _ => return Err(Error::Unimplemented),
         };
 
+        if let Some(hook) = &self.hooks {
+            let object = DataObject::new(&DataType::Module(Module::FileSystem), ())?;
+            let hook = hook.lock().unwrap();
+            hook.trigger("filesystem::remove_file", &object)
+        }
         Ok(())
     }
 
-    fn current_directory(&self) -> &Directory {
-        &self.current
-    }
+    async fn create_directory(&mut self, path: &str, recursive: bool) -> warp_common::Result<()> {
+        let path = affix_root(path);
 
-    fn set_current_directory(&mut self, directory: Directory) {
-        self.current = directory;
+        // check to see if the path exist within the filesystem
+        if self.open_directory(&path).is_ok() {
+            return Err(Error::Unimplemented);
+        }
+
+        match self.client.option {
+            IpfsOption::Mfs => {
+                let client = self.client.as_ref();
+                client
+                    .files_mkdir(&path, recursive)
+                    .await
+                    .map_err(|_| Error::ToBeDetermined)?;
+            }
+            _ => return Err(Error::Unimplemented),
+        };
+
+        let directory = if recursive {
+            Directory::new_recursive(&path)?
+        } else {
+            Directory::new(&path)
+        };
+
+        if let Err(err) = self.current_directory_mut()?.add_child(directory.clone()) {
+            let client = self.client.as_ref();
+            if let IpfsOption::Mfs = self.client.option {
+                client
+                    .files_rm(&path, true)
+                    .await
+                    .map_err(|_| Error::ToBeDetermined)?;
+            };
+            return Err(err);
+        }
+
+        if let Some(hook) = &self.hooks {
+            let object = DataObject::new(&DataType::Module(Module::FileSystem), directory)?;
+            let hook = hook.lock().unwrap();
+            hook.trigger("filesystem::create_directory", &object)
+        }
+
+        Ok(())
     }
 
     fn set_path(&mut self, path: PathBuf) {
