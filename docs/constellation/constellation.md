@@ -21,7 +21,6 @@ use warp_constellation::file::File;
 pub struct ExampleFileSystem {
 	index: Directory,
 	modified: DateTime<Utc>,
-	current: Directory,
 	path: PathBuf
 }
 
@@ -30,7 +29,6 @@ impl Default for ExampleFileSystem {
         DummyFileSystem {
             index: Directory::new("root"),
             modified: Utc::now(),
-            current: Directory::new("root"),
             path: PathBuf::new(),
         }
     }
@@ -66,14 +64,6 @@ impl Constellation for ExampleFileSystem {
 
     fn root_directory_mut(&mut self) -> &mut Directory {
         &mut self.index
-    }
-
-    fn current_directory(&self) -> &Directory {
-        &self.current
-    }
-
-    fn set_current_directory(&mut self, directory: Directory) {
-        self.current = directory;
     }
 
     fn set_path(&mut self, path: PathBuf) {
