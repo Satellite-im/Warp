@@ -8,15 +8,15 @@ use clap::{Parser, Subcommand};
 use manager::ModuleManager;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use warp::PocketDimension;
 use warp::StrettoClient;
+use warp::{Constellation, ConstellationDataType};
 #[allow(unused_imports)]
 use warp_common::dirs;
 use warp_common::error::Error;
 use warp_common::{anyhow, serde_json, tokio};
 use warp_configuration::Config;
-use warp_constellation::constellation::{Constellation, ConstellationDataType};
 use warp_data::DataObject;
-use warp_pocket_dimension::PocketDimension;
 use warp_tesseract::{generate, Tesseract};
 
 #[derive(Debug, Parser)]

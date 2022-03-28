@@ -1,31 +1,35 @@
-#[cfg(feature = "constellation")]
-pub use warp_constellation::{
-    self,
-    constellation::{Constellation, ConstellationDataType, ConstellationVersion},
-};
-#[cfg(feature = "constellation")]
-pub use warp_fs_memory::MemorySystem;
+use warp_common::cfg_if::cfg_if;
 
-#[cfg(feature = "constellation")]
-pub use warp_fs_storj::{StorjClient, StorjFilesystem};
+cfg_if! {
+    if #[cfg(feature = "constellation")] {
+        pub use warp_constellation::{
+            self,
+            constellation::{Constellation, ConstellationDataType, ConstellationVersion},
+        };
+        pub use warp_fs_memory::MemorySystem;
+        pub use warp_fs_storj::{StorjClient, StorjFilesystem};
+        pub use warp_fs_ipfs::IpfsFileSystem;
+    }
+}
+cfg_if! {
+    if #[cfg(feature = "pocket-dimension")] {
+        pub use warp_pocket_dimension::{
+            query::{Comparator, QueryBuilder},
+            DimensionData, PocketDimension,
+        };
+        pub use warp_pd_stretto::StrettoClient;
+        pub use warp_pd_flatfile::FlatfileStorage;
+    }
+}
 
-#[cfg(feature = "constellation")]
-pub use warp_fs_ipfs::IpfsFileSystem;
+cfg_if! {
+    if #[cfg(feature = "multipass")] {
+        pub use warp_multipass::{identity::*, MultiPass};
+    }
+}
 
-#[cfg(feature = "multipass")]
-pub use warp_multipass::{identity::*, MultiPass};
-
-#[cfg(feature = "pocket-dimension")]
-pub use warp_pocket_dimension::{
-    query::{Comparator, QueryBuilder},
-    DimensionData, PocketDimension,
-};
-
-#[cfg(feature = "pocket-dimension")]
-pub use warp_pd_stretto::StrettoClient;
-
-#[cfg(feature = "pocket-dimension")]
-pub use warp_pd_flatfile::FlatfileStorage;
-
-#[cfg(feature = "raygun")]
-pub use warp_raygun::{self, RayGun};
+cfg_if! {
+    if #[cfg(feature = "raygun")] {
+        pub use warp_raygun::{self, RayGun};
+    }
+}
