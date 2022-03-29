@@ -1,8 +1,9 @@
-use blake2::{Blake2b512, Digest};
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
+use warp_common::sha1::{Digest as Sha1Digest, Sha1};
+use warp_common::sha2::{Digest as Sha2Digest, Sha256};
 use warp_module::Module;
 
 use warp_common::{
@@ -391,10 +392,23 @@ async fn hash_file<S: AsRef<str>>(file: S) -> anyhow::Result<String> {
 }
 
 fn hash_data<S: AsRef<[u8]>>(data: S) -> String {
-    let mut hasher = Blake2b512::new();
+    let sha1hash = format!("sha1-{}", sha1_hash(&data));
+    let sha256hash = format!("sha256-{}", sha256_hash(&data));
+    format!("{};{}", sha1hash, sha256hash)
+}
+
+fn sha256_hash<S: AsRef<[u8]>>(data: S) -> String {
+    let mut hasher = Sha256::new();
     hasher.update(&data.as_ref());
     let res = hasher.finalize().to_vec();
-    hex::encode(res)
+    warp_common::hex::encode(res)
+}
+
+fn sha1_hash<S: AsRef<[u8]>>(data: S) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(&data.as_ref());
+    let res = hasher.finalize().to_vec();
+    warp_common::hex::encode(res)
 }
 
 fn split_for<S: AsRef<str>>(name: S) -> anyhow::Result<(String, String)> {
