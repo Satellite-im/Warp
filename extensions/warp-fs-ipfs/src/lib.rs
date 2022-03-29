@@ -553,3 +553,32 @@ fn affix_root<S: AsRef<str>>(name: S) -> String {
 
     name
 }
+
+#[cfg(test)]
+mod test {
+    use crate::anyhow::Result;
+    use crate::IpfsFileSystem;
+    use warp_common::tokio;
+    use warp_constellation::constellation::Constellation;
+
+    #[tokio::test]
+    async fn default_node_with_buffer() -> Result<()> {
+        let mut system = IpfsFileSystem::default();
+        system
+            .from_buffer("test", &b"Hello, World!".to_vec())
+            .await?;
+
+        assert_eq!(system.current_directory().has_child("test"), true);
+
+        let mut buffer: Vec<u8> = vec![];
+
+        system.to_buffer("test", &mut buffer).await?;
+
+        assert_eq!(String::from_utf8_lossy(&buffer), "Hello, World!");
+
+        system.remove("test", false).await?;
+
+        assert_eq!(system.current_directory().has_child("test"), false);
+        Ok(())
+    }
+}
