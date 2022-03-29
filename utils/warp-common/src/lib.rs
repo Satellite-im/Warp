@@ -12,6 +12,7 @@ pub use chrono;
 pub use derive_more;
 #[cfg(not(any(target_os = "android", target_os = "ios", target_family = "wasm")))]
 pub use dirs;
+pub use hex;
 pub use libflate;
 pub use log;
 pub use regex;
@@ -20,6 +21,15 @@ pub use serde_json;
 pub use serde_yaml;
 pub use toml;
 pub use uuid;
+
+#[cfg(feature = "use_blake2")]
+pub use blake2;
+#[cfg(feature = "use_sha1")]
+pub use sha1;
+#[cfg(feature = "use_sha2")]
+pub use sha2;
+#[cfg(feature = "use_sha3")]
+pub use sha3;
 
 cfg_if::cfg_if! {
     if #[cfg(all(feature = "async", not(any(target_family = "wasm", target_os = "emscripten", target_os = "wasi"))))] {
