@@ -1,13 +1,14 @@
 use crate::item::{Item, Metadata};
 use warp_common::chrono::{DateTime, Utc};
+use warp_common::derive_more::Display;
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::uuid::Uuid;
 use warp_common::{error::Error, Result};
-
 /// `DirectoryType` handles the supported types for the directory.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug, Display)]
 #[serde(crate = "warp_common::serde", rename_all = "lowercase")]
 pub enum DirectoryType {
+    #[display(fmt = "default")]
     Default,
 }
 
@@ -15,6 +16,19 @@ impl Default for DirectoryType {
     fn default() -> Self {
         Self::Default
     }
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug, Display)]
+#[serde(crate = "warp_common::serde", rename_all = "lowercase")]
+pub enum DirectoryHookType {
+    #[display(fmt = "create")]
+    Create,
+    #[display(fmt = "delete")]
+    Delete,
+    #[display(fmt = "rename")]
+    Rename,
+    #[display(fmt = "move")]
+    Move,
 }
 
 /// `Directory` handles folders and its contents.
@@ -65,7 +79,7 @@ impl Directory {
     /// Create a `Directory` instance
     ///
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::Directory};
@@ -82,6 +96,46 @@ impl Directory {
         directory
     }
 
+    /// Recurseively create child `Directory` with each instance is a child to the previous
+    ///
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///     use warp_constellation::{directory::Directory, item::Item};
+    ///
+    ///     let root = Directory::new_recursive("/root/test/test2").unwrap();
+    ///     assert_eq!(root.has_child("test"), true);
+    ///     let test = root.get_child("test").and_then(Item::get_directory).unwrap();
+    ///     assert_eq!(test.has_child("test2"), true);
+    /// ```
+    pub fn new_recursive<S: AsRef<str>>(path: S) -> Result<Self> {
+        let path = path.as_ref();
+
+        // Check to determine if the string is initially empty
+        if path.is_empty() {
+            return Err(Error::InvalidPath);
+        }
+
+        let mut path = path
+            .split('/')
+            .filter(|&s| !s.is_empty())
+            .collect::<Vec<_>>();
+
+        // checl to determine if the array is empty
+        if path.is_empty() {
+            return Err(Error::InvalidPath);
+        }
+
+        let name = path.remove(0);
+        let mut directory = Self::new(name);
+        if !path.is_empty() {
+            let sub = Self::new_recursive(path.join("/"))?;
+            directory.add_child(sub)?;
+        }
+        Ok(directory)
+    }
+
     /// List all the `Item` within the `Directory`
     pub fn child_list(&self) -> &Vec<Item> {
         &self.children
@@ -94,7 +148,7 @@ impl Directory {
 
     /// Checks to see if the `Directory` has a `Item`
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
@@ -115,7 +169,7 @@ impl Directory {
 
     /// Add an item to the `Directory`
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
@@ -143,7 +197,7 @@ impl Directory {
 
     /// Used to get the position of a child within a `Directory`
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory}};
@@ -168,7 +222,7 @@ impl Directory {
 
     /// Used to get the child within a `Directory`
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory}};
@@ -191,7 +245,7 @@ impl Directory {
 
     /// Used to get the mutable child within a `Directory`
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory},file::File};
@@ -224,7 +278,7 @@ impl Directory {
 
     /// Used to rename a child within a `Directory`
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory}};
@@ -246,7 +300,7 @@ impl Directory {
 
     /// Used to remove the child within a `Directory`
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::{Directory}};
@@ -274,7 +328,7 @@ impl Directory {
     ///
     /// TODO: Implement within `Directory::remove_child` in a single path
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///         use warp_constellation::directory::{Directory};
@@ -312,7 +366,7 @@ impl Directory {
     }
     /// Used to move the child to another `Directory`
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::Directory};
@@ -347,15 +401,28 @@ impl Directory {
 
         let item = self.remove_child(child)?;
 
-        // TODO: Implement check and restore item back to previous directory if there's an error
-        self.get_child_mut_by_path(dst)?
-            .get_directory_mut()?
-            .add_child(item)
+        // If there is an error, place the item back into the current directory
+        match self
+            .get_child_mut_by_path(dst)
+            .and_then(Item::get_directory_mut)
+        {
+            Ok(directory) => {
+                if let Err(e) = directory.add_child(item.clone()) {
+                    self.add_child(item)?;
+                    return Err(e);
+                }
+            }
+            Err(e) => {
+                self.add_child(item)?;
+                return Err(e);
+            }
+        }
+        Ok(())
     }
 
     /// Used to find an item throughout the `Directory` and its children
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// ```
     ///     use warp_constellation::{directory::Directory};
@@ -390,7 +457,7 @@ impl Directory {
 
     /// Used to get a search for items listed and return a list of `Item` matching the terms
     ///
-    /// #Examples
+    /// # Examples
     ///
     /// TODO
     pub fn find_all_items<S: AsRef<str> + Clone>(&self, item_names: Vec<S>) -> Vec<&Item> {

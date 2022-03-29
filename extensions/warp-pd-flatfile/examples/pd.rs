@@ -14,6 +14,7 @@ fn main() -> anyhow::Result<()> {
     let index = {
         let mut index = PathBuf::new();
         index.push("cache-index");
+
         index
     };
 
@@ -28,10 +29,15 @@ fn main() -> anyhow::Result<()> {
 
     let bufdata = DataObject::new(
         &DataType::Module(Module::FileSystem),
-        DimensionData::from_buffer_nofile("testbin", b"Hello, World".to_vec()),
+        DimensionData::from_buffer_nofile("testbin", b"Hello, World"),
     )?;
 
     storage.add_data(DataType::Module(Module::FileSystem), &bufdata)?;
+    let bufdata = DataObject::new(
+        &DataType::Module(Module::FileSystem),
+        DimensionData::from_buffer_nofile("test", b"Hello, World"),
+    )?;
+    storage.add_data(DataType::File, &bufdata)?;
 
     let mut query = QueryBuilder::default();
     query.filter(Comparator::Eq, "name", "testbin")?;
@@ -46,6 +52,8 @@ fn main() -> anyhow::Result<()> {
 
     arr.write_from_path(&mut buf)?;
 
-    println!("{}", String::from_utf8_lossy(&buf).to_string());
+    println!("Contents: {}", String::from_utf8_lossy(&buf));
+
+    storage.empty(DataType::Module(Module::FileSystem))?;
     Ok(())
 }

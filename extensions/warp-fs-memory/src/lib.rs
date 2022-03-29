@@ -23,6 +23,18 @@ pub type Result<T> = std::result::Result<T, error::Error>;
 #[derive(Debug, Clone)]
 pub struct MemorySystemInternal(item::directory::Directory);
 
+impl AsRef<item::directory::Directory> for MemorySystemInternal {
+    fn as_ref(&self) -> &item::directory::Directory {
+        &self.0
+    }
+}
+
+impl AsMut<item::directory::Directory> for MemorySystemInternal {
+    fn as_mut(&mut self) -> &mut item::directory::Directory {
+        &mut self.0
+    }
+}
+
 impl Default for MemorySystemInternal {
     fn default() -> Self {
         MemorySystemInternal(item::directory::Directory::new("root"))
@@ -40,7 +52,7 @@ pub struct MemorySystem {
     #[serde(skip)]
     cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     #[serde(skip)]
-    pub hooks: Option<Arc<Mutex<Hooks>>>,
+    hooks: Option<Arc<Mutex<Hooks>>>,
 }
 
 impl Default for MemorySystem {
@@ -91,14 +103,6 @@ impl Constellation for MemorySystem {
         &mut self.index
     }
 
-    fn current_directory(&self) -> &Directory {
-        &self.current
-    }
-
-    fn set_current_directory(&mut self, directory: Directory) {
-        self.current = directory;
-    }
-
     fn set_path(&mut self, path: PathBuf) {
         self.path = path;
     }
@@ -125,9 +129,9 @@ impl Constellation for MemorySystem {
 
         let mut file = warp_constellation::file::File::new(&name);
         file.set_size(bytes as i64);
-        file.set_hash(hex::encode(internal_file.hash()));
+        file.set_hash(warp_common::hash_data(&buf));
 
-        self.open_directory("")?.add_child(file.clone())?;
+        self.current_directory_mut()?.add_child(file.clone())?;
         if let Some(cache) = &self.cache {
             let mut cache = cache.lock().unwrap();
 
@@ -141,7 +145,7 @@ impl Constellation for MemorySystem {
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
-            hook.trigger("FILESYSTEM::NEW_FILE", &object)
+            hook.trigger("filesystem::new_file", &object)
         }
         Ok(())
     }
@@ -152,7 +156,7 @@ impl Constellation for MemorySystem {
         name: &str,
         buf: &mut Vec<u8>,
     ) -> std::result::Result<(), warp_common::error::Error> {
-        if !self.root_directory().has_child(name) {
+        if !self.current_directory().has_child(name) {
             return Err(warp_common::error::Error::IoError(std::io::Error::from(
                 ErrorKind::InvalidData,
             )));
@@ -177,11 +181,65 @@ impl Constellation for MemorySystem {
 
         let file = self
             .internal
-            .0
+            .as_ref()
             .get_item_from_path(String::from(name))
             .map_err(|_| Error::Other)?;
 
         *buf = file.data();
+        Ok(())
+    }
+
+    async fn remove(&mut self, path: &str, _: bool) -> warp_common::Result<()> {
+        if !self.current_directory().has_child(path) {
+            return Err(Error::Other);
+        }
+
+        if !self.internal.as_ref().exist(path) {
+            return Err(Error::ObjectNotFound);
+        }
+
+        self.internal
+            .as_mut()
+            .remove(path)
+            .map_err(|_| Error::ObjectNotFound)?;
+
+        self.current_directory_mut()?.remove_child(path)?;
+        Ok(())
+    }
+
+    async fn move_item(&mut self, _: &str, _: &str) -> warp_common::Result<()> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Use to create a directory within the filesystem.
+    async fn create_directory(&mut self, path: &str, recursive: bool) -> warp_common::Result<()> {
+        let inner_directory = if recursive {
+            item::directory::Directory::new_recursive(path)?
+        } else {
+            item::directory::Directory::new(path)
+        };
+
+        self.internal
+            .as_mut()
+            .insert(inner_directory)
+            .map_err(|_| Error::Other)?;
+
+        let directory = if recursive {
+            Directory::new_recursive(&path)?
+        } else {
+            Directory::new(&path)
+        };
+
+        if let Err(err) = self.current_directory_mut()?.add_child(directory) {
+            //TODO
+            return Err(err);
+        }
+
+        if let Some(hook) = &self.hooks {
+            let object = DataObject::new(&DataType::Module(Module::FileSystem), ())?;
+            let hook = hook.lock().unwrap();
+            hook.trigger("filesystem::create_directory", &object)
+        }
         Ok(())
     }
 }

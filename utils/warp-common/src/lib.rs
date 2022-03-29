@@ -9,8 +9,10 @@ pub use anyhow;
 pub use bincode;
 pub use cfg_if;
 pub use chrono;
+pub use derive_more;
 #[cfg(not(any(target_os = "android", target_os = "ios", target_family = "wasm")))]
 pub use dirs;
+pub use hex;
 pub use libflate;
 pub use log;
 pub use regex;
@@ -19,6 +21,15 @@ pub use serde_json;
 pub use serde_yaml;
 pub use toml;
 pub use uuid;
+
+#[cfg(feature = "use_blake2")]
+pub use blake2;
+#[cfg(feature = "use_sha1")]
+pub use sha1;
+#[cfg(feature = "use_sha2")]
+pub use sha2;
+#[cfg(feature = "use_sha3")]
+pub use sha3;
 
 cfg_if::cfg_if! {
     if #[cfg(all(feature = "async", not(any(target_family = "wasm", target_os = "emscripten", target_os = "wasi"))))] {
@@ -64,4 +75,29 @@ pub trait Extension {
 
     /// Returns the module type the extension is meant to be used for
     fn module(&self) -> Module;
+}
+
+#[cfg(any(feature = "use_sha1", feature = "use_sha2"))]
+pub fn hash_data<S: AsRef<[u8]>>(data: S) -> String {
+    let sha1hash = format!("sha1-{}", sha1_hash(&data));
+    let sha256hash = format!("sha256-{}", sha256_hash(&data));
+    format!("{};{}", sha1hash, sha256hash)
+}
+
+#[cfg(feature = "use_sha2")]
+pub fn sha256_hash<S: AsRef<[u8]>>(data: S) -> String {
+    use sha2::{Digest as Sha2Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(&data.as_ref());
+    let res = hasher.finalize().to_vec();
+    hex::encode(res)
+}
+
+#[cfg(feature = "use_sha1")]
+pub fn sha1_hash<S: AsRef<[u8]>>(data: S) -> String {
+    use sha1::{Digest as Sha1Digest, Sha1};
+    let mut hasher = Sha1::new();
+    hasher.update(&data.as_ref());
+    let res = hasher.finalize().to_vec();
+    hex::encode(res)
 }

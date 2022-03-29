@@ -16,10 +16,10 @@ mod test {
     fn test() -> Result<()> {
         let mut system = HOOKS.lock().unwrap();
 
-        let hook = system.create("NEW_FILE", Module::FileSystem)?;
+        let hook = system.create("new_file", Module::FileSystem)?;
 
         system.subscribe(hook, |hook, data| {
-            assert_eq!(hook.name.as_str(), "NEW_FILE");
+            assert_eq!(hook.name.as_str(), "new_file");
             assert_eq!(hook.data_type, DataType::Module(Module::FileSystem));
 
             assert_eq!(data.data_type, DataType::Module(Module::FileSystem));
@@ -29,7 +29,7 @@ mod test {
         })?;
         let data = DataObject::new(&Module::FileSystem, File::new("test.txt"))?;
 
-        system.trigger("FILESYSTEM::NEW_FILE", &data);
+        system.trigger("filesystem::new_file", &data);
         Ok(())
     }
 }

@@ -71,8 +71,8 @@ pub struct Hooks {
 ///     use warp_hooks::hooks::{Hook, Hooks};
 ///     use warp_module::Module;
 ///
-///     let systems = Hooks::from(vec!["FILESYSTEM::NEW_FILE"]);
-///     assert_eq!(systems.hooks(), vec![Hook::from("FILESYSTEM::NEW_FILE")])
+///     let systems = Hooks::from(vec!["filesystem::new_file"]);
+///     assert_eq!(systems.hooks(), vec![Hook::from("filesystem::new_file")])
 /// ```
 impl<A: AsRef<str>> From<Vec<A>> for Hooks {
     fn from(h: Vec<A>) -> Self {
@@ -100,8 +100,8 @@ impl Hooks {
     ///     use warp_hooks::hooks::{Hook, Hooks};
     ///     use warp_module::Module;
     ///
-    ///     let systems = Hooks::from(vec!["FILESYSTEM::NEW_FILE"]);
-    ///     assert_eq!(systems.hooks(), vec![Hook::from("FILESYSTEM::NEW_FILE")])
+    ///     let systems = Hooks::from(vec!["filesystem::new_file"]);
+    ///     assert_eq!(systems.hooks(), vec![Hook::from("filesystem::new_file")])
     pub fn new_from_vec(list: Vec<&str>) -> Self {
         Hooks::from(list)
     }
@@ -116,8 +116,8 @@ impl Hooks {
     ///     use warp_module::Module;
     ///
     ///     let mut system = Hooks::default();
-    ///     let hook = system.create("NEW_FILE", Module::FileSystem).unwrap();
-    ///     assert_eq!(hook, Hook::new("NEW_FILE", Module::FileSystem));
+    ///     let hook = system.create("new_file", Module::FileSystem).unwrap();
+    ///     assert_eq!(hook, Hook::new("new_file", Module::FileSystem));
     /// ```
     pub fn create<S: AsRef<str>>(&mut self, name: S, module: Module) -> Result<Hook> {
         let name = name.as_ref().to_owned();
@@ -142,7 +142,7 @@ impl Hooks {
     ///     use warp_module::Module;
     ///
     ///     let mut system = Hooks::default();
-    ///     let hook = system.create("NEW_FILE", Module::FileSystem).unwrap();
+    ///     let hook = system.create("new_file", Module::FileSystem).unwrap();
     ///     let hooks = system.hooks();
     ///     assert_eq!(hooks.get(0).unwrap(), &hook);
     /// ```
@@ -161,19 +161,19 @@ impl Hooks {
     ///     use warp_constellation::file::File;
     ///
     ///     let mut system = Hooks::default();
-    ///     let hook = system.create("NEW_FILE", Module::FileSystem).unwrap();
+    ///     let hook = system.create("new_file", Module::FileSystem).unwrap();
     ///     //Check to see if hook already exist
-    ///     assert_eq!(system.create("NEW_FILE", Module::FileSystem).is_err(), true);
+    ///     assert_eq!(system.create("new_file", Module::FileSystem).is_err(), true);
     ///     //Check to see if hook havent been registered
-    ///     assert_eq!(system.subscribe(Hook::from("UNKNOWN::NEW_FILE"), |_, _|{}).is_err(), true);
-    ///     system.subscribe("FILESYSTEM::NEW_FILE", |hook, data| {
-    ///         assert_eq!(hook.name.as_str(), "NEW_FILE");
+    ///     assert_eq!(system.subscribe(Hook::from("unknown::new_file"), |_, _|{}).is_err(), true);
+    ///     system.subscribe("filesystem::new_file", |hook, data| {
+    ///         assert_eq!(hook.name.as_str(), "new_file");
     ///         assert_eq!(hook.data_type, DataType::Module(Module::FileSystem));
     ///         let file: File = data.payload().unwrap();
     ///         assert_eq!(file.name.as_str(), "test.txt");
     ///     }).unwrap();
     ///     let data = DataObject::new(&Module::FileSystem, File::new("test.txt")).unwrap();
-    ///     system.trigger("FILESYSTEM::NEW_FILE", &data);
+    ///     system.trigger("filesystem::new_file", &data);
     /// ```
     pub fn subscribe<C, H>(&mut self, hook: H, f: C) -> Result<()>
     where
@@ -202,15 +202,15 @@ impl Hooks {
     ///     use warp_constellation::file::File;
     ///
     ///     let mut system = Hooks::default();
-    ///     let hook = system.create("NEW_FILE", Module::FileSystem).unwrap();
-    ///     system.subscribe("FILESYSTEM::NEW_FILE", |hook, data| {
-    ///         assert_eq!(hook.name.as_str(), "NEW_FILE");
+    ///     let hook = system.create("new_file", Module::FileSystem).unwrap();
+    ///     system.subscribe("filesystem::new_file", |hook, data| {
+    ///         assert_eq!(hook.name.as_str(), "new_file");
     ///         assert_eq!(hook.data_type, DataType::Module(Module::FileSystem));
     ///         let file: File = data.payload().unwrap();
     ///         assert_eq!(file.name.as_str(), "test.txt");
     ///     }).unwrap();
     ///     let data = DataObject::new(&Module::FileSystem, File::new("test.txt")).unwrap();
-    ///     system.trigger("FILESYSTEM::NEW_FILE", &data);
+    ///     system.trigger("filesystem::new_file", &data);
     /// ```
     pub fn trigger<S>(&self, name: S, data: &DataObject)
     where
@@ -220,7 +220,7 @@ impl Hooks {
         let hook = Hook::from(name);
         if let Some(subscribers) = self.subscribers.get(name) {
             for subscriber in subscribers {
-                subscriber(&hook, &data);
+                subscriber(&hook, data);
             }
         }
     }

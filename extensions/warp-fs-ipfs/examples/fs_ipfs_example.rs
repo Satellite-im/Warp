@@ -26,7 +26,7 @@ async fn main() -> warp_common::anyhow::Result<()> {
 
     println!("Output: {}", String::from_utf8_lossy(&buffer).to_string());
 
-    system.remove("testfile").await?;
+    system.remove("testfile", false).await?;
 
     println!("Debug results: {:?}", system.root_directory());
     Ok(())

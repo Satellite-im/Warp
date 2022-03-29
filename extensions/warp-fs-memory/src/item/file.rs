@@ -2,7 +2,6 @@ use crate::error::Error;
 use crate::item::directory::Directory;
 use crate::item::{ItemMut, ItemType};
 use crate::Item;
-use blake2::{Blake2b512, Digest};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
@@ -83,14 +82,6 @@ impl File {
         }
     }
 
-    pub(crate) fn hash_data(&mut self) -> crate::Result<()> {
-        let mut hasher = Blake2b512::new();
-        hasher.update(&self.data[..]);
-        let res = hasher.finalize().to_vec();
-        self.hash = res;
-        Ok(())
-    }
-
     pub fn valid(&self) -> bool {
         false
     }
@@ -109,26 +100,11 @@ impl File {
 
         self.data = buf;
 
-        match self.hash_data() {
-            Ok(()) => {}
-            Err(e) => {
-                self.data.clear();
-                return Err(e);
-            }
-        };
-
         Ok(size)
     }
 
     pub fn insert_buffer(&mut self, data: Vec<u8>) -> crate::Result<usize> {
         self.data = data;
-        match self.hash_data() {
-            Ok(()) => {}
-            Err(e) => {
-                self.data.clear();
-                return Err(e);
-            }
-        };
         Ok(self.data.len())
     }
 

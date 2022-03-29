@@ -1,18 +1,36 @@
 use crate::item::Metadata;
 use warp_common::chrono::{DateTime, Utc};
+use warp_common::derive_more::Display;
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::uuid::Uuid;
-
 /// `FileType` describes all supported file types.
 /// This will be useful for applying icons to the tree later on
 /// if we don't have a supported file type, we can just default to generic.
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+///
+/// TODO: Use mime to define the filetype
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display)]
 #[serde(crate = "warp_common::serde")]
 #[serde(rename_all = "lowercase")]
 pub enum FileType {
+    #[display(fmt = "generic")]
     Generic,
+    #[display(fmt = "image/png")]
     ImagePng,
+    #[display(fmt = "archive")]
     Archive,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug, Display)]
+#[serde(crate = "warp_common::serde", rename_all = "lowercase")]
+pub enum FileHookType {
+    #[display(fmt = "create")]
+    Create,
+    #[display(fmt = "delete")]
+    Delete,
+    #[display(fmt = "rename")]
+    Rename,
+    #[display(fmt = "move")]
+    Move,
 }
 
 /// `File` represents the files uploaded to the FileSystem (`Constellation`).

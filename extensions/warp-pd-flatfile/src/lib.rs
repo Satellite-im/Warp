@@ -62,12 +62,18 @@ impl Extension for FlatfileStorage {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct FlatfileIndex(pub Vec<DataObject>);
 
 impl AsRef<Vec<DataObject>> for FlatfileIndex {
     fn as_ref(&self) -> &Vec<DataObject> {
         &self.0
+    }
+}
+
+impl AsMut<Vec<DataObject>> for FlatfileIndex {
+    fn as_mut(&mut self) -> &mut Vec<DataObject> {
+        &mut self.0
     }
 }
 
@@ -93,8 +99,16 @@ impl FlatfileIndex {
     }
 
     pub fn export_index_to_file<P: AsRef<Path>>(&self, path: P) -> warp_common::Result<()> {
-        let fs = OpenOptions::new().create(true).write(true).open(path)?;
-        warp_common::serde_json::to_writer(fs, &self.0)?;
+        let path = path.as_ref();
+        if path.is_file() {
+            std::fs::copy(path, format!("{}_backup", path.display()))?;
+            std::fs::remove_file(path)?;
+        }
+
+        let mut fs = std::fs::File::create(path)?;
+        let data = warp_common::serde_json::to_string(&self.0)?;
+        fs.write_all(data.as_bytes())?;
+        if std::fs::remove_file(format!("{}_backup", path.display())).is_err() {}
         Ok(())
     }
 
@@ -195,6 +209,10 @@ impl FlatfileStorage {
         &self.index
     }
 
+    pub fn get_index_mut(&mut self) -> &mut FlatfileIndex {
+        &mut self.index
+    }
+
     pub fn get_index_file(&self) -> warp_common::Result<String> {
         if !self.use_index_file() {
             return Err(Error::ToBeDetermined);
@@ -234,7 +252,7 @@ impl PocketDimension for FlatfileStorage {
         data.version = version as u32;
 
         match dimension {
-            DataType::Module(module) if Module::FileSystem == module => {
+            DataType::Module(Module::FileSystem) => {
                 match data.payload::<DimensionData>()? {
                     DimensionData::Path { name, path } => {
                         let old_path = path;
@@ -364,9 +382,34 @@ impl PocketDimension for FlatfileStorage {
             .map(|list| list.len() as i64)
     }
 
-    fn empty(&mut self, _dimension: DataType) -> warp_common::Result<()> {
-        //TODO
-        Err(Error::Unimplemented)
+    fn empty(&mut self, dimension: DataType) -> warp_common::Result<()> {
+        let mut preserved = Vec::new();
+
+        for item in self.index.as_ref().clone() {
+            if item.data_type != dimension {
+                preserved.push(item);
+            }
+        }
+
+        for item in self
+            .index
+            .as_ref()
+            .iter()
+            .filter(|data| data.data_type == dimension)
+        {
+            if let DataType::Module(Module::FileSystem) = &item.data_type {
+                if let DimensionData::Path { path, .. } = item.payload::<DimensionData>()? {
+                    std::fs::remove_file(path)?;
+                }
+            }
+        }
+
+        self.index.0.clear();
+        // self.sync()
+        // for item in preserved.iter() {
+        self.get_index_mut().0.extend(preserved);
+        // }
+        self.sync()
     }
 }
 

@@ -24,8 +24,15 @@ pub trait Constellation: Extension + Sync + Send {
     fn root_directory_mut(&mut self) -> &mut Directory;
 
     /// Get current directory
-    fn current_directory(&self) -> &Directory;
+    fn current_directory(&self) -> &Directory {
+        let current_pathbuf = self.get_path().to_string_lossy().to_string();
+        self.root_directory()
+            .get_child_by_path(current_pathbuf)
+            .and_then(Item::get_directory)
+            .unwrap_or(self.root_directory())
+    }
 
+    /// Select a directory within the filesystem
     fn select(&mut self, path: &str) -> Result<()> {
         let path = Path::new(path).to_path_buf();
         let current_pathbuf = self.get_path();
@@ -35,34 +42,24 @@ pub trait Constellation: Extension + Sync + Send {
         }
         let new_path = Path::new(current_pathbuf).join(path);
         self.set_path(new_path);
-        let directory = self
-            .root_directory()
-            .get_child_by_path(&self.get_path().to_string_lossy())
-            .and_then(Item::get_directory)?
-            .clone();
-        self.set_current_directory(directory);
         Ok(())
     }
 
-    fn set_current_directory(&mut self, _: Directory);
-
+    /// Set path to current directory
     fn set_path(&mut self, _: PathBuf);
 
+    /// Get path of current directory
     fn get_path(&self) -> &PathBuf;
 
+    /// Go back to the previous directory
     fn go_back(&mut self) -> Result<()> {
         if !self.get_path_mut().pop() {
             return Err(Error::DirectoryNotFound);
         }
-        let directory = self
-            .root_directory()
-            .get_child_by_path(&self.get_path().to_string_lossy())
-            .and_then(Item::get_directory)?
-            .clone();
-        self.set_current_directory(directory);
         Ok(())
     }
 
+    /// Obtain a mutable reference of the current directory path
     fn get_path_mut(&mut self) -> &mut PathBuf;
 
     /// Get a current directory that is mutable.
@@ -102,12 +99,17 @@ pub trait Constellation: Extension + Sync + Send {
     }
 
     /// Use to remove data from the filesystem
-    async fn remove(&mut self, _: &str) -> Result<()> {
+    async fn remove(&mut self, _: &str, _: bool) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
     /// Use to move data within the filesystem
-    async fn mv(&mut self, _: &str, _: &str) -> Result<()> {
+    async fn move_item(&mut self, _: &str, _: &str) -> Result<()> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Use to create a directory within the filesystem.
+    async fn create_directory(&mut self, _: &str, _: bool) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
@@ -134,7 +136,7 @@ pub trait Constellation: Extension + Sync + Send {
             ConstellationDataType::Toml => warp_common::toml::from_str(data.as_str())?,
         };
         //TODO: create a function to override directory children.
-        self.open_directory("")?.children = directory.children;
+        self.root_directory_mut().children = directory.children;
 
         Ok(())
     }

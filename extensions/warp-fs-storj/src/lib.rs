@@ -1,8 +1,8 @@
-use blake2::{Blake2b512, Digest};
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
+
 use warp_module::Module;
 
 use warp_common::{
@@ -72,6 +72,7 @@ impl StorjClient {
         match create {
             true => {
                 let config = BucketConfiguration::default();
+
                 let create_bucket_response =
                     Bucket::create(bucket.as_ref(), region.clone(), creds.clone(), config).await?;
                 Ok(create_bucket_response.bucket)
@@ -106,7 +107,6 @@ impl Extension for StorjFilesystem {
 pub struct StorjFilesystem {
     pub index: Directory,
     pub modified: DateTime<Utc>,
-    current: Directory,
     path: PathBuf,
     #[serde(skip)]
     pub client: Option<StorjClient>,
@@ -120,7 +120,6 @@ impl Default for StorjFilesystem {
     fn default() -> StorjFilesystem {
         StorjFilesystem {
             index: Directory::new("root"),
-            current: Directory::new("root"),
             path: PathBuf::new(),
             modified: Utc::now(),
             client: None,
@@ -161,14 +160,6 @@ impl Constellation for StorjFilesystem {
 
     fn root_directory_mut(&mut self) -> &mut Directory {
         &mut self.index
-    }
-
-    fn current_directory(&self) -> &Directory {
-        &self.current
-    }
-
-    fn set_current_directory(&mut self, directory: Directory) {
-        self.current = directory;
     }
 
     fn set_path(&mut self, path: PathBuf) {
@@ -223,7 +214,7 @@ impl Constellation for StorjFilesystem {
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
-            hook.trigger("FILESYSTEM::NEW_FILE", &object)
+            hook.trigger("filesystem::new_file", &object)
         }
         Ok(())
     }
@@ -253,8 +244,8 @@ impl Constellation for StorjFilesystem {
         }
 
         let file = self
-            .root_directory()
-            .get_child_by_path(&name)
+            .current_directory()
+            .get_child(&name)
             .and_then(Item::get_file)?;
 
         let mut fs = tokio::fs::File::create(path).await?;
@@ -297,9 +288,9 @@ impl Constellation for StorjFilesystem {
 
         let mut file = warp_constellation::file::File::new(&name);
         file.set_size(buffer.len() as i64);
-        file.set_hash(hash_data(&buffer));
+        file.set_hash(warp_common::hash_data(&buffer));
 
-        self.open_directory("")?.add_child(file.clone())?;
+        self.current_directory_mut()?.add_child(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -315,7 +306,7 @@ impl Constellation for StorjFilesystem {
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
-            hook.trigger("FILESYSTEM::NEW_FILE", &object)
+            hook.trigger("filesystem::new_file", &object)
         }
         Ok(())
     }
@@ -338,11 +329,6 @@ impl Constellation for StorjFilesystem {
             }
         }
 
-        let file = self
-            .root_directory()
-            .get_child_by_path(&name)
-            .and_then(Item::get_file)?;
-
         let client = self.client.as_ref().ok_or(Error::ToBeDetermined)?;
         let (buf, code) = client
             .bucket(bucket, false)
@@ -354,18 +340,12 @@ impl Constellation for StorjFilesystem {
             return Err(Error::ToBeDetermined);
         }
 
-        let hash = hash_data(&buffer);
-
-        if file.hash != hash {
-            return Err(Error::ToBeDetermined);
-        }
-
         *buffer = buf;
 
         Ok(())
     }
 
-    async fn remove(&mut self, path: &str) -> warp_common::Result<()> {
+    async fn remove(&mut self, path: &str, _: bool) -> warp_common::Result<()> {
         let (bucket, name) = split_for(path)?;
 
         let client = self.client.as_ref().ok_or(Error::Other)?;
@@ -380,13 +360,13 @@ impl Constellation for StorjFilesystem {
             return Err(Error::ToBeDetermined);
         }
 
-        let item = self.root_directory_mut().remove_child(&name)?;
+        let item = self.current_directory_mut()?.remove_child(&name)?;
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(&DataType::Module(Module::FileSystem), &item)?;
             let hook = hook.lock().unwrap();
             let hook_name = match item {
-                Item::Directory(_) => "FILESYSTEM::REMOVE_DIRECTORY",
-                Item::File(_) => "FILESYSTEM::REMOVE_FILE",
+                Item::Directory(_) => "filesystem::remove_directory",
+                Item::File(_) => "filesystem::remove_file",
             };
             hook.trigger(hook_name, &object);
         }
@@ -396,14 +376,7 @@ impl Constellation for StorjFilesystem {
 
 async fn hash_file<S: AsRef<str>>(file: S) -> anyhow::Result<String> {
     let data = tokio::fs::read(file.as_ref()).await?;
-    Ok(hash_data(data))
-}
-
-fn hash_data<S: AsRef<[u8]>>(data: S) -> String {
-    let mut hasher = Blake2b512::new();
-    hasher.update(&data.as_ref());
-    let res = hasher.finalize().to_vec();
-    hex::encode(res)
+    Ok(warp_common::hash_data(data))
 }
 
 fn split_for<S: AsRef<str>>(name: S) -> anyhow::Result<(String, String)> {
