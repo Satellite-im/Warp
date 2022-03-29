@@ -2,8 +2,7 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
-use warp_common::sha1::{Digest as Sha1Digest, Sha1};
-use warp_common::sha2::{Digest as Sha2Digest, Sha256};
+
 use warp_module::Module;
 
 use warp_common::{
@@ -289,7 +288,7 @@ impl Constellation for StorjFilesystem {
 
         let mut file = warp_constellation::file::File::new(&name);
         file.set_size(buffer.len() as i64);
-        file.set_hash(hash_data(&buffer));
+        file.set_hash(warp_common::hash_data(&buffer));
 
         self.current_directory_mut()?.add_child(file.clone())?;
 
@@ -330,11 +329,6 @@ impl Constellation for StorjFilesystem {
             }
         }
 
-        let file = self
-            .root_directory()
-            .get_child_by_path(&name)
-            .and_then(Item::get_file)?;
-
         let client = self.client.as_ref().ok_or(Error::ToBeDetermined)?;
         let (buf, code) = client
             .bucket(bucket, false)
@@ -343,12 +337,6 @@ impl Constellation for StorjFilesystem {
             .await?;
 
         if code != 200 {
-            return Err(Error::ToBeDetermined);
-        }
-
-        let hash = hash_data(&buffer);
-
-        if file.hash != hash {
             return Err(Error::ToBeDetermined);
         }
 
@@ -388,27 +376,7 @@ impl Constellation for StorjFilesystem {
 
 async fn hash_file<S: AsRef<str>>(file: S) -> anyhow::Result<String> {
     let data = tokio::fs::read(file.as_ref()).await?;
-    Ok(hash_data(data))
-}
-
-fn hash_data<S: AsRef<[u8]>>(data: S) -> String {
-    let sha1hash = format!("sha1-{}", sha1_hash(&data));
-    let sha256hash = format!("sha256-{}", sha256_hash(&data));
-    format!("{};{}", sha1hash, sha256hash)
-}
-
-fn sha256_hash<S: AsRef<[u8]>>(data: S) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(&data.as_ref());
-    let res = hasher.finalize().to_vec();
-    warp_common::hex::encode(res)
-}
-
-fn sha1_hash<S: AsRef<[u8]>>(data: S) -> String {
-    let mut hasher = Sha1::new();
-    hasher.update(&data.as_ref());
-    let res = hasher.finalize().to_vec();
-    warp_common::hex::encode(res)
+    Ok(warp_common::hash_data(data))
 }
 
 fn split_for<S: AsRef<str>>(name: S) -> anyhow::Result<(String, String)> {

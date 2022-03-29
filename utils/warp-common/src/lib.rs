@@ -76,3 +76,28 @@ pub trait Extension {
     /// Returns the module type the extension is meant to be used for
     fn module(&self) -> Module;
 }
+
+#[cfg(any(feature = "use_sha1", feature = "use_sha2"))]
+pub fn hash_data<S: AsRef<[u8]>>(data: S) -> String {
+    let sha1hash = format!("sha1-{}", sha1_hash(&data));
+    let sha256hash = format!("sha256-{}", sha256_hash(&data));
+    format!("{};{}", sha1hash, sha256hash)
+}
+
+#[cfg(feature = "use_sha2")]
+pub fn sha256_hash<S: AsRef<[u8]>>(data: S) -> String {
+    use sha2::{Digest as Sha2Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(&data.as_ref());
+    let res = hasher.finalize().to_vec();
+    hex::encode(res)
+}
+
+#[cfg(feature = "use_sha1")]
+pub fn sha1_hash<S: AsRef<[u8]>>(data: S) -> String {
+    use sha1::{Digest as Sha1Digest, Sha1};
+    let mut hasher = Sha1::new();
+    hasher.update(&data.as_ref());
+    let res = hasher.finalize().to_vec();
+    hex::encode(res)
+}
