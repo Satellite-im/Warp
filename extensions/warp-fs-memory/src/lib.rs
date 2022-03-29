@@ -129,7 +129,7 @@ impl Constellation for MemorySystem {
 
         let mut file = warp_constellation::file::File::new(&name);
         file.set_size(bytes as i64);
-        file.set_hash(hex::encode(internal_file.hash()));
+        file.set_hash(warp_common::hash_data(&buf));
 
         self.current_directory_mut()?.add_child(file.clone())?;
         if let Some(cache) = &self.cache {
