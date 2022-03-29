@@ -1,8 +1,10 @@
 use crate::item::Metadata;
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::derive_more::Display;
+use warp_common::hex;
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::uuid::Uuid;
+use warp_common::Result;
 /// `FileType` describes all supported file types.
 /// This will be useful for applying icons to the tree later on
 /// if we don't have a supported file type, we can just default to generic.
@@ -61,7 +63,7 @@ pub struct File {
     pub file_type: FileType,
 
     /// Hash of the `File`
-    pub hash: String,
+    pub hash: Hash,
 
     /// External reference
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -79,7 +81,7 @@ impl Default for File {
             creation: timestamp,
             modified: timestamp,
             file_type: FileType::Generic,
-            hash: String::new(),
+            hash: Hash::default(),
             reference: None,
         }
     }
@@ -122,23 +124,7 @@ impl File {
         self.description = desc.as_ref().to_string();
         self.modified = Utc::now()
     }
-
-    /// Set the hash of the file
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use warp_constellation::{file::File, item::Item};
-    ///
-    /// let mut file = File::new("test.txt");
-    /// file.set_hash("0xabcd");
-    ///
-    /// assert_eq!(file.hash.as_str(), "0xabcd");
-    /// ```
-    pub fn set_hash<S: AsRef<str>>(&mut self, hash: S) {
-        self.hash = hash.as_ref().to_string();
-        self.modified = Utc::now();
-    }
+    
     /// Set the reference of the file
     ///
     /// # Examples
@@ -198,5 +184,118 @@ impl Metadata for File {
 
     fn modified(&self) -> DateTime<Utc> {
         self.modified
+    }
+}
+
+#[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[serde(crate = "warp_common::serde")]
+pub struct Hash {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha1: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blake2: Option<String>,
+}
+
+impl Hash {
+    /// Use to generate a sha1 hash of a file
+    pub fn sha1hash_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<()> {
+        let mut file = std::fs::File::open(path)?;
+        self.sha1hash_from_reader(&mut file)
+    }
+
+    /// Use to generate a sha1 hash from a reader
+    ///
+    /// # Example
+    /// ```
+    /// use std::io::Cursor;
+    /// use warp_constellation::file::Hash;
+    ///
+    /// let mut cursor = Cursor::new(b"Hello, World!");
+    /// let mut hash = Hash::default();
+    /// hash.sha1hash_from_reader(&mut cursor).unwrap();
+    ///
+    /// assert_eq!(hash.sha1, Some(String::from("0A0A9F2A6772942557AB5355D76AF442F8F65E01")))
+    /// ```
+    pub fn sha1hash_from_reader<R: std::io::Read>(&mut self, reader: &mut R) -> Result<()> {
+        use warp_common::sha1::{Digest, Sha1};
+        let mut hasher = Sha1::new();
+        std::io::copy(reader, &mut hasher)?;
+        let res = hasher.finalize().to_vec();
+
+        self.sha1 = Some(hex::encode(res).to_uppercase());
+        Ok(())
+    }
+
+    /// Use to generate a sha1 hash from a reader
+    ///
+    /// # Example
+    /// ```
+    /// use warp_constellation::file::Hash;
+    ///
+    /// let mut hash = Hash::default();
+    /// hash.sha1hash_from_buffer(&b"Hello, World!").unwrap();
+    ///
+    /// assert_eq!(hash.sha1, Some(String::from("0A0A9F2A6772942557AB5355D76AF442F8F65E01")))
+    /// ```
+    pub fn sha1hash_from_buffer<U: AsRef<[u8]>>(&mut self, buffer: U) -> Result<()> {
+        use warp_common::sha1::{Digest, Sha1};
+        let mut hasher = Sha1::new();
+        hasher.update(&buffer.as_ref());
+        let res = hasher.finalize().to_vec();
+
+        self.sha1 = Some(hex::encode(res).to_uppercase());
+        Ok(())
+    }
+
+    /// Use to generate a sha256 hash of a file
+    pub fn sha256hash_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<()> {
+        let mut file = std::fs::File::open(path)?;
+        self.sha256hash_from_reader(&mut file)
+    }
+
+    /// Use to generate a sha1 hash from a reader
+    ///
+    /// # Example
+    /// ```
+    /// use std::io::Cursor;
+    /// use warp_constellation::file::Hash;
+    ///
+    /// let mut cursor = Cursor::new(b"Hello, World!");
+    /// let mut hash = Hash::default();
+    /// hash.sha256hash_from_reader(&mut cursor).unwrap();
+    ///
+    /// assert_eq!(hash.sha256, Some(String::from("DFFD6021BB2BD5B0AF676290809EC3A53191DD81C7F70A4B28688A362182986F")))
+    /// ```
+    pub fn sha256hash_from_reader<R: std::io::Read>(&mut self, reader: &mut R) -> Result<()> {
+        use warp_common::sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        std::io::copy(reader, &mut hasher)?;
+        let res = hasher.finalize().to_vec();
+
+        self.sha256 = Some(hex::encode(res).to_uppercase());
+        Ok(())
+    }
+
+    /// Use to generate a sha1 hash from a reader
+    ///
+    /// # Example
+    /// ```
+    /// use warp_constellation::file::Hash;
+    ///
+    /// let mut hash = Hash::default();
+    /// hash.sha256hash_from_buffer(&b"Hello, World!").unwrap();
+    ///
+    /// assert_eq!(hash.sha256, Some(String::from("DFFD6021BB2BD5B0AF676290809EC3A53191DD81C7F70A4B28688A362182986F")))
+    /// ```
+    pub fn sha256hash_from_buffer<U: AsRef<[u8]>>(&mut self, buffer: U) -> Result<()> {
+        use warp_common::sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(&buffer);
+        let res = hasher.finalize().to_vec();
+
+        self.sha256 = Some(hex::encode(res).to_uppercase());
+        Ok(())
     }
 }

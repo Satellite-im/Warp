@@ -8,6 +8,6 @@ edition = "2021"
 repository = "https://github.com/Satellite-im/Warp"
 
 [dependencies]
-warp-common = { version = "0.1.0", path = "../../utils/warp-common", features = ["async"] }
+warp-common = { version = "0.1.0", path = "../../utils/warp-common", features = ["async", "use_sha1", "use_sha2", "use_blake2"] }
 warp-pocket-dimension = { path = "../warp-pocket-dimension" }
 warp-hooks = { path = "../../utils/warp-hooks" }

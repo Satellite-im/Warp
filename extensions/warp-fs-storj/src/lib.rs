@@ -196,9 +196,10 @@ impl Constellation for StorjFilesystem {
 
         let mut file = warp_constellation::file::File::new(&name);
         file.set_size(size as i64);
-        file.set_hash(hash_file(path).await?);
+        file.hash.sha1hash_from_file(&path)?;
+        file.hash.sha256hash_from_file(&path)?;
 
-        self.open_directory("")?.add_child(file.clone())?;
+        self.current_directory_mut()?.add_child(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -243,10 +244,10 @@ impl Constellation for StorjFilesystem {
             }
         }
 
-        let file = self
-            .current_directory()
-            .get_child(&name)
-            .and_then(Item::get_file)?;
+        // let file = self
+        //     .current_directory()
+        //     .get_child(&name)
+        //     .and_then(Item::get_file)?;
 
         let mut fs = tokio::fs::File::create(path).await?;
         let client = self.client.as_ref().ok_or(Error::ToBeDetermined)?;
@@ -261,13 +262,13 @@ impl Constellation for StorjFilesystem {
             return Err(Error::ToBeDetermined);
         }
 
-        let hash = hash_file(path).await?;
+        // TODO:Implement comparing hash
+        // let hash = hash_file(path).await?;
 
-        if file.hash != hash {
-            tokio::fs::remove_file(path).await?;
-            return Err(Error::ToBeDetermined);
-        }
-
+        // if file.hash != hash {
+        //     tokio::fs::remove_file(path).await?;
+        //     return Err(Error::ToBeDetermined);
+        // }
         Ok(())
     }
 
@@ -288,7 +289,8 @@ impl Constellation for StorjFilesystem {
 
         let mut file = warp_constellation::file::File::new(&name);
         file.set_size(buffer.len() as i64);
-        file.set_hash(warp_common::hash_data(&buffer));
+        file.hash.sha1hash_from_buffer(&buffer)?;
+        file.hash.sha256hash_from_buffer(&buffer)?;
 
         self.current_directory_mut()?.add_child(file.clone())?;
 
@@ -372,11 +374,6 @@ impl Constellation for StorjFilesystem {
         }
         Ok(())
     }
-}
-
-async fn hash_file<S: AsRef<str>>(file: S) -> anyhow::Result<String> {
-    let data = tokio::fs::read(file.as_ref()).await?;
-    Ok(warp_common::hash_data(data))
 }
 
 fn split_for<S: AsRef<str>>(name: S) -> anyhow::Result<(String, String)> {

@@ -224,10 +224,11 @@ impl Constellation for IpfsFileSystem {
 
         let mut file = warp_constellation::file::File::new(&name[1..]);
         file.set_size(size as i64);
-        file.set_hash(hash_file(&path).await?);
+        file.hash.sha1hash_from_file(&path)?;
+        file.hash.sha256hash_from_file(&path)?;
         file.set_ref(hash);
 
-        self.open_directory("")?.add_child(file.clone())?;
+        self.current_directory_mut()?.add_child(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -381,7 +382,8 @@ impl Constellation for IpfsFileSystem {
             }
             _ => return Err(Error::Unimplemented),
         };
-        file.set_hash(warp_common::hash_data(&buffer));
+        file.hash.sha1hash_from_buffer(&buffer)?;
+        file.hash.sha256hash_from_buffer(&buffer)?;
         file.set_ref(&hash);
 
         self.current_directory_mut()?.add_child(file.clone())?;
@@ -543,11 +545,6 @@ impl Constellation for IpfsFileSystem {
     fn get_path(&self) -> &PathBuf {
         &self.path
     }
-}
-
-async fn hash_file<S: AsRef<str>>(file: S) -> anyhow::Result<String> {
-    let data = tokio::fs::read(file.as_ref()).await?;
-    Ok(warp_common::hash_data(data))
 }
 
 fn affix_root<S: AsRef<str>>(name: S) -> String {

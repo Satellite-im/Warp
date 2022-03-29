@@ -129,7 +129,8 @@ impl Constellation for MemorySystem {
 
         let mut file = warp_constellation::file::File::new(&name);
         file.set_size(bytes as i64);
-        file.set_hash(warp_common::hash_data(&buf));
+        file.hash.sha1hash_from_buffer(&buf)?;
+        file.hash.sha256hash_from_buffer(&buf)?;
 
         self.current_directory_mut()?.add_child(file.clone())?;
         if let Some(cache) = &self.cache {
@@ -172,8 +173,7 @@ impl Constellation for MemorySystem {
                     let obj = list.last().unwrap();
 
                     if let Ok(data) = obj.payload::<DimensionData>() {
-                        data.write_from_path(buf)?;
-                        return Ok(());
+                        return data.write_from_path(buf);
                     }
                 }
             }
