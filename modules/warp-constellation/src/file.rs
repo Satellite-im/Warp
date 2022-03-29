@@ -124,7 +124,7 @@ impl File {
         self.description = desc.as_ref().to_string();
         self.modified = Utc::now()
     }
-    
+
     /// Set the reference of the file
     ///
     /// # Examples
@@ -255,7 +255,7 @@ impl Hash {
         self.sha256hash_from_reader(&mut file)
     }
 
-    /// Use to generate a sha1 hash from a reader
+    /// Use to generate a sha256 hash from a reader
     ///
     /// # Example
     /// ```
@@ -278,7 +278,7 @@ impl Hash {
         Ok(())
     }
 
-    /// Use to generate a sha1 hash from a reader
+    /// Use to generate a sha256 hash from a reader
     ///
     /// # Example
     /// ```
