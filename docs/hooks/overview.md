@@ -16,8 +16,7 @@ use warp_module::Module;
 
 fn main() {
     let mut system = Hooks::default();
-    system.create("NEW_FILE", Module::FileSystem).unwrap();
-    let hook = Hook::new("NEW_FILE", Module::FileSystem);
+    let hook = system.create("new_file", Module::FileSystem).unwrap();
 }
 ```
 
@@ -31,14 +30,14 @@ use warp_module::Module;
 
 fn main() {
     let mut system = Hooks::default();
-    let hook = system.create("NEW_FILE", Module::FileSystem).unwrap();
-    system.trigger("FILESYSTEM::NEW_FILE", &hook, &data);
+    let hook = system.create("new_file", Module::FileSystem).unwrap();
+    system.trigger("filesystem::new_file", &hook, &data);
 }
 ```
 
 #### Subscribing to Hook Triggers
 
-You may subscribe to be notified via a `callback` or closure when a hook is triggered as well.
+You may subscribe to be notified via a `Fn` closure when a hook is triggered as well.
 
 ```rust
 use warp_hooks::error::Error;
@@ -47,8 +46,8 @@ use warp_module::Module;
 
 fn main() {
     let mut system = Hooks::default();
-    system.create("NEW_FILE", Module::FileSystem).unwrap();
-    system.subscribe("FILESYSTEM::NEW_FILE", |hook, data| {
+    system.create("new_file", Module::FileSystem).unwrap();
+    system.subscribe("filesystem::new_file", |hook, data| {
         // Hook and Hook data provided in this scope
     })?;
 }
@@ -64,7 +63,7 @@ use warp_module::Module;
 
 fn main() {
     let mut system = Hooks::default();
-    system.create("NEW_FILE", Module::FileSystem).unwrap();
+    system.create("new_file", Module::FileSystem).unwrap();
     let hooks = system.hooks();
 }
 ```
