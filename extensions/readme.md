@@ -5,11 +5,15 @@ These are implementation using warp modules. Some plugins written are examples t
 ## warp-pd-stretto
 
 Pocket Dimension implementation with [Stretto](https://github.com/al8n/stretto), a high performance thread-safe memory 
-cache written in rust. This allows for in-memory caching.
+cache written in rust. This allows for in-memory caching and should be used for development purpose.
 
 ## warp-pd-flatfile
 
 Flatfile implementation for Pocket Dimension to cache data to disk. 
+
+## warp-fs-memory
+
+In-memory filesystem implementation. **This extension is designed for development purpose only and should not be used in production**
 
 ## warp-fs-storj
 
