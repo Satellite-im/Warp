@@ -135,8 +135,8 @@ pub trait Constellation: Extension + Sync + Send {
             ConstellationDataType::Yaml => warp_common::serde_yaml::from_str(data.as_str())?,
             ConstellationDataType::Toml => warp_common::toml::from_str(data.as_str())?,
         };
-        //TODO: create a function to override directory children.
-        self.root_directory_mut().children = directory.children;
+        //TODO: create a function to override directory items.
+        (*self.root_directory_mut().get_items_mut()) = directory.items;
 
         Ok(())
     }

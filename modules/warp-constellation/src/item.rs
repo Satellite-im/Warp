@@ -119,7 +119,7 @@ impl Item {
     pub fn size(&self) -> i64 {
         match self {
             Item::File(file) => file.size,
-            Item::Directory(directory) => directory.children.iter().map(Item::size).sum(),
+            Item::Directory(directory) => directory.items.iter().map(Item::size).sum(),
         }
     }
 
