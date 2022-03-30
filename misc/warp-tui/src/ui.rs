@@ -205,7 +205,7 @@ impl<'a> WarpApp<'a> {
                     format!("{}", item.creation()),
                     if item.is_file() {
                         if let Item::File(file) = item {
-                            file.hash.sha256.as_ref().unwrap().clone()
+                            file.hash.clone().sha256.unwrap_or_default()
                         } else {
                             String::new()
                         }
