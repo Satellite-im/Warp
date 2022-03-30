@@ -7,6 +7,7 @@ pub use anyhow;
 #[cfg(feature = "bincode_opt")]
 #[cfg(not(target_os = "wasm32"))]
 pub use bincode;
+pub use bip39;
 pub use cfg_if;
 pub use chrono;
 pub use derive_more;

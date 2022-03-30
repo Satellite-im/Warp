@@ -23,6 +23,8 @@ log = "0.4"
 derive_more = "0.99"
 hex = "0.4"
 
+tiny-bip39 = "0.8"
+
 # message digest
 blake2 = { version = "0.10", optional = true }
 sha1   = { version = "0.10", optional = true }
