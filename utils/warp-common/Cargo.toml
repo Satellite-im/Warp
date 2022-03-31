@@ -25,6 +25,9 @@ hex = "0.4"
 
 tiny-bip39 = "0.8"
 
+solana-sdk = { version = "1.10", optional = true }
+solana-client = { version = "1.10", optional = true }
+
 # message digest
 blake2 = { version = "0.10", optional = true }
 sha1   = { version = "0.10", optional = true }
@@ -57,3 +60,4 @@ use_sha1 = ["sha1"]
 use_sha2 = ["sha2"]
 use_sha3 = ["sha3"]
 use_blake2 = ["blake2"]
+use_solana = ["solana-sdk", "solana-client"]
