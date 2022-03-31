@@ -6,3 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+warp-module = { path = "../../utils/warp-module" }
+warp-data = { path = "../../utils/warp-data" }
+warp-common = { path = "../../utils/warp-common", features = ["async"] }
+warp-multipass = { path = "../../modules/warp-multipass" }
+warp-pocket-dimension = { path = "../../modules/warp-pocket-dimension" }
+
+warp-solana-utils = { path = "../../utils/warp-solana-utils" }
