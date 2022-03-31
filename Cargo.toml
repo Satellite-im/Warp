@@ -21,5 +21,6 @@ members = [
   "utils/warp-module",
   "utils/warp-tesseract",
   "utils/warp-install",
+  "utils/warp-solana-utils",
   "warp",
 ]
