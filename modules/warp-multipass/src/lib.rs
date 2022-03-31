@@ -15,9 +15,9 @@ pub trait MultiPass: Extension {
 
     fn update_identity(&mut self, id: Identifier, option: Vec<IdentityUpdate>) -> Result<()>;
 
-    fn create_identity(&mut self, identity: &Identity, passphrase: String) -> Result<PublicKey>;
+    fn create_identity(&mut self, identity: &Identity, passphrase: &str) -> Result<PublicKey>;
 
-    fn decrypt_private_key(&self, passphrase: String) -> Result<Vec<u8>>;
+    fn decrypt_private_key(&self, passphrase: &str) -> Result<Vec<u8>>;
 
     fn refresh_cache(&mut self) -> Result<()>;
 }

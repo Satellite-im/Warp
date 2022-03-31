@@ -52,12 +52,12 @@ impl MultiPass for Account {
     fn create_identity(
         &mut self,
         _identity: &Identity,
-        _passphrase: String,
+        _passphrase: &str,
     ) -> warp_common::Result<PublicKey> {
         todo!()
     }
 
-    fn decrypt_private_key(&self, _passphrase: String) -> warp_common::Result<Vec<u8>> {
+    fn decrypt_private_key(&self, _passphrase: &str) -> warp_common::Result<Vec<u8>> {
         todo!()
     }
 
