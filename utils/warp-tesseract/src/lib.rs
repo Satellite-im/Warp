@@ -19,7 +19,7 @@ cfg_if! {
 
 use aes_gcm::{
     aead::{Aead, NewAead},
-    Aes128Gcm,
+    Aes256Gcm,
 };
 use rand::{rngs::OsRng, RngCore};
 
@@ -167,7 +167,7 @@ impl Tesseract {
     ///
     /// ```
     ///  let mut tesseract = warp_tesseract::Tesseract::default();
-    ///  let key = warp_tesseract::generate(28).unwrap();
+    ///  let key = warp_tesseract::generate(32).unwrap();
     ///  tesseract.set(&key, "API", "MYKEY").unwrap();
     ///  assert_eq!(tesseract.exist("API"), true);
     /// ```
@@ -183,7 +183,7 @@ impl Tesseract {
     ///
     /// ```
     ///  let mut tesseract = warp_tesseract::Tesseract::default();
-    ///  let key = warp_tesseract::generate(28).unwrap();
+    ///  let key = warp_tesseract::generate(32).unwrap();
     ///  tesseract.set(&key, "API", "MYKEY").unwrap();
     ///  assert_eq!(tesseract.exist("API"), true);
     ///  assert_eq!(tesseract.exist("NOT_API"), false);
@@ -216,36 +216,40 @@ impl Tesseract {
     /// Internal function that deals with encryption using rust native implementation of AES-128 GCM.
     fn encrypt<U: AsRef<[u8]>>(&mut self, key: U, data: String) -> Result<Vec<u8>> {
         let key = key.as_ref();
-        anyhow::ensure!(key.len() == 28, Error::Other);
-        let e_key = &key[0..16];
-        let nonce = &key[16..28];
+        anyhow::ensure!(key.len() == 32, Error::Other);
+        let e_key = key;
+
+        let nonce = generate(12)?;
 
         let key = aes_gcm::Key::from_slice(e_key);
-        let nonce = aes_gcm::Nonce::from_slice(nonce);
+        let a_nonce = aes_gcm::Nonce::from_slice(&nonce);
 
-        let cipher = Aes128Gcm::new(key);
-        cipher
-            .encrypt(nonce, data.as_bytes())
-            .map_err(|e| anyhow::anyhow!("{}", e))
+        let cipher = Aes256Gcm::new(key);
+        let mut edata = cipher
+            .encrypt(a_nonce, data.as_bytes())
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        edata.extend(nonce);
+
+        Ok(edata)
     }
 
     /// Internal function that deals with decryption using rust native implementation of AES-128 GCM.
     fn decrypt<U: AsRef<[u8]>>(&self, key: U, data: U) -> Result<String> {
         let key = key.as_ref();
         let data = data.as_ref();
+        let nonce = &data[data.len() - 12..];
+        let payload = &data[..data.len() - 12];
+        anyhow::ensure!(key.len() == 32, Error::Other);
 
-        anyhow::ensure!(key.len() == 28, Error::Other);
-        let e_key = &key[0..16];
-        let nonce = &key[16..28];
-
-        let key = aes_gcm::Key::from_slice(e_key);
+        let key = aes_gcm::Key::from_slice(key);
         let nonce = aes_gcm::Nonce::from_slice(nonce);
 
-        let cipher = Aes128Gcm::new(key);
+        let cipher = Aes256Gcm::new(key);
         cipher
-            .decrypt(nonce, data)
+            .decrypt(nonce, payload)
             .map(|pt| String::from_utf8_lossy(&pt[..]).to_string())
-            .map_err(|e| anyhow::anyhow!(e))
+            .map_err(|e| anyhow::anyhow!("{}", e))
     }
 }
 
@@ -263,7 +267,7 @@ mod test {
     #[test]
     pub fn test() -> warp_common::anyhow::Result<()> {
         let mut tesseract = Tesseract::default();
-        let key = generate(28)?;
+        let key = generate(32)?;
         tesseract.set(&key, "API", "MYKEY")?;
         let data = tesseract.retrieve(&key, "API")?;
         assert_eq!(data, String::from("MYKEY"));

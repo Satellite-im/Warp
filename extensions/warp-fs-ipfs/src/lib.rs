@@ -560,9 +560,9 @@ fn affix_root<S: AsRef<str>>(name: S) -> String {
 #[cfg(test)]
 mod test {
     use crate::anyhow::Result;
-    use crate::IpfsFileSystem;
+    // use crate::IpfsFileSystem;
     use warp_common::tokio;
-    use warp_constellation::constellation::Constellation;
+    // use warp_constellation::constellation::Constellation;
 
     #[tokio::test]
     async fn default_node_with_buffer() -> Result<()> {

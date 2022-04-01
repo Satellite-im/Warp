@@ -168,7 +168,7 @@ async fn main() -> anyhow::Result<()> {
             }
             Command::Init { .. } => {
                 //TODO: Do more initializing and rely on path
-                let key = generate(28)?;
+                let key = generate(32)?;
                 tokio::fs::write("keyfile", key).await?;
             }
         },
