@@ -1,10 +1,12 @@
-use warp_solana_utils::manager::SolanaManager;
+use warp_solana_utils::wallet::SolanaWallet;
 
 fn main() -> warp_common::anyhow::Result<()> {
-    let mut manager = SolanaManager::new();
-    manager.initialize_random()?;
+    let wallet = SolanaWallet::restore_from_mnemonic(
+        None,
+        "morning caution dose lab six actress pond humble pause enact virtual train",
+    )?;
 
-    println!("{:?}", manager);
+    println!("{:?}", wallet);
 
     Ok(())
 }

@@ -4,12 +4,12 @@
 pub mod manager;
 pub mod wallet;
 
-use solana_sdk::derivation_path::DerivationPath;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::keypair_from_seed_and_derivation_path;
 use warp_common::anyhow::{anyhow, Result};
 use warp_common::derive_more::Display;
 use warp_common::error::Error;
+use warp_common::solana_sdk::derivation_path::DerivationPath;
+use warp_common::solana_sdk::pubkey::Pubkey;
+use warp_common::solana_sdk::signature::keypair_from_seed_and_derivation_path;
 
 //TODO: Research and determine if solana supplies these URL internally
 #[derive(Debug, Clone, Eq, PartialEq, Display)]
@@ -22,12 +22,10 @@ pub enum EndPoint {
     DevNet,
 }
 
-pub fn derive_seed<U: AsRef<[u8]>>(seed: U, path: &str) -> Result<Vec<u8>> {
-    let keypair = keypair_from_seed_and_derivation_path(
-        seed.as_ref(),
-        Some(DerivationPath::try_from(path).unwrap_or_default()),
-    )
-    .map_err(|e| anyhow!(e.to_string()))?;
+pub fn derive_seed<U: AsRef<[u8]>>(seed: U) -> Result<Vec<u8>> {
+    let der_path = DerivationPath::new_bip44(Some(0), Some(0));
+    let keypair = keypair_from_seed_and_derivation_path(seed.as_ref(), Some(der_path))
+        .map_err(|e| anyhow!(e.to_string()))?;
     Ok(keypair.to_bytes().to_vec())
 }
 

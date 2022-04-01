@@ -1,13 +1,28 @@
-use solana_sdk::signature::{keypair_from_seed, Keypair};
+use crate::get_path;
 use warp_common::anyhow::{anyhow, Result};
 use warp_common::bip39::{Language, Mnemonic, MnemonicType, Seed};
+use warp_common::derive_more::Display;
+use warp_common::solana_sdk::signature::{keypair_from_seed, Keypair, Signer};
 
-#[derive(Clone)]
 pub struct SolanaWallet {
     pub mnemonic: String,
-    pub keypair: Vec<u8>,
+    pub keypair: Keypair,
     pub path: Option<String>,
     pub address: String,
+}
+
+impl Clone for SolanaWallet {
+    fn clone(&self) -> Self {
+        Self {
+            mnemonic: self.mnemonic.clone(),
+            keypair: {
+                let inner = self.keypair.to_base58_string();
+                Keypair::from_base58_string(&inner)
+            },
+            path: self.path.clone(),
+            address: self.address.clone(),
+        }
+    }
 }
 
 impl std::fmt::Debug for SolanaWallet {
@@ -21,41 +36,61 @@ impl std::fmt::Debug for SolanaWallet {
     }
 }
 
+#[derive(Clone, Display)]
+pub enum PhraseType {
+    #[display(fmt = "standard")]
+    Standard,
+    #[display(fmt = "secure")]
+    Secure,
+}
+
+impl Default for PhraseType {
+    fn default() -> Self {
+        Self::Standard
+    }
+}
+
 impl SolanaWallet {
-    pub fn create_random_keypair() -> Result<SolanaWallet> {
-        let mnemonic = Mnemonic::new(MnemonicType::Words12, Language::English);
-        let seed = Seed::new(&mnemonic, "");
-        let path = crate::get_path(0);
-        let seed_with_path = crate::derive_seed(&seed, path.as_str())?;
-        let keypair = keypair_from_seed(&seed_with_path).map_err(|e| anyhow!(e.to_string()))?;
-        let address = keypair.to_base58_string();
-        let mnemonic = mnemonic.into_phrase();
-        Ok(SolanaWallet {
-            mnemonic,
-            keypair: seed_with_path,
-            path: Some(path),
-            address,
-        })
+    /// Generate a random keypair
+    pub fn create_random(phrase: PhraseType, password: Option<&str>) -> Result<SolanaWallet> {
+        let m_type = match phrase {
+            PhraseType::Standard => MnemonicType::Words12,
+            PhraseType::Secure => MnemonicType::Words24,
+        };
+
+        let mnemonic = Mnemonic::new(m_type, Language::English);
+        Self::restore_from_mnemonic(password, mnemonic.phrase())
     }
 
-    pub fn restore_keypair_from_mnemonic(mnemonic: &str, index: u16) -> Result<SolanaWallet> {
+    /// Restore keypair from a mnemonic phrase
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use warp_solana_utils::wallet::SolanaWallet;
+    ///
+    /// let wallet = SolanaWallet::restore_from_mnemonic(None,
+    ///         "morning caution dose lab six actress pond humble pause enact virtual train",
+    /// ).unwrap();
+    ///
+    /// assert_eq!(wallet.address, String::from("68vtRPQcsV7ruWXa6Z8Enrb6TsXhbRzMywgCnEVyk7Va"))
+    /// ```
+    pub fn restore_from_mnemonic(password: Option<&str>, mnemonic: &str) -> Result<SolanaWallet> {
         let mnemonic = Mnemonic::from_phrase(mnemonic, Language::English)?;
-        let seed = Seed::new(&mnemonic, "");
-        let path = crate::get_path(index);
-        let seed_with_path = crate::derive_seed(&seed, path.as_str())?;
+        let seed = Seed::new(&mnemonic, password.unwrap_or_default());
+        let seed_with_path = crate::derive_seed(&seed)?;
         let keypair = keypair_from_seed(&seed_with_path).map_err(|e| anyhow!(e.to_string()))?;
-        let address = keypair.to_base58_string();
+        let address = keypair.pubkey().to_string();
         let mnemonic = mnemonic.into_phrase();
         Ok(SolanaWallet {
             mnemonic,
-            keypair: seed_with_path,
-            path: Some(path),
+            keypair,
+            path: Some(get_path(0)),
             address,
         })
     }
 
-    pub fn get_keypair(&self) -> Result<Keypair> {
-        let keypair = keypair_from_seed(&self.keypair).map_err(|e| anyhow!(e.to_string()))?;
-        Ok(keypair)
+    pub fn get_keypair(&self) -> &Keypair {
+        &self.keypair
     }
 }

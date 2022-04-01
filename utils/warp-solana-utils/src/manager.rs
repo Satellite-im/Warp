@@ -1,11 +1,9 @@
-use solana_client::rpc_client::RpcClient;
-use solana_sdk::commitment_config::CommitmentConfig;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::{keypair_from_seed, Keypair, Signer};
 use std::collections::HashMap;
-use warp_common::anyhow::{anyhow, bail, ensure, Result};
-use warp_common::bip39::{Language, Mnemonic, Seed};
-use warp_common::error::Error;
+use warp_common::anyhow::{ensure, Result};
+use warp_common::solana_client::rpc_client::RpcClient;
+use warp_common::solana_sdk::commitment_config::CommitmentConfig;
+use warp_common::solana_sdk::pubkey::Pubkey;
+use warp_common::solana_sdk::signature::{Keypair, Signer};
 
 use crate::wallet::SolanaWallet;
 use crate::EndPoint;
@@ -17,7 +15,7 @@ pub struct SolanaManager {
     pub connection: RpcClient,
     pub user_account: Option<Keypair>,
     pub network_identifier: EndPoint,
-    pub cluster_api_url: String,
+    pub cluster_endpoint: EndPoint,
     pub public_keys: HashMap<String, Pubkey>,
 }
 
@@ -30,7 +28,7 @@ impl Default for SolanaManager {
             connection: RpcClient::new(EndPoint::DevNet),
             user_account: None,
             network_identifier: EndPoint::DevNet,
-            cluster_api_url: EndPoint::DevNet.to_string(),
+            cluster_endpoint: EndPoint::DevNet,
             public_keys: HashMap::new(),
         }
     }
@@ -45,7 +43,7 @@ impl std::fmt::Debug for SolanaManager {
             .field("connection", &"<>")
             .field("user_account", &self.user_account)
             .field("network_identifier", &self.network_identifier)
-            .field("cluster_api_url", &self.cluster_api_url)
+            .field("cluster_endpoint", &self.cluster_endpoint)
             .field("public_keys", &self.public_keys)
             .finish()
     }
@@ -56,113 +54,124 @@ impl SolanaManager {
         Self::default()
     }
 
+    pub fn new_from_endpoint(endpoint: EndPoint) -> Self {
+        let connection = RpcClient::new(endpoint.clone());
+        Self {
+            accounts: Vec::new(),
+            payer_account: None,
+            mnemonic: None,
+            connection,
+            user_account: None,
+            network_identifier: endpoint.clone(),
+            cluster_endpoint: endpoint,
+            public_keys: HashMap::new(),
+        }
+    }
+
+    //not used
     // pub fn generate_user_keypair(&self) -> Result<Keypair> {
-    //     let mnemonic = Mnemonic::new(MnemonicType::Words12, Language::English);
+    //     let mnemonic = self.mnemonic.as_ref().ok_or(Error::ToBeDetermined)?;
+    //     let mnemonic = Mnemonic::from_phrase(mnemonic.as_str(), Language::English)?;
     //     let seed = Seed::new(&mnemonic, "");
-    //     let keypair = keypair_from_seed(seed.as_bytes()).map_err(|_| Error::ToBeDetermined)?;
+    //     // let hash = sha256_hash(&format!("{}user", String::from_utf8_lossy(seed.as_bytes())));
+    //     let keypair = keypair_from_seed(seed.as_bytes()).map_err(|e| anyhow!(e.to_string()))?;
+    //     // let keypair = keypair_from_seed(hash.as_bytes()).map_err(|e| anyhow!(e.to_string()))?;
     //     Ok(keypair)
     // }
 
-    pub fn generate_user_keypair(&self) -> Result<Keypair> {
-        let mnemonic = self.mnemonic.as_ref().ok_or(Error::ToBeDetermined)?;
-        let mnemonic = Mnemonic::from_phrase(mnemonic.as_str(), Language::English)?;
-        let seed = Seed::new(&mnemonic, "");
-        // let hash = sha256_hash(&format!("{}user", String::from_utf8_lossy(seed.as_bytes())));
-        let keypair = keypair_from_seed(seed.as_bytes()).map_err(|e| anyhow!(e.to_string()))?;
-        // let keypair = keypair_from_seed(hash.as_bytes()).map_err(|e| anyhow!(e.to_string()))?;
-        Ok(keypair)
-    }
+    // pub fn generate_derived_public_key(
+    //     &mut self,
+    //     identifier: &str,
+    //     user_pkey: &Pubkey,
+    //     seed: &str,
+    //     id: &Pubkey,
+    // ) -> Result<Pubkey> {
+    //     let (_, pkey) = crate::pubkey_from_seed(user_pkey, seed, id)?;
+    //     self.public_keys.insert(identifier.to_string(), pkey);
+    //     Ok(pkey)
+    // }
 
-    pub fn generate_derived_public_key(
-        &mut self,
-        identifier: &str,
-        user_pkey: &Pubkey,
-        seed: &str,
-        id: &Pubkey,
-    ) -> Result<Pubkey> {
-        let (_, pkey) = crate::pubkey_from_seed(user_pkey, seed, id)?;
-        self.public_keys.insert(identifier.to_string(), pkey);
-        Ok(pkey)
-    }
+    //Not needed?
+    // pub fn get_derived_pubkey(&self, identifier: &str) -> Result<&Pubkey> {
+    //     self.public_keys
+    //         .get(identifier)
+    //         .ok_or(Error::ToBeDetermined)
+    //         .map_err(|e| anyhow!(e))
+    // }
 
-    pub fn get_derived_pubkey(&self, identifier: &str) -> Result<&Pubkey> {
-        self.public_keys
-            .get(identifier)
-            .ok_or(Error::ToBeDetermined)
-            .map_err(|e| anyhow!(e))
-    }
+    //Not needed?
+    // pub fn generate_new_account(&mut self) -> Result<SolanaWallet> {
+    //     let mnemonic = self.mnemonic.as_ref().ok_or(Error::ToBeDetermined)?;
+    //     let account = SolanaWallet::restore_keypair_from_mnemonic(
+    //         mnemonic.as_str(),
+    //         self.accounts.len() as u16,
+    //     )?;
+    //     //TODO: Change to borrow or clone `SolanaWallet`
+    //     self.accounts
+    //         .push(SolanaWallet::restore_keypair_from_mnemonic(
+    //             mnemonic.as_str(),
+    //             self.accounts.len() as u16,
+    //         )?);
+    //
+    //     Ok(account)
+    // }
 
-    pub fn generate_new_account(&mut self) -> Result<SolanaWallet> {
-        let mnemonic = self.mnemonic.as_ref().ok_or(Error::ToBeDetermined)?;
-        let account = SolanaWallet::restore_keypair_from_mnemonic(
-            mnemonic.as_str(),
-            self.accounts.len() as u16,
-        )?;
-        //TODO: Change to borrow or clone `SolanaWallet`
-        self.accounts
-            .push(SolanaWallet::restore_keypair_from_mnemonic(
-                mnemonic.as_str(),
-                self.accounts.len() as u16,
-            )?);
+    //Not needed?
+    // pub fn initialize_random(&mut self) -> Result<()> {
+    //     let account = SolanaWallet::create_random_keypair()?;
+    //     self.payer_account = Some(account.get_keypair()?);
+    //     self.mnemonic = Some(account.mnemonic.clone());
+    //     self.user_account = Some(self.generate_user_keypair()?);
+    //     self.accounts.push(account);
+    //     Ok(())
+    // }
 
-        Ok(account)
-    }
+    // pub fn initialize_from_mnemonic(&mut self, mnemonic: &str) -> Result<()> {
+    //     let wallet = SolanaWallet::restore_keypair_from_mnemonic(None, mnemonic)?;
+    //     self.payer_account = Some(wallet.clone().keypair);
+    //     self.mnemonic = Some(wallet.mnemonic.clone());
+    //     self.user_account = Some(wallet.clone().keypair);
+    //     self.accounts.push(wallet);
+    //
+    //     Ok(())
+    // }
 
-    pub fn initialize_random(&mut self) -> Result<()> {
-        let account = SolanaWallet::create_random_keypair()?;
-        self.payer_account = Some(account.get_keypair()?);
-        self.mnemonic = Some(account.mnemonic.clone());
-        self.user_account = Some(self.generate_user_keypair()?);
-        self.accounts.push(account);
-        Ok(())
-    }
+    // pub fn initiralize_from_solana_wallet(&mut self, wallet: SolanaWallet) -> Result<()> {
+    //     self.payer_account = Some(wallet.get_keypair()?);
+    //     self.mnemonic = Some(wallet.mnemonic.clone());
+    //     self.user_account = Some(self.generate_user_keypair()?);
+    //     self.accounts.push(wallet); //TODO: Borrow or clone but why dup?
+    //     Ok(())
+    // }
 
-    pub fn initialize_from_mnemonic(&mut self, mnemonic: &str) -> Result<()> {
-        let wallet = SolanaWallet::restore_keypair_from_mnemonic(mnemonic, 0)?;
-        self.payer_account = Some(wallet.get_keypair()?);
-        self.mnemonic = Some(wallet.mnemonic.clone());
-        self.user_account = Some(self.generate_user_keypair()?);
-        self.accounts.push(wallet);
+    // pub fn get_account(&self, address: &str) -> Result<&SolanaWallet> {
+    //     if self
+    //         .accounts
+    //         .iter()
+    //         .filter(|wallet| wallet.address.as_str() == address)
+    //         .count()
+    //         >= 2
+    //     {
+    //         bail!("Duplication of address provided")
+    //     }
+    //     let wallets = self
+    //         .accounts
+    //         .iter()
+    //         .filter(|wallet| wallet.address.as_str() == address)
+    //         .collect::<Vec<_>>();
+    //     ensure!(wallets.len() == 1, "Address provided is invalid");
+    //     let wallet = wallets.get(0).ok_or(Error::ToBeDetermined)?;
+    //     Ok(wallet)
+    // }
 
-        Ok(())
-    }
-
-    pub fn initiralize_from_solana_wallet(&mut self, wallet: SolanaWallet) -> Result<()> {
-        self.payer_account = Some(wallet.get_keypair()?);
-        self.mnemonic = Some(wallet.mnemonic.clone());
-        self.user_account = Some(self.generate_user_keypair()?);
-        self.accounts.push(wallet); //TODO: Borrow or clone but why dup?
-        Ok(())
-    }
-
-    pub fn get_account(&self, address: &str) -> Result<&SolanaWallet> {
-        if self
-            .accounts
-            .iter()
-            .filter(|wallet| wallet.address.as_str() == address)
-            .count()
-            >= 2
-        {
-            bail!("Duplication of address provided")
-        }
-        let wallets = self
-            .accounts
-            .iter()
-            .filter(|wallet| wallet.address.as_str() == address)
-            .collect::<Vec<_>>();
-        ensure!(wallets.len() == 1, "Address provided is invalid");
-        let wallet = wallets.get(0).ok_or(Error::ToBeDetermined)?;
-        Ok(wallet)
-    }
-
-    pub fn list(&self) -> &Vec<SolanaWallet> {
-        &self.accounts
-    }
-
-    pub fn get_user_account(&self) -> Result<&Keypair> {
-        let account = self.user_account.as_ref().ok_or(Error::ToBeDetermined)?;
-        Ok(account)
-    }
+    // pub fn list(&self) -> &Vec<SolanaWallet> {
+    //     &self.accounts
+    // }
+    //
+    // pub fn get_user_account(&self) -> Result<&Keypair> {
+    //     let account = self.user_account.as_ref().ok_or(Error::ToBeDetermined)?;
+    //     Ok(account)
+    // }
 
     pub fn get_account_balance(&self) -> Result<u64> {
         ensure!(self.payer_account.is_some(), "Invalid payer account");
