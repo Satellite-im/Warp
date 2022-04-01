@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-warp-common = { version = "0.1.0", path = "../warp-common"}
+warp-common = { version = "0.1.0", path = "../warp-common", features = ["use_sha2"]}
 aes-gcm = { version = "0.9", optional = true }
 rand = { version = "0.8", optional = true }
 

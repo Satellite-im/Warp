@@ -216,12 +216,15 @@ impl Tesseract {
     /// Internal function that deals with encryption using rust native implementation of AES-128 GCM.
     fn encrypt<U: AsRef<[u8]>>(&mut self, key: U, data: String) -> Result<Vec<u8>> {
         let key = key.as_ref();
-        anyhow::ensure!(key.len() == 32, Error::Other);
-        let e_key = key;
+
+        let e_key = match key.len() {
+            32 => key.to_vec(),
+            _ => sha256_hash(key),
+        };
 
         let nonce = generate(12)?;
 
-        let key = aes_gcm::Key::from_slice(e_key);
+        let key = aes_gcm::Key::from_slice(&e_key);
         let a_nonce = aes_gcm::Nonce::from_slice(&nonce);
 
         let cipher = Aes256Gcm::new(key);
@@ -240,9 +243,13 @@ impl Tesseract {
         let data = data.as_ref();
         let nonce = &data[data.len() - 12..];
         let payload = &data[..data.len() - 12];
-        anyhow::ensure!(key.len() == 32, Error::Other);
 
-        let key = aes_gcm::Key::from_slice(key);
+        let e_key = match key.len() {
+            32 => key.to_vec(),
+            _ => sha256_hash(key),
+        };
+
+        let key = aes_gcm::Key::from_slice(&e_key);
         let nonce = aes_gcm::Nonce::from_slice(nonce);
 
         let cipher = Aes256Gcm::new(key);
@@ -258,6 +265,13 @@ pub fn generate(limit: usize) -> Result<Vec<u8>> {
     let mut key = vec![0u8; limit];
     OsRng.fill_bytes(&mut key);
     Ok(key)
+}
+
+fn sha256_hash<'a, S: AsRef<[u8]>>(data: S) -> Vec<u8> {
+    use warp_common::sha2::{Digest as Sha2Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(&data.as_ref());
+    hasher.finalize().to_vec()
 }
 
 #[cfg(test)]
