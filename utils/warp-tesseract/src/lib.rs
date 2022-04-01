@@ -216,13 +216,12 @@ impl Tesseract {
     /// Internal function that deals with encryption using rust native implementation of AES-128 GCM.
     fn encrypt<U: AsRef<[u8]>>(&mut self, key: U, data: String) -> Result<Vec<u8>> {
         let key = key.as_ref();
+        let nonce = generate(12)?;
 
         let e_key = match key.len() {
             32 => key.to_vec(),
-            _ => sha256_hash(key),
+            _ => sha256_hash(key, Some(&nonce)),
         };
-
-        let nonce = generate(12)?;
 
         let key = aes_gcm::Key::from_slice(&e_key);
         let a_nonce = aes_gcm::Nonce::from_slice(&nonce);
@@ -246,7 +245,7 @@ impl Tesseract {
 
         let e_key = match key.len() {
             32 => key.to_vec(),
-            _ => sha256_hash(key),
+            _ => sha256_hash(key, Some(&nonce)),
         };
 
         let key = aes_gcm::Key::from_slice(&e_key);
@@ -267,10 +266,13 @@ pub fn generate(limit: usize) -> Result<Vec<u8>> {
     Ok(key)
 }
 
-fn sha256_hash<'a, S: AsRef<[u8]>>(data: S) -> Vec<u8> {
+fn sha256_hash<S: AsRef<[u8]>>(data: S, salt: Option<S>) -> Vec<u8> {
     use warp_common::sha2::{Digest as Sha2Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(&data.as_ref());
+    if let Some(salt) = salt {
+        hasher.update(salt.as_ref());
+    }
     hasher.finalize().to_vec()
 }
 
@@ -279,13 +281,33 @@ mod test {
     use crate::{generate, Tesseract};
 
     #[test]
-    pub fn test() -> warp_common::anyhow::Result<()> {
+    pub fn test_default() -> warp_common::anyhow::Result<()> {
         let mut tesseract = Tesseract::default();
         let key = generate(32)?;
         tesseract.set(&key, "API", "MYKEY")?;
         let data = tesseract.retrieve(&key, "API")?;
         assert_eq!(data, String::from("MYKEY"));
+        Ok(())
+    }
 
+    #[test]
+    pub fn test_with_256bit_passphase() -> warp_common::anyhow::Result<()> {
+        let mut tesseract = Tesseract::default();
+        let key = b"an example very very secret key.".to_vec();
+        tesseract.set(&key, "API", "MYKEY")?;
+        let data = tesseract.retrieve(&key, "API")?;
+        assert_eq!(data, String::from("MYKEY"));
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_with_non_256bit_passphase() -> warp_common::anyhow::Result<()> {
+        let mut tesseract = Tesseract::default();
+        let key = b"This is a secret key that will be used for encryption. Totally not 256bit key"
+            .to_vec();
+        tesseract.set(&key, "API", "MYKEY")?;
+        let data = tesseract.retrieve(&key, "API")?;
+        assert_eq!(data, String::from("MYKEY"));
         Ok(())
     }
 }
