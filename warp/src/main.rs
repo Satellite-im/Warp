@@ -151,17 +151,19 @@ async fn main() -> anyhow::Result<()> {
         //TODO: Store keyfile and datastore in a specific path.
         (false, false, false, Some(command)) => match command {
             Command::Import { key, value } => {
-                let mut key_file = tokio::fs::read("keyfile").await?;
-                let mut tesseract = Tesseract::load_from_file("datastore")
+                let mut key_file = tokio::fs::read(warp_directory.join("keyfile")).await?;
+                let mut tesseract = Tesseract::load_from_file(warp_directory.join("datastore"))
                     .await
                     .unwrap_or_default();
                 tesseract.set(&key_file, &key, &value)?;
-                tesseract.save_to_file("datastore").await?;
+                tesseract
+                    .save_to_file(warp_directory.join("datastore"))
+                    .await?;
                 key_file.clear();
             }
             Command::Export { key } => {
-                let mut key_file = tokio::fs::read("keyfile").await?;
-                let tesseract = Tesseract::load_from_file("datastore").await?;
+                let mut key_file = tokio::fs::read(warp_directory.join("keyfile")).await?;
+                let tesseract = Tesseract::load_from_file(warp_directory.join("datastore")).await?;
                 let data = tesseract.retrieve(&key_file, &key)?;
                 println!("Value of: {}", data);
                 key_file.clear();
@@ -169,7 +171,7 @@ async fn main() -> anyhow::Result<()> {
             Command::Init { .. } => {
                 //TODO: Do more initializing and rely on path
                 let key = generate(32)?;
-                tokio::fs::write("keyfile", key).await?;
+                tokio::fs::write(warp_directory.join("keyfile"), key).await?;
             }
         },
         _ => println!("You can only select one option"),
