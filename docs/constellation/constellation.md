@@ -89,7 +89,7 @@ After everything is im place, we can now utilize the filesystem functions to acc
 let mut filesystem = ExampleFileSystem::default();
 
 let mut root = filesystem.root_directory_mut();
-root.add_child(Directory::new("test")).unwrap();
+root.add_item(Directory::new("test")).unwrap();
 
 ```
 
@@ -97,4 +97,38 @@ This will create a directory called `test` at the root of the filesystem.
 
 ### Uploading/Downloading
 
-**TODO**
+**Note: This would be based [warp-fs-memory](https://github.com/Satellite-im/Warp/tree/main/extensions/warp-fs-memory) extension. This also assumes you have a async system such as tokio setup**
+
+#### Uploading a file
+
+```rust
+use warp_common::tokio;
+use warp_constellation::constellation::Constellation;
+use warp_fs_memory::MemorySystem;
+
+let mut filesystem = MemorySystem::new();
+
+let mut buf = vec![];
+
+let mut file = tokio::fs::File::open("hello.txt").await?;
+file.read_to_end(&mut buf).await?;
+
+filesystem.from_buffer("hello.txt", &buf).await.unwrap();
+```
+
+#### Download a file
+
+```rust
+use warp_common::tokio;
+use warp_constellation::constellation::Constellation;
+use warp_fs_memory::MemorySystem;
+
+let mut filesystem = MemorySystem::new();
+
+let mut buf = vec![];
+
+filesystem.to_buffer("test_file", &mut buf).await.unwrap();
+
+println!("Output: {}", String::from_utf8_lossy(&buffer).to_string());
+```
+

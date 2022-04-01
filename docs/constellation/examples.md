@@ -21,15 +21,15 @@ Great, now we've got a new directory created at the root of our filesystem. Let'
 ```rust
 // ...
 let sub = Directory::new("Sub Directory");
-directory.add_child(sub)?;
+directory.add_item(sub)?;
 // ...
 ```
-Now we've got two directories, `SomeDirName` with a child directory of `Sub Directory`.
+Now we've got two directories, `SomeDirName` with a sub directory of `Sub Directory`.
 We can validate that our filesystem looks as expected.
 
 ```rust
 // ...
-if directory.has_child("Sub Directory") { ... }
+if directory.has_item("Sub Directory") { ... }
 // ...
 ```
 
@@ -38,19 +38,19 @@ Lastly you may want to get the directory later. We can easily do that using the 
 
 ```rust
 // ...
-let my_test_dir = directory.get_child("Sub Directory")?;
+let my_test_dir = directory.get_item("Sub Directory")?;
 ```
 
 If you want to obtain a mutable reference of directory we can do the following
 
 ```rust
-let mut my_test_dir = directory.get_child_mut("Sub Directory")?;
+let mut my_test_dir = directory.get_item_mut("Sub Directory")?;
 ```
 
 Removing a directory will remove the contense of the directory as well as the directory itself. You can delete a directory using the example below.
 
 ```rust
-directory.remove_child("Sub Directory")?;
+directory.remove_item("Sub Directory")?;
 ```
 
 #### Uploading/Downloading Files
@@ -95,7 +95,7 @@ if current_directory.name == "Sub Directory" { ... }
 Now if we upload a file, it will automatically be placed inside of our current directory path.
 
 ```rust
-if current_directory.has_child("test.txt") { ... }
+if current_directory.has_item("test.txt") { ... }
 ```
 
 Great now let's head back to the root of our constellation.

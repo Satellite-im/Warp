@@ -123,6 +123,32 @@ fn main() {
 }
 ```
 
+You can also obtain the size of a `Directory`
+
+```rust
+use warp_constellation::{
+    file::File,
+    directory::Directory,
+    item::Item
+};
+ 
+fn main() {
+    let mut file0 = File::new("test.txt");
+    file.set_size(100);
+    
+    let mut file1 = File::new("test.txt");
+    file.set_size(100);
+
+    let mut directory = Directory::new("Test Directory");
+    directory.add_item(file0).unwrap()
+    directory.add_item(file1).unwrap()
+
+    let directory_item = Item::from(directory);
+    
+    assert_eq!(directory_item.size(), 200);
+}
+```
+
 ### Altering `Item`
 
 #### Setting the size
