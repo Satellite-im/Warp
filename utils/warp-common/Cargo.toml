@@ -14,7 +14,7 @@ serde_json = { version = "1.0.78" }
 serde_yaml = "0.8"
 toml = "0.5"
 chrono = { version = "0.4", features = ["serde"] }
-regex = "1.5.4"
+regex = "1"
 futures = { version = "0.3", optional = true }
 warp-module = { version = "0.1.0", path = "../warp-module" }
 cfg-if = "1.0"

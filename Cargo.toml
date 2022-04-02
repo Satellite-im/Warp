@@ -14,6 +14,7 @@ members = [
   "extensions/warp-rg-ipfs",
   "extensions/warp-rg-textile",
   "extensions/warp-mp-solana",
+  "extensions/warp-rg-libp2p",
   "misc/warp-tui",
   "utils/warp-hooks",
   "utils/warp-common",

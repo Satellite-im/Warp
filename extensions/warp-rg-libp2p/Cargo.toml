@@ -1,0 +1,17 @@
+[package]
+name = "warp-rg-libp2p"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+warp-common = { path = "../../utils/warp-common", features = ["async", "use_sha1", "use_sha2"]}
+warp-raygun = { path = "../../modules/warp-raygun" }
+warp-multipass = { path = "../../modules/warp-multipass" }
+warp-module = { path = "../../utils/warp-module" }
+
+libp2p = { git = "https://github.com/libp2p/rust-libp2p", features = ["tcp-tokio"] } # TODO: Lock to a specific commit until version is publish
+
+[features]
+default = []
