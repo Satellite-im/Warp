@@ -6,8 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# TODO: remove `git` when crate is updated
-ipfs-api-backend-hyper    = { version = "0.3", git = "https://github.com/ferristseng/rust-ipfs-api", features = ["with-send-sync", "with-hyper-tls"] }
+ipfs-api-backend-hyper    = { version = "0.4", features = ["with-send-sync", "with-hyper-tls"] }
 hyper-tls = "0.5"
 hyper                     = { version = "0.14", features = ["http1", "http2", "client", "tcp"] }
 http = "0.2"
