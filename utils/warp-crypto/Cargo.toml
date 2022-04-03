@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 x25519-dalek = { version = "1" }
 ed25519-dalek = { version = "1" }
+curve25519-dalek = "3.2"
 rsa = { version = "0.5" }
 chacha20poly1305 = { version = "0.9", features = ["stream"] }
 blake2 = { version = "0.10"  }
@@ -17,5 +18,9 @@ sha3   = { version = "0.10"  }
 multihash = { version = "0.16.2", optional = true }
 digest = { version = "0.10" }
 aes-gcm = { version = "0.9" }
-rand = { version = "0.8"  }
+aead = { version = "0.4", default-features = false }
+rand = { version = "0.7"  }
 anyhow = { version = "1" }
+
+[dev-dependencies]
+hex = "0.4"

@@ -45,3 +45,31 @@ pub fn sha256_hash<S: AsRef<[u8]>>(data: S, salt: Option<&[u8]>) -> Result<Vec<u
 pub fn blake2s_hash<S: AsRef<[u8]>>(data: S, salt: Option<&[u8]>) -> Result<Vec<u8>> {
     blake2s_hash_stream(&mut data.as_ref(), salt)
 }
+
+#[cfg(test)]
+mod test {
+    use crate::hash::*;
+    use hex;
+
+    #[test]
+    fn sha1_test() -> anyhow::Result<()> {
+        let hash = sha1_hash(b"Hello, World!", None)?;
+
+        assert_eq!(
+            hex::encode(&hash),
+            String::from("0a0a9f2a6772942557ab5355d76af442f8f65e01")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sha256_test() -> anyhow::Result<()> {
+        let hash = sha256_hash(b"Hello, World!", None)?;
+
+        assert_eq!(
+            hex::encode(&hash),
+            String::from("dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f")
+        );
+        Ok(())
+    }
+}
