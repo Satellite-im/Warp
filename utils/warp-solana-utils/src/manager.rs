@@ -127,15 +127,10 @@ impl SolanaManager {
     // }
 
     // pub fn initialize_from_mnemonic(&mut self, mnemonic: &str) -> Result<()> {
-    //     let wallet = SolanaWallet::restore_keypair_from_mnemonic(None, mnemonic)?;
-    //     self.payer_account = Some(wallet.clone().keypair);
-    //     self.mnemonic = Some(wallet.mnemonic.clone());
-    //     self.user_account = Some(wallet.clone().keypair);
-    //     self.accounts.push(wallet);
-    //
-    //     Ok(())
+    //     let wallet = SolanaWallet::restore_from_mnemonic(None, mnemonic)?;
+    //     self.initiralize_from_solana_wallet(wallet)
     // }
-
+    //
     // pub fn initiralize_from_solana_wallet(&mut self, wallet: SolanaWallet) -> Result<()> {
     //     self.payer_account = Some(wallet.get_keypair()?);
     //     self.mnemonic = Some(wallet.mnemonic.clone());

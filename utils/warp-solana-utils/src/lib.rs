@@ -1,6 +1,7 @@
 // Based on https://github.com/Satellite-im/Core-PWA/blob/dev/libraries/Solana/SolanaManager/SolanaManager.ts
 // Note: This is a reference for `warp-mp-solana`.
 
+pub mod helper;
 pub mod manager;
 pub mod wallet;
 
@@ -22,6 +23,17 @@ pub enum EndPoint {
     DevNet,
 }
 
+impl<A: AsRef<str>> From<A> for EndPoint {
+    fn from(endpoint: A) -> Self {
+        let endpoint = endpoint.as_ref();
+        match endpoint {
+            "main_net_beta" | "mainnetbeta" | "mainnet" => EndPoint::MainNetBeta,
+            "testnet" | "test_net" => EndPoint::TestNet,
+            _ => EndPoint::DevNet,
+        }
+    }
+}
+
 pub fn derive_seed<U: AsRef<[u8]>>(seed: U) -> Result<Vec<u8>> {
     let der_path = DerivationPath::new_bip44(Some(0), Some(0));
     let keypair = keypair_from_seed_and_derivation_path(seed.as_ref(), Some(der_path))
@@ -39,10 +51,7 @@ pub fn pubkey_from_seed<S: AsRef<str>>(
     seed: S,
     id: &Pubkey,
 ) -> Result<(Pubkey, Pubkey)> {
-    let (base_pkey, _) = Pubkey::try_find_program_address(&[&seed_key.to_bytes()], id)
-        .ok_or(Error::ToBeDetermined)?;
-    let pkey = Pubkey::create_with_seed(&base_pkey, seed.as_ref(), id)?;
-    Ok((base_pkey, pkey))
+    pubkey_from_seeds(&[&seed_key.to_bytes()], seed, id)
 }
 
 pub fn pubkey_from_seeds<S: AsRef<str>>(

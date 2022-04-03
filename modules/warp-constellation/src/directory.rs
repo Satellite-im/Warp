@@ -96,7 +96,7 @@ impl Directory {
         directory
     }
 
-    /// Recurseively create child `Directory` with each instance is a child to the previous
+    /// Recurseively create item `Directory` with each instance is a item to the previous
     ///
     ///
     /// # Examples
@@ -131,7 +131,7 @@ impl Directory {
         let mut directory = Self::new(name);
         if !path.is_empty() {
             let sub = Self::new_recursive(path.join("/"))?;
-            directory.add_child(sub)?;
+            directory.add_item(sub)?;
         }
         Ok(directory)
     }
