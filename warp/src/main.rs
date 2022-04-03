@@ -17,7 +17,7 @@ use warp_common::error::Error;
 use warp_common::{anyhow, serde_json, tokio};
 use warp_configuration::Config;
 use warp_data::DataObject;
-use warp_tesseract::{generate, Tesseract};
+use warp_tesseract::Tesseract;
 
 #[derive(Debug, Parser)]
 #[clap(version, about, long_about = None)]
@@ -170,7 +170,7 @@ async fn main() -> anyhow::Result<()> {
             }
             Command::Init { .. } => {
                 //TODO: Do more initializing and rely on path
-                let key = generate(32)?;
+                let key = warp_crypto::generate(32);
                 tokio::fs::write(warp_directory.join("keyfile"), key).await?;
             }
         },

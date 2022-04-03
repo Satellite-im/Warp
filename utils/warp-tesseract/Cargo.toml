@@ -7,10 +7,8 @@ edition = "2021"
 
 [dependencies]
 warp-common = { version = "0.1.0", path = "../warp-common", features = ["use_sha2"]}
-aes-gcm = { version = "0.9", optional = true }
-rand = { version = "0.8", optional = true }
+warp-crypto = { version = "0.1.0", path = "../warp-crypto" }
 
 [features]
-default = ["async", "use_aes_gcm"]
+default = ["async"]
 async = ["warp-common/async"]
-use_aes_gcm = ["aes-gcm", "rand"]

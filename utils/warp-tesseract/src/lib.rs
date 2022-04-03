@@ -17,12 +17,6 @@ cfg_if! {
     }
 }
 
-use aes_gcm::{
-    aead::{Aead, NewAead},
-    Aes256Gcm,
-};
-use rand::{rngs::OsRng, RngCore};
-
 /// The key store that holds encrypted strings that can be used for later use.
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq, Eq)]
 #[serde(crate = "warp_common::serde")]
@@ -167,12 +161,12 @@ impl Tesseract {
     ///
     /// ```
     ///  let mut tesseract = warp_tesseract::Tesseract::default();
-    ///  let key = warp_tesseract::generate(32).unwrap();
+    ///  let key = warp_crypto::generate(32);
     ///  tesseract.set(&key, "API", "MYKEY").unwrap();
     ///  assert_eq!(tesseract.exist("API"), true);
     /// ```
     pub fn set(&mut self, passkey: &[u8], key: &str, value: &str) -> Result<()> {
-        let data = self.encrypt(passkey, value.to_string())?;
+        let data = warp_crypto::cipher::aes256gcm_encrypt(passkey, value.as_bytes())?;
         self.internal.insert(key.to_string(), data);
         Ok(())
     }
@@ -183,7 +177,7 @@ impl Tesseract {
     ///
     /// ```
     ///  let mut tesseract = warp_tesseract::Tesseract::default();
-    ///  let key = warp_tesseract::generate(32).unwrap();
+    ///  let key = warp_crypto::generate(32);
     ///  tesseract.set(&key, "API", "MYKEY").unwrap();
     ///  assert_eq!(tesseract.exist("API"), true);
     ///  assert_eq!(tesseract.exist("NOT_API"), false);
@@ -198,12 +192,27 @@ impl Tesseract {
             bail!(Error::ObjectNotFound)
         }
         let data = self.internal.get(key).ok_or(Error::ObjectNotFound)?;
-        self.decrypt(passkey, data)
+        let slice = warp_crypto::cipher::aes256gcm_decrypt(passkey, data)?;
+        let plain_text = String::from_utf8_lossy(&slice[..]).to_string();
+        Ok(plain_text)
     }
 
     /// Used to delete the value from the keystore
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp_tesseract::Tesseract::default();
+    ///  let key = warp_crypto::generate(32);
+    ///  tesseract.set(&key, "API", "MYKEY").unwrap();
+    ///  assert_eq!(tesseract.exist("API"), true);
+    ///  tesseract.delete("API").unwrap();
+    ///  assert_eq!(tesseract.exist("API"), false);
+    /// ```
     pub fn delete(&mut self, key: &str) -> Result<()> {
-        self.internal.remove(key);
+        self.internal
+            .remove(key)
+            .ok_or(anyhow::anyhow!("Could not remove key. Item does not exist"))?;
         Ok(())
     }
 
@@ -212,78 +221,16 @@ impl Tesseract {
         self.internal.clear();
         Ok(())
     }
-
-    /// Internal function that deals with encryption using rust native implementation of AES-128 GCM.
-    fn encrypt<U: AsRef<[u8]>>(&mut self, key: U, data: String) -> Result<Vec<u8>> {
-        let key = key.as_ref();
-        let nonce = generate(12)?;
-
-        let e_key = match key.len() {
-            32 => key.to_vec(),
-            _ => sha256_hash(key, Some(&nonce)),
-        };
-
-        let key = aes_gcm::Key::from_slice(&e_key);
-        let a_nonce = aes_gcm::Nonce::from_slice(&nonce);
-
-        let cipher = Aes256Gcm::new(key);
-        let mut edata = cipher
-            .encrypt(a_nonce, data.as_bytes())
-            .map_err(|e| anyhow::anyhow!(e))?;
-
-        edata.extend(nonce);
-
-        Ok(edata)
-    }
-
-    /// Internal function that deals with decryption using rust native implementation of AES-128 GCM.
-    fn decrypt<U: AsRef<[u8]>>(&self, key: U, data: U) -> Result<String> {
-        let key = key.as_ref();
-        let data = data.as_ref();
-        let nonce = &data[data.len() - 12..];
-        let payload = &data[..data.len() - 12];
-
-        let e_key = match key.len() {
-            32 => key.to_vec(),
-            _ => sha256_hash(key, Some(&nonce)),
-        };
-
-        let key = aes_gcm::Key::from_slice(&e_key);
-        let nonce = aes_gcm::Nonce::from_slice(nonce);
-
-        let cipher = Aes256Gcm::new(key);
-        cipher
-            .decrypt(nonce, payload)
-            .map(|pt| String::from_utf8_lossy(&pt[..]).to_string())
-            .map_err(|e| anyhow::anyhow!("{}", e))
-    }
-}
-
-/// Generate random bytes using rand number generator
-pub fn generate(limit: usize) -> Result<Vec<u8>> {
-    let mut key = vec![0u8; limit];
-    OsRng.fill_bytes(&mut key);
-    Ok(key)
-}
-
-fn sha256_hash<S: AsRef<[u8]>>(data: S, salt: Option<S>) -> Vec<u8> {
-    use warp_common::sha2::{Digest as Sha2Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(&data.as_ref());
-    if let Some(salt) = salt {
-        hasher.update(salt.as_ref());
-    }
-    hasher.finalize().to_vec()
 }
 
 #[cfg(test)]
 mod test {
-    use crate::{generate, Tesseract};
-
+    use crate::Tesseract;
+    use warp_crypto::generate;
     #[test]
     pub fn test_default() -> warp_common::anyhow::Result<()> {
         let mut tesseract = Tesseract::default();
-        let key = generate(32)?;
+        let key = generate(32);
         tesseract.set(&key, "API", "MYKEY")?;
         let data = tesseract.retrieve(&key, "API")?;
         assert_eq!(data, String::from("MYKEY"));
