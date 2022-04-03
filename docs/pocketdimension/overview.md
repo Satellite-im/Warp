@@ -26,10 +26,10 @@ If we were to create the following data for example:
 }
 ```
 
-And store it in the dimension providing the `MESSAGING` dimension type, and the [Data Object](data/overview)...
+And store it in the dimension providing the `messaging` dimension type, and the [Data Object](data/overview)...
 
 ```rust
-PocketDimension::add_data(DataType::Module(Module::MESSAGING), DataObject)
+PocketDimension::add_data(DataType::Module(Module::Messaging), DataObject)
 ```
 
 It will simply be added to the dimension. If we then update the data we can simply call `PocketDimension::add_data(Module::MESSAGING, ...<DataObject>)` again. Retrieving the data via some query will return the expected object with `version: 1`, `version: 2`, for each iteration of the data in the dimension.
@@ -37,10 +37,10 @@ It will simply be added to the dimension. If we then update the data we can simp
 
 #### Pulling Data
 
-Data can then be retrieved by providing a query using **TODO SYNTAX**.
+Data can then be retrieved by providing a query using `PocketDimension::get_data`.
 
 ```rust
-PocketDimension::get_data(DataType::Module(Module::MESSAGING), None)
+PocketDimension::get_data(DataType::Module(Module::Messaging), None)
 ```
 
 #### Executing

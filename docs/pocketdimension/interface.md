@@ -3,10 +3,10 @@
 ### Types
 
 **Dimension**
-The Dimension is simply a `String` value you provide used to group data. Generally you'll provide the module name as the dimension such as `MESSAGING` but realistically you can provide any `String` value.
+The Dimension is a  value you provide used to group data. Generally you'll provide the module name as the dimension such as `messaging` but realistically you can provide any `String` value.
 
 **DimensionData**
-Dimension data is supported in three flavors. A `JSON` object, a `String` value, or a `Buffer`. The cache will recall this type and if possible return the data in the same format you've added it in.
+**TODO**
 
 **DimensionQuery**
 Dimension queries support the following query types...**TODO**

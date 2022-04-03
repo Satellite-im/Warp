@@ -37,7 +37,7 @@ each module and the way you're using it.
 
 #### DataType
 
-The data type represents the associated payload. Each module is required to have a unique [Module](modules/core_types) identifier attached 
+The data type represents the associated payload. Each type is required to have a unique [DataType](data/data_types) identifier attached 
 to the data. You can get a list of the available module types by checking the API.
 
 #### Payload
