@@ -28,6 +28,7 @@ pub fn ed25519_to_x25519(keypair: &Keypair) -> Result<StaticSecret> {
 
 #[cfg(test)]
 mod test {
+    use crate::cipher::*;
     use crate::exchange::*;
     use ed25519_dalek::Keypair;
     use rand::rngs::OsRng;
@@ -64,6 +65,67 @@ mod test {
         let b_dh = x25519_key_exchange(&bob_secret, alice_pubkey, None, true)?;
 
         assert_eq!(a_dh, b_dh);
+
+        Ok(())
+    }
+
+    #[test]
+    fn key_exchange_encryption() -> anyhow::Result<()> {
+        let alice_keypair = Keypair::generate(&mut OsRng);
+        let bob_keypair = Keypair::generate(&mut OsRng);
+
+        let alice_private_key = ed25519_to_x25519(&alice_keypair)?;
+        let alice_public_key = PublicKey::from(&alice_private_key);
+
+        let bob_private_key = ed25519_to_x25519(&bob_keypair)?;
+        let bob_public_key = PublicKey::from(&bob_private_key);
+
+        let a_dh = x25519_key_exchange(&alice_private_key, bob_public_key, None, true)?;
+        let b_dh = x25519_key_exchange(&bob_private_key, alice_public_key, None, true)?;
+        assert_eq!(a_dh, b_dh);
+
+        {
+            let for_bob = aes256gcm_encrypt(&a_dh, &b"Hello Bob"[..])?;
+            let plaintext = aes256gcm_decrypt(&b_dh, &for_bob)
+                .map(|ptxt| String::from_utf8_lossy(&ptxt).to_string())?;
+            assert_eq!(plaintext, String::from("Hello Bob"));
+        }
+
+        {
+            let for_alice = aes256gcm_encrypt(&a_dh, &b"Hello Alice"[..])?;
+            let plaintext = aes256gcm_decrypt(&b_dh, &for_alice)
+                .map(|ptxt| String::from_utf8_lossy(&ptxt).to_string())?;
+            assert_eq!(plaintext, String::from("Hello Alice"));
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn ed25519_key_exchange_encryption() -> anyhow::Result<()> {
+        let alice_private_key = StaticSecret::new(&mut OsRng);
+        let alice_public_key = PublicKey::from(&alice_private_key);
+
+        let bob_private_key = StaticSecret::new(&mut OsRng);
+        let bob_public_key = PublicKey::from(&bob_private_key);
+
+        let a_dh = x25519_key_exchange(&alice_private_key, bob_public_key, None, true)?;
+        let b_dh = x25519_key_exchange(&bob_private_key, alice_public_key, None, true)?;
+        assert_eq!(a_dh, b_dh);
+
+        {
+            let for_bob = aes256gcm_encrypt(&a_dh, &b"Hello Bob"[..])?;
+            let plaintext = aes256gcm_decrypt(&b_dh, &for_bob)
+                .map(|ptxt| String::from_utf8_lossy(&ptxt).to_string())?;
+            assert_eq!(plaintext, String::from("Hello Bob"));
+        }
+
+        {
+            let for_alice = aes256gcm_encrypt(&a_dh, &b"Hello Alice"[..])?;
+            let plaintext = aes256gcm_decrypt(&b_dh, &for_alice)
+                .map(|ptxt| String::from_utf8_lossy(&ptxt).to_string())?;
+            assert_eq!(plaintext, String::from("Hello Alice"));
+        }
 
         Ok(())
     }
