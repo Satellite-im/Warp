@@ -3,6 +3,8 @@ pub mod groupchat;
 pub mod server;
 pub mod user;
 
+//TODO: Have these configurable
+
 use std::str::FromStr;
 use warp_common::solana_sdk::pubkey::Pubkey;
 
@@ -20,4 +22,8 @@ pub fn groupchat_key() -> Pubkey {
 
 pub fn user_key() -> Pubkey {
     Pubkey::from_str("7MaC2xrAmmFsuRBEkD6BEL3eJpXCmaikYhLM3eKBPhAH").unwrap_or_default()
+}
+
+pub fn system_program_programid() -> Pubkey {
+    Pubkey::from_str("11111111111111111111111111111111").unwrap_or_default()
 }
