@@ -41,7 +41,6 @@ pub struct Identity {
     pub short_id: u16,
 
     /// Public key for the identity
-    #[serde(flatten)]
     pub public_key: PublicKey,
 
     /// TBD

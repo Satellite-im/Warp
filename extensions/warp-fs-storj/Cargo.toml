@@ -12,5 +12,5 @@ warp-constellation = { path = "../../modules/warp-constellation" }
 warp-pocket-dimension = { path = "../../modules/warp-pocket-dimension" }
 warp-module = { path = "../../utils/warp-module" }
 warp-data = { path = "../../utils/warp-data" }
-warp-common = { path = "../../utils/warp-common", features = ["async", "use_sha1", "use_sha2"]}
+warp-common = { path = "../../utils/warp-common", features = ["async"]}
 warp-hooks = { path = "../../utils/warp-hooks" }

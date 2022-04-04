@@ -3,7 +3,6 @@ use warp_common::anyhow::{anyhow, Result};
 use warp_common::bip39::{Language, Mnemonic, MnemonicType, Seed};
 use warp_common::derive_more::Display;
 use warp_common::solana_sdk::signature::{keypair_from_seed, Keypair, Signer};
-use warp_common::solana_sdk::transaction::Transaction;
 
 pub struct SolanaWallet {
     pub mnemonic: String,
