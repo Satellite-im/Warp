@@ -18,9 +18,6 @@
   - [File](constellation/file.md)
   - [Directory](constellation/directory.md)
   - [Constellation](constellation/constellation.md)
-  - **+ Utilities**
-    - [Hooks](constellation/utilities/hooks.md)
-    - [Navigation](constellation/utilities/navigation.md)
 - **Mulit Pass (Identity)**
   - [Overview](identity/overview.md)
   - [Interface](identity/interface.md)
