@@ -66,6 +66,15 @@ pub struct Identity {
 #[serde(crate = "warp_common::serde")]
 pub struct PublicKey(Vec<u8>);
 
+impl PublicKey {
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        Self(bytes.to_vec())
+    }
+    pub fn to_bytes(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Identifier {
     /// Select identity based on public key
