@@ -1,12 +1,13 @@
 use libp2p::PeerId;
 use std::sync::{Arc, Mutex};
+use warp_common::error::Error;
 use warp_common::uuid::Uuid;
 use warp_common::{Extension, Module};
 use warp_multipass::MultiPass;
 use warp_raygun::{Callback, EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
 
 // TODO: Setup default
-pub struct Messaging {
+pub struct Libp2pMessaging {
     pub id: Option<PeerId>,
     pub account: Arc<Mutex<Box<dyn MultiPass>>>,
     pub relay: (),
@@ -16,7 +17,7 @@ pub struct Messaging {
     pub conversations: Vec<()>,
 }
 
-impl Messaging {
+impl Libp2pMessaging {
     pub fn new() -> Self {
         unimplemented!()
     }
@@ -33,7 +34,7 @@ impl Messaging {
     }
 }
 
-impl Extension for Messaging {
+impl Extension for Libp2pMessaging {
     fn id(&self) -> String {
         "warp-rg-libp2p".to_string()
     }
@@ -58,63 +59,64 @@ pub enum MessagingEvents {
     Pin,
 }
 
-impl RayGun for Messaging {
-    fn get_messages(
+#[warp_common::async_trait::async_trait]
+impl RayGun for Libp2pMessaging {
+    async fn get_messages(
         &self,
         conversation_id: Uuid,
         options: MessageOptions,
         callback: Option<Callback>,
     ) -> warp_common::Result<Vec<Message>> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 
-    fn send(
+    async fn send(
         &mut self,
         conversation_id: Uuid,
         message_id: Option<Uuid>,
         message: Vec<String>,
     ) -> warp_common::Result<()> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 
-    fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> warp_common::Result<()> {
-        todo!()
+    async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> warp_common::Result<()> {
+        Err(Error::Unimplemented)
     }
 
-    fn react(
+    async fn react(
         &mut self,
         conversation_id: Uuid,
         message_id: Uuid,
         state: ReactionState,
         emoji: Option<String>,
     ) -> warp_common::Result<()> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 
-    fn pin(
+    async fn pin(
         &mut self,
         conversation_id: Uuid,
         message_id: Uuid,
         state: PinState,
     ) -> warp_common::Result<()> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 
-    fn reply(
+    async fn reply(
         &mut self,
         conversation_id: Uuid,
         message_id: Uuid,
         message: Vec<String>,
     ) -> warp_common::Result<()> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 
-    fn embeds(
+    async fn embeds(
         &mut self,
         conversation_id: Uuid,
         message_id: Uuid,
         state: EmbedState,
     ) -> warp_common::Result<()> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 }

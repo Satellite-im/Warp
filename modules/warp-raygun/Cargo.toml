@@ -14,3 +14,7 @@ thiserror = "1.0"
 warp-module = { version = "0.1.0", path = "../../utils/warp-module" }
 warp-data = { version = "0.1.0", path = "../../utils/warp-data" }
 warp-common = { version = "0.1.0", path = "../../utils/warp-common" }
+
+[features]
+default = ["async"]
+async = ["warp-common/async"]

@@ -3,13 +3,13 @@ use warp_common::serde::{Deserialize, Serialize};
 use warp_common::uuid::Uuid;
 use warp_common::{Extension, Result};
 
-pub type Callback = Box<dyn Fn()>;
+pub type Callback = Box<dyn Fn() + Sync + Send>;
 
 #[derive(Clone, PartialEq, Eq)]
-pub struct MessageOptions<'a> {
+pub struct MessageOptions {
     pub smart: Option<bool>,
-    pub date_range: Option<&'a [DateTime<Utc>; 2]>,
-    pub id_range: Option<&'a [Uuid; 2]>,
+    pub date_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
+    pub id_range: Option<(Uuid, Uuid)>,
     pub limit: Option<i64>,
     pub skip: Option<i64>,
 }
@@ -67,9 +67,10 @@ pub enum EmbedState {
     Disable,
 }
 
-pub trait RayGun: Extension {
+#[warp_common::async_trait::async_trait]
+pub trait RayGun: Extension + Sync + Send {
     /// Retreive all messages from a conversation
-    fn get_messages(
+    async fn get_messages(
         &self,
         conversation_id: Uuid,
         options: MessageOptions,
@@ -77,7 +78,7 @@ pub trait RayGun: Extension {
     ) -> Result<Vec<Message>>;
 
     /// Sends a message to a conversation. If `message_id` is provided, it will override the selected message
-    fn send(
+    async fn send(
         &mut self,
         conversation_id: Uuid,
         message_id: Option<Uuid>,
@@ -85,10 +86,10 @@ pub trait RayGun: Extension {
     ) -> Result<()>;
 
     /// Delete message from a conversation
-    fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()>;
+    async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()>;
 
     /// React to a message
-    fn react(
+    async fn react(
         &mut self,
         conversation_id: Uuid,
         message_id: Uuid,
@@ -97,15 +98,21 @@ pub trait RayGun: Extension {
     ) -> Result<()>;
 
     /// Pin a message within a conversation
-    fn pin(&mut self, conversation_id: Uuid, message_id: Uuid, state: PinState) -> Result<()>;
+    async fn pin(&mut self, conversation_id: Uuid, message_id: Uuid, state: PinState)
+        -> Result<()>;
 
     /// Reply to a message within a conversation
-    fn reply(
+    async fn reply(
         &mut self,
         conversation_id: Uuid,
         message_id: Uuid,
         message: Vec<String>,
     ) -> Result<()>;
 
-    fn embeds(&mut self, conversation_id: Uuid, message_id: Uuid, state: EmbedState) -> Result<()>;
+    async fn embeds(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: EmbedState,
+    ) -> Result<()>;
 }

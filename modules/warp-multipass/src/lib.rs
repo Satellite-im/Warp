@@ -6,8 +6,8 @@ use warp_data::DataObject;
 
 use crate::identity::{Identifier, Identity, IdentityUpdate, PublicKey};
 
-pub trait MultiPass: Extension {
-    fn create_identity(&mut self, identity: &Identity, passphrase: &str) -> Result<PublicKey>;
+pub trait MultiPass: Extension + Sync + Send {
+    fn create_identity(&mut self, identity: &mut Identity, passphrase: &str) -> Result<PublicKey>;
 
     fn get_identity(&self, id: Identifier) -> Result<DataObject>;
 
@@ -21,3 +21,6 @@ pub trait MultiPass: Extension {
 
     fn refresh_cache(&mut self) -> Result<()>;
 }
+
+// #[warp_common::async_trait::async_trait]
+pub trait Friends: MultiPass {}
