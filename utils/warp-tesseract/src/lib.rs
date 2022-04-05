@@ -237,6 +237,16 @@ impl Tesseract {
     }
 
     /// Used to clear the whole keystore.
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp_tesseract::Tesseract::default();
+    ///  let key = warp_crypto::generate(32);
+    ///  tesseract.set(&key, "API", "MYKEY").unwrap();
+    ///  tesseract.clear().unwrap();
+    ///  assert_eq!(tesseract.exist("API"), false);
+    /// ```
     pub fn clear(&mut self) -> Result<()> {
         self.internal.clear();
         Ok(())
