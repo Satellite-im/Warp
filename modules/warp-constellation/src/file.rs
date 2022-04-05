@@ -236,7 +236,7 @@ impl Hash {
     /// assert_eq!(hash.sha1, Some(String::from("0A0A9F2A6772942557AB5355D76AF442F8F65E01")))
     /// ```
     pub fn sha1hash_from_buffer<U: AsRef<[u8]>>(&mut self, buffer: U) -> Result<()> {
-        let res = warp_crypto::hash::sha1_hash(buffer, None)?;
+        let res = warp_crypto::hash::sha1_hash(buffer.as_ref(), None)?;
         self.sha1 = Some(hex::encode(res).to_uppercase());
         Ok(())
     }
@@ -278,7 +278,7 @@ impl Hash {
     /// assert_eq!(hash.sha256, Some(String::from("DFFD6021BB2BD5B0AF676290809EC3A53191DD81C7F70A4B28688A362182986F")))
     /// ```
     pub fn sha256hash_from_buffer<U: AsRef<[u8]>>(&mut self, buffer: U) -> Result<()> {
-        let res = warp_crypto::hash::sha256_hash(buffer, None)?;
+        let res = warp_crypto::hash::sha256_hash(buffer.as_ref(), None)?;
         self.sha256 = Some(hex::encode(res).to_uppercase());
         Ok(())
     }
