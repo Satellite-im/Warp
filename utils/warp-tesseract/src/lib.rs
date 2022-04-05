@@ -154,6 +154,26 @@ impl Tesseract {
         }
     }
 
+    /// Import and encrypt a hashmap into tesseract
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let map = std::collections::HashMap::from([(String::from("API"), String::from("MYKEY"))]);
+    /// let key = warp_crypto::generate(32);
+    /// let tesseract = warp_tesseract::Tesseract::import(&key, map).unwrap();
+    ///
+    /// assert_eq!(tesseract.exist("API"), true);
+    /// assert_eq!(tesseract.retrieve(&key, "API").unwrap(), String::from("MYKEY"))
+    /// ```
+    pub fn import(passphrase: &[u8], map: HashMap<String, String>) -> Result<Self> {
+        let mut tesseract = Tesseract::default();
+        for (key, val) in map {
+            tesseract.set(passphrase, key.as_str(), val.as_str())?;
+        }
+        Ok(tesseract)
+    }
+
     /// To store a value to be encrypted into the keystore. If the key already exist, it
     /// will be overwritten.
     ///
@@ -212,7 +232,7 @@ impl Tesseract {
     pub fn delete(&mut self, key: &str) -> Result<()> {
         self.internal
             .remove(key)
-            .ok_or(anyhow::anyhow!("Could not remove key. Item does not exist"))?;
+            .ok_or_else(|| anyhow::anyhow!("Could not remove key. Item does not exist"))?;
         Ok(())
     }
 
@@ -220,6 +240,28 @@ impl Tesseract {
     pub fn clear(&mut self) -> Result<()> {
         self.internal.clear();
         Ok(())
+    }
+
+    /// Decrypts and export tesseract contents to a `HashMap`
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp_tesseract::Tesseract::default();
+    ///  let key = warp_crypto::generate(32);
+    ///  tesseract.set(&key, "API", "MYKEY").unwrap();
+    ///  
+    ///  let map = tesseract.export(&key).unwrap();
+    ///  assert_eq!(map.contains_key("API"), true);
+    ///  assert_eq!(map.get("API"), Some(&String::from("MYKEY")));
+    /// ```
+    pub fn export(&self, passphrase: &[u8]) -> Result<HashMap<String, String>> {
+        let mut map = HashMap::new();
+        for key in self.internal.keys() {
+            let value = self.retrieve(passphrase, key)?;
+            map.insert(key.clone(), value);
+        }
+        Ok(map)
     }
 }
 
