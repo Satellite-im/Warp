@@ -51,6 +51,24 @@ mod test {
     }
 
     #[test]
+    fn loop_key_exchange() -> anyhow::Result<()> {
+        for _ in 0..50 {
+            let alice_private_key = StaticSecret::new(&mut OsRng);
+            let alice_public_key = PublicKey::from(&alice_private_key);
+
+            let bob_private_key = StaticSecret::new(&mut OsRng);
+            let bob_public_key = PublicKey::from(&bob_private_key);
+
+            let a_dh = x25519_key_exchange(&alice_private_key, bob_public_key, None, true)?;
+            let b_dh = x25519_key_exchange(&bob_private_key, alice_public_key, None, true)?;
+
+            assert_eq!(a_dh, b_dh);
+        }
+
+        Ok(())
+    }
+
+    #[test]
     fn ed25519_key_exchange() -> anyhow::Result<()> {
         let alice_keypair = Keypair::generate(&mut OsRng);
         let bob_keypair = Keypair::generate(&mut OsRng);
@@ -70,7 +88,7 @@ mod test {
     }
 
     #[test]
-    fn key_exchange_encryption() -> anyhow::Result<()> {
+    fn ed25519_key_exchange_encryption() -> anyhow::Result<()> {
         let alice_keypair = Keypair::generate(&mut OsRng);
         let bob_keypair = Keypair::generate(&mut OsRng);
 
@@ -102,7 +120,7 @@ mod test {
     }
 
     #[test]
-    fn ed25519_key_exchange_encryption() -> anyhow::Result<()> {
+    fn key_exchange_encryption() -> anyhow::Result<()> {
         let alice_private_key = StaticSecret::new(&mut OsRng);
         let alice_public_key = PublicKey::from(&alice_private_key);
 
