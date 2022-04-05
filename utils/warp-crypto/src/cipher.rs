@@ -11,8 +11,7 @@ use chacha20poly1305::XChaCha20Poly1305;
 
 /// Used to encrypt data with AES256-GCM using a 256bit key.
 /// Note: If key is less than or greater than 256bits/32bytes, it will hash the key with sha256 with nonce being its salt
-pub fn aes256gcm_encrypt<U: AsRef<[u8]>>(key: U, data: &[u8]) -> Result<Vec<u8>> {
-    let key = key.as_ref();
+pub fn aes256gcm_encrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     let nonce = crate::generate(12);
 
     let e_key = match key.len() {
@@ -35,9 +34,7 @@ pub fn aes256gcm_encrypt<U: AsRef<[u8]>>(key: U, data: &[u8]) -> Result<Vec<u8>>
 
 /// Used to decrypt data with AES256-GCM using a 256bit key.
 /// Note: If key is less than or greater than 256bits/32bytes, it will hash the key with sha256 with nonce being its salt
-pub fn aes256gcm_decrypt<U: AsRef<[u8]>>(key: U, data: U) -> Result<Vec<u8>> {
-    let key = key.as_ref();
-    let data = data.as_ref();
+pub fn aes256gcm_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     let nonce = &data[data.len() - 12..];
     let payload = &data[..data.len() - 12];
 
@@ -56,12 +53,11 @@ pub fn aes256gcm_decrypt<U: AsRef<[u8]>>(key: U, data: U) -> Result<Vec<u8>> {
 }
 
 // TODO: Test
-pub fn aes256gcm_encrypt_stream<U: AsRef<[u8]>>(
-    key: U,
+pub fn aes256gcm_encrypt_stream(
+    key: &[u8],
     reader: &mut impl Read,
     writer: &mut impl Write,
 ) -> Result<()> {
-    let key = key.as_ref();
     let nonce = crate::generate(7);
     let e_key = match key.len() {
         32 => key.to_vec(),
@@ -95,12 +91,11 @@ pub fn aes256gcm_encrypt_stream<U: AsRef<[u8]>>(
     Ok(())
 }
 
-pub fn aes256gcm_decrypt_stream<U: AsRef<[u8]>>(
-    key: U,
+pub fn aes256gcm_decrypt_stream(
+    key: &[u8],
     reader: &mut impl Read,
     writer: &mut impl Write,
 ) -> Result<()> {
-    let key = key.as_ref();
     let mut nonce = vec![0u8; 7];
 
     reader.read_exact(&mut nonce)?;
@@ -138,8 +133,7 @@ pub fn aes256gcm_decrypt_stream<U: AsRef<[u8]>>(
 
 /// Used to encrypt data using XChaCha20Poly1305 with a 256bit key
 /// Note: If key is less than or greater than 256bits/32bytes, it will hash the key with sha256 with nonce being its salt
-pub fn xchacha20poly1305_encrypt<U: AsRef<[u8]>>(key: U, data: &[u8]) -> Result<Vec<u8>> {
-    let key = key.as_ref();
+pub fn xchacha20poly1305_encrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     let nonce = crate::generate(24);
 
     let e_key = match key.len() {
@@ -158,7 +152,7 @@ pub fn xchacha20poly1305_encrypt<U: AsRef<[u8]>>(key: U, data: &[u8]) -> Result<
 
 /// Used to decrypt data using XChaCha20Poly1305 with a 256bit key
 /// Note: If key is less than or greater than 256bits/32bytes, it will hash the key with sha256 with nonce being its salt
-pub fn xchacha20poly1305_decrypt<U: AsRef<[u8]>>(key: U, data: &[u8]) -> Result<Vec<u8>> {
+pub fn xchacha20poly1305_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     let key = key.as_ref();
     let nonce = &data[data.len() - 24..];
     let payload = &data[..data.len() - 24];
@@ -177,12 +171,11 @@ pub fn xchacha20poly1305_decrypt<U: AsRef<[u8]>>(key: U, data: &[u8]) -> Result<
     Ok(plaintext)
 }
 
-pub fn xchacha20poly1305_encrypt_stream<U: AsRef<[u8]>>(
-    key: U,
+pub fn xchacha20poly1305_encrypt_stream(
+    key: &[u8],
     reader: &mut impl Read,
     writer: &mut impl Write,
 ) -> Result<()> {
-    let key = key.as_ref();
     let nonce = crate::generate(19);
     let e_key = match key.len() {
         32 => key.to_vec(),
@@ -216,8 +209,8 @@ pub fn xchacha20poly1305_encrypt_stream<U: AsRef<[u8]>>(
     Ok(())
 }
 
-pub fn xchacha20poly1305_decrypt_stream<U: AsRef<[u8]>>(
-    key: U,
+pub fn xchacha20poly1305_decrypt_stream(
+    key: &[u8],
     reader: &mut impl Read,
     writer: &mut impl Write,
 ) -> Result<()> {
@@ -261,9 +254,9 @@ mod test {
     #[test]
     fn aes256gcm_encrypt_decrypt() -> anyhow::Result<()> {
         let key = b"this is my secret cipher key!".to_vec();
-        let message = &b"Hello, World!"[..];
+        let message = b"Hello, World!".to_vec();
 
-        let cipher = aes256gcm_encrypt(&key, message)?;
+        let cipher = aes256gcm_encrypt(&key, &message)?;
 
         let plaintext = aes256gcm_decrypt(&key, &cipher)?;
 
@@ -279,13 +272,14 @@ mod test {
     #[test]
     fn aes256gcm_stream_encrypt_decrypt() -> anyhow::Result<()> {
         let base = b"this is my message".to_vec();
+        let key = b"this is my key".to_vec();
         let mut cipher = Vec::<u8>::new();
 
         let mut plaintext = Vec::<u8>::new();
 
-        aes256gcm_encrypt_stream(&"hello, world", &mut base.as_slice(), &mut cipher)?;
+        aes256gcm_encrypt_stream(&key, &mut base.as_slice(), &mut cipher)?;
 
-        aes256gcm_decrypt_stream(&"hello, world", &mut cipher.as_slice(), &mut plaintext)?;
+        aes256gcm_decrypt_stream(&key, &mut cipher.as_slice(), &mut plaintext)?;
 
         assert_ne!(cipher, plaintext);
 
@@ -316,14 +310,15 @@ mod test {
 
     #[test]
     fn xchacha20poly1305_stream_encrypt_decrypt() -> anyhow::Result<()> {
+        let key = b"this is my key".to_vec();
         let base = b"this is my message".to_vec();
         let mut cipher = Vec::<u8>::new();
 
         let mut plaintext = Vec::<u8>::new();
 
-        xchacha20poly1305_encrypt_stream(&"hello, world", &mut base.as_slice(), &mut cipher)?;
+        xchacha20poly1305_encrypt_stream(&key, &mut base.as_slice(), &mut cipher)?;
 
-        xchacha20poly1305_decrypt_stream(&"hello, world", &mut cipher.as_slice(), &mut plaintext)?;
+        xchacha20poly1305_decrypt_stream(&key, &mut cipher.as_slice(), &mut plaintext)?;
 
         assert_ne!(cipher, plaintext);
 

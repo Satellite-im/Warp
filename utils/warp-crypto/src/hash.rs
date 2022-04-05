@@ -34,15 +34,15 @@ pub fn blake2s_hash_stream(reader: &mut impl Read, salt: Option<&[u8]>) -> Resul
     Ok(hasher.finalize().to_vec())
 }
 
-pub fn sha1_hash<S: AsRef<[u8]>>(data: S, salt: Option<&[u8]>) -> Result<Vec<u8>> {
+pub fn sha1_hash(data: &[u8], salt: Option<&[u8]>) -> Result<Vec<u8>> {
     sha1_hash_stream(&mut data.as_ref(), salt)
 }
 
-pub fn sha256_hash<S: AsRef<[u8]>>(data: S, salt: Option<&[u8]>) -> Result<Vec<u8>> {
+pub fn sha256_hash(data: &[u8], salt: Option<&[u8]>) -> Result<Vec<u8>> {
     sha256_hash_stream(&mut data.as_ref(), salt)
 }
 
-pub fn blake2s_hash<S: AsRef<[u8]>>(data: S, salt: Option<&[u8]>) -> Result<Vec<u8>> {
+pub fn blake2s_hash(data: &[u8], salt: Option<&[u8]>) -> Result<Vec<u8>> {
     blake2s_hash_stream(&mut data.as_ref(), salt)
 }
 
