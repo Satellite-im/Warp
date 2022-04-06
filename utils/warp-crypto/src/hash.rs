@@ -35,15 +35,18 @@ pub fn blake2s_hash_stream(reader: &mut impl Read, salt: Option<&[u8]>) -> Resul
 }
 
 pub fn sha1_hash(data: &[u8], salt: Option<&[u8]>) -> Result<Vec<u8>> {
-    sha1_hash_stream(&mut data.as_ref(), salt)
+    let mut inner = data;
+    sha1_hash_stream(&mut inner, salt)
 }
 
 pub fn sha256_hash(data: &[u8], salt: Option<&[u8]>) -> Result<Vec<u8>> {
-    sha256_hash_stream(&mut data.as_ref(), salt)
+    let mut inner = data;
+    sha256_hash_stream(&mut inner, salt)
 }
 
 pub fn blake2s_hash(data: &[u8], salt: Option<&[u8]>) -> Result<Vec<u8>> {
-    blake2s_hash_stream(&mut data.as_ref(), salt)
+    let mut inner = data;
+    blake2s_hash_stream(&mut inner, salt)
 }
 
 #[cfg(test)]

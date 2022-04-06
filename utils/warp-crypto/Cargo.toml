@@ -21,6 +21,8 @@ aes-gcm = { version = "0.9" }
 aead = { version = "0.4", default-features = false }
 rand = { version = "0.7"  }
 anyhow = { version = "1" }
+zeroize = "<=1.5"
+
 
 [dev-dependencies]
 hex = "0.4"

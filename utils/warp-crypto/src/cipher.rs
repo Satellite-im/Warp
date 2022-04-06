@@ -153,7 +153,6 @@ pub fn xchacha20poly1305_encrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
 /// Used to decrypt data using XChaCha20Poly1305 with a 256bit key
 /// Note: If key is less than or greater than 256bits/32bytes, it will hash the key with sha256 with nonce being its salt
 pub fn xchacha20poly1305_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
-    let key = key.as_ref();
     let nonce = &data[data.len() - 24..];
     let payload = &data[..data.len() - 24];
 
@@ -214,7 +213,6 @@ pub fn xchacha20poly1305_decrypt_stream(
     reader: &mut impl Read,
     writer: &mut impl Write,
 ) -> Result<()> {
-    let key = key.as_ref();
     let mut nonce = vec![0u8; 19];
 
     reader.read_exact(&mut nonce)?;
