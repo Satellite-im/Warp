@@ -15,6 +15,7 @@ use warp_common::{
     Extension,
 };
 
+use crate::anyhow::anyhow;
 #[allow(unused_imports)]
 use warp_common::libflate::gzip;
 use warp_data::{DataObject, DataType};
@@ -215,7 +216,9 @@ impl FlatfileStorage {
 
     pub fn get_index_file(&self) -> warp_common::Result<String> {
         if !self.use_index_file() {
-            return Err(Error::ToBeDetermined);
+            return Err(Error::Any(anyhow!(
+                "'use_index_file' must be true to use this function"
+            )));
         }
 
         let mut path = self.directory.clone();

@@ -19,7 +19,7 @@ use s3::bucket::Bucket;
 use s3::creds::Credentials;
 use s3::region::Region;
 use s3::BucketConfiguration;
-use warp_common::anyhow::bail;
+use warp_common::anyhow::{anyhow, bail};
 
 use warp_constellation::item::Item;
 use warp_data::{DataObject, DataType};
@@ -183,7 +183,10 @@ impl Constellation for StorjFilesystem {
         let mut fs = tokio::fs::File::open(&path).await?;
         let size = fs.metadata().await?.len();
 
-        let client = self.client.as_ref().ok_or(Error::ToBeDetermined)?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or(Error::Any(anyhow!("Unable to get StorJ Client")))?;
         let code = client
             .bucket(bucket, true)
             .await?
@@ -191,7 +194,11 @@ impl Constellation for StorjFilesystem {
             .await?;
 
         if code != 200 {
-            return Err(Error::ToBeDetermined);
+            //TODO: Do a range check against the code
+            return Err(Error::Any(anyhow!(
+                "Error uploading file to storj. Code {}",
+                code
+            )));
         }
 
         let mut file = warp_constellation::file::File::new(&name);
@@ -236,8 +243,7 @@ impl Constellation for StorjFilesystem {
                     let obj = list.last().unwrap();
                     if let Ok(data) = obj.payload::<DimensionData>() {
                         if let Ok(mut file) = std::fs::File::create(path) {
-                            data.write_from_path(&mut file)?;
-                            return Ok(());
+                            return data.write_from_path(&mut file);
                         }
                     }
                 }
@@ -250,7 +256,10 @@ impl Constellation for StorjFilesystem {
         //     .and_then(Item::get_file)?;
 
         let mut fs = tokio::fs::File::create(path).await?;
-        let client = self.client.as_ref().ok_or(Error::ToBeDetermined)?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or(Error::Any(anyhow!("Unable to get StorJ Client")))?;
         let code = client
             .bucket(bucket, false)
             .await?
@@ -258,8 +267,21 @@ impl Constellation for StorjFilesystem {
             .await?;
 
         if code != 200 {
-            tokio::fs::remove_file(path).await?;
-            return Err(Error::ToBeDetermined);
+            match tokio::fs::remove_file(path).await {
+                Ok(_) => {
+                    return Err(Error::Any(anyhow!(
+                        "Error getting file from storj. Code {}",
+                        code
+                    )))
+                }
+                Err(e) => {
+                    return Err(Error::Any(anyhow!(
+                        "Error removing file due to code {}: {}",
+                        code,
+                        e
+                    )))
+                }
+            }
         }
 
         // TODO:Implement comparing hash
@@ -276,7 +298,10 @@ impl Constellation for StorjFilesystem {
         let (bucket, name) = split_for(name)?;
 
         //TODO: Allow for custom bucket name
-        let client = self.client.as_ref().ok_or(Error::Other)?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or(Error::Any(anyhow!("Unable to get StorJ Client")))?;
         let code = client
             .bucket(bucket, true)
             .await?
@@ -284,7 +309,10 @@ impl Constellation for StorjFilesystem {
             .await?;
 
         if code.1 != 200 {
-            return Err(warp_common::error::Error::Other);
+            return Err(Error::Any(anyhow!(
+                "Error uploading file to storj. Code {}",
+                code.1
+            )));
         }
 
         let mut file = warp_constellation::file::File::new(&name);
@@ -331,7 +359,10 @@ impl Constellation for StorjFilesystem {
             }
         }
 
-        let client = self.client.as_ref().ok_or(Error::ToBeDetermined)?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or(Error::Any(anyhow!("Unable to get StorJ Client")))?;
         let (buf, code) = client
             .bucket(bucket, false)
             .await?
@@ -339,7 +370,10 @@ impl Constellation for StorjFilesystem {
             .await?;
 
         if code != 200 {
-            return Err(Error::ToBeDetermined);
+            return Err(Error::Any(anyhow!(
+                "Error getting file from storj. Code {}",
+                code
+            )));
         }
 
         *buffer = buf;
@@ -350,7 +384,10 @@ impl Constellation for StorjFilesystem {
     async fn remove(&mut self, path: &str, _: bool) -> warp_common::Result<()> {
         let (bucket, name) = split_for(path)?;
 
-        let client = self.client.as_ref().ok_or(Error::Other)?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or(Error::Any(anyhow!("Unable to get StorJ Client")))?;
 
         let (_, code) = client
             .bucket(bucket, false)
@@ -359,7 +396,10 @@ impl Constellation for StorjFilesystem {
             .await?;
 
         if code != 204 {
-            return Err(Error::ToBeDetermined);
+            return Err(Error::Any(anyhow!(
+                "Error removing data from storj. Code {}",
+                code
+            )));
         }
 
         let item = self.current_directory_mut()?.remove_child(&name)?;

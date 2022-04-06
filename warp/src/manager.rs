@@ -203,7 +203,7 @@ impl ModuleManager {
         let fs = self
             .filesystem
             .get(index)
-            .ok_or(warp_common::error::Error::ToBeDetermined)?;
+            .ok_or(warp_common::error::Error::Other)?;
 
         Ok(fs.as_ref())
     }
@@ -218,7 +218,7 @@ impl ModuleManager {
         let cs = self
             .cache
             .get(index)
-            .ok_or(warp_common::error::Error::ToBeDetermined)?;
+            .ok_or(warp_common::error::Error::Other)?;
 
         Ok(cs.as_ref())
     }

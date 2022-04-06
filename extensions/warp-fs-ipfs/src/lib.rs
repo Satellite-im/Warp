@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 // use warp_common::futures::TryStreamExt;
 use warp_module::Module;
 
+use warp_common::anyhow::anyhow;
 use warp_common::{
     anyhow,
     chrono::{DateTime, Utc},
@@ -167,13 +168,10 @@ impl Constellation for IpfsFileSystem {
                 client
                     .files_write(&name, true, true, fs)
                     .await
-                    .map_err(|_| Error::ToBeDetermined)?;
+                    .map_err(|e| anyhow!(e))?;
 
                 // Get the file stat from ipfs
-                let stat = client
-                    .files_stat(&name)
-                    .await
-                    .map_err(|_| Error::ToBeDetermined)?;
+                let stat = client.files_stat(&name).await.map_err(|e| anyhow!(e))?;
 
                 //check and compare size and if its different from local size to error
 
@@ -182,19 +180,18 @@ impl Constellation for IpfsFileSystem {
                     client
                         .files_rm(&name, false)
                         .await
-                        .map_err(|_| Error::ToBeDetermined)?;
+                        .map_err(|e| anyhow!(e))?;
 
-                    return Err(Error::ToBeDetermined);
+                    return Err(Error::Any(anyhow!(
+                        "Size of the file does not match what was uploaded"
+                    )));
                 }
 
                 let hash = stat.hash;
 
                 //pin file since ipfs mfs doesnt do it automatically
 
-                let res = client
-                    .pin_add(&hash, true)
-                    .await
-                    .map_err(|_| Error::ToBeDetermined)?;
+                let res = client.pin_add(&hash, true).await.map_err(|e| anyhow!(e))?;
 
                 if !res.pins.contains(&hash) {
                     //TODO: Error?
@@ -203,7 +200,7 @@ impl Constellation for IpfsFileSystem {
                 hash
             }
             IpfsOption::Object => {
-                let res = client.add(fs).await.map_err(|_| Error::ToBeDetermined)?;
+                let res = client.add(fs).await.map_err(|e| anyhow!(e))?;
 
                 //pin file since ipfs mfs doesnt do it automatically
                 let hash = res.hash;
@@ -310,21 +307,13 @@ impl Constellation for IpfsFileSystem {
 
                 let size = tokio::fs::metadata(path).await?.len();
 
-                let stat = client
-                    .files_stat(&name)
-                    .await
-                    .map_err(|_| Error::ToBeDetermined)?;
+                let stat = client.files_stat(&name).await.map_err(|e| anyhow!(e))?;
 
                 //check and compare size and if its different from local size to error
-
+                //TODO: Compare hashes instead
                 if stat.size != size {
-                    //Delete from ipfs
-                    client
-                        .files_rm(&name, false)
-                        .await
-                        .map_err(|_| Error::ToBeDetermined)?;
-
-                    return Err(Error::ToBeDetermined);
+                    tokio::fs::remove_file(path).await?;
+                    return Err(Error::Any(anyhow!("File downloaded was invalid")));
                 }
             }
             _ => return Err(Error::Unimplemented),
@@ -346,12 +335,9 @@ impl Constellation for IpfsFileSystem {
                 client
                     .files_write(&name, true, true, fs)
                     .await
-                    .map_err(|_| Error::ToBeDetermined)?;
+                    .map_err(|e| anyhow!(e))?;
                 // Get the file stat from ipfs
-                let stat = client
-                    .files_stat(&name)
-                    .await
-                    .map_err(|_| Error::ToBeDetermined)?;
+                let stat = client.files_stat(&name).await.map_err(|e| anyhow!(e))?;
 
                 //check and compare size and if its different from local size to error
                 let size = buffer.len() as u64;
@@ -361,18 +347,15 @@ impl Constellation for IpfsFileSystem {
                     client
                         .files_rm(&name, false)
                         .await
-                        .map_err(|_| Error::ToBeDetermined)?;
+                        .map_err(|e| anyhow!(e))?;
 
-                    return Err(Error::ToBeDetermined);
+                    return Err(Error::Any(anyhow!("File downloaded was invalid")));
                 }
                 file.set_size(size as i64);
 
                 let hash = stat.hash;
 
-                let res = client
-                    .pin_add(&hash, true)
-                    .await
-                    .map_err(|_| Error::ToBeDetermined)?;
+                let res = client.pin_add(&hash, true).await.map_err(|e| anyhow!(e))?;
 
                 if !res.pins.contains(&hash) {
                     //TODO: Error?
@@ -478,7 +461,7 @@ impl Constellation for IpfsFileSystem {
                 client
                     .files_rm(&name, recursive)
                     .await
-                    .map_err(|_| Error::ToBeDetermined)?;
+                    .map_err(|e| anyhow!(e))?;
 
                 self.current_directory_mut()?.remove_child(&name[1..])?
             }
@@ -507,7 +490,7 @@ impl Constellation for IpfsFileSystem {
                 client
                     .files_mkdir(&path, recursive)
                     .await
-                    .map_err(|_| Error::ToBeDetermined)?;
+                    .map_err(|e| anyhow!(e))?;
             }
             _ => return Err(Error::Unimplemented),
         };
@@ -521,10 +504,7 @@ impl Constellation for IpfsFileSystem {
         if let Err(err) = self.current_directory_mut()?.add_child(directory.clone()) {
             let client = self.client.as_ref();
             if let IpfsOption::Mfs = self.client.option {
-                client
-                    .files_rm(&path, true)
-                    .await
-                    .map_err(|_| Error::ToBeDetermined)?;
+                client.files_rm(&path, true).await.map_err(|e| anyhow!(e))?;
             };
             return Err(err);
         }
