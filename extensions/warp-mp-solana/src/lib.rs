@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use warp_common::anyhow::{anyhow, ensure};
+use warp_common::anyhow::anyhow;
 use warp_common::error::Error;
 use warp_common::solana_client::rpc_client::RpcClient;
 use warp_common::solana_sdk::pubkey::Pubkey;
@@ -72,15 +72,6 @@ impl Account {
     pub fn set_tesseract(&mut self, tesseract: Arc<Mutex<Tesseract>>) {
         self.tesseract = Some(tesseract)
     }
-
-    //TODO: Use when creating identity
-    pub fn generate(&mut self) -> warp_common::anyhow::Result<()> {
-        ensure!(self.wallet.is_none(), "Account already exist"); //TODO: Perform a better check
-        let wallet =
-            SolanaWallet::create_random(warp_solana_utils::wallet::PhraseType::Standard, None)?;
-        self.wallet = Some(wallet);
-        Ok(())
-    }
 }
 
 impl Extension for Account {
@@ -109,7 +100,7 @@ impl MultiPass for Account {
             )));
         }
 
-        let mut tesseract = self.tesseract.as_ref().unwrap().lock().unwrap();
+        let mut tesseract = self.tesseract.as_mut().unwrap().lock().unwrap();
 
         if tesseract.exist("privkey") {
             let private_key = tesseract.retrieve(passphrase.as_bytes(), "privkey")?;
@@ -124,9 +115,11 @@ impl MultiPass for Account {
         }
 
         let wallet = SolanaWallet::create_random(PhraseType::Standard, None)?;
+        self.wallet = Some(wallet.clone());
 
         //TODO: Solana implementation here for creating an account on the blockchain
 
+        // The phrase or mnemonic is set in the event we need to show it to the user
         tesseract.set(passphrase.as_bytes(), "mnemonic", wallet.mnemonic.as_str())?;
         tesseract.set(
             passphrase.as_bytes(),
@@ -137,30 +130,71 @@ impl MultiPass for Account {
         let pubkey = PublicKey::from_bytes(&wallet.keypair.pubkey().to_bytes()[..]);
         identity.public_key = pubkey.clone();
 
+        self.identity = Some(identity.clone());
         Ok(pubkey)
     }
 
     fn get_identity(&self, id: Identifier) -> warp_common::Result<DataObject> {
-        match id {
-            Identifier::Username(_) => Err(Error::Unimplemented),
-            Identifier::PublicKey(_) => Err(Error::Unimplemented),
-            Identifier::Own => DataObject::new(
-                &DataType::Module(Module::Accounts),
-                self.identity.as_ref().unwrap(),
-            ),
-        }
+        let identity = match id {
+            Identifier::Username(_) => return Err(Error::Unimplemented),
+            Identifier::PublicKey(_) => return Err(Error::Unimplemented),
+            Identifier::Own => self.identity.as_ref().unwrap(),
+        };
+
+        DataObject::new(&DataType::Module(Module::Accounts), identity)
     }
 
     fn update_identity(
         &mut self,
-        _id: Identifier,
-        _option: Vec<IdentityUpdate>,
+        id: Identifier,
+        option: Vec<IdentityUpdate>,
     ) -> warp_common::Result<()> {
-        todo!()
+        let mut identity = match id {
+            Identifier::Username(_) => return Err(Error::Unimplemented),
+            Identifier::PublicKey(_) => return Err(Error::Unimplemented),
+            Identifier::Own => self
+                .identity
+                .as_mut()
+                .ok_or_else(|| anyhow!("Identity is not defined"))?,
+        };
+
+        for option in option {
+            match option {
+                IdentityUpdate::Username(username) => identity.username = username,
+                IdentityUpdate::Graphics { picture, banner } => {
+                    if let Some(hash) = picture {
+                        identity.graphics.profile_picture = hash;
+                    }
+                    if let Some(hash) = banner {
+                        identity.graphics.profile_banner = hash;
+                    }
+                }
+                IdentityUpdate::StatusMessage(status) => identity.status_message = status,
+            }
+        }
+
+        self.identity = Some(identity.clone());
+        Ok(())
     }
 
-    fn decrypt_private_key(&self, _passphrase: &str) -> warp_common::Result<Vec<u8>> {
-        todo!()
+    fn decrypt_private_key(&self, passphrase: &str) -> warp_common::Result<Vec<u8>> {
+        if self.tesseract.is_none() {
+            return Err(Error::Any(anyhow!(
+                "Tesseract is required to create an identity"
+            )));
+        }
+
+        let tesseract = self.tesseract.as_ref().unwrap().lock().unwrap();
+
+        if !tesseract.exist("privkey") {
+            return Err(Error::Any(anyhow!("Private key is not set or available")));
+        }
+
+        let private_key = tesseract.retrieve(passphrase.as_bytes(), "privkey")?;
+
+        let keypair = Keypair::from_base58_string(private_key.as_str());
+
+        Ok(keypair.to_bytes().to_vec())
     }
 
     fn refresh_cache(&mut self) -> warp_common::Result<()> {
