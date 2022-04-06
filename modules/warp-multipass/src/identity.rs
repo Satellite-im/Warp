@@ -121,8 +121,11 @@ pub enum IdentityUpdate {
     Username(String),
 
     /// Update graphics
-    Graphics(Graphics),
+    Graphics {
+        picture: Option<String>,
+        banner: Option<String>,
+    },
 
     /// Update status message
-    StatusMessage(String),
+    StatusMessage(Option<String>),
 }
