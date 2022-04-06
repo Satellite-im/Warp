@@ -1,36 +1,135 @@
-use libp2p::PeerId;
+pub mod behaviour;
+
+use crate::anyhow::{anyhow, ensure};
+use behaviour::RayGunBehavior;
+use libp2p::{
+    core::upgrade,
+    floodsub::{self, Floodsub, FloodsubEvent},
+    identity,
+    mdns::{Mdns, MdnsEvent},
+    mplex,
+    noise,
+    swarm::{dial_opts::DialOpts, NetworkBehaviourEventProcess, SwarmBuilder, SwarmEvent},
+    // `TokioTcpConfig` is available through the `tcp-tokio` feature.
+    tcp::TokioTcpConfig,
+    Multiaddr,
+    NetworkBehaviour,
+    PeerId,
+    Swarm,
+    Transport,
+};
+use std::net::ToSocketAddrs;
 use std::sync::{Arc, Mutex};
 use warp_common::error::Error;
+use warp_common::tokio::io::{self, AsyncReadExt};
 use warp_common::uuid::Uuid;
-use warp_common::{Extension, Module};
+use warp_common::{anyhow, Extension, Module};
+use warp_crypto::zeroize::Zeroize;
 use warp_multipass::MultiPass;
 use warp_raygun::{Callback, EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
 
-// TODO: Setup default
+#[derive(Default)]
 pub struct Libp2pMessaging {
-    pub id: Option<PeerId>,
-    pub account: Arc<Mutex<Box<dyn MultiPass>>>,
-    pub relay: (),
+    pub account: Option<Arc<Mutex<Box<dyn MultiPass>>>>,
+    pub keypair: Option<Vec<u8>>,
+    pub swarm: Option<Arc<Mutex<Swarm<RayGunBehavior>>>>,
+    pub relay_addr: Option<Multiaddr>,
+    pub listen_addr: Option<Multiaddr>,
     // topic of conversation
-    pub current_conversation: String,
+    pub current_conversation: Option<Uuid>,
     //TODO: Support multiple conversations
     pub conversations: Vec<()>,
 }
 
+impl Drop for Libp2pMessaging {
+    fn drop(&mut self) {
+        if let Some(key) = self.keypair.as_mut() {
+            key.zeroize();
+        }
+    }
+}
+
 impl Libp2pMessaging {
-    pub fn new() -> Self {
-        unimplemented!()
+    pub fn new(account: Arc<Mutex<Box<dyn MultiPass>>>, passphrase: &str) -> anyhow::Result<Self> {
+        let mut message = Libp2pMessaging::default();
+        message.account = Some(account.clone());
+        message.get_key_from_account(passphrase)?;
+        Ok(message)
     }
 
-    // format would be eg /ip4/x.x.x.x
-    // TODO: Setup ability for messenger to connect to a relay before starting the swarm
-    // TODO: Provide or use a Multiaddr instead and parse it accordingly
-    pub fn new_with_circuit_relay<S: AsRef<str>>(relay: S) -> Self {
-        unimplemented!()
+    pub fn set_circuit_relay<S: Into<Multiaddr>>(&mut self, relay: S) {
+        let address = relay.into();
+        self.relay_addr = Some(address);
     }
 
-    pub fn set_topic<S: AsRef<str>>(&mut self, topic: S) {
-        unimplemented!()
+    pub fn get_key_from_account(&mut self, passphrase: &str) -> anyhow::Result<()> {
+        if let Some(account) = &self.account {
+            let keypair = {
+                let account = account.lock().unwrap();
+                account.decrypt_private_key(passphrase)?
+            };
+            self.keypair = Some(keypair);
+        }
+        //TODO: Maybe error out if account is, for whatever reason, is not set.
+        Ok(())
+    }
+
+    pub async fn construct_connection(&mut self, topic: &str) -> anyhow::Result<()> {
+        //TBD
+        let mut keypair = std::mem::replace(&mut self.keypair.clone(), None)
+            .ok_or(anyhow!("Keypair is not available"))?;
+
+        let keypair = identity::Keypair::Ed25519(identity::ed25519::Keypair::decode(&mut keypair)?);
+
+        let peer = PeerId::from(keypair.public());
+        let noise_keys = noise::Keypair::<noise::X25519Spec>::new().into_authentic(&keypair)?;
+
+        // Create a tokio-based TCP transport use noise for authenticated
+        // encryption and Mplex for multiplexing of substreams on a TCP stream.
+        let transport = TokioTcpConfig::new()
+            .nodelay(true)
+            .upgrade(upgrade::Version::V1)
+            .authenticate(noise::NoiseConfig::xx(noise_keys).into_authenticated())
+            .multiplex(mplex::MplexConfig::new())
+            .boxed();
+
+        let topic = floodsub::Topic::new(topic);
+
+        let swarm = {
+            let mdns = Mdns::new(Default::default()).await?;
+            let mut behaviour = RayGunBehavior {
+                floodsub: Floodsub::new(peer.clone()),
+                mdns,
+            };
+
+            behaviour.floodsub.subscribe(topic.clone());
+
+            Arc::new(Mutex::new(
+                SwarmBuilder::new(transport, behaviour, peer)
+                    // We want the connection background tasks to be spawned
+                    // onto the tokio runtime.
+                    .executor(Box::new(|fut| {
+                        warp_common::tokio::spawn(fut);
+                    }))
+                    .build(),
+            ))
+        };
+
+        //Connect to relay if its available
+        if let Some(relay) = &self.relay_addr {
+            swarm.lock().unwrap().dial(relay.clone())?;
+        }
+
+        let address = match &self.listen_addr {
+            Some(addr) => addr.clone(),
+            None => "/ip4/0.0.0.0/tcp/0".parse()?,
+        };
+        {
+            swarm.lock().unwrap().listen_on(address)?;
+        }
+
+        self.swarm = Some(swarm);
+        Ok(())
     }
 }
 
