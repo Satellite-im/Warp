@@ -25,7 +25,7 @@ impl Default for SolanaManager {
             accounts: Vec::new(),
             payer_account: None,
             mnemonic: None,
-            connection: RpcClient::new(EndPoint::DevNet),
+            connection: RpcClient::new(EndPoint::DevNet.to_string()),
             user_account: None,
             network_identifier: EndPoint::DevNet,
             cluster_endpoint: EndPoint::DevNet,
@@ -55,7 +55,7 @@ impl SolanaManager {
     }
 
     pub fn new_from_endpoint(endpoint: EndPoint) -> Self {
-        let connection = RpcClient::new(endpoint.clone());
+        let connection = RpcClient::new(endpoint.to_string());
         Self {
             accounts: Vec::new(),
             payer_account: None,

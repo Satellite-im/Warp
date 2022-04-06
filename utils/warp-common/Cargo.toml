@@ -25,8 +25,8 @@ hex = "0.4"
 
 tiny-bip39 = "0.8"
 
-solana-sdk = { version = "1.10", optional = true }
-solana-client = { version = "1.10", optional = true }
+solana-sdk = { version = "1.8", optional = true }
+solana-client = { version = "1.8", optional = true }
 
 [target.'cfg(not(all(target_arch = "wasm32", not(any(target_os = "emscripten", target_os = "wasi", target_os="android")))))'.dependencies]
 dirs = "4.0"

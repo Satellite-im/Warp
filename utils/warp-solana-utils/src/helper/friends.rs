@@ -1,9 +1,13 @@
 use super::{friends_key, system_program_programid};
-use crate::pubkey_from_seeds;
+use crate::{pubkey_from_seeds, EndPoint};
+use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
+use bs58::encode::EncodeBuilder;
 use std::str::FromStr;
 use warp_common::anyhow;
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::solana_client::rpc_client::RpcClient;
+use warp_common::solana_client::rpc_config::RpcProgramAccountsConfig;
+use warp_common::solana_client::rpc_filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType};
 use warp_common::solana_sdk::account::{Account, ReadableAccount};
 use warp_common::solana_sdk::instruction::{AccountMeta, Instruction};
 use warp_common::solana_sdk::message::Message;
@@ -13,9 +17,12 @@ use warp_common::solana_sdk::signer::Signer;
 use warp_common::solana_sdk::transaction::Transaction;
 
 //TODO: Move connection and payer to the struct as fields
-pub struct Friends;
+pub struct Friends {
+    connection: RpcClient,
+    payer: Keypair,
+}
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, BorshSchema, Debug)]
 #[serde(crate = "warp_common::serde", rename_all = "camelCase")]
 pub enum FriendParam {
     CreateAccount { friend: FriendKey },
@@ -26,7 +33,7 @@ pub enum FriendParam {
     RemoveFriend,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, BorshSchema, Debug, Clone)]
 #[serde(crate = "warp_common::serde", rename_all = "snake_case")]
 pub enum FriendStatus {
     NotAssigned,
@@ -36,7 +43,7 @@ pub enum FriendStatus {
     Removed,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, BorshSchema, Debug)]
 #[serde(crate = "warp_common::serde", rename_all = "snake_case")]
 pub enum FriendEvents {
     NewRequest,
@@ -46,14 +53,13 @@ pub enum FriendEvents {
     FriendRemoved,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, BorshSchema, Debug)]
 #[serde(crate = "warp_common::serde", rename_all = "camelCase")]
 pub struct FriendKey {
     pub friendkey: [u8; 32],
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(crate = "warp_common::serde")]
+#[derive(BorshSerialize, BorshDeserialize, BorshSchema, PartialEq, Debug)]
 pub struct FriendAccount {
     id: String,
     from: String,
@@ -64,9 +70,14 @@ pub struct FriendAccount {
 }
 
 impl Friends {
+    pub fn new(connection: EndPoint, payer: Keypair) -> Self {
+        Self {
+            payer,
+            connection: RpcClient::new(connection.to_string()),
+        }
+    }
     pub fn create_derived_account(
-        client: &RpcClient,
-        payer: &Keypair,
+        &self,
         seed: &Pubkey,
         seed_str: &str,
         params: FriendParam,
@@ -83,11 +94,12 @@ impl Friends {
             &friends_key(),
         )?;
         let rent_key = Pubkey::from_str("SysvarRent111111111111111111111111111111111")?;
+        //TODO: Determine if we should rely on bincode or borsh
         let instruction = Instruction::new_with_bincode(
             friends_key(),
             &params,
             vec![
-                AccountMeta::new(payer.pubkey(), true),
+                AccountMeta::new(self.payer.pubkey(), true),
                 AccountMeta::new_readonly(*seed, false),
                 AccountMeta::new_readonly(base, false),
                 AccountMeta::new(key, false),
@@ -96,21 +108,18 @@ impl Friends {
             ],
         );
 
-        let message = Message::new(&[instruction], Some(&payer.pubkey()));
-        let transaction = Transaction::new(&[payer], message, client.get_latest_blockhash()?);
-        client.send_and_confirm_transaction(&transaction)?;
+        let message = Message::new(&[instruction], Some(&self.payer.pubkey()));
+        let transaction = Transaction::new(
+            &[&self.payer],
+            message,
+            self.connection.get_recent_blockhash()?.0,
+        );
+        self.connection.send_and_confirm_transaction(&transaction)?;
         Ok(key)
     }
 
-    pub fn create_friend(
-        client: &RpcClient,
-        payer: &Keypair,
-        from: &Pubkey,
-        to: &Pubkey,
-    ) -> anyhow::Result<Pubkey> {
-        Friends::create_derived_account(
-            client,
-            payer,
+    pub fn create_friend(&self, from: &Pubkey, to: &Pubkey) -> anyhow::Result<Pubkey> {
+        self.create_derived_account(
             from,
             "friends",
             FriendParam::CreateAccount {
@@ -122,8 +131,7 @@ impl Friends {
     }
 
     pub fn create_friend_request(
-        client: &RpcClient,
-        payer: &Keypair,
+        &self,
         friend_key: &Pubkey,
         friend_key2: &Pubkey,
         from: &Keypair,
@@ -137,17 +145,20 @@ impl Friends {
             to,
             padded,
         )?;
-        let message = Message::new(&[instruction], Some(&payer.pubkey()));
+        let message = Message::new(&[instruction], Some(&self.payer.pubkey()));
 
-        let transaction = Transaction::new(&[payer], message, client.get_latest_blockhash()?);
-        let signature = client.send_and_confirm_transaction(&transaction)?;
+        let transaction = Transaction::new(
+            &[&self.payer],
+            message,
+            self.connection.get_recent_blockhash()?.0,
+        );
+        let signature = self.connection.send_and_confirm_transaction(&transaction)?;
 
         Ok(signature)
     }
 
     pub fn accept_friend_request(
-        client: &RpcClient,
-        payer: &Keypair,
+        &self,
         friend_key: &Pubkey,
         from: &Pubkey,
         to: &Keypair,
@@ -155,49 +166,58 @@ impl Friends {
     ) -> anyhow::Result<Signature> {
         let instruction =
             Self::accept_friend_request_instruction(friend_key, from, &to.pubkey(), padded)?;
-        let message = Message::new(&[instruction], Some(&payer.pubkey()));
+        let message = Message::new(&[instruction], Some(&self.payer.pubkey()));
 
-        let transaction = Transaction::new(&[payer, to], message, client.get_latest_blockhash()?);
-        let signature = client.send_and_confirm_transaction(&transaction)?;
+        let transaction = Transaction::new(
+            &[&self.payer, to],
+            message,
+            self.connection.get_recent_blockhash()?.0,
+        );
+        let signature = self.connection.send_and_confirm_transaction(&transaction)?;
 
         Ok(signature)
     }
 
     pub fn deny_friend_request(
-        client: &RpcClient,
-        payer: &Keypair,
+        &self,
         friend_key: &Pubkey,
         from: &Pubkey,
         to: &Keypair,
     ) -> anyhow::Result<Signature> {
         let instruction = Self::deny_friend_request_instruction(friend_key, from, &to.pubkey())?;
-        let message = Message::new(&[instruction], Some(&payer.pubkey()));
+        let message = Message::new(&[instruction], Some(&self.payer.pubkey()));
 
-        let transaction = Transaction::new(&[payer, to], message, client.get_latest_blockhash()?);
-        let signature = client.send_and_confirm_transaction(&transaction)?;
+        let transaction = Transaction::new(
+            &[&self.payer, to],
+            message,
+            self.connection.get_recent_blockhash()?.0,
+        );
+        let signature = self.connection.send_and_confirm_transaction(&transaction)?;
 
         Ok(signature)
     }
 
     pub fn remove_friend_request(
-        client: &RpcClient,
-        payer: &Keypair,
+        &self,
         friend_key: &Pubkey,
         from: &Keypair,
         to: &Pubkey,
     ) -> anyhow::Result<Signature> {
         let instruction = Self::remove_friend_request_instruction(friend_key, &from.pubkey(), to)?;
-        let message = Message::new(&[instruction], Some(&payer.pubkey()));
+        let message = Message::new(&[instruction], Some(&self.payer.pubkey()));
 
-        let transaction = Transaction::new(&[payer, from], message, client.get_latest_blockhash()?);
-        let signature = client.send_and_confirm_transaction(&transaction)?;
+        let transaction = Transaction::new(
+            &[&self.payer, from],
+            message,
+            self.connection.get_recent_blockhash()?.0,
+        );
+        let signature = self.connection.send_and_confirm_transaction(&transaction)?;
 
         Ok(signature)
     }
 
     pub fn remove_friend(
-        client: &RpcClient,
-        payer: &Keypair,
+        &self,
         friend: FriendAccount,
         signer: &Keypair,
     ) -> anyhow::Result<Signature> {
@@ -209,28 +229,80 @@ impl Friends {
 
         let instruction =
             Self::remove_friend_instruction(&friend_key, &from_key, &to_key, initiator)?;
-        let message = Message::new(&[instruction], Some(&payer.pubkey()));
-        let transaction =
-            Transaction::new(&[payer, signer], message, client.get_latest_blockhash()?);
-        let signature = client.send_and_confirm_transaction(&transaction)?;
+        let message = Message::new(&[instruction], Some(&self.payer.pubkey()));
+        let transaction = Transaction::new(
+            &[&self.payer, signer],
+            message,
+            self.connection.get_recent_blockhash()?.0,
+        ); //get_latest_blockhash
+        let signature = self.connection.send_and_confirm_transaction(&transaction)?;
         Ok(signature)
     }
 
     //TODO: Convert the data into a proper format
-    pub fn get_friend(client: &RpcClient, friend_key: &Pubkey) -> anyhow::Result<Account> {
-        client
+    pub fn get_friend(&self, friend_key: &Pubkey) -> anyhow::Result<Account> {
+        self.connection
             .get_account(friend_key)
             .map_err(|e| anyhow::anyhow!("Get friend error: {:?}", e))
     }
 
-    pub fn get_parsed_friend(
-        client: &RpcClient,
-        friend_key: &Pubkey,
-    ) -> anyhow::Result<FriendAccount> {
-        let friend = Self::get_friend(client, friend_key)?;
-        let account = bincode::deserialize(friend.data())
-            .map_err(|e| anyhow::anyhow!("Error here: {:?}", e))?;
+    pub fn get_parsed_friend(&self, friend_key: &Pubkey) -> anyhow::Result<FriendAccount> {
+        let friend = self.get_friend(friend_key)?;
+        let account = borsh::try_from_slice_with_schema(&friend.data())?;
         Ok(account)
+    }
+
+    pub fn compute_friend_account_key(&self, from: Pubkey, to: Pubkey) -> anyhow::Result<Pubkey> {
+        let (_, key) = pubkey_from_seeds(
+            &[&from.to_bytes(), &to.to_bytes()],
+            "friend",
+            &friends_key(),
+        )?;
+
+        Ok(key)
+    }
+
+    pub fn get_friend_account_by_status(
+        &self,
+        status: FriendStatus,
+    ) -> anyhow::Result<(Vec<(Pubkey, Account)>, Vec<(Pubkey, Account)>)> {
+        let from_friend_status = borsh::to_vec(&(self.payer.pubkey().to_bytes(), status.clone()))
+            .map(bs58::encode)
+            .map(EncodeBuilder::into_vec)?;
+
+        let to_friend_status = borsh::to_vec(&(status.clone(), self.payer.pubkey().to_bytes()))
+            .map(bs58::encode)
+            .map(EncodeBuilder::into_vec)?;
+
+        let mut outgoing_filter = RpcProgramAccountsConfig::default();
+        outgoing_filter.filters = Some(vec![RpcFilterType::Memcmp(Memcmp {
+            offset: 0,
+            bytes: MemcmpEncodedBytes::Bytes(from_friend_status),
+            encoding: None,
+        })]);
+
+        let mut incoming_filter = RpcProgramAccountsConfig::default();
+        incoming_filter.filters = Some(vec![RpcFilterType::Memcmp(Memcmp {
+            offset: 32,
+            bytes: MemcmpEncodedBytes::Bytes(to_friend_status),
+            encoding: None,
+        })]);
+
+        let outgoing = self
+            .connection
+            .get_program_accounts_with_config(&friends_key(), outgoing_filter)?
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let incoming = self
+            .connection
+            .get_program_accounts_with_config(&friends_key(), incoming_filter)?
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        Ok((incoming, outgoing))
     }
 
     pub fn make_friend_request_instruction(
