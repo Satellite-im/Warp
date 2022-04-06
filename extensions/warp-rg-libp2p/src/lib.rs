@@ -63,59 +63,63 @@ pub enum MessagingEvents {
 impl RayGun for Libp2pMessaging {
     async fn get_messages(
         &self,
-        conversation_id: Uuid,
-        options: MessageOptions,
-        callback: Option<Callback>,
+        _conversation_id: Uuid,
+        _options: MessageOptions,
+        _callback: Option<Callback>,
     ) -> warp_common::Result<Vec<Message>> {
         Err(Error::Unimplemented)
     }
 
     async fn send(
         &mut self,
-        conversation_id: Uuid,
-        message_id: Option<Uuid>,
-        message: Vec<String>,
+        _conversation_id: Uuid,
+        _message_id: Option<Uuid>,
+        _message: Vec<String>,
     ) -> warp_common::Result<()> {
         Err(Error::Unimplemented)
     }
 
-    async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> warp_common::Result<()> {
+    async fn delete(
+        &mut self,
+        _conversation_id: Uuid,
+        _message_id: Uuid,
+    ) -> warp_common::Result<()> {
         Err(Error::Unimplemented)
     }
 
     async fn react(
         &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: ReactionState,
-        emoji: Option<String>,
+        _conversation_id: Uuid,
+        _message_id: Uuid,
+        _state: ReactionState,
+        _emoji: Option<String>,
     ) -> warp_common::Result<()> {
         Err(Error::Unimplemented)
     }
 
     async fn pin(
         &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: PinState,
+        _conversation_id: Uuid,
+        _message_id: Uuid,
+        _state: PinState,
     ) -> warp_common::Result<()> {
         Err(Error::Unimplemented)
     }
 
     async fn reply(
         &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        message: Vec<String>,
+        _conversation_id: Uuid,
+        _message_id: Uuid,
+        _message: Vec<String>,
     ) -> warp_common::Result<()> {
         Err(Error::Unimplemented)
     }
 
     async fn embeds(
         &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: EmbedState,
+        _conversation_id: Uuid,
+        _message_id: Uuid,
+        _state: EmbedState,
     ) -> warp_common::Result<()> {
         Err(Error::Unimplemented)
     }
