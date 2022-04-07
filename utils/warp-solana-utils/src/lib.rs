@@ -7,7 +7,6 @@ pub mod wallet;
 
 use warp_common::anyhow::{anyhow, Result};
 use warp_common::derive_more::Display;
-use warp_common::error::Error;
 use warp_common::solana_sdk::derivation_path::DerivationPath;
 use warp_common::solana_sdk::pubkey::Pubkey;
 use warp_common::solana_sdk::signature::keypair_from_seed_and_derivation_path;

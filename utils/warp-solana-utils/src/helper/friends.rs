@@ -93,7 +93,6 @@ impl Friends {
             seed_str,
             &friends_key(),
         )?;
-        let rent_key = Pubkey::from_str("SysvarRent111111111111111111111111111111111")?;
         //TODO: Determine if we should rely on bincode or borsh
         let instruction = Instruction::new_with_bincode(
             friends_key(),
@@ -103,7 +102,7 @@ impl Friends {
                 AccountMeta::new_readonly(*seed, false),
                 AccountMeta::new_readonly(base, false),
                 AccountMeta::new(key, false),
-                AccountMeta::new(rent_key, false), //SystemProgram?,
+                AccountMeta::new(warp_common::solana_sdk::sysvar::rent::id(), false), //SystemProgram?,
                 AccountMeta::new_readonly(system_program_programid(), false),
             ],
         );
@@ -312,7 +311,6 @@ impl Friends {
         to: &Pubkey,
         padded: [[u8; 32]; 4],
     ) -> anyhow::Result<Instruction> {
-        let rent = Pubkey::from_str("SysvarRent111111111111111111111111111111111")?;
         Ok(Instruction::new_with_bincode(
             friends_key(),
             &FriendParam::MakeRequest { tex: padded },
@@ -321,7 +319,7 @@ impl Friends {
                 AccountMeta::new(*friend_key2, false),
                 AccountMeta::new_readonly(*from, true),
                 AccountMeta::new(*to, false),
-                AccountMeta::new_readonly(rent, false),
+                AccountMeta::new_readonly(warp_common::solana_sdk::sysvar::rent::id(), false),
             ],
         ))
     }
@@ -332,7 +330,6 @@ impl Friends {
         to: &Pubkey,
         padded: [[u8; 32]; 4],
     ) -> anyhow::Result<Instruction> {
-        let rent = Pubkey::from_str("SysvarRent111111111111111111111111111111111")?;
         Ok(Instruction::new_with_bincode(
             friends_key(),
             &FriendParam::AcceptRequest { tex: padded },
@@ -340,7 +337,7 @@ impl Friends {
                 AccountMeta::new(*friend_key, false),
                 AccountMeta::new(*from, false),
                 AccountMeta::new_readonly(*to, true),
-                AccountMeta::new_readonly(rent, false),
+                AccountMeta::new_readonly(warp_common::solana_sdk::sysvar::rent::id(), false),
             ],
         ))
     }
@@ -350,7 +347,6 @@ impl Friends {
         from: &Pubkey,
         to: &Pubkey,
     ) -> anyhow::Result<Instruction> {
-        let rent = Pubkey::from_str("SysvarRent111111111111111111111111111111111")?;
         Ok(Instruction::new_with_bincode(
             friends_key(),
             &FriendParam::DenyRequest,
@@ -358,7 +354,7 @@ impl Friends {
                 AccountMeta::new(*friend_key, false),
                 AccountMeta::new(*from, false),
                 AccountMeta::new_readonly(*to, true),
-                AccountMeta::new_readonly(rent, false),
+                AccountMeta::new_readonly(warp_common::solana_sdk::sysvar::rent::id(), false),
             ],
         ))
     }
@@ -368,7 +364,6 @@ impl Friends {
         from: &Pubkey,
         to: &Pubkey,
     ) -> anyhow::Result<Instruction> {
-        let rent = Pubkey::from_str("SysvarRent111111111111111111111111111111111")?;
         Ok(Instruction::new_with_bincode(
             friends_key(),
             &FriendParam::RemoveRequest,
@@ -376,7 +371,7 @@ impl Friends {
                 AccountMeta::new(*friend_key, false),
                 AccountMeta::new_readonly(*from, true),
                 AccountMeta::new(*to, false),
-                AccountMeta::new_readonly(rent, false),
+                AccountMeta::new_readonly(warp_common::solana_sdk::sysvar::rent::id(), false),
             ],
         ))
     }
@@ -387,7 +382,6 @@ impl Friends {
         to: &Pubkey,
         initiator: bool,
     ) -> anyhow::Result<Instruction> {
-        let rent = Pubkey::from_str("SysvarRent111111111111111111111111111111111")?;
         Ok(Instruction::new_with_bincode(
             friends_key(),
             &FriendParam::RemoveFriend,
@@ -395,7 +389,7 @@ impl Friends {
                 AccountMeta::new(*friend_key, false),
                 AccountMeta::new_readonly(*from, initiator),
                 AccountMeta::new_readonly(*to, !initiator),
-                AccountMeta::new_readonly(rent, false),
+                AccountMeta::new_readonly(warp_common::solana_sdk::sysvar::rent::id(), false),
             ],
         ))
     }
