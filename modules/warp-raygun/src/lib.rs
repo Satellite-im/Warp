@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::uuid::Uuid;
@@ -12,6 +13,21 @@ pub struct MessageOptions {
     pub id_range: Option<(Uuid, Uuid)>,
     pub limit: Option<i64>,
     pub skip: Option<i64>,
+}
+
+/// Instance for holding a conversation with the key being the UUID of the conversation.
+#[derive(Default, Debug)]
+pub struct Conversation(pub HashMap<Uuid, Vec<Message>>);
+
+impl AsRef<HashMap<Uuid, Vec<Message>>> for Conversation {
+    fn as_ref(&self) -> &HashMap<Uuid, Vec<Message>> {
+        &self.0
+    }
+}
+impl AsMut<HashMap<Uuid, Vec<Message>>> for Conversation {
+    fn as_mut(&mut self) -> &mut HashMap<Uuid, Vec<Message>> {
+        &mut self.0
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
@@ -37,6 +53,16 @@ pub struct Message {
 
     /// Message context for `Message`
     pub value: Vec<String>,
+}
+
+impl Message {
+    pub fn pin_message(&mut self) {
+        self.pinned = true
+    }
+
+    pub fn unpin_message(&mut self) {
+        self.pinned = false
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]

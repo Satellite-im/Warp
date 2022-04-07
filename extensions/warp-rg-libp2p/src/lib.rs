@@ -1,7 +1,4 @@
-pub mod behaviour;
-
-use crate::anyhow::{anyhow, ensure};
-use behaviour::RayGunBehavior;
+use crate::anyhow::anyhow;
 use libp2p::{
     core::upgrade,
     floodsub::{self, Floodsub, FloodsubEvent},
@@ -18,7 +15,6 @@ use libp2p::{
     Swarm,
     Transport,
 };
-use std::net::ToSocketAddrs;
 use std::sync::{Arc, Mutex};
 use warp_common::error::Error;
 use warp_common::tokio::io::{self, AsyncReadExt};
@@ -26,7 +22,9 @@ use warp_common::uuid::Uuid;
 use warp_common::{anyhow, Extension, Module};
 use warp_crypto::zeroize::Zeroize;
 use warp_multipass::MultiPass;
-use warp_raygun::{Callback, EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
+use warp_raygun::{
+    Callback, Conversation, EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState,
+};
 
 #[derive(Default)]
 pub struct Libp2pMessaging {
@@ -38,13 +36,73 @@ pub struct Libp2pMessaging {
     // topic of conversation
     pub current_conversation: Option<Uuid>,
     //TODO: Support multiple conversations
-    pub conversations: Vec<()>,
+    pub conversations: Arc<Mutex<Conversation>>,
 }
 
 impl Drop for Libp2pMessaging {
     fn drop(&mut self) {
         if let Some(key) = self.keypair.as_mut() {
             key.zeroize();
+        }
+    }
+}
+
+#[derive(NetworkBehaviour)]
+#[behaviour(event_process = true)]
+pub struct RayGunBehavior {
+    pub floodsub: Floodsub,
+    pub mdns: Mdns,
+
+    #[behaviour(ignore)]
+    pub inner: Arc<Mutex<Conversation>>,
+}
+
+impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
+    // Called when `floodsub` produces an event.
+    fn inject_event(&mut self, message: FloodsubEvent) {
+        match message {
+            FloodsubEvent::Message(_message) => {
+                if let Ok(message) = warp_common::serde_json::from_slice::<Message>(&_message.data)
+                {
+                    self.inner
+                        .lock()
+                        .unwrap()
+                        .as_mut()
+                        .entry(message.conversation_id)
+                        .or_insert_with(Vec::new)
+                        .push(message);
+                }
+            }
+            FloodsubEvent::Subscribed {
+                peer_id: _,
+                topic: _,
+            } => {
+                //TODO: Create key exchange here between the two peers
+            }
+            FloodsubEvent::Unsubscribed {
+                peer_id: _,
+                topic: _,
+            } => {}
+        }
+    }
+}
+
+impl NetworkBehaviourEventProcess<MdnsEvent> for RayGunBehavior {
+    // Called when `mdns` produces an event.
+    fn inject_event(&mut self, event: MdnsEvent) {
+        match event {
+            MdnsEvent::Discovered(list) => {
+                for (peer, _) in list {
+                    self.floodsub.add_node_to_partial_view(peer);
+                }
+            }
+            MdnsEvent::Expired(list) => {
+                for (peer, _) in list {
+                    if !self.mdns.has_node(&peer) {
+                        self.floodsub.remove_node_from_partial_view(&peer);
+                    }
+                }
+            }
         }
     }
 }
@@ -74,10 +132,10 @@ impl Libp2pMessaging {
         Ok(())
     }
 
-    pub async fn construct_connection(&mut self, topic: &str) -> anyhow::Result<()> {
+    pub async fn construct_connection(&mut self, topic: Uuid) -> anyhow::Result<()> {
         //TBD
         let mut keypair = std::mem::replace(&mut self.keypair.clone(), None)
-            .ok_or(anyhow!("Keypair is not available"))?;
+            .ok_or_else(|| anyhow!("Keypair is not available"))?;
 
         let keypair = identity::Keypair::Ed25519(identity::ed25519::Keypair::decode(&mut keypair)?);
 
@@ -93,13 +151,14 @@ impl Libp2pMessaging {
             .multiplex(mplex::MplexConfig::new())
             .boxed();
 
-        let topic = floodsub::Topic::new(topic);
+        let topic = floodsub::Topic::new(topic.to_string());
 
         let swarm = {
             let mdns = Mdns::new(Default::default()).await?;
             let mut behaviour = RayGunBehavior {
-                floodsub: Floodsub::new(peer.clone()),
+                floodsub: Floodsub::new(peer),
                 mdns,
+                inner: self.conversations.clone(),
             };
 
             behaviour.floodsub.subscribe(topic.clone());
@@ -162,19 +221,42 @@ pub enum MessagingEvents {
 impl RayGun for Libp2pMessaging {
     async fn get_messages(
         &self,
-        _conversation_id: Uuid,
-        _options: MessageOptions,
-        _callback: Option<Callback>,
+        conversation_id: Uuid,
+        _: MessageOptions,
+        _: Option<Callback>,
     ) -> warp_common::Result<Vec<Message>> {
-        Err(Error::Unimplemented)
+        let conversation = {
+            self.conversations
+                .lock()
+                .unwrap()
+                .as_ref()
+                .get(&conversation_id)
+                .cloned()
+                .ok_or(Error::ObjectNotFound)?
+        };
+        //TODO: Implement a check across options
+
+        Ok(conversation)
     }
 
     async fn send(
         &mut self,
-        _conversation_id: Uuid,
+        conversation_id: Uuid,
         _message_id: Option<Uuid>,
-        _message: Vec<String>,
+        value: Vec<String>,
     ) -> warp_common::Result<()> {
+        //TODO: Implement editing message
+        let mut message = Message::default();
+        message.conversation_id = conversation_id;
+        message.value = value;
+
+        let bytes = warp_common::serde_json::to_vec(&message)?;
+        if let Some(swarm) = &self.swarm {
+            let topic = floodsub::Topic::new(conversation_id.to_string());
+            let mut swarm = swarm.lock().unwrap();
+            swarm.behaviour_mut().floodsub.publish(topic, bytes);
+            return Ok(());
+        }
         Err(Error::Unimplemented)
     }
 
