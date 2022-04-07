@@ -1,8 +1,13 @@
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
+use warp_common::cfg_if::cfg_if;
+
+cfg_if! {
+    if #[cfg(feature = "http")] {
+        pub mod http;
+    }
+}
+
+cfg_if! {
+    if #[cfg(feature = "native")] {
+        pub mod native;
     }
 }
