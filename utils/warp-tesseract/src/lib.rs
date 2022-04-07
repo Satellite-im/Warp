@@ -400,9 +400,9 @@ mod test {
     #[test]
     pub fn test_with_256bit_passphase() -> warp_common::anyhow::Result<()> {
         let mut tesseract = Tesseract::default();
-        let key = b"an example very very secret key."[..];
-        tesseract.set(&key, "API", "MYKEY")?;
-        let data = tesseract.retrieve(&key, "API")?;
+        let key = &b"an example very very secret key."[..];
+        tesseract.set(key, "API", "MYKEY")?;
+        let data = tesseract.retrieve(key, "API")?;
         assert_eq!(data, String::from("MYKEY"));
         Ok(())
     }
