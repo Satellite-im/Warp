@@ -1,12 +1,12 @@
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, fmt::Debug, path::Path};
 use warp_common::{
     anyhow::{self, Result},
     cfg_if::cfg_if,
-    serde::{Deserialize, Serialize},
     serde_json,
 };
+use warp_crypto::zeroize::Zeroize;
 
-use crate::anyhow::bail;
+use crate::anyhow::{anyhow, bail, ensure};
 use warp_common::error::Error;
 
 cfg_if! {
@@ -18,10 +18,36 @@ cfg_if! {
 }
 
 /// The key store that holds encrypted strings that can be used for later use.
-#[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq, Eq)]
-#[serde(crate = "warp_common::serde")]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct Tesseract {
     internal: HashMap<String, Vec<u8>>,
+    plaintext_inner: Option<HashMap<String, String>>,
+    plaintext_pass: Option<Vec<u8>>,
+}
+
+impl Debug for Tesseract {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tesseract")
+            .field("internal", &self.internal)
+            .finish()
+    }
+}
+
+impl Drop for Tesseract {
+    fn drop(&mut self) {
+        if !self.is_secured() {
+            match self.lock() {
+                Ok(()) => {}
+                Err(_) => {
+                    self.plaintext_inner = None;
+                    self.plaintext_pass = self.plaintext_pass.as_mut().and_then(|z| {
+                        z.zeroize();
+                        None
+                    });
+                }
+            }
+        }
+    }
 }
 
 impl Tesseract {
@@ -273,12 +299,94 @@ impl Tesseract {
         }
         Ok(map)
     }
+
+    /// Checks to see if tesseract is secured and not "unlocked"
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp_tesseract::Tesseract::default();
+    ///  let key = warp_crypto::generate(32);
+    ///  tesseract.set(&key, "API", "MYKEY").unwrap();
+    ///  assert!(tesseract.is_secured());
+    ///  tesseract.unlock(&key).unwrap();
+    ///  assert!(!tesseract.is_secured())
+    /// ```
+    pub fn is_secured(&self) -> bool {
+        self.plaintext_pass.is_none() || self.plaintext_inner.is_none()
+    }
+
+    /// Decrypts and store the password and plaintext contents in memory
+    ///
+    /// Note: This method is ***not safe*** and should not be used in a secured environment.
+    pub fn unlock(&mut self, passphrase: &[u8]) -> Result<()> {
+        let mut map = HashMap::new();
+        for key in self.internal.keys() {
+            let value = self.retrieve(passphrase, key)?;
+            map.insert(key.clone(), value);
+        }
+        self.plaintext_inner = Some(map);
+        self.plaintext_pass = Some(passphrase.to_vec());
+        Ok(())
+    }
+
+    /// Encrypts and remove password and plaintext from memory.
+    ///
+    /// Note: This will override existing contents within Tesseract.
+    pub fn lock(&mut self) -> Result<()> {
+        ensure!(!self.is_secured(), "Data is secured");
+
+        let mut plaintext_inner = std::mem::replace(&mut self.plaintext_inner, None).unwrap();
+        let mut plaintext_pass = std::mem::replace(&mut self.plaintext_pass, None).unwrap();
+
+        for (k, v) in plaintext_inner.drain().take(1) {
+            self.set(&plaintext_pass, &k, &v)?;
+        }
+
+        plaintext_pass.zeroize();
+        Ok(())
+    }
+
+    pub fn unsafe_exist(&self, key: &str) -> bool {
+        if self.is_secured() {
+            return false;
+        }
+        if let Some(plaintext) = self.plaintext_inner.as_ref() {
+            return plaintext.contains_key(key);
+        }
+        false
+    }
+
+    /// Used to retreive the value stored in plaintext
+    pub fn unsafe_retrieve(&self, key: &str) -> Result<String> {
+        ensure!(self.unsafe_exist(key), Error::ObjectNotFound);
+        if let Some(plaintext) = self.plaintext_inner.as_ref() {
+            return plaintext
+                .get(key)
+                .ok_or_else(|| anyhow!(Error::ObjectNotFound))
+                .map(|plain| plain.clone());
+        }
+        bail!(Error::ObjectNotFound)
+    }
+
+    /// Used to set the value in plaintext
+    pub fn unsafe_set(&mut self, key: &str, val: &str) -> Result<()> {
+        if self.is_secured() {
+            return Ok(());
+        }
+        if let Some(plaintext) = self.plaintext_inner.as_mut() {
+            plaintext.insert(key.to_string(), val.to_string());
+            return Ok(());
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod test {
     use crate::Tesseract;
     use warp_crypto::generate;
+
     #[test]
     pub fn test_default() -> warp_common::anyhow::Result<()> {
         let mut tesseract = Tesseract::default();
@@ -292,7 +400,7 @@ mod test {
     #[test]
     pub fn test_with_256bit_passphase() -> warp_common::anyhow::Result<()> {
         let mut tesseract = Tesseract::default();
-        let key = b"an example very very secret key.".to_vec();
+        let key = b"an example very very secret key."[..];
         tesseract.set(&key, "API", "MYKEY")?;
         let data = tesseract.retrieve(&key, "API")?;
         assert_eq!(data, String::from("MYKEY"));
@@ -302,11 +410,40 @@ mod test {
     #[test]
     pub fn test_with_non_256bit_passphase() -> warp_common::anyhow::Result<()> {
         let mut tesseract = Tesseract::default();
-        let key = b"This is a secret key that will be used for encryption. Totally not 256bit key"
-            .to_vec();
-        tesseract.set(&key, "API", "MYKEY")?;
-        let data = tesseract.retrieve(&key, "API")?;
+        let key =
+            &b"This is a secret key that will be used for encryption. Totally not 256bit key"[..];
+        tesseract.set(key, "API", "MYKEY")?;
+        let data = tesseract.retrieve(key, "API")?;
         assert_eq!(data, String::from("MYKEY"));
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_lock_unlock() -> warp_common::anyhow::Result<()> {
+        let mut tesseract = Tesseract::default();
+        let key =
+            &b"This is a secret key that will be used for encryption. Totally not 256bit key"[..];
+        tesseract.set(key, "API", "MYKEY")?;
+        assert!(tesseract.is_secured());
+
+        tesseract.unlock(key)?;
+
+        assert!(!tesseract.is_secured());
+
+        let val = tesseract.unsafe_retrieve("API")?;
+        assert_eq!(val, String::from("MYKEY"));
+
+        tesseract.unsafe_set("API", "NEWKEY")?;
+
+        let val = tesseract.unsafe_retrieve("API")?;
+        assert_eq!(val, String::from("NEWKEY"));
+
+        tesseract.lock()?;
+
+        assert!(tesseract.is_secured());
+
+        let val = tesseract.retrieve(key, "API")?;
+        assert_eq!(val, String::from("NEWKEY"));
         Ok(())
     }
 }
