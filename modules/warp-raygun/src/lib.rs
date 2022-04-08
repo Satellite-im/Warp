@@ -6,7 +6,7 @@ use warp_common::{Extension, Result};
 
 pub type Callback = Box<dyn Fn() + Sync + Send>;
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct MessageOptions {
     pub smart: Option<bool>,
     pub date_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
@@ -59,9 +59,19 @@ impl Default for Message {
     fn default() -> Self {
         Self {
             id: Uuid::new_v4(),
+            conversation_id: Uuid::nil(),
+            sender: Uuid::nil(),
             date: Utc::now(),
-            ..Default::default()
+            pinned: false,
+            reactions: Vec::new(),
+            value: Vec::new(),
         }
+    }
+}
+
+impl Message {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
