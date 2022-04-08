@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use warp_common::serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "warp_common::serde")]
 pub struct Role {
     /// Name of the role
@@ -11,7 +11,7 @@ pub struct Role {
     pub level: u8,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "warp_common::serde")]
 pub struct Badge {
     /// TBD
@@ -21,7 +21,7 @@ pub struct Badge {
     pub icon: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "warp_common::serde")]
 pub struct Graphics {
     /// Hash to profile picture
@@ -31,7 +31,7 @@ pub struct Graphics {
     pub profile_banner: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "warp_common::serde")]
 pub struct Identity {
     /// Username of the identity
@@ -62,7 +62,7 @@ pub struct Identity {
     pub linked_accounts: HashMap<String, String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "warp_common::serde")]
 pub struct PublicKey(Vec<u8>);
 
