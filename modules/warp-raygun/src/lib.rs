@@ -55,6 +55,16 @@ pub struct Message {
     pub value: Vec<String>,
 }
 
+impl Default for Message {
+    fn default() -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            date: Utc::now(),
+            ..Default::default()
+        }
+    }
+}
+
 impl Message {
     pub fn pin_message(&mut self) {
         self.pinned = true
