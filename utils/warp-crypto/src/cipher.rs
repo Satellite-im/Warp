@@ -178,6 +178,13 @@ pub fn xchacha20poly1305_encrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     Ok(cipher)
 }
 
+pub fn xchacha20poly1305_self_encrypt(data: &[u8]) -> Result<Vec<u8>> {
+    let key = crate::generate(34);
+    let mut data = xchacha20poly1305_encrypt(&key, data)?;
+    data.extend(key);
+    Ok(data)
+}
+
 /// Used to decrypt data using XChaCha20Poly1305 with a 256bit key
 /// Note: If key is less than or greater than 256bits/32bytes, it will hash the key with sha256 with nonce being its salt
 pub fn xchacha20poly1305_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
@@ -194,6 +201,11 @@ pub fn xchacha20poly1305_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
         .map_err(|e| anyhow::anyhow!(e))?;
 
     Ok(plaintext)
+}
+
+pub fn xchacha20poly1305_self_decrypt(data: &[u8]) -> Result<Vec<u8>> {
+    let (key, payload) = extract_data_slice(&data, 34);
+    xchacha20poly1305_decrypt(key, payload)
 }
 
 pub fn xchacha20poly1305_encrypt_stream(
@@ -234,6 +246,15 @@ pub fn xchacha20poly1305_encrypt_stream(
     Ok(())
 }
 
+pub fn xchacha20poly1305_self_encrypt_stream(
+    reader: &mut impl Read,
+    writer: &mut impl Write,
+) -> Result<()> {
+    let key = crate::generate(34);
+    writer.write_all(&key)?;
+    xchacha20poly1305_encrypt_stream(&key, reader, writer)
+}
+
 pub fn xchacha20poly1305_decrypt_stream(
     key: &[u8],
     reader: &mut impl Read,
@@ -271,6 +292,15 @@ pub fn xchacha20poly1305_decrypt_stream(
     Ok(())
 }
 
+pub fn xchacha20poly1305_self_decrypt_stream(
+    reader: &mut impl Read,
+    writer: &mut impl Write,
+) -> Result<()> {
+    let mut key = vec![0u8; 34];
+    reader.read_exact(&mut key)?;
+    xchacha20poly1305_decrypt_stream(&key, reader, writer)
+}
+
 fn extract_data_slice(data: &[u8], size: usize) -> (&[u8], &[u8]) {
     let extracted = &data[data.len() - size..];
     let payload = &data[..data.len() - size];
@@ -306,6 +336,23 @@ mod test {
         let cipher = aes256gcm_self_encrypt(&message)?;
 
         let plaintext = aes256gcm_self_decrypt(&cipher)?;
+
+        assert_ne!(cipher, plaintext);
+
+        assert_eq!(
+            String::from_utf8_lossy(&plaintext),
+            String::from("Hello, World!")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn xchacha20poly1305_self_encrypt_decrypt() -> anyhow::Result<()> {
+        let message = b"Hello, World!".to_vec();
+
+        let cipher = xchacha20poly1305_self_encrypt(&message)?;
+
+        let plaintext = xchacha20poly1305_self_decrypt(&cipher)?;
 
         assert_ne!(cipher, plaintext);
 
@@ -386,6 +433,26 @@ mod test {
         xchacha20poly1305_encrypt_stream(&key, &mut base.as_slice(), &mut cipher)?;
 
         xchacha20poly1305_decrypt_stream(&key, &mut cipher.as_slice(), &mut plaintext)?;
+
+        assert_ne!(cipher, plaintext);
+
+        assert_eq!(
+            String::from_utf8_lossy(&plaintext),
+            String::from("this is my message")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn xchacha20poly1305_stream_self_encrypt_decrypt() -> anyhow::Result<()> {
+        let base = b"this is my message".to_vec();
+        let mut cipher = Vec::<u8>::new();
+
+        let mut plaintext = Vec::<u8>::new();
+
+        xchacha20poly1305_self_encrypt_stream(&mut base.as_slice(), &mut cipher)?;
+
+        xchacha20poly1305_self_decrypt_stream(&mut cipher.as_slice(), &mut plaintext)?;
 
         assert_ne!(cipher, plaintext);
 
