@@ -5,8 +5,8 @@ pub mod user;
 
 //TODO: Have these configurable
 
+use anchor_client::solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
-use warp_common::solana_sdk::pubkey::Pubkey;
 
 pub fn friends_key() -> Pubkey {
     Pubkey::from_str("BxX6o2HG5DWrJt2v8GMSWNG2V2NtxNbAUF3wdE5Ao5gS").unwrap_or_default()

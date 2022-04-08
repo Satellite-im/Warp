@@ -1,12 +1,14 @@
+use anchor_client::solana_client::rpc_client::RpcClient;
+use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
+use anchor_client::solana_sdk::pubkey::Pubkey;
+use anchor_client::solana_sdk::signature::keypair_from_seed;
+use anchor_client::solana_sdk::signature::{Keypair, Signer};
 use std::collections::HashMap;
 use warp_common::anyhow::{ensure, Result};
-use warp_common::solana_client::rpc_client::RpcClient;
-use warp_common::solana_sdk::commitment_config::CommitmentConfig;
-use warp_common::solana_sdk::pubkey::Pubkey;
-use warp_common::solana_sdk::signature::{Keypair, Signer};
+use warp_common::bip39::{Language, Mnemonic, Seed};
 
 use crate::wallet::SolanaWallet;
-use crate::EndPoint;
+use crate::{anyhow, EndPoint};
 
 pub struct SolanaManager {
     pub accounts: Vec<SolanaWallet>,
@@ -69,15 +71,18 @@ impl SolanaManager {
     }
 
     //not used
-    // pub fn generate_user_keypair(&self) -> Result<Keypair> {
-    //     let mnemonic = self.mnemonic.as_ref().ok_or(Error::ToBeDetermined)?;
-    //     let mnemonic = Mnemonic::from_phrase(mnemonic.as_str(), Language::English)?;
-    //     let seed = Seed::new(&mnemonic, "");
-    //     // let hash = sha256_hash(&format!("{}user", String::from_utf8_lossy(seed.as_bytes())));
-    //     let keypair = keypair_from_seed(seed.as_bytes()).map_err(|e| anyhow!(e.to_string()))?;
-    //     // let keypair = keypair_from_seed(hash.as_bytes()).map_err(|e| anyhow!(e.to_string()))?;
-    //     Ok(keypair)
-    // }
+    pub fn generate_user_keypair(&self) -> Result<Keypair> {
+        let mnemonic = self
+            .mnemonic
+            .as_ref()
+            .ok_or_else(|| anyhow!("Mnemonic phrase is invalid"))?;
+        let mnemonic = Mnemonic::from_phrase(mnemonic.as_str(), Language::English)?;
+        let seed = Seed::new(&mnemonic, "");
+        // let hash = sha256_hash(&format!("{}user", String::from_utf8_lossy(seed.as_bytes())));
+        let keypair = keypair_from_seed(seed.as_bytes()).map_err(|e| anyhow!(e.to_string()))?;
+        // let keypair = keypair_from_seed(hash.as_bytes()).map_err(|e| anyhow!(e.to_string()))?;
+        Ok(keypair)
+    }
 
     // pub fn generate_derived_public_key(
     //     &mut self,
@@ -126,18 +131,21 @@ impl SolanaManager {
     //     Ok(())
     // }
 
-    // pub fn initialize_from_mnemonic(&mut self, mnemonic: &str) -> Result<()> {
-    //     let wallet = SolanaWallet::restore_from_mnemonic(None, mnemonic)?;
-    //     self.initiralize_from_solana_wallet(wallet)
-    // }
-    //
-    // pub fn initiralize_from_solana_wallet(&mut self, wallet: SolanaWallet) -> Result<()> {
-    //     self.payer_account = Some(wallet.get_keypair()?);
-    //     self.mnemonic = Some(wallet.mnemonic.clone());
-    //     self.user_account = Some(self.generate_user_keypair()?);
-    //     self.accounts.push(wallet); //TODO: Borrow or clone but why dup?
-    //     Ok(())
-    // }
+    pub fn initialize_from_mnemonic(&mut self, mnemonic: &str) -> Result<()> {
+        let wallet = SolanaWallet::restore_from_mnemonic(None, mnemonic)?;
+        self.initiralize_from_solana_wallet(wallet)
+    }
+
+    pub fn initiralize_from_solana_wallet(&mut self, wallet: SolanaWallet) -> Result<()> {
+        self.payer_account = Some({
+            let inner = wallet.keypair.to_bytes();
+            Keypair::from_bytes(&inner)?
+        });
+        self.mnemonic = Some(wallet.mnemonic.clone());
+        // self.user_account = Some(self.generate_user_keypair()?);
+        self.accounts.push(wallet); //TODO: Borrow or clone but why dup?
+        Ok(())
+    }
 
     // pub fn get_account(&self, address: &str) -> Result<&SolanaWallet> {
     //     if self

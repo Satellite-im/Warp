@@ -1,20 +1,21 @@
-use super::{friends_key, system_program_programid};
+use super::friends_key;
 use crate::{pubkey_from_seeds, EndPoint};
+use anchor_client::solana_client::rpc_client::RpcClient;
+use anchor_client::solana_client::rpc_config::RpcProgramAccountsConfig;
+use anchor_client::solana_client::rpc_filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType};
+use anchor_client::solana_sdk::account::{Account, ReadableAccount};
+use anchor_client::solana_sdk::instruction::{AccountMeta, Instruction};
+use anchor_client::solana_sdk::message::Message;
+use anchor_client::solana_sdk::pubkey::Pubkey;
+use anchor_client::solana_sdk::signature::{Keypair, Signature};
+use anchor_client::solana_sdk::signer::Signer;
+use anchor_client::solana_sdk::system_program;
+use anchor_client::solana_sdk::transaction::Transaction;
 use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
 use bs58::encode::EncodeBuilder;
 use std::str::FromStr;
 use warp_common::anyhow;
 use warp_common::serde::{Deserialize, Serialize};
-use warp_common::solana_client::rpc_client::RpcClient;
-use warp_common::solana_client::rpc_config::RpcProgramAccountsConfig;
-use warp_common::solana_client::rpc_filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType};
-use warp_common::solana_sdk::account::{Account, ReadableAccount};
-use warp_common::solana_sdk::instruction::{AccountMeta, Instruction};
-use warp_common::solana_sdk::message::Message;
-use warp_common::solana_sdk::pubkey::Pubkey;
-use warp_common::solana_sdk::signature::{Keypair, Signature};
-use warp_common::solana_sdk::signer::Signer;
-use warp_common::solana_sdk::transaction::Transaction;
 
 //TODO: Move connection and payer to the struct as fields
 pub struct Friends {
@@ -102,8 +103,8 @@ impl Friends {
                 AccountMeta::new_readonly(*seed, false),
                 AccountMeta::new_readonly(base, false),
                 AccountMeta::new(key, false),
-                AccountMeta::new(warp_common::solana_sdk::sysvar::rent::id(), false), //SystemProgram?,
-                AccountMeta::new_readonly(system_program_programid(), false),
+                AccountMeta::new(anchor_client::solana_sdk::sysvar::rent::id(), false), //SystemProgram?,
+                AccountMeta::new_readonly(system_program::ID, false),
             ],
         );
 
@@ -319,7 +320,7 @@ impl Friends {
                 AccountMeta::new(*friend_key2, false),
                 AccountMeta::new_readonly(*from, true),
                 AccountMeta::new(*to, false),
-                AccountMeta::new_readonly(warp_common::solana_sdk::sysvar::rent::id(), false),
+                AccountMeta::new_readonly(anchor_client::solana_sdk::sysvar::rent::id(), false),
             ],
         ))
     }
@@ -337,7 +338,7 @@ impl Friends {
                 AccountMeta::new(*friend_key, false),
                 AccountMeta::new(*from, false),
                 AccountMeta::new_readonly(*to, true),
-                AccountMeta::new_readonly(warp_common::solana_sdk::sysvar::rent::id(), false),
+                AccountMeta::new_readonly(anchor_client::solana_sdk::sysvar::rent::id(), false),
             ],
         ))
     }
@@ -354,7 +355,7 @@ impl Friends {
                 AccountMeta::new(*friend_key, false),
                 AccountMeta::new(*from, false),
                 AccountMeta::new_readonly(*to, true),
-                AccountMeta::new_readonly(warp_common::solana_sdk::sysvar::rent::id(), false),
+                AccountMeta::new_readonly(anchor_client::solana_sdk::sysvar::rent::id(), false),
             ],
         ))
     }
@@ -371,7 +372,7 @@ impl Friends {
                 AccountMeta::new(*friend_key, false),
                 AccountMeta::new_readonly(*from, true),
                 AccountMeta::new(*to, false),
-                AccountMeta::new_readonly(warp_common::solana_sdk::sysvar::rent::id(), false),
+                AccountMeta::new_readonly(anchor_client::solana_sdk::sysvar::rent::id(), false),
             ],
         ))
     }
@@ -389,7 +390,7 @@ impl Friends {
                 AccountMeta::new(*friend_key, false),
                 AccountMeta::new_readonly(*from, initiator),
                 AccountMeta::new_readonly(*to, !initiator),
-                AccountMeta::new_readonly(warp_common::solana_sdk::sysvar::rent::id(), false),
+                AccountMeta::new_readonly(anchor_client::solana_sdk::sysvar::rent::id(), false),
             ],
         ))
     }
