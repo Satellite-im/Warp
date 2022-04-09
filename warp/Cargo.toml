@@ -48,7 +48,7 @@ warp-pd-stretto = { path = "../extensions/warp-pd-stretto", optional = true }
 warp-pd-flatfile = { path = "../extensions/warp-pd-flatfile", optional = true }
 
 #servers
-axum = { version = "0.4", optional = true }
+axum = { version = "0.5", optional = true }
 rocket = { version = "0.5.0-rc.1", git = "https://github.com/SergioBenitez/Rocket", optional = true, features = ["json"]} #TODO: do not use git directly but for now use it for development
 
 
