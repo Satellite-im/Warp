@@ -1,4 +1,3 @@
-use super::friends_key;
 use crate::{pubkey_from_seeds, EndPoint};
 use anchor_client::solana_client::rpc_client::RpcClient;
 use anchor_client::solana_client::rpc_config::RpcProgramAccountsConfig;
@@ -92,11 +91,11 @@ impl Friends {
         let (base, key) = pubkey_from_seeds(
             &[&seed.to_bytes(), &friend.friendkey],
             seed_str,
-            &friends_key(),
+            &friends::id(),
         )?;
         //TODO: Determine if we should rely on bincode or borsh
         let instruction = Instruction::new_with_bincode(
-            friends_key(),
+            friends::id(),
             &params,
             vec![
                 AccountMeta::new(self.payer.pubkey(), true),
@@ -256,7 +255,7 @@ impl Friends {
         let (_, key) = pubkey_from_seeds(
             &[&from.to_bytes(), &to.to_bytes()],
             "friend",
-            &friends_key(),
+            &friends::id(),
         )?;
 
         Ok(key)
@@ -290,14 +289,14 @@ impl Friends {
 
         let outgoing = self
             .connection
-            .get_program_accounts_with_config(&friends_key(), outgoing_filter)?
+            .get_program_accounts_with_config(&friends::id(), outgoing_filter)?
             .iter()
             .cloned()
             .collect::<Vec<_>>();
 
         let incoming = self
             .connection
-            .get_program_accounts_with_config(&friends_key(), incoming_filter)?
+            .get_program_accounts_with_config(&friends::id(), incoming_filter)?
             .iter()
             .cloned()
             .collect::<Vec<_>>();
@@ -313,7 +312,7 @@ impl Friends {
         padded: [[u8; 32]; 4],
     ) -> anyhow::Result<Instruction> {
         Ok(Instruction::new_with_bincode(
-            friends_key(),
+            friends::id(),
             &FriendParam::MakeRequest { tex: padded },
             vec![
                 AccountMeta::new(*friend_key, false),
@@ -332,7 +331,7 @@ impl Friends {
         padded: [[u8; 32]; 4],
     ) -> anyhow::Result<Instruction> {
         Ok(Instruction::new_with_bincode(
-            friends_key(),
+            friends::id(),
             &FriendParam::AcceptRequest { tex: padded },
             vec![
                 AccountMeta::new(*friend_key, false),
@@ -349,7 +348,7 @@ impl Friends {
         to: &Pubkey,
     ) -> anyhow::Result<Instruction> {
         Ok(Instruction::new_with_bincode(
-            friends_key(),
+            friends::id(),
             &FriendParam::DenyRequest,
             vec![
                 AccountMeta::new(*friend_key, false),
@@ -366,7 +365,7 @@ impl Friends {
         to: &Pubkey,
     ) -> anyhow::Result<Instruction> {
         Ok(Instruction::new_with_bincode(
-            friends_key(),
+            friends::id(),
             &FriendParam::RemoveRequest,
             vec![
                 AccountMeta::new(*friend_key, false),
@@ -384,7 +383,7 @@ impl Friends {
         initiator: bool,
     ) -> anyhow::Result<Instruction> {
         Ok(Instruction::new_with_bincode(
-            friends_key(),
+            friends::id(),
             &FriendParam::RemoveFriend,
             vec![
                 AccountMeta::new(*friend_key, false),

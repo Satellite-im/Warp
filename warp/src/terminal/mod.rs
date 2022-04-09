@@ -1,3 +1,7 @@
+pub mod base;
+pub mod cache;
+pub mod filesystem;
+
 use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -14,22 +18,25 @@ use tui::{
     widgets::{Block, BorderType, Borders, ListState, Tabs},
     Frame, Terminal,
 };
-use warp_common::{anyhow, Extension, Module};
+use warp_common::{anyhow, Module};
 
 use crate::manager::ModuleManager;
 
-pub mod tabs;
-
+#[derive(Default, Clone)]
 pub struct TerminalApplication {
     pub title: Option<String>,
     pub modules: Vec<Module>,
     pub module_manager: Arc<Mutex<ModuleManager>>,
-    pub extensions: List<Box<dyn Extension>>,
     pub config: List<(Module, bool)>,
     pub tools: List<String>,
 }
 
 impl TerminalApplication {
+    pub fn new() -> anyhow::Result<Self> {
+        let mut terminal = TerminalApplication::default();
+        terminal.title = Some("Warp by Satellite".to_string());
+        Ok(terminal)
+    }
     pub async fn start_ui(&mut self) -> anyhow::Result<()> {
         Ok(())
     }
@@ -119,7 +126,7 @@ impl TerminalApplication {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct List<T> {
     pub state: ListState,
     pub list: Vec<T>,
@@ -158,11 +165,5 @@ impl<T> List<T> {
             None => 0,
         };
         self.state.select(Some(i));
-    }
-}
-
-impl List<Box<dyn Extension>> {
-    pub fn register(&mut self, extension: Box<dyn Extension>) {
-        self.list.push(extension)
     }
 }

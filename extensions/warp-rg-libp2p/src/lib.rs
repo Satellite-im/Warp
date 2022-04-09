@@ -6,7 +6,7 @@ use libp2p::{
     mdns::{Mdns, MdnsEvent},
     mplex,
     noise,
-    swarm::{dial_opts::DialOpts, NetworkBehaviourEventProcess, SwarmBuilder, SwarmEvent},
+    swarm::{NetworkBehaviourEventProcess, SwarmBuilder},
     // `TokioTcpConfig` is available through the `tcp-tokio` feature.
     tcp::TokioTcpConfig,
     Multiaddr,
@@ -17,7 +17,6 @@ use libp2p::{
 };
 use std::sync::{Arc, Mutex};
 use warp_common::error::Error;
-use warp_common::tokio::io::{self, AsyncReadExt};
 use warp_common::uuid::Uuid;
 use warp_common::{anyhow, Extension, Module};
 use warp_crypto::zeroize::Zeroize;
@@ -62,6 +61,7 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
     fn inject_event(&mut self, message: FloodsubEvent) {
         match message {
             FloodsubEvent::Message(_message) => {
+                println!("Received from '{:?}'", _message.source);
                 if let Ok(message) = warp_common::serde_json::from_slice::<Message>(&_message.data)
                 {
                     self.inner
@@ -73,11 +73,11 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
                         .push(message);
                 }
             }
-            FloodsubEvent::Subscribed {
-                peer_id: _,
-                topic: _,
-            } => {
-                //TODO: Create key exchange here between the two peers
+            FloodsubEvent::Subscribed { peer_id, topic } => {
+                //TODO: Create key exchange here between the two peers to be sure messages are E2E
+                //TODO: Add support for group messages
+                //TODO: Implement check to allow peer to connect to another peer if subscription is done through relay
+                println!("Peer {} Subscribed to {}", peer_id.to_string(), topic.id());
             }
             FloodsubEvent::Unsubscribed {
                 peer_id: _,
@@ -246,7 +246,8 @@ impl RayGun for Libp2pMessaging {
         value: Vec<String>,
     ) -> warp_common::Result<()> {
         //TODO: Implement editing message
-        let mut message = Message::default();
+        //TODO: Check to see if message was sent or if its still sending
+        let mut message = Message::new();
         message.conversation_id = conversation_id;
         message.value = value;
 
@@ -255,16 +256,35 @@ impl RayGun for Libp2pMessaging {
             let topic = floodsub::Topic::new(conversation_id.to_string());
             let mut swarm = swarm.lock().unwrap();
             swarm.behaviour_mut().floodsub.publish(topic, bytes);
+            self.conversations
+                .lock()
+                .unwrap()
+                .as_mut()
+                .entry(message.conversation_id)
+                .or_insert_with(Vec::new)
+                .push(message);
             return Ok(());
         }
         Err(Error::Unimplemented)
     }
 
-    async fn delete(
-        &mut self,
-        _conversation_id: Uuid,
-        _message_id: Uuid,
-    ) -> warp_common::Result<()> {
+    async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> warp_common::Result<()> {
+        //TODO: Option to signal to peer to remove message from their side as well
+        //TODO: Check to see if multiple messages have been selected. This may not be required since the client can submit multiple delete request.
+        if let Some(_) = self
+            .conversations
+            .lock()
+            .unwrap()
+            .as_mut()
+            .entry(conversation_id)
+            .or_insert_with(Vec::new)
+            .iter()
+            .filter(|message| message.id == message_id)
+            .collect::<Vec<_>>()
+            .get(0)
+        {
+            return Ok(());
+        }
         Err(Error::Unimplemented)
     }
 

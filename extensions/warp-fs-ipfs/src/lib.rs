@@ -189,8 +189,8 @@ impl Constellation for IpfsFileSystem {
 
                 let hash = stat.hash;
 
-                //pin file since ipfs mfs doesnt do it automatically
-
+                //Note: MFS will pin files at the root of the system, but any stored
+                //      in directories will not be automatically pinned.
                 let res = client.pin_add(&hash, true).await.map_err(|e| anyhow!(e))?;
 
                 if !res.pins.contains(&hash) {
@@ -203,7 +203,7 @@ impl Constellation for IpfsFileSystem {
                 let res = client.add(fs).await.map_err(|e| anyhow!(e))?;
 
                 //pin file since ipfs mfs doesnt do it automatically
-                let hash = res.hash;
+
                 //TODO: Give a choice to pin file or not
 
                 // let res = client
@@ -215,7 +215,7 @@ impl Constellation for IpfsFileSystem {
                 //     //TODO: Error?
                 // }
 
-                hash
+                res.hash
             }
         };
 

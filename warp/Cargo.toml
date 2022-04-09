@@ -21,6 +21,8 @@ tui-logger = { version = "0.7", optional = true}
 crossterm = {version = "0.23", optional = true }
 
 rustyline = { version = "9.1", optional = true}
+rustyline-derive = { version = "0.6", optional = true}
+unicode-width = { version = "0.1", optional = true }
 
 warp-tesseract = { path = "../utils/warp-tesseract" }
 warp-configuration = { path = "../config/warp-configuration", features = ["async"] }
@@ -61,4 +63,4 @@ multipass = ["warp-multipass"]
 raygun = ["warp-raygun"]
 
 ui = ["tui", "tui-logger", "crossterm"]
-cli = ["rustyline", "clap"]
+cli = ["rustyline", "rustyline-derive", "unicode-width","clap"]

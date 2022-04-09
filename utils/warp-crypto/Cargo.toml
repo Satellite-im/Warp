@@ -3,6 +3,9 @@ name = "warp-crypto"
 version = "0.1.0"
 edition = "2021"
 
+#[lib]
+#name = "warp_crypto"
+#crate-type = ["cdylib", "staticlib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -22,7 +25,7 @@ aead = { version = "0.4", default-features = false }
 rand = { version = "0.7"  }
 anyhow = { version = "1" }
 zeroize = "<=1.5"
-
+libc = "0.2"
 
 [dev-dependencies]
 hex = "0.4"

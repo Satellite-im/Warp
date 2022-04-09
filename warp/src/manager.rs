@@ -1,4 +1,4 @@
-use warp_common::{anyhow, Extension};
+use warp_common::anyhow;
 
 use std::sync::{Arc, Mutex};
 use warp::{Constellation, MultiPass, PocketDimension, RayGun};
@@ -97,23 +97,23 @@ impl Information for Account {
 pub struct ModuleManager {
     pub filesystem: Vec<FileSystem>,
     pub cache: Vec<Cache>,
-    pub account: Vec<Messaging>,
-    pub messaging: Vec<Account>,
+    pub account: Vec<Account>,
+    pub messaging: Vec<Messaging>,
 }
 
 impl ModuleManager {
-    pub fn set_filesystem<T: Constellation + Extension + 'static>(&mut self, handle: T) {
+    pub fn set_filesystem(&mut self, handle: Arc<Mutex<Box<dyn Constellation>>>) {
         if self
             .filesystem
             .iter()
-            .filter(|fs| fs.id() == handle.id())
+            .filter(|fs| fs.id() == handle.lock().unwrap().id())
             .count()
             != 0
         {
             return;
         }
         self.filesystem.push(FileSystem {
-            handle: Arc::new(Mutex::new(Box::new(handle))),
+            handle,
             active: false,
         });
     }
@@ -177,23 +177,23 @@ impl ModuleManager {
         Ok(())
     }
 
-    pub fn set_cache<T: PocketDimension + Extension + 'static>(&mut self, handle: T) {
+    pub fn set_cache(&mut self, handle: Arc<Mutex<Box<dyn PocketDimension>>>) {
         if self
             .cache
             .iter()
-            .filter(|cs| cs.id() == handle.id())
+            .filter(|cs| cs.id() == handle.lock().unwrap().id())
             .count()
             != 0
         {
             return;
         }
         self.cache.push(Cache {
-            handle: Arc::new(Mutex::new(Box::new(handle))),
+            handle,
             active: false,
         })
     }
 
-    pub fn get_filesystem(&self) -> anyhow::Result<&Arc<Mutex<Box<dyn Constellation>>>> {
+    pub fn get_filesystem(&self) -> anyhow::Result<Arc<Mutex<Box<dyn Constellation>>>> {
         let index = self
             .filesystem
             .iter()
@@ -205,10 +205,10 @@ impl ModuleManager {
             .get(index)
             .ok_or(warp_common::error::Error::Other)?;
 
-        Ok(fs.as_ref())
+        Ok(fs.as_ref().clone())
     }
 
-    pub fn get_cache(&self) -> anyhow::Result<&Arc<Mutex<Box<dyn PocketDimension>>>> {
+    pub fn get_cache(&self) -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
         let index = self
             .cache
             .iter()
@@ -220,6 +220,6 @@ impl ModuleManager {
             .get(index)
             .ok_or(warp_common::error::Error::Other)?;
 
-        Ok(cs.as_ref())
+        Ok(cs.as_ref().clone())
     }
 }

@@ -1,3 +1,4 @@
+pub mod cli;
 pub mod http;
 pub mod manager;
 pub mod terminal;
@@ -6,6 +7,7 @@ use crate::anyhow::bail;
 use crate::serde_json::Value;
 use clap::{Parser, Subcommand};
 use manager::ModuleManager;
+use rustyline::Editor;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use warp::PocketDimension;
@@ -41,6 +43,8 @@ struct CommandArgs {
 enum Command {
     Import { key: String, value: String },
     Export { key: String },
+    // Upload { file: String },
+    // Download { file: String },
     Init { path: Option<String> },
 }
 
@@ -59,7 +63,10 @@ fn default_config() -> warp_configuration::Config {
             raygun: false,
         },
         extensions: warp_configuration::ExtensionConfig {
-            constellation: vec!["warp-fs-ipfs"].iter().map(|e| e.to_string()).collect(),
+            constellation: vec!["warp-fs-memory"]
+                .iter()
+                .map(|e| e.to_string())
+                .collect(),
             pocket_dimension: vec!["warp-pd-flatfile"]
                 .iter()
                 .map(|e| e.to_string())
@@ -72,6 +79,9 @@ fn default_config() -> warp_configuration::Config {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    //TODO: Provide hooks to any extensions that may utilize it
+    let mut _hooks = Arc::new(Mutex::new(warp_hooks::hooks::Hooks::new()));
+
     let cli = CommandArgs::parse();
 
     let config = match cli.config {
@@ -92,36 +102,29 @@ async fn main() -> anyhow::Result<()> {
     //TODO: Have the module manager handle the checks
 
     if config.modules.pocket_dimension {
-        {
-            let cache = StrettoClient::new()?;
-            manager.set_cache(cache);
-        }
-        {
-            //TODO: Have the configuration point to the cache directory, or if not define to use system local directory
-            let cache_dir = Path::new(&warp_directory).join("cache");
+        manager.set_cache(Arc::new(Mutex::new(Box::new(StrettoClient::new()?))));
+        //TODO: Have the configuration point to the cache directory, or if not define to use system local directory
+        let cache_dir = Path::new(&warp_directory).join("cache");
 
-            let index = Path::new("cache-index").to_path_buf();
+        let index = Path::new("cache-index").to_path_buf();
 
-            let storage = warp::FlatfileStorage::new_with_index_file(cache_dir, index)?;
-            manager.set_cache(storage);
+        let storage = warp::FlatfileStorage::new_with_index_file(cache_dir, index)?;
+        manager.set_cache(Arc::new(Mutex::new(Box::new(storage))));
+
+        // get the extension from the config and set it
+        if let Some(cache_ext_name) = config.extensions.pocket_dimension.first() {
+            if manager.enable_cache(cache_ext_name).is_err() {
+                println!("Warning: PocketDimension does not have an active extension.");
+            }
         }
     }
 
-    //TODO: Let config pick the caching module
-    manager.enable_cache("warp-pd-flatfile")?;
-    register_fs_ext(&config, &mut manager)?;
-
     if config.modules.constellation {
-        let mut fs_enable: bool = false;
-        for extension in config.extensions.constellation {
-            if let Ok(()) = manager.enable_filesystem(extension.as_str()) {
-                fs_enable = true;
-                break;
-            };
-        }
-
-        if !fs_enable {
-            println!("Warning: Constellation does not have an active module.");
+        register_fs_ext(&config, &mut manager)?;
+        if let Some(fs_ext) = config.extensions.constellation.first() {
+            if manager.enable_filesystem(fs_ext).is_err() {
+                println!("Warning: Constellation does not have an active extension.");
+            }
         }
     }
 
@@ -129,7 +132,7 @@ async fn main() -> anyhow::Result<()> {
     let mut data = DataObject::default();
     if let Ok(cache) = manager.get_cache() {
         if let Ok(fs) = manager.get_filesystem() {
-            match import_from_cache(cache.clone(), fs.clone()) {
+            match import_from_cache(cache, fs) {
                 Ok(d) => data = d,
                 Err(_) => println!("Warning: No structure available from cache; Skip importing"),
             };
@@ -137,6 +140,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     //TODO: Implement configuration and have it be linked up with any flags
+    let mut rl = Editor::new();
 
     match (cli.ui, cli.cli, cli.http, cli.command) {
         //<TUI> <CLI> <HTTP>
@@ -151,27 +155,30 @@ async fn main() -> anyhow::Result<()> {
         //TODO: Store keyfile and datastore in a specific path.
         (false, false, false, Some(command)) => match command {
             Command::Import { key, value } => {
-                let mut key_file = tokio::fs::read(warp_directory.join("keyfile")).await?;
-                let mut tesseract = Tesseract::load_from_file(warp_directory.join("datastore"))
+                rl.set_helper(Some(cli::UnsecuredMarker::default()));
+                rl.helper_mut()
+                    .ok_or(warp_common::error::Error::Other)?
+                    .flip();
+                let passphrase = rl.readline("Password:")?;
+
+                let mut tesseract = Tesseract::from_file(warp_directory.join("datastore"))
                     .await
                     .unwrap_or_default();
-                tesseract.set(&key_file, &key, &value)?;
-                tesseract
-                    .save_to_file(warp_directory.join("datastore"))
-                    .await?;
-                key_file.clear();
+                tesseract.set(passphrase.as_bytes(), &key, &value)?;
+                tesseract.to_file(warp_directory.join("datastore")).await?;
             }
             Command::Export { key } => {
-                let mut key_file = tokio::fs::read(warp_directory.join("keyfile")).await?;
-                let tesseract = Tesseract::load_from_file(warp_directory.join("datastore")).await?;
-                let data = tesseract.retrieve(&key_file, &key)?;
+                rl.set_helper(Some(cli::UnsecuredMarker::default()));
+                rl.helper_mut()
+                    .ok_or(warp_common::error::Error::Other)?
+                    .flip();
+                let passphrase = rl.readline("Password:")?;
+                let tesseract = Tesseract::from_file(warp_directory.join("datastore")).await?;
+                let data = tesseract.retrieve(passphrase.as_bytes(), &key)?;
                 println!("Value of: {}", data);
-                key_file.clear();
             }
             Command::Init { .. } => {
                 //TODO: Do more initializing and rely on path
-                let key = warp_crypto::generate(32);
-                tokio::fs::write(warp_directory.join("keyfile"), key).await?;
             }
         },
         _ => println!("You can only select one option"),
@@ -181,10 +188,11 @@ async fn main() -> anyhow::Result<()> {
     // Note: If in-memory caching is used (eg stretto), this export
     //       serve no purpose since the data will be removed from
     //       memory after application closes unless it is exported
-    //       from memory to disk.
+    //       from memory to disk, in which case it would be wise to
+    //       rely on an extension that writes to disk
     if let Ok(cache) = manager.get_cache() {
         if let Ok(fs) = manager.get_filesystem() {
-            export_to_cache(&data, cache.clone(), fs.clone())?;
+            export_to_cache(&data, cache, fs)?;
         }
     }
 
@@ -232,40 +240,36 @@ fn export_to_cache(
 
 //TODO: Rewrite this
 fn register_fs_ext(config: &Config, manager: &mut ModuleManager) -> anyhow::Result<()> {
-    let m = Arc::new(Mutex::new(manager));
-
-    {
-        let mut manager = m.lock().unwrap();
-        let cache = manager.get_cache()?;
+    manager.set_filesystem(Arc::new(Mutex::new(Box::new({
         //TODO: Have `IpfsFileSystem` provide a custom initialization
         let mut fs = warp::IpfsFileSystem::new();
-
         if config.modules.pocket_dimension {
-            fs.set_cache(cache.clone());
+            if let Ok(cache) = manager.get_cache() {
+                fs.set_cache(cache);
+            }
         }
-        manager.set_filesystem(fs);
-    }
+        fs
+    }))));
 
-    {
-        let mut manager = m.lock().unwrap();
-        let cache = manager.get_cache()?;
-        // //TODO
+    manager.set_filesystem(Arc::new(Mutex::new(Box::new({
         let mut handle = warp::StorjFilesystem::new("", "");
-
         if config.modules.pocket_dimension {
-            handle.set_cache(cache.clone());
+            if let Ok(cache) = manager.get_cache() {
+                handle.set_cache(cache);
+            }
         }
-        manager.set_filesystem(handle);
-    }
+        handle
+    }))));
 
-    {
-        let mut manager = m.lock().unwrap();
-        // let cache = manager.get_cache()?;
-        let handle = warp::MemorySystem::new();
-        // if config.modules.pocket_dimension {
-        //     // handle.set_cache(cache.clone());
-        // }
-        manager.set_filesystem(handle);
-    }
+    manager.set_filesystem(Arc::new(Mutex::new(Box::new({
+        let mut handle = warp::MemorySystem::new();
+        if config.modules.pocket_dimension {
+            if let Ok(cache) = manager.get_cache() {
+                handle.set_cache(cache);
+            }
+        }
+        handle
+    }))));
+
     Ok(())
 }

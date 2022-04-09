@@ -60,7 +60,7 @@ impl Tesseract {
             /// ```
             ///
             /// ```
-            pub async fn load_from_file<S: AsRef<Path>>(file: S) -> Result<Self> {
+            pub async fn from_file<S: AsRef<Path>>(file: S) -> Result<Self> {
                 let mut store = Tesseract::default();
                 let mut fs = File::open(file).await?;
                 let mut data = vec![];
@@ -78,7 +78,7 @@ impl Tesseract {
             /// ```
             ///
             /// ```
-            pub async fn load_from_stream<S: AsyncRead + Unpin>(reader: &mut S) -> Result<Self> {
+            pub async fn from_reader<S: AsyncRead + Unpin>(reader: &mut S) -> Result<Self> {
                 let mut store = Tesseract::default();
                 let mut data = vec![];
                 reader.read_to_end(&mut data).await?;
@@ -95,7 +95,7 @@ impl Tesseract {
             /// ```
             ///
             /// ```
-            pub async fn save_to_file<S: AsRef<Path>>(&self, path: S) -> Result<()> {
+            pub async fn to_file<S: AsRef<Path>>(&self, path: S) -> Result<()> {
                 let data = warp_common::serde_json::to_vec(&self.internal)?;
 
                 let mut fs = File::create(path).await?;
@@ -111,7 +111,7 @@ impl Tesseract {
             /// ```
             ///
             /// ```
-            pub async fn save_to_stream<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<()> {
+            pub async fn to_writer<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<()> {
                 let data = warp_common::serde_json::to_vec(&self.internal)?;
                 writer.write_all(&data[..]).await?;
                 writer.flush().await?;
@@ -125,7 +125,7 @@ impl Tesseract {
             /// ```
             ///
             /// ```
-            pub fn load_from_file<S: AsRef<Path>>(file: S) -> Result<Self> {
+            pub fn from_file<S: AsRef<Path>>(file: S) -> Result<Self> {
                 let mut store = Tesseract::default();
                 let mut fs = std::fs::File::open(file)?;
                 let mut data = vec![];
@@ -143,7 +143,7 @@ impl Tesseract {
             /// ```
             ///
             /// ```
-            pub fn load_from_stream<S: Read>(reader: &mut S) -> Result<Self> {
+            pub fn from_reader<S: Read>(reader: &mut S) -> Result<Self> {
                 let mut store = Tesseract::default();
                 let data = serde_json::from_reader(reader)?;
                 store.internal = data;
@@ -157,7 +157,7 @@ impl Tesseract {
             /// ```
             ///
             /// ```
-            pub fn save_to_file<S: AsRef<Path>>(&self, path: S) -> Result<()> {
+            pub fn to_file<S: AsRef<Path>>(&self, path: S) -> Result<()> {
                 let data = warp_common::serde_json::to_vec(&self.internal)?;
 
                 let mut fs = std::fs::File::create(path)?;
@@ -173,7 +173,7 @@ impl Tesseract {
             /// ```
             ///
             /// ```
-            pub fn save_to_stream<W: Write>(&self, writer: &mut W) -> Result<()> {
+            pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<()> {
                 serde_json::to_writer(writer, &self.internal)?;
                 Ok(())
             }
