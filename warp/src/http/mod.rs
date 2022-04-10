@@ -1,21 +1,23 @@
-mod constellation;
-use crate::manager::ModuleManager;
-use std::sync::{Arc, Mutex};
-use warp::PocketDimension;
-use warp_common::anyhow;
-use warp_common::serde::{Deserialize, Serialize};
+use warp_common::{
+    anyhow,
+    cfg_if::cfg_if,
+    serde::{Deserialize, Serialize},
+};
 use warp_data::Payload;
 
-#[allow(unused_imports)]
-use rocket::{
-    self, catch, catchers,
-    data::{Data, ToByteUnit},
-    get,
-    response::{content, status},
-    routes,
-    serde::json::{json, Json, Value},
-    Build, Request, Rocket, State,
-};
+cfg_if! {
+    if #[cfg(feature = "http_axum")] {
+        pub mod axum;
+        pub use self::axum::http_main;
+    }
+}
+
+cfg_if! {
+    if #[cfg(feature = "http_rocket")] {
+        pub mod rocket;
+        pub use self::rocket::http_main;
+    }
+}
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 #[serde(crate = "warp_common::serde")]
@@ -65,56 +67,4 @@ impl ApiResponse {
         self.data = Some(payload);
         Ok(())
     }
-}
-
-pub struct CacheSystem(Arc<Mutex<Box<dyn PocketDimension>>>);
-
-impl AsRef<Arc<Mutex<Box<dyn PocketDimension>>>> for CacheSystem {
-    fn as_ref(&self) -> &Arc<Mutex<Box<dyn PocketDimension>>> {
-        &self.0
-    }
-}
-
-#[catch(default)]
-fn _error() -> Json<Value> {
-    Json(warp_common::serde_json::json!({"message": "An error as occurred with your request"}))
-}
-
-pub async fn http_main(manage: &mut ModuleManager) -> anyhow::Result<()> {
-    //TODO: This is temporary as things are setup
-    let fs = manage.get_filesystem()?;
-    let cache = manage.get_cache()?;
-    //TODO: Remove
-    if (fs
-        .lock()
-        .unwrap()
-        .from_buffer("Cargo.toml", &include_bytes!("../../Cargo.toml").to_vec())
-        .await)
-        .is_err()
-    {}
-
-    if (fs
-        .lock()
-        .unwrap()
-        .from_buffer("lib.rs", &include_bytes!("../lib.rs").to_vec())
-        .await)
-        .is_err()
-    {}
-
-    rocket::build()
-        .mount(
-            "/v1",
-            routes![
-                constellation::version,
-                constellation::export,
-                constellation::create_directory,
-                constellation::go_to,
-            ],
-        )
-        .register("/", catchers![_error])
-        .manage(constellation::FsSystem(fs.clone()))
-        .manage(CacheSystem(cache.clone()))
-        .launch()
-        .await?;
-    Ok(())
 }

@@ -1,3 +1,4 @@
+use rustyline::Editor;
 use std::borrow::Cow::{self, Borrowed, Owned};
 
 use rustyline::highlight::Highlighter;
@@ -31,4 +32,15 @@ impl Highlighter for UnsecuredMarker {
 
 pub fn command_line() -> anyhow::Result<()> {
     Ok(())
+}
+
+pub fn password_line() -> anyhow::Result<String> {
+    let mut rl = Editor::new();
+    rl.set_helper(Some(UnsecuredMarker::default()));
+    rl.helper_mut()
+        .ok_or(warp_common::error::Error::Other)?
+        .flip();
+    let passphrase = rl.readline("Password:")?;
+
+    Ok(passphrase)
 }
