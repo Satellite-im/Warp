@@ -113,6 +113,11 @@ pub trait Constellation: Extension + Sync + Send {
         Err(Error::Unimplemented)
     }
 
+    /// Used to sync references within the filesystem for a file
+    async fn sync_ref(&mut self, _: &str) -> Result<()> {
+        Err(Error::Unimplemented)
+    }
+
     /// Use to export the filesystem to a specific structure. Currently supports `Json`, `Toml`, and `Yaml`
     fn export(&self, r#type: ConstellationDataType) -> Result<String> {
         match r#type {
