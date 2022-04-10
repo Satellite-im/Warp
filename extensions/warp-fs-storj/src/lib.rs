@@ -1,3 +1,6 @@
+use aws_endpoint::partition::endpoint;
+use aws_endpoint::{CredentialScope, Partition, PartitionResolver};
+use aws_sdk_s3::presigning::config::PresigningConfig;
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -187,8 +190,9 @@ impl Constellation for StorjFilesystem {
             .client
             .as_ref()
             .ok_or(Error::Any(anyhow!("Unable to get StorJ Client")))?;
+
         let code = client
-            .bucket(bucket, true)
+            .bucket(&bucket, true)
             .await?
             .put_object_stream(&mut fs, &name)
             .await?;
@@ -201,8 +205,23 @@ impl Constellation for StorjFilesystem {
             )));
         }
 
+        let cred = client
+            .creds
+            .as_ref()
+            .ok_or(anyhow!("Credentials are not set"))?;
+
+        let url = presign_url(
+            &cred.access_key.clone().unwrap_or_default(),
+            &cred.secret_key.clone().unwrap_or_default(),
+            &bucket,
+            &name,
+        )
+        .await
+        .unwrap_or_default();
+
         let mut file = warp_constellation::file::File::new(&name);
         file.set_size(size as i64);
+        file.set_ref(url);
         file.hash.sha1hash_from_file(&path)?;
         file.hash.sha256hash_from_file(&path)?;
 
@@ -387,7 +406,7 @@ impl Constellation for StorjFilesystem {
         let client = self
             .client
             .as_ref()
-            .ok_or(Error::Any(anyhow!("Unable to get StorJ Client")))?;
+            .ok_or_else(|| Error::Any(anyhow!("Unable to get StorJ Client")))?;
 
         let (_, code) = client
             .bucket(bucket, false)
@@ -438,4 +457,45 @@ fn split_for<S: AsRef<str>>(name: S) -> anyhow::Result<(String, String)> {
     };
 
     Ok(split)
+}
+
+//TODO: Migrate over to using aws-sdk if we deicde to utilize storj s3 over uplink
+async fn presign_url(
+    acc: &str,
+    sec: &str,
+    bucket: &str,
+    obj: &str,
+) -> warp_common::anyhow::Result<String> {
+    let cred = aws_sdk_s3::Credentials::new(acc, sec, None, None, "");
+
+    let resolver = PartitionResolver::new(
+        Partition::builder()
+            .id("storj")
+            .region_regex(r#"^(us|eu)\-\w+\-\d+$"#)
+            .default_endpoint(endpoint::Metadata {
+                uri_template: "gateway.us1.storjshare.io",
+                protocol: endpoint::Protocol::Https,
+                signature_versions: endpoint::SignatureVersion::V4,
+                // Important: The following overrides the credential scope so that request signing works.
+                credential_scope: CredentialScope::builder().build(),
+            })
+            .build()
+            .unwrap(),
+        vec![],
+    );
+    let config = aws_sdk_s3::config::Config::builder()
+        .region(aws_sdk_s3::Region::new("us-west-1"))
+        .credentials_provider(cred)
+        .endpoint_resolver(resolver)
+        .build();
+    let client = aws_sdk_s3::Client::from_conf(config);
+    let expires_in = std::time::Duration::from_secs(604800);
+    let presigned_request = client
+        .get_object()
+        .bucket(bucket)
+        .key(obj)
+        .presigned(PresigningConfig::expires_in(expires_in)?)
+        .await?;
+
+    Ok(presigned_request.uri().to_string())
 }
