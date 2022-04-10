@@ -19,6 +19,9 @@ clap = { version = "3.1", features = ["derive"], optional = true}
 tui = {version = "0.17", features = ["crossterm"], optional = true}
 tui-logger = { version = "0.7", optional = true}
 crossterm = {version = "0.23", optional = true }
+comfy-table = {version = "5.0.1", optional = true }
+
+thiserror = "1.0"
 
 rustyline = { version = "9.1", optional = true}
 rustyline-derive = { version = "0.6", optional = true}
@@ -63,4 +66,4 @@ multipass = ["warp-multipass"]
 raygun = ["warp-raygun"]
 
 ui = ["tui", "tui-logger", "crossterm"]
-cli = ["rustyline", "rustyline-derive", "unicode-width","clap"]
+cli = ["rustyline", "rustyline-derive", "unicode-width", "clap", "comfy-table"]

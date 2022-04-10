@@ -398,6 +398,7 @@ impl Constellation for StorjFilesystem {
             .client
             .as_ref()
             .ok_or(Error::Any(anyhow!("Unable to get StorJ Client")))?;
+
         let (buf, code) = client
             .bucket(bucket, false)
             .await?
