@@ -14,25 +14,25 @@ uuid = { version = "0.8", features = ["serde", "v4"] }
 
 base64 = { version = "0.13.0" }
 
-clap = { version = "3.1", features = ["derive"], optional = true}
+clap = { version = "3.1", features = ["derive"], optional = true }
 
-tui = {version = "0.17", features = ["crossterm"], optional = true}
-tui-logger = { version = "0.7", optional = true}
+tui = {version = "0.17", features = ["crossterm"], optional = true }
+tui-logger = { version = "0.7", optional = true }
 crossterm = {version = "0.23", optional = true }
 comfy-table = {version = "5.0.1", optional = true }
 
 thiserror = "1.0"
 
-rustyline = { version = "9.1", optional = true}
-rustyline-derive = { version = "0.6", optional = true}
+rustyline = { version = "9.1", optional = true }
+rustyline-derive = { version = "0.6", optional = true }
 unicode-width = { version = "0.1", optional = true }
 
 warp-tesseract = { path = "../utils/warp-tesseract" }
 warp-configuration = { path = "../config/warp-configuration", features = ["async"] }
 
 #modules 
-warp-constellation = { path = "../modules/warp-constellation", optional = true}
-warp-pocket-dimension = { path = "../modules/warp-pocket-dimension", optional = true}
+warp-constellation = { path = "../modules/warp-constellation", optional = true }
+warp-pocket-dimension = { path = "../modules/warp-pocket-dimension", optional = true }
 warp-multipass = { path = "../modules/warp-multipass", optional = true}
 warp-raygun = { path = "../modules/warp-raygun", optional = true}
 
@@ -40,11 +40,11 @@ warp-raygun = { path = "../modules/warp-raygun", optional = true}
 warp-hooks = { path = "../utils/warp-hooks" }
 warp-module = { path = "../utils/warp-module" }
 warp-data = { path = "../utils/warp-data" }
-warp-common = { path = "../utils/warp-common", features = ["async"]}
+warp-common = { path = "../utils/warp-common", features = ["async"] }
 warp-crypto = { path = "../utils/warp-crypto" }
 
 #extensions
-warp-fs-ipfs = { path = "../extensions/warp-fs-ipfs", optional = true}
+warp-fs-ipfs = { path = "../extensions/warp-fs-ipfs", optional = true }
 warp-fs-memory = { path = "../extensions/warp-fs-memory", optional = true }
 warp-fs-storj = { path = "../extensions/warp-fs-storj", optional = true }
 warp-pd-stretto = { path = "../extensions/warp-pd-stretto", optional = true }
@@ -52,18 +52,20 @@ warp-pd-flatfile = { path = "../extensions/warp-pd-flatfile", optional = true }
 
 #servers
 axum = { version = "0.5", optional = true }
-rocket = { version = "0.5.0-rc.1", git = "https://github.com/SergioBenitez/Rocket", optional = true, features = ["json"]} #TODO: do not use git directly but for now use it for development
+rocket = { version = "0.5.0-rc.1", git = "https://github.com/SergioBenitez/Rocket", optional = true, features = ["json"] } #TODO: do not use git directly but for now use it for development
 
 
 [features]
-default = ["http_rocket", "pocket-dimension", "constellation", "multipass", "raygun", "ui", "cli"]
-http_rocket = ["rocket"]
-http_axum = ["axum"]
+default = 		["modules_ext", "for_terminal"]
+modules_ext = 	["pocket-dimension", "constellation", "multipass", "raygun"]
+for_terminal =  ["http_rocket", "ui", "cli"]
+http_rocket =   ["rocket"]
+http_axum =     ["axum"]
 
 pocket-dimension = ["warp-pocket-dimension", "warp-pd-stretto", "warp-pd-flatfile"]
-constellation = ["warp-constellation", "warp-fs-memory", "warp-fs-storj", "warp-fs-ipfs"]
-multipass = ["warp-multipass"]
-raygun = ["warp-raygun"]
+constellation =    ["warp-constellation", "warp-fs-memory", "warp-fs-storj", "warp-fs-ipfs"]
+multipass = 	   ["warp-multipass"]
+raygun = 		   ["warp-raygun"]
 
-ui = ["tui", "tui-logger", "crossterm"]
+ui =  ["tui", "tui-logger", "crossterm"]
 cli = ["rustyline", "rustyline-derive", "unicode-width", "clap", "comfy-table"]

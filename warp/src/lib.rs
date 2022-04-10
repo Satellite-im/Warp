@@ -3,7 +3,7 @@ use warp_common::cfg_if::cfg_if;
 cfg_if! {
     if #[cfg(feature = "constellation")] {
         pub use warp_constellation::{
-            self,
+            directory, file, item,
             constellation::{Constellation, ConstellationDataType, ConstellationVersion},
         };
         pub use warp_fs_memory::MemorySystem;

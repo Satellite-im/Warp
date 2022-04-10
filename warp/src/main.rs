@@ -17,7 +17,7 @@ use warp_common::dirs;
 use warp_common::error::Error;
 use warp_common::log::{info, warn};
 use warp_common::{
-    anyhow::{self, anyhow},
+    anyhow::{bail, Result as AnyResult},
     serde_json, tokio,
 };
 use warp_configuration::Config;
@@ -81,7 +81,7 @@ fn default_config() -> warp_configuration::Config {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> AnyResult<()> {
     //TODO: Add a logger for outputting to stdout/stderr
     //TODO: Provide hooks to any extensions that may utilize it
     let mut _hooks = Arc::new(Mutex::new(warp_hooks::hooks::Hooks::new()));
@@ -217,7 +217,7 @@ async fn main() -> anyhow::Result<()> {
 fn import_from_cache(
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
     handle: Arc<Mutex<Box<dyn Constellation>>>,
-) -> anyhow::Result<DataObject> {
+) -> AnyResult<DataObject> {
     let mut handle = handle.lock().unwrap();
     let cache = cache.lock().unwrap();
     let obj = cache.get_data(warp_data::DataType::File, None)?;
@@ -231,14 +231,14 @@ fn import_from_cache(
             return Ok(data.clone());
         }
     };
-    anyhow!(Error::DataObjectNotFound)
+    bail!(Error::DataObjectNotFound)
 }
 
 fn export_to_cache(
     dataobject: &DataObject,
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
     handle: Arc<Mutex<Box<dyn Constellation>>>,
-) -> anyhow::Result<()> {
+) -> AnyResult<()> {
     let handle = handle.lock().unwrap();
     let mut cache = cache.lock().unwrap();
 
@@ -257,7 +257,7 @@ fn register_fs_ext(
     config: &Config,
     manager: &mut ModuleManager,
     tesseract: &Tesseract,
-) -> anyhow::Result<()> {
+) -> AnyResult<()> {
     manager.set_filesystem(Arc::new(Mutex::new(Box::new({
         //TODO: Have `IpfsFileSystem` provide a custom initialization
         let mut fs = warp::IpfsFileSystem::new();
