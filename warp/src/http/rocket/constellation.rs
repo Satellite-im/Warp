@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use warp::{Constellation, ConstellationDataType, ConstellationVersion};
+use warp::constellation::{Constellation, ConstellationDataType, ConstellationVersion};
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::serde::{Deserialize, Serialize};
 use warp_constellation::directory::Directory;

@@ -1,7 +1,7 @@
 mod constellation;
 use crate::manager::ModuleManager;
 use std::sync::{Arc, Mutex};
-use warp::PocketDimension;
+use warp::pocket_dimension::PocketDimension;
 use warp_common::anyhow;
 
 #[allow(unused_imports)]

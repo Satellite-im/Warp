@@ -14,7 +14,7 @@ use tui::widgets::ListState;
 use tui::Terminal;
 use tui_logger::{init_logger, set_default_level};
 use warp_common::Extension;
-use warp_constellation::constellation::Constellation;
+use warp_constellation::Constellation;
 use warp_data::DataType;
 use warp_fs_memory::MemorySystem;
 use warp_hooks::hooks::Hooks;

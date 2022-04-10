@@ -1,5 +1,5 @@
 use warp_common::tokio;
-use warp_constellation::constellation::Constellation;
+use warp_constellation::Constellation;
 use warp_fs_memory::MemorySystem;
 
 #[tokio::main]

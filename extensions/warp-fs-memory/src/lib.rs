@@ -13,8 +13,8 @@ use warp_data::{DataObject, DataType};
 use warp_pocket_dimension::query::QueryBuilder;
 use warp_pocket_dimension::{DimensionData, PocketDimension};
 
-use warp_constellation::constellation::Constellation;
 use warp_constellation::directory::Directory;
+use warp_constellation::Constellation;
 use warp_hooks::hooks::Hooks;
 use warp_module::Module;
 

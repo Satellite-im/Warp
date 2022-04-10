@@ -1,6 +1,6 @@
 use warp_common::tokio;
 use warp_common::tokio::io::AsyncReadExt;
-use warp_constellation::constellation::Constellation;
+use warp_constellation::Constellation;
 use warp_fs_ipfs::IpfsFileSystem;
 
 #[tokio::main]

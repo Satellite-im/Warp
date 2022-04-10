@@ -1,7 +1,10 @@
 use warp_common::anyhow;
 
 use std::sync::{Arc, Mutex};
-use warp::{Constellation, MultiPass, PocketDimension, RayGun};
+use warp::{
+    constellation::Constellation, multipass::MultiPass, pocket_dimension::PocketDimension,
+    raygun::RayGun,
+};
 use warp_common::error::Error;
 
 pub trait Information {

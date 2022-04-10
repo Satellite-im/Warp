@@ -9,9 +9,9 @@ use comfy_table::Table;
 use manager::ModuleManager;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use warp::PocketDimension;
-use warp::StrettoClient;
-use warp::{Constellation, ConstellationDataType};
+use warp::constellation::{Constellation, ConstellationDataType};
+use warp::pd_stretto::StrettoClient;
+use warp::pocket_dimension::PocketDimension;
 #[allow(unused_imports)]
 use warp_common::dirs;
 use warp_common::error::Error;
@@ -115,7 +115,7 @@ async fn main() -> AnyResult<()> {
 
         let index = Path::new("cache-index").to_path_buf();
 
-        let storage = warp::FlatfileStorage::new_with_index_file(cache_dir, index)?;
+        let storage = warp::pd_flatfile::FlatfileStorage::new_with_index_file(cache_dir, index)?;
         manager.set_cache(Arc::new(Mutex::new(Box::new(storage))));
 
         // get the extension from the config and set it
@@ -260,7 +260,7 @@ fn register_fs_ext(
 ) -> AnyResult<()> {
     manager.set_filesystem(Arc::new(Mutex::new(Box::new({
         //TODO: Have `IpfsFileSystem` provide a custom initialization
-        let mut fs = warp::IpfsFileSystem::new();
+        let mut fs = warp::fs_ipfs::IpfsFileSystem::new();
         if config.modules.pocket_dimension {
             if let Ok(cache) = manager.get_cache() {
                 fs.set_cache(cache);
@@ -286,7 +286,7 @@ fn register_fs_ext(
             (String::new(), String::new())
         };
 
-        let mut handle = warp::StorjFilesystem::new(akey, skey);
+        let mut handle = warp::fs_storj::StorjFilesystem::new(akey, skey);
         if config.modules.pocket_dimension {
             if let Ok(cache) = manager.get_cache() {
                 handle.set_cache(cache);
@@ -296,7 +296,7 @@ fn register_fs_ext(
     }))));
 
     manager.set_filesystem(Arc::new(Mutex::new(Box::new({
-        let mut handle = warp::MemorySystem::new();
+        let mut handle = warp::fs_memory::MemorySystem::new();
         if config.modules.pocket_dimension {
             if let Ok(cache) = manager.get_cache() {
                 handle.set_cache(cache);
