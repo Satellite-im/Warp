@@ -278,7 +278,7 @@ impl Constellation for StorjFilesystem {
         let client = self
             .client
             .as_ref()
-            .ok_or(Error::Any(anyhow!("Unable to get StorJ Client")))?;
+            .ok_or(anyhow!("Unable to get StorJ Client"))?;
         let code = client
             .bucket(bucket, false)
             .await?
@@ -322,7 +322,7 @@ impl Constellation for StorjFilesystem {
             .as_ref()
             .ok_or(Error::Any(anyhow!("Unable to get StorJ Client")))?;
         let code = client
-            .bucket(bucket, true)
+            .bucket(&bucket, true)
             .await?
             .put_object(&name, buffer)
             .await?;
@@ -334,10 +334,26 @@ impl Constellation for StorjFilesystem {
             )));
         }
 
+        let cred = client
+            .creds
+            .as_ref()
+            .ok_or(anyhow!("Credentials are not set"))?;
+
+        let url = presign_url(
+            &cred.access_key.clone().unwrap_or_default(),
+            &cred.secret_key.clone().unwrap_or_default(),
+            &bucket,
+            &name,
+        )
+        .await
+        .unwrap_or_default();
+
+        self.modified = Utc::now();
         let mut file = warp_constellation::file::File::new(&name);
         file.set_size(buffer.len() as i64);
         file.hash.sha1hash_from_buffer(&buffer)?;
         file.hash.sha256hash_from_buffer(&buffer)?;
+        file.set_ref(url);
 
         self.current_directory_mut()?.add_child(file.clone())?;
 
@@ -433,6 +449,34 @@ impl Constellation for StorjFilesystem {
         }
         Ok(())
     }
+
+    async fn sync_ref(&mut self, path: &str) -> warp_common::Result<()> {
+        let (bucket, name) = split_for(path)?;
+
+        let client = self
+            .client
+            .clone()
+            .ok_or_else(|| Error::Any(anyhow!("Unable to get StorJ Client")))?;
+        let cred = client
+            .creds
+            .as_ref()
+            .ok_or_else(|| anyhow!("Credentials are not set"))?;
+
+        let url = presign_url(
+            &cred.access_key.clone().unwrap_or_default(),
+            &cred.secret_key.clone().unwrap_or_default(),
+            &bucket,
+            &name,
+        )
+        .await
+        .unwrap_or_default();
+
+        let dir = self.current_directory_mut()?;
+        let file = dir.get_item_mut(name).and_then(Item::get_file_mut)?;
+        file.set_ref(url);
+        self.modified = Utc::now();
+        Ok(())
+    }
 }
 
 fn split_for<S: AsRef<str>>(name: S) -> anyhow::Result<(String, String)> {
@@ -476,15 +520,14 @@ async fn presign_url(
                 uri_template: "gateway.us1.storjshare.io",
                 protocol: endpoint::Protocol::Https,
                 signature_versions: endpoint::SignatureVersion::V4,
-                // Important: The following overrides the credential scope so that request signing works.
                 credential_scope: CredentialScope::builder().build(),
             })
             .build()
-            .unwrap(),
+            .ok_or_else(|| anyhow!("Error building resolver"))?,
         vec![],
     );
     let config = aws_sdk_s3::config::Config::builder()
-        .region(aws_sdk_s3::Region::new("us-west-1"))
+        .region(aws_sdk_s3::Region::new("us1"))
         .credentials_provider(cred)
         .endpoint_resolver(resolver)
         .build();
