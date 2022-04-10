@@ -294,7 +294,10 @@ impl Tesseract {
     pub fn export(&self, passphrase: &[u8]) -> Result<HashMap<String, String>> {
         let mut map = HashMap::new();
         for key in self.internal.keys() {
-            let value = self.retrieve(passphrase, key)?;
+            let value = match self.retrieve(passphrase, key) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
             map.insert(key.clone(), value);
         }
         Ok(map)
@@ -322,7 +325,10 @@ impl Tesseract {
     pub fn unlock(&mut self, passphrase: &[u8]) -> Result<()> {
         let mut map = HashMap::new();
         for key in self.internal.keys() {
-            let value = self.retrieve(passphrase, key)?;
+            let value = match self.retrieve(passphrase, key) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
             map.insert(key.clone(), value);
         }
         self.plaintext_inner = Some(map);
