@@ -35,4 +35,4 @@ More info here: [IPFS Extension](extensions/ipfs)
 
 Running with Storj for the backbone of remote storage, you can enable this native extension to automatically upload files to the Storj ecosystem as well as remotely store your index files on chain. Storj includes a [150GB Free Tier](https://www.storj.io/pricing) which is handy for development.
 
-More info here: [Storj Extension](extensions/storj)
+More info here: [Storj Extension](extensions/constellation/storj)
