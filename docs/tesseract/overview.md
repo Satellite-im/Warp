@@ -4,7 +4,7 @@ Tesseract is an easy way to store encrypted strings for use later on, this can b
 
 ## Interface
 
-***Note: It is recommended that your encryption key is not stored anyplace that would possibly ***
+***Note: It is recommended that your encryption key is not stored anywhere accessable by a third party.***
 
 ### Storing a key
 
