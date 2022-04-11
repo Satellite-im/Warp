@@ -106,6 +106,10 @@ async fn main() -> AnyResult<()> {
     let mut tesseract = Tesseract::from_file(warp_directory.join("datastore"))
         .await
         .unwrap_or_default();
+    //TODO: push this to TUI
+    let passphrase = cli::password_line()?;
+    tesseract.unlock(passphrase.as_bytes())?;
+
     //TODO: Have the module manager handle the checks
 
     if config.modules.pocket_dimension {
@@ -164,13 +168,11 @@ async fn main() -> AnyResult<()> {
         //TODO: Store keyfile and datastore in a specific path.
         (false, false, false, Some(command)) => match command {
             Command::Import { key, value } => {
-                let passphrase = cli::password_line()?;
-                tesseract.set(passphrase.as_bytes(), &key, &value)?;
+                tesseract.set(&key, &value)?;
                 tesseract.to_file(warp_directory.join("datastore")).await?;
             }
             Command::Export { key } => {
-                let passphrase = cli::password_line()?;
-                let data = tesseract.retrieve(passphrase.as_bytes(), &key)?;
+                let data = tesseract.retrieve(&key)?;
                 let mut table = Table::new();
                 table
                     .set_header(vec!["Key", "Value"])
@@ -186,11 +188,9 @@ async fn main() -> AnyResult<()> {
                 //TODO: Do more initializing and rely on path
             }
             Command::Dump => {
-                let passphrase = cli::password_line()?;
-                let data = tesseract.export(passphrase.as_bytes())?;
                 let mut table = Table::new();
                 table.set_header(vec!["Key", "Value"]);
-                for (key, val) in data {
+                for (key, val) in tesseract.export()? {
                     table.add_row(vec![key.as_str(), val.as_str()]);
                 }
                 println!("{table}")
@@ -274,13 +274,8 @@ fn register_fs_ext(
         let (akey, skey) = if let Some("warp-fs-storj") =
             config.extensions.constellation.first().map(|s| s.as_str())
         {
-            let passphrase = cli::password_line().unwrap_or_default();
-            let akey = tesseract
-                .retrieve(passphrase.as_bytes(), "STORJ_ACCESS_KEY")
-                .unwrap_or_default();
-            let skey = tesseract
-                .retrieve(passphrase.as_bytes(), "STORJ_SECRET_KEY")
-                .unwrap_or_default();
+            let akey = tesseract.retrieve("STORJ_ACCESS_KEY")?;
+            let skey = tesseract.retrieve("STORJ_SECRET_KEY")?;
             (akey, skey)
         } else {
             (String::new(), String::new())

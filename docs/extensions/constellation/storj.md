@@ -11,7 +11,7 @@ In your cargo project add the following
 ```
 [dependencies]
 warp = { git = "https://github.com/Satellite-im/Warp", default-features = false, features = ["constellation"] }
-warp-tesseract = { git = "https://github.com/Satellite-im/Warp", default-features = false } #omit `default-features = false` if you wish to use async loading/saving
+warp-tesseract = { git = "https://github.com/Satellite-im/Warp", default-features = false, features = ["indirect"] } #omit `default-features = false` if you wish to use async loading/saving
 ```
 
 ### Adding Keys to Tesseract
@@ -22,8 +22,9 @@ warp-tesseract = { git = "https://github.com/Satellite-im/Warp", default-feature
 use warp_tesseract::Tesseract;
 
 let mut tesseract = Tesseract::default();
-tesseract.set(&b"<PASSWORD/KEY HERE>", "STORJ_ACCESS_KEY", "<ACCESS_KEY_HERE>").unwrap();
-tesseract.set(&b"<PASSWORD/KEY HERE>", "STORJ_SECRET_KEY", "<SECRET_KEY_HERE>").unwrap();
+tesseract.unlock(&b"<PASSWORD/KEY HERE>").unwrap();
+tesseract.set("STORJ_ACCESS_KEY", "<ACCESS_KEY_HERE>").unwrap();
+tesseract.set("STORJ_SECRET_KEY", "<SECRET_KEY_HERE>").unwrap();
 
 //Save to a file
 tesseract.to_file("datastore").unwrap();
@@ -32,10 +33,10 @@ tesseract.to_file("datastore").unwrap();
 You can confirm the contents of the `datastore` file by running
 
 ```rust
-let tesseract = Tesseract::from_file(warp_directory.join("datastore")).unwrap_or_default();
-
-let access_key = tesseract.retrieve(&b"<PASSWORD/KEY HERE>", "STORJ_ACCESS_KEY").unwrap();
-let secret_key = tesseract.retrieve(&b"<PASSWORD/KEY HERE>", "STORJ_SECRET_KEY").unwrap();
+let mut tesseract = Tesseract::from_file(warp_directory.join("datastore")).unwrap_or_default();
+tesseract.unlock(&b"<PASSWORD/KEY HERE>").unwrap();
+let access_key = tesseract.retrieve("STORJ_ACCESS_KEY").unwrap();
+let secret_key = tesseract.retrieve("STORJ_SECRET_KEY").unwrap();
 ```
 
 #### Via Warp CLI
@@ -61,10 +62,10 @@ This will show all the keys stored in tesseract after entering your password.
 
 ```rust
 use warp_tesseract::Tesseract;
-let tesseract = Tesseract::from_file(warp_directory.join("datastore")).unwrap_or_default();
-
-let access_key = tesseract.retrieve(&b"<PASSWORD/KEY HERE>", "STORJ_ACCESS_KEY").unwrap();
-let secret_key = tesseract.retrieve(&b"<PASSWORD/KEY HERE>", "STORJ_SECRET_KEY").unwrap();
+let mut tesseract = Tesseract::from_file(warp_directory.join("datastore")).unwrap_or_default();
+tesseract.unlock(&b"<PASSWORD/KEY HERE>").unwrap();
+let access_key = tesseract.retrieve("STORJ_ACCESS_KEY").unwrap();
+let secret_key = tesseract.retrieve("STORJ_SECRET_KEY").unwrap();
 
 let mut system = StorjFilesystem::new(access_key, secret_key);
 
@@ -75,10 +76,10 @@ system.from_buffer("new_file", &b"This is content to the file".to_vec()).await.u
 
 ```rust
 use warp_tesseract::Tesseract;
-let tesseract = Tesseract::from_file(warp_directory.join("datastore")).unwrap_or_default();
-
-let access_key = tesseract.retrieve(&b"<PASSWORD/KEY HERE>", "STORJ_ACCESS_KEY").unwrap();
-let secret_key = tesseract.retrieve(&b"<PASSWORD/KEY HERE>", "STORJ_SECRET_KEY").unwrap();
+let mut tesseract = Tesseract::from_file(warp_directory.join("datastore")).unwrap_or_default();
+tesseract.unlock(&b"<PASSWORD/KEY HERE>").unwrap();
+let access_key = tesseract.retrieve("STORJ_ACCESS_KEY").unwrap();
+let secret_key = tesseract.retrieve("STORJ_SECRET_KEY").unwrap();
 
 let mut system = StorjFilesystem::new(access_key, secret_key);
 
@@ -95,9 +96,9 @@ println!("{}", String::from_utf8_lossy(&buffer));
 ```rust
 use warp_tesseract::Tesseract;
 let tesseract = Tesseract::from_file(warp_directory.join("datastore")).unwrap_or_default();
-
-let access_key = tesseract.retrieve(&b"<PASSWORD/KEY HERE>", "STORJ_ACCESS_KEY").unwrap();
-let secret_key = tesseract.retrieve(&b"<PASSWORD/KEY HERE>", "STORJ_SECRET_KEY").unwrap();
+tesseract.unlock(&b"<PASSWORD/KEY HERE>").unwrap();
+let access_key = tesseract.retrieve("STORJ_ACCESS_KEY").unwrap();
+let secret_key = tesseract.retrieve("STORJ_SECRET_KEY").unwrap();
 
 let mut system = StorjFilesystem::new(access_key, secret_key);
 

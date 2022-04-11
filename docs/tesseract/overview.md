@@ -14,15 +14,15 @@ Storing a key requries unlocking the store then putting a specific key into it w
 use warp_tesseract::{Tesseract, generate};
 
 let mut store = Tesseract::default();
-
-store.set(&b"MY_PASSPHRASE", "MY_KEY", "MY_VALUE").unwrap();
+store.unlock(&b"MY_PASSPHRASE").unwrap();
+store.set("MY_KEY", "MY_VALUE").unwrap();
 ```
 
 ### Getting a key
 
 Getting a key from Tesseract requires unlocking the store then retrieving a specific key stored. 
 ```rust
-let value = store.retrieve(&b"MY_PASSPHRASE", "MY_KEY").unwrap();
+let value = store.retrieve("MY_KEY").unwrap();
 ```
 
 ### Loading/Saving the datastore
@@ -34,8 +34,8 @@ You can import and export the encrypted contents from and to Tesseract.
 use warp_tesseract::{Tesseract, generate};
 
 let mut store = Tesseract::default();
-
-store.set(&b"MY_PASSPHRASE", "MY_KEY", "MY_VALUE").unwrap();
+store.unlock(&b"MY_PASSPHRASE").unwrap();
+store.set("MY_KEY", "MY_VALUE").unwrap();
 
 store.save_to_file("my_encrypted_data").unwrap();
 ```
@@ -45,6 +45,6 @@ store.save_to_file("my_encrypted_data").unwrap();
 use warp_tesseract::{Tesseract, generate};
 
 let mut store = Tesseract::load_from_file("my_encrypted_data").unwrap();
-
-let value = store.retrieve(&b"MY_PASSPHRASE", "MY_KEY").unwrap();
+store.unlock(&b"MY_PASSPHRASE").unwrap();
+let value = store.retrieve("MY_KEY").unwrap();
 ```

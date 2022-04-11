@@ -10,5 +10,7 @@ warp-common = { version = "0.1.0", path = "../warp-common" }
 warp-crypto = { version = "0.1.0", path = "../warp-crypto" }
 
 [features]
-default = ["async"]
+default = ["async", "indirect"]
 async = ["warp-common/async"]
+direct = []
+indirect = []
