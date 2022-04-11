@@ -16,6 +16,10 @@ pub fn groupchat_key() -> Pubkey {
     Pubkey::from_str("bJhvwTYCkQceANgeShZ4xaxUqEBPsV8e1NgRnLRymxs").unwrap_or_default()
 }
 
+pub fn friend_key() -> Pubkey {
+    Pubkey::from_str("GjS6t1gK9nktqDJBTjobm9Fdepxg2FGb4vifRDEQ8hXL").unwrap_or_default()
+}
+
 pub fn system_program_programid() -> Pubkey {
     Pubkey::from_str("11111111111111111111111111111111").unwrap_or_default()
 }

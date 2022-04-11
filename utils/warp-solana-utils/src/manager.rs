@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use warp_common::anyhow::{ensure, Result};
 use warp_common::bip39::{Language, Mnemonic, Seed};
 
-use crate::wallet::SolanaWallet;
+use crate::wallet::{PhraseType, SolanaWallet};
 use crate::{anyhow, EndPoint};
 
 pub struct SolanaManager {
@@ -19,6 +19,35 @@ pub struct SolanaManager {
     pub network_identifier: EndPoint,
     pub cluster_endpoint: EndPoint,
     pub public_keys: HashMap<String, Pubkey>,
+}
+
+//Note: We should not be cloning the manager
+impl Clone for SolanaManager {
+    fn clone(&self) -> Self {
+        Self {
+            accounts: self.accounts.clone(),
+            payer_account: match &self.payer_account {
+                Some(kp) => {
+                    let inner = kp.to_base58_string();
+                    Some(Keypair::from_base58_string(&inner))
+                }
+                None => None,
+            },
+            mnemonic: self.mnemonic.clone(),
+            //Note: This is temporary
+            connection: RpcClient::new(self.cluster_endpoint.to_string()),
+            user_account: match &self.user_account {
+                Some(kp) => {
+                    let inner = kp.to_base58_string();
+                    Some(Keypair::from_base58_string(&inner))
+                }
+                None => None,
+            },
+            network_identifier: self.network_identifier.clone(),
+            cluster_endpoint: self.cluster_endpoint.clone(),
+            public_keys: self.public_keys.clone(),
+        }
+    }
 }
 
 impl Default for SolanaManager {
@@ -84,26 +113,6 @@ impl SolanaManager {
         Ok(keypair)
     }
 
-    // pub fn generate_derived_public_key(
-    //     &mut self,
-    //     identifier: &str,
-    //     user_pkey: &Pubkey,
-    //     seed: &str,
-    //     id: &Pubkey,
-    // ) -> Result<Pubkey> {
-    //     let (_, pkey) = crate::pubkey_from_seed(user_pkey, seed, id)?;
-    //     self.public_keys.insert(identifier.to_string(), pkey);
-    //     Ok(pkey)
-    // }
-
-    //Not needed?
-    // pub fn get_derived_pubkey(&self, identifier: &str) -> Result<&Pubkey> {
-    //     self.public_keys
-    //         .get(identifier)
-    //         .ok_or(Error::ToBeDetermined)
-    //         .map_err(|e| anyhow!(e))
-    // }
-
     //Not needed?
     // pub fn generate_new_account(&mut self) -> Result<SolanaWallet> {
     //     let mnemonic = self.mnemonic.as_ref().ok_or(Error::ToBeDetermined)?;
@@ -122,59 +131,36 @@ impl SolanaManager {
     // }
 
     //Not needed?
-    // pub fn initialize_random(&mut self) -> Result<()> {
-    //     let account = SolanaWallet::create_random_keypair()?;
-    //     self.payer_account = Some(account.get_keypair()?);
-    //     self.mnemonic = Some(account.mnemonic.clone());
-    //     self.user_account = Some(self.generate_user_keypair()?);
-    //     self.accounts.push(account);
-    //     Ok(())
-    // }
+    pub fn initialize_random(&mut self) -> Result<()> {
+        let account = SolanaWallet::create_random(PhraseType::Standard, None)?;
+        self.payer_account = Some(account.get_keypair());
+        self.mnemonic = Some(account.mnemonic.clone());
+        self.user_account = Some(self.generate_user_keypair()?);
+        self.accounts.push(account);
+        Ok(())
+    }
 
     pub fn initialize_from_mnemonic(&mut self, mnemonic: &str) -> Result<()> {
         let wallet = SolanaWallet::restore_from_mnemonic(None, mnemonic)?;
-        self.initiralize_from_solana_wallet(wallet)
+        self.initiralize_from_solana_wallet(&wallet)
     }
 
-    pub fn initiralize_from_solana_wallet(&mut self, wallet: SolanaWallet) -> Result<()> {
+    pub fn initiralize_from_solana_wallet(&mut self, wallet: &SolanaWallet) -> Result<()> {
+        let wallet = wallet.clone();
         self.payer_account = Some({
             let inner = wallet.keypair.to_bytes();
             Keypair::from_bytes(&inner)?
         });
         self.mnemonic = Some(wallet.mnemonic.clone());
-        // self.user_account = Some(self.generate_user_keypair()?);
-        self.accounts.push(wallet); //TODO: Borrow or clone but why dup?
+        self.accounts.push(wallet);
         Ok(())
     }
 
-    // pub fn get_account(&self, address: &str) -> Result<&SolanaWallet> {
-    //     if self
-    //         .accounts
-    //         .iter()
-    //         .filter(|wallet| wallet.address.as_str() == address)
-    //         .count()
-    //         >= 2
-    //     {
-    //         bail!("Duplication of address provided")
-    //     }
-    //     let wallets = self
-    //         .accounts
-    //         .iter()
-    //         .filter(|wallet| wallet.address.as_str() == address)
-    //         .collect::<Vec<_>>();
-    //     ensure!(wallets.len() == 1, "Address provided is invalid");
-    //     let wallet = wallets.get(0).ok_or(Error::ToBeDetermined)?;
-    //     Ok(wallet)
-    // }
-
-    // pub fn list(&self) -> &Vec<SolanaWallet> {
-    //     &self.accounts
-    // }
-    //
-    // pub fn get_user_account(&self) -> Result<&Keypair> {
-    //     let account = self.user_account.as_ref().ok_or(Error::ToBeDetermined)?;
-    //     Ok(account)
-    // }
+    pub fn get_payer_account(&self) -> Result<&Keypair> {
+        self.payer_account
+            .as_ref()
+            .ok_or_else(|| anyhow!("Payer account unavailable"))
+    }
 
     pub fn get_account_balance(&self) -> Result<u64> {
         ensure!(self.payer_account.is_some(), "Invalid payer account");
@@ -186,6 +172,24 @@ impl SolanaManager {
         Ok(result.value)
     }
 
+    pub fn request_air_drop(&self) -> Result<()> {
+        let payer = self.get_payer_account()?;
+        let payer_pubkey = payer.pubkey().to_string();
+        let response = reqwest::blocking::Client::new()
+            .post("https://faucet.satellite.one")
+            .json(&warp_common::serde_json::json!({ "address": payer_pubkey }))
+            .send()?
+            .json::<ResponseStatus>()?;
+
+        ensure!(response.status == "success", "Error requesting airdrop");
+        // let sig = self
+        //     .connection
+        //     .request_airdrop(&self.payer_account.as_ref().unwrap().pubkey(), 1000000000)?;
+        // self.connection
+        //     .confirm_transaction_with_commitment(&sig, CommitmentConfig::confirmed())?;
+        Ok(())
+    }
+
     // TODO: Determine if needed
     // Note: This function would continuously check for the account until it becomes available.
     // One solution outside utilizing futures would be performing a check on a separate thread and use channels to communicate when it is found
@@ -194,4 +198,14 @@ impl SolanaManager {
     pub fn wait_for_account(&self) -> Result<()> {
         todo!()
     }
+}
+
+#[derive(
+    warp_common::serde::Serialize, warp_common::serde::Deserialize, Debug, Clone, PartialEq, Eq,
+)]
+#[serde(crate = "warp_common::serde")]
+struct ResponseStatus {
+    pub status: String,
+    #[serde(flatten)]
+    pub additional: warp_common::serde_json::Value,
 }

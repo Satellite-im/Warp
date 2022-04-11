@@ -91,11 +91,11 @@ impl Friends {
         let (base, key) = pubkey_from_seeds(
             &[&seed.to_bytes(), &friend.friendkey],
             seed_str,
-            &friends::id(),
+            &super::friend_key(),
         )?;
         //TODO: Determine if we should rely on bincode or borsh
         let instruction = Instruction::new_with_bincode(
-            friends::id(),
+            super::friend_key(),
             &params,
             vec![
                 AccountMeta::new(self.payer.pubkey(), true),
@@ -111,7 +111,7 @@ impl Friends {
         let transaction = Transaction::new(
             &[&self.payer],
             message,
-            self.connection.get_recent_blockhash()?.0,
+            self.connection.get_latest_blockhash()?,
         );
         self.connection.send_and_confirm_transaction(&transaction)?;
         Ok(key)
@@ -149,7 +149,7 @@ impl Friends {
         let transaction = Transaction::new(
             &[&self.payer],
             message,
-            self.connection.get_recent_blockhash()?.0,
+            self.connection.get_latest_blockhash()?,
         );
         let signature = self.connection.send_and_confirm_transaction(&transaction)?;
 
@@ -170,7 +170,7 @@ impl Friends {
         let transaction = Transaction::new(
             &[&self.payer, to],
             message,
-            self.connection.get_recent_blockhash()?.0,
+            self.connection.get_latest_blockhash()?,
         );
         let signature = self.connection.send_and_confirm_transaction(&transaction)?;
 
@@ -189,7 +189,7 @@ impl Friends {
         let transaction = Transaction::new(
             &[&self.payer, to],
             message,
-            self.connection.get_recent_blockhash()?.0,
+            self.connection.get_latest_blockhash()?,
         );
         let signature = self.connection.send_and_confirm_transaction(&transaction)?;
 
@@ -208,7 +208,7 @@ impl Friends {
         let transaction = Transaction::new(
             &[&self.payer, from],
             message,
-            self.connection.get_recent_blockhash()?.0,
+            self.connection.get_latest_blockhash()?,
         );
         let signature = self.connection.send_and_confirm_transaction(&transaction)?;
 
@@ -232,7 +232,7 @@ impl Friends {
         let transaction = Transaction::new(
             &[&self.payer, signer],
             message,
-            self.connection.get_recent_blockhash()?.0,
+            self.connection.get_latest_blockhash()?,
         ); //get_latest_blockhash
         let signature = self.connection.send_and_confirm_transaction(&transaction)?;
         Ok(signature)
@@ -255,7 +255,7 @@ impl Friends {
         let (_, key) = pubkey_from_seeds(
             &[&from.to_bytes(), &to.to_bytes()],
             "friend",
-            &friends::id(),
+            &super::friend_key(),
         )?;
 
         Ok(key)
@@ -289,17 +289,13 @@ impl Friends {
 
         let outgoing = self
             .connection
-            .get_program_accounts_with_config(&friends::id(), outgoing_filter)?
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
+            .get_program_accounts_with_config(&super::friend_key(), outgoing_filter)?
+            .to_vec();
 
         let incoming = self
             .connection
-            .get_program_accounts_with_config(&friends::id(), incoming_filter)?
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
+            .get_program_accounts_with_config(&super::friend_key(), incoming_filter)?
+            .to_vec();
 
         Ok((incoming, outgoing))
     }
@@ -312,7 +308,7 @@ impl Friends {
         padded: [[u8; 32]; 4],
     ) -> anyhow::Result<Instruction> {
         Ok(Instruction::new_with_bincode(
-            friends::id(),
+            super::friend_key(),
             &FriendParam::MakeRequest { tex: padded },
             vec![
                 AccountMeta::new(*friend_key, false),
@@ -331,7 +327,7 @@ impl Friends {
         padded: [[u8; 32]; 4],
     ) -> anyhow::Result<Instruction> {
         Ok(Instruction::new_with_bincode(
-            friends::id(),
+            super::friend_key(),
             &FriendParam::AcceptRequest { tex: padded },
             vec![
                 AccountMeta::new(*friend_key, false),
@@ -348,7 +344,7 @@ impl Friends {
         to: &Pubkey,
     ) -> anyhow::Result<Instruction> {
         Ok(Instruction::new_with_bincode(
-            friends::id(),
+            super::friend_key(),
             &FriendParam::DenyRequest,
             vec![
                 AccountMeta::new(*friend_key, false),
@@ -365,7 +361,7 @@ impl Friends {
         to: &Pubkey,
     ) -> anyhow::Result<Instruction> {
         Ok(Instruction::new_with_bincode(
-            friends::id(),
+            super::friend_key(),
             &FriendParam::RemoveRequest,
             vec![
                 AccountMeta::new(*friend_key, false),
@@ -383,7 +379,7 @@ impl Friends {
         initiator: bool,
     ) -> anyhow::Result<Instruction> {
         Ok(Instruction::new_with_bincode(
-            friends::id(),
+            super::friend_key(),
             &FriendParam::RemoveFriend,
             vec![
                 AccountMeta::new(*friend_key, false),
