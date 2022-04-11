@@ -2,15 +2,15 @@ use std::sync::{Arc, Mutex};
 
 use warp_common::anyhow::anyhow;
 use warp_common::error::Error;
-use warp_common::solana_client::rpc_client::RpcClient;
-use warp_common::solana_sdk::pubkey::Pubkey;
-use warp_common::solana_sdk::signature::Keypair;
-use warp_common::solana_sdk::signer::Signer;
 use warp_common::{Extension, Module};
 use warp_data::{DataObject, DataType};
 use warp_hooks::hooks::Hooks;
 use warp_multipass::{identity::*, MultiPass};
 use warp_pocket_dimension::PocketDimension;
+use warp_solana_utils::solana_client::rpc_client::RpcClient;
+use warp_solana_utils::solana_sdk::pubkey::Pubkey;
+use warp_solana_utils::solana_sdk::signature::Keypair;
+use warp_solana_utils::solana_sdk::signer::Signer;
 use warp_solana_utils::wallet::{PhraseType, SolanaWallet};
 use warp_solana_utils::EndPoint;
 use warp_tesseract::Tesseract;
@@ -92,7 +92,7 @@ impl MultiPass for Account {
     fn create_identity(
         &mut self,
         identity: &mut Identity,
-        passphrase: &str,
+        _: &str,
     ) -> warp_common::Result<PublicKey> {
         if self.tesseract.is_none() {
             return Err(Error::Any(anyhow!(
@@ -103,7 +103,7 @@ impl MultiPass for Account {
         let mut tesseract = self.tesseract.as_mut().unwrap().lock().unwrap();
 
         if tesseract.exist("privkey") {
-            let private_key = tesseract.retrieve(passphrase.as_bytes(), "privkey")?;
+            let private_key = tesseract.retrieve("privkey")?;
 
             let keypair = Keypair::from_base58_string(private_key.as_str());
 
@@ -120,12 +120,8 @@ impl MultiPass for Account {
         //TODO: Solana implementation here for creating an account on the blockchain
 
         // The phrase or mnemonic is set in the event we need to show it to the user
-        tesseract.set(passphrase.as_bytes(), "mnemonic", wallet.mnemonic.as_str())?;
-        tesseract.set(
-            passphrase.as_bytes(),
-            "privkey",
-            wallet.keypair.to_base58_string().as_str(),
-        )?;
+        tesseract.set("mnemonic", wallet.mnemonic.as_str())?;
+        tesseract.set("privkey", wallet.keypair.to_base58_string().as_str())?;
 
         let pubkey = PublicKey::from_bytes(&wallet.keypair.pubkey().to_bytes()[..]);
         identity.public_key = pubkey.clone();
@@ -177,7 +173,7 @@ impl MultiPass for Account {
         Ok(())
     }
 
-    fn decrypt_private_key(&self, passphrase: &str) -> warp_common::Result<Vec<u8>> {
+    fn decrypt_private_key(&self, _: &str) -> warp_common::Result<Vec<u8>> {
         if self.tesseract.is_none() {
             return Err(Error::Any(anyhow!(
                 "Tesseract is required to create an identity"
@@ -190,7 +186,7 @@ impl MultiPass for Account {
             return Err(Error::Any(anyhow!("Private key is not set or available")));
         }
 
-        let private_key = tesseract.retrieve(passphrase.as_bytes(), "privkey")?;
+        let private_key = tesseract.retrieve("privkey")?;
 
         let keypair = Keypair::from_base58_string(private_key.as_str());
 

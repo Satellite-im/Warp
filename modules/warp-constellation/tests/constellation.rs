@@ -4,8 +4,8 @@ mod tests {
     use warp_common::chrono::{DateTime, Utc};
     use warp_common::serde::{Deserialize, Serialize};
     use warp_common::{Extension, Module};
-    use warp_constellation::constellation::{Constellation, ConstellationDataType};
     use warp_constellation::{directory::Directory, file::File};
+    use warp_constellation::{Constellation, ConstellationDataType};
 
     #[derive(Serialize, Deserialize, Clone, Debug)]
     #[serde(crate = "warp_common::serde")]

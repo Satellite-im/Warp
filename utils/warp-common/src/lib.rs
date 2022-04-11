@@ -24,13 +24,6 @@ pub use toml;
 pub use uuid;
 
 cfg_if::cfg_if! {
-    if #[cfg(feature = "use_solana")] {
-        pub use solana_sdk;
-        pub use solana_client;
-    }
-}
-
-cfg_if::cfg_if! {
     if #[cfg(all(feature = "async", not(any(target_family = "wasm", target_os = "emscripten", target_os = "wasi"))))] {
         pub use tokio;
         pub use tokio_stream;

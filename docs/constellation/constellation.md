@@ -12,7 +12,7 @@ We would need to have a structure that would be used for our filesystem.
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::{Extension, Module};
-use warp_constellation::constellation::Constellation;
+use warp_constellation::Constellation;
 use warp_constellation::directory::Directory;
 use warp_constellation::file::File;
 
@@ -103,7 +103,7 @@ This will create a directory called `test` at the root of the filesystem.
 
 ```rust
 use warp_common::tokio;
-use warp_constellation::constellation::Constellation;
+use warp_constellation::Constellation;
 use warp_fs_memory::MemorySystem;
 
 let mut filesystem = MemorySystem::new();
@@ -120,7 +120,7 @@ filesystem.from_buffer("hello.txt", &buf).await.unwrap();
 
 ```rust
 use warp_common::tokio;
-use warp_constellation::constellation::Constellation;
+use warp_constellation::Constellation;
 use warp_fs_memory::MemorySystem;
 
 let mut filesystem = MemorySystem::new();

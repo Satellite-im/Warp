@@ -71,8 +71,8 @@ Getting the item index (position) within a Directory can be useful if you wish t
 ```rust
 use warp_constellation::{
     directory::Directory,
-    warp_constellation::error::Error
 };
+use warp_common::error::Error;
 
 fn main() {
         let mut root = Directory::new("Test Directory");

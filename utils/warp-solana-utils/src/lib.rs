@@ -5,6 +5,8 @@ pub mod helper;
 pub mod manager;
 pub mod wallet;
 
+pub use anchor_client::{solana_client, solana_sdk};
+
 use anchor_client::solana_sdk::derivation_path::DerivationPath;
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::solana_sdk::signature::keypair_from_seed_and_derivation_path;
