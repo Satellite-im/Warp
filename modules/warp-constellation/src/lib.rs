@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use directory::Directory;
 use item::Item;
+use warp_common::anyhow::anyhow;
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::error::Error;
 use warp_common::serde::{Deserialize, Serialize};
@@ -35,7 +36,7 @@ pub trait Constellation: Extension + Sync + Send {
         self.root_directory()
             .get_child_by_path(current_pathbuf)
             .and_then(Item::get_directory)
-            .unwrap_or(self.root_directory())
+            .unwrap_or_else(|_| self.root_directory())
     }
 
     /// Select a directory within the filesystem
@@ -44,8 +45,17 @@ pub trait Constellation: Extension + Sync + Send {
         let current_pathbuf = self.get_path();
 
         if current_pathbuf == &path {
-            return Err(Error::Other);
+            return Err(Error::Any(anyhow!("Path has not change")));
         }
+
+        if !self
+            .current_directory()
+            .get_item(current_pathbuf.to_string_lossy())?
+            .is_directory()
+        {
+            return Err(Error::DirectoryNotFound);
+        }
+
         let new_path = Path::new(current_pathbuf).join(path);
         self.set_path(new_path);
         Ok(())
@@ -140,6 +150,7 @@ pub trait Constellation: Extension + Sync + Send {
     }
 
     /// Used to import data into the filesystem. This would override current contents.
+    /// TODO: Have the data argument accept either bytes or an reader field
     fn import(&mut self, r#type: ConstellationDataType, data: String) -> Result<()> {
         let directory: Directory = match r#type {
             ConstellationDataType::Json => warp_common::serde_json::from_str(data.as_str())?,
@@ -147,7 +158,7 @@ pub trait Constellation: Extension + Sync + Send {
             ConstellationDataType::Toml => warp_common::toml::from_str(data.as_str())?,
         };
         //TODO: create a function to override directory items.
-        (*self.root_directory_mut().get_items_mut()) = directory.items;
+        *self.root_directory_mut().get_items_mut() = directory.items;
 
         Ok(())
     }
