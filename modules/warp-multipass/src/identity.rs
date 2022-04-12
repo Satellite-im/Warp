@@ -66,12 +66,18 @@ pub struct Identity {
 #[serde(crate = "warp_common::serde")]
 pub struct PublicKey(Vec<u8>);
 
+impl AsRef<[u8]> for PublicKey {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
 impl PublicKey {
     pub fn from_bytes(bytes: &[u8]) -> Self {
         Self(bytes.to_vec())
     }
     pub fn to_bytes(&self) -> &[u8] {
-        self.0.as_slice()
+        self.as_ref()
     }
 }
 

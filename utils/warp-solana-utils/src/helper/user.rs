@@ -17,9 +17,13 @@ pub struct UserHelper {
 }
 
 impl UserHelper {
-    pub fn new(manager: SolanaManager) -> anyhow::Result<Self> {
-        //"chea[" way of copying keypair since it does not support copy or clone
-        let kp_str = manager.get_payer_account()?.to_base58_string();
+    pub fn new_with_manager(manager: SolanaManager) -> anyhow::Result<Self> {
+        manager.get_payer_account().map(Self::new_with_keypair)
+    }
+
+    pub fn new_with_keypair(kp: &Keypair) -> Self {
+        //"cheap" way of copying keypair since it does not support copy or clone
+        let kp_str = kp.to_base58_string();
         let kp = Keypair::from_base58_string(&kp_str);
         let client = Client::new_with_options(
             Cluster::Devnet,
@@ -28,14 +32,14 @@ impl UserHelper {
         );
 
         let program = client.program(users::id());
-        Ok(Self {
+        Self {
             client,
             program,
             kp,
-        })
+        }
     }
 
-    pub fn create(&self, name: &str, photo: &str, status: &str) -> anyhow::Result<()> {
+    pub fn create(&mut self, name: &str, photo_hash: &str, status: &str) -> anyhow::Result<()> {
         let payer = self.program.payer();
 
         let user = self.program_key(&payer)?;
@@ -51,7 +55,7 @@ impl UserHelper {
             })
             .args(users::instruction::Create {
                 name: name.to_string(),
-                photo_hash: photo.to_string(),
+                photo_hash: photo_hash.to_string(),
                 status: status.to_string(),
             })
             .send()?;
@@ -121,6 +125,66 @@ impl UserHelper {
             })
             .args(users::instruction::SetStatus {
                 status: status.to_string(),
+            })
+            .signer(&self.kp)
+            .send()?;
+
+        Ok(())
+    }
+
+    pub fn set_banner_image(&mut self, hash: &str) -> anyhow::Result<()> {
+        let payer = self.program.payer();
+
+        let user = self.program_key(&payer)?;
+        self.program
+            .request()
+            .accounts(users::accounts::Modify {
+                user,
+                signer: payer,
+                payer,
+            })
+            .args(users::instruction::SetBannerImageHash {
+                banner_image_hash: hash.to_string(),
+            })
+            .signer(&self.kp)
+            .send()?;
+
+        Ok(())
+    }
+
+    pub fn set_extra_one(&mut self, data: &str) -> anyhow::Result<()> {
+        let payer = self.program.payer();
+
+        let user = self.program_key(&payer)?;
+        self.program
+            .request()
+            .accounts(users::accounts::Modify {
+                user,
+                signer: payer,
+                payer,
+            })
+            .args(users::instruction::SetExtraOne {
+                extra_1: data.to_string(),
+            })
+            .signer(&self.kp)
+            .send()?;
+
+        Ok(())
+    }
+
+    pub fn set_extra_two(&mut self, data: &str) -> anyhow::Result<()> {
+        let payer = self.program.payer();
+
+        let user = self.program_key(&payer)?;
+        self.program
+            .request()
+            .accounts(users::accounts::Modify {
+                user,
+                signer: payer,
+                payer,
+            })
+            .args(users::instruction::SetExtraTwo {
+                extra_2: data.to_string(),
             })
             .signer(&self.kp)
             .send()?;
