@@ -1,5 +1,10 @@
 ## StorJ Extension Overview
 
+
+<img src="https://assets-global.website-files.com/602eda09fc78afc76e9706b6/621e48c4119670aeeb4309f0_storj-logo-type-ukr.svg" alt="STORJ" height="50">
+
+[How StorJ works](https://www.storj.io/how-it-works)
+
 ### Obtaining `Access` and `Secret` keys.
 
 **Please [review](https://docs.storj.io/dcs/getting-started/quickstart-aws-sdk-and-hosted-gateway-mt/) on how to obtain the `Access Key`, and `Secret Key`**
