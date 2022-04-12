@@ -56,7 +56,7 @@ impl UserHelper {
                 user,
                 signer: payer,
                 payer,
-                system_program: self.program.id(),
+                system_program: anchor_client::solana_sdk::system_program::ID,
             })
             .args(users::instruction::Create {
                 name: name.to_string(),
@@ -195,6 +195,10 @@ impl UserHelper {
             .send()?;
 
         Ok(())
+    }
+
+    pub fn user_pubkey(&self) -> Pubkey {
+        self.program.payer()
     }
 
     fn program_key(&self, addr: &Pubkey) -> anyhow::Result<Pubkey> {
