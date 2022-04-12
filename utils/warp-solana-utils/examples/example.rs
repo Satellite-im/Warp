@@ -1,4 +1,3 @@
-use users::User;
 use warp_crypto::rand::Rng;
 use warp_solana_utils::helper::user;
 use warp_solana_utils::manager::SolanaManager;
@@ -7,14 +6,7 @@ use warp_solana_utils::solana_sdk::signature::Signer;
 use warp_solana_utils::wallet::{PhraseType, SolanaWallet};
 
 fn main() -> warp_common::anyhow::Result<()> {
-    // Account existing on solana
-    let wallet = SolanaWallet::restore_from_mnemonic(
-        None,
-        "morning caution dose lab six actress pond humble pause enact virtual train",
-    )?;
-
-    // Account not existing on solana and needs to pass through `UserHelper::create`
-    // let wallet = SolanaWallet::create_random(PhraseType::Standard, None)?;
+    let wallet = SolanaWallet::create_random(PhraseType::Standard, None)?;
 
     let mut manager = SolanaManager::new();
     manager.initiralize_from_solana_wallet(&wallet)?;
@@ -24,18 +16,15 @@ fn main() -> warp_common::anyhow::Result<()> {
     }
 
     let mut handle = user::UserHelper::new_with_manager(&manager)?;
-    let User { name, .. } = handle.get_current_user()?;
-    println!("Old Name: {name}");
 
     let code = warp_crypto::rand::thread_rng().gen_range(0, 9999);
 
-    let new_name = &format!("ThatRandomGuy#{code}");
+    let new_name = format!("ThatRandomGuy#{code}");
 
-    println!("New name: {new_name}");
-    handle.set_name(new_name)?;
-    //
+    handle.create(&new_name, "", "")?;
+
     let data = handle.get_current_user()?;
-    //
+
     let users::User {
         name,
         photo_hash,
@@ -44,6 +33,7 @@ fn main() -> warp_common::anyhow::Result<()> {
         extra_1,
         extra_2,
     } = data;
+
     println!();
     println!("Name: {name}");
     println!("Photo Hash: {photo_hash}");
@@ -51,6 +41,7 @@ fn main() -> warp_common::anyhow::Result<()> {
     println!("Banner Hash: {banner_image_hash}");
     println!("Extra#1: {extra_1}");
     println!("Extra#2: {extra_2}");
+
     let balance = manager.get_account_balance()?;
     println!("Balance: {}", balance);
     println!("Public Key: {}", wallet.keypair.pubkey());
