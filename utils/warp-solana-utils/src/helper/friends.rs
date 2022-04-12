@@ -25,9 +25,18 @@ pub struct Friends {
 #[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, BorshSchema, Debug)]
 #[serde(crate = "warp_common::serde", rename_all = "camelCase")]
 pub enum FriendParam {
-    CreateAccount { friend: FriendKey },
-    MakeRequest { tex: [[u8; 32]; 4] },
-    AcceptRequest { tex: [[u8; 32]; 4] },
+    CreateAccount {
+        #[allow(dead_code)]
+        friend: FriendKey,
+    },
+    MakeRequest {
+        #[allow(dead_code)]
+        tex: [[u8; 32]; 4],
+    },
+    AcceptRequest {
+        #[allow(dead_code)]
+        tex: [[u8; 32]; 4],
+    },
     DenyRequest,
     RemoveRequest,
     RemoveFriend,
@@ -56,6 +65,7 @@ pub enum FriendEvents {
 #[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, BorshSchema, Debug)]
 #[serde(crate = "warp_common::serde", rename_all = "camelCase")]
 pub struct FriendKey {
+    #[allow(dead_code)]
     pub friendkey: [u8; 32],
 }
 
