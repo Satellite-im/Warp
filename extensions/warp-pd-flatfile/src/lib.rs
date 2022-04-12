@@ -347,9 +347,9 @@ impl PocketDimension for FlatfileStorage {
             .collect::<Vec<_>>();
 
         if execute(&list, query)?.is_empty() {
-            return Err(Error::ToBeDetermined);
+            Err(Error::ToBeDetermined)
         } else {
-            return Ok(());
+            Ok(())
         }
     }
 

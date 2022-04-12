@@ -16,3 +16,6 @@ warp-pocket-dimension = { path = "../../modules/warp-pocket-dimension" }
 warp-crypto = { path = "../../utils/warp-crypto" }
 
 warp-solana-utils = { path = "../../utils/warp-solana-utils" }
+
+[dev-dependencies]
+warp-pd-flatfile = { path = "../warp-pd-flatfile" }

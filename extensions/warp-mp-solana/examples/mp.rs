@@ -1,8 +1,13 @@
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use warp_common::anyhow;
 use warp_mp_solana::Account;
-use warp_multipass::identity::IdentityUpdate;
+use warp_multipass::identity::{Identifier, IdentityUpdate, PublicKey};
 use warp_multipass::MultiPass;
+use warp_pd_flatfile::FlatfileStorage;
+use warp_pocket_dimension::PocketDimension;
+use warp_solana_utils::solana_sdk::pubkey::Pubkey;
+use warp_solana_utils::wallet::SolanaWallet;
 use warp_tesseract::Tesseract;
 
 fn update_name(account: &mut impl MultiPass, name: &str) -> anyhow::Result<()> {
@@ -27,6 +32,29 @@ fn update_status(account: &mut impl MultiPass, status: &str) -> anyhow::Result<(
     Ok(())
 }
 
+fn generated_wallet() -> anyhow::Result<SolanaWallet> {
+    SolanaWallet::restore_from_mnemonic(
+        None,
+        "morning caution dose lab six actress pond humble pause enact virtual train",
+    )
+}
+
+fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
+    let mut root = std::env::temp_dir();
+    root.push("pd-cache");
+
+    let index = {
+        let mut index = std::path::PathBuf::new();
+        index.push("cache-index");
+
+        index
+    };
+
+    let storage = FlatfileStorage::new_with_index_file(root, index)?;
+
+    Ok(Arc::new(Mutex::new(Box::new(storage))))
+}
+
 fn main() -> warp_common::anyhow::Result<()> {
     let mut tesseract = Tesseract::default();
     tesseract.unlock(
@@ -35,23 +63,22 @@ fn main() -> warp_common::anyhow::Result<()> {
 
     let tesseract = Arc::new(Mutex::new(tesseract));
 
+    let pd = cache_setup()?;
+
     let mut account = Account::with_devnet();
     account.set_tesseract(tesseract);
+    account.set_cache(pd);
+    account.insert_private_key(generated_wallet()?)?;
 
-    let ident = if let Ok(ident) = account.get_own_identity() {
-        ident
-    } else {
-        account.create_identity("ThatIsRandom", "")?;
-        account.get_own_identity()?
-    };
+    let ident = account.get_own_identity()?;
 
     println!(
         "Current Identity: {}",
         warp_common::serde_json::to_string(&ident)?
     );
-    // update_name(&mut account, "SuchRandom")?; //this is commented out due to an error. TODO: Investigate
 
-    update_status(&mut account, "New status update")?;
+    // update_name(&mut account, "SuchRandom")?; //this is commented out due to an error. TODO: Investigate
+    update_status(&mut account, "New status message")?;
 
     Ok(())
 }

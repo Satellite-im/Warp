@@ -5,9 +5,10 @@ use warp_common::anyhow::{anyhow, bail};
 use warp_common::error::Error;
 use warp_common::{anyhow, Extension, Module};
 use warp_crypto::rand::Rng;
-use warp_data::DataType;
+use warp_data::{DataObject, DataType};
 use warp_hooks::hooks::Hooks;
 use warp_multipass::{identity::*, MultiPass};
+use warp_pocket_dimension::query::QueryBuilder;
 use warp_pocket_dimension::PocketDimension;
 use warp_solana_utils::helper::user::UserHelper;
 use warp_solana_utils::manager::SolanaManager;
@@ -170,18 +171,71 @@ impl MultiPass for Account {
 
         let identity = user_to_identity(&helper, None)?;
 
-        self.identity = Some(identity);
+        self.identity = Some(identity.clone());
+
+        if let Some(cache) = &self.cache {
+            let mut cache = cache.lock().unwrap();
+            let object = DataObject::new(&DataType::Module(Module::Accounts), identity)?;
+            cache.add_data(DataType::Module(Module::Accounts), &object)?;
+        }
         Ok(pubkey)
     }
 
     fn get_identity(&self, id: Identifier) -> warp_common::Result<Identity> {
         let helper = self.user_helper()?;
         let ident = match id {
-            Identifier::Username(_) => return Err(Error::Unimplemented),
-            Identifier::PublicKey(pkey) => user_to_identity(&helper, Some(pkey.to_bytes()))?,
+            Identifier::Username(username) => {
+                if let Some(cache) = &self.cache {
+                    let cache = cache.lock().unwrap();
+
+                    let mut query = QueryBuilder::default();
+                    query.r#where("username", &username)?;
+                    if let Ok(list) =
+                        cache.get_data(DataType::Module(Module::Accounts), Some(&query))
+                    {
+                        //get last
+                        if !list.is_empty() {
+                            let obj = list.last().unwrap();
+                            return obj.payload::<Identity>();
+                        }
+                    }
+                }
+                return Err(Error::Unimplemented);
+            }
+            Identifier::PublicKey(pkey) => {
+                if let Some(cache) = &self.cache {
+                    let cache = cache.lock().unwrap();
+
+                    let mut query = QueryBuilder::default();
+                    query.r#where("public_key", &pkey)?;
+                    if let Ok(list) =
+                        cache.get_data(DataType::Module(Module::Accounts), Some(&query))
+                    {
+                        //get last
+                        if !list.is_empty() {
+                            let obj = list.last().unwrap();
+                            return obj.payload::<Identity>();
+                        }
+                    }
+                }
+                user_to_identity(&helper, Some(pkey.to_bytes()))?
+            }
             Identifier::Own => user_to_identity(&helper, None)?,
         };
 
+        if let Some(cache) = &self.cache {
+            let mut cache = cache.lock().unwrap();
+
+            let mut query = QueryBuilder::default();
+            query.r#where("public_key", &ident.public_key)?;
+            if cache
+                .has_data(DataType::Module(Module::Accounts), &query)
+                .is_err()
+            {
+                let object = DataObject::new(&DataType::Module(Module::Accounts), &ident)?;
+                cache.add_data(DataType::Module(Module::Accounts), &object)?;
+            }
+        }
         Ok(ident)
     }
 
@@ -189,7 +243,7 @@ impl MultiPass for Account {
         let mut helper = self.user_helper()?;
 
         let mut identity = user_to_identity(&helper, None)?;
-
+        let old_identity = identity.clone();
         match option {
             IdentityUpdate::Username(username) => {
                 helper.set_name(&format!("{username}#{}", identity.short_id))?; //TODO: Investigate why it errors and causes interaction to contract to error until there is an update.
@@ -210,7 +264,25 @@ impl MultiPass for Account {
                 identity.status_message = status
             }
         }
+        if let Some(cache) = &self.cache {
+            let mut cache = cache.lock().unwrap();
 
+            let mut query = QueryBuilder::default();
+            query.r#where("username", &old_identity.username)?;
+            if let Ok(list) = cache.get_data(DataType::Module(Module::Accounts), Some(&query)) {
+                //get last
+                if !list.is_empty() {
+                    let mut obj = list.last().unwrap().clone();
+                    obj.set_payload(identity.clone())?;
+                    cache.add_data(DataType::Module(Module::Accounts), &obj)?;
+                }
+            } else {
+                cache.add_data(
+                    DataType::Module(Module::Accounts),
+                    &DataObject::new(&DataType::Module(Module::Accounts), identity.clone())?,
+                )?;
+            }
+        }
         self.identity = Some(identity);
         Ok(())
     }
@@ -239,10 +311,19 @@ impl MultiPass for Account {
 }
 
 fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Result<Identity> {
-    let user = match pubkey {
-        Some(pubkey) => helper.get_user(&Pubkey::new(pubkey))?,
-        None => helper.get_current_user()?,
+    let (user, pubkey) = match pubkey {
+        Some(pubkey) => {
+            let pkey = Pubkey::new(pubkey);
+            let user = helper.get_user(&pkey)?;
+            (user, pkey)
+        }
+        None => {
+            let user = helper.get_current_user()?;
+            let pkey = helper.program.payer();
+            (user, pkey)
+        }
     };
+
     let mut identity = Identity::default();
     //Note: This is temporary
     if user.name.contains('#') {
@@ -269,7 +350,7 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
         identity.username = user.name
     };
 
-    identity.public_key = PublicKey::from_bytes(&helper.user_pubkey().to_bytes());
+    identity.public_key = PublicKey::from_bytes(&pubkey.to_bytes());
     identity.status_message = Some(user.status);
     identity.graphics.profile_picture = user.photo_hash;
     identity.graphics.profile_banner = user.banner_image_hash;
