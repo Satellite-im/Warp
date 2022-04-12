@@ -5,6 +5,7 @@ use anchor_client::{
 use warp_common::anyhow;
 
 use crate::manager::SolanaManager;
+use crate::wallet::SolanaWallet;
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use std::rc::Rc;
 use users::User;
@@ -19,6 +20,10 @@ pub struct UserHelper {
 impl UserHelper {
     pub fn new_with_manager(manager: &SolanaManager) -> anyhow::Result<Self> {
         manager.get_payer_account().map(Self::new_with_keypair)
+    }
+
+    pub fn new_with_wallet(wallet: &SolanaWallet) -> Self {
+        Self::new_with_keypair(&wallet.keypair)
     }
 
     pub fn new_with_keypair(kp: &Keypair) -> Self {
