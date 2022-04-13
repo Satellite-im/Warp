@@ -12,10 +12,6 @@ pub fn server_key() -> Pubkey {
     Pubkey::from_str("FGdpP9RSN3ZE8d1PXxiBXS8ThCsXdi342KmDwqSQ3ZBz").unwrap_or_default()
 }
 
-pub fn groupchat_key() -> Pubkey {
-    Pubkey::from_str("bJhvwTYCkQceANgeShZ4xaxUqEBPsV8e1NgRnLRymxs").unwrap_or_default()
-}
-
 pub fn friend_key() -> Pubkey {
     Pubkey::from_str("GjS6t1gK9nktqDJBTjobm9Fdepxg2FGb4vifRDEQ8hXL").unwrap_or_default()
 }
