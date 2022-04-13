@@ -1,3 +1,4 @@
+use crate::anyhow::anyhow;
 use std::sync::{Arc, Mutex};
 use warp_common::anyhow;
 use warp_mp_solana::Account;
@@ -55,9 +56,8 @@ fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
 
 fn main() -> warp_common::anyhow::Result<()> {
     let mut tesseract = Tesseract::default();
-    tesseract.unlock(
-        &b"this is my totally secured password that should nnever be embedded in code"[..],
-    )?;
+    tesseract
+        .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
     let tesseract = Arc::new(Mutex::new(tesseract));
 

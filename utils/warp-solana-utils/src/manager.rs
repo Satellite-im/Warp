@@ -133,7 +133,7 @@ impl SolanaManager {
     //Not needed?
     pub fn initialize_random(&mut self) -> Result<()> {
         let account = SolanaWallet::create_random(PhraseType::Standard, None)?;
-        self.payer_account = Some(account.get_keypair());
+        self.payer_account = Some(account.get_keypair()?);
         self.mnemonic = Some(account.mnemonic.clone());
         self.user_account = Some(self.generate_user_keypair()?);
         self.accounts.push(account);
@@ -147,10 +147,7 @@ impl SolanaManager {
 
     pub fn initiralize_from_solana_wallet(&mut self, wallet: &SolanaWallet) -> Result<()> {
         let wallet = wallet.clone();
-        self.payer_account = Some({
-            let inner = wallet.keypair.to_bytes();
-            Keypair::from_bytes(&inner)?
-        });
+        self.payer_account = Keypair::from_bytes(&wallet.keypair).ok();
         self.mnemonic = Some(wallet.mnemonic.clone());
         self.accounts.push(wallet);
         Ok(())

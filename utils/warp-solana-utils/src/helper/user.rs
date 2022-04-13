@@ -22,8 +22,9 @@ impl UserHelper {
         manager.get_payer_account().map(Self::new_with_keypair)
     }
 
-    pub fn new_with_wallet(wallet: &SolanaWallet) -> Self {
-        Self::new_with_keypair(&wallet.keypair)
+    pub fn new_with_wallet(wallet: &SolanaWallet) -> anyhow::Result<Self> {
+        let kp = Keypair::from_bytes(&wallet.keypair)?;
+        Ok(Self::new_with_keypair(&kp))
     }
 
     pub fn new_with_keypair(kp: &Keypair) -> Self {

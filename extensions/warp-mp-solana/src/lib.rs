@@ -76,14 +76,14 @@ impl Account {
         self.tesseract = Some(tesseract)
     }
 
-    pub fn insert_private_key(&mut self, wallet: SolanaWallet) -> anyhow::Result<()> {
+    pub fn insert_solana_wallet(&mut self, wallet: SolanaWallet) -> anyhow::Result<()> {
         ensure!(self.tesseract.is_some(), "Tesseract is not available");
         let mut tesseract = self.tesseract.as_mut().unwrap().lock().unwrap();
 
         ensure!(tesseract.is_unlock(), "Tesseract is currently locked.");
 
         tesseract.set("mnemonic", wallet.mnemonic.as_str())?;
-        tesseract.set("privkey", wallet.keypair.to_base58_string().as_str())?;
+        tesseract.set("privkey", wallet.get_keypair()?.to_base58_string().as_str())?;
 
         Ok(())
     }
@@ -145,7 +145,7 @@ impl MultiPass for Account {
         let mut tesseract = self.tesseract.as_mut().unwrap().lock().unwrap();
 
         let wallet = SolanaWallet::create_random(PhraseType::Standard, None)?;
-        let mut helper = UserHelper::new_with_wallet(&wallet);
+        let mut helper = UserHelper::new_with_wallet(&wallet)?;
 
         if let Ok(identity) = user_to_identity(&helper, None) {
             if identity.username == *username {
@@ -165,9 +165,9 @@ impl MultiPass for Account {
         helper.create(&uname, "", "We have liftoff")?;
 
         tesseract.set("mnemonic", wallet.mnemonic.as_str())?;
-        tesseract.set("privkey", wallet.keypair.to_base58_string().as_str())?;
+        tesseract.set("privkey", wallet.get_keypair()?.to_base58_string().as_str())?;
 
-        let pubkey = PublicKey::from_bytes(&wallet.keypair.pubkey().to_bytes()[..]);
+        let pubkey = PublicKey::from_bytes(&wallet.get_keypair()?.pubkey().to_bytes()[..]);
 
         let identity = user_to_identity(&helper, None)?;
 

@@ -1,7 +1,7 @@
 use warp_crypto::rand::Rng;
+use warp_solana_utils::anchor_client::solana_sdk::signature::Signer;
 use warp_solana_utils::helper::user;
 use warp_solana_utils::manager::SolanaManager;
-use warp_solana_utils::solana_sdk::signature::Signer;
 #[allow(unused_imports)]
 use warp_solana_utils::wallet::{PhraseType, SolanaWallet};
 
@@ -44,7 +44,7 @@ fn main() -> warp_common::anyhow::Result<()> {
 
     let balance = manager.get_account_balance()?;
     println!("Balance: {}", balance);
-    println!("Public Key: {}", wallet.keypair.pubkey());
+    println!("Public Key: {}", wallet.get_keypair()?.pubkey());
     // println!("{photo_hash}");
     // println!("{status}");
     Ok(())
