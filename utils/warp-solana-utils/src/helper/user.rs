@@ -23,7 +23,7 @@ impl UserHelper {
     }
 
     pub fn new_with_wallet(wallet: &SolanaWallet) -> anyhow::Result<Self> {
-        let kp = Keypair::from_bytes(&wallet.keypair)?;
+        let kp = wallet.get_keypair()?;
         Ok(Self::new_with_keypair(&kp))
     }
 

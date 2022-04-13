@@ -82,7 +82,7 @@ impl Account {
 
         ensure!(tesseract.is_unlock(), "Tesseract is currently locked.");
 
-        tesseract.set("mnemonic", wallet.mnemonic.as_str())?;
+        tesseract.set("mnemonic", &wallet.get_mnemonic_phrase()?)?;
         tesseract.set("privkey", wallet.get_keypair()?.to_base58_string().as_str())?;
 
         Ok(())
@@ -164,7 +164,7 @@ impl MultiPass for Account {
 
         helper.create(&uname, "", "We have liftoff")?;
 
-        tesseract.set("mnemonic", wallet.mnemonic.as_str())?;
+        tesseract.set("mnemonic", &wallet.get_mnemonic_phrase()?)?;
         tesseract.set("privkey", wallet.get_keypair()?.to_base58_string().as_str())?;
 
         let pubkey = PublicKey::from_bytes(&wallet.get_keypair()?.pubkey().to_bytes()[..]);

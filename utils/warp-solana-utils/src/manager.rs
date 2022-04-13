@@ -134,8 +134,8 @@ impl SolanaManager {
     pub fn initialize_random(&mut self) -> Result<()> {
         let account = SolanaWallet::create_random(PhraseType::Standard, None)?;
         self.payer_account = Some(account.get_keypair()?);
-        self.mnemonic = Some(account.mnemonic.clone());
-        self.user_account = Some(self.generate_user_keypair()?);
+        self.mnemonic = Some(account.get_mnemonic_phrase()?);
+        self.user_account = self.generate_user_keypair().ok();
         self.accounts.push(account);
         Ok(())
     }
@@ -147,8 +147,8 @@ impl SolanaManager {
 
     pub fn initiralize_from_solana_wallet(&mut self, wallet: &SolanaWallet) -> Result<()> {
         let wallet = wallet.clone();
-        self.payer_account = Keypair::from_bytes(&wallet.keypair).ok();
-        self.mnemonic = Some(wallet.mnemonic.clone());
+        self.payer_account = Some(wallet.get_keypair()?);
+        self.mnemonic = Some(wallet.get_mnemonic_phrase()?);
         self.accounts.push(wallet);
         Ok(())
     }
@@ -160,8 +160,7 @@ impl SolanaManager {
     }
 
     pub fn get_account_balance(&self) -> Result<u64> {
-        ensure!(self.payer_account.is_some(), "Invalid payer account");
-        let payer_account = self.payer_account.as_ref().unwrap();
+        let payer_account = self.get_payer_account()?;
         let commitment_config = CommitmentConfig::confirmed();
         let result = self
             .connection
