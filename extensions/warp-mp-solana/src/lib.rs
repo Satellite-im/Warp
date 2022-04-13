@@ -246,7 +246,7 @@ impl MultiPass for Account {
         let old_identity = identity.clone();
         match option {
             IdentityUpdate::Username(username) => {
-                helper.set_name(&format!("{username}#{}", identity.short_id))?; //TODO: Investigate why it errors and causes interaction to contract to error until there is an update.
+                helper.set_name(&format!("{username}#{}", identity.short_id))?; //TODO: Investigate why it *sometimes* errors and causes interaction to contract to error until there is an update
                 identity.username = username
             }
             IdentityUpdate::Graphics { picture, banner } => {
