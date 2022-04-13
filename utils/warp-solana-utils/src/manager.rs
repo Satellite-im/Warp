@@ -182,11 +182,15 @@ impl SolanaManager {
             .json::<ResponseStatus>()?;
 
         ensure!(response.status == "success", "Error requesting airdrop");
-        // let sig = self
-        //     .connection
-        //     .request_airdrop(&self.payer_account.as_ref().unwrap().pubkey(), 1000000000)?;
-        // self.connection
-        //     .confirm_transaction_with_commitment(&sig, CommitmentConfig::confirmed())?;
+        Ok(())
+    }
+
+    pub fn request_air_drop_direct(&self, amount: u64) -> Result<()> {
+        let sig = self
+            .connection
+            .request_airdrop(&self.get_payer_account()?.pubkey(), amount)?;
+        self.connection
+            .confirm_transaction_with_commitment(&sig, CommitmentConfig::confirmed())?;
         Ok(())
     }
 

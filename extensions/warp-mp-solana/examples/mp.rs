@@ -1,12 +1,10 @@
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use warp_common::anyhow;
 use warp_mp_solana::Account;
-use warp_multipass::identity::{Identifier, IdentityUpdate, PublicKey};
+use warp_multipass::identity::IdentityUpdate;
 use warp_multipass::MultiPass;
 use warp_pd_flatfile::FlatfileStorage;
 use warp_pocket_dimension::PocketDimension;
-use warp_solana_utils::solana_sdk::pubkey::Pubkey;
 use warp_solana_utils::wallet::SolanaWallet;
 use warp_tesseract::Tesseract;
 
@@ -68,8 +66,10 @@ fn main() -> warp_common::anyhow::Result<()> {
     let mut account = Account::with_devnet();
     account.set_tesseract(tesseract);
     account.set_cache(pd);
-    account.insert_private_key(generated_wallet()?)?;
+    // Uncomment this if you want to interact with an precreated account and comment out `account.create_identity`
+    // account.insert_private_key(generated_wallet()?)?;
 
+    account.create_identity("MyNewAccount", "")?;
     let ident = account.get_own_identity()?;
 
     println!(
@@ -77,7 +77,7 @@ fn main() -> warp_common::anyhow::Result<()> {
         warp_common::serde_json::to_string(&ident)?
     );
 
-    // update_name(&mut account, "SuchRandom")?; //this is commented out due to an error. TODO: Investigate
+    update_name(&mut account, "NotSoNewAccount")?;
     update_status(&mut account, "New status message")?;
 
     Ok(())
