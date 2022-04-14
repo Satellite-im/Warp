@@ -1,7 +1,7 @@
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 // use warp_common::futures::TryStreamExt;
 use warp_module::Module;
 
@@ -118,6 +118,20 @@ impl IpfsFileSystem {
     pub fn set_hook(&mut self, hook: Arc<Mutex<Hooks>>) {
         self.hooks = Some(hook)
     }
+
+    pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
+
+        let inner = match cache.lock() {
+            Ok(inner) => inner,
+            Err(e) => e.into_inner(),
+        };
+
+        Ok(inner)
+    }
 }
 
 impl Extension for IpfsFileSystem {
@@ -146,9 +160,11 @@ impl Constellation for IpfsFileSystem {
     fn root_directory_mut(&mut self) -> &mut Directory {
         &mut self.index
     }
+
     fn get_path_mut(&mut self) -> &mut PathBuf {
         &mut self.path
     }
+
     async fn put(&mut self, name: &str, path: &str) -> warp_common::Result<()> {
         //TODO: Implement a remote check along with a check within constellation to determine if the file exist
         if self.root_directory().get_child_by_path(name).is_ok() {
@@ -229,8 +245,7 @@ impl Constellation for IpfsFileSystem {
 
         self.modified = Utc::now();
 
-        if let Some(cache) = &self.cache {
-            let mut cache = cache.lock().unwrap();
+        if let Ok(mut cache) = self.get_cache() {
             let object = DataObject::new(
                 DataType::Module(Module::FileSystem),
                 DimensionData::from_path(path),
@@ -259,9 +274,7 @@ impl Constellation for IpfsFileSystem {
 
         let name = affix_root(name);
 
-        if let Some(cache) = &self.cache {
-            let cache = cache.lock().unwrap();
-
+        if let Ok(cache) = self.get_cache() {
             let name = Path::new(&name)
                 .file_name()
                 .ok_or(Error::Other)?
@@ -373,9 +386,7 @@ impl Constellation for IpfsFileSystem {
 
         self.modified = Utc::now();
 
-        if let Some(cache) = &self.cache {
-            let mut cache = cache.lock().unwrap();
-
+        if let Ok(mut cache) = self.get_cache() {
             let name = Path::new(&name)
                 .file_name()
                 .ok_or(Error::Other)?
@@ -401,9 +412,7 @@ impl Constellation for IpfsFileSystem {
     async fn to_buffer(&self, name: &str, buffer: &mut Vec<u8>) -> warp_common::Result<()> {
         let name = affix_root(name);
 
-        if let Some(cache) = &self.cache {
-            let cache = cache.lock().unwrap();
-
+        if let Ok(cache) = self.get_cache() {
             let name = Path::new(&name)
                 .file_name()
                 .ok_or(Error::Other)?

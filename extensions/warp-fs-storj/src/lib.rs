@@ -1,6 +1,7 @@
 use aws_endpoint::partition::endpoint;
 use aws_endpoint::{CredentialScope, Partition, PartitionResolver};
 use aws_sdk_s3::presigning::config::PresigningConfig;
+use std::sync::MutexGuard;
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -149,6 +150,20 @@ impl StorjFilesystem {
     pub fn set_hook(&mut self, hook: Arc<Mutex<Hooks>>) {
         self.hooks = Some(hook)
     }
+
+    pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
+
+        let inner = match cache.lock() {
+            Ok(inner) => inner,
+            Err(e) => e.into_inner(),
+        };
+
+        Ok(inner)
+    }
 }
 
 #[warp_common::async_trait::async_trait]
@@ -189,7 +204,7 @@ impl Constellation for StorjFilesystem {
         let client = self
             .client
             .as_ref()
-            .ok_or(Error::Any(anyhow!("Unable to get StorJ Client")))?;
+            .ok_or_else(|| Error::Any(anyhow!("Unable to get StorJ Client")))?;
 
         let code = client
             .bucket(&bucket, true)
@@ -208,7 +223,7 @@ impl Constellation for StorjFilesystem {
         let cred = client
             .creds
             .as_ref()
-            .ok_or(anyhow!("Credentials are not set"))?;
+            .ok_or_else(|| anyhow!("Credentials are not set"))?;
 
         let url = presign_url(
             &cred.access_key.clone().unwrap_or_default(),
@@ -229,8 +244,7 @@ impl Constellation for StorjFilesystem {
 
         self.modified = Utc::now();
 
-        if let Some(cache) = &self.cache {
-            let mut cache = cache.lock().unwrap();
+        if let Ok(mut cache) = self.get_cache() {
             let object = DataObject::new(
                 DataType::Module(Module::FileSystem),
                 DimensionData::from_path(path),
@@ -252,8 +266,7 @@ impl Constellation for StorjFilesystem {
     async fn get(&self, name: &str, path: &str) -> warp_common::Result<()> {
         let (bucket, name) = split_for(name)?;
 
-        if let Some(cache) = &self.cache {
-            let cache = cache.lock().unwrap();
+        if let Ok(cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
             query.r#where("name", &name)?;
             if let Ok(list) = cache.get_data(DataType::Module(Module::FileSystem), Some(&query)) {
@@ -278,7 +291,7 @@ impl Constellation for StorjFilesystem {
         let client = self
             .client
             .as_ref()
-            .ok_or(anyhow!("Unable to get StorJ Client"))?;
+            .ok_or_else(|| anyhow!("Unable to get StorJ Client"))?;
         let code = client
             .bucket(bucket, false)
             .await?
@@ -286,21 +299,17 @@ impl Constellation for StorjFilesystem {
             .await?;
 
         if code != 200 {
-            match tokio::fs::remove_file(path).await {
-                Ok(_) => {
-                    return Err(Error::Any(anyhow!(
-                        "Error getting file from storj. Code {}",
-                        code
-                    )))
-                }
-                Err(e) => {
-                    return Err(Error::Any(anyhow!(
-                        "Error removing file due to code {}: {}",
-                        code,
-                        e
-                    )))
-                }
-            }
+            return match tokio::fs::remove_file(path).await {
+                Ok(_) => Err(Error::Any(anyhow!(
+                    "Error getting file from storj. Code {}",
+                    code
+                ))),
+                Err(e) => Err(Error::Any(anyhow!(
+                    "Error removing file due to code {}: {}",
+                    code,
+                    e
+                ))),
+            };
         }
 
         // TODO:Implement comparing hash
@@ -337,7 +346,7 @@ impl Constellation for StorjFilesystem {
         let cred = client
             .creds
             .as_ref()
-            .ok_or(anyhow!("Credentials are not set"))?;
+            .ok_or_else(|| anyhow!("Credentials are not set"))?;
 
         let url = presign_url(
             &cred.access_key.clone().unwrap_or_default(),
@@ -359,8 +368,7 @@ impl Constellation for StorjFilesystem {
 
         self.modified = Utc::now();
 
-        if let Some(cache) = &self.cache {
-            let mut cache = cache.lock().unwrap();
+        if let Ok(mut cache) = self.get_cache() {
             let object = DataObject::new(
                 DataType::Module(Module::FileSystem),
                 DimensionData::from_buffer(name, &buffer),
@@ -379,8 +387,7 @@ impl Constellation for StorjFilesystem {
     async fn to_buffer(&self, name: &str, buffer: &mut Vec<u8>) -> warp_common::Result<()> {
         let (bucket, name) = split_for(name)?;
 
-        if let Some(cache) = &self.cache {
-            let cache = cache.lock().unwrap();
+        if let Ok(cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
             query.r#where("name", &name)?;
             if let Ok(list) = cache.get_data(DataType::Module(Module::FileSystem), Some(&query)) {
@@ -397,7 +404,7 @@ impl Constellation for StorjFilesystem {
         let client = self
             .client
             .as_ref()
-            .ok_or(Error::Any(anyhow!("Unable to get StorJ Client")))?;
+            .ok_or_else(|| Error::Any(anyhow!("Unable to get StorJ Client")))?;
 
         let (buf, code) = client
             .bucket(bucket, false)
@@ -504,7 +511,7 @@ fn split_for<S: AsRef<str>>(name: S) -> anyhow::Result<(String, String)> {
     Ok(split)
 }
 
-//TODO: Migrate over to using aws-sdk if we deicde to utilize storj s3 over uplink
+//TODO: Migrate over to using aws-sdk if we decide to utilize storj s3 over uplink
 async fn presign_url(
     acc: &str,
     sec: &str,

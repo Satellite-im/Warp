@@ -109,6 +109,20 @@ impl Account {
         Ok(inner)
     }
 
+    pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
+
+        let inner = match cache.lock() {
+            Ok(inner) => inner,
+            Err(e) => e.into_inner(),
+        };
+
+        Ok(inner)
+    }
+
     pub fn user_helper(&self) -> anyhow::Result<UserHelper> {
         let kp = self.get_private_key()?;
         let helper = UserHelper::new_with_keypair(&kp);
@@ -169,8 +183,7 @@ impl MultiPass for Account {
 
         self.identity = Some(identity.clone());
 
-        if let Some(cache) = &self.cache {
-            let mut cache = cache.lock().unwrap();
+        if let Ok(mut cache) = self.get_cache() {
             let object = DataObject::new(DataType::Module(Module::Accounts), identity)?;
             cache.add_data(DataType::Module(Module::Accounts), &object)?;
         }
@@ -181,9 +194,7 @@ impl MultiPass for Account {
         let helper = self.user_helper()?;
         let ident = match id {
             Identifier::Username(username) => {
-                if let Some(cache) = &self.cache {
-                    let cache = cache.lock().unwrap();
-
+                if let Ok(cache) = self.get_cache() {
                     let mut query = QueryBuilder::default();
                     query.r#where("username", &username)?;
                     if let Ok(list) =
@@ -199,9 +210,7 @@ impl MultiPass for Account {
                 return Err(Error::Unimplemented);
             }
             Identifier::PublicKey(pkey) => {
-                if let Some(cache) = &self.cache {
-                    let cache = cache.lock().unwrap();
-
+                if let Ok(cache) = self.get_cache() {
                     let mut query = QueryBuilder::default();
                     query.r#where("public_key", &pkey)?;
                     if let Ok(list) =
@@ -219,9 +228,7 @@ impl MultiPass for Account {
             Identifier::Own => user_to_identity(&helper, None)?,
         };
 
-        if let Some(cache) = &self.cache {
-            let mut cache = cache.lock().unwrap();
-
+        if let Ok(mut cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
             query.r#where("public_key", &ident.public_key)?;
             if cache
@@ -260,9 +267,8 @@ impl MultiPass for Account {
                 identity.status_message = status
             }
         }
-        if let Some(cache) = &self.cache {
-            let mut cache = cache.lock().unwrap();
 
+        if let Ok(mut cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
             query.r#where("username", &old_identity.username)?;
             if let Ok(list) = cache.get_data(DataType::Module(Module::Accounts), Some(&query)) {
@@ -289,13 +295,8 @@ impl MultiPass for Account {
     }
 
     fn refresh_cache(&mut self) -> warp_common::Result<()> {
-        if let Some(cache) = &self.cache {
-            let mut cache = cache.lock().unwrap();
-            return cache.empty(DataType::Module(self.module()));
-        }
-        Err(warp_common::error::Error::Any(anyhow!(
-            "Cache extension was not enabled"
-        )))
+        let mut cache = self.get_cache()?;
+        cache.empty(DataType::Module(self.module()))
     }
 }
 

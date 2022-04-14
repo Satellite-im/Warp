@@ -4,11 +4,12 @@ pub mod item;
 use item::Item;
 use std::io::ErrorKind;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
+use warp_common::anyhow::anyhow;
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::error::Error;
 use warp_common::serde::{Deserialize, Serialize};
-use warp_common::Extension;
+use warp_common::{anyhow, Extension};
 use warp_data::{DataObject, DataType};
 use warp_pocket_dimension::query::QueryBuilder;
 use warp_pocket_dimension::{DimensionData, PocketDimension};
@@ -81,6 +82,20 @@ impl MemorySystem {
     pub fn set_hook(&mut self, hook: Arc<Mutex<Hooks>>) {
         self.hooks = Some(hook)
     }
+
+    pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
+
+        let inner = match cache.lock() {
+            Ok(inner) => inner,
+            Err(e) => e.into_inner(),
+        };
+
+        Ok(inner)
+    }
 }
 
 impl MemorySystemInternal {
@@ -133,9 +148,7 @@ impl Constellation for MemorySystem {
         file.hash.sha256hash_from_buffer(&buf)?;
 
         self.current_directory_mut()?.add_child(file.clone())?;
-        if let Some(cache) = &self.cache {
-            let mut cache = cache.lock().unwrap();
-
+        if let Ok(mut cache) = self.get_cache() {
             let mut data = DataObject::default();
             data.set_size(bytes as u64);
             data.set_payload(DimensionData::from_buffer(&name, &buf))?;
@@ -163,8 +176,7 @@ impl Constellation for MemorySystem {
             )));
         }
 
-        if let Some(cache) = &self.cache {
-            let cache = cache.lock().unwrap();
+        if let Ok(cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
             query.r#where("name", name.to_string())?;
             if let Ok(list) = cache.get_data(DataType::Module(Module::FileSystem), Some(&query)) {
