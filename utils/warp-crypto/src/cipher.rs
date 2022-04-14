@@ -42,7 +42,7 @@ pub fn aes256gcm_self_encrypt(data: &[u8]) -> Result<Vec<u8>> {
 /// Used to decrypt data with AES256-GCM using a 256bit key.
 /// Note: If key is less than or greater than 256bits/32bytes, it will hash the key with sha256 with nonce being its salt
 pub fn aes256gcm_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
-    let (nonce, payload) = extract_data_slice(&data, 12);
+    let (nonce, payload) = extract_data_slice(data, 12);
 
     let e_key = match key.len() {
         32 => key.to_vec(),
@@ -59,7 +59,7 @@ pub fn aes256gcm_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
 }
 
 pub fn aes256gcm_self_decrypt(data: &[u8]) -> Result<Vec<u8>> {
-    let (key, payload) = extract_data_slice(&data, 34);
+    let (key, payload) = extract_data_slice(data, 34);
     aes256gcm_decrypt(key, payload)
 }
 
@@ -188,7 +188,7 @@ pub fn xchacha20poly1305_self_encrypt(data: &[u8]) -> Result<Vec<u8>> {
 /// Used to decrypt data using XChaCha20Poly1305 with a 256bit key
 /// Note: If key is less than or greater than 256bits/32bytes, it will hash the key with sha256 with nonce being its salt
 pub fn xchacha20poly1305_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
-    let (nonce, payload) = extract_data_slice(&data, 24);
+    let (nonce, payload) = extract_data_slice(data, 24);
     let e_key = match key.len() {
         32 => key.to_vec(),
         _ => sha256_hash(key, Some(nonce))?,
@@ -204,7 +204,7 @@ pub fn xchacha20poly1305_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
 }
 
 pub fn xchacha20poly1305_self_decrypt(data: &[u8]) -> Result<Vec<u8>> {
-    let (key, payload) = extract_data_slice(&data, 34);
+    let (key, payload) = extract_data_slice(data, 34);
     xchacha20poly1305_decrypt(key, payload)
 }
 

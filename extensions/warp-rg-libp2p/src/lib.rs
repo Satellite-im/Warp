@@ -77,7 +77,7 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
                 //TODO: Create key exchange here between the two peers to be sure messages are E2E
                 //TODO: Add support for group messages
                 //TODO: Implement check to allow peer to connect to another peer if subscription is done through relay
-                println!("Peer {} Subscribed to {}", peer_id.to_string(), topic.id());
+                println!("Peer {} Subscribed to {}", peer_id, topic.id());
             }
             FloodsubEvent::Unsubscribed {
                 peer_id: _,
