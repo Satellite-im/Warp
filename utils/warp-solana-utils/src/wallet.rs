@@ -99,6 +99,19 @@ impl SolanaWallet {
         Ok(kp.pubkey())
     }
 
+    /// Obtains the mnemonic phrase
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use warp_solana_utils::wallet::SolanaWallet;
+    ///
+    /// let wallet = SolanaWallet::restore_from_mnemonic(None,
+    ///         "morning caution dose lab six actress pond humble pause enact virtual train",
+    /// ).unwrap();
+    ///
+    /// assert_eq!(wallet.get_mnemonic_phrase().unwrap(), String::from("morning caution dose lab six actress pond humble pause enact virtual train"))
+    /// ```
     pub fn get_mnemonic_phrase(&self) -> Result<String> {
         let phrase = Mnemonic::from_entropy(&self.mnemonic, Language::English)?;
         Ok(phrase.phrase().to_string())
