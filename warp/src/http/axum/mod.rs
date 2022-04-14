@@ -41,7 +41,7 @@ pub async fn export(
             .unwrap(),
     };
 
-    let data_object = DataObject::new(&DataType::Http, response)?;
+    let data_object = DataObject::new(DataType::Http, response)?;
     let res = (
         StatusCode::OK,
         Json(warp_common::serde_json::to_value(data_object).unwrap()),

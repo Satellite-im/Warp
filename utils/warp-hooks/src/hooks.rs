@@ -172,7 +172,7 @@ impl Hooks {
     ///         let file: File = data.payload().unwrap();
     ///         assert_eq!(file.name.as_str(), "test.txt");
     ///     }).unwrap();
-    ///     let data = DataObject::new(&Module::FileSystem, File::new("test.txt")).unwrap();
+    ///     let data = DataObject::new(DataType::Module(Module::FileSystem), File::new("test.txt")).unwrap();
     ///     system.trigger("filesystem::new_file", &data);
     /// ```
     pub fn subscribe<C, H>(&mut self, hook: H, f: C) -> Result<()>
@@ -209,7 +209,7 @@ impl Hooks {
     ///         let file: File = data.payload().unwrap();
     ///         assert_eq!(file.name.as_str(), "test.txt");
     ///     }).unwrap();
-    ///     let data = DataObject::new(&Module::FileSystem, File::new("test.txt")).unwrap();
+    ///     let data = DataObject::new(DataType::Module(Module::FileSystem), File::new("test.txt")).unwrap();
     ///     system.trigger("filesystem::new_file", &data);
     /// ```
     pub fn trigger<S>(&self, name: S, data: &DataObject)

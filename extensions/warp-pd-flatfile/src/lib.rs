@@ -280,7 +280,7 @@ impl PocketDimension for FlatfileStorage {
                         })?;
                         let mut writer = std::fs::File::create(&new_path)?;
 
-                        //TODO: Have a gzip encoder compress data
+                        //TODO: Have a gzip encoder compress data and/or possibly encrypt the cached file
                         // let mut writer = gzip::Encoder::new(writer)?;
                         let mut reader = std::fs::File::open(old_path)?;
                         std::io::copy(&mut reader, &mut writer)?;
@@ -309,7 +309,7 @@ impl PocketDimension for FlatfileStorage {
 
                         let mut writer = std::fs::File::create(&new_path)?;
 
-                        //TODO: Have a gzip encoder compress data
+                        //TODO: Have a gzip encoder compress data and/or possibly encrypt the cached file
                         // let mut writer = gzip::Encoder::new(writer)?;
                         let mut reader = std::io::Cursor::new(buffer);
                         std::io::copy(&mut reader, &mut writer)?;

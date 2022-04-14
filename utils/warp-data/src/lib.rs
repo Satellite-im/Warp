@@ -132,11 +132,10 @@ impl Default for Data {
 
 impl Data {
     /// Creates a instance of `Data` with `Module` and `Payload`
-    pub fn new<T, I: Into<DataType> + Clone>(data_type: &I, payload: T) -> Result<Self>
+    pub fn new<T>(data_type: DataType, payload: T) -> Result<Self>
     where
         T: Serialize,
     {
-        let data_type = data_type.clone().into();
         let payload = Payload::new_from_ser(payload)?;
         Ok(Data {
             data_type,

@@ -232,14 +232,14 @@ impl Constellation for StorjFilesystem {
         if let Some(cache) = &self.cache {
             let mut cache = cache.lock().unwrap();
             let object = DataObject::new(
-                &DataType::Module(Module::FileSystem),
+                DataType::Module(Module::FileSystem),
                 DimensionData::from_path(path),
             )?;
             cache.add_data(DataType::Module(Module::FileSystem), &object)?;
         }
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
+            let object = DataObject::new(DataType::Module(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::new_file", &object)
         }
@@ -362,14 +362,14 @@ impl Constellation for StorjFilesystem {
         if let Some(cache) = &self.cache {
             let mut cache = cache.lock().unwrap();
             let object = DataObject::new(
-                &DataType::Module(Module::FileSystem),
+                DataType::Module(Module::FileSystem),
                 DimensionData::from_buffer(name, &buffer),
             )?;
             cache.add_data(DataType::Module(Module::FileSystem), &object)?;
         }
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
+            let object = DataObject::new(DataType::Module(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::new_file", &object)
         }
@@ -440,7 +440,7 @@ impl Constellation for StorjFilesystem {
 
         let item = self.current_directory_mut()?.remove_child(&name)?;
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(&DataType::Module(Module::FileSystem), &item)?;
+            let object = DataObject::new(DataType::Module(Module::FileSystem), &item)?;
             let hook = hook.lock().unwrap();
             let hook_name = match item {
                 Item::Directory(_) => "filesystem::remove_directory",

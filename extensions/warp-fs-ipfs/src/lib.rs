@@ -232,14 +232,14 @@ impl Constellation for IpfsFileSystem {
         if let Some(cache) = &self.cache {
             let mut cache = cache.lock().unwrap();
             let object = DataObject::new(
-                &DataType::Module(Module::FileSystem),
+                DataType::Module(Module::FileSystem),
                 DimensionData::from_path(path),
             )?;
             cache.add_data(DataType::Module(Module::FileSystem), &object)?;
         }
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
+            let object = DataObject::new(DataType::Module(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::new_file", &object)
         }
@@ -383,14 +383,14 @@ impl Constellation for IpfsFileSystem {
                 .to_string();
 
             let object = DataObject::new(
-                &DataType::Module(Module::FileSystem),
+                DataType::Module(Module::FileSystem),
                 DimensionData::from_buffer(name, buffer),
             )?;
             cache.add_data(DataType::Module(Module::FileSystem), &object)?;
         }
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
+            let object = DataObject::new(DataType::Module(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::new_file", &object)
         }
@@ -469,7 +469,7 @@ impl Constellation for IpfsFileSystem {
         };
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(&DataType::Module(Module::FileSystem), ())?;
+            let object = DataObject::new(DataType::Module(Module::FileSystem), ())?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::remove_file", &object)
         }
@@ -510,7 +510,7 @@ impl Constellation for IpfsFileSystem {
         }
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(&DataType::Module(Module::FileSystem), directory)?;
+            let object = DataObject::new(DataType::Module(Module::FileSystem), directory)?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::create_directory", &object)
         }

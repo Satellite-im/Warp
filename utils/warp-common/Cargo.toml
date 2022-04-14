@@ -24,6 +24,7 @@ derive_more = "0.99"
 hex = "0.4"
 
 tiny-bip39 = "0.8"
+bincode = { version = "1.3.3", optional = true }
 
 [target.'cfg(not(all(target_arch = "wasm32", not(any(target_os = "emscripten", target_os = "wasi", target_os="android")))))'.dependencies]
 dirs = "4.0"
@@ -34,7 +35,7 @@ tokio = { version = "1", features = ["full"], optional = true }
 tokio-util = { version = "0.6", features = ["full"], optional = true }
 async-trait = { version = "0.1", optional = true }
 tokio-stream = { version = "0.1", features = ["net"], optional = true }
-bincode = { version = "1.3.3", optional = true }
+
 
 [target.'cfg(all(target_arch = "wasm32", not(any(target_os = "emscripten", target_os = "wasi"))))'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }

@@ -144,7 +144,7 @@ impl Constellation for MemorySystem {
         }
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(&DataType::Module(Module::FileSystem), file)?;
+            let object = DataObject::new(DataType::Module(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::new_file", &object)
         }
@@ -236,7 +236,7 @@ impl Constellation for MemorySystem {
         }
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(&DataType::Module(Module::FileSystem), ())?;
+            let object = DataObject::new(DataType::Module(Module::FileSystem), ())?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::create_directory", &object)
         }

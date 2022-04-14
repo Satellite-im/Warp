@@ -175,7 +175,7 @@ impl MultiPass for Account {
 
         if let Some(cache) = &self.cache {
             let mut cache = cache.lock().unwrap();
-            let object = DataObject::new(&DataType::Module(Module::Accounts), identity)?;
+            let object = DataObject::new(DataType::Module(Module::Accounts), identity)?;
             cache.add_data(DataType::Module(Module::Accounts), &object)?;
         }
         Ok(pubkey)
@@ -232,7 +232,7 @@ impl MultiPass for Account {
                 .has_data(DataType::Module(Module::Accounts), &query)
                 .is_err()
             {
-                let object = DataObject::new(&DataType::Module(Module::Accounts), &ident)?;
+                let object = DataObject::new(DataType::Module(Module::Accounts), &ident)?;
                 cache.add_data(DataType::Module(Module::Accounts), &object)?;
             }
         }
@@ -279,7 +279,7 @@ impl MultiPass for Account {
             } else {
                 cache.add_data(
                     DataType::Module(Module::Accounts),
-                    &DataObject::new(&DataType::Module(Module::Accounts), identity.clone())?,
+                    &DataObject::new(DataType::Module(Module::Accounts), identity.clone())?,
                 )?;
             }
         }

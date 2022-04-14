@@ -21,20 +21,20 @@ fn main() -> anyhow::Result<()> {
     let mut storage = FlatfileStorage::new_with_index_file(root, index)?;
 
     let data = DataObject::new(
-        &DataType::Module(Module::FileSystem),
+        DataType::Module(Module::FileSystem),
         DimensionData::from_path("Cargo.toml"),
     )?;
 
     storage.add_data(DataType::Module(Module::FileSystem), &data)?;
 
     let bufdata = DataObject::new(
-        &DataType::Module(Module::FileSystem),
+        DataType::Module(Module::FileSystem),
         DimensionData::from_buffer_nofile("testbin", b"Hello, World"),
     )?;
 
     storage.add_data(DataType::Module(Module::FileSystem), &bufdata)?;
     let bufdata = DataObject::new(
-        &DataType::Module(Module::FileSystem),
+        DataType::Module(Module::FileSystem),
         DimensionData::from_buffer_nofile("test", b"Hello, World"),
     )?;
     storage.add_data(DataType::File, &bufdata)?;

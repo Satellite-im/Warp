@@ -46,7 +46,7 @@ pub fn version(state: &State<FsSystem>) -> Json<Value> {
     };
     response.set_data(status).unwrap();
 
-    let data_object = DataObject::new(&DataType::Http, response);
+    let data_object = DataObject::new(DataType::Http, response);
     Json(warp_common::serde_json::to_value(data_object.unwrap()).unwrap_or_default())
 }
 
@@ -69,7 +69,7 @@ pub fn export(state: &State<FsSystem>, format: &str) -> Json<Value> {
             .unwrap(),
     };
 
-    let data_object = DataObject::new(&DataType::Http, response);
+    let data_object = DataObject::new(DataType::Http, response);
     Json(warp_common::serde_json::to_value(data_object.unwrap()).unwrap_or_default())
 }
 
@@ -85,7 +85,7 @@ pub fn create_directory(state: &State<FsSystem>, name: &str) -> Json<Value> {
         Err(_) => ApiResponse::new(ApiStatus::FAIL, 304),
     };
 
-    let data_object = DataObject::new(&DataType::Http, response);
+    let data_object = DataObject::new(DataType::Http, response);
     Json(warp_common::serde_json::to_value(data_object.unwrap()).unwrap_or_default())
 }
 
@@ -102,6 +102,6 @@ pub fn go_to(state: &State<FsSystem>, path: PathBuf) -> Json<Value> {
         ApiResponse::default()
     };
 
-    let data_object = DataObject::new(&DataType::Http, response);
+    let data_object = DataObject::new(DataType::Http, response);
     Json(warp_common::serde_json::to_value(data_object.unwrap()).unwrap_or_default())
 }
