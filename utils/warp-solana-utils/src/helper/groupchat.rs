@@ -37,7 +37,7 @@ impl GroupChat {
             CommitmentConfig::confirmed(),
         );
 
-        let program = client.program(friends::id());
+        let program = client.program(groupchats::id());
         Self {
             client,
             program,
