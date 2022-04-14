@@ -19,3 +19,4 @@ warp-solana-utils = { path = "../../utils/warp-solana-utils" }
 
 [dev-dependencies]
 warp-pd-flatfile = { path = "../warp-pd-flatfile" }
+warp-pd-stretto = { path = "../warp-pd-stretto" }

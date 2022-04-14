@@ -66,7 +66,7 @@ fn main() -> warp_common::anyhow::Result<()> {
     account.set_tesseract(tesseract);
     account.set_cache(pd);
     // Uncomment this if you want to interact with an precreated account and comment out `account.create_identity`
-    // account.insert_private_key(generated_wallet()?)?;
+    // account.insert_solana_wallet(generated_wallet()?)?;
 
     account.create_identity("MyNewAccount", "")?;
     let ident = account.get_own_identity()?;
