@@ -1,6 +1,5 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::anyhow::ensure;
 use warp_common::anyhow::{anyhow, bail};
 use warp_common::error::Error;
 use warp_common::{anyhow, Extension, Module};
@@ -77,10 +76,7 @@ impl Account {
     }
 
     pub fn insert_solana_wallet(&mut self, wallet: SolanaWallet) -> anyhow::Result<()> {
-        ensure!(self.tesseract.is_some(), "Tesseract is not available");
-        let mut tesseract = self.tesseract.as_mut().unwrap().lock().unwrap();
-
-        ensure!(tesseract.is_unlock(), "Tesseract is currently locked.");
+        let mut tesseract = self.get_tesseract()?;
 
         tesseract.set("mnemonic", &wallet.get_mnemonic_phrase()?)?;
         tesseract.set("privkey", wallet.get_keypair()?.to_base58_string().as_str())?;
@@ -89,10 +85,7 @@ impl Account {
     }
 
     pub fn get_private_key(&self) -> anyhow::Result<Keypair> {
-        ensure!(self.tesseract.is_some(), "Tesseract is not available");
-        let tesseract = self.tesseract.as_ref().unwrap().lock().unwrap();
-
-        ensure!(tesseract.is_unlock(), "Tesseract is currently locked.");
+        let tesseract = self.get_tesseract()?;
 
         if !tesseract.exist("privkey") {
             bail!("Private key is not set or available");
@@ -102,6 +95,18 @@ impl Account {
 
         let keypair = Keypair::from_base58_string(private_key.as_str());
         Ok(keypair)
+    }
+
+    pub fn get_tesseract(&self) -> anyhow::Result<MutexGuard<Tesseract>> {
+        let tesseract = self
+            .tesseract
+            .as_ref()
+            .ok_or_else(|| anyhow!("Tesseract is not available"))?;
+        let inner = match tesseract.lock() {
+            Ok(inner) => inner,
+            Err(e) => e.into_inner(),
+        };
+        Ok(inner)
     }
 
     pub fn user_helper(&self) -> anyhow::Result<UserHelper> {
@@ -127,12 +132,6 @@ impl Extension for Account {
 
 impl MultiPass for Account {
     fn create_identity(&mut self, username: &str, _: &str) -> warp_common::Result<PublicKey> {
-        if self.tesseract.is_none() {
-            return Err(Error::Any(anyhow!(
-                "Tesseract is required to create an identity"
-            )));
-        }
-
         if let Ok(keypair) = &self.get_private_key() {
             if UserHelper::new_with_keypair(keypair)
                 .get_current_user()
@@ -141,8 +140,6 @@ impl MultiPass for Account {
                 return Err(Error::Other);
             }
         }
-
-        let mut tesseract = self.tesseract.as_mut().unwrap().lock().unwrap();
 
         let wallet = SolanaWallet::create_random(PhraseType::Standard, None)?;
         let mut helper = UserHelper::new_with_wallet(&wallet)?;
@@ -162,12 +159,11 @@ impl MultiPass for Account {
 
         let uname = format!("{username}#{code}");
 
-        helper.create(&uname, "", "We have liftoff")?;
+        helper.create(&uname, "", "We have lift off")?;
 
-        tesseract.set("mnemonic", &wallet.get_mnemonic_phrase()?)?;
-        tesseract.set("privkey", wallet.get_keypair()?.to_base58_string().as_str())?;
+        self.insert_solana_wallet(wallet)?;
 
-        let pubkey = PublicKey::from_bytes(&wallet.get_keypair()?.pubkey().to_bytes()[..]);
+        let pubkey = PublicKey::from_bytes(&self.get_private_key()?.pubkey().to_bytes()[..]);
 
         let identity = user_to_identity(&helper, None)?;
 
@@ -288,14 +284,7 @@ impl MultiPass for Account {
     }
 
     fn decrypt_private_key(&self, _: &str) -> warp_common::Result<Vec<u8>> {
-        if self.tesseract.is_none() {
-            return Err(Error::Any(anyhow!(
-                "Tesseract is required to create an identity"
-            )));
-        }
-
         let keypair = self.get_private_key()?;
-
         Ok(keypair.to_bytes().to_vec())
     }
 
