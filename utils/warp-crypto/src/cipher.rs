@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 
 use crate::hash::sha256_hash;
 use aead::{
@@ -6,7 +6,7 @@ use aead::{
     Aead, NewAead,
 };
 use aes_gcm::{Aes256Gcm, Key, Nonce};
-use anyhow::Result;
+use anyhow::{bail, Result};
 use chacha20poly1305::XChaCha20Poly1305;
 
 /// Used to encrypt data with AES256-GCM using a 256bit key.
@@ -83,19 +83,22 @@ pub fn aes256gcm_encrypt_stream(
 
     // loop and read `reader`
     loop {
-        let read_count = reader.read(&mut buffer)?;
-
-        if read_count == 512 {
-            let ciphertext = stream
-                .encrypt_next(buffer.as_slice())
-                .map_err(|err| anyhow::anyhow!(err))?;
-            writer.write_all(&ciphertext)?;
-        } else {
-            let ciphertext = stream
-                .encrypt_last(&buffer[..read_count])
-                .map_err(|err| anyhow::anyhow!(err))?;
-            writer.write_all(&ciphertext)?;
-            break;
+        match reader.read(&mut buffer) {
+            Ok(512) => {
+                let ciphertext = stream
+                    .encrypt_next(buffer.as_slice())
+                    .map_err(|err| anyhow::anyhow!(err))?;
+                writer.write_all(&ciphertext)?;
+            }
+            Ok(read_count) => {
+                let ciphertext = stream
+                    .encrypt_last(&buffer[..read_count])
+                    .map_err(|err| anyhow::anyhow!(err))?;
+                writer.write_all(&ciphertext)?;
+                break;
+            }
+            Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(e) => bail!(e),
         }
     }
     Ok(())
@@ -129,22 +132,25 @@ pub fn aes256gcm_decrypt_stream(
     let mut stream = DecryptorBE32::from_aead(cipher, nonce.as_slice().into());
     let mut buffer = [0u8; 528];
     loop {
-        let read_count = reader.read(&mut buffer)?;
+        match reader.read(&mut buffer) {
+            Ok(528) => {
+                let plaintext = stream
+                    .decrypt_next(buffer.as_slice())
+                    .map_err(|e| anyhow::anyhow!(e))?;
 
-        if read_count == 528 {
-            let plaintext = stream
-                .decrypt_next(buffer.as_slice())
-                .map_err(|e| anyhow::anyhow!(e))?;
-            writer.write_all(&plaintext)?;
-        } else if read_count == 0 {
-            break;
-        } else {
-            let plaintext = stream
-                .decrypt_last(&buffer[..read_count])
-                .map_err(|e| anyhow::anyhow!(e))?;
-            writer.write_all(&plaintext)?;
-            break;
-        }
+                writer.write_all(&plaintext)?
+            }
+            Ok(read_count) if read_count == 0 => break,
+            Ok(read_count) => {
+                let plaintext = stream
+                    .decrypt_last(&buffer[..read_count])
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                writer.write_all(&plaintext)?;
+                break;
+            }
+            Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(e) => bail!(e),
+        };
     }
     writer.flush()?;
     Ok(())
@@ -227,19 +233,22 @@ pub fn xchacha20poly1305_encrypt_stream(
 
     // loop and read `reader`
     loop {
-        let read_count = reader.read(&mut buffer)?;
-
-        if read_count == 512 {
-            let ciphertext = stream
-                .encrypt_next(buffer.as_slice())
-                .map_err(|err| anyhow::anyhow!(err))?;
-            writer.write_all(&ciphertext)?;
-        } else {
-            let ciphertext = stream
-                .encrypt_last(&buffer[..read_count])
-                .map_err(|err| anyhow::anyhow!(err))?;
-            writer.write_all(&ciphertext)?;
-            break;
+        match reader.read(&mut buffer) {
+            Ok(512) => {
+                let ciphertext = stream
+                    .encrypt_next(buffer.as_slice())
+                    .map_err(|err| anyhow::anyhow!(err))?;
+                writer.write_all(&ciphertext)?;
+            }
+            Ok(read_count) => {
+                let ciphertext = stream
+                    .encrypt_last(&buffer[..read_count])
+                    .map_err(|err| anyhow::anyhow!(err))?;
+                writer.write_all(&ciphertext)?;
+                break;
+            }
+            Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(e) => bail!(e),
         }
     }
     writer.flush()?;
@@ -271,22 +280,25 @@ pub fn xchacha20poly1305_decrypt_stream(
     let mut stream = DecryptorBE32::from_aead(chacha, nonce.as_slice().into());
     let mut buffer = [0u8; 528];
     loop {
-        let read_count = reader.read(&mut buffer)?;
+        match reader.read(&mut buffer) {
+            Ok(528) => {
+                let plaintext = stream
+                    .decrypt_next(buffer.as_slice())
+                    .map_err(|e| anyhow::anyhow!(e))?;
 
-        if read_count == 528 {
-            let plaintext = stream
-                .decrypt_next(buffer.as_slice())
-                .map_err(|e| anyhow::anyhow!(e))?;
-            writer.write_all(&plaintext)?;
-        } else if read_count == 0 {
-            break;
-        } else {
-            let plaintext = stream
-                .decrypt_last(&buffer[..read_count])
-                .map_err(|e| anyhow::anyhow!(e))?;
-            writer.write_all(&plaintext)?;
-            break;
-        }
+                writer.write_all(&plaintext)?
+            }
+            Ok(read_count) if read_count == 0 => break,
+            Ok(read_count) => {
+                let plaintext = stream
+                    .decrypt_last(&buffer[..read_count])
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                writer.write_all(&plaintext)?;
+                break;
+            }
+            Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(e) => bail!(e),
+        };
     }
     writer.flush()?;
     Ok(())
