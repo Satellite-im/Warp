@@ -19,6 +19,7 @@ cfg_if! {
 cfg_if! {
     if #[cfg(feature = "multipass")] {
         pub use warp_multipass as multipass;
+        pub use warp_mp_solana as mp_solana;
     }
 }
 
