@@ -325,27 +325,27 @@ mod test {
 
     #[test]
     fn aes256gcm_encrypt_decrypt() -> anyhow::Result<()> {
-        let key = b"this is my secret cipher key!".to_vec();
-        let message = b"Hello, World!".to_vec();
+        let key = b"this is my secret cipher key!";
+        let message = b"Hello, World!";
 
-        let cipher = aes256gcm_encrypt(&key, &message)?;
+        let cipher = aes256gcm_encrypt(key, message)?;
 
-        let plaintext = aes256gcm_decrypt(&key, &cipher)?;
+        let plaintext = aes256gcm_decrypt(key, &cipher)?;
 
         assert_ne!(cipher, plaintext);
 
         assert_eq!(
             String::from_utf8_lossy(&plaintext),
-            String::from("Hello, World!")
+            String::from_utf8_lossy(message)
         );
         Ok(())
     }
 
     #[test]
     fn aes256gcm_self_encrypt_decrypt() -> anyhow::Result<()> {
-        let message = b"Hello, World!".to_vec();
+        let message = b"Hello, World!";
 
-        let cipher = aes256gcm_self_encrypt(&message)?;
+        let cipher = aes256gcm_self_encrypt(message)?;
 
         let plaintext = aes256gcm_self_decrypt(&cipher)?;
 
@@ -353,16 +353,16 @@ mod test {
 
         assert_eq!(
             String::from_utf8_lossy(&plaintext),
-            String::from("Hello, World!")
+            String::from_utf8_lossy(message)
         );
         Ok(())
     }
 
     #[test]
     fn xchacha20poly1305_self_encrypt_decrypt() -> anyhow::Result<()> {
-        let message = b"Hello, World!".to_vec();
+        let message = b"Hello, World!";
 
-        let cipher = xchacha20poly1305_self_encrypt(&message)?;
+        let cipher = xchacha20poly1305_self_encrypt(message)?;
 
         let plaintext = xchacha20poly1305_self_decrypt(&cipher)?;
 
@@ -370,14 +370,14 @@ mod test {
 
         assert_eq!(
             String::from_utf8_lossy(&plaintext),
-            String::from("Hello, World!")
+            String::from_utf8_lossy(message)
         );
         Ok(())
     }
 
     #[test]
     fn aes256gcm_stream_self_encrypt_decrypt() -> anyhow::Result<()> {
-        let base = b"this is my message".to_vec();
+        let base = b"this is my message";
         let mut cipher = Vec::<u8>::new();
 
         let mut plaintext = Vec::<u8>::new();
@@ -390,74 +390,74 @@ mod test {
 
         assert_eq!(
             String::from_utf8_lossy(&plaintext),
-            String::from("this is my message")
+            String::from_utf8_lossy(base)
         );
         Ok(())
     }
 
     #[test]
     fn aes256gcm_stream_encrypt_decrypt() -> anyhow::Result<()> {
-        let base = b"this is my message".to_vec();
-        let key = b"this is my key".to_vec();
+        let base = b"this is my message";
+        let key = b"this is my key";
         let mut cipher = Vec::<u8>::new();
 
         let mut plaintext = Vec::<u8>::new();
 
-        aes256gcm_encrypt_stream(&key, &mut base.as_slice(), &mut cipher)?;
+        aes256gcm_encrypt_stream(key, &mut base.as_slice(), &mut cipher)?;
 
-        aes256gcm_decrypt_stream(&key, &mut cipher.as_slice(), &mut plaintext)?;
+        aes256gcm_decrypt_stream(key, &mut cipher.as_slice(), &mut plaintext)?;
 
         assert_ne!(cipher, plaintext);
 
         assert_eq!(
             String::from_utf8_lossy(&plaintext),
-            String::from("this is my message")
+            String::from_utf8_lossy(base)
         );
         Ok(())
     }
 
     #[test]
     fn xchacha20poly1305_encrypt_decrypt() -> anyhow::Result<()> {
-        let key = b"this is my secret cipher key!".to_vec();
-        let message = &b"Hello, World!"[..];
+        let key = b"this is my secret cipher key!";
+        let message = b"Hello, World!";
 
-        let cipher = xchacha20poly1305_encrypt(&key, message)?;
+        let cipher = xchacha20poly1305_encrypt(key, message)?;
 
-        let plaintext = xchacha20poly1305_decrypt(&key, &cipher)?;
+        let plaintext = xchacha20poly1305_decrypt(key, &cipher)?;
 
         assert_ne!(cipher, plaintext);
 
         assert_eq!(
             String::from_utf8_lossy(&plaintext),
-            String::from("Hello, World!")
+            String::from_utf8_lossy(message)
         );
         Ok(())
     }
 
     #[test]
     fn xchacha20poly1305_stream_encrypt_decrypt() -> anyhow::Result<()> {
-        let key = b"this is my key".to_vec();
-        let base = b"this is my message".to_vec();
+        let key = b"this is my key";
+        let base = b"this is my message";
         let mut cipher = Vec::<u8>::new();
 
         let mut plaintext = Vec::<u8>::new();
 
-        xchacha20poly1305_encrypt_stream(&key, &mut base.as_slice(), &mut cipher)?;
+        xchacha20poly1305_encrypt_stream(key, &mut base.as_slice(), &mut cipher)?;
 
-        xchacha20poly1305_decrypt_stream(&key, &mut cipher.as_slice(), &mut plaintext)?;
+        xchacha20poly1305_decrypt_stream(key, &mut cipher.as_slice(), &mut plaintext)?;
 
         assert_ne!(cipher, plaintext);
 
         assert_eq!(
             String::from_utf8_lossy(&plaintext),
-            String::from("this is my message")
+            String::from_utf8_lossy(base)
         );
         Ok(())
     }
 
     #[test]
     fn xchacha20poly1305_stream_self_encrypt_decrypt() -> anyhow::Result<()> {
-        let base = b"this is my message".to_vec();
+        let base = b"this is my message";
         let mut cipher = Vec::<u8>::new();
 
         let mut plaintext = Vec::<u8>::new();
@@ -470,7 +470,7 @@ mod test {
 
         assert_eq!(
             String::from_utf8_lossy(&plaintext),
-            String::from("this is my message")
+            String::from_utf8_lossy(base)
         );
         Ok(())
     }
