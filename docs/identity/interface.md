@@ -64,21 +64,21 @@ Example identity retrieval:
 
 
 ```rust
-Multipass::get_identity(&self, id: Identifier) -> Result<DataObject>;
+Multipass::get_identity(&self, id: Identifier) -> Result<Identity>;
 ```
 
 ```rust
-Multipass::get_own_identity(&self) -> Result<DataObject> // Returns Identity
+Multipass::get_own_identity(&self) -> Result<Identity> // Returns Identity
 ```
 
-The response will be returned, wrapped in the `DataObject` with the payload representing the `Identity` Struct. After each fetch of an identity a new version of the identity will be stored in cache automatically.
+The function will return the `Identity` struct. After each fetch of an identity a new version of the identity will be stored in cache automatically.
 
 #### Updating Own Identity
 
-Allows user to update mutable identity variables such as their `Username`, `Graphics`, `stats_msg` and more. Other values like the global `roles`, `available_badges` and more are only mutable by outside entities such as `Satellite`. These represent global application identity traits.
+Allows user to update mutable identity variables such as their `Username`, `Graphics`, `Status` and more. Other values like the global `roles`, `available_badges` and more are only mutable by outside entities such as `Satellite`. These represent global application identity traits.
 
 ```rust
-Multipass::update_identity(&mut self, id: Identifier, option: Vec<IdentityUpdate>) -> Result<()>;
+Multipass::update_identity(&mut self, id: Identifier, option: IdentityUpdate) -> Result<()>;
 ```
 
 The cache is updated to reflect our profile changes. This allows us to optimistically update UIs without waiting for on chain transactions to process.
@@ -88,7 +88,7 @@ The cache is updated to reflect our profile changes. This allows us to optimisti
 This should only be called once, this is used to create a new account on the system. Calling this will store the encrypted PrivateKey on disk. Calling again will overwrite the previous account which cannot be retrieved unless the PrivateKey was backed up. The PrivateKey will be encrypted by the supplied `passphrase` so that it's not readable on disk.
 
 ```rust
-Multipass::create_identity(&mut self, identity: &Identity, passphrase: String) -> Result<PublicKey>; // Returns PublicKey, stores encrypted private key
+Multipass::create_identity(&mut self, username: &str, passphrase: &str) -> Result<PublicKey>; // Returns PublicKey, stores encrypted private key
 ```
 
 #### Decrypt Private Key
@@ -96,7 +96,7 @@ Multipass::create_identity(&mut self, identity: &Identity, passphrase: String) -
 Decrypts the stored PrivateKey given a passphrase to allow interactions with the account such as on chain transactions.
 
 ```rust
-Multipass::decrypt_private_key(&self, passphrase: String) -> Result<Vec<u8>>;
+Multipass::decrypt_private_key(&self, passphrase: &str) -> Result<Vec<u8>>;
 ```
 
 #### Refresh Dimension Cache
