@@ -144,8 +144,7 @@ impl Constellation for MemorySystem {
 
         let mut file = warp_constellation::file::File::new(&name);
         file.set_size(bytes as i64);
-        file.hash.sha1hash_from_buffer(&buf)?;
-        file.hash.sha256hash_from_buffer(&buf)?;
+        file.hash.sha1hash_from_slice(buf)?;
 
         self.current_directory_mut()?.add_child(file.clone())?;
         if let Ok(mut cache) = self.get_cache() {
