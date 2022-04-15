@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 use warp_common::anyhow;
-use warp_mp_solana::Account;
+use warp_mp_solana::SolanaAccount;
 use warp_multipass::identity::IdentityUpdate;
 use warp_multipass::MultiPass;
 use warp_pd_flatfile::FlatfileStorage;
@@ -62,7 +62,7 @@ fn main() -> warp_common::anyhow::Result<()> {
 
     let pd = cache_setup()?;
 
-    let mut account = Account::with_devnet();
+    let mut account = SolanaAccount::with_devnet();
     account.set_tesseract(tesseract);
     account.set_cache(pd);
     // Uncomment this if you want to interact with an precreated account and comment out `account.create_identity`

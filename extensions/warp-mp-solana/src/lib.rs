@@ -19,7 +19,7 @@ use warp_solana_utils::wallet::{PhraseType, SolanaWallet};
 use warp_solana_utils::EndPoint;
 use warp_tesseract::Tesseract;
 
-pub struct Account {
+pub struct SolanaAccount {
     pub endpoint: EndPoint,
     pub connection: Option<RpcClient>,
     pub identity: Option<Identity>,
@@ -29,7 +29,7 @@ pub struct Account {
     pub hooks: Option<Arc<Mutex<Hooks>>>,
 }
 
-impl Default for Account {
+impl Default for SolanaAccount {
     fn default() -> Self {
         Self {
             identity: None,
@@ -43,7 +43,7 @@ impl Default for Account {
     }
 }
 
-impl Account {
+impl SolanaAccount {
     pub fn new(endpoint: EndPoint) -> Self {
         let mut account = Self::default();
         account.endpoint = endpoint.clone();
@@ -130,7 +130,7 @@ impl Account {
     }
 }
 
-impl Extension for Account {
+impl Extension for SolanaAccount {
     fn id(&self) -> String {
         String::from("warp-mp-solana")
     }
@@ -144,7 +144,7 @@ impl Extension for Account {
     }
 }
 
-impl MultiPass for Account {
+impl MultiPass for SolanaAccount {
     fn create_identity(&mut self, username: &str, _: &str) -> warp_common::Result<PublicKey> {
         if let Ok(keypair) = &self.get_private_key() {
             if UserHelper::new_with_keypair(keypair)

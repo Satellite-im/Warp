@@ -4,7 +4,7 @@ mod tests {
     use std::str::FromStr;
     use std::sync::{Arc, Mutex};
     use warp_common::anyhow;
-    use warp_mp_solana::Account;
+    use warp_mp_solana::SolanaAccount;
     #[allow(unused)]
     use warp_multipass::identity::{Identifier, IdentityUpdate, PublicKey};
     use warp_multipass::MultiPass;
@@ -43,7 +43,7 @@ mod tests {
 
     #[test]
     fn use_mp_with_pregenerated_wallet() -> anyhow::Result<()> {
-        let mut account = Account::with_devnet();
+        let mut account = SolanaAccount::with_devnet();
         let tesseract = tesseract_with_random_key()?;
         account.set_tesseract(tesseract);
         account.insert_solana_wallet(pregenerated_wallet()?)?;
@@ -64,7 +64,7 @@ mod tests {
 
     // #[test]
     // fn use_mp_with_new_wallet() -> anyhow::Result<()> {
-    //     let mut account = Account::with_devnet();
+    //     let mut account = SolanaAccount::with_devnet();
     //     let tesseract = tesseract_with_random_key()?;
     //     account.set_tesseract(tesseract);
     //
