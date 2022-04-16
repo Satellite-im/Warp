@@ -124,8 +124,8 @@ impl Item {
     }
 
     /// Rename the name of `Item`
-    pub fn rename<S: AsRef<str>>(&mut self, name: S) -> Result<()> {
-        let name = name.as_ref().trim();
+    pub fn rename(&mut self, name: &str) -> Result<()> {
+        let name = name.trim();
         if self.name() == name {
             return Err(Error::DuplicateName);
         }
@@ -192,14 +192,14 @@ impl Item {
     }
 
     /// Set description of `Item`
-    pub fn set_description<S: AsRef<str>>(&mut self, desc: S) {
+    pub fn set_description(&mut self, desc: &str) {
         match self {
             Item::File(file) => {
-                file.description = desc.as_ref().to_string();
+                file.description = desc.to_string();
                 file.modified = Utc::now();
             }
             Item::Directory(directory) => {
-                directory.description = desc.as_ref().to_string();
+                directory.description = desc.to_string();
                 directory.modified = Utc::now();
             }
         }

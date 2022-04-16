@@ -240,7 +240,7 @@ impl Constellation for IpfsFileSystem {
 
         file.hash.hash_from_file(path)?;
 
-        file.set_ref(hash);
+        file.set_ref(&hash);
 
         self.current_directory_mut()?.add_child(file.clone())?;
 

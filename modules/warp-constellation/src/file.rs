@@ -100,9 +100,9 @@ impl File {
     ///
     /// assert_eq!(file.name, String::from("test.txt"));
     /// ```
-    pub fn new<S: AsRef<str>>(name: S) -> File {
+    pub fn new(name: &str) -> File {
         let mut file = File::default();
-        let name = name.as_ref().trim();
+        let name = name.trim();
         if !name.is_empty() {
             file.name = name.to_string();
         }
@@ -121,8 +121,8 @@ impl File {
     ///
     /// assert_eq!(file.description.as_str(), "test file");
     /// ```
-    pub fn set_description<S: AsRef<str>>(&mut self, desc: S) {
-        self.description = desc.as_ref().to_string();
+    pub fn set_description(&mut self, desc: &str) {
+        self.description = desc.to_string();
         self.modified = Utc::now()
     }
 
@@ -139,8 +139,8 @@ impl File {
     /// assert_eq!(file.reference.is_some(), true);
     /// assert_eq!(file.reference.unwrap().as_str(), "test_file.txt");
     /// ```
-    pub fn set_ref<S: AsRef<str>>(&mut self, reference: S) {
-        self.reference = Some(reference.as_ref().to_string());
+    pub fn set_ref(&mut self, reference: &str) {
+        self.reference = Some(reference.to_string());
         self.modified = Utc::now();
     }
 

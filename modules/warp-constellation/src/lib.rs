@@ -34,7 +34,7 @@ pub trait Constellation: Extension + Sync + Send {
     fn current_directory(&self) -> &Directory {
         let current_pathbuf = self.get_path().to_string_lossy().to_string();
         self.root_directory()
-            .get_child_by_path(current_pathbuf)
+            .get_child_by_path(&current_pathbuf)
             .and_then(Item::get_directory)
             .unwrap_or_else(|_| self.root_directory())
     }
@@ -50,7 +50,7 @@ pub trait Constellation: Extension + Sync + Send {
 
         if !self
             .current_directory()
-            .get_item(current_pathbuf.to_string_lossy())?
+            .get_item(&current_pathbuf.to_string_lossy())?
             .is_directory()
         {
             return Err(Error::DirectoryNotFound);
