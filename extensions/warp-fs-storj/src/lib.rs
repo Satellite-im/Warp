@@ -31,7 +31,7 @@ use warp_hooks::hooks::Hooks;
 
 #[derive(Debug, Clone)]
 pub struct StorjClient {
-    creds: Option<Credentials>,
+    creds: Credentials,
     endpoint: String,
 }
 
@@ -39,50 +39,57 @@ impl Default for StorjClient {
     fn default() -> Self {
         Self {
             endpoint: String::from("https://gateway.us1.storjshare.io"),
-            creds: None,
+            creds: Credentials {
+                access_key: None,
+                secret_key: None,
+                security_token: None,
+                session_token: None,
+            },
         }
     }
 }
 
 impl StorjClient {
     pub fn new<S: AsRef<str>>(access_key: S, secret_key: S, endpoint: String) -> Self {
-        let creds = Some(Credentials {
+        let creds = Credentials {
             access_key: Some(access_key.as_ref().to_string()),
             secret_key: Some(secret_key.as_ref().to_string()),
             security_token: None,
             session_token: None,
-        });
+        };
         Self { creds, endpoint }
     }
 
     pub fn set_credentials<S: AsRef<str>>(&mut self, access_key: S, secret_key: S) {
-        let creds = Some(Credentials {
+        let creds = Credentials {
             access_key: Some(access_key.as_ref().to_string()),
             secret_key: Some(secret_key.as_ref().to_string()),
             security_token: None,
             session_token: None,
-        });
-        self.creds = creds;
+        };
+        self.creds = Credentials {
+            access_key: Some(access_key.as_ref().to_string()),
+            secret_key: Some(secret_key.as_ref().to_string()),
+            ..creds
+        }
     }
 
     pub async fn bucket<S: AsRef<str>>(&self, bucket: S, create: bool) -> anyhow::Result<Bucket> {
-        anyhow::ensure!(self.creds.is_some(), warp_common::error::Error::Other);
-
         let region = Region::Custom {
             region: "us-east-1".to_string(),
             endpoint: self.endpoint.clone(),
         };
-        let creds = self.creds.clone().unwrap();
         match create {
             true => {
                 let config = BucketConfiguration::default();
 
                 let create_bucket_response =
-                    Bucket::create(bucket.as_ref(), region.clone(), creds.clone(), config).await?;
+                    Bucket::create(bucket.as_ref(), region.clone(), self.creds.clone(), config)
+                        .await?;
                 Ok(create_bucket_response.bucket)
             }
             false => {
-                let bucket = Bucket::new(bucket.as_ref(), region, creds)?;
+                let bucket = Bucket::new(bucket.as_ref(), region, self.creds.clone())?;
                 Ok(bucket)
             }
         }
@@ -113,7 +120,7 @@ pub struct StorjFilesystem {
     pub modified: DateTime<Utc>,
     path: PathBuf,
     #[serde(skip)]
-    pub client: Option<StorjClient>,
+    pub client: StorjClient,
     #[serde(skip)]
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     #[serde(skip)]
@@ -126,7 +133,7 @@ impl Default for StorjFilesystem {
             index: Directory::new("root"),
             path: PathBuf::new(),
             modified: Utc::now(),
-            client: None,
+            client: StorjClient::default(),
             cache: None,
             hooks: None,
         }
@@ -138,7 +145,7 @@ impl StorjFilesystem {
         let mut system = StorjFilesystem::default();
         let mut client = StorjClient::default();
         client.set_credentials(access_key, secret_key);
-        system.client = Some(client);
+        system.client = client;
 
         system
     }
@@ -201,12 +208,8 @@ impl Constellation for StorjFilesystem {
         let mut fs = tokio::fs::File::open(&path).await?;
         let size = fs.metadata().await?.len();
 
-        let client = self
+        let code = self
             .client
-            .as_ref()
-            .ok_or_else(|| Error::Any(anyhow!("Unable to get StorJ Client")))?;
-
-        let code = client
             .bucket(&bucket, true)
             .await?
             .put_object_stream(&mut fs, &name)
@@ -220,14 +223,9 @@ impl Constellation for StorjFilesystem {
             )));
         }
 
-        let cred = client
-            .creds
-            .as_ref()
-            .ok_or_else(|| anyhow!("Credentials are not set"))?;
-
         let url = presign_url(
-            &cred.access_key.clone().unwrap_or_default(),
-            &cred.secret_key.clone().unwrap_or_default(),
+            &self.client.creds.access_key.clone().unwrap_or_default(),
+            &self.client.creds.secret_key.clone().unwrap_or_default(),
             &bucket,
             &name,
         )
@@ -287,11 +285,9 @@ impl Constellation for StorjFilesystem {
         //     .and_then(Item::get_file)?;
 
         let mut fs = tokio::fs::File::create(path).await?;
-        let client = self
+
+        let code = self
             .client
-            .as_ref()
-            .ok_or_else(|| anyhow!("Unable to get StorJ Client"))?;
-        let code = client
             .bucket(bucket, false)
             .await?
             .get_object_stream(&name, &mut fs)
@@ -325,11 +321,8 @@ impl Constellation for StorjFilesystem {
         let (bucket, name) = split_for(name)?;
 
         //TODO: Allow for custom bucket name
-        let client = self
+        let code = self
             .client
-            .as_ref()
-            .ok_or(Error::Any(anyhow!("Unable to get StorJ Client")))?;
-        let code = client
             .bucket(&bucket, true)
             .await?
             .put_object(&name, buffer)
@@ -342,14 +335,9 @@ impl Constellation for StorjFilesystem {
             )));
         }
 
-        let cred = client
-            .creds
-            .as_ref()
-            .ok_or_else(|| anyhow!("Credentials are not set"))?;
-
         let url = presign_url(
-            &cred.access_key.clone().unwrap_or_default(),
-            &cred.secret_key.clone().unwrap_or_default(),
+            &self.client.creds.access_key.clone().unwrap_or_default(),
+            &self.client.creds.secret_key.clone().unwrap_or_default(),
             &bucket,
             &name,
         )
@@ -399,12 +387,8 @@ impl Constellation for StorjFilesystem {
             }
         }
 
-        let client = self
+        let (buf, code) = self
             .client
-            .as_ref()
-            .ok_or_else(|| Error::Any(anyhow!("Unable to get StorJ Client")))?;
-
-        let (buf, code) = client
             .bucket(bucket, false)
             .await?
             .get_object(&name)
@@ -425,12 +409,8 @@ impl Constellation for StorjFilesystem {
     async fn remove(&mut self, path: &str, _: bool) -> warp_common::Result<()> {
         let (bucket, name) = split_for(path)?;
 
-        let client = self
+        let (_, code) = self
             .client
-            .as_ref()
-            .ok_or_else(|| Error::Any(anyhow!("Unable to get StorJ Client")))?;
-
-        let (_, code) = client
             .bucket(bucket, false)
             .await?
             .delete_object(&name)
@@ -459,18 +439,9 @@ impl Constellation for StorjFilesystem {
     async fn sync_ref(&mut self, path: &str) -> warp_common::Result<()> {
         let (bucket, name) = split_for(path)?;
 
-        let client = self
-            .client
-            .clone()
-            .ok_or_else(|| Error::Any(anyhow!("Unable to get StorJ Client")))?;
-        let cred = client
-            .creds
-            .as_ref()
-            .ok_or_else(|| anyhow!("Credentials are not set"))?;
-
         let url = presign_url(
-            &cred.access_key.clone().unwrap_or_default(),
-            &cred.secret_key.clone().unwrap_or_default(),
+            &self.client.creds.access_key.clone().unwrap_or_default(),
+            &self.client.creds.secret_key.clone().unwrap_or_default(),
             &bucket,
             &name,
         )
@@ -537,6 +508,7 @@ async fn presign_url(
         .credentials_provider(cred)
         .endpoint_resolver(resolver)
         .build();
+
     let client = aws_sdk_s3::Client::from_conf(config);
     let expires_in = std::time::Duration::from_secs(604800);
     let presigned_request = client
