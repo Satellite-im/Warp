@@ -1,6 +1,6 @@
 use warp_common::serde::Serialize;
 use warp_common::serde_json::{self, Value};
-use warp_common::{error::Error, Result};
+use warp_common::Result;
 
 #[derive(Debug)]
 pub enum Comparator {
@@ -12,10 +12,33 @@ pub enum Comparator {
     Ne,
 }
 
+#[derive(Debug)]
+pub enum ComparatorFilter {
+    Eq(String, Value),
+    Gt(String, Value),
+    Gte(String, Value),
+    Lt(String, Value),
+    Lte(String, Value),
+    Ne(String, Value),
+}
+
+impl From<(Comparator, String, Value)> for ComparatorFilter {
+    fn from((comp, key, val): (Comparator, String, Value)) -> Self {
+        match comp {
+            Comparator::Eq => ComparatorFilter::Eq(key, val),
+            Comparator::Ne => ComparatorFilter::Ne(key, val),
+            Comparator::Gt => ComparatorFilter::Gt(key, val),
+            Comparator::Gte => ComparatorFilter::Gte(key, val),
+            Comparator::Lt => ComparatorFilter::Lt(key, val),
+            Comparator::Lte => ComparatorFilter::Lte(key, val),
+        }
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct QueryBuilder {
     pub r#where: Vec<(String, Value)>,
-    pub comparator: Vec<(Comparator, String, Value)>,
+    pub comparator: Vec<ComparatorFilter>,
     pub limit: Option<usize>,
 }
 
@@ -30,26 +53,15 @@ impl QueryBuilder {
         Ok(self)
     }
 
-    pub fn filter<S, I>(&mut self, compatator: Comparator, key: S, value: I) -> Result<&mut Self>
+    pub fn filter<I>(&mut self, comparator: Comparator, key: &str, value: I) -> Result<&mut Self>
     where
-        S: AsRef<str>,
         I: Serialize,
     {
-        let value = serde_json::to_value(value)?;
-        match compatator {
-            Comparator::Eq | Comparator::Ne => {
-                self.comparator
-                    .push((compatator, key.as_ref().to_owned(), value))
-            }
-            Comparator::Gt | Comparator::Gte | Comparator::Lt | Comparator::Lte => {
-                //Due it being greater or less than (or similar), we need to check that `value` is numeric
-                if !value.is_number() {
-                    return Err(Error::Other); //Mismatch
-                }
-                self.comparator
-                    .push((compatator, key.as_ref().to_owned(), value))
-            }
-        };
+        self.comparator.push(ComparatorFilter::from((
+            comparator,
+            key.to_string(),
+            serde_json::to_value(value)?,
+        )));
         Ok(self)
     }
 

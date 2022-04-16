@@ -21,7 +21,7 @@ use warp_common::libflate::gzip;
 use warp_data::{DataObject, DataType};
 use warp_module::Module;
 use warp_pocket_dimension::{
-    query::{Comparator, QueryBuilder},
+    query::{ComparatorFilter, QueryBuilder},
     DimensionData, PocketDimension,
 };
 
@@ -435,9 +435,9 @@ fn execute(data: &[DataObject], query: &QueryBuilder) -> warp_common::Result<Vec
                 }
             }
         }
-        for (comp, key, val) in query.comparator.iter() {
+        for comp in query.comparator.iter() {
             match comp {
-                Comparator::Eq => {
+                ComparatorFilter::Eq(key, val) => {
                     if let Some(result) = object.get(key) {
                         if result == val {
                             if list.contains(data) {
@@ -447,7 +447,7 @@ fn execute(data: &[DataObject], query: &QueryBuilder) -> warp_common::Result<Vec
                         }
                     }
                 }
-                Comparator::Ne => {
+                ComparatorFilter::Ne(key, val) => {
                     if let Some(result) = object.get(key) {
                         if result != val {
                             if list.contains(data) {
@@ -457,7 +457,7 @@ fn execute(data: &[DataObject], query: &QueryBuilder) -> warp_common::Result<Vec
                         }
                     }
                 }
-                Comparator::Gte => {
+                ComparatorFilter::Gte(key, val) => {
                     if let Some(result) = object.get(key) {
                         let result = result.as_i64().unwrap();
                         let val = val.as_i64().unwrap();
@@ -469,7 +469,7 @@ fn execute(data: &[DataObject], query: &QueryBuilder) -> warp_common::Result<Vec
                         }
                     }
                 }
-                Comparator::Gt => {
+                ComparatorFilter::Gt(key, val) => {
                     if let Some(result) = object.get(key) {
                         let result = result.as_i64().unwrap();
                         let val = val.as_i64().unwrap();
@@ -481,7 +481,7 @@ fn execute(data: &[DataObject], query: &QueryBuilder) -> warp_common::Result<Vec
                         }
                     }
                 }
-                Comparator::Lte => {
+                ComparatorFilter::Lte(key, val) => {
                     if let Some(result) = object.get(key) {
                         let result = result.as_i64().unwrap();
                         let val = val.as_i64().unwrap();
@@ -493,7 +493,7 @@ fn execute(data: &[DataObject], query: &QueryBuilder) -> warp_common::Result<Vec
                         }
                     }
                 }
-                Comparator::Lt => {
+                ComparatorFilter::Lt(key, val) => {
                     if let Some(result) = object.get(key) {
                         let result = result.as_i64().unwrap();
                         let val = val.as_i64().unwrap();

@@ -5,7 +5,7 @@ use warp_common::serde_json::Value;
 use warp_common::{Extension, Result};
 use warp_data::{DataObject, DataType};
 use warp_module::Module;
-use warp_pocket_dimension::query::{Comparator, QueryBuilder};
+use warp_pocket_dimension::query::{Comparator, ComparatorFilter, QueryBuilder};
 use warp_pocket_dimension::PocketDimension;
 
 // MemoryCache instance will hold a map of both module and dataobject "in memory".
@@ -109,9 +109,9 @@ fn execute(data: &Vec<DataObject>, query: &QueryBuilder) -> Result<Vec<DataObjec
                 }
             }
         }
-        for (comp, key, val) in query.comparator.iter() {
+        for comp in query.comparator.iter() {
             match comp {
-                Comparator::Eq => {
+                ComparatorFilter::Eq(key, val) => {
                     if let Some(result) = object.get(key) {
                         if result == val {
                             if list.contains(&data) {
@@ -121,7 +121,7 @@ fn execute(data: &Vec<DataObject>, query: &QueryBuilder) -> Result<Vec<DataObjec
                         }
                     }
                 }
-                Comparator::Ne => {
+                ComparatorFilter::Ne(key, val) => {
                     if let Some(result) = object.get(key) {
                         if result != val {
                             if list.contains(&data) {
@@ -131,7 +131,7 @@ fn execute(data: &Vec<DataObject>, query: &QueryBuilder) -> Result<Vec<DataObjec
                         }
                     }
                 }
-                Comparator::Gte => {
+                ComparatorFilter::Gte(key, val) => {
                     if let Some(result) = object.get(key) {
                         let result = result.as_i64().unwrap();
                         let val = val.as_i64().unwrap();
@@ -143,7 +143,7 @@ fn execute(data: &Vec<DataObject>, query: &QueryBuilder) -> Result<Vec<DataObjec
                         }
                     }
                 }
-                Comparator::Gt => {
+                ComparatorFilter::Gt(key, val) => {
                     if let Some(result) = object.get(key) {
                         let result = result.as_i64().unwrap();
                         let val = val.as_i64().unwrap();
@@ -155,7 +155,7 @@ fn execute(data: &Vec<DataObject>, query: &QueryBuilder) -> Result<Vec<DataObjec
                         }
                     }
                 }
-                Comparator::Lte => {
+                ComparatorFilter::Lte(key, val) => {
                     if let Some(result) = object.get(key) {
                         let result = result.as_i64().unwrap();
                         let val = val.as_i64().unwrap();
@@ -167,7 +167,7 @@ fn execute(data: &Vec<DataObject>, query: &QueryBuilder) -> Result<Vec<DataObjec
                         }
                     }
                 }
-                Comparator::Lt => {
+                ComparatorFilter::Lt(key, val) => {
                     if let Some(result) = object.get(key) {
                         let result = result.as_i64().unwrap();
                         let val = val.as_i64().unwrap();

@@ -30,6 +30,7 @@ fn update_status(account: &mut impl MultiPass, status: &str) -> anyhow::Result<(
     Ok(())
 }
 
+#[allow(unused)]
 fn generated_wallet() -> anyhow::Result<SolanaWallet> {
     SolanaWallet::restore_from_mnemonic(
         None,

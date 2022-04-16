@@ -7,7 +7,7 @@ use stretto::Cache;
 
 use error::Error;
 use warp_common::{serde_json, Extension};
-use warp_pocket_dimension::query::{Comparator, QueryBuilder};
+use warp_pocket_dimension::query::{ComparatorFilter, QueryBuilder};
 use warp_pocket_dimension::PocketDimension;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -150,9 +150,9 @@ pub(crate) fn execute(
                 }
             }
         }
-        for (comp, key, val) in query.comparator.iter() {
+        for comp in query.comparator.iter() {
             match comp {
-                Comparator::Eq => {
+                ComparatorFilter::Eq(key, val) => {
                     if let Some(result) = object.get(key) {
                         if result == val {
                             if list.contains(data) {
@@ -162,7 +162,7 @@ pub(crate) fn execute(
                         }
                     }
                 }
-                Comparator::Ne => {
+                ComparatorFilter::Ne(key, val) => {
                     if let Some(result) = object.get(key) {
                         if result != val {
                             if list.contains(data) {
@@ -172,7 +172,7 @@ pub(crate) fn execute(
                         }
                     }
                 }
-                Comparator::Gte => {
+                ComparatorFilter::Gte(key, val) => {
                     if let Some(result) = object.get(key) {
                         let result = result.as_i64().unwrap();
                         let val = val.as_i64().unwrap();
@@ -184,7 +184,7 @@ pub(crate) fn execute(
                         }
                     }
                 }
-                Comparator::Gt => {
+                ComparatorFilter::Gt(key, val) => {
                     if let Some(result) = object.get(key) {
                         let result = result.as_i64().unwrap();
                         let val = val.as_i64().unwrap();
@@ -196,7 +196,7 @@ pub(crate) fn execute(
                         }
                     }
                 }
-                Comparator::Lte => {
+                ComparatorFilter::Lte(key, val) => {
                     if let Some(result) = object.get(key) {
                         let result = result.as_i64().unwrap();
                         let val = val.as_i64().unwrap();
@@ -208,7 +208,7 @@ pub(crate) fn execute(
                         }
                     }
                 }
-                Comparator::Lt => {
+                ComparatorFilter::Lt(key, val) => {
                     if let Some(result) = object.get(key) {
                         let result = result.as_i64().unwrap();
                         let val = val.as_i64().unwrap();
