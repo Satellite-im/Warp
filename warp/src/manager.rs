@@ -55,12 +55,12 @@ impl Information for Cache {
 }
 
 #[derive(Clone)]
-pub struct Messaging {
+pub struct Account {
     pub handle: Arc<Mutex<Box<dyn MultiPass>>>,
     pub active: bool,
 }
 
-impl AsRef<Arc<Mutex<Box<dyn MultiPass>>>> for Messaging {
+impl AsRef<Arc<Mutex<Box<dyn MultiPass>>>> for Account {
     fn as_ref(&self) -> &Arc<Mutex<Box<dyn MultiPass>>> {
         &self.handle
     }
@@ -76,12 +76,12 @@ impl Information for Messaging {
 }
 
 #[derive(Clone)]
-pub struct Account {
+pub struct Messaging {
     pub handle: Arc<Mutex<Box<dyn RayGun>>>,
     pub active: bool,
 }
 
-impl AsRef<Arc<Mutex<Box<dyn RayGun>>>> for Account {
+impl AsRef<Arc<Mutex<Box<dyn RayGun>>>> for Messaging {
     fn as_ref(&self) -> &Arc<Mutex<Box<dyn RayGun>>> {
         &self.handle
     }
