@@ -18,14 +18,15 @@ use warp::pocket_dimension::PocketDimension;
 #[allow(unused_imports)]
 use warp_common::dirs;
 use warp_common::error::Error;
-use warp_common::log::{info, warn};
+use warp_common::log::{error, info, warn};
 use warp_common::{
     anyhow,
     anyhow::{bail, Result as AnyResult},
-    serde_json, tokio,
+    bs58, serde_json, tokio,
 };
 use warp_configuration::Config;
 use warp_data::DataObject;
+use warp_multipass::identity::{Identifier, PublicKey};
 use warp_tesseract::Tesseract;
 
 #[derive(Debug, Parser)]
@@ -53,6 +54,7 @@ enum Command {
     Unset { key: String },
     Dump,
     CreateAccount { username: Option<String> },
+    ViewAccount { pubkey: Option<String> },
 }
 
 fn default_config() -> warp_configuration::Config {
@@ -117,14 +119,12 @@ async fn main() -> AnyResult<()> {
     ));
 
     //TODO: push this to TUI
-    let passphrase = cli::password_line()?;
-
-    {
-        tesseract.lock().unwrap().unlock(passphrase.as_bytes())?;
-    }
+    tesseract
+        .lock()
+        .unwrap()
+        .unlock(cli::password_line()?.as_bytes())?;
 
     //TODO: Have the module manager handle the checks
-
     if config.modules.pocket_dimension {
         manager.set_cache(Arc::new(Mutex::new(Box::new(StrettoClient::new()?))));
         //TODO: Have the configuration point to the cache directory, or if not define to use system local directory
@@ -156,6 +156,9 @@ async fn main() -> AnyResult<()> {
     if config.modules.multipass {
         let mut account = warp::mp_solana::SolanaAccount::with_devnet();
         account.set_tesseract(tesseract.clone());
+        if let Ok(cache) = manager.get_cache() {
+            account.set_cache(cache.clone())
+        }
         manager.set_account(Arc::new(Mutex::new(Box::new(account))));
         if let Some(ext) = config.extensions.multipass.first() {
             if manager.enable_account(ext).is_err() {
@@ -263,6 +266,49 @@ async fn main() -> AnyResult<()> {
                     table.add_row(vec![key.as_str(), val.as_str()]);
                 }
                 println!("{table}")
+            }
+            Command::ViewAccount { pubkey } => {
+                let account = manager.get_account()?;
+                let account = match account.lock() {
+                    Ok(a) => a,
+                    Err(e) => e.into_inner(),
+                };
+
+                let ident = match pubkey {
+                    Some(puk) => {
+                        let decoded_puk = bs58::decode(puk).into_vec().map(PublicKey::from_vec)?;
+                        account.get_identity(Identifier::PublicKey(decoded_puk))
+                    }
+                    None => account.get_own_identity(),
+                };
+
+                match ident {
+                    Ok(ident) => {
+                        let warp::multipass::identity::Identity {
+                            username,
+                            public_key,
+                            short_id,
+                            ..
+                        } = ident;
+
+                        println!("Account Found\n");
+                        println!("Username: {username}#{short_id}");
+                        println!(
+                            "Public Key: {}",
+                            warp_common::bs58::encode(public_key.to_bytes()).into_string()
+                        );
+                        println!();
+                        tesseract
+                            .lock()
+                            .unwrap()
+                            .to_file(warp_directory.join("datastore"))
+                            .await?;
+                    }
+                    Err(e) => {
+                        println!("Error obtaining account: {}", e.to_string());
+                        error!("Error obtaining account: {}", e.to_string());
+                    }
+                }
             }
         },
         _ => warn!("You can only select one option"),
