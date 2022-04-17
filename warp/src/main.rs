@@ -237,12 +237,18 @@ async fn main() -> AnyResult<()> {
                             short_id,
                             ..
                         } = identity;
-
+                        println!();
                         println!("Username: {username}#{short_id}");
                         println!(
                             "Public Key: {}",
                             warp_common::bs58::encode(public_key.to_bytes()).into_string()
                         ); // Using bs58 due to account being solana related.
+                        println!();
+                        tesseract
+                            .lock()
+                            .unwrap()
+                            .to_file(warp_directory.join("datastore"))
+                            .await?;
                     }
                     Err(e) => {
                         warn!("Could not create account: {}", e);
