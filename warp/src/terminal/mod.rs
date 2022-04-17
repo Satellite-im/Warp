@@ -32,6 +32,7 @@ pub struct TerminalApplication {
 }
 
 impl TerminalApplication {
+    #[allow(clippy::field_reassign_with_default)]
     pub fn new() -> anyhow::Result<Self> {
         let mut terminal = TerminalApplication::default();
         terminal.title = Some("Warp by Satellite".to_string());

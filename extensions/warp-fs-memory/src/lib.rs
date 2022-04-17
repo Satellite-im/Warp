@@ -142,7 +142,7 @@ impl Constellation for MemorySystem {
             .insert(internal_file.clone())
             .map_err(|_| Error::Other)?;
 
-        let mut file = warp_constellation::file::File::new(&name);
+        let mut file = warp_constellation::file::File::new(name);
         file.set_size(bytes as i64);
         file.hash.sha1hash_from_slice(buf)?;
 
@@ -150,7 +150,7 @@ impl Constellation for MemorySystem {
         if let Ok(mut cache) = self.get_cache() {
             let mut data = DataObject::default();
             data.set_size(bytes as u64);
-            data.set_payload(DimensionData::from_buffer(&name, &buf))?;
+            data.set_payload(DimensionData::from_buffer(name, buf))?;
 
             cache.add_data(DataType::Module(Module::FileSystem), &data)?;
         }
@@ -236,9 +236,9 @@ impl Constellation for MemorySystem {
             .map_err(|_| Error::Other)?;
 
         let directory = if recursive {
-            Directory::new_recursive(&path)?
+            Directory::new_recursive(path)?
         } else {
-            Directory::new(&path)
+            Directory::new(path)
         };
 
         if let Err(err) = self.current_directory_mut()?.add_child(directory) {

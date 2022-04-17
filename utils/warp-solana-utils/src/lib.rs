@@ -60,8 +60,8 @@ pub fn pubkey_from_seeds<S: AsRef<str>>(
     seed: S,
     id: &Pubkey,
 ) -> Result<(Pubkey, Pubkey)> {
-    let (base_pkey, _) =
-        Pubkey::try_find_program_address(seeds, id).ok_or(anyhow!("Error finding program"))?;
+    let (base_pkey, _) = Pubkey::try_find_program_address(seeds, id)
+        .ok_or_else(|| anyhow!("Error finding program"))?;
     let pkey = Pubkey::create_with_seed(&base_pkey, seed.as_ref(), id)?;
     Ok((base_pkey, pkey))
 }

@@ -357,7 +357,7 @@ impl Constellation for StorjFilesystem {
         if let Ok(mut cache) = self.get_cache() {
             let object = DataObject::new(
                 DataType::Module(Module::FileSystem),
-                DimensionData::from_buffer(name, &buffer),
+                DimensionData::from_buffer(&name, buffer),
             )?;
             cache.add_data(DataType::Module(Module::FileSystem), &object)?;
         }

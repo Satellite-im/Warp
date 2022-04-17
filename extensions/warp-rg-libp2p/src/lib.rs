@@ -271,7 +271,7 @@ impl RayGun for Libp2pMessaging {
     async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> warp_common::Result<()> {
         //TODO: Option to signal to peer to remove message from their side as well
         //TODO: Check to see if multiple messages have been selected. This may not be required since the client can submit multiple delete request.
-        if let Some(_) = self
+        if self
             .conversations
             .lock()
             .unwrap()
@@ -282,6 +282,7 @@ impl RayGun for Libp2pMessaging {
             .filter(|message| message.id == message_id)
             .collect::<Vec<_>>()
             .get(0)
+            .is_some()
         {
             return Ok(());
         }

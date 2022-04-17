@@ -12,7 +12,6 @@ use warp_pocket_dimension::PocketDimension;
 use warp_solana_utils::anchor_client::solana_client::rpc_client::RpcClient;
 use warp_solana_utils::anchor_client::solana_sdk::pubkey::Pubkey;
 use warp_solana_utils::anchor_client::solana_sdk::signature::Keypair;
-use warp_solana_utils::anchor_client::solana_sdk::signer::Signer;
 use warp_solana_utils::helper::user::UserHelper;
 use warp_solana_utils::manager::SolanaManager;
 use warp_solana_utils::wallet::{PhraseType, SolanaWallet};
@@ -45,10 +44,12 @@ impl Default for SolanaAccount {
 
 impl SolanaAccount {
     pub fn new(endpoint: EndPoint) -> Self {
-        let mut account = Self::default();
-        account.endpoint = endpoint.clone();
-        account.connection = Some(RpcClient::new(endpoint.to_string()));
-        account
+        let connection = Some(RpcClient::new(endpoint.to_string()));
+        Self {
+            endpoint,
+            connection,
+            ..Default::default()
+        }
     }
 
     pub fn with_devnet() -> Self {
@@ -110,17 +111,15 @@ impl SolanaAccount {
     }
 
     pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
-        let cache = self
+        match self
             .cache
             .as_ref()
-            .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
-
-        let inner = match cache.lock() {
-            Ok(inner) => inner,
-            Err(e) => e.into_inner(),
-        };
-
-        Ok(inner)
+            .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?
+            .lock()
+        {
+            Ok(inner) => Ok(inner),
+            Err(e) => Ok(e.into_inner()),
+        }
     }
 
     pub fn user_helper(&self) -> anyhow::Result<UserHelper> {
@@ -177,17 +176,15 @@ impl MultiPass for SolanaAccount {
 
         self.insert_solana_wallet(wallet)?;
 
-        let pubkey = PublicKey::from_bytes(&self.get_private_key()?.pubkey().to_bytes()[..]);
-
         let identity = user_to_identity(&helper, None)?;
 
         self.identity = Some(identity.clone());
 
         if let Ok(mut cache) = self.get_cache() {
-            let object = DataObject::new(DataType::Module(Module::Accounts), identity)?;
+            let object = DataObject::new(DataType::Module(Module::Accounts), &identity)?;
             cache.add_data(DataType::Module(Module::Accounts), &object)?;
         }
-        Ok(pubkey)
+        Ok(identity.public_key)
     }
 
     fn get_identity(&self, id: Identifier) -> warp_common::Result<Identity> {
@@ -295,8 +292,7 @@ impl MultiPass for SolanaAccount {
     }
 
     fn refresh_cache(&mut self) -> warp_common::Result<()> {
-        let mut cache = self.get_cache()?;
-        cache.empty(DataType::Module(self.module()))
+        self.get_cache()?.empty(DataType::Module(self.module()))
     }
 }
 

@@ -220,6 +220,7 @@ impl Modules {
     }
 }
 
+#[allow(clippy::field_reassign_with_default)]
 impl<'a> WarpApp<'a> {
     pub fn new(title: &'a str) -> anyhow::Result<Self> {
         let mut app = WarpApp::default();

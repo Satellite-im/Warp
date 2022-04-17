@@ -23,15 +23,15 @@ impl DimensionData {
         DimensionData::Path { name, path }
     }
 
-    pub fn from_buffer<S: AsRef<str>, U: AsRef<[u8]>>(name: S, buffer: U) -> Self {
-        let name = name.as_ref().to_string();
-        let buffer = buffer.as_ref().to_vec();
+    pub fn from_buffer(name: &str, buffer: &[u8]) -> Self {
+        let name = name.to_string();
+        let buffer = buffer.to_vec();
         DimensionData::Buffer { name, buffer }
     }
 
-    pub fn from_buffer_nofile<S: AsRef<str>, U: AsRef<[u8]>>(name: S, internal: U) -> Self {
-        let name = name.as_ref().to_string();
-        let internal = internal.as_ref().to_vec();
+    pub fn from_buffer_nofile(name: &str, internal: &[u8]) -> Self {
+        let name = name.to_string();
+        let internal = internal.to_vec();
         DimensionData::BufferNoFile { name, internal }
     }
 

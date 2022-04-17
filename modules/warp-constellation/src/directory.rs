@@ -289,7 +289,6 @@ impl Directory {
     ///
     /// ```
     pub fn get_item_mut(&mut self, item_name: &str) -> Result<&mut Item> {
-        let item_name = item_name.as_ref();
         if !self.has_child(item_name) {
             return Err(Error::ItemInvalid);
         }
@@ -343,7 +342,6 @@ impl Directory {
     ///     assert_eq!(root.has_item("Sub Directory"), false);
     /// ```
     pub fn remove_item(&mut self, item_name: &str) -> Result<Item> {
-        let item_name = item_name.as_ref();
         if !self.has_child(item_name) {
             return Err(Error::ItemInvalid);
         }

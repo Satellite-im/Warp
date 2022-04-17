@@ -132,6 +132,7 @@ impl Directory {
             == 1
     }
 
+    #[allow(clippy::borrowed_box)]
     pub fn get_item(&self, name: &str) -> crate::Result<&Box<dyn Item>> {
         if !self.exist(name) {
             return Err(Error::Other);
@@ -144,6 +145,7 @@ impl Directory {
         self.content.get(index).ok_or(Error::Other)
     }
 
+    #[allow(clippy::borrowed_box)]
     pub fn get_item_from_path<S: AsRef<str>>(&self, path: S) -> crate::Result<&Box<dyn Item>> {
         let mut path = path
             .as_ref()

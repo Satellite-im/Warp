@@ -105,6 +105,7 @@ pub trait Constellation: Extension + Sync + Send {
     }
 
     /// Use to upload file to the filesystem with data from buffer
+    #[allow(clippy::wrong_self_convention)]
     async fn from_buffer(&mut self, _: &str, _: &Vec<u8>) -> Result<()> {
         Err(Error::Unimplemented)
     }
