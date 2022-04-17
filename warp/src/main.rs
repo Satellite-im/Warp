@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod generator;
 pub mod http;
 pub mod manager;
 pub mod terminal;
@@ -62,7 +63,7 @@ fn default_config() -> warp_configuration::Config {
         modules: warp_configuration::ModuleConfig {
             constellation: true,
             pocket_dimension: true,
-            multipass: false,
+            multipass: true,
             raygun: false,
         },
         extensions: warp_configuration::ExtensionConfig {
@@ -74,7 +75,10 @@ fn default_config() -> warp_configuration::Config {
                 .iter()
                 .map(|e| e.to_string())
                 .collect(),
-            multipass: vec![],
+            multipass: vec!["warp-mp-solana"]
+                .iter()
+                .map(|e| e.to_string())
+                .collect(),
             raygun: vec![],
         },
     }
