@@ -18,6 +18,7 @@ use warp_common::dirs;
 use warp_common::error::Error;
 use warp_common::log::{info, warn};
 use warp_common::{
+    anyhow,
     anyhow::{bail, Result as AnyResult},
     serde_json, tokio,
 };
@@ -49,7 +50,7 @@ enum Command {
     Export { key: String },
     Unset { key: String },
     Dump,
-    Init { path: Option<String> },
+    CreateAccount { username: Option<String> },
 }
 
 fn default_config() -> warp_configuration::Config {
@@ -107,12 +108,18 @@ async fn main() -> AnyResult<()> {
         tokio::fs::create_dir(&warp_directory).await?;
     }
 
-    let mut tesseract = Tesseract::from_file(warp_directory.join("datastore"))
-        .await
-        .unwrap_or_default();
+    let tesseract = Arc::new(Mutex::new(
+        Tesseract::from_file(warp_directory.join("datastore"))
+            .await
+            .unwrap_or_default(),
+    ));
+
     //TODO: push this to TUI
     let passphrase = cli::password_line()?;
-    tesseract.unlock(passphrase.as_bytes())?;
+
+    {
+        tesseract.lock().unwrap().unlock(passphrase.as_bytes())?;
+    }
 
     //TODO: Have the module manager handle the checks
 
@@ -135,10 +142,22 @@ async fn main() -> AnyResult<()> {
     }
 
     if config.modules.constellation {
+        let tesseract = tesseract.lock().unwrap();
         register_fs_ext(&config, &mut manager, &tesseract)?;
         if let Some(fs_ext) = config.extensions.constellation.first() {
             if manager.enable_filesystem(fs_ext).is_err() {
                 warn!("Warning: Constellation does not have an active extension.");
+            }
+        }
+    }
+
+    if config.modules.multipass {
+        let mut account = warp::mp_solana::SolanaAccount::with_devnet();
+        account.set_tesseract(tesseract.clone());
+        manager.set_account(Arc::new(Mutex::new(Box::new(account))));
+        if let Some(ext) = config.extensions.multipass.first() {
+            if manager.enable_account(ext).is_err() {
+                warn!("Warning: MultiPass does not have an active extension.");
             }
         }
     }
@@ -172,10 +191,12 @@ async fn main() -> AnyResult<()> {
         //TODO: Store keyfile and datastore in a specific path.
         (false, false, false, Some(command)) => match command {
             Command::Import { key, value } => {
+                let mut tesseract = tesseract.lock().unwrap();
                 tesseract.set(&key, &value)?;
                 tesseract.to_file(warp_directory.join("datastore")).await?;
             }
             Command::Export { key } => {
+                let tesseract = tesseract.lock().unwrap();
                 let data = tesseract.retrieve(&key)?;
                 let mut table = Table::new();
                 table
@@ -185,13 +206,49 @@ async fn main() -> AnyResult<()> {
                 println!("{table}")
             }
             Command::Unset { key } => {
+                let mut tesseract = tesseract.lock().unwrap();
                 tesseract.delete(&key)?;
                 tesseract.to_file(warp_directory.join("datastore")).await?;
             }
-            Command::Init { .. } => {
-                //TODO: Do more initializing and rely on path
+            Command::CreateAccount { username } => {
+                let account = manager.get_account()?.clone();
+
+                //Note `spawn_blocking` is used due to reqwest using a separate runtime in its blocking feature in `warp-solana-utils`
+                match tokio::task::spawn_blocking(
+                    move || -> anyhow::Result<warp::multipass::identity::Identity> {
+                        let username = match username {
+                            Some(username) => username,
+                            None => generator::generate_name(),
+                        };
+                        let mut account = account.lock().unwrap();
+                        account.create_identity(&username, "")?;
+                        let ident = account.get_own_identity()?;
+                        Ok(ident)
+                    },
+                )
+                .await?
+                {
+                    Ok(identity) => {
+                        let warp::multipass::identity::Identity {
+                            username,
+                            public_key,
+                            short_id,
+                            ..
+                        } = identity;
+                        println!("Account Created");
+                        println!("Username: {username}#{short_id}");
+                        println!(
+                            "Public Key: {}",
+                            warp_common::bs58::encode(public_key.to_bytes()).into_string()
+                        ); // Using bs58 due to account being solana related.
+                    }
+                    Err(e) => {
+                        warn!("Could not create account: {}", e);
+                    }
+                };
             }
             Command::Dump => {
+                let tesseract = tesseract.lock().unwrap();
                 let mut table = Table::new();
                 table.set_header(vec!["Key", "Value"]);
                 for (key, val) in tesseract.export()? {
