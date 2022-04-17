@@ -1,9 +1,11 @@
 pub mod cli;
 pub mod generator;
+pub mod gui;
 pub mod http;
 pub mod manager;
 pub mod terminal;
 
+use crate::anyhow::anyhow;
 use crate::serde_json::Value;
 use clap::{Parser, Subcommand};
 use comfy_table::Table;
@@ -211,7 +213,8 @@ async fn main() -> AnyResult<()> {
                 tesseract.to_file(warp_directory.join("datastore")).await?;
             }
             Command::CreateAccount { username } => {
-                let account = manager.get_account()?.clone();
+                // clone the arc to be used within `spawn_blocking` without moving the whole thing over
+                let account = manager.get_account()?;
 
                 //Note `spawn_blocking` is used due to reqwest using a separate runtime in its blocking feature in `warp-solana-utils`
                 match tokio::task::spawn_blocking(
@@ -222,8 +225,7 @@ async fn main() -> AnyResult<()> {
                         };
                         let mut account = account.lock().unwrap();
                         account.create_identity(&username, "")?;
-                        let ident = account.get_own_identity()?;
-                        Ok(ident)
+                        account.get_own_identity().map_err(|e| anyhow!(e))
                     },
                 )
                 .await?
@@ -235,7 +237,7 @@ async fn main() -> AnyResult<()> {
                             short_id,
                             ..
                         } = identity;
-                        println!("Account Created");
+
                         println!("Username: {username}#{short_id}");
                         println!(
                             "Public Key: {}",
