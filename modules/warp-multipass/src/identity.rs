@@ -73,6 +73,9 @@ impl AsRef<[u8]> for PublicKey {
 }
 
 impl PublicKey {
+    pub fn from_vec(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
     pub fn from_bytes(bytes: &[u8]) -> Self {
         Self(bytes.to_vec())
     }
