@@ -49,9 +49,7 @@ pub use wasm::Result;
 /// Functions that provide information about extensions that iterates around a Module
 pub trait Extension {
     /// Returns an id of the extension. Should be the crate name (eg in a `warp-module-ext` format)
-    fn id(&self) -> String {
-        self.name()
-    }
+    fn id(&self) -> String;
 
     /// Returns the name of an extension
     fn name(&self) -> String;

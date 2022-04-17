@@ -22,6 +22,10 @@ impl MemoryCache {
 }
 
 impl Extension for MemoryCache {
+    fn id(&self) -> String {
+        String::from("test")
+    }
+
     fn name(&self) -> String {
         "MemoryCache".to_string()
     }

@@ -26,6 +26,10 @@ impl Default for DummyFileSystem {
 }
 
 impl Extension for DummyFileSystem {
+    fn id(&self) -> String {
+        String::from("test")
+    }
+    
     fn name(&self) -> String {
         "Dummy Filesystem".to_string()
     }
