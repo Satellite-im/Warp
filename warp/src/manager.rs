@@ -196,6 +196,52 @@ impl ModuleManager {
         })
     }
 
+    pub fn enable_account<S: AsRef<str>>(&mut self, id: S) -> anyhow::Result<()> {
+        let id = id.as_ref();
+
+        if self.cache.iter().filter(|item| item.active).count() >= 1 {
+            let index = self
+                .cache
+                .iter()
+                .position(|item| item.active)
+                .ok_or(Error::ArrayPositionNotFound)?;
+
+            self.cache
+                .get_mut(index)
+                .ok_or(Error::ArrayPositionNotFound)?
+                .active = false;
+        }
+
+        let index = self
+            .cache
+            .iter()
+            .position(|item| item.id() == id)
+            .ok_or(Error::ArrayPositionNotFound)?;
+
+        self.cache
+            .get_mut(index)
+            .ok_or(Error::ArrayPositionNotFound)?
+            .active = true;
+
+        Ok(())
+    }
+
+    pub fn set_account(&mut self, handle: Arc<Mutex<Box<dyn MultiPass>>>) {
+        if self
+            .account
+            .iter()
+            .filter(|cs| cs.id() == handle.lock().unwrap().id())
+            .count()
+            != 0
+        {
+            return;
+        }
+        self.account.push(Account {
+            handle,
+            active: false,
+        })
+    }
+
     pub fn get_filesystem(&self) -> anyhow::Result<Arc<Mutex<Box<dyn Constellation>>>> {
         let index = self
             .filesystem
@@ -220,6 +266,21 @@ impl ModuleManager {
 
         let cs = self
             .cache
+            .get(index)
+            .ok_or(warp_common::error::Error::Other)?;
+
+        Ok(cs.as_ref().clone())
+    }
+
+    pub fn get_account(&self) -> anyhow::Result<Arc<Mutex<Box<dyn MultiPass>>>> {
+        let index = self
+            .account
+            .iter()
+            .position(|item| item.active)
+            .ok_or(Error::ArrayPositionNotFound)?;
+
+        let cs = self
+            .account
             .get(index)
             .ok_or(warp_common::error::Error::Other)?;
 
