@@ -199,26 +199,26 @@ impl ModuleManager {
     pub fn enable_account<S: AsRef<str>>(&mut self, id: S) -> anyhow::Result<()> {
         let id = id.as_ref();
 
-        if self.cache.iter().filter(|item| item.active).count() >= 1 {
+        if self.account.iter().filter(|item| item.active).count() >= 1 {
             let index = self
-                .cache
+                .account
                 .iter()
                 .position(|item| item.active)
                 .ok_or(Error::ArrayPositionNotFound)?;
 
-            self.cache
+            self.account
                 .get_mut(index)
                 .ok_or(Error::ArrayPositionNotFound)?
                 .active = false;
         }
 
         let index = self
-            .cache
+            .account
             .iter()
             .position(|item| item.id() == id)
             .ok_or(Error::ArrayPositionNotFound)?;
 
-        self.cache
+        self.account
             .get_mut(index)
             .ok_or(Error::ArrayPositionNotFound)?
             .active = true;
