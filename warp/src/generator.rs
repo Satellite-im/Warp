@@ -21,15 +21,11 @@ pub fn generate_name() -> String {
 }
 
 fn capitalize_first_letter(word: &str) -> String {
-    let mut new_word = String::new();
-    for (index, letter) in word.chars().enumerate() {
-        if index == 0 {
-            new_word = format!("{new_word}{}", letter.to_uppercase());
-        } else {
-            new_word = format!("{new_word}{letter}");
-        }
+    let mut word_letters = word.chars();
+    if let Some(first_letter) = word_letters.next() {
+        return first_letter.to_uppercase().collect::<String>() + word_letters.as_str();
     }
-    new_word
+    String::new()
 }
 
 fn nouns() -> Vec<&'static str> {
