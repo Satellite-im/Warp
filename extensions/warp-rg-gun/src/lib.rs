@@ -1,4 +1,5 @@
-use gundb::Node;
+use gundb::{Node, NodeConfig};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use warp_common::anyhow;
 use warp_common::anyhow::anyhow;
@@ -13,6 +14,7 @@ use warp_raygun::{Callback, EmbedState, Message, MessageOptions, PinState, RayGu
 pub struct GunMessaging {
     pub account: Option<Arc<Mutex<Box<dyn MultiPass>>>>,
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    pub conversion: HashMap<Uuid, Vec<Message>>,
     pub node: Node,
 }
 
@@ -32,6 +34,7 @@ impl std::fmt::Debug for GunMessaging {
             .field("account", &ident)
             .field("cache", &cache)
             .field("node", &self.node.get_peer_id())
+            .field("conversion", &"<>")
             .finish()
     }
 }
@@ -42,6 +45,7 @@ impl Default for GunMessaging {
             account: None,
             cache: None,
             node: Node::new(),
+            conversion: HashMap::new(),
         }
     }
 }
@@ -49,6 +53,17 @@ impl Default for GunMessaging {
 impl GunMessaging {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn new_with_peers(peers: Vec<String>) -> Self {
+        let node = Node::new_with_config(NodeConfig {
+            outgoing_websocket_peers: peers,
+            ..NodeConfig::default()
+        });
+        Self {
+            node,
+            ..Default::default()
+        }
     }
 
     pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
@@ -91,6 +106,7 @@ impl Extension for GunMessaging {
 }
 
 #[warp_common::async_trait::async_trait]
+#[allow(unused_variables)]
 impl RayGun for GunMessaging {
     async fn get_messages(
         &self,
