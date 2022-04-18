@@ -305,7 +305,7 @@ async fn main() -> AnyResult<()> {
                             .await?;
                     }
                     Err(e) => {
-                        println!("Error obtaining account: {}", e.to_string());
+                        println!("Error obtaining account: {}", e);
                         error!("Error obtaining account: {}", e.to_string());
                     }
                 }
