@@ -1,0 +1,14 @@
+[package]
+name = "warp-rg-gun"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+warp-common 	      = { path = "../../utils/warp-common", features = ["async"]}
+warp-raygun 	      = { path = "../../modules/warp-raygun" }
+warp-multipass 	      = { path = "../../modules/warp-multipass" }
+warp-pocket-dimension = { path = "../../modules/warp-pocket-dimension" }
+warp-module 	      = { path = "../../utils/warp-module" }
+warp-crypto 	      = { path = "../../utils/warp-crypto" }
+
+gundb = { version = "0.1.1" }
