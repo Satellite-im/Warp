@@ -29,7 +29,7 @@ mod tests {
         fn id(&self) -> String {
             String::from("test")
         }
-        
+
         fn name(&self) -> String {
             "Dummy Filesystem".to_string()
         }
@@ -71,27 +71,26 @@ mod tests {
 
         let root = filesystem.open_directory("")?;
 
-        root.add_child(File::new("testFile.png"))?;
-        root.add_child(File::new("testPng2.png"))?;
-        root.add_child(File::new("abc.png"))?;
-        root.add_child(File::new("cc123.png"))?;
-        root.add_child(Directory::new("Test Directory"))?;
+        root.add_item(File::new("testFile.png"))?;
+        root.add_item(File::new("testPng2.png"))?;
+        root.add_item(File::new("abc.png"))?;
+        root.add_item(File::new("cc123.png"))?;
+        root.add_item(Directory::new("Test Directory"))?;
 
-        assert_eq!(root.has_child("testFile.png"), true);
-        assert_eq!(root.has_child("testPng2.png"), true);
-        assert_eq!(root.has_child("abc.png"), true);
-        assert_eq!(root.has_child("cc123.png"), true);
+        assert_eq!(root.has_item("testFile.png"), true);
+        assert_eq!(root.has_item("testPng2.png"), true);
+        assert_eq!(root.has_item("abc.png"), true);
+        assert_eq!(root.has_item("cc123.png"), true);
 
-        root.rename_child("abc.png", "test.png")?;
+        root.rename_item("abc.png", "test.png")?;
 
-        assert_eq!(root.has_child("abc.png"), false);
+        assert_eq!(root.has_item("abc.png"), false);
 
         root.move_item_to("testFile.png", "Test Directory")?;
 
-        assert_eq!(root.has_child("testFile.png"), false);
+        assert_eq!(root.has_item("testFile.png"), false);
         assert_eq!(
-            root.get_child_by_path("Test Directory/testFile.png")
-                .is_ok(),
+            root.get_item_by_path("Test Directory/testFile.png").is_ok(),
             true
         );
 
@@ -104,22 +103,22 @@ mod tests {
 
         let root = filesystem.open_directory("")?;
 
-        root.add_child(File::new("testFile.png"))?;
-        root.add_child(File::new("testPng2.png"))?;
-        root.add_child(File::new("abc.png"))?;
-        root.add_child(File::new("cc123.png"))?;
+        root.add_item(File::new("testFile.png"))?;
+        root.add_item(File::new("testPng2.png"))?;
+        root.add_item(File::new("abc.png"))?;
+        root.add_item(File::new("cc123.png"))?;
 
-        assert_eq!(root.has_child("testFile.png"), true);
-        assert_eq!(root.has_child("testPng2.png"), true);
-        assert_eq!(root.has_child("abc.png"), true);
-        assert_eq!(root.has_child("cc123.png"), true);
+        assert_eq!(root.has_item("testFile.png"), true);
+        assert_eq!(root.has_item("testPng2.png"), true);
+        assert_eq!(root.has_item("abc.png"), true);
+        assert_eq!(root.has_item("cc123.png"), true);
 
         // Json
         {
             let data = filesystem.export(ConstellationDataType::Json)?;
             let mut new_fs = DummyFileSystem::default();
             new_fs.import(ConstellationDataType::Json, data)?;
-            assert_eq!(filesystem.root_directory().has_child("testPng2.png"), true);
+            assert_eq!(filesystem.root_directory().has_item("testPng2.png"), true);
         }
 
         // Yaml
@@ -127,7 +126,7 @@ mod tests {
             let data = filesystem.export(ConstellationDataType::Yaml)?;
             let mut new_fs = DummyFileSystem::default();
             new_fs.import(ConstellationDataType::Yaml, data)?;
-            assert_eq!(filesystem.root_directory().has_child("testFile.png"), true);
+            assert_eq!(filesystem.root_directory().has_item("testFile.png"), true);
         }
 
         // Toml
@@ -135,7 +134,7 @@ mod tests {
             let data = filesystem.export(ConstellationDataType::Toml)?;
             let mut new_fs = DummyFileSystem::default();
             new_fs.import(ConstellationDataType::Toml, data)?;
-            assert_eq!(filesystem.root_directory().has_child("abc.png"), true);
+            assert_eq!(filesystem.root_directory().has_item("abc.png"), true);
         }
 
         Ok(())

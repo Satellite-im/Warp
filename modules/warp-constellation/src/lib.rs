@@ -34,7 +34,7 @@ pub trait Constellation: Extension + Sync + Send {
     fn current_directory(&self) -> &Directory {
         let current_pathbuf = self.get_path().to_string_lossy().to_string();
         self.root_directory()
-            .get_child_by_path(&current_pathbuf)
+            .get_item_by_path(&current_pathbuf)
             .and_then(Item::get_directory)
             .unwrap_or_else(|_| self.root_directory())
     }
@@ -89,7 +89,7 @@ pub trait Constellation: Extension + Sync + Send {
             true => Ok(self.root_directory_mut()),
             false => self
                 .root_directory_mut()
-                .get_child_mut_by_path(path)
+                .get_item_mut_by_path(path)
                 .and_then(Item::get_directory_mut),
         }
     }

@@ -80,7 +80,7 @@ pub fn create_directory(state: &State<FsSystem>, name: &str) -> Json<Value> {
     let directory = Directory::new(name);
 
     //TODO: Remove unwrap
-    let response = match fs.current_directory_mut().unwrap().add_child(directory) {
+    let response = match fs.current_directory_mut().unwrap().add_item(directory) {
         Ok(_) => ApiResponse::default(),
         Err(_) => ApiResponse::new(ApiStatus::FAIL, 304),
     };

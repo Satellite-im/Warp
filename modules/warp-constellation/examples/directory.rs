@@ -8,6 +8,6 @@ fn main() -> warp_common::Result<()> {
 
     // Create `Directory` called "Test Directory" and add "textFile.png" to it.
     let mut directory = Directory::new("Test Directory");
-    directory.add_child(file.clone())?;
+    directory.add_item(file.clone())?;
     Ok(())
 }

@@ -29,7 +29,7 @@ impl Extension for DummyFileSystem {
     fn id(&self) -> String {
         String::from("test")
     }
-    
+
     fn name(&self) -> String {
         "Dummy Filesystem".to_string()
     }
@@ -71,14 +71,14 @@ fn main() -> warp_common::Result<()> {
     file.set_size(10000);
 
     let mut directory = Directory::new("Test Directory");
-    directory.add_child(file.clone())?;
+    directory.add_item(file.clone())?;
 
     let mut new_directory = Directory::new("Test Directory");
-    new_directory.add_child(file)?;
+    new_directory.add_item(file)?;
 
-    directory.add_child(new_directory)?;
+    directory.add_item(new_directory)?;
 
-    dummy_fs.root_directory_mut().add_child(directory)?;
+    dummy_fs.root_directory_mut().add_item(directory)?;
 
     Ok(())
 }

@@ -82,56 +82,40 @@ impl Directory {
     /// # Examples
     ///
     /// ```
-    ///     use warp_constellation::{directory::Directory};
+    ///     use warp_constellation::{directory::Directory, item::Item};
     ///
     ///     let dir = Directory::new("Test Directory");
     ///     assert_eq!(dir.name, String::from("Test Directory"));
+    ///
+    ///     let root = Directory::new("/root/test/test2");
+    ///     assert_eq!(root.has_item("test"), true);
+    ///     let test = root.get_item("test").and_then(Item::get_directory).unwrap();
+    ///     assert_eq!(test.has_item("test2"), true);
     /// ```
     pub fn new(name: &str) -> Self {
         let mut directory = Directory::default();
-        let name = name.trim();
-        if !name.is_empty() {
-            directory.name = name.to_string();
-        }
-        directory
-    }
-
-    /// Recurseively create item `Directory` with each instance is a item to the previous
-    ///
-    ///
-    /// # Examples
-    ///
-    /// ```
-    ///     use warp_constellation::{directory::Directory, item::Item};
-    ///
-    ///     let root = Directory::new_recursive("/root/test/test2").unwrap();
-    ///     assert_eq!(root.has_child("test"), true);
-    ///     let test = root.get_child("test").and_then(Item::get_directory).unwrap();
-    ///     assert_eq!(test.has_child("test2"), true);
-    /// ```
-    pub fn new_recursive(path: &str) -> Result<Self> {
-        // Check to determine if the string is initially empty
-        if path.is_empty() {
-            return Err(Error::InvalidPath);
+        // let name = name.trim();
+        if name.is_empty() {
+            return directory;
         }
 
-        let mut path = path
+        let mut path = name
             .split('/')
             .filter(|&s| !s.is_empty())
             .collect::<Vec<_>>();
 
         // checl to determine if the array is empty
         if path.is_empty() {
-            return Err(Error::InvalidPath);
+            return directory;
         }
 
         let name = path.remove(0);
-        let mut directory = Self::new(name);
+        directory.name = name.to_string();
         if !path.is_empty() {
-            let sub = Self::new_recursive(path.join("/").as_str())?;
-            directory.add_item(sub)?;
+            let sub = Self::new(path.join("/").as_str());
+            if directory.add_item(sub).is_ok() {};
         }
-        Ok(directory)
+        directory
     }
 
     /// List all the `Item` within the `Directory`
@@ -161,7 +145,7 @@ impl Directory {
     ///
     ///     let mut root = Directory::new("Test Directory");
     ///     let sub = Directory::new("Sub Directory");
-    ///     root.add_child(sub).unwrap();
+    ///     root.add_item(sub).unwrap();
     ///
     ///     assert_eq!(root.has_item("Sub Directory"), true);
     /// ```
@@ -171,10 +155,6 @@ impl Directory {
             .filter(|item| item.name() == item_name)
             .count()
             == 1
-    }
-
-    pub fn has_child(&self, child_name: &str) -> bool {
-        self.has_item(child_name)
     }
 
     /// Add an item to the `Directory`
@@ -191,7 +171,7 @@ impl Directory {
     pub fn add_item<I: Into<Item>>(&mut self, item: I) -> Result<()> {
         //TODO: Implement check to make sure that the Directory isnt being added to itself
         let item = &item.into();
-        if self.has_child(item.name()) {
+        if self.has_item(item.name()) {
             return Err(Error::DuplicateName);
         }
 
@@ -205,10 +185,6 @@ impl Directory {
         Ok(())
     }
 
-    pub fn add_child<I: Into<Item>>(&mut self, child: I) -> Result<()> {
-        self.add_item(child)
-    }
-
     /// Used to get the position of a child within a `Directory`
     ///
     /// # Examples
@@ -220,8 +196,8 @@ impl Directory {
     ///     let mut root = Directory::new("Test Directory");
     ///     let sub1 = Directory::new("Sub1 Directory");
     ///     let sub2 = Directory::new("Sub2 Directory");
-    ///     root.add_child(sub1).unwrap();
-    ///     root.add_child(sub2).unwrap();
+    ///     root.add_item(sub1).unwrap();
+    ///     root.add_item(sub2).unwrap();
     ///     assert_eq!(root.get_item_index("Sub1 Directory").unwrap(), 0);
     ///     assert_eq!(root.get_item_index("Sub2 Directory").unwrap(), 1);
     ///     assert_eq!(root.get_item_index("Sub3 Directory").is_err(), true);
@@ -232,10 +208,6 @@ impl Directory {
             .iter()
             .position(|item| item.name() == item_name)
             .ok_or(Error::ArrayPositionNotFound)
-    }
-
-    pub fn get_child_index(&self, child_name: &str) -> Result<usize> {
-        self.get_item_index(child_name)
     }
 
     /// Used to get the child within a `Directory`
@@ -253,15 +225,11 @@ impl Directory {
     ///     assert_eq!(item.name(), "Sub Directory");
     /// ```
     pub fn get_item(&self, item_name: &str) -> Result<&Item> {
-        if !self.has_child(item_name) {
+        if !self.has_item(item_name) {
             return Err(Error::ItemInvalid);
         }
         let index = self.get_item_index(item_name)?;
         self.items.get(index).ok_or(Error::ItemInvalid)
-    }
-
-    pub fn get_child(&self, child_name: &str) -> Result<&Item> {
-        self.get_item(child_name)
     }
 
     /// Used to get the mutable child within a `Directory`
@@ -273,31 +241,27 @@ impl Directory {
     ///
     ///     let mut root = Directory::new("Test Directory");
     ///     let sub = Directory::new("Sub Directory");
-    ///     root.add_child(sub).unwrap();
-    ///     assert_eq!(root.has_child("Sub Directory"), true);
-    ///     let child = root.get_child("Sub Directory").unwrap();
+    ///     root.add_item(sub).unwrap();
+    ///     assert_eq!(root.has_item("Sub Directory"), true);
+    ///     let child = root.get_item("Sub Directory").unwrap();
     ///     assert_eq!(child.name(), "Sub Directory");
     ///     let mut file = File::new("testFile.jpg");
-    ///     root.get_child_mut("Sub Directory").unwrap()
+    ///     root.get_item_mut("Sub Directory").unwrap()
     ///         .get_directory_mut().unwrap()
-    ///         .add_child(file).unwrap();
+    ///         .add_item(file).unwrap();
     ///
-    ///     let dir = root.get_child("Sub Directory").unwrap().get_directory().unwrap();
+    ///     let dir = root.get_item("Sub Directory").unwrap().get_directory().unwrap();
     ///
-    ///     assert_eq!(dir.has_child("testFile.jpg"), true);
-    ///     assert_eq!(dir.has_child("testFile.png"), false);
+    ///     assert_eq!(dir.has_item("testFile.jpg"), true);
+    ///     assert_eq!(dir.has_item("testFile.png"), false);
     ///
     /// ```
     pub fn get_item_mut(&mut self, item_name: &str) -> Result<&mut Item> {
-        if !self.has_child(item_name) {
+        if !self.has_item(item_name) {
             return Err(Error::ItemInvalid);
         }
-        let index = self.get_child_index(item_name)?;
+        let index = self.get_item_index(item_name)?;
         self.items.get_mut(index).ok_or(Error::ItemInvalid)
-    }
-
-    pub fn get_child_mut(&mut self, child_name: &str) -> Result<&mut Item> {
-        self.get_item_mut(child_name)
     }
 
     /// Used to rename a child within a `Directory`
@@ -310,20 +274,16 @@ impl Directory {
     ///
     ///     let mut root = Directory::new("Test Directory");
     ///     let sub = Directory::new("Sub Directory");
-    ///     root.add_child(sub).unwrap();
-    ///     assert_eq!(root.has_child("Sub Directory"), true);
+    ///     root.add_item(sub).unwrap();
+    ///     assert_eq!(root.has_item("Sub Directory"), true);
     ///
-    ///     root.rename_child("Sub Directory", "Test Directory").unwrap();
+    ///     root.rename_item("Sub Directory", "Test Directory").unwrap();
     ///
-    ///     assert_eq!(root.has_child("Test Directory"), true);
+    ///     assert_eq!(root.has_item("Test Directory"), true);
     ///
     /// ```
     pub fn rename_item(&mut self, current_name: &str, new_name: &str) -> Result<()> {
-        self.get_child_mut_by_path(current_name)?.rename(new_name)
-    }
-
-    pub fn rename_child(&mut self, current_name: &str, new_name: &str) -> Result<()> {
-        self.rename_item(current_name, new_name)
+        self.get_item_mut_by_path(current_name)?.rename(new_name)
     }
 
     /// Used to remove the child within a `Directory`
@@ -335,29 +295,25 @@ impl Directory {
     ///
     ///     let mut root = Directory::new("Test Directory");
     ///     let sub = Directory::new("Sub Directory");
-    ///     root.add_child(sub).unwrap();
+    ///     root.add_item(sub).unwrap();
     ///
     ///     assert_eq!(root.has_item("Sub Directory"), true);
     ///     let _ = root.remove_item("Sub Directory").unwrap();
     ///     assert_eq!(root.has_item("Sub Directory"), false);
     /// ```
     pub fn remove_item(&mut self, item_name: &str) -> Result<Item> {
-        if !self.has_child(item_name) {
+        if !self.has_item(item_name) {
             return Err(Error::ItemInvalid);
         }
-        let index = self.get_child_index(item_name)?;
+        let index = self.get_item_index(item_name)?;
         let item = self.items.remove(index);
         self.modified = Utc::now();
         Ok(item)
     }
 
-    pub fn remove_child(&mut self, child_name: &str) -> Result<Item> {
-        self.remove_item(child_name)
-    }
-
     /// Used to remove the child within a `Directory` path
     ///
-    /// TODO: Implement within `Directory::remove_child` in a single path
+    /// TODO: Implement within `Directory::remove_item` in a single path
     ///
     /// # Examples
     ///
@@ -387,13 +343,9 @@ impl Directory {
     ///         assert_eq!(root.get_item_by_path("Sub Directory 1/Sub Directory 2/Sub Directory 3").is_err(), true);
     /// ```
     pub fn remove_item_from_path(&mut self, directory: &str, item: &str) -> Result<Item> {
-        self.get_child_mut_by_path(directory)?
+        self.get_item_mut_by_path(directory)?
             .get_directory_mut()?
-            .remove_child(item)
-    }
-
-    pub fn remove_child_from_path(&mut self, directory: &str, child: &str) -> Result<Item> {
-        self.remove_item_from_path(directory, child)
+            .remove_item(item)
     }
 
     /// Used to move the child to another `Directory`
@@ -406,15 +358,15 @@ impl Directory {
     ///     let mut root = Directory::new("Test Directory");
     ///     let sub0 = Directory::new("Sub Directory 1");
     ///     let sub1 = Directory::new("Sub Directory 2");
-    ///     root.add_child(sub0).unwrap();
-    ///     root.add_child(sub1).unwrap();
+    ///     root.add_item(sub0).unwrap();
+    ///     root.add_item(sub1).unwrap();
     ///
-    ///     assert_eq!(root.has_child("Sub Directory 1"), true);
-    ///     assert_eq!(root.has_child("Sub Directory 2"), true);
+    ///     assert_eq!(root.has_item("Sub Directory 1"), true);
+    ///     assert_eq!(root.has_item("Sub Directory 2"), true);
     ///
     ///     root.move_item_to("Sub Directory 2", "Sub Directory 1").unwrap();
     ///
-    ///     assert_ne!(root.has_child("Sub Directory 2"), true);
+    ///     assert_ne!(root.has_item("Sub Directory 2"), true);
     /// ```
     pub fn move_item_to(&mut self, child: &str, dst: &str) -> Result<()> {
         let (child, dst) = (child.trim(), dst.trim());
@@ -423,29 +375,25 @@ impl Directory {
             return Err(Error::ItemNotDirectory);
         }
 
-        if self
-            .get_child_by_path(dst)?
-            .get_directory()?
-            .has_child(child)
-        {
+        if self.get_item_by_path(dst)?.get_directory()?.has_item(child) {
             return Err(Error::DuplicateName);
         }
 
-        let item = self.remove_child(child)?;
+        let item = self.remove_item(child)?;
 
         // If there is an error, place the item back into the current directory
         match self
-            .get_child_mut_by_path(dst)
+            .get_item_mut_by_path(dst)
             .and_then(Item::get_directory_mut)
         {
             Ok(directory) => {
-                if let Err(e) = directory.add_child(item.clone()) {
-                    self.add_child(item)?;
+                if let Err(e) = directory.add_item(item.clone()) {
+                    self.add_item(item)?;
                     return Err(e);
                 }
             }
             Err(e) => {
-                self.add_child(item)?;
+                self.add_item(item)?;
                 return Err(e);
             }
         }
@@ -462,10 +410,10 @@ impl Directory {
     ///     let mut root = Directory::new("Test Directory");
     ///     let mut sub0 = Directory::new("Sub Directory 1");
     ///     let sub1 = Directory::new("Sub Directory 2");
-    ///     sub0.add_child(sub1).unwrap();
-    ///     root.add_child(sub0).unwrap();
+    ///     sub0.add_item(sub1).unwrap();
+    ///     root.add_item(sub0).unwrap();
     ///
-    ///     assert_eq!(root.has_child("Sub Directory 1"), true);
+    ///     assert_eq!(root.has_item("Sub Directory 1"), true);
     ///
     ///     let item = root.find_item("Sub Directory 2").unwrap();
     ///     assert_eq!(item.name(), "Sub Directory 2");
@@ -517,14 +465,14 @@ impl Directory {
     ///     let mut sub0 = Directory::new("Sub Directory 1");
     ///     let mut sub1 = Directory::new("Sub Directory 2");
     ///     let sub2 = Directory::new("Sub Directory 3");
-    ///     sub1.add_child(sub2).unwrap();
-    ///     sub0.add_child(sub1).unwrap();
-    ///     root.add_child(sub0).unwrap();
+    ///     sub1.add_item(sub2).unwrap();
+    ///     sub0.add_item(sub1).unwrap();
+    ///     root.add_item(sub0).unwrap();
     ///
-    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/").is_ok(), true);
-    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/").is_ok(), true);
-    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory 3").is_ok(), true);
-    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory3/Another Dir").is_ok(), false);
+    ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/").is_ok(), true);
+    ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/Sub Directory 2/").is_ok(), true);
+    ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory 3").is_ok(), true);
+    ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory3/Another Dir").is_ok(), false);
     /// ```
     pub fn get_item_by_path(&self, path: &str) -> Result<&Item> {
         let mut path = path
@@ -547,10 +495,6 @@ impl Directory {
         };
     }
 
-    pub fn get_child_by_path(&self, path: &str) -> Result<&Item> {
-        self.get_item_by_path(path)
-    }
-
     /// Get a mutable `Item` from a path
     ///
     /// # Examples
@@ -561,17 +505,17 @@ impl Directory {
     ///     let mut sub0 = Directory::new("Sub Directory 1");
     ///     let mut sub1 = Directory::new("Sub Directory 2");
     ///     let sub2 = Directory::new("Sub Directory 3");
-    ///     sub1.add_child(sub2).unwrap();
-    ///     sub0.add_child(sub1).unwrap();
-    ///     root.add_child(sub0).unwrap();
+    ///     sub1.add_item(sub2).unwrap();
+    ///     sub0.add_item(sub1).unwrap();
+    ///     root.add_item(sub0).unwrap();
     ///     
-    ///     root.get_child_mut_by_path("/Sub Directory 1/Sub Directory 2").unwrap()
+    ///     root.get_item_mut_by_path("/Sub Directory 1/Sub Directory 2").unwrap()
     ///         .get_directory_mut().unwrap()
-    ///         .add_child(Directory::new("Another Directory")).unwrap();    
-    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/").is_ok(), true);
-    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/").is_ok(), true);
-    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory 3").is_ok(), true);
-    ///     assert_eq!(root.get_child_by_path("/Sub Directory 1/Sub Directory 2/Another Directory").is_ok(), true);
+    ///         .add_item(Directory::new("Another Directory")).unwrap();    
+    ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/").is_ok(), true);
+    ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/Sub Directory 2/").is_ok(), true);
+    ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory 3").is_ok(), true);
+    ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/Sub Directory 2/Another Directory").is_ok(), true);
     /// ```
     pub fn get_item_mut_by_path(&mut self, path: &str) -> Result<&mut Item> {
         let mut path = path
@@ -592,10 +536,6 @@ impl Directory {
         } else {
             Ok(item)
         };
-    }
-
-    pub fn get_child_mut_by_path(&mut self, path: &str) -> Result<&mut Item> {
-        self.get_item_mut_by_path(path)
     }
 }
 

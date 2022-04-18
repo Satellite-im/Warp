@@ -167,7 +167,7 @@ impl Constellation for IpfsFileSystem {
 
     async fn put(&mut self, name: &str, path: &str) -> warp_common::Result<()> {
         //TODO: Implement a remote check along with a check within constellation to determine if the file exist
-        if self.root_directory().get_child_by_path(name).is_ok() {
+        if self.root_directory().get_item_by_path(name).is_ok() {
             return Err(warp_common::error::Error::IoError(std::io::Error::from(
                 ErrorKind::AlreadyExists,
             )));
@@ -242,7 +242,7 @@ impl Constellation for IpfsFileSystem {
 
         file.set_ref(&hash);
 
-        self.current_directory_mut()?.add_child(file.clone())?;
+        self.current_directory_mut()?.add_item(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -267,7 +267,7 @@ impl Constellation for IpfsFileSystem {
         // TODO: Implement a function that would check against both remote and constellation
         //       otherwise this would give an error if it doesnt exist within constellation
         //       even if it exist remotely
-        // if self.root_directory().get_child_by_path(name).is_err() {
+        // if self.root_directory().get_item_by_path(name).is_err() {
         //     return Err(warp_common::error::Error::IoError(std::io::Error::from(
         //         ErrorKind::NotFound,
         //     )));
@@ -300,7 +300,7 @@ impl Constellation for IpfsFileSystem {
 
         let _file = self
             .current_directory()
-            .get_child_by_path(&name)
+            .get_item_by_path(&name)
             .and_then(Item::get_file)?;
 
         let mut fs = tokio::fs::File::create(path).await?;
@@ -382,7 +382,7 @@ impl Constellation for IpfsFileSystem {
         file.hash.hash_from_slice(buffer)?;
         file.set_ref(&hash);
 
-        self.current_directory_mut()?.add_child(file.clone())?;
+        self.current_directory_mut()?.add_item(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -435,7 +435,7 @@ impl Constellation for IpfsFileSystem {
 
         let _file = self
             .current_directory()
-            .get_child(&name[1..])
+            .get_item(&name[1..])
             .and_then(Item::get_file)?;
 
         let client = self.client.as_ref();
@@ -459,7 +459,7 @@ impl Constellation for IpfsFileSystem {
         let name = affix_root(name);
 
         //TODO: Resolve to full directory
-        if !self.current_directory().has_child(&name[1..]) {
+        if !self.current_directory().has_item(&name[1..]) {
             return Err(warp_common::error::Error::IoError(std::io::Error::from(
                 ErrorKind::NotFound,
             )));
@@ -472,7 +472,7 @@ impl Constellation for IpfsFileSystem {
                     .await
                     .map_err(|e| anyhow!(e))?;
 
-                self.current_directory_mut()?.remove_child(&name[1..])?
+                self.current_directory_mut()?.remove_item(&name[1..])?
             }
             _ => return Err(Error::Unimplemented),
         };
@@ -504,13 +504,9 @@ impl Constellation for IpfsFileSystem {
             _ => return Err(Error::Unimplemented),
         };
 
-        let directory = if recursive {
-            Directory::new_recursive(&path)?
-        } else {
-            Directory::new(&path)
-        };
+        let directory = Directory::new(&path);
 
-        if let Err(err) = self.current_directory_mut()?.add_child(directory.clone()) {
+        if let Err(err) = self.current_directory_mut()?.add_item(directory.clone()) {
             let client = self.client.as_ref();
             if let IpfsOption::Mfs = self.client.option {
                 client.files_rm(&path, true).await.map_err(|e| anyhow!(e))?;
@@ -561,7 +557,7 @@ mod test {
         //     .from_buffer("test", &b"Hello, World!".to_vec())
         //     .await?;
         //
-        // assert_eq!(system.current_directory().has_child("test"), true);
+        // assert_eq!(system.current_directory().has_item("test"), true);
         //
         // let mut buffer: Vec<u8> = vec![];
         //
@@ -571,7 +567,7 @@ mod test {
         //
         // system.remove("test", false).await?;
         //
-        // assert_eq!(system.current_directory().has_child("test"), false);
+        // assert_eq!(system.current_directory().has_item("test"), false);
         Ok(())
     }
 }

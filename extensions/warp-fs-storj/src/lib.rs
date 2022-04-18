@@ -237,7 +237,7 @@ impl Constellation for StorjFilesystem {
         file.set_ref(&url);
         file.hash.hash_from_file(&path)?;
 
-        self.current_directory_mut()?.add_child(file.clone())?;
+        self.current_directory_mut()?.add_item(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -281,7 +281,7 @@ impl Constellation for StorjFilesystem {
 
         // let file = self
         //     .current_directory()
-        //     .get_child(&name)
+        //     .get_item(&name)
         //     .and_then(Item::get_file)?;
 
         let mut fs = tokio::fs::File::create(path).await?;
@@ -350,7 +350,7 @@ impl Constellation for StorjFilesystem {
         file.hash.hash_from_slice(buffer)?;
         file.set_ref(&url);
 
-        self.current_directory_mut()?.add_child(file.clone())?;
+        self.current_directory_mut()?.add_item(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -423,7 +423,7 @@ impl Constellation for StorjFilesystem {
             )));
         }
 
-        let item = self.current_directory_mut()?.remove_child(&name)?;
+        let item = self.current_directory_mut()?.remove_item(&name)?;
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::Module(Module::FileSystem), &item)?;
             let hook = hook.lock().unwrap();

@@ -146,7 +146,7 @@ impl Constellation for MemorySystem {
         file.set_size(bytes as i64);
         file.hash.sha1hash_from_slice(buf)?;
 
-        self.current_directory_mut()?.add_child(file.clone())?;
+        self.current_directory_mut()?.add_item(file.clone())?;
         if let Ok(mut cache) = self.get_cache() {
             let mut data = DataObject::default();
             data.set_size(bytes as u64);
@@ -169,7 +169,7 @@ impl Constellation for MemorySystem {
         name: &str,
         buf: &mut Vec<u8>,
     ) -> std::result::Result<(), warp_common::error::Error> {
-        if !self.current_directory().has_child(name) {
+        if !self.current_directory().has_item(name) {
             return Err(warp_common::error::Error::IoError(std::io::Error::from(
                 ErrorKind::InvalidData,
             )));
@@ -201,7 +201,7 @@ impl Constellation for MemorySystem {
     }
 
     async fn remove(&mut self, path: &str, _: bool) -> warp_common::Result<()> {
-        if !self.current_directory().has_child(path) {
+        if !self.current_directory().has_item(path) {
             return Err(Error::Other);
         }
 
@@ -214,7 +214,7 @@ impl Constellation for MemorySystem {
             .remove(path)
             .map_err(|_| Error::ObjectNotFound)?;
 
-        self.current_directory_mut()?.remove_child(path)?;
+        self.current_directory_mut()?.remove_item(path)?;
         Ok(())
     }
 
@@ -235,13 +235,9 @@ impl Constellation for MemorySystem {
             .insert(inner_directory)
             .map_err(|_| Error::Other)?;
 
-        let directory = if recursive {
-            Directory::new_recursive(path)?
-        } else {
-            Directory::new(path)
-        };
+        let directory = Directory::new(path);
 
-        if let Err(err) = self.current_directory_mut()?.add_child(directory) {
+        if let Err(err) = self.current_directory_mut()?.add_item(directory) {
             //TODO
             return Err(err);
         }
