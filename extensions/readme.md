@@ -29,20 +29,12 @@ Implementation of [IPFS](https://ipfs.io/) for Constellation. a peer-to-peer pro
 
 ### Note
 
-For this extension to work, one would need to have a IPFS node installed or connect to a IPFS node via HTTP. 
-
-## warp-fs-textile
-
-Placeholder for the implementation of [Textile](https://docs.textile.io/) for Constellation, a provider that connects and extends libp2p, ipfs, and filecoin. 
+For this extension to work, one would need to have a IPFS node installed or connect to a IPFS node via HTTP.
 
 ## warp-mp-solana
 
 **TODO**
 
 ## warp-rg-ipfs
-
-**TODO**
-
-## warp-rg-textile 
 
 **TODO**
