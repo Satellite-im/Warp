@@ -195,7 +195,7 @@ impl<'a> WarpApp<'a> {
             .as_ref()
             .unwrap()
             .root_directory()
-            .child_list()
+            .get_items()
             .iter()
             // .filter(|item| item.is_file())
             .map(|item| {

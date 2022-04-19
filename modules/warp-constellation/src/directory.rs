@@ -130,14 +130,6 @@ impl Directory {
         &mut self.items
     }
 
-    pub fn child_list(&self) -> &Vec<Item> {
-        self.get_items()
-    }
-
-    pub fn child_list_mut(&mut self) -> &mut Vec<Item> {
-        self.get_items_mut()
-    }
-
     /// Checks to see if the `Directory` has a `Item`
     ///
     /// # Examples
@@ -559,7 +551,7 @@ impl Directory {
 
 impl Directory {
     pub fn id(&self) -> Uuid {
-        self.id.clone()
+        self.id
     }
 
     pub fn name(&self) -> String {
