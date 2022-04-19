@@ -2,7 +2,7 @@ pub mod error;
 
 pub use warp_module::Module;
 
-#[cfg(not(target_os = "wasm32"))]
+// #[cfg(not(target_os = "wasm32"))]
 pub use anyhow;
 #[cfg(feature = "bincode_opt")]
 #[cfg(not(target_os = "wasm32"))]
@@ -29,6 +29,11 @@ cfg_if::cfg_if! {
         pub use tokio;
         pub use tokio_stream;
         pub use tokio_util;
+    }
+}
+
+cfg_if::cfg_if! {
+    if #[cfg(feature = "async")] {
         pub use async_trait;
         pub use futures;
     }
@@ -37,15 +42,18 @@ cfg_if::cfg_if! {
 #[cfg(not(target_family = "wasm"))]
 pub type Result<T> = std::result::Result<T, crate::error::Error>;
 
-#[cfg(target_os = "wasm32")]
+#[cfg(target_arch = "wasm32")]
 pub mod wasm {
     use wasm_bindgen::JsError;
 
     pub type Result<T> = std::result::Result<T, JsError>;
 }
 
-#[cfg(target_os = "wasm32")]
+#[cfg(target_arch = "wasm32")]
 pub use wasm::Result;
+
+#[cfg(target_arch = "wasm32")]
+pub use wasm_bindgen;
 
 /// Functions that provide information about extensions that iterates around a Module
 pub trait Extension {
