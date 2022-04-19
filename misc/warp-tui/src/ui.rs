@@ -200,12 +200,12 @@ impl<'a> WarpApp<'a> {
             // .filter(|item| item.is_file())
             .map(|item| {
                 Row::new(vec![
-                    item.name().to_string(),
+                    item.name(),
                     format!("{}", item.size()),
                     format!("{}", item.creation()),
                     if item.is_file() {
                         if let Item::File(file) = item {
-                            file.hash.clone().sha256.unwrap_or_default()
+                            file.hash().sha256.unwrap_or_default()
                         } else {
                             String::new()
                         }

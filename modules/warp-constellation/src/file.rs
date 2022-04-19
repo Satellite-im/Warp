@@ -1,4 +1,3 @@
-use crate::item::Metadata;
 use std::io::{Read, Seek, SeekFrom};
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::derive_more::Display;
@@ -41,34 +40,34 @@ pub enum FileHookType {
 #[serde(crate = "warp_common::serde")]
 pub struct File {
     /// ID of the `File`
-    pub id: Uuid,
+    id: Uuid,
 
     /// Name of the `File`
-    pub name: String,
+    name: String,
 
     /// Size of the `File`.
-    pub size: i64,
+    size: i64,
 
     /// Description of the `File`. TODO: Make this optional
-    pub description: String,
+    description: String,
 
     /// Timestamp of the creation of the `File`
     #[serde(with = "warp_common::chrono::serde::ts_seconds")]
-    pub creation: DateTime<Utc>,
+    creation: DateTime<Utc>,
 
     /// Timestamp of the `File` when it is modified
     #[serde(with = "warp_common::chrono::serde::ts_seconds")]
-    pub modified: DateTime<Utc>,
+    modified: DateTime<Utc>,
 
     /// Type of the `File`.
-    pub file_type: FileType,
+    file_type: FileType,
 
     /// Hash of the `File`
-    pub hash: Hash,
+    hash: Hash,
 
     /// External reference
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reference: Option<String>,
+    reference: Option<String>,
 }
 
 impl Default for File {
@@ -98,7 +97,7 @@ impl File {
     ///
     /// let file = File::new("test.txt");
     ///
-    /// assert_eq!(file.name, String::from("test.txt"));
+    /// assert_eq!(file.name(), String::from("test.txt"));
     /// ```
     pub fn new(name: &str) -> File {
         let mut file = File::default();
@@ -107,6 +106,22 @@ impl File {
             file.name = name.to_string();
         }
         file
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.id.clone()
+    }
+
+    pub fn name(&self) -> String {
+        self.name.to_owned()
+    }
+
+    pub fn set_name(&mut self, name: &str) {
+        self.name = name.to_string()
+    }
+
+    pub fn description(&self) -> String {
+        self.description.to_owned()
     }
 
     /// Set the description of the file
@@ -119,7 +134,7 @@ impl File {
     /// let mut file = File::new("test.txt");
     /// file.set_description("test file");
     ///
-    /// assert_eq!(file.description.as_str(), "test file");
+    /// assert_eq!(file.description().as_str(), "test file");
     /// ```
     pub fn set_description(&mut self, desc: &str) {
         self.description = desc.to_string();
@@ -136,12 +151,20 @@ impl File {
     /// let mut file = File::new("test.txt");
     /// file.set_ref("test_file.txt");
     ///
-    /// assert_eq!(file.reference.is_some(), true);
-    /// assert_eq!(file.reference.unwrap().as_str(), "test_file.txt");
+    /// assert_eq!(file.reference().is_some(), true);
+    /// assert_eq!(file.reference().unwrap().as_str(), "test_file.txt");
     /// ```
     pub fn set_ref(&mut self, reference: &str) {
         self.reference = Some(reference.to_string());
         self.modified = Utc::now();
+    }
+
+    pub fn reference(&self) -> Option<String> {
+        self.reference.clone()
+    }
+
+    pub fn size(&self) -> i64 {
+        self.size
     }
 
     /// Set the size the file
@@ -160,31 +183,25 @@ impl File {
         self.size = size;
         self.modified = Utc::now();
     }
-}
 
-impl Metadata for File {
-    fn id(&self) -> &Uuid {
-        &self.id
-    }
-
-    fn name(&self) -> String {
-        self.name.to_owned()
-    }
-
-    fn description(&self) -> String {
-        self.description.to_owned()
-    }
-
-    fn size(&self) -> i64 {
-        self.size
-    }
-
-    fn creation(&self) -> DateTime<Utc> {
+    pub fn creation(&self) -> DateTime<Utc> {
         self.creation
     }
 
-    fn modified(&self) -> DateTime<Utc> {
+    pub fn modified(&self) -> DateTime<Utc> {
         self.modified
+    }
+
+    pub fn set_modified(&mut self) {
+        self.modified = Utc::now()
+    }
+
+    pub fn hash(&self) -> Hash {
+        self.hash.clone()
+    }
+
+    pub fn hash_mut(&mut self) -> &mut Hash {
+        &mut self.hash
     }
 }
 

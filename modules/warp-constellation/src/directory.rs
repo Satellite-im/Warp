@@ -1,9 +1,11 @@
-use crate::item::{Item, Metadata};
+use crate::file::File;
+use crate::item::Item;
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::derive_more::Display;
 use warp_common::serde::{Deserialize, Serialize};
 use warp_common::uuid::Uuid;
 use warp_common::{error::Error, Result};
+
 /// `DirectoryType` handles the supported types for the directory.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug, Display)]
 #[serde(crate = "warp_common::serde", rename_all = "lowercase")]
@@ -36,28 +38,28 @@ pub enum DirectoryHookType {
 #[serde(crate = "warp_common::serde")]
 pub struct Directory {
     /// ID of the `Directory`
-    pub id: Uuid,
+    id: Uuid,
 
     /// Name of the `Directory`
-    pub name: String,
+    name: String,
 
     /// Description of the `Directory`
     /// TODO: Make this optional
-    pub description: String,
+    description: String,
 
     /// Timestamp of the creation of the directory
     #[serde(with = "warp_common::chrono::serde::ts_seconds")]
-    pub creation: DateTime<Utc>,
+    creation: DateTime<Utc>,
 
     /// Timestamp of the `Directory` when it is modified
     #[serde(with = "warp_common::chrono::serde::ts_seconds")]
-    pub modified: DateTime<Utc>,
+    modified: DateTime<Utc>,
 
     /// Type of `Directory`
-    pub directory_type: DirectoryType,
+    directory_type: DirectoryType,
 
     /// List of `Item`, which would represents either `File` or `Directory`
-    pub items: Vec<Item>,
+    items: Vec<Item>,
 }
 
 impl Default for Directory {
@@ -82,10 +84,10 @@ impl Directory {
     /// # Examples
     ///
     /// ```
-    ///     use warp_constellation::{directory::Directory, item::Item};
+    ///     use warp_constellation::{directory::Directory, item::{Item, Metadata}};
     ///
     ///     let dir = Directory::new("Test Directory");
-    ///     assert_eq!(dir.name, String::from("Test Directory"));
+    ///     assert_eq!(dir.name(), String::from("Test Directory"));
     ///
     ///     let root = Directory::new("/root/test/test2");
     ///     assert_eq!(root.has_item("test"), true);
@@ -168,20 +170,36 @@ impl Directory {
     ///     let sub = Directory::new("Sub Directory");
     ///     root.add_item(sub).unwrap();
     /// ```
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn add_item<I: Into<Item>>(&mut self, item: I) -> Result<()> {
-        //TODO: Implement check to make sure that the Directory isnt being added to itself
-        let item = &item.into();
-        if self.has_item(item.name()) {
+        match item.into() {
+            Item::Directory(dir) => self.add_directory(dir),
+            Item::File(file) => self.add_file(file),
+        }
+    }
+
+    /// Add a file to the `Directory`
+    pub fn add_file(&mut self, file: File) -> Result<()> {
+        if self.has_item(&file.name()) {
+            return Err(Error::DuplicateName);
+        }
+        self.items.push(Item::File(file));
+        self.set_modified();
+        Ok(())
+    }
+
+    /// Add a directory to the `Directory`
+    pub fn add_directory(&mut self, directory: Directory) -> Result<()> {
+        if self.has_item(&directory.name()) {
             return Err(Error::DuplicateName);
         }
 
-        if let Item::Directory(directory) = item {
-            if directory == self {
-                return Err(Error::DirParadox);
-            }
+        if directory == self.clone() {
+            return Err(Error::DirParadox);
         }
-        self.items.push(item.clone());
-        self.modified = Utc::now();
+
+        self.items.push(Item::Directory(directory));
+        self.set_modified();
         Ok(())
     }
 
@@ -539,28 +557,40 @@ impl Directory {
     }
 }
 
-impl Metadata for Directory {
-    fn id(&self) -> &Uuid {
-        &self.id
+impl Directory {
+    pub fn id(&self) -> Uuid {
+        self.id.clone()
     }
 
-    fn name(&self) -> String {
+    pub fn name(&self) -> String {
         self.name.to_owned()
     }
 
-    fn description(&self) -> String {
+    pub fn set_name(&mut self, name: &str) {
+        self.name = name.to_string()
+    }
+
+    pub fn description(&self) -> String {
         self.description.to_owned()
     }
 
-    fn size(&self) -> i64 {
-        self.items.iter().map(Metadata::size).sum()
+    pub fn set_description(&mut self, desc: &str) {
+        self.description = desc.to_string()
     }
 
-    fn creation(&self) -> DateTime<Utc> {
+    pub fn size(&self) -> i64 {
+        self.get_items().iter().map(Item::size).sum()
+    }
+
+    pub fn creation(&self) -> DateTime<Utc> {
         self.creation
     }
 
-    fn modified(&self) -> DateTime<Utc> {
+    pub fn modified(&self) -> DateTime<Utc> {
         self.modified
+    }
+
+    pub fn set_modified(&mut self) {
+        self.modified = Utc::now()
     }
 }

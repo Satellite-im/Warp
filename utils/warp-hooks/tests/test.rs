@@ -25,7 +25,7 @@ mod test {
             assert_eq!(data.data_type, DataType::Module(Module::FileSystem));
 
             let file: File = data.payload().unwrap(); //TODO: Implement Result for `Fn`
-            assert_eq!(file.name.as_str(), "test.txt");
+            assert_eq!(file.name(), String::from("test.txt"));
         })?;
         let data = DataObject::new(DataType::Module(Module::FileSystem), File::new("test.txt"))?;
 

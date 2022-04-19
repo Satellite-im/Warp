@@ -170,7 +170,7 @@ impl Hooks {
     ///         assert_eq!(hook.name.as_str(), "new_file");
     ///         assert_eq!(hook.data_type, DataType::Module(Module::FileSystem));
     ///         let file: File = data.payload().unwrap();
-    ///         assert_eq!(file.name.as_str(), "test.txt");
+    ///         assert_eq!(file.name().as_str(), "test.txt");
     ///     }).unwrap();
     ///     let data = DataObject::new(DataType::Module(Module::FileSystem), File::new("test.txt")).unwrap();
     ///     system.trigger("filesystem::new_file", &data);
@@ -207,7 +207,7 @@ impl Hooks {
     ///         assert_eq!(hook.name.as_str(), "new_file");
     ///         assert_eq!(hook.data_type, DataType::Module(Module::FileSystem));
     ///         let file: File = data.payload().unwrap();
-    ///         assert_eq!(file.name.as_str(), "test.txt");
+    ///         assert_eq!(file.name().as_str(), "test.txt");
     ///     }).unwrap();
     ///     let data = DataObject::new(DataType::Module(Module::FileSystem), File::new("test.txt")).unwrap();
     ///     system.trigger("filesystem::new_file", &data);

@@ -48,7 +48,7 @@ pub trait Metadata {
 ///     use warp_constellation::{file::File, item::Item};
 ///     let file = File::new("test.txt");
 ///     let item = Item::from(file.clone());
-///     assert_eq!(item.name(), file.name.as_str());
+///     assert_eq!(item.name(), file.name());
 /// ```
 impl From<File> for Item {
     fn from(file: File) -> Self {
@@ -61,10 +61,10 @@ impl From<File> for Item {
 /// #Examples
 ///
 /// ```
-///     use warp_constellation::{directory::{Directory, DirectoryType}, item::Item};
+///     use warp_constellation::{directory::{Directory, DirectoryType}, item::{Item, Metadata}};
 ///     let dir = Directory::new("Test Directory");
 ///     let item = Item::from(dir.clone());
-///     assert_eq!(item.name(), dir.name.as_str());
+///     assert_eq!(item.name(), dir.name());
 /// ```
 impl From<Directory> for Item {
     fn from(directory: Directory) -> Self {
@@ -74,42 +74,42 @@ impl From<Directory> for Item {
 
 impl Item {
     /// Get id of `Item`
-    pub fn id(&self) -> &Uuid {
+    pub fn id(&self) -> Uuid {
         match self {
-            Item::File(file) => &file.id,
-            Item::Directory(directory) => &directory.id,
+            Item::File(file) => file.id(),
+            Item::Directory(directory) => directory.id(),
         }
     }
 
     /// Get string of `Item`
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> String {
         match self {
-            Item::File(file) => &file.name,
-            Item::Directory(directory) => &directory.name,
+            Item::File(file) => file.name(),
+            Item::Directory(directory) => directory.name(),
         }
     }
 
     /// Get description of `Item`
-    pub fn description(&self) -> &str {
+    pub fn description(&self) -> String {
         match self {
-            Item::File(file) => &file.description,
-            Item::Directory(directory) => &directory.description,
+            Item::File(file) => file.description(),
+            Item::Directory(directory) => directory.description(),
         }
     }
 
     /// Get the creation date of `Item`
     pub fn creation(&self) -> DateTime<Utc> {
         match self {
-            Item::File(file) => file.creation,
-            Item::Directory(directory) => directory.creation,
+            Item::File(file) => file.creation(),
+            Item::Directory(directory) => directory.creation(),
         }
     }
 
     /// Get the modified date of `Item`
     pub fn modified(&self) -> DateTime<Utc> {
         match self {
-            Item::File(file) => file.modified,
-            Item::Directory(directory) => directory.modified,
+            Item::File(file) => file.modified(),
+            Item::Directory(directory) => directory.modified(),
         }
     }
 
@@ -118,8 +118,8 @@ impl Item {
     /// If `Item::Directory` it will return the size of all files within the `Directory`, including files located within a sub directory
     pub fn size(&self) -> i64 {
         match self {
-            Item::File(file) => file.size,
-            Item::Directory(directory) => directory.items.iter().map(Item::size).sum(),
+            Item::File(file) => file.size(),
+            Item::Directory(directory) => directory.get_items().iter().map(Item::size).sum(),
         }
     }
 
@@ -131,12 +131,10 @@ impl Item {
         }
         match self {
             Item::File(file) => {
-                (*file).name = name.to_string();
-                (*file).modified = Utc::now();
+                (*file).set_name(name);
             }
             Item::Directory(directory) => {
-                (*directory).name = name.to_string();
-                (*directory).modified = Utc::now();
+                (*directory).set_name(name);
             }
         };
 
@@ -195,12 +193,10 @@ impl Item {
     pub fn set_description(&mut self, desc: &str) {
         match self {
             Item::File(file) => {
-                file.description = desc.to_string();
-                file.modified = Utc::now();
+                file.set_description(desc);
             }
             Item::Directory(directory) => {
-                directory.description = desc.to_string();
-                directory.modified = Utc::now();
+                directory.set_description(desc);
             }
         }
     }
@@ -209,37 +205,10 @@ impl Item {
     pub fn set_size(&mut self, size: i64) -> Result<()> {
         match self {
             Item::File(file) => {
-                file.size = size;
-                file.modified = Utc::now();
+                file.set_size(size);
                 Ok(())
             }
             Item::Directory(_) => Err(Error::ItemNotFile),
         }
-    }
-}
-
-impl Metadata for Item {
-    fn id(&self) -> &Uuid {
-        self.id()
-    }
-
-    fn name(&self) -> String {
-        self.name().to_string()
-    }
-
-    fn description(&self) -> String {
-        self.description().to_string()
-    }
-
-    fn size(&self) -> i64 {
-        self.size()
-    }
-
-    fn creation(&self) -> DateTime<Utc> {
-        self.creation()
-    }
-
-    fn modified(&self) -> DateTime<Utc> {
-        self.modified()
     }
 }

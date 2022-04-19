@@ -238,7 +238,7 @@ impl Constellation for IpfsFileSystem {
         let mut file = warp_constellation::file::File::new(&name[1..]);
         file.set_size(size as i64);
 
-        file.hash.hash_from_file(path)?;
+        file.hash_mut().hash_from_file(path)?;
 
         file.set_ref(&hash);
 
@@ -379,7 +379,7 @@ impl Constellation for IpfsFileSystem {
             }
             _ => return Err(Error::Unimplemented),
         };
-        file.hash.hash_from_slice(buffer)?;
+        file.hash_mut().hash_from_slice(buffer)?;
         file.set_ref(&hash);
 
         self.current_directory_mut()?.add_item(file.clone())?;

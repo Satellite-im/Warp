@@ -39,13 +39,14 @@ tokio-stream = { version = "0.1", features = ["net"], optional = true }
 
 
 [target.'cfg(all(target_arch = "wasm32", not(any(target_os = "emscripten", target_os = "wasi"))))'.dependencies]
-getrandom = { version = "0.2", features = ["js"] }
-uuid = { version = "0.8", features = ["serde", "v4", "wasm-bindgen"] }
-wasm-bindgen = "0.2"
-web-sys = "0.3"
-js-sys = "0.3"
+getrandom = { version = "0.2", features = ["js"], optional = true }
+uuid = { version = "0.8", features = ["serde", "v4", "wasm-bindgen"], optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+web-sys = { version = "0.3", optional = true }
+js-sys = { version = "0.3", optional = true }
 
 [features]
 default = []
 bincode_opt = ["bincode"]
 async = ["tokio", "tokio-util", "async-trait", "futures", "tokio-stream"]
+wasm = ["getrandom", "wasm-bindgen", "web-sys", "js-sys", "uuid/wasm-bindgen"]

@@ -159,7 +159,7 @@ pub trait Constellation: Extension + Sync + Send {
             ConstellationDataType::Toml => warp_common::toml::from_str(data.as_str())?,
         };
         //TODO: create a function to override directory items.
-        *self.root_directory_mut().get_items_mut() = directory.items;
+        *self.root_directory_mut().get_items_mut() = directory.get_items().clone();
 
         Ok(())
     }
