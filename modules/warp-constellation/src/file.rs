@@ -252,15 +252,14 @@ impl Hash {
     /// use warp_constellation::file::Hash;
     ///
     /// let mut hash = Hash::default();
-    /// hash.hash_from_slice(b"Hello, World!").unwrap();
+    /// hash.hash_from_slice(b"Hello, World!");
     ///
     /// assert_eq!(hash.sha1, Some(String::from("0A0A9F2A6772942557AB5355D76AF442F8F65E01")));
     /// assert_eq!(hash.sha256, Some(String::from("DFFD6021BB2BD5B0AF676290809EC3A53191DD81C7F70A4B28688A362182986F")));
     /// ```
-    pub fn hash_from_slice(&mut self, data: &[u8]) -> Result<()> {
-        self.sha1hash_from_slice(data)?;
-        self.sha256hash_from_slice(data)?;
-        Ok(())
+    pub fn hash_from_slice(&mut self, data: &[u8]) {
+        self.sha1hash_from_slice(data);
+        self.sha256hash_from_slice(data);
     }
 
     /// Use to generate a sha1 hash of a file
@@ -296,14 +295,13 @@ impl Hash {
     /// use warp_constellation::file::Hash;
     ///
     /// let mut hash = Hash::default();
-    /// hash.sha1hash_from_slice(b"Hello, World!").unwrap();
+    /// hash.sha1hash_from_slice(b"Hello, World!");
     ///
     /// assert_eq!(hash.sha1, Some(String::from("0A0A9F2A6772942557AB5355D76AF442F8F65E01")))
     /// ```
-    pub fn sha1hash_from_slice(&mut self, slice: &[u8]) -> Result<()> {
-        let res = warp_crypto::hash::sha1_hash(slice, None)?;
+    pub fn sha1hash_from_slice(&mut self, slice: &[u8]) {
+        let res = warp_crypto::hash::sha1_hash(slice, None);
         self.sha1 = Some(hex::encode(res).to_uppercase());
-        Ok(())
     }
 
     /// Use to generate a sha256 hash of a file
@@ -339,13 +337,12 @@ impl Hash {
     /// use warp_constellation::file::Hash;
     ///
     /// let mut hash = Hash::default();
-    /// hash.sha256hash_from_slice(b"Hello, World!").unwrap();
+    /// hash.sha256hash_from_slice(b"Hello, World!");
     ///
     /// assert_eq!(hash.sha256, Some(String::from("DFFD6021BB2BD5B0AF676290809EC3A53191DD81C7F70A4B28688A362182986F")))
     /// ```
-    pub fn sha256hash_from_slice(&mut self, slice: &[u8]) -> Result<()> {
-        let res = warp_crypto::hash::sha256_hash(slice, None)?;
+    pub fn sha256hash_from_slice(&mut self, slice: &[u8]) {
+        let res = warp_crypto::hash::sha256_hash(slice, None);
         self.sha256 = Some(hex::encode(res).to_uppercase());
-        Ok(())
     }
 }

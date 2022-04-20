@@ -48,7 +48,7 @@ impl GroupChat {
 
     pub fn create_group(&self, id: &str, name: &str) -> anyhow::Result<()> {
         let payer = self.program.payer();
-        let hash = self.group_hash(id)?;
+        let hash = self.group_hash(id);
         let group_key = self.group_address_from_id(id)?;
         let invite_key = self.invite_pubkey(payer, group_key)?;
 
@@ -95,14 +95,14 @@ impl GroupChat {
             ..
         } = invitation;
         let kp = warp_crypto::ed25519_dalek::Keypair::from_bytes(&self.kp.to_bytes())?;
-        let secret = warp_crypto::exchange::ed25519_to_x25519(&kp)?;
+        let secret = warp_crypto::exchange::ed25519_to_x25519(&kp);
 
         let dh_key = warp_crypto::exchange::x25519_key_exchange(
             &secret,
             PublicKey::from(recipient.to_bytes()),
             None,
             true,
-        )?;
+        );
 
         let group_id = warp_crypto::cipher::aes256gcm_encrypt(&dh_key, group_id.as_bytes())
             .map(warp_common::hex::encode)?;
@@ -123,14 +123,14 @@ impl GroupChat {
         } = invitation;
         let group_id = hex::decode(group_id)?;
         let kp = warp_crypto::ed25519_dalek::Keypair::from_bytes(&self.kp.to_bytes())?;
-        let secret = warp_crypto::exchange::ed25519_to_x25519(&kp)?;
+        let secret = warp_crypto::exchange::ed25519_to_x25519(&kp);
 
         let dh_key = warp_crypto::exchange::x25519_key_exchange(
             &secret,
             PublicKey::from(sender.to_bytes()),
             None,
             true,
-        )?;
+        );
 
         let group_id = warp_crypto::cipher::aes256gcm_decrypt(&dh_key, &group_id)?;
         let group_id = String::from_utf8_lossy(&group_id).to_string();
@@ -144,7 +144,7 @@ impl GroupChat {
 
     pub fn invite_to_group(&self, id: &str, recipient: &Pubkey) -> anyhow::Result<()> {
         let payer = self.program.payer();
-        let hash = self.group_hash(id)?;
+        let hash = self.group_hash(id);
         let group_key = self.group_address_from_id(id)?;
         let inviter = self.invite_pubkey(payer, group_key)?;
         let invitee = self.invite_pubkey(*recipient, group_key)?;
@@ -191,12 +191,12 @@ impl GroupChat {
         Ok(key)
     }
 
-    fn group_hash(&self, id: &str) -> anyhow::Result<Vec<u8>> {
+    fn group_hash(&self, id: &str) -> Vec<u8> {
         warp_crypto::hash::sha256_hash(id.as_bytes(), None)
     }
 
     fn group_address_from_id(&self, id: &str) -> anyhow::Result<Pubkey> {
-        let hash = self.group_hash(id)?;
+        let hash = self.group_hash(id);
         let (key, _) = self.group_pubkey(&hash)?;
         Ok(key)
     }

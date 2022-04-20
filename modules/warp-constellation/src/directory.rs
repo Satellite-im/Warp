@@ -586,3 +586,61 @@ impl Directory {
         self.modified = Utc::now()
     }
 }
+
+// Prep for FFI
+// #[no_mangle]
+// pub extern "C" fn directory_new(name: *mut c_char) -> *mut Directory {
+//     let name = unsafe { CString::from_raw(name).to_string_lossy().to_string() };
+//     let directory = Box::new(Directory::new(name.as_str()));
+//     Box::into_raw(directory)
+// }
+//
+// #[no_mangle]
+// pub extern "C" fn directory_add_directory(
+//     dir_ptr: *mut Directory,
+//     directory: *mut Directory,
+// ) -> c_int {
+//     if dir_ptr.is_null() {
+//         return 0;
+//     }
+//
+//     if directory.is_null() {
+//         return 0;
+//     }
+//
+//     let mut dir_ptr = unsafe { Box::from_raw(dir_ptr) };
+//
+//     let directory0 = unsafe { Box::from_raw(directory) };
+//
+//     // Add directory to directory
+//
+//     0
+// }
+//
+// #[no_mangle]
+// pub extern "C" fn directory_add_file(dir_ptr: *mut Directory, file: *mut File) -> c_int {
+//     if dir_ptr.is_null() {
+//         return 0;
+//     }
+//
+//     if file.is_null() {
+//         return 0;
+//     }
+//
+//     let mut directory = unsafe { Box::from_raw(dir_ptr) };
+//
+//     let file = unsafe { Box::from_raw(file) };
+//
+//     // Add file to directory
+//
+//     0
+// }
+//
+// #[no_mangle]
+// pub extern "C" fn directory_free(dir: *mut Directory) {
+//     if dir.is_null() {
+//         return;
+//     }
+//
+//     unsafe { Box::from_raw(dir) };
+// }

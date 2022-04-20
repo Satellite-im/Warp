@@ -1,13 +1,22 @@
-use anyhow::Result;
 use blake2::Blake2s256;
 use digest::Digest;
 use sha1::Sha1;
 use sha2::Sha256;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Read;
 
-//TODO: Implement multiple hashes, including streaming data for each one
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
 
-pub fn sha1_hash_stream(reader: &mut impl Read, salt: Option<&[u8]>) -> Result<Vec<u8>> {
+#[cfg(not(target_arch = "wasm32"))]
+pub type OptionalSalt<'a> = Option<&'a [u8]>;
+
+#[cfg(target_arch = "wasm32")]
+pub type OptionalSalt = Option<Vec<u8>>;
+
+//TODO: Implement multiple hashes, including streaming data for each one
+#[cfg(not(target_arch = "wasm32"))]
+pub fn sha1_hash_stream(reader: &mut impl Read, salt: Option<&[u8]>) -> anyhow::Result<Vec<u8>> {
     let mut hasher = Sha1::new();
     std::io::copy(reader, &mut hasher)?;
     if let Some(salt) = salt {
@@ -16,7 +25,8 @@ pub fn sha1_hash_stream(reader: &mut impl Read, salt: Option<&[u8]>) -> Result<V
     Ok(hasher.finalize().to_vec())
 }
 
-pub fn sha256_hash_stream(reader: &mut impl Read, salt: Option<&[u8]>) -> Result<Vec<u8>> {
+#[cfg(not(target_arch = "wasm32"))]
+pub fn sha256_hash_stream(reader: &mut impl Read, salt: Option<&[u8]>) -> anyhow::Result<Vec<u8>> {
     let mut hasher = Sha256::new();
     std::io::copy(reader, &mut hasher)?;
     if let Some(salt) = salt {
@@ -25,7 +35,8 @@ pub fn sha256_hash_stream(reader: &mut impl Read, salt: Option<&[u8]>) -> Result
     Ok(hasher.finalize().to_vec())
 }
 
-pub fn blake2s_hash_stream(reader: &mut impl Read, salt: Option<&[u8]>) -> Result<Vec<u8>> {
+#[cfg(not(target_arch = "wasm32"))]
+pub fn blake2s_hash_stream(reader: &mut impl Read, salt: Option<&[u8]>) -> anyhow::Result<Vec<u8>> {
     let mut hasher = Blake2s256::new();
     std::io::copy(reader, &mut hasher)?;
     if let Some(salt) = salt {
@@ -34,19 +45,34 @@ pub fn blake2s_hash_stream(reader: &mut impl Read, salt: Option<&[u8]>) -> Resul
     Ok(hasher.finalize().to_vec())
 }
 
-pub fn sha1_hash(data: &[u8], salt: Option<&[u8]>) -> Result<Vec<u8>> {
-    let mut inner = data;
-    sha1_hash_stream(&mut inner, salt)
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub fn sha1_hash(data: &[u8], salt: OptionalSalt) -> Vec<u8> {
+    let mut hasher = Sha1::new();
+    hasher.update(data);
+    if let Some(salt) = salt {
+        hasher.update(salt);
+    }
+    hasher.finalize().to_vec()
 }
 
-pub fn sha256_hash(data: &[u8], salt: Option<&[u8]>) -> Result<Vec<u8>> {
-    let mut inner = data;
-    sha256_hash_stream(&mut inner, salt)
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub fn sha256_hash(data: &[u8], salt: OptionalSalt) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    if let Some(salt) = salt {
+        hasher.update(salt);
+    }
+    hasher.finalize().to_vec()
 }
 
-pub fn blake2s_hash(data: &[u8], salt: Option<&[u8]>) -> Result<Vec<u8>> {
-    let mut inner = data;
-    blake2s_hash_stream(&mut inner, salt)
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub fn blake2s_hash(data: &[u8], salt: OptionalSalt) -> Vec<u8> {
+    let mut hasher = Blake2s256::new();
+    hasher.update(data);
+    if let Some(salt) = salt {
+        hasher.update(salt);
+    }
+    hasher.finalize().to_vec()
 }
 
 #[cfg(test)]
@@ -56,7 +82,7 @@ mod test {
 
     #[test]
     fn sha1_test() -> anyhow::Result<()> {
-        let hash = sha1_hash(b"Hello, World!", None)?;
+        let hash = sha1_hash(b"Hello, World!", None);
 
         assert_eq!(
             hex::encode(&hash),
@@ -67,7 +93,7 @@ mod test {
 
     #[test]
     fn sha256_test() -> anyhow::Result<()> {
-        let hash = sha256_hash(b"Hello, World!", None)?;
+        let hash = sha256_hash(b"Hello, World!", None);
 
         assert_eq!(
             hex::encode(&hash),
