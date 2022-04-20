@@ -1,6 +1,9 @@
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
 //
 /// `Messaging` - Allows direct, and multi-user encrypted messaging with ownership rights added so only
 ///             the expected users can edit, and delete messages.
@@ -15,6 +18,7 @@ use serde::{Deserialize, Serialize};
 ///
 #[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum Module {
     /// Allows for direct, and multi-user encrypted messaging with ownership
     #[display(fmt = "messaging")]
@@ -35,21 +39,19 @@ pub enum Module {
     #[display(fmt = "cache")]
     Cache,
 
-    /// Manual Defining of a module
-    #[display(fmt = "{}", "_0")]
-    Other(String),
-
     /// Unknown module. Should be used by default where a module cannot be identified for any specific reason.
     #[display(fmt = "unknown")]
     Unknown,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for Module {
     fn default() -> Self {
         Self::Unknown
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<A> From<A> for Module
 where
     A: AsRef<str>,
@@ -60,8 +62,31 @@ where
             "filesystem" => Module::FileSystem,
             "accounts" => Module::Accounts,
             "cache" => Module::Cache,
-            "unknown" => Module::Unknown,
-            other => Module::Other(other.to_string()),
+            "unknown" | _ => Module::Unknown,
         }
     }
 }
+
+// cfg_if! {
+//     if #[cfg(target_arch = "wasm32")] {
+//         #[cfg(wasm_bindgen)]
+//         #[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Display)]
+//         #[serde(rename_all = "lowercase")]
+//         pub enum Module {
+//             #[display(fmt = "messaging")]
+//             Messaging,
+//
+//             #[display(fmt = "filesystem")]
+//             FileSystem,
+//
+//             #[display(fmt = "accounts")]
+//             Accounts,
+//
+//             #[display(fmt = "cache")]
+//             Cache,
+//
+//             #[display(fmt = "unknown")]
+//             Unknown,
+//         }
+//     }
+// }

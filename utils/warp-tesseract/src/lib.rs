@@ -1,10 +1,14 @@
-pub use warp_common::cfg_if::cfg_if;
+pub use cfg_if::cfg_if;
+#[cfg(not(target_arch = "wasm32"))]
 cfg_if! {
     if #[cfg(feature = "indirect")] {
         pub mod indirect;
         pub use indirect::Tesseract;
-    } else {
+    } else if #[cfg(feature = "direct")] {
         pub mod direct;
         pub use direct::Tesseract;
     }
 }
+
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;

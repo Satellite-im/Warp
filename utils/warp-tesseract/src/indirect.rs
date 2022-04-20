@@ -270,12 +270,11 @@ impl Tesseract {
     ///  let mut tesseract = warp_tesseract::Tesseract::default();
     ///  tesseract.unlock(&warp_crypto::generate(32)).unwrap();
     ///  tesseract.set("API", "MYKEY").unwrap();
-    ///  tesseract.clear().unwrap();
+    ///  tesseract.clear();
     ///  assert_eq!(tesseract.exist("API"), false);
     /// ```
-    pub fn clear(&mut self) -> Result<()> {
+    pub fn clear(&mut self) {
         self.internal.clear();
-        Ok(())
     }
 
     /// Decrypts and export tesseract contents to a `HashMap`
@@ -322,8 +321,6 @@ impl Tesseract {
     }
 
     /// Decrypts and store the password and plaintext contents in memory
-    ///
-    /// Note: This method is ***not safe*** and should not be used in a secured environment.
     pub fn unlock(&mut self, passphrase: &[u8]) -> anyhow::Result<()> {
         self.enc_pass = warp_crypto::cipher::aes256gcm_self_encrypt(passphrase)?;
         self.unlock = true;
