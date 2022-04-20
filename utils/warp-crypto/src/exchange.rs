@@ -1,18 +1,14 @@
-use crate::hash::sha256_hash;
-use ed25519_dalek::Keypair;
-use x25519_dalek::{PublicKey, StaticSecret};
-
 #[cfg(not(target_arch = "wasm32"))]
 pub fn x25519_key_exchange(
-    prikey: &StaticSecret,
-    pubkey: PublicKey,
+    prikey: &x25519_dalek::StaticSecret,
+    pubkey: x25519_dalek::PublicKey,
     nonce: Option<Vec<u8>>,
     hashed: bool,
 ) -> Vec<u8> {
     let secret = prikey.diffie_hellman(&pubkey);
 
     let hash = match hashed {
-        true => sha256_hash(secret.as_bytes(), nonce),
+        true => crate::hash::sha256_hash(secret.as_bytes(), nonce),
         false => secret.as_bytes().to_vec(),
     };
 
@@ -23,8 +19,8 @@ pub fn x25519_key_exchange(
 //      as it may require specific access to the curve via curve25519-dalek crate
 //Note: It may be better to use two separate keypairs.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn ed25519_to_x25519(keypair: &Keypair) -> StaticSecret {
-    StaticSecret::from(keypair.secret.to_bytes())
+pub fn ed25519_to_x25519(keypair: &ed25519_dalek::Keypair) -> x25519_dalek::StaticSecret {
+    x25519_dalek::StaticSecret::from(keypair.secret.to_bytes())
 }
 
 #[cfg(test)]

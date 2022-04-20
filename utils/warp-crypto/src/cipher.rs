@@ -69,11 +69,9 @@ pub fn aes256gcm_self_encrypt(data: &[u8]) -> Result<Vec<u8>> {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn aes256gcm_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     let ExtractedData {
-        extract_a,
-        extract_b,
+        extract_a: nonce,
+        extract_b: payload,
     } = extract_data_slice(data, 12);
-    let nonce = extract_a;
-    let payload = extract_b;
 
     let e_key = match key.len() {
         32 => key.to_vec(),
@@ -90,11 +88,9 @@ pub fn aes256gcm_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn aes256gcm_self_decrypt(data: &[u8]) -> Result<Vec<u8>> {
     let ExtractedData {
-        extract_a,
-        extract_b,
+        extract_a: key,
+        extract_b: payload,
     } = extract_data_slice(data, 34);
-    let key = extract_a;
-    let payload = extract_b;
     aes256gcm_decrypt(&key, &payload)
 }
 
@@ -236,11 +232,10 @@ pub fn xchacha20poly1305_self_encrypt(data: &[u8]) -> Result<Vec<u8>> {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn xchacha20poly1305_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     let ExtractedData {
-        extract_a,
-        extract_b,
+        extract_a: nonce,
+        extract_b: payload,
     } = extract_data_slice(data, 24);
-    let nonce = extract_a;
-    let payload = extract_b;
+
     let e_key = match key.len() {
         32 => key.to_vec(),
         _ => sha256_hash(key, Some(nonce.to_vec())),
@@ -254,11 +249,9 @@ pub fn xchacha20poly1305_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn xchacha20poly1305_self_decrypt(data: &[u8]) -> Result<Vec<u8>> {
     let ExtractedData {
-        extract_a,
-        extract_b,
+        extract_a: key,
+        extract_b: payload,
     } = extract_data_slice(data, 34);
-    let key = extract_a;
-    let payload = extract_b;
     xchacha20poly1305_decrypt(&key, &payload)
 }
 
