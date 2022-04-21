@@ -130,7 +130,7 @@ impl FlatfileIndex {
         let index = self
             .0
             .iter()
-            .position(|item| item.id == id)
+            .position(|item| item.id() == id)
             .ok_or(Error::ArrayPositionNotFound)?;
 
         let object = self.0.remove(index);
@@ -249,10 +249,10 @@ impl PocketDimension for FlatfileStorage {
             .index
             .as_ref()
             .iter()
-            .filter(|inner| inner.id == data.id && inner.data_type == data.data_type)
+            .filter(|inner| inner.id() == data.id() && inner.data_type() == data.data_type())
             .count();
 
-        data.version = version as u32;
+        data.set_version(version as u32);
 
         match dimension {
             DataType::Module(Module::FileSystem) => {
@@ -342,7 +342,7 @@ impl PocketDimension for FlatfileStorage {
             .index
             .as_ref()
             .iter()
-            .filter(|data| data.data_type == dimension)
+            .filter(|data| data.data_type() == dimension)
             .cloned()
             .collect::<Vec<_>>();
 
@@ -362,7 +362,7 @@ impl PocketDimension for FlatfileStorage {
             .index
             .as_ref()
             .iter()
-            .filter(|data| data.data_type == dimension)
+            .filter(|data| data.data_type() == dimension)
             .cloned()
             .collect::<Vec<_>>();
         match query {
@@ -377,7 +377,7 @@ impl PocketDimension for FlatfileStorage {
         query: Option<&warp_pocket_dimension::query::QueryBuilder>,
     ) -> warp_common::Result<i64> {
         self.get_data(dimension, query)
-            .map(|list| list.iter().map(|i| i.size as i64).sum())
+            .map(|list| list.iter().map(|i| i.size() as i64).sum())
     }
 
     fn count(
@@ -393,7 +393,7 @@ impl PocketDimension for FlatfileStorage {
         let mut preserved = Vec::new();
 
         for item in self.index.as_ref().clone() {
-            if item.data_type != dimension {
+            if item.data_type() != dimension {
                 preserved.push(item);
             }
         }
@@ -402,9 +402,9 @@ impl PocketDimension for FlatfileStorage {
             .index
             .as_ref()
             .iter()
-            .filter(|data| data.data_type == dimension)
+            .filter(|data| data.data_type() == dimension)
         {
-            if let DataType::Module(Module::FileSystem) = &item.data_type {
+            if let DataType::Module(Module::FileSystem) = &item.data_type() {
                 if let DimensionData::Path { path, .. } = item.payload::<DimensionData>()? {
                     std::fs::remove_file(path)?;
                 }

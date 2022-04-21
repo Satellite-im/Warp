@@ -59,9 +59,9 @@ impl PocketDimension for StrettoClient {
             let version = value
                 .value()
                 .iter()
-                .filter(|item| item.id == data.id)
+                .filter(|item| item.id() == data.id())
                 .count() as u32;
-            data.version = version;
+            data.set_version(version);
             (*value.value_mut()).push(data);
             self.client
                 .wait()
@@ -105,7 +105,7 @@ impl PocketDimension for StrettoClient {
         query: Option<&QueryBuilder>,
     ) -> std::result::Result<i64, warp_common::error::Error> {
         self.get_data(dimension, query)
-            .map(|data| data.iter().map(|i| i.size as i64).sum())
+            .map(|data| data.iter().map(|i| i.size() as i64).sum())
     }
 
     fn count(

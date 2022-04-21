@@ -43,7 +43,7 @@ impl PocketDimension for MemoryCache {
         if let Some(val) = self.0.get_mut(&dimension) {
             let objects = val
                 .iter()
-                .filter(|item| item.id == data.id)
+                .filter(|item| item.id() == data.id())
                 .collect::<Vec<&DataObject>>();
 
             if objects.contains(&data) {
@@ -51,7 +51,7 @@ impl PocketDimension for MemoryCache {
             }
 
             let version = objects.len() as u32;
-            object.version = version;
+            object.set_version(version);
             val.push(object);
         } else {
             self.0.insert(dimension, vec![object]);
@@ -78,7 +78,7 @@ impl PocketDimension for MemoryCache {
 
     fn size(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
         self.get_data(dimension, query)
-            .map(|data| data.iter().map(|i| i.size as i64).sum())
+            .map(|data| data.iter().map(|i| i.size() as i64).sum())
     }
 
     fn count(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64> {

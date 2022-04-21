@@ -246,7 +246,7 @@ impl<'a> WarpApp<'a> {
 
         let trigger_list = app.hooks_trigger.clone();
         hook_system.subscribe("FILESYSTEM::NEW_FILE", move |hook, data| {
-            info!(target:"Warp", "{}, with {} bytes, was uploaded to the filesystem", data.payload::<(String, Vec<u8>)>().unwrap().0, data.size);
+            info!(target:"Warp", "{}, with {} bytes, was uploaded to the filesystem", data.payload::<(String, Vec<u8>)>().unwrap().0, data.size());
             trigger_list.lock().unwrap().push(hook.to_string())
         })?;
 

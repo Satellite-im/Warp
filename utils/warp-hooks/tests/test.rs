@@ -22,7 +22,7 @@ mod test {
             assert_eq!(hook.name.as_str(), "new_file");
             assert_eq!(hook.data_type, DataType::Module(Module::FileSystem));
 
-            assert_eq!(data.data_type, DataType::Module(Module::FileSystem));
+            assert_eq!(data.data_type(), DataType::Module(Module::FileSystem));
 
             let file: File = data.payload().unwrap(); //TODO: Implement Result for `Fn`
             assert_eq!(file.name(), String::from("test.txt"));

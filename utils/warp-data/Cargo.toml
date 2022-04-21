@@ -5,10 +5,18 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 warp-module = { version = "0.1.0", path = "../warp-module" }
 warp-common = { version = "0.1.0", path = "../warp-common" }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { version = "0.2", features = ["serde-serialize"] }
+web-sys = { version = "0.3" }
+js-sys = { version = "0.3" }
+serde-wasm-bindgen = "0.4.2"
+
 [features]
 default = []
-bincode_opt2 = ["warp-common/bincode_opt"]

@@ -2,8 +2,8 @@ use warp_common::{
     anyhow,
     cfg_if::cfg_if,
     serde::{Deserialize, Serialize},
+    serde_json::{self, Value},
 };
-use warp_data::Payload;
 
 cfg_if! {
     if #[cfg(feature = "http_axum")] {
@@ -32,7 +32,7 @@ pub struct ApiResponse {
     status: ApiStatus,
     code: u16,
     #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<Payload>,
+    data: Option<Value>,
 }
 
 impl Default for ApiResponse {
@@ -63,7 +63,7 @@ impl ApiResponse {
     }
 
     pub fn set_data<T: Serialize>(&mut self, data: T) -> anyhow::Result<()> {
-        let payload = Payload::new_from_ser(data)?;
+        let payload = serde_json::to_value(data)?;
         self.data = Some(payload);
         Ok(())
     }
