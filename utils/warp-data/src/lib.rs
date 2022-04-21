@@ -187,8 +187,8 @@ cfg_if! {
             }
 
             /// Set the `Module` for `Data`
-            pub fn set_data_type<I: Into<DataType> + Clone>(&mut self, data_type: &I) {
-                self.data_type = data_type.clone().into();
+            pub fn set_data_type(&mut self, data_type: DataType) {
+                self.data_type = data_type;
             }
 
             /// Set the payload for `Data`

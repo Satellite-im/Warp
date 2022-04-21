@@ -243,7 +243,7 @@ impl PocketDimension for FlatfileStorage {
         data: &warp_data::DataObject,
     ) -> warp_common::Result<()> {
         let mut data = data.clone();
-        data.set_data_type(&dimension);
+        data.set_data_type(dimension.clone());
 
         let version = self
             .index
