@@ -9,7 +9,6 @@ use item::Item;
 use warp_common::anyhow::anyhow;
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::error::Error;
-use warp_common::serde::{Deserialize, Serialize};
 use warp_common::Extension;
 use warp_common::Result;
 
@@ -17,8 +16,8 @@ use warp_common::Result;
 #[warp_common::async_trait::async_trait]
 pub trait Constellation: Extension + Sync + Send {
     /// Returns the version for `Constellation`
-    fn version(&self) -> ConstellationVersion {
-        ConstellationVersion::from((0, 1, 0))
+    fn version(&self) -> &str {
+        "0.1.0"
     }
 
     /// Provides the timestamp of when the file system was modified
@@ -184,63 +183,5 @@ impl<S: AsRef<str>> From<S> for ConstellationDataType {
             "JSON" => ConstellationDataType::Json,
             _ => ConstellationDataType::Json,
         }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-#[serde(crate = "warp_common::serde")]
-pub struct ConstellationVersion(String);
-
-impl From<i16> for ConstellationVersion {
-    fn from(version: i16) -> Self {
-        ConstellationVersion(format!("{version}"))
-    }
-}
-
-impl From<(i16, i16)> for ConstellationVersion {
-    fn from((major, minor): (i16, i16)) -> Self {
-        ConstellationVersion(format!("{major}.{minor}"))
-    }
-}
-
-impl From<(i16, i16, i16)> for ConstellationVersion {
-    fn from((major, minor, patch): (i16, i16, i16)) -> Self {
-        ConstellationVersion(format!("{major}.{minor}.{patch}"))
-    }
-}
-
-impl ConstellationVersion {
-    pub fn major(&self) -> i16 {
-        match self.0.contains('.') {
-            true => self
-                .0
-                .split('.')
-                .filter_map(|v| v.parse().ok())
-                .collect::<Vec<_>>()
-                .get(0)
-                .copied()
-                .unwrap_or_default(),
-            false => self.0.parse().unwrap_or_default(),
-        }
-    }
-
-    pub fn minor(&self) -> i16 {
-        self.0
-            .split('.')
-            .filter_map(|v| v.parse().ok())
-            .collect::<Vec<_>>()
-            .get(1)
-            .copied()
-            .unwrap_or_default()
-    }
-
-    pub fn patch(&self) -> i16 {
-        self.0
-            .split('.')
-            .filter_map(|v| v.parse().ok())
-            .collect::<Vec<_>>()
-            .get(2)
-            .copied()
-            .unwrap_or_default()
     }
 }

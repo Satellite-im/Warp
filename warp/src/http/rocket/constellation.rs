@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use warp::constellation::{Constellation, ConstellationDataType, ConstellationVersion};
+use warp::constellation::{Constellation, ConstellationDataType};
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::serde::{Deserialize, Serialize};
 use warp_constellation::directory::Directory;
@@ -28,7 +28,7 @@ use rocket::{
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[serde(crate = "warp_common::serde")]
 pub struct ConstellationStatus {
-    version: ConstellationVersion,
+    version: String,
     modified: DateTime<Utc>,
     // current_directory: String,
 }
@@ -40,7 +40,7 @@ pub fn version(state: &State<FsSystem>) -> Json<Value> {
 
     let mut response = ApiResponse::default();
     let status = ConstellationStatus {
-        version: fs.version(),
+        version: fs.version().to_string(),
         modified: fs.modified(),
         // current_directory: fs.current_directory()
     };

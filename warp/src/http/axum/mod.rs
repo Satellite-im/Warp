@@ -12,7 +12,7 @@ use axum::{
     routing::get,
     Extension, Json, Router,
 };
-use warp::constellation::{Constellation, ConstellationDataType, ConstellationVersion};
+use warp::constellation::{Constellation, ConstellationDataType};
 use warp_common::{
     anyhow::{self, bail},
     serde_json::Value,
