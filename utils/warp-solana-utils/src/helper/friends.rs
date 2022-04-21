@@ -1,4 +1,5 @@
 use crate::manager::SolanaManager;
+#[allow(unused_imports)]
 use crate::pubkey_from_seeds;
 use crate::wallet::SolanaWallet;
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
@@ -6,6 +7,7 @@ use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::solana_sdk::signature::{Keypair, Signature, Signer};
 use anchor_client::solana_sdk::system_program;
 use anchor_client::{Client, Cluster, Program};
+#[allow(unused_imports)]
 use friends::{FriendRequest, Status};
 use std::rc::Rc;
 use warp_common::anyhow;
@@ -148,14 +150,14 @@ impl Friends {
         Ok(sig)
     }
 
-    fn compute_account_keys(&self, to: &Pubkey) -> anyhow::Result<(Pubkey, Pubkey, Pubkey)> {
+    pub fn compute_account_keys(&self, to: &Pubkey) -> anyhow::Result<(Pubkey, Pubkey)> {
         let (request, _) = Pubkey::try_find_program_address(
             &[&self.kp.pubkey().to_bytes(), &to.to_bytes()],
             &self.program.id(),
         )
         .ok_or_else(|| anyhow!("Error finding program"))?;
 
-        Ok((request, self.kp.pubkey(), *to))
+        Ok((request, *to))
     }
 
     fn program_key(&self, addr: &Pubkey) -> anyhow::Result<Pubkey> {
