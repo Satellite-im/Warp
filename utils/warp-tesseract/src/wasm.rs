@@ -30,7 +30,7 @@ impl Tesseract {
     /// Import and encrypt a hashmap into tesseract
     #[wasm_bindgen]
     pub fn import(passphrase: &[u8], map: JsValue) -> Result<Tesseract, JsError> {
-        let map: HashMap<String, String> = map.into_serde().unwrap();
+        let map: HashMap<String, String> = serde_wasm_bindgen::from_value(map).unwrap();
         let mut tesseract = Tesseract::default();
         tesseract.unlock(passphrase)?;
         for (key, val) in map {
@@ -75,7 +75,6 @@ impl Tesseract {
     }
 
     /// Used to delete the value from the keystore
-    #[wasm_bindgen]
     pub fn delete(&mut self, key: &str) -> Result<(), JsError> {
         self.internal
             .remove(key)
@@ -101,7 +100,7 @@ impl Tesseract {
             };
             map.insert(key.clone(), value);
         }
-        Ok(JsValue::from_serde(&map).unwrap())
+        Ok(serde_wasm_bindgen::to_value(&map).unwrap())
     }
 
     /// Checks to see if tesseract is secured and not "unlocked"
