@@ -218,9 +218,10 @@ cfg_if! {
         impl Data {
 
             /// Creates a instance of `Data` with `Module` and `Payload`
+            #[wasm_bindgen(constructor)]
             pub fn new(data_type: DataType, payload: JsValue) -> Result<Data>
             {
-                let payload = payload.into_serde()?;
+                let payload = serde_wasm_bindgen::from_value(payload).map_err(|e| JsError::new(&e.to_string()))?;
                 Ok(Data {
                     data_type,
                     payload,
@@ -238,7 +239,7 @@ cfg_if! {
             #[wasm_bindgen(setter)]
             pub fn set_payload(&mut self, payload: JsValue) -> Result<()>
             {
-                self.payload = payload.into_serde().map_err(|e| JsError::new(&e.to_string()))?;
+                self.payload = serde_wasm_bindgen::from_value(payload).map_err(|e| JsError::new(&e.to_string()))?;
                 Ok(())
             }
         }
