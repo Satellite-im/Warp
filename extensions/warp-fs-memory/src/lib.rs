@@ -132,19 +132,16 @@ impl Constellation for MemorySystem {
     }
 
     async fn put(&mut self, name: &str, path: &str) -> warp_common::Result<()> {
-        println!("Test");
         let mut internal_file = item::file::File::new(name);
         let bytes = internal_file.insert_from_path(path).unwrap_or_default();
         self.internal
             .0
             .insert(internal_file.clone())
             .map_err(|_| Error::Other)?;
-        println!("Test");
 
         let mut file = warp_constellation::file::File::new(name);
         file.set_size(bytes as i64);
         file.hash_mut().hash_from_file(path)?;
-        println!("Test");
 
         self.current_directory_mut()?.add_item(file.clone())?;
         if let Ok(mut cache) = self.get_cache() {
@@ -154,7 +151,6 @@ impl Constellation for MemorySystem {
 
             cache.add_data(DataType::Module(Module::FileSystem), &data)?;
         }
-        println!("Test");
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::Module(Module::FileSystem), file)?;
