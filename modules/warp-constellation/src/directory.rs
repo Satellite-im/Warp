@@ -621,9 +621,9 @@ pub mod ffi {
 
         let dir_ptr = &mut *(dir_ptr as *mut Directory);
 
-        let new_directory = Box::from_raw(directory as *mut Directory);
+        let new_directory = &*(directory as *mut Directory);
 
-        match dir_ptr.add_directory(*new_directory) {
+        match dir_ptr.add_directory(new_directory.clone()) {
             Ok(_) => 1,
             Err(_) => 0,
         }
@@ -652,7 +652,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_print_debug(dir: *mut Directory) {
+    pub unsafe extern "C" fn directory_print_debug(dir: *mut c_void) {
         if dir.is_null() {
             return;
         }
@@ -663,7 +663,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_free(dir: *mut Directory) {
+    pub unsafe extern "C" fn directory_free(dir: *mut c_void) {
         if dir.is_null() {
             return;
         }
