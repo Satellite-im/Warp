@@ -2,6 +2,7 @@ pub mod error;
 pub mod item;
 
 use item::Item;
+use std::ffi::c_void;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -328,4 +329,11 @@ impl Extension for MemorySystem {
     fn module(&self) -> Module {
         Module::FileSystem
     }
+}
+
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn constellation_fs_memory_create_context() -> *mut c_void {
+    let memory = Box::new(Box::new(MemorySystem::new()));
+    Box::into_raw(memory) as *mut Box<dyn Constellation> as *mut c_void
 }
