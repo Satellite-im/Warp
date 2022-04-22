@@ -49,11 +49,9 @@ pub trait Constellation: Extension + Sync + Send {
             return Err(Error::Any(anyhow!("Path has not change")));
         }
 
-        if !self
-            .current_directory()
-            .get_item(&current_pathbuf.to_string_lossy())?
-            .is_directory()
-        {
+        let item = self.current_directory().get_item(&path.to_string_lossy())?;
+
+        if !item.is_directory() {
             return Err(Error::DirectoryNotFound);
         }
 
