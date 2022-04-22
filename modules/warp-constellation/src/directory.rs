@@ -1,5 +1,7 @@
 use crate::file::File;
 use crate::item::Item;
+use std::ffi::{c_void, CString};
+use std::os::raw::{c_char, c_int};
 use warp_common::chrono::{DateTime, Utc};
 use warp_common::derive_more::Display;
 use warp_common::serde::{Deserialize, Serialize};
@@ -588,59 +590,79 @@ impl Directory {
 }
 
 // Prep for FFI
-// #[no_mangle]
-// pub extern "C" fn directory_new(name: *mut c_char) -> *mut Directory {
-//     let name = unsafe { CString::from_raw(name).to_string_lossy().to_string() };
-//     let directory = Box::new(Directory::new(name.as_str()));
-//     Box::into_raw(directory)
-// }
-//
-// #[no_mangle]
-// pub extern "C" fn directory_add_directory(
-//     dir_ptr: *mut Directory,
-//     directory: *mut Directory,
-// ) -> c_int {
-//     if dir_ptr.is_null() {
-//         return 0;
-//     }
-//
-//     if directory.is_null() {
-//         return 0;
-//     }
-//
-//     let mut dir_ptr = unsafe { Box::from_raw(dir_ptr) };
-//
-//     let directory0 = unsafe { Box::from_raw(directory) };
-//
-//     // Add directory to directory
-//
-//     0
-// }
-//
-// #[no_mangle]
-// pub extern "C" fn directory_add_file(dir_ptr: *mut Directory, file: *mut File) -> c_int {
-//     if dir_ptr.is_null() {
-//         return 0;
-//     }
-//
-//     if file.is_null() {
-//         return 0;
-//     }
-//
-//     let mut directory = unsafe { Box::from_raw(dir_ptr) };
-//
-//     let file = unsafe { Box::from_raw(file) };
-//
-//     // Add file to directory
-//
-//     0
-// }
-//
-// #[no_mangle]
-// pub extern "C" fn directory_free(dir: *mut Directory) {
-//     if dir.is_null() {
-//         return;
-//     }
-//
-//     unsafe { Box::from_raw(dir) };
-// }
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn directory_new(name: *mut c_char) -> *mut Directory {
+    let name = match name.is_null() {
+        true => "unused".to_string(),
+        false => CString::from_raw(name).to_string_lossy().to_string(),
+    };
+    let directory = Box::new(Directory::new(name.as_str()));
+    Box::into_raw(directory) as *mut Directory
+}
+
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn directory_add_directory(
+    dir_ptr: *mut c_void,
+    directory: *mut c_void,
+) -> c_int {
+    if dir_ptr.is_null() {
+        return 0;
+    }
+
+    if directory.is_null() {
+        return 0;
+    }
+
+    let dir_ptr = &mut *(dir_ptr as *mut Directory);
+
+    let new_directory = Box::from_raw(directory as *mut Directory);
+
+    match dir_ptr.add_directory(*new_directory) {
+        Ok(_) => 1,
+        Err(_) => 0,
+    }
+}
+
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn directory_add_file(dir_ptr: *mut c_void, file: *mut c_void) -> c_int {
+    if dir_ptr.is_null() {
+        return 0;
+    }
+
+    if file.is_null() {
+        return 0;
+    }
+
+    let dir_ptr = &mut *(dir_ptr as *mut Directory);
+
+    let new_file = Box::from_raw(file as *mut File);
+
+    match dir_ptr.add_file(*new_file) {
+        Ok(_) => 1,
+        Err(_) => 0,
+    }
+}
+
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn directory_print_debug(dir: *mut Directory) {
+    if dir.is_null() {
+        return;
+    }
+
+    let dir: &Directory = &*(dir as *const Directory);
+    println!("{:?}", dir);
+}
+
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn directory_free(dir: *mut Directory) {
+    if dir.is_null() {
+        return;
+    }
+    println!("free?");
+    drop(Box::from_raw(dir))
+}
