@@ -7,10 +7,16 @@ license = "MIT"
 edition = "2021"
 repository = "https://github.com/Satellite-im/Warp"
 
+[lib]
+crate-type = ["cdylib", "rlib", "staticlib"]
+
 [dependencies]
 warp-common = { version = "0.1.0", path = "../../utils/warp-common", features = ["async"] }
 warp-hooks = { path = "../../utils/warp-hooks" }
 warp-crypto = { version = "0.1.0", path = "../../utils/warp-crypto" }
+
+[dev-dependencies]
+libloading = "0.7"
 
 [features]
 default = []
