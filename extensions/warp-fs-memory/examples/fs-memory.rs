@@ -10,17 +10,16 @@ async fn main() -> warp_common::anyhow::Result<()> {
     //move to the new directory
 
     system.select("test")?;
-    system
-        .from_buffer("hello", &b"hello world".to_vec())
-        .await?;
+
+    system.put("Cargo.toml", "Cargo.toml").await?;
 
     println!("Debug results: {:?}", system.root_directory());
 
-    let mut buf: Vec<u8> = vec![];
+    let mut buf = vec![];
 
-    system.to_buffer("hello", &mut buf).await?;
+    system.to_buffer("Cargo.toml", &mut buf).await?;
 
-    println!("Content: {}", String::from_utf8_lossy(&buf).to_string());
+    println!("Content: {}", String::from_utf8_lossy(&buf));
     system.remove("hello", false).await?;
 
     println!("Debug results: {:?}", system.root_directory());
