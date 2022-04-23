@@ -2,7 +2,6 @@ pub mod error;
 pub mod item;
 
 use item::Item;
-use std::ffi::c_void;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};

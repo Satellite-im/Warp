@@ -166,7 +166,8 @@ pub trait Constellation: Extension + Sync + Send {
 /// Currently only support `Json`, `Yaml`, and `Toml`.
 /// Implementation can override these functions for their own
 /// types to be use for import and export.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
+#[repr(C)]
 pub enum ConstellationDataType {
     Json,
     Yaml,
@@ -185,58 +186,148 @@ impl<S: AsRef<str>> From<S> for ConstellationDataType {
 }
 
 pub mod ffi {
+    use crate::directory::ffi::{DirectoryPointer, DirectoryStructPointer};
     use crate::{Constellation, ConstellationDataType};
     use std::ffi::{c_void, CString};
-    use std::os::raw::{c_char, c_int};
+    use std::os::raw::c_char;
+
+    pub type ConstellationPointer = *mut c_void;
+    pub type ConstellationBoxPointer = *mut Box<dyn Constellation>;
+
+    pub type ConstellationDataTypePointer = *mut ConstellationDataType;
+    // pub type ConstellationDataTypePointer = *mut c_void;
+    pub type ConstellationDataTypeEnumPointer = *mut ConstellationDataType;
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_select(
+        ctx: ConstellationPointer,
+        name: *mut c_char,
+    ) -> bool {
+        if ctx.is_null() {
+            return false;
+        }
+
+        if name.is_null() {
+            return false;
+        }
+
+        let cname = CString::from_raw(name).to_string_lossy().to_string();
+
+        let constellation = &mut *(ctx as *mut Box<dyn Constellation>);
+        match (**constellation).select(&cname) {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_current_directory(
+        ctx: ConstellationPointer,
+    ) -> DirectoryPointer {
+        if ctx.is_null() {
+            return std::ptr::null_mut();
+        }
+        let constellation = &*(ctx as *mut Box<dyn Constellation>);
+        let current_directory = (**constellation).current_directory();
+        let directory = Box::new(current_directory.clone());
+        Box::into_raw(directory) as DirectoryStructPointer as DirectoryPointer
+    }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_put(
-        ctx: *mut c_void,
+        ctx: ConstellationPointer,
         remote: *mut c_char,
         local: *mut c_char,
-    ) -> c_int {
+    ) -> bool {
         if ctx.is_null() {
-            return 0;
+            return false;
         }
-        let constellation = &*(ctx as *mut *mut dyn Constellation);
+
+        if remote.is_null() {
+            return false;
+        }
+
+        if local.is_null() {
+            return false;
+        }
+
+        let constellation = &mut *(ctx as *mut Box<dyn Constellation>);
         let remote = CString::from_raw(remote).to_string_lossy().to_string();
         let local = CString::from_raw(local).to_string_lossy().to_string();
         let rt = warp_common::tokio::runtime::Runtime::new().unwrap();
         match rt.block_on(async move { (**constellation).put(&remote, &local).await }) {
-            Ok(_) => 1,
-            Err(_) => 0,
+            Ok(_) => true,
+            Err(_) => false,
         }
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_get(
-        ctx: *mut c_void,
+        ctx: ConstellationPointer,
         remote: *mut c_char,
         local: *mut c_char,
-    ) -> c_int {
+    ) -> bool {
         if ctx.is_null() {
-            return 0;
+            return false;
         }
-        let constellation = &*(ctx as *mut *mut dyn Constellation);
+
+        if remote.is_null() {
+            return false;
+        }
+
+        if local.is_null() {
+            return false;
+        }
+
+        let constellation = &*(ctx as *mut Box<dyn Constellation>);
 
         let remote = CString::from_raw(remote).to_string_lossy().to_string();
         let local = CString::from_raw(local).to_string_lossy().to_string();
         let rt = warp_common::tokio::runtime::Runtime::new().unwrap();
         match rt.block_on(async move { (**constellation).get(&remote, &local).await }) {
-            Ok(_) => 1,
-            Err(_) => 0,
+            Ok(_) => true,
+            Err(_) => false,
         }
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn constellation_export_json(ctx: *mut c_void) -> *mut c_char {
+    pub unsafe extern "C" fn constellation_export(
+        ctx: ConstellationPointer,
+        datatype: ConstellationDataTypePointer,
+    ) -> *mut c_char {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
-        let constellation = &*(ctx as *mut *mut dyn Constellation);
+
+        if datatype.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let constellation = &*(ctx as *mut Box<dyn Constellation>);
+
+        let data_type = &*(datatype as ConstellationDataTypeEnumPointer);
+
+        match (**constellation).export(data_type.clone()) {
+            Ok(export) => match CString::new(export) {
+                Ok(export) => export.into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            },
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_export_json(ctx: ConstellationPointer) -> *mut c_char {
+        if ctx.is_null() {
+            return std::ptr::null_mut();
+        }
+        let constellation = &*(ctx as *mut Box<dyn Constellation>);
         match (**constellation).export(ConstellationDataType::Json) {
             Ok(export) => match CString::new(export) {
                 Ok(export) => export.into_raw(),
@@ -249,27 +340,27 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_import_json(
-        ctx: *mut c_void,
+        ctx: ConstellationPointer,
         data: *mut c_char,
-    ) -> c_int {
+    ) -> bool {
         if ctx.is_null() {
-            return 0;
-        }
-        let constellation = &mut *(ctx as *mut *mut dyn Constellation);
-        let data = CString::from_raw(data).to_string_lossy().to_string();
-        if (**constellation)
-            .import(ConstellationDataType::Json, data)
-            .is_ok()
-        {
-            return 1;
+            return false;
         }
 
-        0
+        if data.is_null() {
+            return false;
+        }
+
+        let constellation = &mut *(ctx as *mut Box<dyn Constellation>);
+        let data = CString::from_raw(data).to_string_lossy().to_string();
+        (**constellation)
+            .import(ConstellationDataType::Json, data)
+            .is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn constellation_free(ctx: *mut c_void) {
+    pub unsafe extern "C" fn constellation_free(ctx: ConstellationPointer) {
         let constellation: Box<Box<dyn Constellation>> =
             Box::from_raw(ctx as *mut Box<dyn Constellation>);
         drop(constellation)

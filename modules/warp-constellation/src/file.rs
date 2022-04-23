@@ -346,3 +346,26 @@ impl Hash {
         self.sha256 = Some(hex::encode(res).to_uppercase());
     }
 }
+
+pub mod ffi {
+    use crate::file::File;
+    #[allow(unused)]
+    use std::ffi::{c_void, CString};
+    #[allow(unused)]
+    use std::os::raw::{c_char, c_int};
+
+    pub type FilePointer = *mut File;
+    // pub type FilePointer = *mut c_void;
+    pub type FileStructPointer = *mut File;
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn file_new(name: *mut c_char) -> FilePointer {
+        let name = match name.is_null() {
+            true => "unused".to_string(),
+            false => CString::from_raw(name).to_string_lossy().to_string(),
+        };
+        let file = Box::new(File::new(name.as_str()));
+        Box::into_raw(file) as FileStructPointer as FilePointer
+    }
+}

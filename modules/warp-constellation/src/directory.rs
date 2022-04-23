@@ -588,82 +588,91 @@ impl Directory {
 }
 
 pub mod ffi {
-    use crate::file::File;
+    use crate::file::ffi::{FilePointer, FileStructPointer};
     use crate::Directory;
+    #[allow(unused)]
     use std::ffi::{c_void, CString};
-    use std::os::raw::{c_char, c_int};
+    use std::os::raw::c_char;
+
+    //Note: We have this pointer instead of a struct pointer since we want
+    pub type DirectoryPointer = *mut Directory;
+    // pub type DirectoryPointer = *mut c_void;
+    pub type DirectoryStructPointer = *mut Directory;
 
     // Prep for FFI
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_new(name: *mut c_char) -> *mut Directory {
+    pub unsafe extern "C" fn directory_new(name: *mut c_char) -> DirectoryPointer {
         let name = match name.is_null() {
             true => "unused".to_string(),
             false => CString::from_raw(name).to_string_lossy().to_string(),
         };
         let directory = Box::new(Directory::new(name.as_str()));
-        Box::into_raw(directory) as *mut Directory
+        Box::into_raw(directory) as DirectoryStructPointer as DirectoryPointer
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn directory_add_directory(
-        dir_ptr: *mut c_void,
-        directory: *mut c_void,
-    ) -> c_int {
+        dir_ptr: DirectoryPointer,
+        directory: DirectoryPointer,
+    ) -> bool {
         if dir_ptr.is_null() {
-            return 0;
+            return false;
         }
 
         if directory.is_null() {
-            return 0;
+            return false;
         }
 
-        let dir_ptr = &mut *(dir_ptr as *mut Directory);
+        let dir_ptr = &mut *(dir_ptr as DirectoryStructPointer);
 
-        let new_directory = &*(directory as *mut Directory);
+        let new_directory = &*(directory as DirectoryStructPointer);
 
         match dir_ptr.add_directory(new_directory.clone()) {
-            Ok(_) => 1,
-            Err(_) => 0,
+            Ok(_) => true,
+            Err(_) => true,
         }
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_add_file(dir_ptr: *mut c_void, file: *mut c_void) -> c_int {
+    pub unsafe extern "C" fn directory_add_file(
+        dir_ptr: DirectoryPointer,
+        file: FilePointer,
+    ) -> bool {
         if dir_ptr.is_null() {
-            return 0;
+            return false;
         }
 
         if file.is_null() {
-            return 0;
+            return false;
         }
 
-        let dir_ptr = &mut *(dir_ptr as *mut Directory);
+        let dir_ptr = &mut *(dir_ptr as DirectoryStructPointer);
 
-        let new_file = Box::from_raw(file as *mut File);
+        let new_file = &*(file as FileStructPointer);
 
-        match dir_ptr.add_file(*new_file) {
-            Ok(_) => 1,
-            Err(_) => 0,
+        match dir_ptr.add_file(new_file.clone()) {
+            Ok(_) => true,
+            Err(_) => false,
         }
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_print_debug(dir: *mut c_void) {
+    pub unsafe extern "C" fn directory_print_debug(dir: DirectoryPointer) {
         if dir.is_null() {
             return;
         }
 
-        let dir: &Directory = &*(dir as *const Directory);
+        let dir: &Directory = &*(dir as DirectoryStructPointer);
         println!("{:?}", dir);
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_free(dir: *mut c_void) {
+    pub unsafe extern "C" fn directory_free(dir: DirectoryPointer) {
         if dir.is_null() {
             return;
         }
