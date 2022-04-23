@@ -266,6 +266,41 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
+    pub unsafe extern "C" fn constellation_from_buffer(
+        ctx: ConstellationPointer,
+        remote: *mut c_char,
+        buffer: *const u8,
+        buffer_size: u32,
+    ) -> bool {
+        if ctx.is_null() {
+            return false;
+        }
+
+        if remote.is_null() {
+            return false;
+        }
+
+        if buffer.is_null() {
+            return false;
+        }
+
+        let slice = std::slice::from_raw_parts(buffer, buffer_size as usize);
+
+        let constellation = &mut *(ctx as *mut Box<dyn Constellation>);
+        let remote = CString::from_raw(remote).to_string_lossy().to_string();
+        let rt = warp_common::tokio::runtime::Runtime::new().unwrap();
+        match rt.block_on(async move {
+            (**constellation)
+                .from_buffer(&remote, &slice.to_vec())
+                .await
+        }) {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
     pub unsafe extern "C" fn constellation_get(
         ctx: ConstellationPointer,
         remote: *mut c_char,
@@ -292,6 +327,41 @@ pub mod ffi {
             Ok(_) => true,
             Err(_) => false,
         }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_to_buffer(
+        ctx: ConstellationPointer,
+        remote: *mut c_char,
+    ) -> *mut u8 {
+        if ctx.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        if remote.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let mut temp_buf = vec![];
+
+        let constellation = &mut *(ctx as *mut Box<dyn Constellation>);
+        let remote = CString::from_raw(remote).to_string_lossy().to_string();
+        let rt = warp_common::tokio::runtime::Runtime::new().unwrap();
+        let ptr = rt.block_on(async move {
+            {
+                match (**constellation).to_buffer(&remote, &mut temp_buf).await {
+                    Ok(_) => temp_buf.as_ptr(),
+                    Err(_) => std::ptr::null(),
+                }
+            }
+        });
+
+        if ptr.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        ptr as *mut _
     }
 
     #[allow(clippy::missing_safety_doc)]
