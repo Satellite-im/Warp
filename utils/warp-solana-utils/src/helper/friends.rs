@@ -1,10 +1,11 @@
+use crate::helper;
 use crate::manager::SolanaManager;
 #[allow(unused_imports)]
 use crate::pubkey_from_seeds;
 use crate::wallet::SolanaWallet;
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
 use anchor_client::solana_sdk::pubkey::Pubkey;
-use anchor_client::solana_sdk::signature::{Keypair, Signature, Signer};
+use anchor_client::solana_sdk::signature::{Keypair, Signature};
 use anchor_client::solana_sdk::system_program;
 use anchor_client::{Client, Cluster, Program};
 #[allow(unused_imports)]
@@ -49,26 +50,22 @@ impl Friends {
         }
     }
 
-    pub fn create_friend_request(
-        &self,
-        request: &Pubkey,
-        friend: &Pubkey,
-        key: &str,
-    ) -> anyhow::Result<()> {
+    pub fn create_friend_request(&self, friend: &Pubkey, key: &str) -> anyhow::Result<()> {
         let payer = self.program.payer();
+        let (request, from, to) = self.compute_account_keys(*friend)?;
 
         self.program
             .request()
             .signer(&self.kp)
             .accounts(friends::accounts::MakeRequest {
-                request: *request,
+                request,
                 user: payer,
                 payer,
                 system_program: system_program::ID,
             })
             .args(friends::instruction::MakeRequest {
-                user1: payer,
-                user2: *friend,
+                user1: from,
+                user2: to,
                 k: key.to_string(),
             })
             .send()?;
@@ -76,18 +73,19 @@ impl Friends {
     }
 
     pub fn get_request(&self, key: Pubkey) -> anyhow::Result<friends::FriendRequest> {
-        let key = self.program_key(&key)?;
-        let account = self.program.account(key)?;
+        let (request, _, _) = self.compute_account_keys(key)?;
+        let account = self.program.account(request)?;
         Ok(account)
     }
 
-    pub fn accept_friend_request(&self, request: &Pubkey, key: &str) -> anyhow::Result<Signature> {
+    pub fn accept_friend_request(&self, friend: Pubkey, key: &str) -> anyhow::Result<Signature> {
+        let (request, _, _) = self.compute_account_keys(friend)?;
         let sig = self
             .program
             .request()
             .signer(&self.kp)
             .accounts(friends::accounts::AcceptRequest {
-                request: *request,
+                request,
                 user: self.program.payer(),
             })
             .args(friends::instruction::AcceptRequest { k: key.to_string() })
@@ -95,40 +93,43 @@ impl Friends {
         Ok(sig)
     }
 
-    pub fn deny_friend_request(&self, request: &Pubkey) -> anyhow::Result<Signature> {
+    pub fn deny_friend_request(&self, request: Pubkey) -> anyhow::Result<Signature> {
+        // let (request, _, _) = self.compute_account_keys(friend)?;
         let sig = self
             .program
             .request()
             .signer(&self.kp)
             .accounts(friends::accounts::DenyRequest {
-                request: *request,
+                request,
                 user: self.program.payer(),
             })
             .send()?;
         Ok(sig)
     }
 
-    pub fn remove_friend_request(&self, request: &Pubkey) -> anyhow::Result<Signature> {
+    pub fn remove_friend_request(&self, request: Pubkey) -> anyhow::Result<Signature> {
+        // let (request, _, _) = self.compute_account_keys(friend)?;
         let sig = self
             .program
             .request()
             .signer(&self.kp)
             .accounts(friends::accounts::RemoveRequest {
-                request: *request,
+                request,
                 user: self.program.payer(),
             })
             .send()?;
         Ok(sig)
     }
 
-    pub fn close_friend_request(&self, request: &Pubkey) -> anyhow::Result<Signature> {
+    pub fn close_friend_request(&self, request: Pubkey) -> anyhow::Result<Signature> {
+        // let (request, _, _) = self.compute_account_keys(request)?;
         let payer = self.program.payer();
         let sig = self
             .program
             .request()
             .signer(&self.kp)
             .accounts(friends::accounts::CloseRequest {
-                request: *request,
+                request,
                 user: payer,
                 payer,
             })
@@ -136,36 +137,37 @@ impl Friends {
         Ok(sig)
     }
 
-    pub fn remove_friend(&self, request: &Pubkey) -> anyhow::Result<Signature> {
+    pub fn remove_friend(&self, request: Pubkey) -> anyhow::Result<Signature> {
         let payer = self.program.payer();
+        // let (request, _, _) = self.compute_account_keys(friend)?;
         let sig = self
             .program
             .request()
             .signer(&self.kp)
             .accounts(friends::accounts::RemoveFriend {
-                request: *request,
+                request,
                 user: payer,
             })
             .send()?;
         Ok(sig)
     }
 
-    pub fn compute_account_keys(&self, to: &Pubkey) -> anyhow::Result<(Pubkey, Pubkey)> {
-        let (request, _) = Pubkey::try_find_program_address(
-            &[&self.kp.pubkey().to_bytes(), &to.to_bytes()],
-            &self.program.id(),
-        )
-        .ok_or_else(|| anyhow!("Error finding program"))?;
-
-        Ok((request, *to))
+    pub fn list_requests(&self) -> anyhow::Result<Vec<(Pubkey, FriendRequest)>> {
+        let requests = helper::accounts(&self.program, vec![])?;
+        Ok(requests)
     }
 
-    fn program_key(&self, addr: &Pubkey) -> anyhow::Result<Pubkey> {
-        let (key, _) = Pubkey::try_find_program_address(
-            &[&addr.to_bytes(), &b"friend"[..]],
+    fn compute_account_keys(&self, to: Pubkey) -> anyhow::Result<(Pubkey, Pubkey, Pubkey)> {
+        let mut list = vec![self.program.payer(), to];
+        list.sort_by(|a, b| b.to_bytes().cmp(&a.to_bytes()));
+
+        let (first, second) = (list[0], list[1]);
+
+        let (request, _) = Pubkey::try_find_program_address(
+            &[&first.to_bytes(), &second.to_bytes()],
             &self.program.id(),
         )
         .ok_or_else(|| anyhow!("Error finding program"))?;
-        Ok(key)
+        Ok((request, first, second))
     }
 }
