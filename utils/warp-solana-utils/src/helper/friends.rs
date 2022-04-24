@@ -94,7 +94,7 @@ impl Friends {
     }
 
     pub fn deny_friend_request(&self, request: Pubkey) -> anyhow::Result<Signature> {
-        // let (request, _, _) = self.compute_account_keys(friend)?;
+        let (request, _, _) = self.compute_account_keys(request)?;
         let sig = self
             .program
             .request()
@@ -109,7 +109,7 @@ impl Friends {
     }
 
     pub fn remove_friend_request(&self, request: Pubkey) -> anyhow::Result<Signature> {
-        // let (request, _, _) = self.compute_account_keys(friend)?;
+        let (request, _, _) = self.compute_account_keys(request)?;
         let sig = self
             .program
             .request()
@@ -124,7 +124,7 @@ impl Friends {
     }
 
     pub fn close_friend_request(&self, request: Pubkey) -> anyhow::Result<Signature> {
-        // let (request, _, _) = self.compute_account_keys(request)?;
+        let (request, _, _) = self.compute_account_keys(request)?;
         let payer = self.program.payer();
         let sig = self
             .program
