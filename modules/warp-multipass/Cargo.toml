@@ -11,11 +11,7 @@ repository = "https://github.com/Satellite-im/Warp"
 
 [dependencies]
 warp-common = { path = "../../utils/warp-common" }
-warp-data = { path = "../../utils/warp-data" }
-warp-pocket-dimension = { path = "../warp-pocket-dimension" }
-warp-module = { path = "../../utils/warp-module" }
-warp-hooks = { path = "../../utils/warp-hooks" }
+warp-crypto = { path = "../../utils/warp-crypto" }
 
 [features]
-default = ["async"]
-async = ["warp-common/async"]
+default = []

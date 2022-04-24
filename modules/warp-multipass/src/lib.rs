@@ -1,3 +1,4 @@
+pub mod generator;
 pub mod identity;
 
 use identity::Identity;

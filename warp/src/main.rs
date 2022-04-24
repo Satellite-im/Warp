@@ -1,5 +1,4 @@
 pub mod cli;
-pub mod generator;
 pub mod gui;
 pub mod http;
 pub mod manager;
@@ -13,6 +12,7 @@ use manager::ModuleManager;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use warp::constellation::{Constellation, ConstellationDataType};
+use warp::multipass::identity::{Identifier, PublicKey};
 use warp::pd_stretto::StrettoClient;
 use warp::pocket_dimension::PocketDimension;
 #[allow(unused_imports)]
@@ -26,8 +26,9 @@ use warp_common::{
 };
 use warp_configuration::Config;
 use warp_data::DataObject;
-use warp_multipass::identity::{Identifier, PublicKey};
 use warp_tesseract::Tesseract;
+
+use warp::multipass::generator;
 
 #[derive(Debug, Parser)]
 #[clap(version, about, long_about = None)]
