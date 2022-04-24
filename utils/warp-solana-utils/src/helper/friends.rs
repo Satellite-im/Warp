@@ -103,6 +103,7 @@ impl Friends {
                 request,
                 user: self.program.payer(),
             })
+            .args(friends::instruction::DenyRequest)
             .send()?;
         Ok(sig)
     }
@@ -117,6 +118,7 @@ impl Friends {
                 request,
                 user: self.program.payer(),
             })
+            .args(friends::instruction::RemoveRequest)
             .send()?;
         Ok(sig)
     }
@@ -133,13 +135,14 @@ impl Friends {
                 user: payer,
                 payer,
             })
+            .args(friends::instruction::CloseRequest)
             .send()?;
         Ok(sig)
     }
 
     pub fn remove_friend(&self, request: Pubkey) -> anyhow::Result<Signature> {
         let payer = self.program.payer();
-        // let (request, _, _) = self.compute_account_keys(friend)?;
+        let (request, _, _) = self.compute_account_keys(request)?;
         let sig = self
             .program
             .request()
@@ -148,6 +151,7 @@ impl Friends {
                 request,
                 user: payer,
             })
+            .args(friends::instruction::RemoveFriend)
             .send()?;
         Ok(sig)
     }
