@@ -1,5 +1,15 @@
 use warp_crypto::rand::Rng;
 
+/// Used to generate a random user name
+///
+/// # Example
+///
+/// ```
+/// use warp_multipass::generator;
+/// let name = generator::generate_name();
+///
+/// assert!(name.len() <= 32);
+/// ```
 pub fn generate_name() -> String {
     let nouns_length = nouns().len();
     loop {
