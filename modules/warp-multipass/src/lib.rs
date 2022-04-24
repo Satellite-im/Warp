@@ -4,7 +4,7 @@ use identity::Identity;
 use warp_common::Extension;
 use warp_common::Result;
 
-use crate::identity::{Identifier, IdentityUpdate, PublicKey};
+use crate::identity::{FriendRequest, Identifier, IdentityUpdate, PublicKey};
 
 pub trait MultiPass: Extension + Sync + Send {
     fn create_identity(&mut self, username: &str, passphrase: &str) -> Result<PublicKey>;
@@ -23,7 +23,7 @@ pub trait MultiPass: Extension + Sync + Send {
 }
 
 // #[warp_common::async_trait::async_trait]
-pub trait Friends {
+pub trait Friends: Sync + Send {
     /// Send friend request to corresponding public key
     fn send_request(&mut self, pubkey: PublicKey) -> Result<()>;
 
@@ -36,7 +36,11 @@ pub trait Friends {
     /// Closing or retracting friend request
     fn close_request(&mut self, pubkey: PublicKey) -> Result<()>;
 
-    //TODO: List request
+    /// List the friend request
+    fn list_request(&self) -> Result<Vec<FriendRequest>>;
+
+    /// List all the friend request that been sent or received
+    fn list_all_request(&self) -> Result<Vec<FriendRequest>>;
 
     /// Remove friend from contacts
     fn remove_friend(&mut self, pubkey: PublicKey) -> Result<()>;
