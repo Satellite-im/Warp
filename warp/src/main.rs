@@ -43,6 +43,8 @@ struct CommandArgs {
     #[clap(long)]
     cli: bool,
     #[clap(short, long)]
+    path: Option<String>,
+    #[clap(short, long)]
     config: Option<String>,
 }
 
@@ -111,9 +113,12 @@ async fn main() -> AnyResult<()> {
 
     let mut manager = ModuleManager::default();
 
-    let warp_directory = warp_common::dirs::home_dir()
-        .map(|directory| Path::new(&directory).join(".warp"))
-        .ok_or(Error::DirectoryNotFound)?;
+    let warp_directory = match cli.path {
+        Some(path) => Path::new(&path).to_path_buf(),
+        None => warp_common::dirs::home_dir()
+            .map(|directory| Path::new(&directory).join(".warp"))
+            .ok_or(Error::DirectoryNotFound)?,
+    };
 
     if !warp_directory.exists() {
         tokio::fs::create_dir(&warp_directory).await?;
@@ -443,7 +448,7 @@ async fn main() -> AnyResult<()> {
                 account.remove_friend(decoded_pubkey.clone())?;
                 let friend = account.get_identity(Identifier::PublicKey(decoded_pubkey))?;
                 println!(
-                    "Removed {}#{} Friend Request",
+                    "Removed {}#{} from friend list",
                     &friend.username, &friend.short_id
                 );
             }
