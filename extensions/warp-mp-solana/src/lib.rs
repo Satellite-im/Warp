@@ -447,11 +447,17 @@ impl Friends for SolanaAccount {
     fn list_friends(&self) -> warp_common::Result<Vec<Identity>> {
         let mut identities = vec![];
         let list = self.list_all_request()?;
+        let ident = self.get_own_identity()?;
         for request in list
             .iter()
             .filter(|r| r.status == FriendRequestStatus::Accepted)
         {
-            let identity = self.get_identity(Identifier::PublicKey(request.clone().to))?;
+            let identity = if request.to != ident.public_key {
+                self.get_identity(Identifier::PublicKey(request.clone().to))?
+            } else {
+                self.get_identity(Identifier::PublicKey(request.clone().from))?
+            };
+
             identities.push(identity)
         }
         Ok(identities)
