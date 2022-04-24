@@ -310,11 +310,11 @@ impl Friends for SolanaAccount {
             .get_identity(Identifier::PublicKey(pubkey.clone()))
             .is_err()
         {
-            return Err(Error::Unimplemented);
+            return Err(Error::Any(anyhow!("You cannot add yourself.")));
         }
 
         if self.has_friend(pubkey.clone()).is_ok() {
-            return Err(Error::Unimplemented);
+            return Err(Error::Any(anyhow!("You are already friends")));
         }
 
         let helper = self.friend_helper()?;
@@ -328,11 +328,11 @@ impl Friends for SolanaAccount {
             .get_identity(Identifier::PublicKey(pubkey.clone()))
             .is_err()
         {
-            return Err(Error::Unimplemented);
+            return Err(Error::Any(anyhow!("You cannot accept yourself.")));
         }
 
         if self.has_friend(pubkey.clone()).is_ok() {
-            return Err(Error::Unimplemented);
+            return Err(Error::Any(anyhow!("You are already friends")));
         }
 
         let helper = self.friend_helper()?;
@@ -346,16 +346,16 @@ impl Friends for SolanaAccount {
             .get_identity(Identifier::PublicKey(pubkey.clone()))
             .is_err()
         {
-            return Err(Error::Unimplemented);
+            return Err(Error::Any(anyhow!("You cannot deny yourself.")));
         }
 
         if self.has_friend(pubkey.clone()).is_ok() {
-            return Err(Error::Unimplemented);
+            return Err(Error::Any(anyhow!("You are already friends")));
         }
 
         let helper = self.friend_helper()?;
 
-        helper.create_friend_request(Pubkey::new(pubkey.to_bytes()), "")?;
+        helper.deny_friend_request(Pubkey::new(pubkey.to_bytes()))?;
         Ok(())
     }
 
@@ -377,9 +377,22 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn list_request(&self) -> warp_common::Result<Vec<FriendRequest>> {
+    fn list_incoming_request(&self) -> warp_common::Result<Vec<FriendRequest>> {
+        let ident = self.get_own_identity()?;
         self.list_all_request().map(|fr| {
             fr.iter()
+                .filter(|fr| fr.to == ident.public_key)
+                .filter(|fr| fr.status == FriendRequestStatus::Pending)
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+    }
+
+    fn list_outgoing_request(&self) -> warp_common::Result<Vec<FriendRequest>> {
+        let ident = self.get_own_identity()?;
+        self.list_all_request().map(|fr| {
+            fr.iter()
+                .filter(|fr| fr.from == ident.public_key)
                 .filter(|fr| fr.status == FriendRequestStatus::Pending)
                 .cloned()
                 .collect::<Vec<_>>()
@@ -393,8 +406,8 @@ impl Friends for SolanaAccount {
         let new_list = list
             .iter()
             .map(|(_, request)| request)
-            .filter(|r| r.from == Pubkey::new(ident.public_key.to_bytes()))
             .map(fr_to_fr)
+            .filter(|fr| fr.from == ident.public_key || fr.to == ident.public_key)
             .collect::<Vec<_>>();
         Ok(new_list)
     }
@@ -404,11 +417,11 @@ impl Friends for SolanaAccount {
             .get_identity(Identifier::PublicKey(pubkey.clone()))
             .is_err()
         {
-            return Err(Error::Unimplemented);
+            return Err(Error::Any(anyhow!("You cannot remove yourself.")));
         }
 
-        if self.has_friend(pubkey.clone()).is_ok() {
-            return Err(Error::Unimplemented);
+        if self.has_friend(pubkey.clone()).is_err() {
+            return Err(Error::Any(anyhow!("You are not friends.")));
         }
 
         let helper = self.friend_helper()?;

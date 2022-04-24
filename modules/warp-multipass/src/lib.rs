@@ -36,8 +36,11 @@ pub trait Friends: Sync + Send {
     /// Closing or retracting friend request
     fn close_request(&mut self, pubkey: PublicKey) -> Result<()>;
 
-    /// List the friend request
-    fn list_request(&self) -> Result<Vec<FriendRequest>>;
+    /// List the incoming friend request
+    fn list_incoming_request(&self) -> Result<Vec<FriendRequest>>;
+
+    /// List the outgoing friend request
+    fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>>;
 
     /// List all the friend request that been sent or received
     fn list_all_request(&self) -> Result<Vec<FriendRequest>>;
