@@ -6,6 +6,7 @@ use warp_common::{anyhow, Extension, Module};
 use warp_crypto::rand::Rng;
 use warp_data::{DataObject, DataType};
 use warp_hooks::hooks::Hooks;
+use warp_multipass::generator::generate_name;
 use warp_multipass::{identity::*, Friends, MultiPass};
 use warp_pocket_dimension::query::QueryBuilder;
 use warp_pocket_dimension::PocketDimension;
@@ -165,13 +166,16 @@ impl MultiPass for SolanaAccount {
             }
         }
 
-        let username = username.ok_or(Error::Other)?;
+        let username = match username {
+            Some(u) => u.to_string(),
+            None => generate_name(),
+        };
 
         let wallet = SolanaWallet::create_random(PhraseType::Standard, None)?;
         let mut helper = UserHelper::new_with_wallet(&wallet)?;
 
         if let Ok(identity) = user_to_identity(&helper, None) {
-            if identity.username == *username {
+            if identity.username == username {
                 return Err(Error::ToBeDetermined);
             }
         }

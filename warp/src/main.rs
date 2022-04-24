@@ -28,8 +28,6 @@ use warp_configuration::Config;
 use warp_data::DataObject;
 use warp_tesseract::Tesseract;
 
-use warp::multipass::generator;
-
 #[derive(Debug, Parser)]
 #[clap(version, about, long_about = None)]
 struct CommandArgs {
@@ -223,12 +221,9 @@ async fn main() -> AnyResult<()> {
                 //Note `spawn_blocking` is used due to reqwest using a separate runtime in its blocking feature in `warp-solana-utils`
                 match tokio::task::spawn_blocking(
                     move || -> anyhow::Result<warp::multipass::identity::Identity> {
-                        let username = match username {
-                            Some(username) => username,
-                            None => generator::generate_name(),
-                        };
+                        let username = username.as_deref();
                         let mut account = account.lock().unwrap();
-                        account.create_identity(Some(&username), None)?;
+                        account.create_identity(username, None)?;
                         account.get_own_identity().map_err(|e| anyhow!(e))
                     },
                 )
