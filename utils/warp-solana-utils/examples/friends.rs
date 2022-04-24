@@ -1,5 +1,4 @@
 use friends::Status;
-use std::time::Duration;
 use warp_common::anyhow;
 use warp_crypto::rand::Rng;
 use warp_solana_utils::helper::friends::Friends;
@@ -60,7 +59,7 @@ fn main() -> warp_common::anyhow::Result<()> {
         println!("{} Creating request", wallet_a.get_pubkey()?);
         println!();
         let friend_program = Friends::new_with_wallet(&wallet_a)?;
-        friend_program.create_friend_request(&wallet_b.get_pubkey()?, "")?;
+        friend_program.create_friend_request(wallet_b.get_pubkey()?, "")?;
         let friends::FriendRequest {
             from, to, status, ..
         } = friend_program.get_request(wallet_b.get_pubkey()?)?;
