@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 use warp_common::anyhow;
-use warp_crypto::rand::{self, Rng};
+use warp_crypto::rand::{self, prelude::*};
 use warp_mp_solana::SolanaAccount;
 use warp_multipass::identity::{Identifier, Identity};
 use warp_multipass::{Friends, MultiPass};
@@ -62,6 +62,8 @@ fn username(ident: &Identity) -> String {
 }
 
 fn main() -> anyhow::Result<()> {
+    let mut rng = rand::thread_rng();
+
     let mut account_a = account()?;
     let mut account_b = account()?;
 
@@ -110,51 +112,57 @@ fn main() -> anyhow::Result<()> {
         println!("Status: {:?}", incoming.status);
         println!();
     }
+    let coin = rng.gen_range(0, 2);
+    match coin {
+        0 => {
+            account_b.accept_request(ident_a.public_key.clone())?;
 
-    account_b.accept_request(ident_a.public_key.clone())?;
+            println!("{} Friends:", username(&ident_a));
 
-    println!("{} Friends:", username(&ident_a));
+            for friend in account_a.list_friends()? {
+                println!("Username: {}", username(&friend));
+                println!("Public Key: {}", Pubkey::new(friend.public_key.to_bytes()));
+                println!();
+            }
 
-    for friend in account_a.list_friends()? {
-        println!("Username: {}", username(&friend));
-        println!("Public Key: {}", Pubkey::new(friend.public_key.to_bytes()));
-        println!();
-    }
+            println!("{} Friends:", username(&ident_b));
 
-    println!("{} Friends:", username(&ident_b));
+            for friend in account_b.list_friends()? {
+                println!("Username: {}", username(&friend));
+                println!("Public Key: {}", Pubkey::new(friend.public_key.to_bytes()));
+                println!();
+            }
 
-    for friend in account_b.list_friends()? {
-        println!("Username: {}", username(&friend));
-        println!("Public Key: {}", Pubkey::new(friend.public_key.to_bytes()));
-        println!();
-    }
-
-    let mut rng = rand::thread_rng();
-    let coin_flip = rng.gen::<bool>();
-
-    if coin_flip {
-        account_a.remove_friend(ident_b.public_key.clone())?;
-        if account_a.has_friend(ident_b.public_key.clone()).is_ok() {
-            println!(
-                "{} is stuck with {} forever",
-                username(&ident_a),
-                username(&ident_b)
-            );
-        } else {
-            println!("{} removed {}", username(&ident_a), username(&ident_b));
+            if rand::random() {
+                account_a.remove_friend(ident_b.public_key.clone())?;
+                if account_a.has_friend(ident_b.public_key.clone()).is_ok() {
+                    println!(
+                        "{} is stuck with {} forever",
+                        username(&ident_a),
+                        username(&ident_b)
+                    );
+                } else {
+                    println!("{} removed {}", username(&ident_a), username(&ident_b));
+                }
+            } else {
+                account_b.remove_friend(ident_a.public_key.clone())?;
+                if account_b.has_friend(ident_a.public_key.clone()).is_ok() {
+                    println!(
+                        "{} is stuck with {} forever",
+                        username(&ident_b),
+                        username(&ident_a)
+                    );
+                } else {
+                    println!("{} removed {}", username(&ident_b), username(&ident_a));
+                }
+            }
         }
-    } else {
-        account_b.remove_friend(ident_a.public_key.clone())?;
-        if account_b.has_friend(ident_a.public_key.clone()).is_ok() {
-            println!(
-                "{} is stuck with {} forever",
-                username(&ident_b),
-                username(&ident_a)
-            );
-        } else {
-            println!("{} removed {}", username(&ident_b), username(&ident_a));
+        1 | _ => {
+            println!("Denying {} friend request", username(&ident_a));
+            account_b.deny_request(ident_a.public_key.clone())?;
         }
     }
+
     println!();
 
     println!("Request List for {}", username(&ident_a));
