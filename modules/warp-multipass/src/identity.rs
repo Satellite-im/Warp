@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use warp_common::derive_more::Display;
 use warp_common::serde::{Deserialize, Serialize};
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -75,14 +76,20 @@ pub struct FriendRequest {
     pub status: FriendRequestStatus,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Display)]
 #[serde(crate = "warp_common::serde")]
 pub enum FriendRequestStatus {
+    #[display(fmt = "uninitialized")]
     Uninitialized,
+    #[display(fmt = "pending")]
     Pending,
+    #[display(fmt = "accepted")]
     Accepted,
+    #[display(fmt = "denied")]
     Denied,
+    #[display(fmt = "friend removed")]
     FriendRemoved,
+    #[display(fmt = "request removed")]
     RequestRemoved,
 }
 

@@ -7,7 +7,7 @@ use warp_common::Result;
 
 use crate::identity::{FriendRequest, Identifier, IdentityUpdate, PublicKey};
 
-pub trait MultiPass: Extension + Sync + Send {
+pub trait MultiPass: Extension + Friends + Sync + Send {
     fn create_identity(
         &mut self,
         username: Option<&str>,

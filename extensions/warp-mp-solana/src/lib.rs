@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use warp_common::anyhow::{anyhow, bail};
+use warp_common::anyhow::anyhow;
 use warp_common::error::Error;
 use warp_common::{anyhow, Extension, Module};
 use warp_crypto::rand::Rng;
