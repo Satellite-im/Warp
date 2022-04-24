@@ -45,6 +45,8 @@ struct CommandArgs {
     #[clap(short, long)]
     path: Option<String>,
     #[clap(short, long)]
+    keyfile: Option<String>,
+    #[clap(short, long)]
     config: Option<String>,
 }
 
@@ -130,11 +132,16 @@ async fn main() -> AnyResult<()> {
             .unwrap_or_default(),
     ));
 
+    //TODO: Have keyfile encrypted
+    let key = match cli.keyfile {
+        Some(path) => {
+            let data = tokio::fs::read_to_string(path).await?;
+            data
+        }
+        None => cli::password_line()?,
+    };
     //TODO: push this to TUI
-    tesseract
-        .lock()
-        .unwrap()
-        .unlock(cli::password_line()?.as_bytes())?;
+    tesseract.lock().unwrap().unlock(key.trim().as_bytes())?;
 
     //TODO: Have the module manager handle the checks
     if config.modules.pocket_dimension {
