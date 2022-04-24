@@ -54,6 +54,14 @@ enum Command {
     Dump,
     CreateAccount { username: Option<String> },
     ViewAccount { pubkey: Option<String> },
+    ListAllRequest,
+    ListIncomingRequest,
+    ListOutgoingRequest,
+    ListFriends,
+    SendFriendRequest { pubkey: String },
+    AcceptFriendRequest { pubkey: String },
+    DenyFriendRequest { pubkey: String },
+    RemoveFriend { pubkey: String },
 }
 
 fn default_config() -> warp_configuration::Config {
@@ -305,6 +313,139 @@ async fn main() -> AnyResult<()> {
                         error!("Error obtaining account: {}", e.to_string());
                     }
                 }
+            }
+            Command::ListAllRequest => {
+                let account = manager.get_account()?;
+                let account = match account.lock() {
+                    Ok(a) => a,
+                    Err(e) => e.into_inner(),
+                };
+
+                let mut table = Table::new();
+                table.set_header(vec!["From", "To", "Status"]);
+                for request in account.list_all_request()? {
+                    let from_ident = account.get_identity(Identifier::PublicKey(request.from))?;
+                    let to_ident = account.get_identity(Identifier::PublicKey(request.to))?;
+                    table.add_row(vec![
+                        &format!("{}#{}", &from_ident.username, &from_ident.short_id),
+                        &format!("{}#{}", &to_ident.username, &to_ident.short_id),
+                        &request.status.to_string(),
+                    ]);
+                }
+                println!("{table}")
+            }
+            Command::ListFriends => {
+                let account = manager.get_account()?;
+                let account = match account.lock() {
+                    Ok(a) => a,
+                    Err(e) => e.into_inner(),
+                };
+                let friends = account.list_friends()?;
+                let mut table = Table::new();
+                table.set_header(vec!["Username", "Address"]);
+                for friend in friends {
+                    table.add_row(vec![
+                        &format!("{}#{}", &friend.username, &friend.short_id),
+                        &bs58::encode(friend.public_key.to_bytes()).into_string(),
+                    ]);
+                }
+                println!("{table}")
+            }
+            Command::ListIncomingRequest => {
+                let account = manager.get_account()?;
+                let account = match account.lock() {
+                    Ok(a) => a,
+                    Err(e) => e.into_inner(),
+                };
+
+                let mut table = Table::new();
+                table.set_header(vec!["From", "To", "Status"]);
+                for request in account.list_incoming_request()? {
+                    let from_ident = account.get_identity(Identifier::PublicKey(request.from))?;
+                    let to_ident = account.get_identity(Identifier::PublicKey(request.to))?;
+                    table.add_row(vec![
+                        &format!("{}#{}", &from_ident.username, &from_ident.short_id),
+                        &format!("{}#{}", &to_ident.username, &to_ident.short_id),
+                        &request.status.to_string(),
+                    ]);
+                }
+                println!("{table}")
+            }
+            Command::ListOutgoingRequest => {
+                let account = manager.get_account()?;
+                let account = match account.lock() {
+                    Ok(a) => a,
+                    Err(e) => e.into_inner(),
+                };
+
+                let mut table = Table::new();
+                table.set_header(vec!["From", "To", "Status"]);
+                for request in account.list_outgoing_request()? {
+                    let from_ident = account.get_identity(Identifier::PublicKey(request.from))?;
+                    let to_ident = account.get_identity(Identifier::PublicKey(request.to))?;
+                    table.add_row(vec![
+                        &format!("{}#{}", &from_ident.username, &from_ident.short_id),
+                        &format!("{}#{}", &to_ident.username, &to_ident.short_id),
+                        &request.status.to_string(),
+                    ]);
+                }
+                println!("{table}")
+            }
+            Command::SendFriendRequest { pubkey } => {
+                let account = manager.get_account()?;
+                let mut account = match account.lock() {
+                    Ok(a) => a,
+                    Err(e) => e.into_inner(),
+                };
+                let decoded_pubkey = bs58::decode(pubkey).into_vec().map(PublicKey::from_vec)?;
+                account.send_request(decoded_pubkey.clone())?;
+                let ident = account.get_identity(Identifier::PublicKey(decoded_pubkey))?;
+                println!(
+                    "Sent {}#{} A Friend Request",
+                    &ident.username, &ident.short_id
+                );
+            }
+            Command::AcceptFriendRequest { pubkey } => {
+                let account = manager.get_account()?;
+                let mut account = match account.lock() {
+                    Ok(a) => a,
+                    Err(e) => e.into_inner(),
+                };
+                let decoded_pubkey = bs58::decode(pubkey).into_vec().map(PublicKey::from_vec)?;
+                account.accept_request(decoded_pubkey.clone())?;
+                let friend = account.get_identity(Identifier::PublicKey(decoded_pubkey))?;
+                println!(
+                    "Accepted {}#{} Friend Request",
+                    &friend.username, &friend.short_id
+                );
+            }
+            Command::DenyFriendRequest { pubkey } => {
+                let account = manager.get_account()?;
+                let mut account = match account.lock() {
+                    Ok(a) => a,
+                    Err(e) => e.into_inner(),
+                };
+                let decoded_pubkey = bs58::decode(pubkey).into_vec().map(PublicKey::from_vec)?;
+                account.deny_request(decoded_pubkey.clone())?;
+                let friend = account.get_identity(Identifier::PublicKey(decoded_pubkey))?;
+                println!(
+                    "Denied {}#{} Friend Request",
+                    &friend.username, &friend.short_id
+                );
+            }
+            Command::RemoveFriend { pubkey } => {
+                let account = manager.get_account()?;
+                let mut account = match account.lock() {
+                    Ok(a) => a,
+                    Err(e) => e.into_inner(),
+                };
+                let decoded_pubkey = bs58::decode(pubkey).into_vec().map(PublicKey::from_vec)?;
+                account.remove_friend(decoded_pubkey.clone())?;
+                let friend = account.get_identity(Identifier::PublicKey(decoded_pubkey))?;
+                println!(
+                    "Removed {}#{} Friend Request",
+                    &friend.username, &friend.short_id
+                );
             }
         },
         _ => warn!("You can only select one option"),
