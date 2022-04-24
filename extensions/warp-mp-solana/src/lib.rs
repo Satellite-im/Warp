@@ -151,15 +151,21 @@ impl Extension for SolanaAccount {
 }
 
 impl MultiPass for SolanaAccount {
-    fn create_identity(&mut self, username: &str, _: &str) -> warp_common::Result<PublicKey> {
+    fn create_identity(
+        &mut self,
+        username: Option<&str>,
+        _: Option<&str>,
+    ) -> warp_common::Result<PublicKey> {
         if let Ok(keypair) = &self.get_private_key() {
             if UserHelper::new_with_keypair(keypair)
                 .get_current_user()
                 .is_ok()
             {
-                return Err(Error::Other);
+                return Err(Error::Other); //TODO: Error for existing account
             }
         }
+
+        let username = username.ok_or(Error::Other)?;
 
         let wallet = SolanaWallet::create_random(PhraseType::Standard, None)?;
         let mut helper = UserHelper::new_with_wallet(&wallet)?;
@@ -293,7 +299,7 @@ impl MultiPass for SolanaAccount {
         Ok(())
     }
 
-    fn decrypt_private_key(&self, _: &str) -> warp_common::Result<Vec<u8>> {
+    fn decrypt_private_key(&self, _: Option<&str>) -> warp_common::Result<Vec<u8>> {
         let keypair = self.get_private_key()?;
         Ok(keypair.to_bytes().to_vec())
     }

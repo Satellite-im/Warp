@@ -69,7 +69,7 @@ fn main() -> warp_common::anyhow::Result<()> {
     // Uncomment this if you want to interact with an precreated account and comment out `account.create_identity`
     // account.insert_solana_wallet(generated_wallet()?)?;
 
-    account.create_identity("MyNewAccount", "")?;
+    account.create_identity(Some("MyNewAccount"), None)?;
     let ident = account.get_own_identity()?;
 
     println!(

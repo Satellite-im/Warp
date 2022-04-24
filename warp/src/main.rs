@@ -228,7 +228,7 @@ async fn main() -> AnyResult<()> {
                             None => generator::generate_name(),
                         };
                         let mut account = account.lock().unwrap();
-                        account.create_identity(&username, "")?;
+                        account.create_identity(Some(&username), None)?;
                         account.get_own_identity().map_err(|e| anyhow!(e))
                     },
                 )

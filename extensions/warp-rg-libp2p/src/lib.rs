@@ -124,7 +124,7 @@ impl Libp2pMessaging {
         if let Some(account) = &self.account {
             let keypair = {
                 let account = account.lock().unwrap();
-                account.decrypt_private_key(passphrase)?
+                account.decrypt_private_key(Some(passphrase))?
             };
             self.keypair = Some(keypair);
         }

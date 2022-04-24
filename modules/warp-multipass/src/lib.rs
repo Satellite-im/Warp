@@ -8,7 +8,11 @@ use warp_common::Result;
 use crate::identity::{FriendRequest, Identifier, IdentityUpdate, PublicKey};
 
 pub trait MultiPass: Extension + Sync + Send {
-    fn create_identity(&mut self, username: &str, passphrase: &str) -> Result<PublicKey>;
+    fn create_identity(
+        &mut self,
+        username: Option<&str>,
+        passphrase: Option<&str>,
+    ) -> Result<PublicKey>;
 
     fn get_identity(&self, id: Identifier) -> Result<Identity>;
 
@@ -18,7 +22,7 @@ pub trait MultiPass: Extension + Sync + Send {
 
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<()>;
 
-    fn decrypt_private_key(&self, passphrase: &str) -> Result<Vec<u8>>;
+    fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<Vec<u8>>;
 
     fn refresh_cache(&mut self) -> Result<()>;
 }
