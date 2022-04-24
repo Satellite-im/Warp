@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 use warp_common::anyhow;
+use warp_crypto::rand::{self, Rng};
 use warp_mp_solana::SolanaAccount;
 use warp_multipass::identity::{Identifier, Identity};
 use warp_multipass::{Friends, MultiPass};
@@ -127,5 +128,44 @@ fn main() -> anyhow::Result<()> {
         println!("Public Key: {}", Pubkey::new(friend.public_key.to_bytes()));
         println!();
     }
+
+    let mut rng = rand::thread_rng();
+    let coin_flip = rng.gen::<bool>();
+
+    if coin_flip {
+        account_a.remove_friend(ident_b.public_key.clone())?;
+        if account_a.has_friend(ident_b.public_key.clone()).is_ok() {
+            println!(
+                "{} is stuck with {} forever",
+                username(&ident_a),
+                username(&ident_b)
+            );
+        } else {
+            println!("{} removed {}", username(&ident_a), username(&ident_b));
+        }
+    } else {
+        account_b.remove_friend(ident_a.public_key.clone())?;
+        if account_b.has_friend(ident_a.public_key.clone()).is_ok() {
+            println!(
+                "{} is stuck with {} forever",
+                username(&ident_b),
+                username(&ident_a)
+            );
+        } else {
+            println!("{} removed {}", username(&ident_b), username(&ident_a));
+        }
+    }
+    println!();
+
+    println!("Request List for {}", username(&ident_a));
+    for list in account_a.list_all_request()? {
+        let ident_from = account_a.get_identity(Identifier::PublicKey(list.from))?;
+        let ident_to = account_a.get_identity(Identifier::PublicKey(list.to))?;
+        println!("From: {}", username(&ident_from));
+        println!("To: {}", username(&ident_to));
+        println!("Status: {:?}", list.status);
+        println!();
+    }
+
     Ok(())
 }
