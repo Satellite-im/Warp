@@ -9,7 +9,7 @@ use anchor_client::solana_sdk::signature::{Keypair, Signature};
 use anchor_client::solana_sdk::system_program;
 use anchor_client::{Client, Cluster, Program};
 #[allow(unused_imports)]
-use friends::{FriendRequest, Status};
+pub use friends::{FriendRequest, Status};
 use std::rc::Rc;
 use warp_common::anyhow;
 use warp_common::anyhow::anyhow;
@@ -50,9 +50,9 @@ impl Friends {
         }
     }
 
-    pub fn create_friend_request(&self, friend: &Pubkey, key: &str) -> anyhow::Result<()> {
+    pub fn create_friend_request(&self, friend: Pubkey, key: &str) -> anyhow::Result<()> {
         let payer = self.program.payer();
-        let (request, from, to) = self.compute_account_keys(*friend)?;
+        let (request, from, to) = self.compute_account_keys(friend)?;
 
         self.program
             .request()
@@ -162,7 +162,15 @@ impl Friends {
     }
 
     fn compute_account_keys(&self, to: Pubkey) -> anyhow::Result<(Pubkey, Pubkey, Pubkey)> {
-        let mut list = vec![self.program.payer(), to];
+        self.compute_account_keys_direct(self.program.payer(), to)
+    }
+
+    fn compute_account_keys_direct(
+        &self,
+        from: Pubkey,
+        to: Pubkey,
+    ) -> anyhow::Result<(Pubkey, Pubkey, Pubkey)> {
+        let mut list = vec![from, to];
         list.sort_by(|a, b| b.to_bytes().cmp(&a.to_bytes()));
 
         let (first, second) = (list[0], list[1]);
