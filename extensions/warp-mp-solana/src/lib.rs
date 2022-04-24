@@ -315,12 +315,17 @@ impl MultiPass for SolanaAccount {
 
 impl Friends for SolanaAccount {
     fn send_request(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
-        //check to see if account is valid
+        let ident = self.get_own_identity()?;
+
+        if ident.public_key == pubkey {
+            return Err(Error::Any(anyhow!("Unable to send a request to yourself")));
+        }
+
         if self
             .get_identity(Identifier::PublicKey(pubkey.clone()))
             .is_err()
         {
-            return Err(Error::Any(anyhow!("You cannot add yourself.")));
+            return Err(Error::Any(anyhow!("Account does not exist")));
         }
 
         if self.has_friend(pubkey.clone()).is_ok() {
@@ -334,11 +339,19 @@ impl Friends for SolanaAccount {
     }
 
     fn accept_request(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
+        let ident = self.get_own_identity()?;
+
+        if ident.public_key == pubkey {
+            return Err(Error::Any(anyhow!(
+                "Unable to send/accept a request for yourself"
+            )));
+        }
+
         if self
             .get_identity(Identifier::PublicKey(pubkey.clone()))
             .is_err()
         {
-            return Err(Error::Any(anyhow!("You cannot accept yourself.")));
+            return Err(Error::Any(anyhow!("Account does not exist")));
         }
 
         if self.has_friend(pubkey.clone()).is_ok() {
@@ -352,13 +365,18 @@ impl Friends for SolanaAccount {
     }
 
     fn deny_request(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
+        let ident = self.get_own_identity()?;
+
+        if ident.public_key == pubkey {
+            return Err(Error::Any(anyhow!("Unable to deny a request for yourself")));
+        }
+
         if self
             .get_identity(Identifier::PublicKey(pubkey.clone()))
             .is_err()
         {
-            return Err(Error::Any(anyhow!("You cannot deny yourself.")));
+            return Err(Error::Any(anyhow!("Account does not exist")));
         }
-
         if self.has_friend(pubkey.clone()).is_ok() {
             return Err(Error::Any(anyhow!("You are already friends")));
         }
@@ -370,11 +388,19 @@ impl Friends for SolanaAccount {
     }
 
     fn close_request(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
+        let ident = self.get_own_identity()?;
+
+        if ident.public_key == pubkey {
+            return Err(Error::Any(anyhow!(
+                "Unable to close a request for yourself"
+            )));
+        }
+
         if self
             .get_identity(Identifier::PublicKey(pubkey.clone()))
             .is_err()
         {
-            return Err(Error::Unimplemented);
+            return Err(Error::Any(anyhow!("Account does not exist")));
         }
 
         if self.has_friend(pubkey.clone()).is_ok() {
