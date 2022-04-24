@@ -88,13 +88,22 @@ impl SolanaAccount {
     }
 
     pub fn get_private_key(&self) -> anyhow::Result<Keypair> {
-        let tesseract = self.get_tesseract()?;
+        let mut tesseract = self.get_tesseract()?;
 
-        if !tesseract.exist("privkey") {
-            bail!("Private key is not set or available");
-        }
-
-        let private_key = tesseract.retrieve("privkey")?;
+        let private_key = match tesseract.retrieve("privkey") {
+            Ok(key) => key,
+            Err(e) => {
+                if tesseract.exist("mnemonic") {
+                    let mnemonic = tesseract.retrieve("mnemonic")?;
+                    let wallet = SolanaWallet::restore_from_mnemonic(None, &mnemonic)?;
+                    let kp = wallet.get_keypair()?.to_base58_string();
+                    tesseract.set("privkey", kp.as_str())?;
+                    kp
+                } else {
+                    return Err(e);
+                }
+            }
+        };
 
         let keypair = Keypair::from_base58_string(private_key.as_str());
         Ok(keypair)
