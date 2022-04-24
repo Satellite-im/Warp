@@ -6,16 +6,17 @@ use warp_common::{anyhow, Extension, Module};
 use warp_crypto::rand::Rng;
 use warp_data::{DataObject, DataType};
 use warp_hooks::hooks::Hooks;
-use warp_multipass::{identity::*, MultiPass};
+use warp_multipass::{identity::*, Friends, MultiPass};
 use warp_pocket_dimension::query::QueryBuilder;
 use warp_pocket_dimension::PocketDimension;
 use warp_solana_utils::anchor_client::solana_client::rpc_client::RpcClient;
 use warp_solana_utils::anchor_client::solana_sdk::pubkey::Pubkey;
 use warp_solana_utils::anchor_client::solana_sdk::signature::Keypair;
+use warp_solana_utils::helper::friends::Status;
 use warp_solana_utils::helper::user::UserHelper;
 use warp_solana_utils::manager::SolanaManager;
 use warp_solana_utils::wallet::{PhraseType, SolanaWallet};
-use warp_solana_utils::EndPoint;
+use warp_solana_utils::{helper, EndPoint};
 use warp_tesseract::Tesseract;
 
 pub struct SolanaAccount {
@@ -125,6 +126,12 @@ impl SolanaAccount {
     pub fn user_helper(&self) -> anyhow::Result<UserHelper> {
         let kp = self.get_private_key()?;
         let helper = UserHelper::new_with_keypair(&kp);
+        Ok(helper)
+    }
+
+    pub fn friend_helper(&self) -> anyhow::Result<helper::friends::Friends> {
+        let kp = self.get_private_key()?;
+        let helper = helper::friends::Friends::new_with_keypair(&kp);
         Ok(helper)
     }
 }
@@ -294,6 +301,168 @@ impl MultiPass for SolanaAccount {
     fn refresh_cache(&mut self) -> warp_common::Result<()> {
         self.get_cache()?.empty(DataType::Module(self.module()))
     }
+}
+
+impl Friends for SolanaAccount {
+    fn send_request(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
+        //check to see if account is valid
+        if self
+            .get_identity(Identifier::PublicKey(pubkey.clone()))
+            .is_err()
+        {
+            return Err(Error::Unimplemented);
+        }
+
+        if self.has_friend(pubkey.clone()).is_ok() {
+            return Err(Error::Unimplemented);
+        }
+
+        let helper = self.friend_helper()?;
+
+        helper.create_friend_request(Pubkey::new(pubkey.to_bytes()), "")?;
+        Ok(())
+    }
+
+    fn accept_request(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
+        if self
+            .get_identity(Identifier::PublicKey(pubkey.clone()))
+            .is_err()
+        {
+            return Err(Error::Unimplemented);
+        }
+
+        if self.has_friend(pubkey.clone()).is_ok() {
+            return Err(Error::Unimplemented);
+        }
+
+        let helper = self.friend_helper()?;
+
+        helper.accept_friend_request(Pubkey::new(pubkey.to_bytes()), "")?;
+        Ok(())
+    }
+
+    fn deny_request(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
+        if self
+            .get_identity(Identifier::PublicKey(pubkey.clone()))
+            .is_err()
+        {
+            return Err(Error::Unimplemented);
+        }
+
+        if self.has_friend(pubkey.clone()).is_ok() {
+            return Err(Error::Unimplemented);
+        }
+
+        let helper = self.friend_helper()?;
+
+        helper.create_friend_request(Pubkey::new(pubkey.to_bytes()), "")?;
+        Ok(())
+    }
+
+    fn close_request(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
+        if self
+            .get_identity(Identifier::PublicKey(pubkey.clone()))
+            .is_err()
+        {
+            return Err(Error::Unimplemented);
+        }
+
+        if self.has_friend(pubkey.clone()).is_ok() {
+            return Err(Error::Unimplemented);
+        }
+
+        let helper = self.friend_helper()?;
+
+        helper.close_friend_request(Pubkey::new(pubkey.to_bytes()))?;
+        Ok(())
+    }
+
+    fn list_request(&self) -> warp_common::Result<Vec<FriendRequest>> {
+        self.list_all_request().map(|fr| {
+            fr.iter()
+                .filter(|fr| fr.status == FriendRequestStatus::Pending)
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+    }
+
+    fn list_all_request(&self) -> warp_common::Result<Vec<FriendRequest>> {
+        let helper = self.friend_helper()?;
+        let list = helper.list_requests()?;
+        let ident = self.get_own_identity()?;
+        let new_list = list
+            .iter()
+            .map(|(_, request)| request)
+            .filter(|r| r.from == Pubkey::new(ident.public_key.to_bytes()))
+            .map(fr_to_fr)
+            .collect::<Vec<_>>();
+        Ok(new_list)
+    }
+
+    fn remove_friend(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
+        if self
+            .get_identity(Identifier::PublicKey(pubkey.clone()))
+            .is_err()
+        {
+            return Err(Error::Unimplemented);
+        }
+
+        if self.has_friend(pubkey.clone()).is_ok() {
+            return Err(Error::Unimplemented);
+        }
+
+        let helper = self.friend_helper()?;
+
+        helper.remove_friend(Pubkey::new(pubkey.to_bytes()))?;
+        Ok(())
+    }
+
+    fn block_key(&mut self, _: PublicKey) -> warp_common::Result<()> {
+        Err(Error::Unimplemented)
+    }
+
+    fn list_friends(&self) -> warp_common::Result<Vec<Identity>> {
+        let mut identities = vec![];
+        let list = self.list_all_request()?;
+        for request in list
+            .iter()
+            .filter(|r| r.status == FriendRequestStatus::Accepted)
+        {
+            let identity = self.get_identity(Identifier::PublicKey(request.clone().to))?;
+            identities.push(identity)
+        }
+        Ok(identities)
+    }
+
+    fn has_friend(&self, pubkey: PublicKey) -> warp_common::Result<()> {
+        let helper = self.friend_helper()?;
+        let request = helper.get_request(Pubkey::new(pubkey.to_bytes()))?;
+
+        if request.status == Status::Accepted {
+            return Ok(());
+        }
+
+        Err(Error::Unimplemented)
+    }
+
+    fn key_exchange(&self, _: Identity) -> warp_common::Result<Vec<u8>> {
+        Err(Error::Unimplemented)
+    }
+}
+
+fn fr_to_fr(fr: &helper::friends::FriendRequest) -> FriendRequest {
+    let mut new_fr = FriendRequest::default();
+    new_fr.status = match fr.status {
+        Status::Uninitilized => FriendRequestStatus::Uninitialized,
+        Status::Pending => FriendRequestStatus::Pending,
+        Status::Accepted => FriendRequestStatus::Accepted,
+        Status::Denied => FriendRequestStatus::Denied,
+        Status::RemovedFriend => FriendRequestStatus::RequestRemoved,
+        Status::RequestRemoved => FriendRequestStatus::RequestRemoved,
+    };
+    new_fr.from = PublicKey::from_bytes(&fr.from.to_bytes());
+    new_fr.to = PublicKey::from_bytes(&fr.to.to_bytes());
+    new_fr
 }
 
 fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Result<Identity> {
