@@ -39,7 +39,7 @@ impl PocketDimension for MemoryCache {
     fn add_data(&mut self, dimension: DataType, data: &DataObject) -> Result<()> {
         //TODO: Determine size of payload for `DataObject::size`
         let mut object = data.clone();
-        object.set_data_type(&dimension);
+        object.set_data_type(dimension.clone());
         if let Some(val) = self.0.get_mut(&dimension) {
             let objects = val
                 .iter()
