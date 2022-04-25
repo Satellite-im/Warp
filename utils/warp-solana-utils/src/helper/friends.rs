@@ -8,8 +8,8 @@ use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::solana_sdk::signature::{Keypair, Signature};
 use anchor_client::solana_sdk::system_program;
 use anchor_client::{Client, Cluster, Program};
+use friends::{FriendRequest, Status};
 #[allow(unused_imports)]
-pub use friends::{FriendRequest, Status};
 use std::rc::Rc;
 use warp_common::anyhow;
 use warp_common::anyhow::anyhow;
@@ -181,5 +181,63 @@ impl Friends {
         )
         .ok_or_else(|| anyhow!("Error finding program"))?;
         Ok((request, first, second))
+    }
+}
+
+pub struct DirectFriendRequest {
+    pub from: Pubkey,
+    pub status: DirectStatus,
+    pub to: Pubkey,
+    pub payer: Pubkey,
+    pub from_encrypted_key: String,
+    pub to_encrypted_key: String,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum DirectStatus {
+    Uninitilized,
+    Pending,
+    Accepted,
+    Denied,
+    RemovedFriend,
+    RequestRemoved,
+}
+
+impl From<Status> for DirectStatus {
+    fn from(status: Status) -> Self {
+        match status {
+            Status::Uninitilized => DirectStatus::Uninitilized,
+            Status::Pending => DirectStatus::Pending,
+            Status::Accepted => DirectStatus::Accepted,
+            Status::Denied => DirectStatus::Denied,
+            Status::RemovedFriend => DirectStatus::RequestRemoved,
+            Status::RequestRemoved => DirectStatus::RequestRemoved,
+        }
+    }
+}
+
+impl From<FriendRequest> for DirectFriendRequest {
+    fn from(request: FriendRequest) -> Self {
+        DirectFriendRequest {
+            from: request.from,
+            status: DirectStatus::from(request.status),
+            to: request.to,
+            payer: request.payer,
+            from_encrypted_key: request.from_encrypted_key,
+            to_encrypted_key: request.to_encrypted_key,
+        }
+    }
+}
+
+impl From<&FriendRequest> for DirectFriendRequest {
+    fn from(request: &FriendRequest) -> Self {
+        DirectFriendRequest {
+            from: request.from,
+            status: DirectStatus::from(request.status),
+            to: request.to,
+            payer: request.payer,
+            from_encrypted_key: request.from_encrypted_key.clone(),
+            to_encrypted_key: request.to_encrypted_key.clone(),
+        }
     }
 }

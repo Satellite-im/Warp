@@ -13,7 +13,7 @@ use warp_pocket_dimension::PocketDimension;
 use warp_solana_utils::anchor_client::solana_client::rpc_client::RpcClient;
 use warp_solana_utils::anchor_client::solana_sdk::pubkey::Pubkey;
 use warp_solana_utils::anchor_client::solana_sdk::signature::Keypair;
-use warp_solana_utils::helper::friends::Status;
+use warp_solana_utils::helper::friends::{DirectFriendRequest, DirectStatus};
 use warp_solana_utils::helper::user::UserHelper;
 use warp_solana_utils::manager::SolanaManager;
 use warp_solana_utils::wallet::{PhraseType, SolanaWallet};
@@ -451,6 +451,7 @@ impl Friends for SolanaAccount {
         let new_list = list
             .iter()
             .map(|(_, request)| request)
+            .map(DirectFriendRequest::from)
             .map(fr_to_fr)
             .filter(|fr| fr.from == ident.public_key || fr.to == ident.public_key)
             .collect::<Vec<_>>();
@@ -500,9 +501,11 @@ impl Friends for SolanaAccount {
 
     fn has_friend(&self, pubkey: PublicKey) -> warp_common::Result<()> {
         let helper = self.friend_helper()?;
-        let request = helper.get_request(Pubkey::new(pubkey.to_bytes()))?;
+        let request = helper
+            .get_request(Pubkey::new(pubkey.to_bytes()))
+            .map(DirectFriendRequest::from)?;
 
-        if request.status == Status::Accepted {
+        if request.status == DirectStatus::Accepted {
             return Ok(());
         }
 
@@ -514,15 +517,15 @@ impl Friends for SolanaAccount {
     }
 }
 
-fn fr_to_fr(fr: &helper::friends::FriendRequest) -> FriendRequest {
+fn fr_to_fr(fr: helper::friends::DirectFriendRequest) -> FriendRequest {
     let mut new_fr = FriendRequest::default();
     new_fr.status = match fr.status {
-        Status::Uninitilized => FriendRequestStatus::Uninitialized,
-        Status::Pending => FriendRequestStatus::Pending,
-        Status::Accepted => FriendRequestStatus::Accepted,
-        Status::Denied => FriendRequestStatus::Denied,
-        Status::RemovedFriend => FriendRequestStatus::RequestRemoved,
-        Status::RequestRemoved => FriendRequestStatus::RequestRemoved,
+        DirectStatus::Uninitilized => FriendRequestStatus::Uninitialized,
+        DirectStatus::Pending => FriendRequestStatus::Pending,
+        DirectStatus::Accepted => FriendRequestStatus::Accepted,
+        DirectStatus::Denied => FriendRequestStatus::Denied,
+        DirectStatus::RemovedFriend => FriendRequestStatus::RequestRemoved,
+        DirectStatus::RequestRemoved => FriendRequestStatus::RequestRemoved,
     };
     new_fr.from = PublicKey::from_bytes(&fr.from.to_bytes());
     new_fr.to = PublicKey::from_bytes(&fr.to.to_bytes());
