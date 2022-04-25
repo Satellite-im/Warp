@@ -4,9 +4,6 @@ pub use warp_module::Module;
 
 // #[cfg(not(target_os = "wasm32"))]
 pub use anyhow;
-#[cfg(feature = "bincode_opt")]
-#[cfg(not(target_os = "wasm32"))]
-pub use bincode;
 pub use bip39;
 pub use bs58;
 pub use cfg_if;

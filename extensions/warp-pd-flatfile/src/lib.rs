@@ -1,4 +1,3 @@
-use blake2::{Blake2b512, Digest};
 #[allow(unused_imports)]
 use std::{
     fs::OpenOptions,
@@ -515,26 +514,4 @@ fn execute(data: &[DataObject], query: &QueryBuilder) -> warp_common::Result<Vec
         }
     }
     Ok(list)
-}
-
-#[allow(dead_code)]
-fn hash<R: Read>(reader: &mut R) -> std::io::Result<Vec<u8>> {
-    let mut buf = vec![0; 2014];
-    let mut hasher = Blake2b512::new();
-    loop {
-        let count = reader.read(&mut buf)?;
-        if count == 0 {
-            break;
-        }
-        hasher.update(&buf[..count]);
-    }
-    Ok(hasher.finalize().to_vec())
-}
-
-#[allow(dead_code)]
-fn hash_buffer<R: AsRef<[u8]>>(buffer: &R) -> std::io::Result<Vec<u8>> {
-    let buffer = buffer.as_ref();
-    let mut hasher = Blake2b512::new();
-    hasher.update(buffer);
-    Ok(hasher.finalize().to_vec())
 }

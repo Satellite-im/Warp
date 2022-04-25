@@ -21,12 +21,11 @@ digest = { version = "0.10" }
 aes-gcm = { version = "0.9" }
 aead = { version = "0.4", default-features = false }
 anyhow = { version = "1" }
-zeroize = "<=1.5"
+zeroize = "1"
 cfg-if = "1.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rand = { version = "0.7"  }
-libc = "0.2"
 getrandom = { version = "0.2" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

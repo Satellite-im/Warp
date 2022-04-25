@@ -24,7 +24,6 @@ warp-module = { path = "../../utils/warp-module" }
 warp-data = { path = "../../utils/warp-data" }
 warp-common = { path = "../../utils/warp-common" }
 
-blake2 = "0.10"
 lazy_static = "1.4"
 hex = "0.4"
 # Extensions
