@@ -25,6 +25,7 @@ use warp_common::{
     bs58, serde_json, tokio,
 };
 use warp_configuration::Config;
+use warp_crypto::zeroize::Zeroize;
 use warp_data::DataObject;
 use warp_tesseract::Tesseract;
 
@@ -133,15 +134,18 @@ async fn main() -> AnyResult<()> {
     ));
 
     //TODO: Have keyfile encrypted
-    let key = match cli.keyfile {
+    let mut key = match cli.keyfile {
         Some(path) => {
-            let data = tokio::fs::read_to_string(path).await?;
+            let data = tokio::fs::read(path).await?;
             data
         }
         None => cli::password_line()?,
     };
+
     //TODO: push this to TUI
-    tesseract.lock().unwrap().unlock(key.trim().as_bytes())?;
+    tesseract.lock().unwrap().unlock(&key)?;
+
+    key.zeroize();
 
     //TODO: Have the module manager handle the checks
     if config.modules.pocket_dimension {

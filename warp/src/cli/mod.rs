@@ -34,7 +34,7 @@ pub fn command_line() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn password_line() -> anyhow::Result<String> {
+pub fn password_line() -> anyhow::Result<Vec<u8>> {
     let mut rl = Editor::new();
     rl.set_helper(Some(UnsecuredMarker::default()));
     rl.helper_mut()
@@ -42,5 +42,5 @@ pub fn password_line() -> anyhow::Result<String> {
         .flip();
     let passphrase = rl.readline("Password:")?;
 
-    Ok(passphrase)
+    Ok(passphrase.as_bytes().to_vec())
 }
