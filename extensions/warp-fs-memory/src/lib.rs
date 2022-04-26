@@ -148,11 +148,11 @@ impl Constellation for MemorySystem {
             data.set_size(bytes as u64);
             data.set_payload(DimensionData::from_path(path))?;
 
-            cache.add_data(DataType::Module(Module::FileSystem), &data)?;
+            cache.add_data(DataType::from(Module::FileSystem), &data)?;
         }
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::Module(Module::FileSystem), file)?;
+            let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::new_file", &object)
         }
@@ -163,7 +163,7 @@ impl Constellation for MemorySystem {
         if let Ok(cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
             query.r#where("name", name.to_string())?;
-            if let Ok(list) = cache.get_data(DataType::Module(Module::FileSystem), Some(&query)) {
+            if let Ok(list) = cache.get_data(DataType::from(Module::FileSystem), Some(&query)) {
                 //get last
                 if !list.is_empty() {
                     let obj = list.last().unwrap();
@@ -211,11 +211,11 @@ impl Constellation for MemorySystem {
             data.set_size(bytes as u64);
             data.set_payload(DimensionData::from_buffer(name, buf))?;
 
-            cache.add_data(DataType::Module(Module::FileSystem), &data)?;
+            cache.add_data(DataType::from(Module::FileSystem), &data)?;
         }
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::Module(Module::FileSystem), file)?;
+            let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::new_file", &object)
         }
@@ -237,7 +237,7 @@ impl Constellation for MemorySystem {
         if let Ok(cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
             query.r#where("name", name.to_string())?;
-            if let Ok(list) = cache.get_data(DataType::Module(Module::FileSystem), Some(&query)) {
+            if let Ok(list) = cache.get_data(DataType::from(Module::FileSystem), Some(&query)) {
                 //get last
                 if !list.is_empty() {
                     let obj = list.last().unwrap();
@@ -302,7 +302,7 @@ impl Constellation for MemorySystem {
         }
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::Module(Module::FileSystem), ())?;
+            let object = DataObject::new(DataType::from(Module::FileSystem), ())?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::create_directory", &object)
         }

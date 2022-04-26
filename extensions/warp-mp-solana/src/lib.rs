@@ -207,8 +207,8 @@ impl MultiPass for SolanaAccount {
         self.identity = Some(identity.clone());
 
         if let Ok(mut cache) = self.get_cache() {
-            let object = DataObject::new(DataType::Module(Module::Accounts), &identity)?;
-            cache.add_data(DataType::Module(Module::Accounts), &object)?;
+            let object = DataObject::new(DataType::from(Module::Accounts), &identity)?;
+            cache.add_data(DataType::from(Module::Accounts), &object)?;
         }
         Ok(identity.public_key)
     }
@@ -220,8 +220,7 @@ impl MultiPass for SolanaAccount {
                 if let Ok(cache) = self.get_cache() {
                     let mut query = QueryBuilder::default();
                     query.r#where("username", &username)?;
-                    if let Ok(list) =
-                        cache.get_data(DataType::Module(Module::Accounts), Some(&query))
+                    if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
                     {
                         //get last
                         if !list.is_empty() {
@@ -236,8 +235,7 @@ impl MultiPass for SolanaAccount {
                 if let Ok(cache) = self.get_cache() {
                     let mut query = QueryBuilder::default();
                     query.r#where("public_key", &pkey)?;
-                    if let Ok(list) =
-                        cache.get_data(DataType::Module(Module::Accounts), Some(&query))
+                    if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
                     {
                         //get last
                         if !list.is_empty() {
@@ -255,11 +253,11 @@ impl MultiPass for SolanaAccount {
             let mut query = QueryBuilder::default();
             query.r#where("public_key", &ident.public_key)?;
             if cache
-                .has_data(DataType::Module(Module::Accounts), &query)
+                .has_data(DataType::from(Module::Accounts), &query)
                 .is_err()
             {
-                let object = DataObject::new(DataType::Module(Module::Accounts), &ident)?;
-                cache.add_data(DataType::Module(Module::Accounts), &object)?;
+                let object = DataObject::new(DataType::from(Module::Accounts), &ident)?;
+                cache.add_data(DataType::from(Module::Accounts), &object)?;
             }
         }
         Ok(ident)
@@ -294,17 +292,17 @@ impl MultiPass for SolanaAccount {
         if let Ok(mut cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
             query.r#where("username", &old_identity.username)?;
-            if let Ok(list) = cache.get_data(DataType::Module(Module::Accounts), Some(&query)) {
+            if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query)) {
                 //get last
                 if !list.is_empty() {
                     let mut obj = list.last().unwrap().clone();
                     obj.set_payload(identity.clone())?;
-                    cache.add_data(DataType::Module(Module::Accounts), &obj)?;
+                    cache.add_data(DataType::from(Module::Accounts), &obj)?;
                 }
             } else {
                 cache.add_data(
-                    DataType::Module(Module::Accounts),
-                    &DataObject::new(DataType::Module(Module::Accounts), identity.clone())?,
+                    DataType::from(Module::Accounts),
+                    &DataObject::new(DataType::from(Module::Accounts), identity.clone())?,
                 )?;
             }
         }
@@ -318,7 +316,7 @@ impl MultiPass for SolanaAccount {
     }
 
     fn refresh_cache(&mut self) -> warp_common::Result<()> {
-        self.get_cache()?.empty(DataType::Module(self.module()))
+        self.get_cache()?.empty(DataType::from(self.module()))
     }
 }
 

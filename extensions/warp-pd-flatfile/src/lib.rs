@@ -254,7 +254,7 @@ impl PocketDimension for FlatfileStorage {
         data.set_version(version as u32);
 
         match dimension {
-            DataType::Module(Module::FileSystem) => {
+            DataType::FileSystem => {
                 match data.payload::<DimensionData>()? {
                     DimensionData::Path { name, path } => {
                         let old_path = path;
@@ -403,7 +403,7 @@ impl PocketDimension for FlatfileStorage {
             .iter()
             .filter(|data| data.data_type() == dimension)
         {
-            if let DataType::Module(Module::FileSystem) = &item.data_type() {
+            if let DataType::FileSystem = &item.data_type() {
                 if let DimensionData::Path { path, .. } = item.payload::<DimensionData>()? {
                     std::fs::remove_file(path)?;
                 }

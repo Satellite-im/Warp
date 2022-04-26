@@ -55,48 +55,39 @@ pub struct Data {
     payload: Value,
 }
 
-cfg_if! {
-    if #[cfg(not(target_arch = "wasm32"))] {
-        #[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Display)]
-        #[serde(crate = "warp_common::serde")]
-        #[serde(rename_all = "lowercase")]
-        pub enum DataType {
-            #[display(fmt = "{}", "_0")]
-            Module(Module),
-            #[display(fmt = "http")]
-            Http,
-            #[display(fmt = "file")]
-            File,
-            #[display(fmt = "data_export")]
-            DataExport,
-            #[display(fmt = "unknown")]
-            Unknown,
-        }
-
-        impl From<Module> for DataType {
-            fn from(module: Module) -> Self {
-                DataType::Module(module)
-            }
-        }
-    }
+#[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Display)]
+#[serde(crate = "warp_common::serde")]
+#[serde(rename_all = "lowercase")]
+#[repr(C)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub enum DataType {
+    #[display(fmt = "messaging")]
+    Messaging,
+    #[display(fmt = "filesystem")]
+    FileSystem,
+    #[display(fmt = "accounts")]
+    Accounts,
+    #[display(fmt = "cache")]
+    Cache,
+    #[display(fmt = "http")]
+    Http,
+    #[display(fmt = "file")]
+    File,
+    #[display(fmt = "data_export")]
+    DataExport,
+    #[display(fmt = "unknown")]
+    Unknown,
 }
 
-//TODO: Implement a C-Style enum variant that handles `Module` for wasm
-cfg_if! {
-    if #[cfg(target_arch = "wasm32")] {
-        #[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Display)]
-        #[serde(crate = "warp_common::serde")]
-        #[serde(rename_all = "lowercase")]
-        #[wasm_bindgen]
-        pub enum DataType {
-            #[display(fmt = "http")]
-            Http,
-            #[display(fmt = "file")]
-            File,
-            #[display(fmt = "data_export")]
-            DataExport,
-            #[display(fmt = "unknown")]
-            Unknown,
+#[cfg(not(target_arch = "wasm32"))]
+impl From<Module> for DataType {
+    fn from(module: Module) -> Self {
+        match module {
+            Module::Messaging => DataType::Messaging,
+            Module::FileSystem => DataType::FileSystem,
+            Module::Accounts => DataType::Accounts,
+            Module::Cache => DataType::Cache,
+            Module::Unknown => DataType::Unknown,
         }
     }
 }
@@ -123,6 +114,7 @@ impl Default for Data {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Data {
     /// Update the `Data` instance with the current time stamp (UTC)
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn update_time(&mut self) {
         self.timestamp = Utc::now();
     }

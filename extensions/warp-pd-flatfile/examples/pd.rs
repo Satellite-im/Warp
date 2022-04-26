@@ -21,20 +21,20 @@ fn main() -> anyhow::Result<()> {
     let mut storage = FlatfileStorage::new_with_index_file(root, index)?;
 
     let data = DataObject::new(
-        DataType::Module(Module::FileSystem),
+        DataType::from(Module::FileSystem),
         DimensionData::from_path("Cargo.toml"),
     )?;
 
-    storage.add_data(DataType::Module(Module::FileSystem), &data)?;
+    storage.add_data(DataType::from(Module::FileSystem), &data)?;
 
     let bufdata = DataObject::new(
-        DataType::Module(Module::FileSystem),
+        DataType::from(Module::FileSystem),
         DimensionData::from_buffer_nofile("testbin", b"Hello, World"),
     )?;
 
-    storage.add_data(DataType::Module(Module::FileSystem), &bufdata)?;
+    storage.add_data(DataType::from(Module::FileSystem), &bufdata)?;
     let bufdata = DataObject::new(
-        DataType::Module(Module::FileSystem),
+        DataType::from(Module::FileSystem),
         DimensionData::from_buffer_nofile("test", b"Hello, World"),
     )?;
     storage.add_data(DataType::File, &bufdata)?;
@@ -43,7 +43,7 @@ fn main() -> anyhow::Result<()> {
     query.filter(Comparator::Eq, "name", "testbin")?;
 
     let arr = storage
-        .get_data(DataType::Module(Module::FileSystem), Some(&query))?
+        .get_data(DataType::from(Module::FileSystem), Some(&query))?
         .last()
         .ok_or(Error::InvalidDataType)?
         .payload::<DimensionData>()?;
@@ -54,6 +54,6 @@ fn main() -> anyhow::Result<()> {
 
     println!("Contents: {}", String::from_utf8_lossy(&buf));
 
-    storage.empty(DataType::Module(Module::FileSystem))?;
+    storage.empty(DataType::from(Module::FileSystem))?;
     Ok(())
 }

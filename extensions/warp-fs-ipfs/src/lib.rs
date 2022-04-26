@@ -248,14 +248,14 @@ impl Constellation for IpfsFileSystem {
 
         if let Ok(mut cache) = self.get_cache() {
             let object = DataObject::new(
-                DataType::Module(Module::FileSystem),
+                DataType::from(Module::FileSystem),
                 DimensionData::from_path(path),
             )?;
-            cache.add_data(DataType::Module(Module::FileSystem), &object)?;
+            cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::Module(Module::FileSystem), file)?;
+            let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::new_file", &object)
         }
@@ -284,7 +284,7 @@ impl Constellation for IpfsFileSystem {
 
             let mut query = QueryBuilder::default();
             query.r#where("name", &name)?;
-            if let Ok(list) = cache.get_data(DataType::Module(Module::FileSystem), Some(&query)) {
+            if let Ok(list) = cache.get_data(DataType::from(Module::FileSystem), Some(&query)) {
                 //get last
                 if !list.is_empty() {
                     let obj = list.last().unwrap();
@@ -394,14 +394,14 @@ impl Constellation for IpfsFileSystem {
                 .to_string();
 
             let object = DataObject::new(
-                DataType::Module(Module::FileSystem),
+                DataType::from(Module::FileSystem),
                 DimensionData::from_buffer(&name, buffer),
             )?;
-            cache.add_data(DataType::Module(Module::FileSystem), &object)?;
+            cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::Module(Module::FileSystem), file)?;
+            let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::new_file", &object)
         }
@@ -421,7 +421,7 @@ impl Constellation for IpfsFileSystem {
 
             let mut query = QueryBuilder::default();
             query.r#where("name", &name)?;
-            if let Ok(list) = cache.get_data(DataType::Module(Module::FileSystem), Some(&query)) {
+            if let Ok(list) = cache.get_data(DataType::from(Module::FileSystem), Some(&query)) {
                 //get last
                 if !list.is_empty() {
                     let obj = list.last().unwrap();
@@ -478,7 +478,7 @@ impl Constellation for IpfsFileSystem {
         };
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::Module(Module::FileSystem), ())?;
+            let object = DataObject::new(DataType::from(Module::FileSystem), ())?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::remove_file", &object)
         }
@@ -515,7 +515,7 @@ impl Constellation for IpfsFileSystem {
         }
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::Module(Module::FileSystem), directory)?;
+            let object = DataObject::new(DataType::from(Module::FileSystem), directory)?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::create_directory", &object)
         }

@@ -252,7 +252,7 @@ impl<'a> WarpApp<'a> {
             .map(|(module, _)| module)
             .map(|module| {
                 let data = cache
-                    .get_data(DataType::Module(module.clone()), None)
+                    .get_data(DataType::from(module.clone()), None)
                     .unwrap_or_default();
                 Row::new(vec![
                     module.to_string().to_lowercase(),

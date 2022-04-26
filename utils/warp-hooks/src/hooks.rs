@@ -168,11 +168,11 @@ impl Hooks {
     ///     assert_eq!(system.subscribe(Hook::from("unknown::new_file"), |_, _|{}).is_err(), true);
     ///     system.subscribe("filesystem::new_file", |hook, data| {
     ///         assert_eq!(hook.name.as_str(), "new_file");
-    ///         assert_eq!(hook.data_type, DataType::Module(Module::FileSystem));
+    ///         assert_eq!(hook.data_type, DataType::from(Module::FileSystem));
     ///         let file: File = data.payload().unwrap();
     ///         assert_eq!(file.name().as_str(), "test.txt");
     ///     }).unwrap();
-    ///     let data = DataObject::new(DataType::Module(Module::FileSystem), File::new("test.txt")).unwrap();
+    ///     let data = DataObject::new(DataType::from(Module::FileSystem), File::new("test.txt")).unwrap();
     ///     system.trigger("filesystem::new_file", &data);
     /// ```
     pub fn subscribe<C, H>(&mut self, hook: H, f: C) -> Result<()>
@@ -205,11 +205,11 @@ impl Hooks {
     ///     let hook = system.create("new_file", Module::FileSystem).unwrap();
     ///     system.subscribe("filesystem::new_file", |hook, data| {
     ///         assert_eq!(hook.name.as_str(), "new_file");
-    ///         assert_eq!(hook.data_type, DataType::Module(Module::FileSystem));
+    ///         assert_eq!(hook.data_type, DataType::from(Module::FileSystem));
     ///         let file: File = data.payload().unwrap();
     ///         assert_eq!(file.name().as_str(), "test.txt");
     ///     }).unwrap();
-    ///     let data = DataObject::new(DataType::Module(Module::FileSystem), File::new("test.txt")).unwrap();
+    ///     let data = DataObject::new(DataType::from(Module::FileSystem), File::new("test.txt")).unwrap();
     ///     system.trigger("filesystem::new_file", &data);
     /// ```
     pub fn trigger<S>(&self, name: S, data: &DataObject)

@@ -1,6 +1,6 @@
 use std::{ffi::CString, os::raw::c_char};
 
-use crate::Tesseract;
+use crate::tesseract::Tesseract;
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]

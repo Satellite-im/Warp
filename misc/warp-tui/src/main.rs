@@ -330,10 +330,10 @@ impl<'a> WarpApp<'a> {
                                             let mut cache = cache.lock().unwrap();
                                             for (module, active) in self.modules.modules.iter() {
                                                 if *active {
-                                                    info!(target:"Warp", "{} items cached for {}", cache.count(DataType::Module(module.clone()), None).unwrap_or_default(), module.to_string().to_lowercase());
+                                                    info!(target:"Warp", "{} items cached for {}", cache.count(DataType::from(module.clone()), None).unwrap_or_default(), module.to_string().to_lowercase());
                                                     info!(target:"Warp", "Clearing {} from cache", module);
-                                                    if let Err(e) = cache
-                                                        .empty(DataType::Module(module.clone()))
+                                                    if let Err(e) =
+                                                        cache.empty(DataType::from(module.clone()))
                                                     {
                                                         error!(target:"Error", "Error attempting to clear {} from cache: {}", module, e);
                                                     }

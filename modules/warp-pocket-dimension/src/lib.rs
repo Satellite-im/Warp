@@ -95,3 +95,23 @@ pub trait PocketDimension: Extension + Send + Sync {
     /// Will flush out the data related to `Module`.
     fn empty(&mut self, dimension: DataType) -> Result<()>;
 }
+
+// pub mod ffi {
+//     use std::ffi::{c_void, CString};
+//     use std::os::raw::c_char;
+//     use warp_data::{DataObject, DataType};
+//
+//     use crate::PocketDimension;
+//
+//     pub type PocketDimensionPointer = *mut c_void;
+//     pub type PocketDimensionBoxPointer = *mut Box<dyn PocketDimension>;
+//
+//     #[allow(clippy::missing_safety_doc)]
+//     #[no_mangle]
+//     pub unsafe extern "C" fn pocket_dimension_add_data(
+//         ctx: PocketDimensionPointer,
+//         dimension: *mut DataType,
+//         data: *mut DataObject,
+//     ) {
+//     }
+// }

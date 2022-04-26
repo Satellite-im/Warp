@@ -230,7 +230,7 @@ fn generate_data(system: &mut MemoryCache, amount: i64) {
 
         object.set_payload(data).unwrap();
         system
-            .add_data(DataType::Module(Module::Accounts), &object)
+            .add_data(DataType::from(Module::Accounts), &object)
             .unwrap();
     }
 }
@@ -244,7 +244,7 @@ fn if_count_eq_five() -> Result<()> {
     let mut query = QueryBuilder::default();
     query.filter(Comparator::Gte, "age", 19)?.limit(5);
 
-    let count = memory.count(DataType::Module(Module::Accounts), Some(&query))?;
+    let count = memory.count(DataType::from(Module::Accounts), Some(&query))?;
 
     assert_eq!(count, 5);
 
@@ -260,7 +260,7 @@ fn data_test() -> Result<()> {
     let mut query = QueryBuilder::default();
     query.r#where("age", 21)?;
 
-    let data = memory.get_data(DataType::Module(Module::Accounts), Some(&query))?;
+    let data = memory.get_data(DataType::from(Module::Accounts), Some(&query))?;
 
     assert_eq!(data.get(0).unwrap().payload::<SomeData>().unwrap().age, 21);
 

@@ -243,14 +243,14 @@ impl Constellation for StorjFilesystem {
 
         if let Ok(mut cache) = self.get_cache() {
             let object = DataObject::new(
-                DataType::Module(Module::FileSystem),
+                DataType::from(Module::FileSystem),
                 DimensionData::from_path(path),
             )?;
-            cache.add_data(DataType::Module(Module::FileSystem), &object)?;
+            cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::Module(Module::FileSystem), file)?;
+            let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::new_file", &object)
         }
@@ -266,7 +266,7 @@ impl Constellation for StorjFilesystem {
         if let Ok(cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
             query.r#where("name", &name)?;
-            if let Ok(list) = cache.get_data(DataType::Module(Module::FileSystem), Some(&query)) {
+            if let Ok(list) = cache.get_data(DataType::from(Module::FileSystem), Some(&query)) {
                 //get last
                 if !list.is_empty() {
                     let obj = list.last().unwrap();
@@ -356,14 +356,14 @@ impl Constellation for StorjFilesystem {
 
         if let Ok(mut cache) = self.get_cache() {
             let object = DataObject::new(
-                DataType::Module(Module::FileSystem),
+                DataType::from(Module::FileSystem),
                 DimensionData::from_buffer(&name, buffer),
             )?;
-            cache.add_data(DataType::Module(Module::FileSystem), &object)?;
+            cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
 
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::Module(Module::FileSystem), file)?;
+            let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
             let hook = hook.lock().unwrap();
             hook.trigger("filesystem::new_file", &object)
         }
@@ -376,7 +376,7 @@ impl Constellation for StorjFilesystem {
         if let Ok(cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
             query.r#where("name", &name)?;
-            if let Ok(list) = cache.get_data(DataType::Module(Module::FileSystem), Some(&query)) {
+            if let Ok(list) = cache.get_data(DataType::from(Module::FileSystem), Some(&query)) {
                 if !list.is_empty() {
                     let obj = list.last().ok_or(Error::ArrayPositionNotFound)?;
                     if let Ok(data) = obj.payload::<DimensionData>() {
@@ -425,7 +425,7 @@ impl Constellation for StorjFilesystem {
 
         let item = self.current_directory_mut()?.remove_item(&name)?;
         if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::Module(Module::FileSystem), &item)?;
+            let object = DataObject::new(DataType::from(Module::FileSystem), &item)?;
             let hook = hook.lock().unwrap();
             let hook_name = match item {
                 Item::Directory(_) => "filesystem::remove_directory",

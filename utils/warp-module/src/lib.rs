@@ -19,6 +19,7 @@ use wasm_bindgen::prelude::*;
 #[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[repr(C)]
 pub enum Module {
     /// Allows for direct, and multi-user encrypted messaging with ownership
     #[display(fmt = "messaging")]
