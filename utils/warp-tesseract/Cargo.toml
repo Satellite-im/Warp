@@ -22,7 +22,6 @@ js-sys = { version = "0.3" }
 serde-wasm-bindgen = "0.4.2"
 
 [features]
-default = ["async", "indirect"]
-async = ["warp-common/async"]
+default = ["indirect"]
 direct = []
 indirect = []

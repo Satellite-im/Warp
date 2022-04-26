@@ -51,133 +51,64 @@ impl Drop for Tesseract {
 }
 
 impl Tesseract {
-    cfg_if! {
-        if #[cfg(feature = "async")] {
-            /// Loads the keystore from a file
-            ///
-            /// # Example
-            /// TODO
-            /// ```
-            ///
-            /// ```
-            pub async fn from_file<S: AsRef<Path>>(file: S) -> Result<Self> {
-                let mut store = Tesseract::default();
-                let mut fs = File::open(file).await?;
-                let mut data = vec![];
-                fs.read_to_end(&mut data).await?;
+    /// Loads the keystore from a file
+    ///
+    /// # Example
+    /// TODO
+    /// ```
+    ///
+    /// ```
+    pub fn from_file<S: AsRef<Path>>(file: S) -> Result<Self> {
+        let mut store = Tesseract::default();
+        let mut fs = std::fs::File::open(file)?;
+        let mut data = vec![];
+        fs.read_to_end(&mut data)?;
 
-                let data = serde_json::from_slice(&data[..])?;
-                store.internal = data;
-                Ok(store)
-            }
+        let data = serde_json::from_slice(&data[..])?;
+        store.internal = data;
+        Ok(store)
+    }
 
-            /// Loads the keystore from a stream
-            ///
-            /// # Example
-            /// TODO
-            /// ```
-            ///
-            /// ```
-            pub async fn from_reader<S: AsyncRead + Unpin>(reader: &mut S) -> Result<Self> {
-                let mut store = Tesseract::default();
-                let mut data = vec![];
-                reader.read_to_end(&mut data).await?;
+    /// Loads the keystore from a stream
+    ///
+    /// # Example
+    /// TODO
+    /// ```
+    ///
+    /// ```
+    pub fn from_reader<S: Read>(reader: &mut S) -> Result<Self> {
+        let mut store = Tesseract::default();
+        let data = serde_json::from_reader(reader)?;
+        store.internal = data;
+        Ok(store)
+    }
 
-                let data = serde_json::from_slice(&data[..])?;
-                store.internal = data;
-                Ok(store)
-            }
+    /// Save the keystore to a file
+    ///
+    /// # Example
+    /// TODO
+    /// ```
+    ///
+    /// ```
+    pub fn to_file<S: AsRef<Path>>(&self, path: S) -> Result<()> {
+        let data = warp_common::serde_json::to_vec(&self.internal)?;
 
-            /// Save the keystore to a file
-            ///
-            /// # Example
-            /// TODO
-            /// ```
-            ///
-            /// ```
-            pub async fn to_file<S: AsRef<Path>>(&self, path: S) -> Result<()> {
-                let data = warp_common::serde_json::to_vec(&self.internal)?;
+        let mut fs = std::fs::File::create(path)?;
+        fs.write_all(&data[..])?;
+        fs.flush()?;
+        Ok(())
+    }
 
-                let mut fs = File::create(path).await?;
-                fs.write_all(&data[..]).await?;
-                fs.flush().await?;
-                Ok(())
-            }
-
-            /// Save the keystore from stream
-            ///
-            /// # Example
-            /// TODO
-            /// ```
-            ///
-            /// ```
-            pub async fn to_writer<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<()> {
-                let data = warp_common::serde_json::to_vec(&self.internal)?;
-                writer.write_all(&data[..]).await?;
-                writer.flush().await?;
-                Ok(())
-            }
-        } else {
-            /// Loads the keystore from a file
-            ///
-            /// # Example
-            /// TODO
-            /// ```
-            ///
-            /// ```
-            pub fn from_file<S: AsRef<Path>>(file: S) -> Result<Self> {
-                let mut store = Tesseract::default();
-                let mut fs = std::fs::File::open(file)?;
-                let mut data = vec![];
-                fs.read_to_end(&mut data)?;
-
-                let data = serde_json::from_slice(&data[..])?;
-                store.internal = data;
-                Ok(store)
-            }
-
-            /// Loads the keystore from a stream
-            ///
-            /// # Example
-            /// TODO
-            /// ```
-            ///
-            /// ```
-            pub fn from_reader<S: Read>(reader: &mut S) -> Result<Self> {
-                let mut store = Tesseract::default();
-                let data = serde_json::from_reader(reader)?;
-                store.internal = data;
-                Ok(store)
-            }
-
-            /// Save the keystore to a file
-            ///
-            /// # Example
-            /// TODO
-            /// ```
-            ///
-            /// ```
-            pub fn to_file<S: AsRef<Path>>(&self, path: S) -> Result<()> {
-                let data = warp_common::serde_json::to_vec(&self.internal)?;
-
-                let mut fs = std::fs::File::create(path)?;
-                fs.write_all(&data[..])?;
-                fs.flush()?;
-                Ok(())
-            }
-
-            /// Save the keystore from stream
-            ///
-            /// # Example
-            /// TODO
-            /// ```
-            ///
-            /// ```
-            pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<()> {
-                serde_json::to_writer(writer, &self.internal)?;
-                Ok(())
-            }
-        }
+    /// Save the keystore from stream
+    ///
+    /// # Example
+    /// TODO
+    /// ```
+    ///
+    /// ```
+    pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<()> {
+        serde_json::to_writer(writer, &self.internal)?;
+        Ok(())
     }
 
     /// Import and encrypt a hashmap into tesseract

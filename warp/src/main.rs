@@ -174,8 +174,7 @@ async fn main() -> AnyResult<()> {
 
     let tesseract = Arc::new(Mutex::new(
         Tesseract::from_file(warp_directory.join("datastore"))
-            .await
-            .unwrap_or_default(),
+            .unwrap_or_default()
     ));
 
     //TODO: Have keyfile encrypted
@@ -275,7 +274,7 @@ async fn main() -> AnyResult<()> {
             Command::Import { key, value } => {
                 let mut tesseract = tesseract.lock().unwrap();
                 tesseract.set(&key, &value)?;
-                tesseract.to_file(warp_directory.join("datastore")).await?;
+                tesseract.to_file(warp_directory.join("datastore"))?;
             }
             Command::Export { key } => {
                 let tesseract = tesseract.lock().unwrap();
@@ -290,7 +289,7 @@ async fn main() -> AnyResult<()> {
             Command::Unset { key } => {
                 let mut tesseract = tesseract.lock().unwrap();
                 tesseract.delete(&key)?;
-                tesseract.to_file(warp_directory.join("datastore")).await?;
+                tesseract.to_file(warp_directory.join("datastore"))?;
             }
             Command::CreateAccount { username } => {
                 // clone the arc to be used within `spawn_blocking` without moving the whole thing over
@@ -324,8 +323,7 @@ async fn main() -> AnyResult<()> {
                         tesseract
                             .lock()
                             .unwrap()
-                            .to_file(warp_directory.join("datastore"))
-                            .await?;
+                            .to_file(warp_directory.join("datastore"))?;
                     }
                     Err(e) => {
                         warn!("Could not create account: {}", e);
@@ -375,8 +373,7 @@ async fn main() -> AnyResult<()> {
                         tesseract
                             .lock()
                             .unwrap()
-                            .to_file(warp_directory.join("datastore"))
-                            .await?;
+                            .to_file(warp_directory.join("datastore"))?;
                     }
                     Err(e) => {
                         println!("Error obtaining account: {}", e);
