@@ -1,4 +1,3 @@
-use crate::helper;
 use crate::manager::SolanaManager;
 #[allow(unused_imports)]
 use crate::pubkey_from_seeds;
@@ -157,7 +156,7 @@ impl Friends {
     }
 
     pub fn list_requests(&self) -> anyhow::Result<Vec<(Pubkey, FriendRequest)>> {
-        let requests = helper::accounts(&self.program, vec![])?;
+        let requests = self.program.accounts(vec![])?;
         Ok(requests)
     }
 

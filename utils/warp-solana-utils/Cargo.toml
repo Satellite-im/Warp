@@ -8,12 +8,10 @@ edition = "2021"
 [dependencies]
 warp-common = { path = "../../utils/warp-common" }
 warp-crypto = { path = "../../utils/warp-crypto" }
-users = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"] }
-friends = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"] }
-groupchats = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"] }
-anchor-client = "0.20"
-
-solana-account-decoder = "1.9"
+users = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"], rev = "139e02a0060f7ba94e998abb4d64451d2de61ad0"}
+friends = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"], rev = "139e02a0060f7ba94e998abb4d64451d2de61ad0" }
+groupchats = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"], rev = "139e02a0060f7ba94e998abb4d64451d2de61ad0" }
+anchor-client = "0.24.2"
 
 # TODO: Remove blocking feature and use async in the future
 reqwest = { version = "0.11", features = ["blocking", "json"] }
