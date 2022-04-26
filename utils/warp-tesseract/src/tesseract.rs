@@ -1,7 +1,6 @@
 use std::{collections::HashMap, fmt::Debug, path::Path};
 use warp_common::{
     anyhow::{self, Result},
-    cfg_if::cfg_if,
     serde_json,
 };
 use warp_crypto::zeroize::Zeroize;
@@ -9,13 +8,7 @@ use warp_crypto::zeroize::Zeroize;
 use warp_common::anyhow::{bail, ensure};
 use warp_common::error::Error;
 
-cfg_if! {
-    if #[cfg(feature = "async")] {
-        use warp_common::tokio::{fs::File, io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt}};
-    } else {
-        use std::io::prelude::*;
-    }
-}
+use std::io::prelude::*;
 
 /// The key store that holds encrypted strings that can be used for later use.
 #[derive(Default, Clone, PartialEq, Eq)]
