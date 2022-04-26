@@ -223,6 +223,58 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
+    pub unsafe extern "C" fn constellation_go_back(ctx: ConstellationPointer) -> bool {
+        if ctx.is_null() {
+            return false;
+        }
+
+        let constellation = &mut *(ctx as *mut Box<dyn Constellation>);
+        match (**constellation).go_back() {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_open_directory(
+        ctx: ConstellationPointer,
+        name: *mut c_char,
+    ) -> DirectoryPointer {
+        if ctx.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        if name.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let cname = CString::from_raw(name).to_string_lossy().to_string();
+
+        let constellation = &mut *(ctx as *mut Box<dyn Constellation>);
+        match (**constellation).open_directory(&cname) {
+            Ok(directory) => {
+                Box::into_raw(Box::new(directory)) as DirectoryStructPointer as DirectoryPointer
+            }
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_root_directory(
+        ctx: ConstellationPointer,
+    ) -> DirectoryPointer {
+        if ctx.is_null() {
+            return std::ptr::null_mut();
+        }
+        let constellation = &*(ctx as *mut Box<dyn Constellation>);
+        let directory = (**constellation).root_directory();
+        Box::into_raw(Box::new(directory)) as DirectoryStructPointer as DirectoryPointer
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
     pub unsafe extern "C" fn constellation_current_directory(
         ctx: ConstellationPointer,
     ) -> DirectoryPointer {
@@ -233,6 +285,23 @@ pub mod ffi {
         let current_directory = (**constellation).current_directory();
         let directory = Box::new(current_directory.clone());
         Box::into_raw(directory) as DirectoryStructPointer as DirectoryPointer
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_current_directory_mut(
+        ctx: ConstellationPointer,
+    ) -> DirectoryPointer {
+        if ctx.is_null() {
+            return std::ptr::null_mut();
+        }
+        let constellation = &mut *(ctx as *mut Box<dyn Constellation>);
+        match (**constellation).current_directory_mut() {
+            Ok(directory) => {
+                Box::into_raw(Box::new(directory)) as DirectoryStructPointer as DirectoryPointer
+            }
+            Err(_) => std::ptr::null_mut(),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -362,6 +431,102 @@ pub mod ffi {
         }
 
         ptr as *mut _
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_remove(
+        ctx: ConstellationPointer,
+        remote: *mut c_char,
+        recursive: bool,
+    ) -> bool {
+        if ctx.is_null() {
+            return false;
+        }
+
+        if remote.is_null() {
+            return false;
+        }
+
+        let constellation = &mut *(ctx as *mut Box<dyn Constellation>);
+        let remote = CString::from_raw(remote).to_string_lossy().to_string();
+        let rt = warp_common::tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move { (**constellation).remove(&remote, recursive).await })
+            .is_ok()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_create_directory(
+        ctx: ConstellationPointer,
+        remote: *mut c_char,
+        recursive: bool,
+    ) -> bool {
+        if ctx.is_null() {
+            return false;
+        }
+
+        if remote.is_null() {
+            return false;
+        }
+
+        let constellation = &mut *(ctx as *mut Box<dyn Constellation>);
+        let remote = CString::from_raw(remote).to_string_lossy().to_string();
+        let rt = warp_common::tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move { (**constellation).create_directory(&remote, recursive).await })
+            .is_ok()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_move_item(
+        ctx: ConstellationPointer,
+        src: *mut c_char,
+        dst: *mut c_char,
+    ) -> bool {
+        if ctx.is_null() {
+            return false;
+        }
+
+        if src.is_null() {
+            return false;
+        }
+
+        if dst.is_null() {
+            return false;
+        }
+
+        let constellation = &mut *(ctx as *mut Box<dyn Constellation>);
+        let src = CString::from_raw(src).to_string_lossy().to_string();
+        let dst = CString::from_raw(dst).to_string_lossy().to_string();
+        let rt = warp_common::tokio::runtime::Runtime::new().unwrap();
+        match rt.block_on(async move { (**constellation).move_item(&src, &dst).await }) {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_sync_ref(
+        ctx: ConstellationPointer,
+        src: *mut c_char,
+    ) -> bool {
+        if ctx.is_null() {
+            return false;
+        }
+
+        if src.is_null() {
+            return false;
+        }
+
+        let constellation = &mut *(ctx as *mut Box<dyn Constellation>);
+        let src = CString::from_raw(src).to_string_lossy().to_string();
+        let rt = warp_common::tokio::runtime::Runtime::new().unwrap();
+        match rt.block_on(async move { (**constellation).sync_ref(&src).await }) {
+            Ok(_) => true,
+            Err(_) => false,
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
