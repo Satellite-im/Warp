@@ -12,12 +12,12 @@ use axum::{
     routing::get,
     Extension, Json, Router,
 };
-use warp::constellation::{Constellation, ConstellationDataType};
-use warp_common::{
+use warp::common::{
     anyhow::{self, bail},
     serde_json::Value,
 };
-use warp_data::{DataObject, DataType};
+use warp::constellation::{Constellation, ConstellationDataType};
+use warp::data::{DataObject, DataType};
 
 use crate::manager::ModuleManager;
 

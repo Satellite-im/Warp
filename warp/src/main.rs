@@ -11,23 +11,23 @@ use comfy_table::Table;
 use manager::ModuleManager;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use warp::constellation::{Constellation, ConstellationDataType};
-use warp::multipass::identity::{Identifier, PublicKey};
-use warp::pd_stretto::StrettoClient;
-use warp::pocket_dimension::PocketDimension;
 #[allow(unused_imports)]
-use warp_common::dirs;
-use warp_common::error::Error;
-use warp_common::log::{error, info, warn};
-use warp_common::{
+use warp::common::dirs;
+use warp::common::error::Error;
+use warp::common::log::{error, info, warn};
+use warp::common::{
     anyhow,
     anyhow::{bail, Result as AnyResult},
     bs58, serde_json, tokio,
 };
+use warp::constellation::{Constellation, ConstellationDataType};
+use warp::crypto::zeroize::Zeroize;
+use warp::data::DataObject;
+use warp::multipass::identity::{Identifier, PublicKey};
+use warp::pd_stretto::StrettoClient;
+use warp::pocket_dimension::PocketDimension;
+use warp::tesseract::Tesseract;
 use warp_configuration::Config;
-use warp_crypto::zeroize::Zeroize;
-use warp_data::DataObject;
-use warp_tesseract::Tesseract;
 
 #[derive(Debug, Parser)]
 #[clap(version, about, long_about = None)]
