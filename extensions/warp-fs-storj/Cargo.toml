@@ -7,9 +7,9 @@ edition = "2021"
 
 [dependencies]
 rust-s3 = {version = "0.30.0" }
-aws-config = "0.9.0"
-aws-sdk-s3 = "0.9.0"
-aws-endpoint = "0.9.0"
+aws-config = "0.10.1"
+aws-sdk-s3 = "0.10.1"
+aws-endpoint = "0.10.1"
 warp-constellation = { path = "../../modules/warp-constellation" }
 warp-pocket-dimension = { path = "../../modules/warp-pocket-dimension" }
 warp-module = { path = "../../utils/warp-module" }
