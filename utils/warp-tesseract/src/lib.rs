@@ -1,5 +1,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tesseract;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ffi;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub use tesseract::Tesseract;
 
