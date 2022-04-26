@@ -9,7 +9,6 @@ In your cargo project add the following
 ```
 [dependencies]
 warp = { git = "https://github.com/Satellite-im/Warp", default-features = false, features = ["multipass"] }
-warp-tesseract = { git = "https://github.com/Satellite-im/Warp", default-features = false, features = ["indirect"] } #omit `default-features = false` if you wish to use async loading/saving
 ```
 
 ## Starting Extension 

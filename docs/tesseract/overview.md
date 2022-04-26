@@ -57,14 +57,14 @@ let mut store = Tesseract::default();
 store.unlock(&b"MY_PASSPHRASE").unwrap();
 store.set("MY_KEY", "MY_VALUE").unwrap();
 
-store.save_to_file("my_encrypted_data").unwrap();
+store.to_file("my_encrypted_data").unwrap();
 ```
 
 #### Loading the datastore
 ```rust
 use warp_tesseract::Tesseract;
 
-let mut store = Tesseract::load_from_file("my_encrypted_data").unwrap();
+let mut store = Tesseract::from_file("my_encrypted_data").unwrap();
 store.unlock(&b"MY_PASSPHRASE").unwrap();
 let value = store.retrieve("MY_KEY").unwrap();
 ```

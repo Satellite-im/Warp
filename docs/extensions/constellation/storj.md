@@ -16,7 +16,6 @@ In your cargo project add the following
 ```
 [dependencies]
 warp = { git = "https://github.com/Satellite-im/Warp", default-features = false, features = ["constellation"] }
-warp-tesseract = { git = "https://github.com/Satellite-im/Warp", default-features = false, features = ["indirect"] } #omit `default-features = false` if you wish to use async loading/saving
 ```
 
 ### Adding Keys to Tesseract
@@ -24,7 +23,7 @@ warp-tesseract = { git = "https://github.com/Satellite-im/Warp", default-feature
 #### Via `warp-tesseract`
 
 ```rust
-use warp_tesseract::Tesseract;
+use warp::tesseract::Tesseract;
 
 let mut tesseract = Tesseract::default();
 tesseract.unlock(&b"<PASSWORD/KEY HERE>").unwrap();
@@ -63,10 +62,15 @@ This will show all the keys stored in tesseract after entering your password.
 
 ### Testing StorJ Extension
 
+#### Via CLI
+
+***TODO***
+
 #### Uploading Content
 
 ```rust
-use warp_tesseract::Tesseract;
+use warp::fs_storj::StorjFilesystem;
+
 let mut tesseract = Tesseract::from_file(warp_directory.join("datastore")).unwrap_or_default();
 tesseract.unlock(&b"<PASSWORD/KEY HERE>").unwrap();
 let access_key = tesseract.retrieve("STORJ_ACCESS_KEY").unwrap();
@@ -80,7 +84,6 @@ system.from_buffer("new_file", &b"This is content to the file".to_vec()).await.u
 #### Downloading Content
 
 ```rust
-use warp_tesseract::Tesseract;
 let mut tesseract = Tesseract::from_file(warp_directory.join("datastore")).unwrap_or_default();
 tesseract.unlock(&b"<PASSWORD/KEY HERE>").unwrap();
 let access_key = tesseract.retrieve("STORJ_ACCESS_KEY").unwrap();
@@ -99,7 +102,6 @@ println!("{}", String::from_utf8_lossy(&buffer));
 
 
 ```rust
-use warp_tesseract::Tesseract;
 let tesseract = Tesseract::from_file(warp_directory.join("datastore")).unwrap_or_default();
 tesseract.unlock(&b"<PASSWORD/KEY HERE>").unwrap();
 let access_key = tesseract.retrieve("STORJ_ACCESS_KEY").unwrap();
@@ -111,5 +113,5 @@ system.sync_ref().unwrap(); // To make sure the link is up to date
 
 let file = system.current_directory().get_item("new_item").and_then(warp::item::Item::get_file).unwrap();
 
-println!("{}", file.reference);
+println!("{}", file.reference());
 ```

@@ -88,7 +88,7 @@ The cache is updated to reflect our profile changes. This allows us to optimisti
 This should only be called once, this is used to create a new account on the system. Calling this will store the encrypted PrivateKey on disk. Calling again will overwrite the previous account which cannot be retrieved unless the PrivateKey was backed up. The PrivateKey will be encrypted by the supplied `passphrase` so that it's not readable on disk.
 
 ```rust
-Multipass::create_identity(&mut self, username: &str, passphrase: &str) -> Result<PublicKey>; // Returns PublicKey, stores encrypted private key
+Multipass::create_identity(&mut self, username: Option<&str>, passphrase: Option<&str>) -> Result<PublicKey>; // Returns PublicKey, stores encrypted private key
 ```
 
 #### Decrypt Private Key
@@ -96,7 +96,7 @@ Multipass::create_identity(&mut self, username: &str, passphrase: &str) -> Resul
 Decrypts the stored PrivateKey given a passphrase to allow interactions with the account such as on chain transactions.
 
 ```rust
-Multipass::decrypt_private_key(&self, passphrase: &str) -> Result<Vec<u8>>;
+Multipass::decrypt_private_key(&self, passphrase: Option<&str>) -> Result<Vec<u8>>;
 ```
 
 #### Refresh Dimension Cache
