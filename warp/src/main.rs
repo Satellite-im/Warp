@@ -173,8 +173,7 @@ async fn main() -> AnyResult<()> {
     }
 
     let tesseract = Arc::new(Mutex::new(
-        Tesseract::from_file(warp_directory.join("datastore"))
-            .unwrap_or_default()
+        Tesseract::from_file(warp_directory.join("datastore")).unwrap_or_default(),
     ));
 
     //TODO: Have keyfile encrypted
@@ -426,13 +425,12 @@ async fn main() -> AnyResult<()> {
                 };
 
                 let mut table = Table::new();
-                table.set_header(vec!["From", "To", "Status"]);
+                table.set_header(vec!["From", "Address", "Status"]);
                 for request in account.list_incoming_request()? {
-                    let from_ident = account.get_identity(Identifier::PublicKey(request.from))?;
-                    let to_ident = account.get_identity(Identifier::PublicKey(request.to))?;
+                    let ident = account.get_identity(Identifier::PublicKey(request.from))?;
                     table.add_row(vec![
-                        &format!("{}#{}", &from_ident.username, &from_ident.short_id),
-                        &format!("{}#{}", &to_ident.username, &to_ident.short_id),
+                        &format!("{}#{}", &ident.username, &ident.short_id),
+                        &bs58::encode(ident.public_key.to_bytes()).into_string(),
                         &request.status.to_string(),
                     ]);
                 }
@@ -446,13 +444,12 @@ async fn main() -> AnyResult<()> {
                 };
 
                 let mut table = Table::new();
-                table.set_header(vec!["From", "To", "Status"]);
+                table.set_header(vec!["To", "Address", "Status"]);
                 for request in account.list_outgoing_request()? {
-                    let from_ident = account.get_identity(Identifier::PublicKey(request.from))?;
-                    let to_ident = account.get_identity(Identifier::PublicKey(request.to))?;
+                    let ident = account.get_identity(Identifier::PublicKey(request.to))?;
                     table.add_row(vec![
-                        &format!("{}#{}", &from_ident.username, &from_ident.short_id),
-                        &format!("{}#{}", &to_ident.username, &to_ident.short_id),
+                        &format!("{}#{}", &ident.username, &ident.short_id),
+                        &bs58::encode(ident.public_key.to_bytes()).into_string(),
                         &request.status.to_string(),
                     ]);
                 }
