@@ -184,7 +184,7 @@ impl MultiPass for SolanaAccount {
         let mut helper = UserHelper::new_with_wallet(&wallet)?;
 
         if let Ok(identity) = user_to_identity(&helper, None) {
-            if identity.username == username {
+            if identity.get_username() == username {
                 return Err(Error::ToBeDetermined);
             }
         }
@@ -210,7 +210,7 @@ impl MultiPass for SolanaAccount {
             let object = DataObject::new(DataType::from(Module::Accounts), &identity)?;
             cache.add_data(DataType::from(Module::Accounts), &object)?;
         }
-        Ok(identity.public_key)
+        Ok(identity.get_public_key())
     }
 
     fn get_identity(&self, id: Identifier) -> warp_common::Result<Identity> {
@@ -251,7 +251,7 @@ impl MultiPass for SolanaAccount {
 
         if let Ok(mut cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
-            query.r#where("public_key", &ident.public_key)?;
+            query.r#where("public_key", &ident.get_public_key())?;
             if cache
                 .has_data(DataType::from(Module::Accounts), &query)
                 .is_err()
@@ -270,7 +270,7 @@ impl MultiPass for SolanaAccount {
         let old_identity = identity.clone();
         match option {
             IdentityUpdate::Username(username) => {
-                helper.set_name(&format!("{username}#{}", identity.short_id))?; //TODO: Investigate why it *sometimes* errors and causes interaction to contract to error until there is an update
+                helper.set_name(&format!("{username}#{}", identity.get_short_id()))?; //TODO: Investigate why it *sometimes* errors and causes interaction to contract to error until there is an update
                 identity.username = username
             }
             IdentityUpdate::Graphics { picture, banner } => {
@@ -324,7 +324,7 @@ impl Friends for SolanaAccount {
     fn send_request(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
         let ident = self.get_own_identity()?;
 
-        if ident.public_key == pubkey {
+        if ident.get_public_key() == pubkey {
             return Err(Error::Any(anyhow!("Unable to send a request to yourself")));
         }
 
@@ -348,7 +348,7 @@ impl Friends for SolanaAccount {
     fn accept_request(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
         let ident = self.get_own_identity()?;
 
-        if ident.public_key == pubkey {
+        if ident.get_public_key() == pubkey {
             return Err(Error::Any(anyhow!(
                 "Unable to send/accept a request for yourself"
             )));
@@ -374,7 +374,7 @@ impl Friends for SolanaAccount {
     fn deny_request(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
         let ident = self.get_own_identity()?;
 
-        if ident.public_key == pubkey {
+        if ident.get_public_key() == pubkey {
             return Err(Error::Any(anyhow!("Unable to deny a request for yourself")));
         }
 
@@ -397,7 +397,7 @@ impl Friends for SolanaAccount {
     fn close_request(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
         let ident = self.get_own_identity()?;
 
-        if ident.public_key == pubkey {
+        if ident.get_public_key() == pubkey {
             return Err(Error::Any(anyhow!(
                 "Unable to close a request for yourself"
             )));
@@ -424,8 +424,8 @@ impl Friends for SolanaAccount {
         let ident = self.get_own_identity()?;
         self.list_all_request().map(|fr| {
             fr.iter()
-                .filter(|fr| fr.to == ident.public_key)
-                .filter(|fr| fr.status == FriendRequestStatus::Pending)
+                .filter(|fr| fr.get_to() == ident.get_public_key())
+                .filter(|fr| fr.get_status() == FriendRequestStatus::Pending)
                 .cloned()
                 .collect::<Vec<_>>()
         })
@@ -435,8 +435,8 @@ impl Friends for SolanaAccount {
         let ident = self.get_own_identity()?;
         self.list_all_request().map(|fr| {
             fr.iter()
-                .filter(|fr| fr.from == ident.public_key)
-                .filter(|fr| fr.status == FriendRequestStatus::Pending)
+                .filter(|fr| fr.get_from() == ident.get_public_key())
+                .filter(|fr| fr.get_status() == FriendRequestStatus::Pending)
                 .cloned()
                 .collect::<Vec<_>>()
         })
@@ -451,7 +451,9 @@ impl Friends for SolanaAccount {
             .map(|(_, request)| request)
             .map(DirectFriendRequest::from)
             .map(fr_to_fr)
-            .filter(|fr| fr.from == ident.public_key || fr.to == ident.public_key)
+            .filter(|fr| {
+                fr.get_from() == ident.get_public_key() || fr.get_to() == ident.get_public_key()
+            })
             .collect::<Vec<_>>();
         Ok(new_list)
     }
@@ -484,12 +486,12 @@ impl Friends for SolanaAccount {
         let ident = self.get_own_identity()?;
         for request in list
             .iter()
-            .filter(|r| r.status == FriendRequestStatus::Accepted)
+            .filter(|r| r.get_status() == FriendRequestStatus::Accepted)
         {
-            let identity = if request.to != ident.public_key {
-                self.get_identity(Identifier::PublicKey(request.clone().to))?
+            let identity = if request.get_to() != ident.get_public_key() {
+                self.get_identity(Identifier::PublicKey(request.get_to()))?
             } else {
-                self.get_identity(Identifier::PublicKey(request.clone().from))?
+                self.get_identity(Identifier::PublicKey(request.get_from()))?
             };
 
             identities.push(identity)

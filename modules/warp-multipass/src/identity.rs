@@ -12,6 +12,16 @@ pub struct Role {
     pub level: u8,
 }
 
+impl Role {
+    pub fn get_name(&self) -> String {
+        self.name.clone()
+    }
+
+    pub fn get_level(&self) -> u8 {
+        self.level
+    }
+}
+
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(crate = "warp_common::serde")]
 pub struct Badge {
@@ -22,6 +32,16 @@ pub struct Badge {
     pub icon: String,
 }
 
+impl Badge {
+    pub fn get_name(&self) -> String {
+        self.name.clone()
+    }
+
+    pub fn get_icon(&self) -> String {
+        self.icon.clone()
+    }
+}
+
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(crate = "warp_common::serde")]
 pub struct Graphics {
@@ -30,6 +50,16 @@ pub struct Graphics {
 
     /// Hash to profile banner
     pub profile_banner: String,
+}
+
+impl Graphics {
+    pub fn get_profile_picture(&self) -> String {
+        self.profile_picture.clone()
+    }
+
+    pub fn get_profile_banner(&self) -> String {
+        self.profile_banner.clone()
+    }
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -63,6 +93,44 @@ pub struct Identity {
     pub linked_accounts: HashMap<String, String>,
 }
 
+impl Identity {
+    pub fn get_username(&self) -> String {
+        self.username.clone()
+    }
+
+    pub fn get_short_id(&self) -> u16 {
+        self.short_id
+    }
+
+    pub fn get_public_key(&self) -> PublicKey {
+        self.public_key.clone()
+    }
+
+    pub fn get_graphics(&self) -> Graphics {
+        self.graphics.clone()
+    }
+
+    pub fn get_status_message(&self) -> Option<String> {
+        self.status_message.clone()
+    }
+
+    pub fn get_roles(&self) -> Vec<Role> {
+        self.roles.clone()
+    }
+
+    pub fn get_available_badges(&self) -> Vec<Badge> {
+        self.available_badges.clone()
+    }
+
+    pub fn get_active_badge(&self) -> Badge {
+        self.active_badge.clone()
+    }
+
+    pub fn get_linked_accounts(&self) -> HashMap<String, String> {
+        self.linked_accounts.clone()
+    }
+}
+
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(crate = "warp_common::serde")]
 pub struct FriendRequest {
@@ -76,7 +144,21 @@ pub struct FriendRequest {
     pub status: FriendRequestStatus,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Display)]
+impl FriendRequest {
+    pub fn get_from(&self) -> PublicKey {
+        self.from.clone()
+    }
+
+    pub fn get_to(&self) -> PublicKey {
+        self.to.clone()
+    }
+
+    pub fn get_status(&self) -> FriendRequestStatus {
+        self.status
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Display)]
 #[serde(crate = "warp_common::serde")]
 #[repr(C)]
 pub enum FriendRequestStatus {
