@@ -672,6 +672,87 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
+    pub unsafe extern "C" fn directory_id(dir: DirectoryPointer) -> *mut c_char {
+        if dir.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let dir: &Directory = &*(dir as DirectoryStructPointer);
+
+        match CString::new(dir.id().to_string()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_name(dir: DirectoryPointer) -> *mut c_char {
+        if dir.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let dir: &Directory = &*(dir as DirectoryStructPointer);
+
+        match CString::new(dir.name()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_description(dir: DirectoryPointer) -> *mut c_char {
+        if dir.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let dir: &Directory = &*(dir as DirectoryStructPointer);
+
+        match CString::new(dir.description().to_string()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_size(dir: DirectoryPointer) -> i64 {
+        if dir.is_null() {
+            return 0;
+        }
+
+        let dir: &Directory = &*(dir as DirectoryStructPointer);
+
+        dir.size()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_creation(dir: DirectoryPointer) -> i64 {
+        if dir.is_null() {
+            return 0;
+        }
+
+        let dir: &Directory = &*(dir as DirectoryStructPointer);
+
+        dir.creation().timestamp()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_modified(dir: DirectoryPointer) -> i64 {
+        if dir.is_null() {
+            return 0;
+        }
+
+        let dir: &Directory = &*(dir as DirectoryStructPointer);
+
+        dir.modified().timestamp()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
     pub unsafe extern "C" fn directory_free(dir: DirectoryPointer) {
         if dir.is_null() {
             return;
