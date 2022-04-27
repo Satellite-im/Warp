@@ -78,6 +78,7 @@ pub struct FriendRequest {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Display)]
 #[serde(crate = "warp_common::serde")]
+#[repr(C)]
 pub enum FriendRequestStatus {
     #[display(fmt = "uninitialized")]
     Uninitialized,
