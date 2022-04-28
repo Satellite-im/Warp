@@ -183,6 +183,7 @@ impl Friends {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct DirectFriendRequest {
     pub from: Pubkey,
     pub status: DirectStatus,
@@ -192,7 +193,7 @@ pub struct DirectFriendRequest {
     pub to_encrypted_key: String,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Debug, Copy, PartialEq)]
 pub enum DirectStatus {
     Uninitilized,
     Pending,
