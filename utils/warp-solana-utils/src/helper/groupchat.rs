@@ -61,7 +61,7 @@ impl GroupChat {
             group_id: id.to_string(),
             encryption_key: hex::encode(crypto_key),
             db_type: 0,
-        });
+        })?;
 
         self.program
             .request()
@@ -80,7 +80,7 @@ impl GroupChat {
                 group_id: id.to_string(),
                 open_invites: true,
                 name: name.to_string(),
-                encryption_key: String::new(),
+                encryption_key: invite.encryption_key,
                 db_type: 1,
             })
             .send()?;
@@ -142,17 +142,17 @@ impl GroupChat {
         })
     }
 
-    pub fn invite_to_group(&self, id: &str, recipient: &Pubkey) -> anyhow::Result<()> {
+    pub fn invite_to_group(&self, id: &str, recipient: Pubkey) -> anyhow::Result<()> {
         let payer = self.program.payer();
         let hash = self.group_hash(id);
         let group_key = self.group_address_from_id(id)?;
         let inviter = self.invite_pubkey(payer, group_key)?;
-        let invitee = self.invite_pubkey(*recipient, group_key)?;
+        let invitee = self.invite_pubkey(recipient, group_key)?;
 
         let creator_invite = self.get_invite_by_group_id(id)?;
 
         let encrypted = self.encrypt_invite(Invitation {
-            recipient: *recipient,
+            recipient,
             ..creator_invite
         })?;
 
@@ -169,11 +169,15 @@ impl GroupChat {
             })
             .args(groupchats::instruction::Invite {
                 group_id: id.to_string(),
-                recipient: *recipient,
+                recipient,
                 encryption_key: String::new(),
                 db_type: 1,
             })
             .send()?;
+        Ok(())
+    }
+
+    pub fn close_invite(&self) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -184,7 +188,7 @@ impl GroupChat {
 
     fn invite_pubkey(&self, user: Pubkey, group: Pubkey) -> anyhow::Result<Pubkey> {
         let (key, _) = Pubkey::try_find_program_address(
-            &[&user.to_bytes(), &group.to_bytes(), b"groupchat"],
+            &[&user.to_bytes(), &group.to_bytes(), b"invite"],
             &self.program.id(),
         )
         .ok_or_else(|| anyhow!("Error finding program"))?;
@@ -201,8 +205,21 @@ impl GroupChat {
         Ok(key)
     }
 
-    fn get_invitation_accounts(&self) -> anyhow::Result<Vec<Invitation>> {
-        unimplemented!()
+    pub fn get_invitation(&self, key: Pubkey) -> anyhow::Result<Invitation> {
+        let account = self.program.account(key)?;
+        Ok(account)
+    }
+
+    pub fn get_invitation_accounts(&self) -> anyhow::Result<Vec<Invitation>> {
+        let list = self
+            .program
+            .accounts(vec![])?
+            .iter()
+            .map(|(_, inv)| inv)
+            .cloned()
+            .collect::<Vec<Invitation>>();
+
+        Ok(list)
     }
 
     fn get_invite_by_group_id(&self, id: &str) -> anyhow::Result<Invitation> {

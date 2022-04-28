@@ -10,6 +10,7 @@ pub use anchor_client;
 use anchor_client::solana_sdk::derivation_path::DerivationPath;
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::solana_sdk::signature::keypair_from_seed_and_derivation_path;
+use anchor_client::Cluster;
 use warp_common::anyhow::{anyhow, Result};
 use warp_common::derive_more::Display;
 
@@ -31,6 +32,16 @@ impl<A: AsRef<str>> From<A> for EndPoint {
             "main_net_beta" | "mainnetbeta" | "mainnet" => EndPoint::MainNetBeta,
             "testnet" | "test_net" => EndPoint::TestNet,
             _ => EndPoint::DevNet,
+        }
+    }
+}
+
+impl Into<Cluster> for EndPoint {
+    fn into(self) -> Cluster {
+        match self {
+            EndPoint::MainNetBeta => todo!(),
+            EndPoint::TestNet => todo!(),
+            EndPoint::DevNet => todo!(),
         }
     }
 }
