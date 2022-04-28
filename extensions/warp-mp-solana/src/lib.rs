@@ -109,6 +109,12 @@ impl SolanaAccount {
         Ok(keypair)
     }
 
+    pub fn get_wallet(&self) -> anyhow::Result<SolanaWallet> {
+        let tesseract = self.get_tesseract()?;
+        let mnemonic = tesseract.retrieve("mnemonic")?;
+        SolanaWallet::restore_from_mnemonic(None, &mnemonic)
+    }
+
     pub fn get_tesseract(&self) -> anyhow::Result<MutexGuard<Tesseract>> {
         let tesseract = self
             .tesseract
@@ -171,7 +177,7 @@ impl MultiPass for SolanaAccount {
                 .get_current_user()
                 .is_ok()
             {
-                return Err(Error::Other); //TODO: Error for existing account
+                return Err(Error::Any(anyhow!("Account already exist")));
             }
         }
 
@@ -180,14 +186,19 @@ impl MultiPass for SolanaAccount {
             None => generate_name(),
         };
 
-        let wallet = SolanaWallet::create_random(PhraseType::Standard, None)?;
+        let wallet = match self.get_wallet() {
+            Ok(wallet) => wallet,
+            Err(_) => SolanaWallet::create_random(PhraseType::Standard, None)?,
+        };
+
         let mut helper = UserHelper::new_with_wallet(&wallet)?;
 
         if let Ok(identity) = user_to_identity(&helper, None) {
             if identity.get_username() == username {
-                return Err(Error::ToBeDetermined);
+                return Err(Error::Any(anyhow!("Account already exist")));
             }
         }
+
         let mut manager = SolanaManager::new();
         manager.initiralize_from_solana_wallet(&wallet)?;
 
@@ -200,7 +211,9 @@ impl MultiPass for SolanaAccount {
 
         helper.create(&uname, "", "We have lift off")?;
 
-        self.insert_solana_wallet(wallet)?;
+        if self.get_wallet().is_err() {
+            self.insert_solana_wallet(wallet)?;
+        }
 
         let identity = user_to_identity(&helper, None)?;
 
@@ -229,7 +242,7 @@ impl MultiPass for SolanaAccount {
                         }
                     }
                 }
-                return Err(Error::Unimplemented);
+                return Err(Error::Any(anyhow!("Unable to find identity by username")));
             }
             Identifier::PublicKey(pkey) => {
                 if let Ok(cache) = self.get_cache() {
@@ -270,7 +283,7 @@ impl MultiPass for SolanaAccount {
         let old_identity = identity.clone();
         match option {
             IdentityUpdate::Username(username) => {
-                helper.set_name(&format!("{username}#{}", identity.get_short_id()))?; //TODO: Investigate why it *sometimes* errors and causes interaction to contract to error until there is an update
+                helper.set_name(&format!("{username}#{}", identity.get_short_id()))?;
                 identity.username = username
             }
             IdentityUpdate::Graphics { picture, banner } => {
@@ -411,7 +424,7 @@ impl Friends for SolanaAccount {
         }
 
         if self.has_friend(pubkey.clone()).is_ok() {
-            return Err(Error::Unimplemented);
+            return Err(Error::Any(anyhow!("You are already friends")));
         }
 
         let helper = self.friend_helper()?;
@@ -581,8 +594,7 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
 
 pub mod ffi {
     use std::ffi::c_void;
-    use std::sync::Arc;
-    use warp_common::futures::lock::Mutex;
+    use std::sync::{Arc, Mutex};
     use warp_multipass::MultiPass;
     use warp_tesseract::Tesseract;
 
@@ -593,11 +605,11 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_mp_solana_new_wth_devnet(
         tesseract: *mut Tesseract,
     ) -> *mut c_void {
-        let mut account = SolanaAccount::new_with_devnet();
+        let mut account = SolanaAccount::with_devnet();
         let tesseract = match tesseract.is_null() {
             true => {
                 let tesseract = &*tesseract;
-                tesseract
+                tesseract.clone()
             }
             false => Tesseract::default(),
         };
