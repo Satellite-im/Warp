@@ -12,7 +12,7 @@ warp-multipass = { path = "../../modules/warp-multipass" }
 warp-module = { path = "../../utils/warp-module" }
 warp-crypto = { path = "../../utils/warp-crypto" }
 
-libp2p = { git = "https://github.com/libp2p/rust-libp2p", features = ["tcp-tokio"] } # TODO: Lock to a specific commit until version is publish
+#libp2p = { git = "https://github.com/libp2p/rust-libp2p", features = ["tcp-tokio"] } # TODO: Lock to a specific commit until version is publish
 
 [features]
 default = []
