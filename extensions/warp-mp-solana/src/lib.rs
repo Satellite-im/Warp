@@ -578,3 +578,32 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
     identity.graphics.profile_banner = user.banner_image_hash;
     Ok(identity)
 }
+
+pub mod ffi {
+    use std::ffi::c_void;
+    use std::sync::Arc;
+    use warp_common::futures::lock::Mutex;
+    use warp_multipass::MultiPass;
+    use warp_tesseract::Tesseract;
+
+    use crate::SolanaAccount;
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_mp_solana_new_wth_devnet(
+        tesseract: *mut Tesseract,
+    ) -> *mut c_void {
+        let mut account = SolanaAccount::new_with_devnet();
+        let tesseract = match tesseract.is_null() {
+            true => {
+                let tesseract = &*tesseract;
+                tesseract
+            }
+            false => Tesseract::default(),
+        };
+        account.set_tesseract(Arc::new(Mutex::new(tesseract)));
+
+        let mp = Box::new(Box::new(account));
+        Box::into_raw(mp) as *mut Box<dyn MultiPass> as *mut c_void
+    }
+}
