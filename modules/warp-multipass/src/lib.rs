@@ -279,7 +279,10 @@ pub mod ffi {
 
         let mp = &mut *(ctx as MultiPassBoxPointer);
         match (**mp).list_incoming_request() {
-            Ok(list) => list.as_ptr() as *const *const _,
+            Ok(list) => {
+                let ptr = list.as_ptr() as *const *const _;
+                ptr
+            }
             Err(_) => std::ptr::null(),
         }
     }
@@ -306,13 +309,22 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_list_all_request(ctx: MultiPassPointer) -> bool {
+    pub unsafe extern "C" fn multipass_list_all_request(
+        ctx: MultiPassPointer,
+    ) -> *const *const FriendRequest {
         if ctx.is_null() {
-            return false;
+            return std::ptr::null();
         }
 
-        let _ = &mut *(ctx as MultiPassBoxPointer);
-        unimplemented!()
+        let mp = &mut *(ctx as MultiPassBoxPointer);
+        match (**mp).list_all_request() {
+            Ok(list) => {
+                let ptr = list.as_ptr() as *const *const _;
+                std::mem::forget(list);
+                ptr
+            }
+            Err(_) => std::ptr::null(),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -355,13 +367,22 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_list_friends(ctx: MultiPassPointer) -> *mut c_void {
+    pub unsafe extern "C" fn multipass_list_friends(
+        ctx: MultiPassPointer,
+    ) -> *const *const Identity {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
 
-        let _ = &mut *(ctx as MultiPassBoxPointer);
-        unimplemented!()
+        let mp = &mut *(ctx as MultiPassBoxPointer);
+        match (**mp).list_friends() {
+            Ok(list) => {
+                let ptr = list.as_ptr() as *const *const _;
+                std::mem::forget(list);
+                ptr
+            }
+            Err(_) => std::ptr::null(),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
