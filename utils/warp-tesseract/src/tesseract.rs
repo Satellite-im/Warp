@@ -39,27 +39,27 @@ impl Tesseract {
     /// Loads the keystore from a file
     ///
     /// # Example
-    /// TODO
-    /// ```
     ///
+    /// ```norun
+    /// use warp_tesseract::Tesseract;
+    ///
+    /// let tesseract = Tesseract::from_file("test_file")?;
     /// ```
     pub fn from_file<S: AsRef<Path>>(file: S) -> Result<Self> {
-        let mut store = Tesseract::default();
         let mut fs = std::fs::File::open(file)?;
-        let mut data = vec![];
-        fs.read_to_end(&mut data)?;
-
-        let data = serde_json::from_slice(&data[..])?;
-        store.internal = data;
-        Ok(store)
+        Tesseract::from_reader(&mut fs)
     }
 
     /// Loads the keystore from a stream
     ///
     /// # Example
-    /// TODO
-    /// ```
     ///
+    /// ```norun
+    /// use warp_tesseract::Tesseract;
+    /// use std::fs::File;
+    ///
+    /// let mut file = File::open("test_file")?;
+    /// let tesseract = Tesseract::from_reader(&mut file)?;
     /// ```
     pub fn from_reader<S: Read>(reader: &mut S) -> Result<Self> {
         let mut store = Tesseract::default();
@@ -71,25 +71,30 @@ impl Tesseract {
     /// Save the keystore to a file
     ///
     /// # Example
-    /// TODO
-    /// ```
     ///
+    /// ```norun
+    /// use std::fs::File;
+    /// use warp_tesseract::Tesseract;
+    ///
+    /// let mut tesseract = Tesseract::default();
+    /// tesseract.to_file("test_file")?;
     /// ```
     pub fn to_file<S: AsRef<Path>>(&self, path: S) -> Result<()> {
-        let data = warp_common::serde_json::to_vec(&self.internal)?;
-
         let mut fs = std::fs::File::create(path)?;
-        fs.write_all(&data[..])?;
-        fs.flush()?;
-        Ok(())
+        self.to_writer(&mut fs)
     }
 
     /// Save the keystore from stream
     ///
     /// # Example
-    /// TODO
-    /// ```
     ///
+    /// ```norun
+    /// use std::fs::File;
+    /// use warp_tesseract::Tesseract;
+    ///
+    /// let mut file = File::open("test_file")?;
+    /// let mut tesseract = Tesseract::default();
+    /// tesseract.to_writer(&mut file)?;
     /// ```
     pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<()> {
         serde_json::to_writer(writer, &self.internal)?;
@@ -151,7 +156,7 @@ impl Tesseract {
         self.internal.contains_key(key)
     }
 
-    /// Used to retreive and decrypt the value stored for the key
+    /// Used to retrieve and decrypt the value stored for the key
     pub fn retrieve(&self, key: &str) -> Result<String> {
         ensure!(self.is_unlock(), "Data is secured");
 
@@ -252,8 +257,6 @@ impl Tesseract {
     }
 
     /// Encrypts and remove password and plaintext from memory.
-    ///
-    /// Note: This will override existing contents within Tesseract.
     pub fn lock(&mut self) {
         self.enc_pass.zeroize();
         self.unlock = false;
