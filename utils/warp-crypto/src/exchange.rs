@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn x25519_key_exchange(
     prikey: &x25519_dalek::StaticSecret,
@@ -15,12 +18,40 @@ pub fn x25519_key_exchange(
     hash
 }
 
-//TODO: Evaluate and determine if this is the best choice for conversion of ed25519 to x25519
-//      as it may require specific access to the curve via curve25519-dalek crate
-//Note: It may be better to use two separate keypairs.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn x25519_key_exchange(
+    prikey: &[u8],
+    pubkey: &[u8],
+    nonce: Option<Vec<u8>>,
+    hashed: bool,
+) -> Vec<u8> {
+    let prikey: [u8; 32] = prikey.try_into().unwrap();
+    let pubkey: [u8; 32] = pubkey.try_into().unwrap();
+    let prikey = x25519_dalek::StaticSecret::from(prikey);
+    let pubkey = x25519_dalek::PublicKey::from(pubkey);
+    let secret = prikey.diffie_hellman(&pubkey);
+
+    let hash = match hashed {
+        true => crate::hash::sha256_hash(secret.as_bytes(), nonce),
+        false => secret.as_bytes().to_vec(),
+    };
+
+    hash
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn ed25519_to_x25519(keypair: &ed25519_dalek::Keypair) -> x25519_dalek::StaticSecret {
     x25519_dalek::StaticSecret::from(keypair.secret.to_bytes())
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn ed25519_to_x25519(keypair: &[u8]) -> Vec<u8> {
+    let kp = ed25519_dalek::Keypair::from_bytes(&keypair).unwrap();
+    x25519_dalek::StaticSecret::from(kp.secret.to_bytes())
+        .to_bytes()
+        .to_vec()
 }
 
 #[cfg(test)]
