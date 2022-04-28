@@ -6,13 +6,19 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rust-s3 = {version = "0.30.0" }
-aws-config = "0.10.1"
-aws-sdk-s3 = "0.10.1"
-aws-endpoint = "0.10.1"
+rust-s3 = { version = "0.30.0", optional = true }
+aws-config = { version = "0.10.1", optional = true }
+aws-sdk-s3 = { version = "0.10.1", optional = true }
+aws-endpoint = { version = "0.10.1", optional = true }
+
 warp-constellation = { path = "../../modules/warp-constellation" }
 warp-pocket-dimension = { path = "../../modules/warp-pocket-dimension" }
 warp-module = { path = "../../utils/warp-module" }
 warp-data = { path = "../../utils/warp-data" }
 warp-common = { path = "../../utils/warp-common", features = ["async"]}
 warp-hooks = { path = "../../utils/warp-hooks" }
+
+[features]
+default = ["s3"]
+s3 = ["rust-s3", "aws-config", "aws-sdk-s3", "aws-endpoint"]
+uplink = []
