@@ -11,10 +11,7 @@ fn update_name(account: &mut impl MultiPass, name: &str) -> anyhow::Result<()> {
     account.update_identity(IdentityUpdate::Username(name.to_string()))?;
     let ident = account.get_own_identity()?;
     println!();
-    println!(
-        "Updated Identity: {}",
-        warp_common::serde_json::to_string(&ident)?
-    );
+    println!("Updated Identity: {}", serde_json::to_string(&ident)?);
     Ok(())
 }
 
@@ -22,10 +19,7 @@ fn update_status(account: &mut impl MultiPass, status: &str) -> anyhow::Result<(
     account.update_identity(IdentityUpdate::StatusMessage(Some(status.to_string())))?;
     let ident = account.get_own_identity()?;
     println!();
-    println!(
-        "Updated Identity: {}",
-        warp_common::serde_json::to_string(&ident)?
-    );
+    println!("Updated Identity: {}", serde_json::to_string(&ident)?);
     Ok(())
 }
 
@@ -53,7 +47,7 @@ fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
     Ok(Arc::new(Mutex::new(Box::new(storage))))
 }
 
-fn main() -> warp_common::anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let mut tesseract = Tesseract::default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
@@ -71,10 +65,7 @@ fn main() -> warp_common::anyhow::Result<()> {
     account.create_identity(None, None)?;
     let ident = account.get_own_identity()?;
 
-    println!(
-        "Current Identity: {}",
-        warp_common::serde_json::to_string(&ident)?
-    );
+    println!("Current Identity: {}", serde_json::to_string(&ident)?);
 
     update_name(&mut account, "NotSoNewAccount")?;
     update_status(&mut account, "New status message")?;

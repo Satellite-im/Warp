@@ -36,10 +36,10 @@ impl Tesseract {
     ///
     /// # Example
     ///
-    /// ```norun
-    /// use warp_tesseract::Tesseract;
+    /// ```no_run
+    /// use warp::tesseract::Tesseract;
     ///
-    /// let tesseract = Tesseract::from_file("test_file")?;
+    /// let tesseract = Tesseract::from_file("test_file").unwrap();
     /// ```
     pub fn from_file<S: AsRef<Path>>(file: S) -> Result<Self> {
         let mut fs = std::fs::File::open(file)?;
@@ -50,12 +50,12 @@ impl Tesseract {
     ///
     /// # Example
     ///
-    /// ```norun
-    /// use warp_tesseract::Tesseract;
+    /// ```no_run
+    /// use warp::tesseract::Tesseract;
     /// use std::fs::File;
     ///
-    /// let mut file = File::open("test_file")?;
-    /// let tesseract = Tesseract::from_reader(&mut file)?;
+    /// let mut file = File::open("test_file").unwrap();
+    /// let tesseract = Tesseract::from_reader(&mut file).unwrap();
     /// ```
     pub fn from_reader<S: Read>(reader: &mut S) -> Result<Self> {
         let mut store = Tesseract::default();
@@ -68,12 +68,12 @@ impl Tesseract {
     ///
     /// # Example
     ///
-    /// ```norun
+    /// ```no_run
     /// use std::fs::File;
-    /// use warp_tesseract::Tesseract;
+    /// use warp::tesseract::Tesseract;
     ///
     /// let mut tesseract = Tesseract::default();
-    /// tesseract.to_file("test_file")?;
+    /// tesseract.to_file("test_file").unwrap();
     /// ```
     pub fn to_file<S: AsRef<Path>>(&self, path: S) -> Result<()> {
         let mut fs = std::fs::File::create(path)?;
@@ -84,13 +84,13 @@ impl Tesseract {
     ///
     /// # Example
     ///
-    /// ```norun
+    /// ```no_run
     /// use std::fs::File;
-    /// use warp_tesseract::Tesseract;
+    /// use warp::tesseract::Tesseract;
     ///
-    /// let mut file = File::open("test_file")?;
+    /// let mut file = File::open("test_file").unwrap();
     /// let mut tesseract = Tesseract::default();
-    /// tesseract.to_writer(&mut file)?;
+    /// tesseract.to_writer(&mut file).unwrap();
     /// ```
     pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<()> {
         serde_json::to_writer(writer, &self.internal)?;
@@ -103,8 +103,8 @@ impl Tesseract {
     ///
     /// ```
     /// let map = std::collections::HashMap::from([(String::from("API"), String::from("MYKEY"))]);
-    /// let key = warp_crypto::generate(32);
-    /// let tesseract = warp_tesseract::Tesseract::import(&key, map).unwrap();
+    /// let key = warp::crypto::generate(32);
+    /// let tesseract = warp::tesseract::Tesseract::import(&key, map).unwrap();
     ///
     /// assert_eq!(tesseract.exist("API"), true);
     /// assert_eq!(tesseract.retrieve("API").unwrap(), String::from("MYKEY"))
@@ -124,8 +124,8 @@ impl Tesseract {
     /// # Example
     ///
     /// ```
-    ///  let mut tesseract = warp_tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp_crypto::generate(32)).unwrap();
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
     ///  tesseract.set("API", "MYKEY").unwrap();
     ///  assert_eq!(tesseract.exist("API"), true);
     /// ```
@@ -142,8 +142,8 @@ impl Tesseract {
     /// # Example
     ///
     /// ```
-    ///  let mut tesseract = warp_tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp_crypto::generate(32)).unwrap();
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
     ///  tesseract.set("API", "MYKEY").unwrap();
     ///  assert_eq!(tesseract.exist("API"), true);
     ///  assert_eq!(tesseract.exist("NOT_API"), false);
@@ -173,8 +173,8 @@ impl Tesseract {
     /// # Example
     ///
     /// ```
-    ///  let mut tesseract = warp_tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp_crypto::generate(32)).unwrap();
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
     ///  tesseract.set("API", "MYKEY").unwrap();
     ///  assert_eq!(tesseract.exist("API"), true);
     ///  tesseract.delete("API").unwrap();
@@ -192,8 +192,8 @@ impl Tesseract {
     /// # Example
     ///
     /// ```
-    ///  let mut tesseract = warp_tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp_crypto::generate(32)).unwrap();
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
     ///  tesseract.set("API", "MYKEY").unwrap();
     ///  tesseract.clear();
     ///  assert_eq!(tesseract.exist("API"), false);
@@ -207,8 +207,8 @@ impl Tesseract {
     /// # Example
     ///
     /// ```
-    ///  let mut tesseract = warp_tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp_crypto::generate(32)).unwrap();
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
     ///  tesseract.set("API", "MYKEY").unwrap();
     ///  
     ///  let map = tesseract.export().unwrap();
@@ -233,9 +233,9 @@ impl Tesseract {
     /// # Example
     ///
     /// ```
-    ///  let mut tesseract = warp_tesseract::Tesseract::default();
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
     ///  assert!(!tesseract.is_unlock());
-    ///  tesseract.unlock(&warp_crypto::generate(32)).unwrap();
+    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
     ///  assert!(tesseract.is_unlock());
     ///  tesseract.set("API", "MYKEY").unwrap();
     ///  tesseract.lock();

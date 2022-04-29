@@ -5,7 +5,7 @@ use crate::crypto::rand::Rng;
 /// # Example
 ///
 /// ```
-/// use warp_multipass::generator;
+/// use warp::multipass::generator;
 /// let name = generator::generate_name();
 ///
 /// assert!(name.len() <= 32);

@@ -13,3 +13,4 @@ anyhow = "1"
 [dev-dependencies]
 warp-pd-flatfile = { path = "../warp-pd-flatfile" }
 warp-pd-stretto = { path = "../warp-pd-stretto" }
+serde_json = "1.0"

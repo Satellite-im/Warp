@@ -3,7 +3,7 @@ use warp::constellation::Constellation;
 use warp_fs_ipfs::IpfsFileSystem;
 
 #[tokio::main]
-async fn main() -> warp_common::anyhow::Result<()> {
+async fn main() -> anyhow::Result<()> {
     let mut system = IpfsFileSystem::new();
 
     let file = if let Ok(path) = std::env::var("IPFS_FILE") {
