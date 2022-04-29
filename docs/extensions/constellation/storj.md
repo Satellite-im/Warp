@@ -15,7 +15,8 @@ In your cargo project add the following
 
 ```
 [dependencies]
-warp = { git = "https://github.com/Satellite-im/Warp", default-features = false, features = ["constellation"] }
+warp = { git = "https://github.com/Satellite-im/Warp" }
+warp_extensions = { git = "https://github.com/Satellite-im/Warp", features = ["fs_storj"] }
 ```
 
 ### Adding Keys to Tesseract

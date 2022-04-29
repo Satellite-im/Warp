@@ -6,14 +6,14 @@ allow for storage of both `File` and `Directory`.
 ### Creating a `Directory`
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     directory::Directory,
 };
 
 fn main() {
     let directory = Directory::new("Test Directory");
 
-    assert_eq!(directory.name.as_str(), "Test Directory");
+    assert_eq!(directory.name().as_str(), "Test Directory");
 }
 ```
 
@@ -22,7 +22,7 @@ fn main() {
 You can create recursive directories (similar to `mkdir -p` in unix-like environment)
 
 ```rust
-use warp_constellation::{directory::Directory, item::Item};
+use warp::constellation::{directory::Directory, item::Item};
 
 fn main() {
     let root = Directory::new_recursive("/root/test/test2").unwrap();
@@ -35,7 +35,7 @@ fn main() {
 ### Getting an item from `Directory`
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     directory::Directory,
 };
 
@@ -51,7 +51,7 @@ fn main() {
 ### Adding a item to `Directory`
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     directory::Directory,
 };
 
@@ -69,10 +69,10 @@ fn main() {
 Getting the item index (position) within a Directory can be useful if you wish to manually get the item from the array of items through `Directory::list_item`
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     directory::Directory,
 };
-use warp_common::error::Error;
+use warp::error::Error;
 
 fn main() {
         let mut root = Directory::new("Test Directory");
@@ -89,7 +89,7 @@ fn main() {
 ### Get a item from a `Directory`
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     directory::Directory,
 };
 
@@ -106,7 +106,7 @@ fn main() {
 You can also get a item from a `Directory` using a specific path
 
 ```rust
-use warp_constellation::{directory::Directory};
+use warp::constellation::{directory::Directory};
 
 fn main() {
     let mut root = Directory::new("Test Directory");
@@ -127,7 +127,7 @@ fn main() {
 ### Renaming a item within a `Directory`
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     directory::Directory,
 };
 
@@ -146,7 +146,7 @@ fn main() {
 ### Removing a item within a `Directory`
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     directory::Directory,
 };
 
@@ -164,7 +164,7 @@ fn main() {
 You can also remove a item from a `Directory` using a specific path
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     directory::Directory,
 };
 

@@ -13,7 +13,7 @@ either
 Both `File` and `Directory` can be converted into an `Item` due to it being the base. 
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     directory::Directory, 
     file::File, 
     item::Item
@@ -37,7 +37,7 @@ fn main() {
 You are able to obtain a reference of `File` or `Directory` from an `Item`. 
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     directory::Directory,
     file::File,
     item::Item
@@ -73,7 +73,7 @@ fn main() {
 #### Get name from `Item`
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     file::File, 
     item::Item
 };
@@ -90,7 +90,7 @@ fn main() {
 #### Get description from `Item`
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     file::File, 
     item::Item
 };
@@ -108,7 +108,7 @@ fn main() {
 #### Get size from `Item`
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     file::File, 
     item::Item
 };
@@ -126,7 +126,7 @@ fn main() {
 You can also obtain the size of a `Directory`
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     file::File,
     directory::Directory,
     item::Item
@@ -156,7 +156,7 @@ fn main() {
 Note, `Item::set_size` can only be used if its value is `Item::File`, otherwise it would return an `ItemNotFile` error
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     directory::Directory,
     file::File,
     item::Item
@@ -178,7 +178,7 @@ fn main() {
 #### Setting the description of an `Item`
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     file::File,
     item::Item
 };
@@ -197,7 +197,7 @@ fn main() {
 #### Renaming an `Item`
 
 ```rust
-use warp_constellation::{
+use warp::constellation::{
     file::File,
     item::Item
 };

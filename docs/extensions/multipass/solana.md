@@ -8,7 +8,8 @@ In your cargo project add the following
 
 ```
 [dependencies]
-warp = { git = "https://github.com/Satellite-im/Warp", default-features = false, features = ["multipass"] }
+warp = { git = "https://github.com/Satellite-im/Warp" }
+warp-extensions = { git = "https://github.com/Satellite-im/Warp", features = ["mp_solana"] }
 ```
 
 ## Starting Extension 
@@ -29,10 +30,17 @@ Here you will also need to utilize tesseract when utilizing multipass extension
 
 ## Creating a new account
 
-***Note: Second field is not used within this extension and may be subjected to removal in the future.***
+### With a username
 
 ```rust
-    account.create_identity("NewAcctName", "").unwrap();
+    account.create_identity(Some("NewAcctName"), None).unwrap();
+```
+### Without a username
+
+**Note: If a username is not defined, one will automatically be generated**
+
+```rust
+    account.create_identity(None, None).unwrap();
 ```
 
 After the function successfully executes, there will be two encrypted fields within tesseract called `mnemonic` and `privkey`. 
@@ -59,7 +67,7 @@ return an error.
 ## Getting private key
 
 ```rust
-    let privkey = account.decrypt_private_key("").unwrap();
+    let privkey = account.decrypt_private_key(None).unwrap();
 ```
 
 This returns an array of bytes that is related for your private key. You would need to import them into the proper keypair to utilize them directly.

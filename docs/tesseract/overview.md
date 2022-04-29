@@ -13,7 +13,7 @@ If the `indirect` flag is used, you can unlock/lock tesseract with `Tesseract::u
 #### Unlocking Tesseract
 
 ```rust
-use warp_tesseract::Tesseract;
+use warp::tesseract::Tesseract;
 let mut store = Tesseract::default();
 store.unlock(&b"MY_PASSPHRASE").unwrap();
 ```
@@ -31,7 +31,7 @@ store.lock();
 Storing a key requries unlocking the store then putting a specific key into it with the `store` method. 
 
 ```rust
-use warp_tesseract::Tesseract;
+use warp::tesseract::Tesseract;
 
 let mut store = Tesseract::default();
 store.unlock(&b"MY_PASSPHRASE").unwrap();
@@ -51,7 +51,7 @@ You can import and export the encrypted contents from and to Tesseract.
 
 #### Saving the datastore
 ```rust
-use warp_tesseract::Tesseract;
+use warp::tesseract::Tesseract;
 
 let mut store = Tesseract::default();
 store.unlock(&b"MY_PASSPHRASE").unwrap();
@@ -62,8 +62,7 @@ store.to_file("my_encrypted_data").unwrap();
 
 #### Loading the datastore
 ```rust
-use warp_tesseract::Tesseract;
-
+use warp::tesseract::Tesseract;
 let mut store = Tesseract::from_file("my_encrypted_data").unwrap();
 store.unlock(&b"MY_PASSPHRASE").unwrap();
 let value = store.retrieve("MY_KEY").unwrap();

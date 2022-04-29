@@ -9,15 +9,14 @@ The `Constellation` is an trait that acts similarly to `Directory`, however, it 
 We would need to have a structure that would be used for our filesystem.
 
 ```rust
-use warp_common::chrono::{DateTime, Utc};
-use warp_common::serde::{Deserialize, Serialize};
-use warp_common::{Extension, Module};
-use warp_constellation::Constellation;
-use warp_constellation::directory::Directory;
-use warp_constellation::file::File;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use warp::{Extension, module::Module};
+use warp::constellation::Constellation;
+use warp::constellation::directory::Directory;
+use warp::constellation::file::File;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(crate = "warp_common::serde")]
 pub struct ExampleFileSystem {
 	index: Directory,
 	modified: DateTime<Utc>,
@@ -102,16 +101,15 @@ This will create a directory called `test` at the root of the filesystem.
 #### Uploading a file
 
 ```rust
-use warp_common::tokio;
-use warp_constellation::Constellation;
-use warp_fs_memory::MemorySystem;
+use warp::constellation::Constellation;
+use warp_extensions::fs_memory::MemorySystem;
 
 let mut filesystem = MemorySystem::new();
 
 let mut buf = vec![];
 
-let mut file = tokio::fs::File::open("hello.txt").await?;
-file.read_to_end(&mut buf).await?;
+let mut file = std::fs::File::open("hello.txt")?;
+file.read_to_end(&mut buf)?;
 
 filesystem.from_buffer("hello.txt", &buf).await.unwrap();
 ```
@@ -119,9 +117,8 @@ filesystem.from_buffer("hello.txt", &buf).await.unwrap();
 #### Download a file
 
 ```rust
-use warp_common::tokio;
-use warp_constellation::Constellation;
-use warp_fs_memory::MemorySystem;
+use warp::constellation::Constellation;
+use warp_extension::fs_memory::MemorySystem;
 
 let mut filesystem = MemorySystem::new();
 

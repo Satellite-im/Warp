@@ -11,8 +11,8 @@ Hooks allow us to create subscription points for extensions of the platform to l
 Each hook must be registered with the system, you can do so by calling the `create` method outlined below.
 
 ```rust
-use warp_hooks::hooks::{Hook, Hooks};
-use warp_module::Module;
+use warp::hooks::hooks::{Hook, Hooks};
+use warp::module::Module;
 
 fn main() {
     let mut system = Hooks::default();
@@ -25,8 +25,8 @@ fn main() {
 You can emit the hook to all subscribers by `triggering` the hook. Again shown below.
 
 ```rust
-use warp_hooks::hooks::{Hook, Hooks};
-use warp_module::Module;
+use warp::hooks::hooks::{Hook, Hooks};
+use warp::module::Module;
 
 fn main() {
     let mut system = Hooks::default();
@@ -40,9 +40,8 @@ fn main() {
 You may subscribe to be notified via a `Fn` closure when a hook is triggered as well.
 
 ```rust
-use warp_hooks::error::Error;
-use warp_hooks::hooks::{Hook, Hooks};
-use warp_module::Module;
+use warp::hooks::hooks::{Hook, Hooks};
+use warp::module::Module;
 
 fn main() {
     let mut system = Hooks::default();
