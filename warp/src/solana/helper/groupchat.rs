@@ -176,7 +176,106 @@ impl GroupChat {
         Ok(())
     }
 
-    pub fn close_invite(&self) -> anyhow::Result<()> {
+    pub fn modify_name(&self, group: &str, name: &str) -> anyhow::Result<()> {
+        let admin = self.program.payer();
+        let group = self.group_address_from_id(group)?;
+        let name = name.to_string();
+        self.program
+            .request()
+            .signer(&self.kp)
+            .accounts(groupchats::accounts::ModifyParameter { group, admin })
+            .args(groupchats::instruction::ModifyName { name })
+            .send()?;
+        Ok(())
+    }
+
+    pub fn modify_successor(&self, group: &str, receipient: Pubkey) -> anyhow::Result<()> {
+        let admin = self.program.payer();
+        let group_key = self.group_address_from_id(group)?;
+        let group = self.get_group(group_key)?;
+        let successor = self.invite_pubkey(receipient, group_key)?;
+        self.program
+            .request()
+            .signer(&self.kp)
+            .accounts(groupchats::accounts::ModifySuccessor {
+                group: group_key,
+                successor,
+                admin: group.admin,
+            })
+            .args(groupchats::instruction::ModifySuccessor)
+            .send()?;
+        Ok(())
+    }
+
+    pub fn modify_open_invites(&self, group: &str, open_invites: bool) -> anyhow::Result<()> {
+        let group = self.group_address_from_id(group)?;
+        let admin = self.program.payer();
+        self.program
+            .request()
+            .signer(&self.kp)
+            .accounts(groupchats::accounts::ModifyParameter { group, admin })
+            .args(groupchats::instruction::ModifyOpenIvites { open_invites })
+            .send()?;
+        Ok(())
+    }
+
+    pub fn admin_leave(&self, group: &str, receipient: Pubkey) -> anyhow::Result<()> {
+        let payer = self.program.payer();
+        let group_key = self.group_address_from_id(group)?;
+        let inviter = self.invite_pubkey(payer, group_key)?;
+        let successor = self.invite_pubkey(receipient, group_key)?;
+        self.program
+            .request()
+            .signer(&self.kp)
+            .accounts(groupchats::accounts::AdminLeave {
+                group: group_key,
+                invitation: inviter,
+                signer: payer,
+                invitation_sender: payer,
+                successor,
+            })
+            .args(groupchats::instruction::AdminLeave)
+            .send()?;
+        Ok(())
+    }
+
+    pub fn leave(&self, group: &str) -> anyhow::Result<()> {
+        let payer = self.program.payer();
+        let group_key = self.group_address_from_id(group)?;
+        let group = self.get_group(group_key)?;
+        let invite = self.invite_pubkey(payer, group_key)?;
+        self.program
+            .request()
+            .signer(&self.kp)
+            .accounts(groupchats::accounts::Leave {
+                group: group_key,
+                invitation: invite,
+                signer: payer,
+                invitation_sender: group.admin,
+            })
+            .args(groupchats::instruction::Leave)
+            .send()?;
+        Ok(())
+    }
+
+    //TODO
+    pub fn close(&self, group: &str) -> anyhow::Result<()> {
+        let group_key = self.group_address_from_id(group)?;
+        let group = self.get_group(group_key)?;
+        let payer = self.program.payer();
+        let invitation = self.invite_pubkey(payer, group_key)?;
+        self.program
+            .request()
+            .signer(&self.kp)
+            .accounts(groupchats::accounts::Close {
+                group: group_key,
+                invitation,
+                signer: payer,
+                creator: group.creator,
+                invitation_sender: group.admin,
+            })
+            .args(groupchats::instruction::Close)
+            .send()?;
         Ok(())
     }
 
@@ -223,6 +322,11 @@ impl GroupChat {
 
     fn get_invite_by_group_id(&self, id: &str) -> anyhow::Result<Invitation> {
         unimplemented!()
+    }
+
+    pub fn get_group(&self, addr: Pubkey) -> anyhow::Result<Group> {
+        let group = self.program.account(addr)?;
+        Ok(group)
     }
 
     pub fn get_user_groups(&self, addr: Pubkey) -> anyhow::Result<Vec<Group>> {
