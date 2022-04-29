@@ -1,26 +1,26 @@
 pub mod error;
 pub mod item;
 
+use anyhow::anyhow;
+use chrono::{DateTime, Utc};
 use item::Item;
+use serde::{Deserialize, Serialize};
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
-use warp_common::anyhow::anyhow;
-use warp_common::chrono::{DateTime, Utc};
-use warp_common::error::Error;
-use warp_common::serde::{Deserialize, Serialize};
-use warp_common::{anyhow, Extension};
-use warp_data::{DataObject, DataType};
-use warp_pocket_dimension::query::QueryBuilder;
-use warp_pocket_dimension::{DimensionData, PocketDimension};
+use warp::data::{DataObject, DataType};
+use warp::error::Error;
+use warp::pocket_dimension::query::QueryBuilder;
+use warp::pocket_dimension::{DimensionData, PocketDimension};
 
-use warp_constellation::directory::Directory;
-use warp_constellation::Constellation;
-use warp_hooks::hooks::Hooks;
-use warp_module::Module;
+use warp::constellation::directory::Directory;
+use warp::constellation::Constellation;
+use warp::hooks::Hooks;
+use warp::module::Module;
+use warp::Extension;
 
 pub type Result<T> = std::result::Result<T, error::Error>;
-
+pub type WarpResult<T> = std::result::Result<T, Error>;
 #[derive(Debug, Clone)]
 pub struct MemorySystemInternal(item::directory::Directory);
 
@@ -42,7 +42,6 @@ impl Default for MemorySystemInternal {
     }
 }
 #[derive(Serialize, Deserialize, Clone)]
-#[serde(crate = "warp_common::serde")]
 pub struct MemorySystem {
     index: Directory,
     current: Directory,
@@ -104,7 +103,7 @@ impl MemorySystemInternal {
     }
 }
 
-#[warp_common::async_trait::async_trait]
+#[async_trait::async_trait]
 impl Constellation for MemorySystem {
     fn modified(&self) -> DateTime<Utc> {
         self.modified
@@ -130,7 +129,7 @@ impl Constellation for MemorySystem {
         &mut self.path
     }
 
-    async fn put(&mut self, name: &str, path: &str) -> warp_common::Result<()> {
+    async fn put(&mut self, name: &str, path: &str) -> WarpResult<()> {
         let mut internal_file = item::file::File::new(name);
         let bytes = internal_file.insert_from_path(path).unwrap_or_default();
         self.internal
@@ -138,7 +137,7 @@ impl Constellation for MemorySystem {
             .insert(internal_file.clone())
             .map_err(|_| Error::Other)?;
 
-        let mut file = warp_constellation::file::File::new(name);
+        let mut file = warp::constellation::file::File::new(name);
         file.set_size(bytes as i64);
         file.hash_mut().hash_from_file(path)?;
 
@@ -159,7 +158,7 @@ impl Constellation for MemorySystem {
         Ok(())
     }
 
-    async fn get(&self, name: &str, path: &str) -> warp_common::Result<()> {
+    async fn get(&self, name: &str, path: &str) -> WarpResult<()> {
         if let Ok(cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
             query.r#where("name", name.to_string())?;
@@ -193,7 +192,7 @@ impl Constellation for MemorySystem {
         &mut self,
         name: &str,
         buf: &Vec<u8>,
-    ) -> std::result::Result<(), warp_common::error::Error> {
+    ) -> std::result::Result<(), warp::error::Error> {
         let mut internal_file = item::file::File::new(name);
         let bytes = internal_file.insert_buffer(buf.clone()).unwrap();
         self.internal
@@ -201,7 +200,7 @@ impl Constellation for MemorySystem {
             .insert(internal_file.clone())
             .map_err(|_| Error::Other)?;
 
-        let mut file = warp_constellation::file::File::new(name);
+        let mut file = warp::constellation::file::File::new(name);
         file.set_size(bytes as i64);
         file.hash_mut().hash_from_slice(buf);
 
@@ -227,9 +226,9 @@ impl Constellation for MemorySystem {
         &self,
         name: &str,
         buf: &mut Vec<u8>,
-    ) -> std::result::Result<(), warp_common::error::Error> {
+    ) -> std::result::Result<(), warp::error::Error> {
         if !self.current_directory().has_item(name) {
-            return Err(warp_common::error::Error::IoError(std::io::Error::from(
+            return Err(warp::error::Error::IoError(std::io::Error::from(
                 ErrorKind::InvalidData,
             )));
         }
@@ -259,7 +258,7 @@ impl Constellation for MemorySystem {
         Ok(())
     }
 
-    async fn remove(&mut self, path: &str, _: bool) -> warp_common::Result<()> {
+    async fn remove(&mut self, path: &str, _: bool) -> WarpResult<()> {
         if !self.current_directory().has_item(path) {
             return Err(Error::Other);
         }
@@ -277,12 +276,12 @@ impl Constellation for MemorySystem {
         Ok(())
     }
 
-    async fn move_item(&mut self, _: &str, _: &str) -> warp_common::Result<()> {
+    async fn move_item(&mut self, _: &str, _: &str) -> WarpResult<()> {
         Err(Error::Unimplemented)
     }
 
     /// Use to create a directory within the filesystem.
-    async fn create_directory(&mut self, path: &str, recursive: bool) -> warp_common::Result<()> {
+    async fn create_directory(&mut self, path: &str, recursive: bool) -> WarpResult<()> {
         let inner_directory = if recursive {
             item::directory::Directory::new_recursive(path)?
         } else {
@@ -329,7 +328,7 @@ impl Extension for MemorySystem {
 pub mod ffi {
     use crate::MemorySystem;
     use std::ffi::c_void;
-    use warp_constellation::Constellation;
+    use warp::constellation::Constellation;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]

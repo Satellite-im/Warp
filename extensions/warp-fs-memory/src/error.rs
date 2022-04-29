@@ -1,5 +1,4 @@
 use thiserror::Error;
-use warp_common::anyhow;
 
 #[derive(Error, Debug)]
 pub enum Error {

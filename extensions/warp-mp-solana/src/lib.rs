@@ -1,24 +1,27 @@
+use anyhow::anyhow;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use warp_common::anyhow::anyhow;
-use warp_common::error::Error;
-use warp_common::{anyhow, Extension, Module};
-use warp_crypto::rand::Rng;
-use warp_data::{DataObject, DataType};
-use warp_hooks::hooks::Hooks;
-use warp_multipass::generator::generate_name;
-use warp_multipass::{identity::*, Friends, MultiPass};
-use warp_pocket_dimension::query::QueryBuilder;
-use warp_pocket_dimension::PocketDimension;
-use warp_solana_utils::anchor_client::solana_client::rpc_client::RpcClient;
-use warp_solana_utils::anchor_client::solana_sdk::pubkey::Pubkey;
-use warp_solana_utils::anchor_client::solana_sdk::signature::Keypair;
-use warp_solana_utils::helper::friends::{DirectFriendRequest, DirectStatus};
-use warp_solana_utils::helper::user::UserHelper;
-use warp_solana_utils::manager::SolanaManager;
-use warp_solana_utils::wallet::{PhraseType, SolanaWallet};
-use warp_solana_utils::{helper, EndPoint};
-use warp_tesseract::Tesseract;
+use warp::crypto::rand::Rng;
+use warp::data::{DataObject, DataType};
+use warp::error::Error;
+use warp::hooks::Hooks;
+use warp::module::Module;
+use warp::multipass::generator::generate_name;
+use warp::multipass::{identity::*, Friends, MultiPass};
+use warp::pocket_dimension::query::QueryBuilder;
+use warp::pocket_dimension::PocketDimension;
+use warp::solana::anchor_client::solana_client::rpc_client::RpcClient;
+use warp::solana::anchor_client::solana_sdk::pubkey::Pubkey;
+use warp::solana::anchor_client::solana_sdk::signature::Keypair;
+use warp::solana::helper::friends::{DirectFriendRequest, DirectStatus};
+use warp::solana::helper::user::UserHelper;
+use warp::solana::manager::SolanaManager;
+use warp::solana::wallet::{PhraseType, SolanaWallet};
+use warp::solana::{helper, EndPoint};
+use warp::tesseract::Tesseract;
+use warp::Extension;
+
+type Result<T> = std::result::Result<T, Error>;
 
 pub struct SolanaAccount {
     pub endpoint: EndPoint,
@@ -161,17 +164,13 @@ impl Extension for SolanaAccount {
         String::from("Solana Multipass")
     }
 
-    fn module(&self) -> warp_common::Module {
+    fn module(&self) -> Module {
         Module::Accounts
     }
 }
 
 impl MultiPass for SolanaAccount {
-    fn create_identity(
-        &mut self,
-        username: Option<&str>,
-        _: Option<&str>,
-    ) -> warp_common::Result<PublicKey> {
+    fn create_identity(&mut self, username: Option<&str>, _: Option<&str>) -> Result<PublicKey> {
         if let Ok(keypair) = &self.get_private_key() {
             if UserHelper::new_with_keypair(keypair)
                 .get_current_user()
@@ -205,7 +204,7 @@ impl MultiPass for SolanaAccount {
         if manager.get_account_balance()? == 0 {
             manager.request_air_drop()?;
         }
-        let code: i32 = warp_crypto::rand::thread_rng().gen_range(0, 9999);
+        let code: i32 = warp::crypto::rand::thread_rng().gen_range(0, 9999);
 
         let uname = format!("{username}#{code}");
 
@@ -226,7 +225,7 @@ impl MultiPass for SolanaAccount {
         Ok(identity.get_public_key())
     }
 
-    fn get_identity(&self, id: Identifier) -> warp_common::Result<Identity> {
+    fn get_identity(&self, id: Identifier) -> Result<Identity> {
         let helper = self.user_helper()?;
         let ident = match id {
             Identifier::Username(username) => {
@@ -276,7 +275,7 @@ impl MultiPass for SolanaAccount {
         Ok(ident)
     }
 
-    fn update_identity(&mut self, option: IdentityUpdate) -> warp_common::Result<()> {
+    fn update_identity(&mut self, option: IdentityUpdate) -> Result<()> {
         let mut helper = self.user_helper()?;
 
         let mut identity = user_to_identity(&helper, None)?;
@@ -323,18 +322,18 @@ impl MultiPass for SolanaAccount {
         Ok(())
     }
 
-    fn decrypt_private_key(&self, _: Option<&str>) -> warp_common::Result<Vec<u8>> {
+    fn decrypt_private_key(&self, _: Option<&str>) -> Result<Vec<u8>> {
         let keypair = self.get_private_key()?;
         Ok(keypair.to_bytes().to_vec())
     }
 
-    fn refresh_cache(&mut self) -> warp_common::Result<()> {
+    fn refresh_cache(&mut self) -> Result<()> {
         self.get_cache()?.empty(DataType::from(self.module()))
     }
 }
 
 impl Friends for SolanaAccount {
-    fn send_request(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
+    fn send_request(&mut self, pubkey: PublicKey) -> Result<()> {
         let ident = self.get_own_identity()?;
 
         if ident.get_public_key() == pubkey {
@@ -358,7 +357,7 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn accept_request(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
+    fn accept_request(&mut self, pubkey: PublicKey) -> Result<()> {
         let ident = self.get_own_identity()?;
 
         if ident.get_public_key() == pubkey {
@@ -384,7 +383,7 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn deny_request(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
+    fn deny_request(&mut self, pubkey: PublicKey) -> Result<()> {
         let ident = self.get_own_identity()?;
 
         if ident.get_public_key() == pubkey {
@@ -407,7 +406,7 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn close_request(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
+    fn close_request(&mut self, pubkey: PublicKey) -> Result<()> {
         let ident = self.get_own_identity()?;
 
         if ident.get_public_key() == pubkey {
@@ -433,7 +432,7 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn list_incoming_request(&self) -> warp_common::Result<Vec<FriendRequest>> {
+    fn list_incoming_request(&self) -> Result<Vec<FriendRequest>> {
         let ident = self.get_own_identity()?;
         self.list_all_request().map(|fr| {
             fr.iter()
@@ -444,7 +443,7 @@ impl Friends for SolanaAccount {
         })
     }
 
-    fn list_outgoing_request(&self) -> warp_common::Result<Vec<FriendRequest>> {
+    fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>> {
         let ident = self.get_own_identity()?;
         self.list_all_request().map(|fr| {
             fr.iter()
@@ -455,7 +454,7 @@ impl Friends for SolanaAccount {
         })
     }
 
-    fn list_all_request(&self) -> warp_common::Result<Vec<FriendRequest>> {
+    fn list_all_request(&self) -> Result<Vec<FriendRequest>> {
         let helper = self.friend_helper()?;
         let list = helper.list_requests()?;
         let ident = self.get_own_identity()?;
@@ -471,7 +470,7 @@ impl Friends for SolanaAccount {
         Ok(new_list)
     }
 
-    fn remove_friend(&mut self, pubkey: PublicKey) -> warp_common::Result<()> {
+    fn remove_friend(&mut self, pubkey: PublicKey) -> Result<()> {
         if self
             .get_identity(Identifier::PublicKey(pubkey.clone()))
             .is_err()
@@ -489,11 +488,11 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn block_key(&mut self, _: PublicKey) -> warp_common::Result<()> {
+    fn block_key(&mut self, _: PublicKey) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
-    fn list_friends(&self) -> warp_common::Result<Vec<Identity>> {
+    fn list_friends(&self) -> Result<Vec<Identity>> {
         let mut identities = vec![];
         let list = self.list_all_request()?;
         let ident = self.get_own_identity()?;
@@ -512,7 +511,7 @@ impl Friends for SolanaAccount {
         Ok(identities)
     }
 
-    fn has_friend(&self, pubkey: PublicKey) -> warp_common::Result<()> {
+    fn has_friend(&self, pubkey: PublicKey) -> Result<()> {
         let helper = self.friend_helper()?;
         let request = helper
             .get_request(Pubkey::new(pubkey.to_bytes()))
@@ -525,7 +524,7 @@ impl Friends for SolanaAccount {
         Err(Error::Unimplemented)
     }
 
-    fn key_exchange(&self, _: Identity) -> warp_common::Result<Vec<u8>> {
+    fn key_exchange(&self, _: Identity) -> Result<Vec<u8>> {
         Err(Error::Unimplemented)
     }
 }
@@ -595,8 +594,8 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
 pub mod ffi {
     use std::ffi::c_void;
     use std::sync::{Arc, Mutex};
-    use warp_multipass::MultiPass;
-    use warp_tesseract::Tesseract;
+    use warp::multipass::MultiPass;
+    use warp::tesseract::Tesseract;
 
     use crate::SolanaAccount;
 

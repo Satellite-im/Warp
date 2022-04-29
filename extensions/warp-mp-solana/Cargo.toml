@@ -7,16 +7,8 @@ edition = "2021"
 crate-type = ["cdylib", "rlib", "staticlib"]
 
 [dependencies]
-warp-module = { path = "../../utils/warp-module" }
-warp-hooks = { path = "../../utils/warp-hooks" }
-warp-data = { path = "../../utils/warp-data" }
-warp-tesseract = { path = "../../utils/warp-tesseract" }
-warp-common = { path = "../../utils/warp-common", features = ["async"] }
-warp-multipass = { path = "../../modules/warp-multipass" }
-warp-pocket-dimension = { path = "../../modules/warp-pocket-dimension" }
-warp-crypto = { path = "../../utils/warp-crypto" }
-
-warp-solana-utils = { path = "../../utils/warp-solana-utils" }
+warp = { path = "../../warp" }
+anyhow = "1"
 
 [dev-dependencies]
 warp-pd-flatfile = { path = "../warp-pd-flatfile" }

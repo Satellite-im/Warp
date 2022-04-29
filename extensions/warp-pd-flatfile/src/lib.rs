@@ -4,31 +4,24 @@ use std::{
     io::{ErrorKind, Read, Write},
     path::{Path, PathBuf},
 };
-#[allow(unused_imports)]
-use warp_common::{
-    anyhow::{self, bail},
-    cfg_if::cfg_if,
-    error::Error,
-    serde_json::Value,
-    uuid::Uuid,
-    Extension,
-};
 
-use crate::anyhow::anyhow;
-#[allow(unused_imports)]
-use warp_common::libflate::gzip;
-use warp_data::{DataObject, DataType};
-use warp_module::Module;
-use warp_pocket_dimension::{
+use anyhow::anyhow;
+use serde_json::Value;
+use uuid::Uuid;
+use warp::error::Error;
+use warp::Extension;
+
+use warp::data::{DataObject, DataType};
+use warp::module::Module;
+use warp::pocket_dimension::{
     query::{ComparatorFilter, QueryBuilder},
     DimensionData, PocketDimension,
 };
 
-cfg_if! {
-    if #[cfg(feature = "async")] {
-        use warp_common::tokio::{self, io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt}};
-    }
-}
+#[allow(unused_imports)]
+use libflate::gzip;
+
+type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Default, Debug)]
 pub struct FlatfileStorage {
@@ -78,7 +71,7 @@ impl AsMut<Vec<DataObject>> for FlatfileIndex {
 }
 
 impl FlatfileIndex {
-    pub fn from_path<P: AsRef<Path>>(path: P) -> warp_common::Result<Self> {
+    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
         let mut index = Self::default();
 
@@ -92,13 +85,13 @@ impl FlatfileIndex {
         Ok(index)
     }
 
-    pub fn build_index_from_file<P: AsRef<Path>>(&mut self, file: P) -> warp_common::Result<()> {
+    pub fn build_index_from_file<P: AsRef<Path>>(&mut self, file: P) -> Result<()> {
         let file = std::fs::File::open(file)?;
-        self.0 = warp_common::serde_json::from_reader(file)?;
+        self.0 = serde_json::from_reader(file)?;
         Ok(())
     }
 
-    pub fn export_index_to_file<P: AsRef<Path>>(&self, path: P) -> warp_common::Result<()> {
+    pub fn export_index_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let path = path.as_ref();
         if path.is_file() {
             std::fs::copy(path, format!("{}_backup", path.display()))?;
@@ -106,17 +99,17 @@ impl FlatfileIndex {
         }
 
         let mut fs = std::fs::File::create(path)?;
-        let data = warp_common::serde_json::to_string(&self.0)?;
+        let data = serde_json::to_string(&self.0)?;
         fs.write_all(data.as_bytes())?;
         if std::fs::remove_file(format!("{}_backup", path.display())).is_err() {}
         Ok(())
     }
 
-    pub fn export_index_to_multifile<P: AsRef<Path>>(&self, _: P) -> warp_common::Result<()> {
+    pub fn export_index_to_multifile<P: AsRef<Path>>(&self, _: P) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
-    pub fn insert(&mut self, data: DataObject) -> warp_common::Result<()> {
+    pub fn insert(&mut self, data: DataObject) -> Result<()> {
         if self.0.contains(&data) {
             return Err(Error::Other);
         }
@@ -124,7 +117,7 @@ impl FlatfileIndex {
         Ok(())
     }
 
-    pub fn remove_by_id(&mut self, id: Uuid) -> warp_common::Result<DataObject> {
+    pub fn remove_by_id(&mut self, id: Uuid) -> Result<DataObject> {
         //get index of said dataobject
         let index = self
             .0
@@ -137,7 +130,7 @@ impl FlatfileIndex {
         Ok(object)
     }
 
-    pub fn build_index(&mut self) -> warp_common::Result<()> {
+    pub fn build_index(&mut self) -> Result<()> {
         Ok(())
     }
 }
@@ -158,7 +151,7 @@ impl FlatfileStorage {
         Self::from(path)
     }
 
-    pub fn new_with_index_file<P: AsRef<Path>>(path: P, file: P) -> warp_common::Result<Self> {
+    pub fn new_with_index_file<P: AsRef<Path>>(path: P, file: P) -> Result<Self> {
         let mut storage = Self::from(path);
 
         if !storage.is_valid() {
@@ -184,7 +177,7 @@ impl FlatfileStorage {
         Ok(storage)
     }
 
-    pub fn create_directory(&self, all: bool) -> warp_common::Result<()> {
+    pub fn create_directory(&self, all: bool) -> Result<()> {
         match all {
             true => std::fs::create_dir_all(&self.directory)?,
             false => std::fs::create_dir(&self.directory)?,
@@ -213,7 +206,7 @@ impl FlatfileStorage {
         &mut self.index
     }
 
-    pub fn get_index_file(&self) -> warp_common::Result<String> {
+    pub fn get_index_file(&self) -> Result<String> {
         if !self.use_index_file() {
             return Err(Error::Any(anyhow!(
                 "'use_index_file' must be true to use this function"
@@ -226,7 +219,7 @@ impl FlatfileStorage {
         Ok(path.to_string_lossy().to_string())
     }
 
-    pub fn sync(&self) -> warp_common::Result<()> {
+    pub fn sync(&self) -> Result<()> {
         let index_file = self.get_index_file()?;
 
         self.index.export_index_to_file(index_file)?;
@@ -236,11 +229,7 @@ impl FlatfileStorage {
 }
 
 impl PocketDimension for FlatfileStorage {
-    fn add_data(
-        &mut self,
-        dimension: DataType,
-        data: &warp_data::DataObject,
-    ) -> warp_common::Result<()> {
+    fn add_data(&mut self, dimension: DataType, data: &warp::data::DataObject) -> Result<()> {
         let mut data = data.clone();
         data.set_data_type(dimension.clone());
 
@@ -331,8 +320,8 @@ impl PocketDimension for FlatfileStorage {
     fn has_data(
         &mut self,
         dimension: DataType,
-        query: &warp_pocket_dimension::query::QueryBuilder,
-    ) -> warp_common::Result<()> {
+        query: &warp::pocket_dimension::query::QueryBuilder,
+    ) -> Result<()> {
         let list = self
             .index
             .as_ref()
@@ -351,8 +340,8 @@ impl PocketDimension for FlatfileStorage {
     fn get_data(
         &self,
         dimension: DataType,
-        query: Option<&warp_pocket_dimension::query::QueryBuilder>,
-    ) -> warp_common::Result<Vec<warp_data::DataObject>> {
+        query: Option<&warp::pocket_dimension::query::QueryBuilder>,
+    ) -> Result<Vec<warp::data::DataObject>> {
         let list = self
             .index
             .as_ref()
@@ -369,8 +358,8 @@ impl PocketDimension for FlatfileStorage {
     fn size(
         &self,
         dimension: DataType,
-        query: Option<&warp_pocket_dimension::query::QueryBuilder>,
-    ) -> warp_common::Result<i64> {
+        query: Option<&warp::pocket_dimension::query::QueryBuilder>,
+    ) -> Result<i64> {
         self.get_data(dimension, query)
             .map(|list| list.iter().map(|i| i.size() as i64).sum())
     }
@@ -378,13 +367,13 @@ impl PocketDimension for FlatfileStorage {
     fn count(
         &self,
         dimension: DataType,
-        query: Option<&warp_pocket_dimension::query::QueryBuilder>,
-    ) -> warp_common::Result<i64> {
+        query: Option<&warp::pocket_dimension::query::QueryBuilder>,
+    ) -> Result<i64> {
         self.get_data(dimension, query)
             .map(|list| list.len() as i64)
     }
 
-    fn empty(&mut self, dimension: DataType) -> warp_common::Result<()> {
+    fn empty(&mut self, dimension: DataType) -> Result<()> {
         let mut preserved = Vec::new();
 
         for item in self.index.as_ref().clone() {
@@ -414,7 +403,7 @@ impl PocketDimension for FlatfileStorage {
     }
 }
 
-fn execute(data: &[DataObject], query: &QueryBuilder) -> warp_common::Result<Vec<DataObject>> {
+fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<DataObject>> {
     let mut list = Vec::new();
     for data in data.iter() {
         let object = data.payload::<Value>()?;

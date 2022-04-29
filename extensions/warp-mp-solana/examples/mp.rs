@@ -1,12 +1,11 @@
 use std::sync::{Arc, Mutex};
-use warp_common::anyhow;
+use warp::multipass::identity::IdentityUpdate;
+use warp::multipass::MultiPass;
+use warp::pocket_dimension::PocketDimension;
+use warp::solana::wallet::SolanaWallet;
+use warp::tesseract::Tesseract;
 use warp_mp_solana::SolanaAccount;
-use warp_multipass::identity::IdentityUpdate;
-use warp_multipass::MultiPass;
 use warp_pd_flatfile::FlatfileStorage;
-use warp_pocket_dimension::PocketDimension;
-use warp_solana_utils::wallet::SolanaWallet;
-use warp_tesseract::Tesseract;
 
 fn update_name(account: &mut impl MultiPass, name: &str) -> anyhow::Result<()> {
     account.update_identity(IdentityUpdate::Username(name.to_string()))?;

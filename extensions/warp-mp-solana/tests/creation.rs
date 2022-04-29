@@ -3,14 +3,13 @@ mod tests {
     #[allow(unused)]
     use std::str::FromStr;
     use std::sync::{Arc, Mutex};
-    use warp_common::anyhow;
-    use warp_mp_solana::SolanaAccount;
     #[allow(unused)]
-    use warp_multipass::identity::{Identifier, IdentityUpdate, PublicKey};
-    use warp_multipass::MultiPass;
-    use warp_solana_utils::anchor_client::anchor_lang::prelude::Pubkey;
-    use warp_solana_utils::wallet::{PhraseType, SolanaWallet};
-    use warp_tesseract::Tesseract;
+    use warp::multipass::identity::{Identifier, IdentityUpdate, PublicKey};
+    use warp::multipass::MultiPass;
+    use warp::solana::anchor_client::anchor_lang::prelude::Pubkey;
+    use warp::solana::wallet::{PhraseType, SolanaWallet};
+    use warp::tesseract::Tesseract;
+    use warp_mp_solana::SolanaAccount;
 
     #[allow(unused)]
     fn pregenerated_wallet() -> anyhow::Result<SolanaWallet> {
@@ -27,7 +26,7 @@ mod tests {
 
     fn tesseract_with_random_key() -> anyhow::Result<Arc<Mutex<Tesseract>>> {
         let mut tesseract = Tesseract::default();
-        let key = warp_crypto::generate(32);
+        let key = warp::crypto::generate(32);
         tesseract.unlock(&key)?;
         Ok(Arc::new(Mutex::new(tesseract)))
     }

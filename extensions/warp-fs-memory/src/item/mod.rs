@@ -1,8 +1,8 @@
 use crate::item::directory::Directory;
 use crate::item::file::File;
+use chrono::{DateTime, Utc};
 use dyn_clone::DynClone;
 use std::fmt::Debug;
-use warp_common::chrono::{DateTime, Utc};
 
 pub mod directory;
 pub mod file;
@@ -24,9 +24,13 @@ pub trait Item: DynClone + Debug + Sync + Send {
 
     fn to_directory(&self) -> crate::Result<&Directory>;
 
-    fn hash(&self) -> Vec<u8> { Vec::new() }
+    fn hash(&self) -> Vec<u8> {
+        Vec::new()
+    }
 
-    fn data(&self) -> Vec<u8> { Vec::new() }
+    fn data(&self) -> Vec<u8> {
+        Vec::new()
+    }
 
     fn to_directory_mut(&mut self) -> crate::Result<&mut Directory>;
 

@@ -2,11 +2,11 @@ use crate::error::Error;
 use crate::item::directory::Directory;
 use crate::item::{ItemMut, ItemType};
 use crate::Item;
+use chrono::{DateTime, Utc};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
-use warp_common::chrono::{DateTime, Utc};
-use warp_common::uuid::Uuid;
+use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct File {
@@ -94,7 +94,7 @@ impl File {
                 Ok(0) => break,
                 Ok(n) => size += n,
                 Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-                Err(e) => return Err(Error::from(e)),
+                Err(e) => return Err(crate::error::Error::from(e)),
             }
         }
 

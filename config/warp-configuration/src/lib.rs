@@ -1,11 +1,11 @@
 pub mod error;
 
 use crate::error::Error;
+#[allow(unused_imports)]
+use cfg_if::cfg_if;
 use serde::{Deserialize, Serialize}; // https://docs.serde.rs/serde/
 use std::io::{Read, Write};
 use std::path::Path;
-#[allow(unused_imports)]
-use warp_common::cfg_if::cfg_if;
 
 // Acceptable module implementations for the FileSystem
 #[derive(Debug, Serialize, Deserialize)]

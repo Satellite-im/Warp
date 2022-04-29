@@ -1,14 +1,17 @@
 pub mod error;
 
-use warp_data::{DataObject, DataType};
-use warp_module::Module;
+use warp::{
+    data::{DataObject, DataType},
+    module::Module,
+    Extension,
+};
 
 use stretto::Cache;
 
 use error::Error;
-use warp_common::{serde_json, Extension};
-use warp_pocket_dimension::query::{ComparatorFilter, QueryBuilder};
-use warp_pocket_dimension::PocketDimension;
+use serde_json;
+use warp::pocket_dimension::query::{ComparatorFilter, QueryBuilder};
+use warp::pocket_dimension::PocketDimension;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -51,7 +54,7 @@ impl PocketDimension for StrettoClient {
         &mut self,
         dimension: DataType,
         data: &DataObject,
-    ) -> std::result::Result<(), warp_common::error::Error> {
+    ) -> std::result::Result<(), warp::error::Error> {
         let mut data = data.clone();
         data.set_data_type(dimension.clone());
 
@@ -65,20 +68,24 @@ impl PocketDimension for StrettoClient {
             (*value.value_mut()).push(data);
             self.client
                 .wait()
-                .map_err(|_| warp_common::error::Error::DataObjectNotFound)?;
+                .map_err(|_| warp::error::Error::DataObjectNotFound)?;
         } else {
             self.client.insert(dimension, vec![data], 1);
             self.client
                 .wait()
-                .map_err(|_| warp_common::error::Error::DataObjectNotFound)?;
+                .map_err(|_| warp::error::Error::DataObjectNotFound)?;
         }
         Ok(())
     }
 
-    fn has_data(&mut self, dimension: DataType, query: &QueryBuilder) -> warp_common::Result<()> {
+    fn has_data(
+        &mut self,
+        dimension: DataType,
+        query: &QueryBuilder,
+    ) -> std::result::Result<(), warp::error::Error> {
         self.client
             .get(&dimension)
-            .ok_or(warp_common::error::Error::DataObjectNotFound)
+            .ok_or(warp::error::Error::DataObjectNotFound)
             .and_then(|data| execute(data.value(), query).map(|_| ()))
     }
 
@@ -86,11 +93,11 @@ impl PocketDimension for StrettoClient {
         &self,
         dimension: DataType,
         query: Option<&QueryBuilder>,
-    ) -> std::result::Result<Vec<DataObject>, warp_common::error::Error> {
+    ) -> std::result::Result<Vec<DataObject>, warp::error::Error> {
         let data = self
             .client
             .get(&dimension)
-            .ok_or(warp_common::error::Error::DataObjectNotFound)?;
+            .ok_or(warp::error::Error::DataObjectNotFound)?;
 
         let data = data.value();
         match query {
@@ -103,7 +110,7 @@ impl PocketDimension for StrettoClient {
         &self,
         dimension: DataType,
         query: Option<&QueryBuilder>,
-    ) -> std::result::Result<i64, warp_common::error::Error> {
+    ) -> std::result::Result<i64, warp::error::Error> {
         self.get_data(dimension, query)
             .map(|data| data.iter().map(|i| i.size() as i64).sum())
     }
@@ -112,37 +119,33 @@ impl PocketDimension for StrettoClient {
         &self,
         dimension: DataType,
         query: Option<&QueryBuilder>,
-    ) -> std::result::Result<i64, warp_common::error::Error> {
+    ) -> std::result::Result<i64, warp::error::Error> {
         self.get_data(dimension, query)
             .map(|data| data.len() as i64)
     }
 
-    fn empty(&mut self, _: DataType) -> std::result::Result<(), warp_common::error::Error> {
+    fn empty(&mut self, _: DataType) -> std::result::Result<(), warp::error::Error> {
         // Note, since stretto doesnt clear base on key, we will clear everything when this is
         // call for now.
         // TODO: Implement a direct clear or mutation for the dimension
 
-        self.client
-            .clear()
-            .map_err(|_| warp_common::error::Error::Other)?;
+        self.client.clear().map_err(|_| warp::error::Error::Other)?;
 
-        self.client
-            .wait()
-            .map_err(|_| warp_common::error::Error::Other)
+        self.client.wait().map_err(|_| warp::error::Error::Other)
     }
 }
 
 pub(crate) fn execute(
     data: &[DataObject],
     query: &QueryBuilder,
-) -> std::result::Result<Vec<DataObject>, warp_common::error::Error> {
+) -> std::result::Result<Vec<DataObject>, warp::error::Error> {
     let mut list = Vec::new();
     for data in data.iter() {
         let object = data.payload::<serde_json::Value>()?;
         if !object.is_object() {
             continue;
         }
-        let object = object.as_object().ok_or(warp_common::error::Error::Other)?;
+        let object = object.as_object().ok_or(warp::error::Error::Other)?;
         for (key, val) in query.r#where.iter() {
             if let Some(result) = object.get(key) {
                 if val == result {
@@ -235,15 +238,14 @@ pub(crate) fn execute(
 #[cfg(test)]
 mod test {
     use crate::StrettoClient;
-    use warp_common::error::Error;
-    use warp_common::serde::{Deserialize, Serialize};
-    use warp_data::{DataObject, DataType};
-    use warp_module::Module;
-    use warp_pocket_dimension::query::{Comparator, QueryBuilder};
-    use warp_pocket_dimension::PocketDimension;
+    use serde::{Deserialize, Serialize};
+    use warp::data::{DataObject, DataType};
+    use warp::error::Error;
+    use warp::module::Module;
+    use warp::pocket_dimension::query::{Comparator, QueryBuilder};
+    use warp::pocket_dimension::PocketDimension;
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
-    #[serde(crate = "warp_common::serde")]
     pub struct SomeData {
         pub name: String,
         pub age: i64,

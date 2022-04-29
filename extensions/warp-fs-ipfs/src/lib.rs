@@ -3,28 +3,25 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 // use warp_common::futures::TryStreamExt;
-use warp_module::Module;
+use warp::module::Module;
 
-use warp_common::anyhow::anyhow;
-use warp_common::{
-    anyhow,
-    chrono::{DateTime, Utc},
-    error::Error,
-    futures::TryStreamExt,
-    serde::{Deserialize, Serialize},
-    tokio,
-    tokio_util::io::StreamReader,
-    Extension,
-};
-use warp_constellation::item::Item;
-use warp_constellation::{directory::Directory, Constellation};
-use warp_data::{DataObject, DataType};
-use warp_hooks::hooks::Hooks;
-use warp_pocket_dimension::query::QueryBuilder;
-use warp_pocket_dimension::{DimensionData, PocketDimension};
+use anyhow::anyhow;
+use chrono::{DateTime, Utc};
+use futures::TryStreamExt;
+use serde::{Deserialize, Serialize};
+use tokio_util::io::StreamReader;
+use warp::constellation::item::Item;
+use warp::constellation::{directory::Directory, Constellation};
+use warp::data::{DataObject, DataType};
+use warp::error::Error;
+use warp::hooks::Hooks;
+use warp::pocket_dimension::query::QueryBuilder;
+use warp::pocket_dimension::{DimensionData, PocketDimension};
+use warp::Extension;
+
+type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Serialize, Deserialize, Clone)]
-#[serde(crate = "warp_common::serde")]
 pub struct IpfsFileSystem {
     pub index: Directory,
     path: PathBuf,
@@ -147,7 +144,7 @@ impl Extension for IpfsFileSystem {
     }
 }
 
-#[warp_common::async_trait::async_trait]
+#[async_trait::async_trait]
 impl Constellation for IpfsFileSystem {
     fn modified(&self) -> DateTime<Utc> {
         self.modified
@@ -165,10 +162,10 @@ impl Constellation for IpfsFileSystem {
         &mut self.path
     }
 
-    async fn put(&mut self, name: &str, path: &str) -> warp_common::Result<()> {
+    async fn put(&mut self, name: &str, path: &str) -> Result<()> {
         //TODO: Implement a remote check along with a check within constellation to determine if the file exist
         if self.root_directory().get_item_by_path(name).is_ok() {
-            return Err(warp_common::error::Error::IoError(std::io::Error::from(
+            return Err(warp::error::Error::IoError(std::io::Error::from(
                 ErrorKind::AlreadyExists,
             )));
         }
@@ -235,7 +232,7 @@ impl Constellation for IpfsFileSystem {
             }
         };
 
-        let mut file = warp_constellation::file::File::new(&name[1..]);
+        let mut file = warp::constellation::file::File::new(&name[1..]);
         file.set_size(size as i64);
 
         file.hash_mut().hash_from_file(path)?;
@@ -263,7 +260,7 @@ impl Constellation for IpfsFileSystem {
         Ok(())
     }
 
-    async fn get(&self, name: &str, path: &str) -> warp_common::Result<()> {
+    async fn get(&self, name: &str, path: &str) -> Result<()> {
         // TODO: Implement a function that would check against both remote and constellation
         //       otherwise this would give an error if it doesnt exist within constellation
         //       even if it exist remotely
@@ -336,13 +333,13 @@ impl Constellation for IpfsFileSystem {
         Ok(())
     }
 
-    async fn from_buffer(&mut self, name: &str, buffer: &Vec<u8>) -> warp_common::Result<()> {
+    async fn from_buffer(&mut self, name: &str, buffer: &Vec<u8>) -> Result<()> {
         let name = affix_root(name);
 
         let fs = std::io::Cursor::new(buffer.clone());
         let client = self.client.as_ref();
 
-        let mut file = warp_constellation::file::File::new(&name[1..]);
+        let mut file = warp::constellation::file::File::new(&name[1..]);
 
         let hash = match self.client.option {
             IpfsOption::Mfs => {
@@ -409,7 +406,7 @@ impl Constellation for IpfsFileSystem {
         Ok(())
     }
 
-    async fn to_buffer(&self, name: &str, buffer: &mut Vec<u8>) -> warp_common::Result<()> {
+    async fn to_buffer(&self, name: &str, buffer: &mut Vec<u8>) -> Result<()> {
         let name = affix_root(name);
 
         if let Ok(cache) = self.get_cache() {
@@ -455,12 +452,12 @@ impl Constellation for IpfsFileSystem {
         Ok(())
     }
 
-    async fn remove(&mut self, name: &str, recursive: bool) -> warp_common::Result<()> {
+    async fn remove(&mut self, name: &str, recursive: bool) -> Result<()> {
         let name = affix_root(name);
 
         //TODO: Resolve to full directory
         if !self.current_directory().has_item(&name[1..]) {
-            return Err(warp_common::error::Error::IoError(std::io::Error::from(
+            return Err(warp::error::Error::IoError(std::io::Error::from(
                 ErrorKind::NotFound,
             )));
         }
@@ -485,7 +482,7 @@ impl Constellation for IpfsFileSystem {
         Ok(())
     }
 
-    async fn create_directory(&mut self, path: &str, recursive: bool) -> warp_common::Result<()> {
+    async fn create_directory(&mut self, path: &str, recursive: bool) -> Result<()> {
         let path = affix_root(path);
 
         // check to see if the path exist within the filesystem
@@ -544,9 +541,8 @@ fn affix_root<S: AsRef<str>>(name: S) -> String {
 
 #[cfg(test)]
 mod test {
-    use crate::anyhow::Result;
+    use anyhow::Result;
     // use crate::IpfsFileSystem;
-    use warp_common::tokio;
     // use warp_constellation::constellation::Constellation;
 
     #[tokio::test]

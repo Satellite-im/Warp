@@ -11,9 +11,15 @@ hyper-tls = "0.5"
 hyper                     = { version = "0.14", features = ["http1", "http2", "client", "tcp"] }
 http = "0.2"
 
-warp-constellation = { path = "../../modules/warp-constellation" }
-warp-pocket-dimension = { path = "../../modules/warp-pocket-dimension" }
-warp-module = { path = "../../utils/warp-module" }
-warp-data = { path = "../../utils/warp-data" }
-warp-hooks = { path = "../../utils/warp-hooks" }
-warp-common = { path = "../../utils/warp-common", features = ["async"]}
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.6", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+async-trait = "0.1"
+futures = { version = "0.3" }
+warp = { path = "../../warp" }
+
+anyhow = "1"
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+chrono = { version = "0.4", features = ["serde"] }

@@ -1,0 +1,62 @@
+[package]
+name = "warp-bin"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+dirs = "4.0"
+tokio = { version = "1", features = ["full"] }
+warp = { path = "../warp" }
+anyhow = "1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+bs58 = "0.4"
+cfg-if = "1.0"
+uuid = { version = "0.8", features = ["serde", "v4"] }
+
+base64 = { version = "0.13.0" }
+
+clap = { version = "3.1", features = ["derive"], optional = true }
+
+tui = {version = "0.17", features = ["crossterm"], optional = true }
+tui-logger = { version = "0.7", optional = true }
+crossterm = {version = "0.23", optional = true }
+comfy-table = {version = "5.0.1", optional = true }
+
+thiserror = "1.0"
+
+rustyline = { version = "9.1", optional = true }
+rustyline-derive = { version = "0.6", optional = true }
+unicode-width = { version = "0.1", optional = true }
+
+warp-configuration = { path = "../config/warp-configuration" }
+
+warp-fs-ipfs = { path = "../extensions/warp-fs-ipfs", optional = true }
+warp-fs-memory = { path = "../extensions/warp-fs-memory", optional = true }
+warp-fs-storj = { path = "../extensions/warp-fs-storj", optional = true }
+warp-pd-stretto = { path = "../extensions/warp-pd-stretto", optional = true }
+warp-pd-flatfile = { path = "../extensions/warp-pd-flatfile", optional = true }
+warp-mp-solana = { path = "../extensions/warp-mp-solana", optional = true }
+
+axum = { version = "0.5", optional = true }
+rocket = { version = "0.5.0-rc.1", git = "https://github.com/SergioBenitez/Rocket", optional = true, features = ["json"] } #TODO: do not use git directly but for now use it for development
+
+
+[features]
+default = 		["modules_ext", "for_terminal"]
+modules_ext = 	["pocket-dimension", "constellation", "multipass", "raygun"]
+for_terminal =  ["http_rocket", "ui", "cli"]
+http_rocket =   ["rocket"]
+http_axum =     ["axum"]
+
+pocket-dimension = ["warp-pd-stretto", "warp-pd-flatfile"]
+constellation =    ["warp-fs-memory", "warp-fs-storj", "warp-fs-ipfs"]
+multipass = 	   ["warp-mp-solana"]
+raygun = 		   []
+
+ui =  ["tui", "tui-logger", "crossterm"]
+cli = ["rustyline", "rustyline-derive", "unicode-width", "clap", "comfy-table"]

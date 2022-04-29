@@ -4,11 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-warp-common 	      = { path = "../../utils/warp-common", features = ["async"]}
-warp-raygun 	      = { path = "../../modules/warp-raygun" }
-warp-multipass 	      = { path = "../../modules/warp-multipass" }
-warp-pocket-dimension = { path = "../../modules/warp-pocket-dimension" }
-warp-module 	      = { path = "../../utils/warp-module" }
-warp-crypto 	      = { path = "../../utils/warp-crypto" }
+async-trait = "0.1"
+warp = { path = "../../warp" }
+
+anyhow = "1"
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+chrono = { version = "0.4", features = ["serde"] }
 
 gundb = { version = "0.1.1" }
+uuid = { version = "0.8", features = ["serde", "v4"] }

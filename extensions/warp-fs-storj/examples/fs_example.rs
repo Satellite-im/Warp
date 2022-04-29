@@ -1,9 +1,8 @@
-use warp_common::tokio;
-use warp_constellation::Constellation;
+use warp::constellation::Constellation;
 use warp_fs_storj::StorjFilesystem;
 
 #[tokio::main]
-async fn main() -> warp_common::anyhow::Result<()> {
+async fn main() -> anyhow::Result<()> {
     let env_akey = std::env::var("STORJ_ACCESS_KEY")?;
     let env_skey = std::env::var("STORJ_SECRET_KEY")?;
 

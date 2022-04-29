@@ -1,16 +1,20 @@
+use anyhow::anyhow;
 use gundb::{Node, NodeConfig};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
-use warp_common::anyhow;
-use warp_common::anyhow::anyhow;
-use warp_common::uuid::Uuid;
-use warp_common::Extension;
-use warp_module::Module;
-use warp_multipass::identity::Identity;
-use warp_multipass::MultiPass;
-use warp_pocket_dimension::PocketDimension;
-use warp_raygun::{Callback, EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
 
+use uuid::Uuid;
+use warp::error::Error;
+use warp::module::Module;
+use warp::multipass::identity::Identity;
+use warp::multipass::MultiPass;
+use warp::pocket_dimension::PocketDimension;
+use warp::raygun::{
+    Callback, EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState,
+};
+use warp::Extension;
+
+type Result<T> = std::result::Result<T, Error>;
 pub struct GunMessaging {
     pub account: Option<Arc<Mutex<Box<dyn MultiPass>>>>,
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
@@ -105,7 +109,7 @@ impl Extension for GunMessaging {
     }
 }
 
-#[warp_common::async_trait::async_trait]
+#[async_trait::async_trait]
 #[allow(unused_variables)]
 impl RayGun for GunMessaging {
     async fn get_messages(
@@ -113,7 +117,7 @@ impl RayGun for GunMessaging {
         conversation_id: Uuid,
         options: MessageOptions,
         callback: Option<Callback>,
-    ) -> warp_common::Result<Vec<Message>> {
+    ) -> Result<Vec<Message>> {
         todo!()
     }
 
@@ -122,11 +126,11 @@ impl RayGun for GunMessaging {
         conversation_id: Uuid,
         message_id: Option<Uuid>,
         message: Vec<String>,
-    ) -> warp_common::Result<()> {
+    ) -> Result<()> {
         todo!()
     }
 
-    async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> warp_common::Result<()> {
+    async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()> {
         todo!()
     }
 
@@ -136,7 +140,7 @@ impl RayGun for GunMessaging {
         message_id: Uuid,
         state: ReactionState,
         emoji: Option<String>,
-    ) -> warp_common::Result<()> {
+    ) -> Result<()> {
         todo!()
     }
 
@@ -145,7 +149,7 @@ impl RayGun for GunMessaging {
         conversation_id: Uuid,
         message_id: Uuid,
         state: PinState,
-    ) -> warp_common::Result<()> {
+    ) -> Result<()> {
         todo!()
     }
 
@@ -154,7 +158,7 @@ impl RayGun for GunMessaging {
         conversation_id: Uuid,
         message_id: Uuid,
         message: Vec<String>,
-    ) -> warp_common::Result<()> {
+    ) -> Result<()> {
         todo!()
     }
 
@@ -163,7 +167,7 @@ impl RayGun for GunMessaging {
         conversation_id: Uuid,
         message_id: Uuid,
         state: EmbedState,
-    ) -> warp_common::Result<()> {
+    ) -> Result<()> {
         todo!()
     }
 }

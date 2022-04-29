@@ -1,3 +1,4 @@
+use anyhow::{anyhow, bail};
 use aws_endpoint::partition::endpoint;
 use aws_endpoint::{CredentialScope, Partition, PartitionResolver};
 use aws_sdk_s3::presigning::config::PresigningConfig;
@@ -7,27 +8,26 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use warp_module::Module;
+use warp::module::Module;
 
-use warp_common::{
-    anyhow,
-    chrono::{DateTime, Utc},
-    error::Error,
-    serde::{Deserialize, Serialize},
-    tokio, Extension,
-};
-use warp_constellation::{directory::Directory, Constellation};
-use warp_pocket_dimension::{query::QueryBuilder, DimensionData, PocketDimension};
+use warp::constellation::{directory::Directory, Constellation};
+use warp::pocket_dimension::{query::QueryBuilder, DimensionData, PocketDimension};
 
 use s3::bucket::Bucket;
 use s3::creds::Credentials;
 use s3::region::Region;
 use s3::BucketConfiguration;
-use warp_common::anyhow::{anyhow, bail};
 
-use warp_constellation::item::Item;
-use warp_data::{DataObject, DataType};
-use warp_hooks::hooks::Hooks;
+use serde::{Deserialize, Serialize};
+use warp::constellation::item::Item;
+use warp::data::{DataObject, DataType};
+use warp::hooks::Hooks;
+use warp::Extension;
+
+use chrono::{DateTime, Utc};
+use warp::error::Error;
+
+type Result<T> = std::result::Result<T, warp::error::Error>;
 
 #[derive(Debug, Clone)]
 pub struct StorjClient {
@@ -114,7 +114,6 @@ impl Extension for StorjFilesystem {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-#[serde(crate = "warp_common::serde")]
 pub struct StorjFilesystem {
     pub index: Directory,
     pub modified: DateTime<Utc>,
@@ -173,7 +172,7 @@ impl StorjFilesystem {
     }
 }
 
-#[warp_common::async_trait::async_trait]
+#[async_trait::async_trait]
 impl Constellation for StorjFilesystem {
     fn modified(&self) -> DateTime<Utc> {
         self.modified
@@ -202,7 +201,7 @@ impl Constellation for StorjFilesystem {
     /// Uploads file from path with the name format being `bucket_name://path/to/file`
     /// Note: This only supports uploading of files. This has not implemented creation of
     ///       directories.
-    async fn put(&mut self, name: &str, path: &str) -> warp_common::Result<()> {
+    async fn put(&mut self, name: &str, path: &str) -> Result<()> {
         let (bucket, name) = split_for(name)?;
 
         let mut fs = tokio::fs::File::open(&path).await?;
@@ -232,7 +231,7 @@ impl Constellation for StorjFilesystem {
         .await
         .unwrap_or_default();
 
-        let mut file = warp_constellation::file::File::new(&name);
+        let mut file = warp::constellation::file::File::new(&name);
         file.set_size(size as i64);
         file.set_ref(&url);
         file.hash_mut().hash_from_file(&path)?;
@@ -260,7 +259,7 @@ impl Constellation for StorjFilesystem {
     /// Download file to path with the name format being `bucket_name://path/to/file`
     /// Note: This only supports uploading of files. This has not implemented creation of
     ///       directories.
-    async fn get(&self, name: &str, path: &str) -> warp_common::Result<()> {
+    async fn get(&self, name: &str, path: &str) -> Result<()> {
         let (bucket, name) = split_for(name)?;
 
         if let Ok(cache) = self.get_cache() {
@@ -317,7 +316,7 @@ impl Constellation for StorjFilesystem {
         Ok(())
     }
 
-    async fn from_buffer(&mut self, name: &str, buffer: &Vec<u8>) -> warp_common::Result<()> {
+    async fn from_buffer(&mut self, name: &str, buffer: &Vec<u8>) -> Result<()> {
         let (bucket, name) = split_for(name)?;
 
         //TODO: Allow for custom bucket name
@@ -345,7 +344,7 @@ impl Constellation for StorjFilesystem {
         .unwrap_or_default();
 
         self.modified = Utc::now();
-        let mut file = warp_constellation::file::File::new(&name);
+        let mut file = warp::constellation::file::File::new(&name);
         file.set_size(buffer.len() as i64);
         file.hash_mut().hash_from_slice(buffer);
         file.set_ref(&url);
@@ -370,7 +369,7 @@ impl Constellation for StorjFilesystem {
         Ok(())
     }
 
-    async fn to_buffer(&self, name: &str, buffer: &mut Vec<u8>) -> warp_common::Result<()> {
+    async fn to_buffer(&self, name: &str, buffer: &mut Vec<u8>) -> Result<()> {
         let (bucket, name) = split_for(name)?;
 
         if let Ok(cache) = self.get_cache() {
@@ -406,7 +405,7 @@ impl Constellation for StorjFilesystem {
         Ok(())
     }
 
-    async fn remove(&mut self, path: &str, _: bool) -> warp_common::Result<()> {
+    async fn remove(&mut self, path: &str, _: bool) -> Result<()> {
         let (bucket, name) = split_for(path)?;
 
         let (_, code) = self
@@ -436,7 +435,7 @@ impl Constellation for StorjFilesystem {
         Ok(())
     }
 
-    async fn sync_ref(&mut self, path: &str) -> warp_common::Result<()> {
+    async fn sync_ref(&mut self, path: &str) -> Result<()> {
         let (bucket, name) = split_for(path)?;
 
         let url = presign_url(
@@ -481,12 +480,7 @@ fn split_for<S: AsRef<str>>(name: S) -> anyhow::Result<(String, String)> {
 }
 
 //TODO: Migrate over to using aws-sdk if we decide to utilize storj s3 over uplink
-async fn presign_url(
-    acc: &str,
-    sec: &str,
-    bucket: &str,
-    obj: &str,
-) -> warp_common::anyhow::Result<String> {
+async fn presign_url(acc: &str, sec: &str, bucket: &str, obj: &str) -> anyhow::Result<String> {
     let cred = aws_sdk_s3::Credentials::new(acc, sec, None, None, "");
 
     let resolver = PartitionResolver::new(

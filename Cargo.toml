@@ -1,9 +1,11 @@
 [workspace]
 members = [
   "config/warp-configuration",
-  "modules/*",
+#  "modules/*",
   "extensions/*",
-  "misc/warp-tui",
-  "utils/*",
+#  "misc/warp-tui",
+#  "utils/*",
   "warp",
+  "warp-bin"
 ]
+exclude = ["misc/*"]
