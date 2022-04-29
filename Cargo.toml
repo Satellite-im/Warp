@@ -6,6 +6,7 @@ members = [
 #  "misc/warp-tui",
 #  "utils/*",
   "warp",
-  "warp-bin"
+  "warp-bin",
+  "warp-extensions"
 ]
 exclude = ["misc/*"]

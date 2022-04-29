@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "warp"
+path = "src/main.rs"
 
 [dependencies]
 dirs = "4.0"
@@ -35,28 +38,18 @@ unicode-width = { version = "0.1", optional = true }
 
 warp-configuration = { path = "../config/warp-configuration" }
 
-warp-fs-ipfs = { path = "../extensions/warp-fs-ipfs", optional = true }
-warp-fs-memory = { path = "../extensions/warp-fs-memory", optional = true }
-warp-fs-storj = { path = "../extensions/warp-fs-storj", optional = true }
-warp-pd-stretto = { path = "../extensions/warp-pd-stretto", optional = true }
-warp-pd-flatfile = { path = "../extensions/warp-pd-flatfile", optional = true }
-warp-mp-solana = { path = "../extensions/warp-mp-solana", optional = true }
+warp-extensions = { path = "../warp-extensions", features = ["all"]}
 
 axum = { version = "0.5", optional = true }
 rocket = { version = "0.5.0-rc.1", git = "https://github.com/SergioBenitez/Rocket", optional = true, features = ["json"] } #TODO: do not use git directly but for now use it for development
 
 
 [features]
-default = 		["modules_ext", "for_terminal"]
-modules_ext = 	["pocket-dimension", "constellation", "multipass", "raygun"]
+default = 		["for_terminal"]
 for_terminal =  ["http_rocket", "ui", "cli"]
 http_rocket =   ["rocket"]
 http_axum =     ["axum"]
 
-pocket-dimension = ["warp-pd-stretto", "warp-pd-flatfile"]
-constellation =    ["warp-fs-memory", "warp-fs-storj", "warp-fs-ipfs"]
-multipass = 	   ["warp-mp-solana"]
-raygun = 		   []
 
 ui =  ["tui", "tui-logger", "crossterm"]
 cli = ["rustyline", "rustyline-derive", "unicode-width", "clap", "comfy-table"]

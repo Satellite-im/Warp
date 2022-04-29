@@ -1,0 +1,24 @@
+[package]
+name = "warp-extensions"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+warp-fs-ipfs = { path = "../extensions/warp-fs-ipfs", optional = true }
+warp-fs-memory = { path = "../extensions/warp-fs-memory", optional = true }
+warp-fs-storj = { path = "../extensions/warp-fs-storj", optional = true }
+warp-pd-stretto = { path = "../extensions/warp-pd-stretto", optional = true }
+warp-pd-flatfile = { path = "../extensions/warp-pd-flatfile", optional = true }
+warp-mp-solana = { path = "../extensions/warp-mp-solana", optional = true }
+
+cfg-if = "1.0"
+
+[features]
+default = []
+all = ["fs-ipfs", "fs-memory", "fs-storj", "pd-flatfile", "pd-stretto", "mp-solana"]
+fs-ipfs = ["warp-fs-ipfs"]
+fs-memory = ["warp-fs-memory"]
+fs-storj = ["warp-fs-storj"]
+pd-stretto = ["warp-pd-stretto"]
+pd-flatfile = ["warp-pd-flatfile"]
+mp-solana = ["warp-mp-solana"]

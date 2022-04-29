@@ -24,12 +24,12 @@ use warp::multipass::identity::{Identifier, PublicKey};
 use warp::pocket_dimension::PocketDimension;
 use warp::tesseract::Tesseract;
 use warp_configuration::Config;
-use warp_fs_ipfs::IpfsFileSystem;
-use warp_fs_memory::MemorySystem;
-use warp_fs_storj::StorjFilesystem;
-use warp_mp_solana::SolanaAccount;
-use warp_pd_flatfile::FlatfileStorage;
-use warp_pd_stretto::StrettoClient;
+use warp_extensions::fs_ipfs::IpfsFileSystem;
+use warp_extensions::fs_memory::MemorySystem;
+use warp_extensions::fs_storj::StorjFilesystem;
+use warp_extensions::mp_solana::SolanaAccount;
+use warp_extensions::pd_flatfile::FlatfileStorage;
+use warp_extensions::pd_stretto::StrettoClient;
 
 #[derive(Debug, Parser)]
 #[clap(version, about, long_about = None)]
