@@ -589,6 +589,7 @@ impl Directory {
 pub mod ffi {
     use crate::constellation::file::ffi::{FilePointer, FileStructPointer};
     use crate::constellation::Directory;
+    use std::ffi::CStr;
     #[allow(unused)]
     use std::ffi::{c_void, CString};
     use std::os::raw::c_char;
@@ -601,10 +602,10 @@ pub mod ffi {
     // Prep for FFI
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_new(name: *mut c_char) -> DirectoryPointer {
+    pub unsafe extern "C" fn directory_new(name: *const c_char) -> DirectoryPointer {
         let name = match name.is_null() {
             true => "unused".to_string(),
-            false => CString::from_raw(name).to_string_lossy().to_string(),
+            false => CStr::from_ptr(name).to_string_lossy().to_string(),
         };
         let directory = Box::new(Directory::new(name.as_str()));
         Box::into_raw(directory) as DirectoryStructPointer as DirectoryPointer
@@ -652,10 +653,7 @@ pub mod ffi {
 
         let new_file = &*(file as FileStructPointer);
 
-        match dir_ptr.add_file(new_file.clone()) {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        dir_ptr.add_file(new_file.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -708,7 +706,7 @@ pub mod ffi {
 
         let dir: &Directory = &*(dir as DirectoryStructPointer);
 
-        match CString::new(dir.description().to_string()) {
+        match CString::new(dir.description()) {
             Ok(c) => c.into_raw(),
             Err(_) => std::ptr::null_mut(),
         }

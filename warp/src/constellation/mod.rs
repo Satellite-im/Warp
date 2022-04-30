@@ -216,10 +216,7 @@ pub mod ffi {
         let cname = CString::from_raw(name).to_string_lossy().to_string();
 
         let constellation = &mut *(ctx as *mut Box<dyn Constellation>);
-        match (**constellation).select(&cname) {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        (**constellation).select(&cname).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -230,10 +227,7 @@ pub mod ffi {
         }
 
         let constellation = &mut *(ctx as *mut Box<dyn Constellation>);
-        match (**constellation).go_back() {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        (**constellation).go_back().is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -328,10 +322,8 @@ pub mod ffi {
         let remote = CString::from_raw(remote).to_string_lossy().to_string();
         let local = CString::from_raw(local).to_string_lossy().to_string();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        match rt.block_on(async move { (**constellation).put(&remote, &local).await }) {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        rt.block_on(async move { (**constellation).put(&remote, &local).await })
+            .is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -359,14 +351,12 @@ pub mod ffi {
         let constellation = &mut *(ctx as *mut Box<dyn Constellation>);
         let remote = CString::from_raw(remote).to_string_lossy().to_string();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        match rt.block_on(async move {
+        rt.block_on(async move {
             (**constellation)
                 .from_buffer(&remote, &slice.to_vec())
                 .await
-        }) {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        })
+        .is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -393,10 +383,8 @@ pub mod ffi {
         let remote = CString::from_raw(remote).to_string_lossy().to_string();
         let local = CString::from_raw(local).to_string_lossy().to_string();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        match rt.block_on(async move { (**constellation).get(&remote, &local).await }) {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        rt.block_on(async move { (**constellation).get(&remote, &local).await })
+            .is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -421,7 +409,11 @@ pub mod ffi {
         let ptr = rt.block_on(async move {
             {
                 match (**constellation).to_buffer(&remote, &mut temp_buf).await {
-                    Ok(_) => temp_buf.as_ptr(),
+                    Ok(_) => {
+                        let buf = temp_buf.as_ptr();
+                        std::mem::forget(temp_buf);
+                        buf
+                    }
                     Err(_) => std::ptr::null(),
                 }
             }
@@ -501,10 +493,8 @@ pub mod ffi {
         let src = CString::from_raw(src).to_string_lossy().to_string();
         let dst = CString::from_raw(dst).to_string_lossy().to_string();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        match rt.block_on(async move { (**constellation).move_item(&src, &dst).await }) {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        rt.block_on(async move { (**constellation).move_item(&src, &dst).await })
+            .is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -524,10 +514,8 @@ pub mod ffi {
         let constellation = &mut *(ctx as *mut Box<dyn Constellation>);
         let src = CString::from_raw(src).to_string_lossy().to_string();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        match rt.block_on(async move { (**constellation).sync_ref(&src).await }) {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        rt.block_on(async move { (**constellation).sync_ref(&src).await })
+            .is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]

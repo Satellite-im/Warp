@@ -346,6 +346,7 @@ impl Hash {
 
 pub mod ffi {
     use crate::constellation::file::File;
+    use std::ffi::CStr;
     #[allow(unused)]
     use std::ffi::{c_void, CString};
     #[allow(unused)]
@@ -357,10 +358,10 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn file_new(name: *mut c_char) -> FilePointer {
+    pub unsafe extern "C" fn file_new(name: *const c_char) -> FilePointer {
         let name = match name.is_null() {
             true => "unused".to_string(),
-            false => CString::from_raw(name).to_string_lossy().to_string(),
+            false => CStr::from_ptr(name).to_string_lossy().to_string(),
         };
         let file = Box::new(File::new(name.as_str()));
         Box::into_raw(file) as FileStructPointer as FilePointer
