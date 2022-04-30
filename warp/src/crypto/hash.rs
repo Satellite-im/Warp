@@ -75,6 +75,100 @@ pub fn blake2s_hash(data: &[u8], salt: Option<Vec<u8>>) -> Vec<u8> {
     hasher.finalize().to_vec()
 }
 
+pub mod ffi {
+    use crate::crypto::hash::*;
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn crypto_sha1_hash(
+        data: *const u8,
+        data_size: usize,
+        salt: *const u8,
+        salt_size: usize,
+    ) -> *const u8 {
+        if data.is_null() || data_size == 0 {
+            return std::ptr::null();
+        }
+        let data_slice = std::slice::from_raw_parts(data, data_size);
+
+        let salt = match salt.is_null() {
+            true => None,
+            false => {
+                if salt_size == 0 {
+                    None
+                } else {
+                    Some(std::slice::from_raw_parts(salt, salt_size).to_vec())
+                }
+            }
+        };
+
+        let hash = sha1_hash(data_slice, salt);
+        let data_ptr = hash.as_ptr();
+        std::mem::forget(hash);
+        data_ptr
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn crypto_sha256_hash(
+        data: *const u8,
+        data_size: usize,
+        salt: *const u8,
+        salt_size: usize,
+    ) -> *const u8 {
+        if data.is_null() || data_size == 0 {
+            return std::ptr::null();
+        }
+        let data_slice = std::slice::from_raw_parts(data, data_size);
+
+        let salt = match salt.is_null() {
+            true => None,
+            false => {
+                if salt_size == 0 {
+                    None
+                } else {
+                    Some(std::slice::from_raw_parts(salt, salt_size).to_vec())
+                }
+            }
+        };
+
+        let hash = sha256_hash(data_slice, salt);
+        let data_ptr = hash.as_ptr();
+        std::mem::forget(hash);
+        data_ptr
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn crypto_blake2s_hash(
+        data: *const u8,
+        data_size: usize,
+        salt: *const u8,
+        salt_size: usize,
+    ) -> *const u8 {
+        if data.is_null() || data_size == 0 {
+            return std::ptr::null();
+        }
+        let data_slice = std::slice::from_raw_parts(data, data_size);
+
+        let salt = match salt.is_null() {
+            true => None,
+            false => {
+                if salt_size == 0 {
+                    None
+                } else {
+                    Some(std::slice::from_raw_parts(salt, salt_size).to_vec())
+                }
+            }
+        };
+
+        let hash = blake2s_hash(data_slice, salt);
+        let data_ptr = hash.as_ptr();
+        std::mem::forget(hash);
+        data_ptr
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::crypto::hash::*;
