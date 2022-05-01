@@ -84,7 +84,7 @@ impl Directory {
     /// # Examples
     ///
     /// ```
-    ///     use warp::constellation::{directory::Directory, item::{Item, Metadata}};
+    ///     use warp::constellation::{directory::Directory, item::{Item}};
     ///
     ///     let dir = Directory::new("Test Directory");
     ///     assert_eq!(dir.name(), String::from("Test Directory"));
@@ -135,7 +135,7 @@ impl Directory {
     /// # Examples
     ///
     /// ```
-    ///     use warp::constellation::{directory::Directory, item::{Item, Metadata}};
+    ///     use warp::constellation::{directory::Directory, item::{Item}};
     ///
     ///     let mut root = Directory::new("Test Directory");
     ///     let sub = Directory::new("Sub Directory");
@@ -164,10 +164,12 @@ impl Directory {
     /// ```
     #[cfg(not(target_arch = "wasm32"))]
     pub fn add_item<I: Into<Item>>(&mut self, item: I) -> Result<()> {
-        match item.into() {
-            Item::Directory(dir) => self.add_directory(dir),
-            Item::File(file) => self.add_file(file),
+        let item = item.into();
+        if self.has_item(&item.name()) {
+            return Err(Error::DuplicateName);
         }
+        self.items.push(item);
+        Ok(())
     }
 
     /// Add a file to the `Directory`
@@ -175,7 +177,7 @@ impl Directory {
         if self.has_item(&file.name()) {
             return Err(Error::DuplicateName);
         }
-        self.items.push(Item::File(file));
+        self.items.push(Item::new_file(file));
         self.set_modified();
         Ok(())
     }
@@ -190,7 +192,7 @@ impl Directory {
             return Err(Error::DirParadox);
         }
 
-        self.items.push(Item::Directory(directory));
+        self.items.push(Item::new_directory(directory));
         self.set_modified();
         Ok(())
     }
@@ -432,7 +434,7 @@ impl Directory {
             if item.name().eq(item_name) {
                 return Ok(item);
             }
-            if let Item::Directory(directory) = item {
+            if let Ok(directory) = item.get_directory() {
                 match directory.find_item(item_name) {
                     Ok(item) => return Ok(item),
                     //Since we know the error will be `Error::ItemInvalid`, we can continue through the iteration until it ends
@@ -457,7 +459,7 @@ impl Directory {
                 }
             }
 
-            if let Item::Directory(directory) = item {
+            if let Ok(directory) = item.get_directory() {
                 list.extend(directory.find_all_items(item_names.clone()));
             }
         }
@@ -494,7 +496,7 @@ impl Directory {
         let name = path.remove(0);
         let item = self.get_item(name)?;
         return if !path.is_empty() {
-            if let Item::Directory(dir) = item {
+            if let Ok(dir) = item.get_directory() {
                 dir.get_item_by_path(path.join("/").as_str())
             } else {
                 Ok(item)
@@ -537,8 +539,9 @@ impl Directory {
         let name = path.remove(0);
         let item = self.get_item_mut(name)?;
         return if !path.is_empty() {
-            if let Item::Directory(dir) = item {
-                dir.get_item_mut_by_path(path.join("/").as_str())
+            if item.is_directory() {
+                item.get_directory_mut()?
+                    .get_item_mut_by_path(path.join("/").as_str())
             } else {
                 Ok(item)
             }

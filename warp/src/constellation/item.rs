@@ -10,34 +10,11 @@ use crate::error::Error;
 
 /// `Item` is a type that handles both `File` and `Directory`
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum Item {
-    /// Instance of `File`
-    File(File),
-
-    /// Instance of `Directory`
-    Directory(Directory),
-}
-
-/// Provides basic information about `Item`, `File`, or `Directory`
-pub trait Metadata {
-    /// ID of the instance
-    fn id(&self) -> &Uuid;
-
-    /// Name of the instance
-    fn name(&self) -> String;
-
-    /// Description of the instance
-    fn description(&self) -> String;
-
-    /// Size of the instance
-    fn size(&self) -> i64;
-
-    /// Timestamp of the creation of the instance
-    fn creation(&self) -> DateTime<Utc>;
-
-    /// Timestamp that represents the time in which the instance is modified
-    fn modified(&self) -> DateTime<Utc>;
+pub struct Item {
+    #[serde(skip_serializing_if = "Option::is_none", flatten)]
+    directory: Option<Directory>,
+    #[serde(skip_serializing_if = "Option::is_none", flatten)]
+    file: Option<File>,
 }
 
 /// Used to convert `File` to `Item`
@@ -52,7 +29,7 @@ pub trait Metadata {
 /// ```
 impl From<File> for Item {
     fn from(file: File) -> Self {
-        Item::File(file)
+        Item::new_file(file)
     }
 }
 
@@ -61,65 +38,103 @@ impl From<File> for Item {
 /// #Examples
 ///
 /// ```
-///     use warp::constellation::{directory::{Directory, DirectoryType}, item::{Item, Metadata}};
+///     use warp::constellation::{directory::{Directory, DirectoryType}, item::{Item}};
 ///     let dir = Directory::new("Test Directory");
 ///     let item = Item::from(dir.clone());
 ///     assert_eq!(item.name(), dir.name());
 /// ```
 impl From<Directory> for Item {
     fn from(directory: Directory) -> Self {
-        Item::Directory(directory)
+        Item::new_directory(directory)
+    }
+}
+
+impl Item {
+    pub fn new_file(file: File) -> Item {
+        Item {
+            file: Some(file),
+            directory: None,
+        }
+    }
+
+    pub fn new_directory(directory: Directory) -> Item {
+        Item {
+            file: None,
+            directory: Some(directory),
+        }
+    }
+
+    pub fn file(&self) -> Option<&File> {
+        self.file.as_ref()
+    }
+
+    pub fn directory(&self) -> Option<&Directory> {
+        self.directory.as_ref()
+    }
+
+    pub fn file_mut(&mut self) -> Option<&mut File> {
+        self.file.as_mut()
+    }
+
+    pub fn directory_mut(&mut self) -> Option<&mut Directory> {
+        self.directory.as_mut()
     }
 }
 
 impl Item {
     /// Get id of `Item`
     pub fn id(&self) -> Uuid {
-        match self {
-            Item::File(file) => file.id(),
-            Item::Directory(directory) => directory.id(),
+        match (self.file(), self.directory()) {
+            (Some(file), None) => file.id(),
+            (None, Some(directory)) => directory.id(),
+            _ => Uuid::nil(),
         }
     }
 
     /// Get string of `Item`
     pub fn name(&self) -> String {
-        match self {
-            Item::File(file) => file.name(),
-            Item::Directory(directory) => directory.name(),
+        match (self.file(), self.directory()) {
+            (Some(file), None) => file.name(),
+            (None, Some(directory)) => directory.name(),
+            _ => String::new(),
         }
     }
 
     /// Get description of `Item`
     pub fn description(&self) -> String {
-        match self {
-            Item::File(file) => file.description(),
-            Item::Directory(directory) => directory.description(),
+        match (self.file(), self.directory()) {
+            (Some(file), None) => file.description(),
+            (None, Some(directory)) => directory.description(),
+            _ => String::new(),
         }
     }
 
     /// Get the creation date of `Item`
     pub fn creation(&self) -> DateTime<Utc> {
-        match self {
-            Item::File(file) => file.creation(),
-            Item::Directory(directory) => directory.creation(),
+        match (self.file(), self.directory()) {
+            (Some(file), None) => file.creation(),
+            (None, Some(directory)) => directory.creation(),
+            _ => Utc::now(),
         }
     }
 
     /// Get the modified date of `Item`
     pub fn modified(&self) -> DateTime<Utc> {
-        match self {
-            Item::File(file) => file.modified(),
-            Item::Directory(directory) => directory.modified(),
+        match (self.file(), self.directory()) {
+            (Some(file), None) => file.modified(),
+            (None, Some(directory)) => directory.modified(),
+            _ => Utc::now(),
         }
     }
 
     /// Get size of `Item`.
-    /// If `Item::File` it will return the size of the `File`.
-    /// If `Item::Directory` it will return the size of all files within the `Directory`, including files located within a sub directory
+    /// If `Item` is a `File` it will return the size of the `File`.
+    /// If `Item` is a `Directory` it will return the size of all files within the `Directory`, including files located within a sub directory
     pub fn size(&self) -> i64 {
-        match self {
-            Item::File(file) => file.size(),
-            Item::Directory(directory) => directory.get_items().iter().map(Item::size).sum(),
+        match (self.file(), self.directory()) {
+            (Some(file), None) => file.size(),
+            (None, Some(directory)) => directory.get_items().iter().map(Item::size).sum(),
+            _ => 0,
         }
     }
 
@@ -129,87 +144,66 @@ impl Item {
         if self.name() == name {
             return Err(Error::DuplicateName);
         }
-        match self {
-            Item::File(file) => {
-                (*file).set_name(name);
-            }
-            Item::Directory(directory) => {
-                (*directory).set_name(name);
-            }
-        };
+        if let Some(file) = self.file_mut() {
+            file.set_name(name);
+            return Ok(());
+        }
 
-        Ok(())
+        if let Some(directory) = self.directory_mut() {
+            directory.set_name(name);
+            return Ok(());
+        }
+        return Err(Error::Other);
     }
 
     /// Convert `Item` to `Directory`
     pub fn get_directory(&self) -> Result<&Directory> {
-        match self {
-            Item::File(_) => Err(Error::InvalidConversion),
-            Item::Directory(directory) => Ok(directory),
-        }
+        self.directory().ok_or(Error::InvalidConversion)
     }
 
     /// Convert `Item` to `File`
     pub fn get_file(&self) -> Result<&File> {
-        match self {
-            Item::File(file) => Ok(file),
-            Item::Directory(_) => Err(Error::InvalidConversion),
-        }
+        self.file().ok_or(Error::InvalidConversion)
     }
 
     /// Convert `Item` to `Directory`
     pub fn get_directory_mut(&mut self) -> Result<&mut Directory> {
-        match self {
-            Item::File(_) => Err(Error::InvalidConversion),
-            Item::Directory(directory) => Ok(directory),
-        }
+        self.directory_mut().ok_or(Error::InvalidConversion)
     }
 
     /// Convert `Item` to `File`
     pub fn get_file_mut(&mut self) -> Result<&mut File> {
-        match self {
-            Item::File(file) => Ok(file),
-            Item::Directory(_) => Err(Error::InvalidConversion),
-        }
+        self.file_mut().ok_or(Error::InvalidConversion)
     }
 
     /// Check to see if `Item` is `Directory`
     pub fn is_directory(&self) -> bool {
-        match self {
-            Item::File(_) => false,
-            Item::Directory(_) => true,
-        }
+        self.directory().is_some() && self.file().is_none()
     }
 
     /// Check to see if `Item` is `File`
     pub fn is_file(&self) -> bool {
-        match self {
-            Item::File(_) => true,
-            Item::Directory(_) => false,
-        }
+        self.directory().is_none() && self.file().is_some()
     }
 
     /// Set description of `Item`
     pub fn set_description(&mut self, desc: &str) {
-        match self {
-            Item::File(file) => {
-                file.set_description(desc);
-            }
-            Item::Directory(directory) => {
-                directory.set_description(desc);
-            }
+        if let Some(file) = self.file_mut() {
+            file.set_description(desc);
+        }
+
+        if let Some(directory) = self.directory_mut() {
+            directory.set_description(desc);
         }
     }
 
     /// Set size of `Item` if its a `File`
     pub fn set_size(&mut self, size: i64) -> Result<()> {
-        match self {
-            Item::File(file) => {
-                file.set_size(size);
-                Ok(())
-            }
-            Item::Directory(_) => Err(Error::ItemNotFile),
+        if let Some(file) = self.file_mut() {
+            file.set_size(size);
+            return Ok(());
         }
+        return Err(Error::ItemNotFile);
     }
 }
 
@@ -231,7 +225,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn directory_into_item(directory: *mut Directory) -> *mut Item {
         let directory = &*directory;
-        let item = Box::new(Item::Directory(directory.clone()));
+        let item = Box::new(Item::new_directory(directory.clone()));
         Box::into_raw(item) as *mut Item
     }
 
@@ -239,7 +233,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn file_into_item(file: *mut File) -> *mut Item {
         let file = &*file;
-        let item = Box::new(Item::File(file.clone()));
+        let item = Box::new(Item::new_file(file.clone()));
         Box::into_raw(item) as *mut Item
     }
 
@@ -247,12 +241,12 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn item_into_directory(item: *mut Item) -> *mut Directory {
         let item = &*(item);
-        match item {
-            Item::Directory(directory) => {
-                let directory = Box::new(directory.clone());
-                Box::into_raw(directory) as *mut Directory
+        match item.get_directory() {
+            Ok(directory) => {
+                let dir = Box::new(directory.clone());
+                Box::into_raw(dir) as *mut Directory
             }
-            Item::File(_) => std::ptr::null_mut(),
+            Err(_) => std::ptr::null_mut(),
         }
     }
 
@@ -260,12 +254,12 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn item_into_file(item: *mut Item) -> *mut File {
         let item = &*(item);
-        match item {
-            Item::Directory(_) => std::ptr::null_mut(),
-            Item::File(file) => {
+        match item.get_file() {
+            Ok(file) => {
                 let file = Box::new(file.clone());
                 Box::into_raw(file) as *mut File
             }
+            Err(_) => std::ptr::null_mut(),
         }
     }
 }

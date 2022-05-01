@@ -426,9 +426,13 @@ impl Constellation for StorjFilesystem {
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), &item)?;
             let hook = hook.lock().unwrap();
-            let hook_name = match item {
-                Item::Directory(_) => "filesystem::remove_directory",
-                Item::File(_) => "filesystem::remove_file",
+            //TODO: Add a proper check
+            let hook_name = if item.is_directory() {
+                "filesystem::remove_directory"
+            } else if item.is_file() {
+                "filesystem::remove_file"
+            } else {
+                "filesystem::unknown_event"
             };
             hook.trigger(hook_name, &object);
         }
