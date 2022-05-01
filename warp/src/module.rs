@@ -16,7 +16,7 @@ use wasm_bindgen::prelude::*;
 ///            This can include simple things like usernames and status messages, but may also
 ///            include permissions, friends, and more.
 ///
-#[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Display)]
+#[derive(Hash, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[repr(C)]

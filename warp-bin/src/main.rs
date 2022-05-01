@@ -18,7 +18,7 @@ use serde_json::Value;
 
 use warp::constellation::{Constellation, ConstellationDataType};
 use warp::crypto::zeroize::Zeroize;
-use warp::data::DataObject;
+use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, PublicKey};
 use warp::pocket_dimension::PocketDimension;
@@ -107,6 +107,10 @@ enum Command {
     },
     FileReference {
         remote: String,
+    },
+    ClearCache {
+        data_type: Option<String>,
+        force: Option<bool>,
     },
 }
 
@@ -582,6 +586,65 @@ async fn main() -> AnyResult<()> {
                     match file.reference() {
                         Some(r) => println!("{} Reference: {r}", remote),
                         None => println!("{} has no reference", remote),
+                    }
+                }
+            }
+            Command::ClearCache { data_type, force } => {
+                let data_type = match data_type {
+                    Some(dtype) => {
+                        let data_type = DataType::from(&dtype);
+                        if let DataType::Unknown = data_type {
+                            println!("'{}' is not a valid data type", &dtype);
+                            match force {
+                                Some(true) => {
+                                    println!("Clearing all available dimensions");
+                                    vec![
+                                        DataType::FileSystem,
+                                        DataType::Accounts,
+                                        DataType::Messaging,
+                                        DataType::Cache,
+                                        DataType::File,
+                                        DataType::Unknown,
+                                    ]
+                                }
+                                _ => vec![],
+                            }
+                        } else {
+                            vec![data_type]
+                        }
+                    }
+                    None => {
+                        println!("Clearing all available dimensions");
+                        vec![
+                            DataType::FileSystem,
+                            DataType::Accounts,
+                            DataType::Messaging,
+                            DataType::Cache,
+                            DataType::File,
+                            DataType::Unknown,
+                        ]
+                    }
+                };
+
+                let cache = manager.get_cache()?;
+                let mut cache = match cache.lock() {
+                    Ok(a) => a,
+                    Err(e) => e.into_inner(),
+                };
+
+                if !data_type.is_empty() {
+                    for data_type in data_type.iter() {
+                        println!("Clearing {}", data_type.to_string());
+                        match cache.empty(*data_type) {
+                            Ok(_) => println!("{} cleared", data_type.to_string()),
+                            Err(e) => {
+                                println!(
+                                    "Unable to clear {} with error {}",
+                                    data_type.to_string(),
+                                    e
+                                );
+                            }
+                        }
                     }
                 }
             }
