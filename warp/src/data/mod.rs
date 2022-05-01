@@ -55,7 +55,7 @@ pub struct Data {
     payload: Value,
 }
 
-#[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Display)]
+#[derive(Hash, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -76,6 +76,22 @@ pub enum DataType {
     DataExport,
     #[display(fmt = "unknown")]
     Unknown,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl<S: AsRef<str>> From<S> for DataType {
+    fn from(data: S) -> Self {
+        match data.as_ref().to_lowercase().as_str() {
+            "messaging" => DataType::Messaging,
+            "filesystem" => DataType::FileSystem,
+            "accounts" => DataType::Accounts,
+            "cache" => DataType::Cache,
+            "http" => DataType::Http,
+            "file" => DataType::File,
+            "data_export" | "dataexport" => DataType::DataExport,
+            _ => DataType::Unknown,
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
