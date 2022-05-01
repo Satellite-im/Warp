@@ -1,10 +1,17 @@
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
 pub mod generator;
 pub mod identity;
 
 use crate::Extension;
 use identity::Identity;
 
+#[cfg(not(target_arch = "wasm32"))]
 type Result<T> = std::result::Result<T, crate::error::Error>;
+
+#[cfg(target_arch = "wasm32")]
+type Result<T> = std::result::Result<T, JsError>;
 
 use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate, PublicKey};
 
@@ -18,7 +25,7 @@ pub trait MultiPass: Extension + Friends + Sync + Send {
     fn get_identity(&self, id: Identifier) -> Result<Identity>;
 
     fn get_own_identity(&self) -> Result<Identity> {
-        self.get_identity(Identifier::Own)
+        self.get_identity(Identifier::own())
     }
 
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<()>;
@@ -28,19 +35,24 @@ pub trait MultiPass: Extension + Friends + Sync + Send {
     fn refresh_cache(&mut self) -> Result<()>;
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct MultiPassTraitObject {
     object: Box<dyn MultiPass>,
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl MultiPassTraitObject {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(object: Box<dyn MultiPass>) -> Self {
         MultiPassTraitObject { object }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn get_inner(&self) -> &Box<dyn MultiPass> {
         &self.object
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn get_inner_mut(&mut self) -> &mut Box<dyn MultiPass> {
         &mut self.object
     }
@@ -85,6 +97,7 @@ pub trait Friends: Sync + Send {
     fn key_exchange(&self, identity: Identity) -> Result<Vec<u8>>;
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::multipass::{
         identity::{FriendRequest, Identifier, Identity, IdentityUpdate, PublicKey},

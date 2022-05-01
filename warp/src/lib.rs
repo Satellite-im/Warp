@@ -7,7 +7,6 @@ pub mod error;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hooks;
 pub mod module;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod multipass;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod pocket_dimension;

@@ -57,7 +57,7 @@ fn account() -> anyhow::Result<SolanaAccount> {
 }
 
 fn username(ident: &Identity) -> String {
-    format!("{}#{}", &ident.username, &ident.short_id)
+    format!("{}#{}", &ident.username(), &ident.short_id())
 }
 
 fn main() -> anyhow::Result<()> {
@@ -70,18 +70,18 @@ fn main() -> anyhow::Result<()> {
     println!(
         "{} with {}",
         username(&ident_a),
-        Pubkey::new(ident_a.public_key.to_bytes())
+        Pubkey::new(ident_a.public_key().to_bytes())
     );
 
     let ident_b = account_b.get_own_identity()?;
     println!(
         "{} with {}",
         username(&ident_b),
-        Pubkey::new(ident_b.public_key.to_bytes())
+        Pubkey::new(ident_b.public_key().to_bytes())
     );
 
     println!();
-    if account_a.has_friend(ident_b.public_key.clone()).is_ok() {
+    if account_a.has_friend(ident_b.public_key()).is_ok() {
         println!(
             "{} are friends with {}",
             username(&ident_a),
@@ -90,37 +90,40 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    account_a.send_request(ident_b.public_key.clone())?;
+    account_a.send_request(ident_b.public_key())?;
 
     println!("{} Outgoing request:", username(&ident_a));
     for outgoing in account_a.list_outgoing_request()? {
-        let ident_from = account_a.get_identity(Identifier::PublicKey(outgoing.from))?;
-        let ident_to = account_a.get_identity(Identifier::PublicKey(outgoing.to))?;
+        let ident_from = account_a.get_identity(Identifier::from(outgoing.from()))?;
+        let ident_to = account_a.get_identity(Identifier::from(outgoing.to()))?;
         println!("From: {}", username(&ident_from));
         println!("To: {}", username(&ident_to));
-        println!("Status: {:?}", outgoing.status);
+        println!("Status: {:?}", outgoing.status());
         println!();
     }
 
     println!("{} Incoming request:", username(&ident_b));
     for incoming in account_b.list_incoming_request()? {
-        let ident_from = account_b.get_identity(Identifier::PublicKey(incoming.from))?;
-        let ident_to = account_b.get_identity(Identifier::PublicKey(incoming.to))?;
+        let ident_from = account_b.get_identity(Identifier::from(incoming.from()))?;
+        let ident_to = account_b.get_identity(Identifier::from(incoming.to()))?;
         println!("From: {}", username(&ident_from));
         println!("To: {}", username(&ident_to));
-        println!("Status: {:?}", incoming.status);
+        println!("Status: {:?}", incoming.status());
         println!();
     }
     let coin = rng.gen_range(0, 2);
     match coin {
         0 => {
-            account_b.accept_request(ident_a.public_key.clone())?;
+            account_b.accept_request(ident_a.public_key())?;
 
             println!("{} Friends:", username(&ident_a));
 
             for friend in account_a.list_friends()? {
                 println!("Username: {}", username(&friend));
-                println!("Public Key: {}", Pubkey::new(friend.public_key.to_bytes()));
+                println!(
+                    "Public Key: {}",
+                    Pubkey::new(friend.public_key().to_bytes())
+                );
                 println!();
             }
 
@@ -128,13 +131,16 @@ fn main() -> anyhow::Result<()> {
 
             for friend in account_b.list_friends()? {
                 println!("Username: {}", username(&friend));
-                println!("Public Key: {}", Pubkey::new(friend.public_key.to_bytes()));
+                println!(
+                    "Public Key: {}",
+                    Pubkey::new(friend.public_key().to_bytes())
+                );
                 println!();
             }
 
             if rand::random() {
-                account_a.remove_friend(ident_b.public_key.clone())?;
-                if account_a.has_friend(ident_b.public_key.clone()).is_ok() {
+                account_a.remove_friend(ident_b.public_key())?;
+                if account_a.has_friend(ident_b.public_key()).is_ok() {
                     println!(
                         "{} is stuck with {} forever",
                         username(&ident_a),
@@ -144,8 +150,8 @@ fn main() -> anyhow::Result<()> {
                     println!("{} removed {}", username(&ident_a), username(&ident_b));
                 }
             } else {
-                account_b.remove_friend(ident_a.public_key.clone())?;
-                if account_b.has_friend(ident_a.public_key.clone()).is_ok() {
+                account_b.remove_friend(ident_a.public_key())?;
+                if account_b.has_friend(ident_a.public_key()).is_ok() {
                     println!(
                         "{} is stuck with {} forever",
                         username(&ident_b),
@@ -158,7 +164,7 @@ fn main() -> anyhow::Result<()> {
         }
         1 | _ => {
             println!("Denying {} friend request", username(&ident_a));
-            account_b.deny_request(ident_a.public_key.clone())?;
+            account_b.deny_request(ident_a.public_key())?;
         }
     }
 
@@ -166,11 +172,11 @@ fn main() -> anyhow::Result<()> {
 
     println!("Request List for {}", username(&ident_a));
     for list in account_a.list_all_request()? {
-        let ident_from = account_a.get_identity(Identifier::PublicKey(list.from))?;
-        let ident_to = account_a.get_identity(Identifier::PublicKey(list.to))?;
+        let ident_from = account_a.get_identity(Identifier::from(list.from()))?;
+        let ident_to = account_a.get_identity(Identifier::from(list.to()))?;
         println!("From: {}", username(&ident_from));
         println!("To: {}", username(&ident_to));
-        println!("Status: {:?}", list.status);
+        println!("Status: {:?}", list.status());
         println!();
     }
 

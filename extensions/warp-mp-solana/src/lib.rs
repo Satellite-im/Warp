@@ -193,7 +193,7 @@ impl MultiPass for SolanaAccount {
         let mut helper = UserHelper::new_with_wallet(&wallet)?;
 
         if let Ok(identity) = user_to_identity(&helper, None) {
-            if identity.get_username() == username {
+            if identity.username() == username {
                 return Err(Error::Any(anyhow!("Account already exist")));
             }
         }
@@ -206,7 +206,7 @@ impl MultiPass for SolanaAccount {
         }
         let code: i32 = warp::crypto::rand::thread_rng().gen_range(0, 9999);
 
-        let uname = format!("{username}#{code}");
+        let uname = format!("{username}#{}", code);
 
         helper.create(&uname, "", "We have lift off")?;
 
@@ -222,13 +222,13 @@ impl MultiPass for SolanaAccount {
             let object = DataObject::new(DataType::from(Module::Accounts), &identity)?;
             cache.add_data(DataType::from(Module::Accounts), &object)?;
         }
-        Ok(identity.get_public_key())
+        Ok(identity.public_key())
     }
 
     fn get_identity(&self, id: Identifier) -> Result<Identity> {
         let helper = self.user_helper()?;
-        let ident = match id {
-            Identifier::Username(username) => {
+        let ident = match id.get_inner() {
+            (None, Some(username), false) => {
                 if let Ok(cache) = self.get_cache() {
                     let mut query = QueryBuilder::default();
                     query.r#where("username", &username)?;
@@ -243,7 +243,7 @@ impl MultiPass for SolanaAccount {
                 }
                 return Err(Error::Any(anyhow!("Unable to find identity by username")));
             }
-            Identifier::PublicKey(pkey) => {
+            (Some(pkey), None, false) => {
                 if let Ok(cache) = self.get_cache() {
                     let mut query = QueryBuilder::default();
                     query.r#where("public_key", &pkey)?;
@@ -258,12 +258,13 @@ impl MultiPass for SolanaAccount {
                 }
                 user_to_identity(&helper, Some(pkey.to_bytes()))?
             }
-            Identifier::Own => user_to_identity(&helper, None)?,
+            (None, None, true) => user_to_identity(&helper, None)?,
+            _ => return Err(Error::Any(anyhow!("Invalid identifier condition provided. Must be either public key, username, or your own identity")))
         };
 
         if let Ok(mut cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
-            query.r#where("public_key", &ident.get_public_key())?;
+            query.r#where("public_key", &ident.public_key())?;
             if cache
                 .has_data(DataType::from(Module::Accounts), &query)
                 .is_err()
@@ -282,28 +283,32 @@ impl MultiPass for SolanaAccount {
         let old_identity = identity.clone();
         match option {
             IdentityUpdate::Username(username) => {
-                helper.set_name(&format!("{username}#{}", identity.get_short_id()))?;
-                identity.username = username
+                helper.set_name(&format!("{username}#{}", identity.short_id()))?;
+                identity.set_username(&username)
             }
             IdentityUpdate::Graphics { picture, banner } => {
                 if let Some(hash) = picture {
                     helper.set_photo(&hash)?;
-                    identity.graphics.profile_picture = hash;
+                    let mut graphics = identity.graphics();
+                    graphics.set_profile_picture(&hash);
+                    identity.set_graphics(graphics);
                 }
                 if let Some(hash) = banner {
                     helper.set_banner_image(&hash)?;
-                    identity.graphics.profile_banner = hash;
+                    let mut graphics = identity.graphics();
+                    graphics.set_profile_banner(&hash);
+                    identity.set_graphics(graphics);
                 }
             }
             IdentityUpdate::StatusMessage(status) => {
                 helper.set_status(&status.clone().unwrap_or_default())?;
-                identity.status_message = status
+                identity.set_status_message(status)
             }
         }
 
         if let Ok(mut cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
-            query.r#where("username", &old_identity.username)?;
+            query.r#where("username", &old_identity.username())?;
             if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query)) {
                 //get last
                 if !list.is_empty() {
@@ -336,14 +341,11 @@ impl Friends for SolanaAccount {
     fn send_request(&mut self, pubkey: PublicKey) -> Result<()> {
         let ident = self.get_own_identity()?;
 
-        if ident.get_public_key() == pubkey {
+        if ident.public_key() == pubkey {
             return Err(Error::Any(anyhow!("Unable to send a request to yourself")));
         }
 
-        if self
-            .get_identity(Identifier::PublicKey(pubkey.clone()))
-            .is_err()
-        {
+        if self.get_identity(Identifier::from(pubkey.clone())).is_err() {
             return Err(Error::Any(anyhow!("Account does not exist")));
         }
 
@@ -360,16 +362,13 @@ impl Friends for SolanaAccount {
     fn accept_request(&mut self, pubkey: PublicKey) -> Result<()> {
         let ident = self.get_own_identity()?;
 
-        if ident.get_public_key() == pubkey {
+        if ident.public_key() == pubkey {
             return Err(Error::Any(anyhow!(
                 "Unable to send/accept a request for yourself"
             )));
         }
 
-        if self
-            .get_identity(Identifier::PublicKey(pubkey.clone()))
-            .is_err()
-        {
+        if self.get_identity(Identifier::from(pubkey.clone())).is_err() {
             return Err(Error::Any(anyhow!("Account does not exist")));
         }
 
@@ -386,14 +385,11 @@ impl Friends for SolanaAccount {
     fn deny_request(&mut self, pubkey: PublicKey) -> Result<()> {
         let ident = self.get_own_identity()?;
 
-        if ident.get_public_key() == pubkey {
+        if ident.public_key() == pubkey {
             return Err(Error::Any(anyhow!("Unable to deny a request for yourself")));
         }
 
-        if self
-            .get_identity(Identifier::PublicKey(pubkey.clone()))
-            .is_err()
-        {
+        if self.get_identity(Identifier::from(pubkey.clone())).is_err() {
             return Err(Error::Any(anyhow!("Account does not exist")));
         }
         if self.has_friend(pubkey.clone()).is_ok() {
@@ -409,16 +405,13 @@ impl Friends for SolanaAccount {
     fn close_request(&mut self, pubkey: PublicKey) -> Result<()> {
         let ident = self.get_own_identity()?;
 
-        if ident.get_public_key() == pubkey {
+        if ident.public_key() == pubkey {
             return Err(Error::Any(anyhow!(
                 "Unable to close a request for yourself"
             )));
         }
 
-        if self
-            .get_identity(Identifier::PublicKey(pubkey.clone()))
-            .is_err()
-        {
+        if self.get_identity(Identifier::from(pubkey.clone())).is_err() {
             return Err(Error::Any(anyhow!("Account does not exist")));
         }
 
@@ -436,8 +429,8 @@ impl Friends for SolanaAccount {
         let ident = self.get_own_identity()?;
         self.list_all_request().map(|fr| {
             fr.iter()
-                .filter(|fr| fr.get_to() == ident.get_public_key())
-                .filter(|fr| fr.get_status() == FriendRequestStatus::Pending)
+                .filter(|fr| fr.to() == ident.public_key())
+                .filter(|fr| fr.status() == FriendRequestStatus::Pending)
                 .cloned()
                 .collect::<Vec<_>>()
         })
@@ -447,8 +440,8 @@ impl Friends for SolanaAccount {
         let ident = self.get_own_identity()?;
         self.list_all_request().map(|fr| {
             fr.iter()
-                .filter(|fr| fr.get_from() == ident.get_public_key())
-                .filter(|fr| fr.get_status() == FriendRequestStatus::Pending)
+                .filter(|fr| fr.from() == ident.public_key())
+                .filter(|fr| fr.status() == FriendRequestStatus::Pending)
                 .cloned()
                 .collect::<Vec<_>>()
         })
@@ -463,18 +456,13 @@ impl Friends for SolanaAccount {
             .map(|(_, request)| request)
             .map(DirectFriendRequest::from)
             .map(fr_to_fr)
-            .filter(|fr| {
-                fr.get_from() == ident.get_public_key() || fr.get_to() == ident.get_public_key()
-            })
+            .filter(|fr| fr.from() == ident.public_key() || fr.to() == ident.public_key())
             .collect::<Vec<_>>();
         Ok(new_list)
     }
 
     fn remove_friend(&mut self, pubkey: PublicKey) -> Result<()> {
-        if self
-            .get_identity(Identifier::PublicKey(pubkey.clone()))
-            .is_err()
-        {
+        if self.get_identity(Identifier::from(pubkey.clone())).is_err() {
             return Err(Error::Any(anyhow!("You cannot remove yourself.")));
         }
 
@@ -498,12 +486,12 @@ impl Friends for SolanaAccount {
         let ident = self.get_own_identity()?;
         for request in list
             .iter()
-            .filter(|r| r.get_status() == FriendRequestStatus::Accepted)
+            .filter(|r| r.status() == FriendRequestStatus::Accepted)
         {
-            let identity = if request.get_to() != ident.get_public_key() {
-                self.get_identity(Identifier::PublicKey(request.get_to()))?
+            let identity = if request.to() != ident.public_key() {
+                self.get_identity(Identifier::from(request.to()))?
             } else {
-                self.get_identity(Identifier::PublicKey(request.get_from()))?
+                self.get_identity(Identifier::from(request.from()))?
             };
 
             identities.push(identity)
@@ -531,16 +519,16 @@ impl Friends for SolanaAccount {
 
 fn fr_to_fr(fr: helper::friends::DirectFriendRequest) -> FriendRequest {
     let mut new_fr = FriendRequest::default();
-    new_fr.status = match fr.status {
+    new_fr.set_status(match fr.status {
         DirectStatus::Uninitilized => FriendRequestStatus::Uninitialized,
         DirectStatus::Pending => FriendRequestStatus::Pending,
         DirectStatus::Accepted => FriendRequestStatus::Accepted,
         DirectStatus::Denied => FriendRequestStatus::Denied,
         DirectStatus::RemovedFriend => FriendRequestStatus::RequestRemoved,
         DirectStatus::RequestRemoved => FriendRequestStatus::RequestRemoved,
-    };
-    new_fr.from = PublicKey::from_bytes(&fr.from.to_bytes());
-    new_fr.to = PublicKey::from_bytes(&fr.to.to_bytes());
+    });
+    new_fr.set_from(PublicKey::from_bytes(&fr.from.to_bytes()));
+    new_fr.set_to(PublicKey::from_bytes(&fr.to.to_bytes()));
     new_fr
 }
 
@@ -567,27 +555,29 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
             //Because of it being invalid and due to the lack of short code within the contract
             //we will not error here but instead would ignore and return the original username to
             //the identity.
-            identity.username = user.name;
+            identity.set_username(&user.name);
         } else {
             match (
                 split_data.get(0).ok_or(Error::Other).map(|s| s.to_string()),
                 split_data.get(1).ok_or(Error::Other)?.parse(),
             ) {
                 (Ok(name), Ok(code)) => {
-                    identity.username = name;
-                    identity.short_id = code;
+                    identity.set_username(&name);
+                    identity.set_short_id(code);
                 }
-                _ => identity.username = user.name,
+                _ => identity.set_username(&user.name),
             };
         }
     } else {
-        identity.username = user.name
+        identity.set_username(&user.name);
     };
 
-    identity.public_key = PublicKey::from_bytes(&pubkey.to_bytes());
-    identity.status_message = Some(user.status);
-    identity.graphics.profile_picture = user.photo_hash;
-    identity.graphics.profile_banner = user.banner_image_hash;
+    identity.set_public_key(PublicKey::from_bytes(&pubkey.to_bytes()));
+    identity.set_status_message(Some(user.status));
+    let mut graphics = Graphics::default();
+    graphics.set_profile_banner(&user.banner_image_hash);
+    graphics.set_profile_picture(&user.photo_hash);
+    identity.set_graphics(graphics);
     Ok(identity)
 }
 
