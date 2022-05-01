@@ -214,8 +214,9 @@ impl Item {
 }
 
 pub mod ffi {
-    use crate::constellation::directory::ffi::{DirectoryPointer, DirectoryStructPointer};
-    use crate::constellation::file::ffi::{FilePointer, FileStructPointer};
+
+    use crate::constellation::directory::Directory;
+    use crate::constellation::file::File;
     use crate::constellation::Item;
     #[allow(unused)]
     use std::ffi::{c_void, CString};
@@ -228,28 +229,28 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_into_item(directory: DirectoryPointer) -> ItemPointer {
-        let directory = &*(directory as DirectoryStructPointer);
+    pub unsafe extern "C" fn directory_into_item(directory: *mut Directory) -> *mut Item {
+        let directory = &*directory;
         let item = Box::new(Item::Directory(directory.clone()));
-        Box::into_raw(item) as ItemStructPointer as ItemPointer
+        Box::into_raw(item) as *mut Item
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn file_into_item(file: FilePointer) -> ItemPointer {
-        let file = &*(file as FileStructPointer);
+    pub unsafe extern "C" fn file_into_item(file: *mut File) -> *mut Item {
+        let file = &*file;
         let item = Box::new(Item::File(file.clone()));
-        Box::into_raw(item) as ItemStructPointer as ItemPointer
+        Box::into_raw(item) as *mut Item
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_into_directory(item: ItemPointer) -> DirectoryPointer {
-        let item = &*(item as ItemStructPointer);
+    pub unsafe extern "C" fn item_into_directory(item: *mut Item) -> *mut Directory {
+        let item = &*(item);
         match item {
             Item::Directory(directory) => {
                 let directory = Box::new(directory.clone());
-                Box::into_raw(directory) as DirectoryStructPointer as DirectoryPointer
+                Box::into_raw(directory) as *mut Directory
             }
             Item::File(_) => std::ptr::null_mut(),
         }
@@ -257,13 +258,13 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_into_file(item: ItemPointer) -> FilePointer {
-        let item = &*(item as ItemStructPointer);
+    pub unsafe extern "C" fn item_into_file(item: *mut Item) -> *mut File {
+        let item = &*(item);
         match item {
             Item::Directory(_) => std::ptr::null_mut(),
             Item::File(file) => {
                 let file = Box::new(file.clone());
-                Box::into_raw(file) as FileStructPointer as FilePointer
+                Box::into_raw(file) as *mut File
             }
         }
     }

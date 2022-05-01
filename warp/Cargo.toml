@@ -73,3 +73,4 @@ serde-wasm-bindgen = "0.4.2"
 
 [dev-dependencies]
 lazy_static = "1.4"
+libloading = "0.7"

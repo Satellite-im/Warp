@@ -385,11 +385,7 @@ pub fn extract_data_slice(data: &[u8], size: usize) -> ExtractedData {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use crate::crypto::cipher::{
-        self, aes256gcm_decrypt, aes256gcm_encrypt, aes256gcm_self_decrypt, aes256gcm_self_encrypt,
-        xchacha20poly1305_decrypt, xchacha20poly1305_encrypt, xchacha20poly1305_self_decrypt,
-        xchacha20poly1305_self_encrypt,
-    };
+    use crate::crypto::cipher::*;
     #[allow(unused)]
     use std::ffi::{c_void, CString};
     #[allow(unused)]

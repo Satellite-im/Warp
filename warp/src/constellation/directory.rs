@@ -587,35 +587,29 @@ impl Directory {
 }
 
 pub mod ffi {
-    use crate::constellation::file::ffi::{FilePointer, FileStructPointer};
+    use crate::constellation::file::File;
     use crate::constellation::Directory;
     use std::ffi::CStr;
-    #[allow(unused)]
-    use std::ffi::{c_void, CString};
+    use std::ffi::CString;
     use std::os::raw::c_char;
-
-    //Note: We have this pointer instead of a struct pointer since we want
-    pub type DirectoryPointer = *mut Directory;
-    // pub type DirectoryPointer = *mut c_void;
-    pub type DirectoryStructPointer = *mut Directory;
 
     // Prep for FFI
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_new(name: *const c_char) -> DirectoryPointer {
+    pub unsafe extern "C" fn directory_new(name: *const c_char) -> *mut Directory {
         let name = match name.is_null() {
             true => "unused".to_string(),
             false => CStr::from_ptr(name).to_string_lossy().to_string(),
         };
         let directory = Box::new(Directory::new(name.as_str()));
-        Box::into_raw(directory) as DirectoryStructPointer as DirectoryPointer
+        Box::into_raw(directory) as *mut Directory
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn directory_add_directory(
-        dir_ptr: DirectoryPointer,
-        directory: DirectoryPointer,
+        dir_ptr: *mut Directory,
+        directory: *mut Directory,
     ) -> bool {
         if dir_ptr.is_null() {
             return false;
@@ -625,9 +619,9 @@ pub mod ffi {
             return false;
         }
 
-        let dir_ptr = &mut *(dir_ptr as DirectoryStructPointer);
+        let dir_ptr = &mut *(dir_ptr);
 
-        let new_directory = &*(directory as DirectoryStructPointer);
+        let new_directory = &*(directory);
 
         match dir_ptr.add_directory(new_directory.clone()) {
             Ok(_) => true,
@@ -637,10 +631,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_add_file(
-        dir_ptr: DirectoryPointer,
-        file: FilePointer,
-    ) -> bool {
+    pub unsafe extern "C" fn directory_add_file(dir_ptr: *mut Directory, file: *mut File) -> bool {
         if dir_ptr.is_null() {
             return false;
         }
@@ -649,32 +640,21 @@ pub mod ffi {
             return false;
         }
 
-        let dir_ptr = &mut *(dir_ptr as DirectoryStructPointer);
+        let dir_ptr = &mut *dir_ptr;
 
-        let new_file = &*(file as FileStructPointer);
+        let new_file = &*file;
 
         dir_ptr.add_file(new_file.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_print_debug(dir: DirectoryPointer) {
-        if dir.is_null() {
-            return;
-        }
-
-        let dir: &Directory = &*(dir as DirectoryStructPointer);
-        println!("{:?}", dir);
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn directory_id(dir: DirectoryPointer) -> *mut c_char {
+    pub unsafe extern "C" fn directory_id(dir: *mut Directory) -> *mut c_char {
         if dir.is_null() {
             return std::ptr::null_mut();
         }
 
-        let dir: &Directory = &*(dir as DirectoryStructPointer);
+        let dir: &Directory = &*dir;
 
         match CString::new(dir.id().to_string()) {
             Ok(c) => c.into_raw(),
@@ -684,12 +664,12 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_name(dir: DirectoryPointer) -> *mut c_char {
+    pub unsafe extern "C" fn directory_name(dir: *mut Directory) -> *mut c_char {
         if dir.is_null() {
             return std::ptr::null_mut();
         }
 
-        let dir: &Directory = &*(dir as DirectoryStructPointer);
+        let dir: &Directory = &*dir;
 
         match CString::new(dir.name()) {
             Ok(c) => c.into_raw(),
@@ -699,12 +679,12 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_description(dir: DirectoryPointer) -> *mut c_char {
+    pub unsafe extern "C" fn directory_description(dir: *mut Directory) -> *mut c_char {
         if dir.is_null() {
             return std::ptr::null_mut();
         }
 
-        let dir: &Directory = &*(dir as DirectoryStructPointer);
+        let dir: &Directory = &*dir;
 
         match CString::new(dir.description()) {
             Ok(c) => c.into_raw(),
@@ -714,43 +694,43 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_size(dir: DirectoryPointer) -> i64 {
+    pub unsafe extern "C" fn directory_size(dir: *mut Directory) -> i64 {
         if dir.is_null() {
             return 0;
         }
 
-        let dir: &Directory = &*(dir as DirectoryStructPointer);
+        let dir: &Directory = &*dir;
 
         dir.size()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_creation(dir: DirectoryPointer) -> i64 {
+    pub unsafe extern "C" fn directory_creation(dir: *mut Directory) -> i64 {
         if dir.is_null() {
             return 0;
         }
 
-        let dir: &Directory = &*(dir as DirectoryStructPointer);
+        let dir: &Directory = &*dir;
 
         dir.creation().timestamp()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_modified(dir: DirectoryPointer) -> i64 {
+    pub unsafe extern "C" fn directory_modified(dir: *mut Directory) -> i64 {
         if dir.is_null() {
             return 0;
         }
 
-        let dir: &Directory = &*(dir as DirectoryStructPointer);
+        let dir: &Directory = &*dir;
 
         dir.modified().timestamp()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_free(dir: DirectoryPointer) {
+    pub unsafe extern "C" fn directory_free(dir: *mut Directory) {
         if dir.is_null() {
             return;
         }

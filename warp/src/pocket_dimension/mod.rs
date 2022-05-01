@@ -99,6 +99,40 @@ pub trait PocketDimension: Extension + Send + Sync {
     fn empty(&mut self, dimension: DataType) -> Result<()>;
 }
 
+pub struct PocketDimensionTraitObject {
+    object: Box<dyn PocketDimension>,
+}
+
+impl PocketDimensionTraitObject {
+    pub fn new(object: Box<dyn PocketDimension>) -> Self {
+        PocketDimensionTraitObject { object }
+    }
+
+    pub fn add_data(&mut self, dim: DataType, data: &DataObject) -> Result<()> {
+        self.object.add_data(dim, data)
+    }
+
+    pub fn has_data(&mut self, dim: DataType, query: &QueryBuilder) -> Result<()> {
+        self.object.has_data(dim, query)
+    }
+
+    pub fn get_data(&self, dim: DataType, query: Option<&QueryBuilder>) -> Result<Vec<DataObject>> {
+        self.object.get_data(dim, query)
+    }
+
+    pub fn size(&self, dim: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
+        self.object.size(dim, query)
+    }
+
+    pub fn count(&self, dim: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
+        self.object.count(dim, query)
+    }
+
+    pub fn empty(&mut self, dimension: DataType) -> Result<()> {
+        self.object.empty(dimension)
+    }
+}
+
 // pub mod ffi {
 //     use std::ffi::{c_void, CString};
 //     use std::os::raw::c_char;

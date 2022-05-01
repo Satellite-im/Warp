@@ -28,6 +28,24 @@ pub trait MultiPass: Extension + Friends + Sync + Send {
     fn refresh_cache(&mut self) -> Result<()>;
 }
 
+pub struct MultiPassTraitObject {
+    object: Box<dyn MultiPass>,
+}
+
+impl MultiPassTraitObject {
+    pub fn new(object: Box<dyn MultiPass>) -> Self {
+        MultiPassTraitObject { object }
+    }
+
+    pub fn get_inner(&self) -> &Box<dyn MultiPass> {
+        &self.object
+    }
+
+    pub fn get_inner_mut(&mut self) -> &mut Box<dyn MultiPass> {
+        &mut self.object
+    }
+}
+
 // #[warp_common::async_trait::async_trait]
 pub trait Friends: Sync + Send {
     /// Send friend request to corresponding public key
@@ -70,18 +88,15 @@ pub trait Friends: Sync + Send {
 pub mod ffi {
     use crate::multipass::{
         identity::{FriendRequest, Identifier, Identity, IdentityUpdate, PublicKey},
-        MultiPass,
+        MultiPassTraitObject,
     };
-    use std::ffi::{c_void, CString};
+    use std::ffi::CString;
     use std::os::raw::c_char;
-
-    pub type MultiPassPointer = *mut c_void;
-    pub type MultiPassBoxPointer = *mut Box<dyn MultiPass>;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_create_identity(
-        ctx: MultiPassPointer,
+        ctx: *mut MultiPassTraitObject,
         username: *mut c_char,
         passphrase: *mut c_char,
     ) -> bool {
@@ -105,8 +120,8 @@ pub mod ffi {
             true => None,
         };
 
-        let mp = &mut *(ctx as MultiPassBoxPointer);
-        (**mp)
+        let mp = &mut *(ctx);
+        mp.get_inner_mut()
             .create_identity(username.as_deref(), passphrase.as_deref())
             .is_ok()
     }
@@ -114,7 +129,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_get_identity(
-        ctx: MultiPassPointer,
+        ctx: *mut MultiPassTraitObject,
         identifier: *mut Identifier,
     ) -> *mut Identity {
         if ctx.is_null() {
@@ -125,9 +140,9 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
 
-        let mp = &*(ctx as MultiPassBoxPointer);
+        let mp = &*(ctx);
         let id = &*(identifier as *mut Identifier);
-        match (**mp).get_identity(id.clone()) {
+        match mp.get_inner().get_identity(id.clone()) {
             Ok(identity) => Box::into_raw(Box::new(identity)) as *mut Identity,
             Err(_) => std::ptr::null_mut(),
         }
@@ -135,13 +150,15 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_get_own_identity(ctx: MultiPassPointer) -> *mut Identity {
+    pub unsafe extern "C" fn multipass_get_own_identity(
+        ctx: *mut MultiPassTraitObject,
+    ) -> *mut Identity {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
 
-        let mp = &*(ctx as MultiPassBoxPointer);
-        match (**mp).get_own_identity() {
+        let mp = &*(ctx);
+        match mp.get_inner().get_own_identity() {
             Ok(identity) => Box::into_raw(Box::new(identity)) as *mut Identity,
             Err(_) => std::ptr::null_mut(),
         }
@@ -150,22 +167,22 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_update_identity(
-        ctx: MultiPassPointer,
+        ctx: *mut MultiPassTraitObject,
         option: *mut IdentityUpdate,
     ) -> bool {
         if ctx.is_null() {
             return false;
         }
 
-        let mp = &mut *(ctx as MultiPassBoxPointer);
+        let mp = &mut *(ctx);
         let option = &*(option as *mut IdentityUpdate);
-        (**mp).update_identity(option.clone()).is_ok()
+        mp.get_inner_mut().update_identity(option.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_decrypt_private_key(
-        ctx: MultiPassPointer,
+        ctx: *mut MultiPassTraitObject,
         passphrase: *mut c_char,
     ) -> *const u8 {
         if ctx.is_null() {
@@ -178,8 +195,8 @@ pub mod ffi {
             }
             true => None,
         };
-        let mp = &mut *(ctx as MultiPassBoxPointer);
-        match (**mp).decrypt_private_key(passphrase.as_deref()) {
+        let mp = &*(ctx);
+        match mp.get_inner().decrypt_private_key(passphrase.as_deref()) {
             Ok(key) => key.as_ptr(),
             Err(_) => std::ptr::null_mut(),
         }
@@ -187,19 +204,19 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_refresh_cache(ctx: MultiPassPointer) {
+    pub unsafe extern "C" fn multipass_refresh_cache(ctx: *mut MultiPassTraitObject) {
         if ctx.is_null() {
             return;
         }
 
-        let mp = &mut *(ctx as MultiPassBoxPointer);
-        if (**mp).refresh_cache().is_ok() {}
+        let mp = &mut *(ctx);
+        if mp.get_inner_mut().refresh_cache().is_ok() {}
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_send_request(
-        ctx: MultiPassPointer,
+        ctx: *mut MultiPassTraitObject,
         pubkey: *mut PublicKey,
     ) -> bool {
         if ctx.is_null() {
@@ -209,16 +226,15 @@ pub mod ffi {
         if pubkey.is_null() {
             return false;
         }
-
-        let mp = &mut *(ctx as MultiPassBoxPointer);
+        let mp = &mut *(ctx);
         let pk = &*pubkey;
-        (**mp).send_request(pk.clone()).is_ok()
+        mp.get_inner_mut().send_request(pk.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_accept_request(
-        ctx: MultiPassPointer,
+        ctx: *mut MultiPassTraitObject,
         pubkey: *mut PublicKey,
     ) -> bool {
         if ctx.is_null() {
@@ -229,15 +245,15 @@ pub mod ffi {
             return false;
         }
 
-        let mp = &mut *(ctx as MultiPassBoxPointer);
+        let mp = &mut *(ctx);
         let pk = &*pubkey;
-        (**mp).send_request(pk.clone()).is_ok()
+        mp.get_inner_mut().accept_request(pk.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_deny_request(
-        ctx: MultiPassPointer,
+        ctx: *mut MultiPassTraitObject,
         pubkey: *mut PublicKey,
     ) -> bool {
         if ctx.is_null() {
@@ -248,15 +264,15 @@ pub mod ffi {
             return false;
         }
 
-        let mp = &mut *(ctx as MultiPassBoxPointer);
+        let mp = &mut *(ctx);
         let pk = &*pubkey;
-        (**mp).send_request(pk.clone()).is_ok()
+        mp.get_inner_mut().deny_request(pk.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_close_request(
-        ctx: MultiPassPointer,
+        ctx: *mut MultiPassTraitObject,
         pubkey: *mut PublicKey,
     ) -> bool {
         if ctx.is_null() {
@@ -267,22 +283,22 @@ pub mod ffi {
             return false;
         }
 
-        let mp = &mut *(ctx as MultiPassBoxPointer);
+        let mp = &mut *(ctx);
         let pk = &*pubkey;
-        (**mp).send_request(pk.clone()).is_ok()
+        mp.get_inner_mut().close_request(pk.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_incoming_request(
-        ctx: MultiPassPointer,
+        ctx: *mut MultiPassTraitObject,
     ) -> *const *const FriendRequest {
         if ctx.is_null() {
             return std::ptr::null();
         }
 
-        let mp = &mut *(ctx as MultiPassBoxPointer);
-        match (**mp).list_incoming_request() {
+        let mp = &*(ctx);
+        match mp.get_inner().list_incoming_request() {
             Ok(list) => {
                 let ptr = list.as_ptr() as *const *const _;
                 ptr
@@ -294,14 +310,14 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_outcoming_request(
-        ctx: MultiPassPointer,
+        ctx: *mut MultiPassTraitObject,
     ) -> *const *const FriendRequest {
         if ctx.is_null() {
             return std::ptr::null();
         }
 
-        let mp = &mut *(ctx as MultiPassBoxPointer);
-        match (**mp).list_outgoing_request() {
+        let mp = &*(ctx);
+        match mp.get_inner().list_outgoing_request() {
             Ok(list) => {
                 let ptr = list.as_ptr() as *const *const _;
                 std::mem::forget(list);
@@ -314,14 +330,14 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_all_request(
-        ctx: MultiPassPointer,
+        ctx: *mut MultiPassTraitObject,
     ) -> *const *const FriendRequest {
         if ctx.is_null() {
             return std::ptr::null();
         }
 
-        let mp = &mut *(ctx as MultiPassBoxPointer);
-        match (**mp).list_all_request() {
+        let mp = &*(ctx);
+        match mp.get_inner().list_all_request() {
             Ok(list) => {
                 let ptr = list.as_ptr() as *const *const _;
                 std::mem::forget(list);
@@ -334,7 +350,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_remove_friend(
-        ctx: MultiPassPointer,
+        ctx: *mut MultiPassTraitObject,
         pubkey: *mut PublicKey,
     ) -> bool {
         if ctx.is_null() {
@@ -345,15 +361,15 @@ pub mod ffi {
             return false;
         }
 
-        let mp = &mut *(ctx as MultiPassBoxPointer);
+        let mp = &mut *(ctx);
         let pk = &*pubkey;
-        (**mp).remove_friend(pk.clone()).is_ok()
+        mp.get_inner_mut().remove_friend(pk.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_block_key(
-        ctx: MultiPassPointer,
+        ctx: *mut MultiPassTraitObject,
         pubkey: *mut PublicKey,
     ) -> bool {
         if ctx.is_null() {
@@ -364,22 +380,22 @@ pub mod ffi {
             return false;
         }
 
-        let mp = &mut *(ctx as MultiPassBoxPointer);
+        let mp = &mut *(ctx);
         let pk = &*pubkey;
-        (**mp).block_key(pk.clone()).is_ok()
+        mp.get_inner_mut().block_key(pk.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_friends(
-        ctx: MultiPassPointer,
+        ctx: *mut MultiPassTraitObject,
     ) -> *const *const Identity {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
 
-        let mp = &mut *(ctx as MultiPassBoxPointer);
-        match (**mp).list_friends() {
+        let mp = &*(ctx);
+        match mp.get_inner().list_friends() {
             Ok(list) => {
                 let ptr = list.as_ptr() as *const *const _;
                 std::mem::forget(list);
@@ -392,7 +408,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_has_friend(
-        ctx: MultiPassPointer,
+        ctx: *mut MultiPassTraitObject,
         pubkey: *mut PublicKey,
     ) -> bool {
         if ctx.is_null() {
@@ -403,15 +419,15 @@ pub mod ffi {
             return false;
         }
 
-        let mp = &mut *(ctx as MultiPassBoxPointer);
+        let mp = &*(ctx);
         let pk = &*pubkey;
-        (**mp).has_friend(pk.clone()).is_ok()
+        mp.get_inner().has_friend(pk.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_free(ctx: MultiPassPointer) {
-        let mp: Box<Box<dyn MultiPass>> = Box::from_raw(ctx as MultiPassBoxPointer);
+    pub unsafe extern "C" fn multipass_free(ctx: *mut MultiPassTraitObject) {
+        let mp: Box<MultiPassTraitObject> = Box::from_raw(ctx);
         drop(mp)
     }
 }
