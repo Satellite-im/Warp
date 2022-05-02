@@ -51,9 +51,9 @@ derive_more = "0.99"
 
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-users = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"], rev = "139e02a0060f7ba94e998abb4d64451d2de61ad0"}
-friends = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"], rev = "139e02a0060f7ba94e998abb4d64451d2de61ad0" }
-groupchats = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"], rev = "139e02a0060f7ba94e998abb4d64451d2de61ad0" }
+users = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"] }
+friends = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"] }
+groupchats = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"] }
 getrandom = { version = "0.2" }
 anchor-client = "0.24.2"
 uuid = { version = "0.8", features = ["serde", "v4"] }
