@@ -1,4 +1,7 @@
-use std::{ffi::CString, os::raw::c_char};
+use std::{
+    ffi::{CStr, CString},
+    os::raw::c_char,
+};
 
 use crate::tesseract::Tesseract;
 
@@ -9,12 +12,12 @@ pub unsafe extern "C" fn tesseract_new() -> *mut Tesseract {
 }
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "C" fn tesseract_from_file(file: *mut c_char) -> *mut Tesseract {
+pub unsafe extern "C" fn tesseract_from_file(file: *const c_char) -> *mut Tesseract {
     if file.is_null() {
         return std::ptr::null_mut();
     }
 
-    let cname = CString::from_raw(file).to_string_lossy().to_string();
+    let cname = CStr::from_ptr(file).to_string_lossy().to_string();
     match Tesseract::from_file(cname) {
         Ok(tesseract) => Box::into_raw(Box::new(tesseract)) as *mut Tesseract,
         Err(_) => std::ptr::null_mut(),
@@ -23,7 +26,7 @@ pub unsafe extern "C" fn tesseract_from_file(file: *mut c_char) -> *mut Tesserac
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "C" fn tesseract_to_file(tesseract: *mut Tesseract, file: *mut c_char) -> bool {
+pub unsafe extern "C" fn tesseract_to_file(tesseract: *mut Tesseract, file: *const c_char) -> bool {
     if tesseract.is_null() {
         return false;
     }
@@ -33,7 +36,7 @@ pub unsafe extern "C" fn tesseract_to_file(tesseract: *mut Tesseract, file: *mut
     }
 
     let tesseract = &mut *tesseract;
-    let cname = CString::from_raw(file).to_string_lossy().to_string();
+    let cname = CStr::from_ptr(file).to_string_lossy().to_string();
     tesseract.to_file(cname).is_ok()
 }
 
@@ -41,8 +44,8 @@ pub unsafe extern "C" fn tesseract_to_file(tesseract: *mut Tesseract, file: *mut
 #[no_mangle]
 pub unsafe extern "C" fn tesseract_set(
     tesseract: *mut Tesseract,
-    key: *mut c_char,
-    val: *mut c_char,
+    key: *const c_char,
+    val: *const c_char,
 ) -> bool {
     if tesseract.is_null() {
         return false;
@@ -55,8 +58,8 @@ pub unsafe extern "C" fn tesseract_set(
     }
 
     let tesseract = &mut *tesseract;
-    let c_key = CString::from_raw(key).to_string_lossy().to_string();
-    let c_val = CString::from_raw(val).to_string_lossy().to_string();
+    let c_key = CStr::from_ptr(key).to_string_lossy().to_string();
+    let c_val = CStr::from_ptr(val).to_string_lossy().to_string();
 
     tesseract.set(&c_key, &c_val).is_ok()
 }
@@ -65,7 +68,7 @@ pub unsafe extern "C" fn tesseract_set(
 #[no_mangle]
 pub unsafe extern "C" fn tesseract_retrieve(
     tesseract: *mut Tesseract,
-    key: *mut c_char,
+    key: *const c_char,
 ) -> *mut c_char {
     if tesseract.is_null() {
         return std::ptr::null_mut();
@@ -75,7 +78,7 @@ pub unsafe extern "C" fn tesseract_retrieve(
     }
 
     let tesseract = &mut *tesseract;
-    let c_key = CString::from_raw(key).to_string_lossy().to_string();
+    let c_key = CStr::from_ptr(key).to_string_lossy().to_string();
 
     match tesseract.retrieve(&c_key) {
         Ok(val) => match CString::new(val) {
@@ -88,7 +91,7 @@ pub unsafe extern "C" fn tesseract_retrieve(
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "C" fn tesseract_exist(tesseract: *mut Tesseract, key: *mut c_char) -> bool {
+pub unsafe extern "C" fn tesseract_exist(tesseract: *mut Tesseract, key: *const c_char) -> bool {
     if tesseract.is_null() {
         return false;
     }
@@ -97,12 +100,12 @@ pub unsafe extern "C" fn tesseract_exist(tesseract: *mut Tesseract, key: *mut c_
     }
 
     let tesseract = &*tesseract;
-    let c_key = CString::from_raw(key).to_string_lossy().to_string();
+    let c_key = CStr::from_ptr(key).to_string_lossy().to_string();
     tesseract.exist(&c_key)
 }
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "C" fn tesseract_delete(tesseract: *mut Tesseract, key: *mut c_char) -> bool {
+pub unsafe extern "C" fn tesseract_delete(tesseract: *mut Tesseract, key: *const c_char) -> bool {
     if tesseract.is_null() {
         return false;
     }
@@ -111,7 +114,7 @@ pub unsafe extern "C" fn tesseract_delete(tesseract: *mut Tesseract, key: *mut c
     }
 
     let tesseract = &mut *tesseract;
-    let c_key = CString::from_raw(key).to_string_lossy().to_string();
+    let c_key = CStr::from_ptr(key).to_string_lossy().to_string();
     tesseract.delete(&c_key).is_ok()
 }
 #[allow(clippy::missing_safety_doc)]
@@ -139,7 +142,7 @@ pub unsafe extern "C" fn tesseract_is_unlock(tesseract: *mut Tesseract) -> bool 
 //TODO: Have key be bytes
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "C" fn tesseract_unlock(tesseract: *mut Tesseract, key: *mut c_char) -> bool {
+pub unsafe extern "C" fn tesseract_unlock(tesseract: *mut Tesseract, key: *const c_char) -> bool {
     if tesseract.is_null() {
         return false;
     }
@@ -149,7 +152,7 @@ pub unsafe extern "C" fn tesseract_unlock(tesseract: *mut Tesseract, key: *mut c
     }
 
     let tesseract = &mut *tesseract;
-    let c_key = CString::from_raw(key).to_string_lossy().to_string();
+    let c_key = CStr::from_ptr(key).to_string_lossy().to_string();
     tesseract.unlock(c_key.as_bytes()).is_ok()
 }
 
