@@ -103,15 +103,15 @@ pub mod ffi {
         identity::{FriendRequest, Identifier, Identity, IdentityUpdate, PublicKey},
         MultiPassTraitObject,
     };
-    use std::ffi::CString;
+    use std::ffi::CStr;
     use std::os::raw::c_char;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_create_identity(
         ctx: *mut MultiPassTraitObject,
-        username: *mut c_char,
-        passphrase: *mut c_char,
+        username: *const c_char,
+        passphrase: *const c_char,
     ) -> bool {
         if ctx.is_null() {
             return false;
@@ -119,7 +119,7 @@ pub mod ffi {
 
         let username = match username.is_null() {
             false => {
-                let username = CString::from_raw(username).to_string_lossy().to_string();
+                let username = CStr::from_ptr(username).to_string_lossy().to_string();
                 Some(username)
             }
             true => None,
@@ -127,7 +127,7 @@ pub mod ffi {
 
         let passphrase = match passphrase.is_null() {
             false => {
-                let passphrase = CString::from_raw(passphrase).to_string_lossy().to_string();
+                let passphrase = CStr::from_ptr(passphrase).to_string_lossy().to_string();
                 Some(passphrase)
             }
             true => None,
@@ -196,14 +196,14 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_decrypt_private_key(
         ctx: *mut MultiPassTraitObject,
-        passphrase: *mut c_char,
+        passphrase: *const c_char,
     ) -> *const u8 {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
         let passphrase = match passphrase.is_null() {
             false => {
-                let passphrase = CString::from_raw(passphrase).to_string_lossy().to_string();
+                let passphrase = CStr::from_ptr(passphrase).to_string_lossy().to_string();
                 Some(passphrase)
             }
             true => None,
