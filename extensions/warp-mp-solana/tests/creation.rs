@@ -49,7 +49,7 @@ mod tests {
 
         let ident = account.get_own_identity()?;
 
-        let pubkey = Pubkey::new(ident.public_key.to_bytes());
+        let pubkey = Pubkey::new(ident.public_key().to_bytes());
 
         assert_eq!(
             pubkey.to_string(),
