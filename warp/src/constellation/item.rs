@@ -8,13 +8,26 @@ use super::file::File;
 use super::Result;
 use crate::error::Error;
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
 /// `Item` is a type that handles both `File` and `Directory`
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Item {
-    #[serde(skip_serializing_if = "Option::is_none", flatten)]
-    directory: Option<Directory>,
-    #[serde(skip_serializing_if = "Option::is_none", flatten)]
-    file: Option<File>,
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub struct Item(ItemInner);
+
+/// `Item` is a type that handles both `File` and `Directory`
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum ItemInner {
+    File(File),
+    Directory(Directory),
+}
+
+impl AsMut<ItemInner> for Item {
+    fn as_mut(&mut self) -> &mut ItemInner {
+        &mut self.0
+    }
 }
 
 /// Used to convert `File` to `Item`
@@ -49,38 +62,50 @@ impl From<Directory> for Item {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Item {
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn new_file(file: File) -> Item {
-        Item {
-            file: Some(file),
-            directory: None,
-        }
+        Item(ItemInner::File(file))
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn new_directory(directory: Directory) -> Item {
-        Item {
-            file: None,
-            directory: Some(directory),
+        Item(ItemInner::Directory(directory))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn file(&self) -> Option<&File> {
+        match &self.0 {
+            ItemInner::File(item) => Some(item),
+            _ => None,
         }
     }
 
-    pub fn file(&self) -> Option<&File> {
-        self.file.as_ref()
-    }
-
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn directory(&self) -> Option<&Directory> {
-        self.directory.as_ref()
+        match &self.0 {
+            ItemInner::Directory(item) => Some(item),
+            _ => None,
+        }
     }
 
     pub fn file_mut(&mut self) -> Option<&mut File> {
-        self.file.as_mut()
+        match self.as_mut() {
+            ItemInner::File(item) => Some(item),
+            _ => None,
+        }
     }
 
     pub fn directory_mut(&mut self) -> Option<&mut Directory> {
-        self.directory.as_mut()
+        match self.as_mut() {
+            ItemInner::Directory(item) => Some(item),
+            _ => None,
+        }
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Item {
     /// Get id of `Item`
     pub fn id(&self) -> Uuid {
@@ -88,24 +113,6 @@ impl Item {
             (Some(file), None) => file.id(),
             (None, Some(directory)) => directory.id(),
             _ => Uuid::nil(),
-        }
-    }
-
-    /// Get string of `Item`
-    pub fn name(&self) -> String {
-        match (self.file(), self.directory()) {
-            (Some(file), None) => file.name(),
-            (None, Some(directory)) => directory.name(),
-            _ => String::new(),
-        }
-    }
-
-    /// Get description of `Item`
-    pub fn description(&self) -> String {
-        match (self.file(), self.directory()) {
-            (Some(file), None) => file.description(),
-            (None, Some(directory)) => directory.description(),
-            _ => String::new(),
         }
     }
 
@@ -126,6 +133,58 @@ impl Item {
             _ => Utc::now(),
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl Item {
+    /// Get id of `Item`
+    pub fn id(&self) -> String {
+        match (self.file(), self.directory()) {
+            (Some(file), None) => file.id(),
+            (None, Some(directory)) => directory.id(),
+            _ => Uuid::nil().to_string(),
+        }
+    }
+
+    /// Get the creation date of `Item`
+    pub fn creation(&self) -> i64 {
+        match (self.file(), self.directory()) {
+            (Some(file), None) => file.creation(),
+            (None, Some(directory)) => directory.creation(),
+            _ => Utc::now().timestamp(),
+        }
+    }
+
+    /// Get the modified date of `Item`
+    pub fn modified(&self) -> i64 {
+        match (self.file(), self.directory()) {
+            (Some(file), None) => file.modified(),
+            (None, Some(directory)) => directory.modified(),
+            _ => Utc::now().timestamp(),
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+impl Item {
+    /// Get string of `Item`
+    pub fn name(&self) -> String {
+        match (self.file(), self.directory()) {
+            (Some(file), None) => file.name(),
+            (None, Some(directory)) => directory.name(),
+            _ => String::new(),
+        }
+    }
+
+    /// Get description of `Item`
+    pub fn description(&self) -> String {
+        match (self.file(), self.directory()) {
+            (Some(file), None) => file.description(),
+            (None, Some(directory)) => directory.description(),
+            _ => String::new(),
+        }
+    }
 
     /// Get size of `Item`.
     /// If `Item` is a `File` it will return the size of the `File`.
@@ -144,6 +203,7 @@ impl Item {
         if self.name() == name {
             return Err(Error::DuplicateName);
         }
+
         if let Some(file) = self.file_mut() {
             file.set_name(name);
             return Ok(());
@@ -153,7 +213,7 @@ impl Item {
             directory.set_name(name);
             return Ok(());
         }
-        return Err(Error::Other);
+        Err(Error::Other)
     }
 
     /// Convert `Item` to `Directory`
@@ -203,10 +263,11 @@ impl Item {
             file.set_size(size);
             return Ok(());
         }
-        return Err(Error::ItemNotFile);
+        Err(Error::ItemNotFile)
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
 
     use crate::constellation::directory::Directory;

@@ -11,6 +11,13 @@ use chrono::{DateTime, Utc};
 use directory::Directory;
 use item::Item;
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+pub(super) type Result<T> = std::result::Result<T, JsError>;
+
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) type Result<T> = std::result::Result<T, Error>;
 
 /// Interface that would provide functionality around the filesystem.
@@ -186,15 +193,19 @@ impl<S: AsRef<str>> From<S> for ConstellationDataType {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct ConstellationTraitObject {
     object: Box<dyn Constellation>,
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl ConstellationTraitObject {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(obj: Box<dyn Constellation>) -> ConstellationTraitObject {
         ConstellationTraitObject { object: obj }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn get_inner(&self) -> &Box<dyn Constellation> {
         &self.object
     }
@@ -215,10 +226,12 @@ impl ConstellationTraitObject {
         self.object.root_directory_mut()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn current_directory(&self) -> &Directory {
         self.object.current_directory()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn current_directory_mut(&mut self) -> Result<&mut Directory> {
         self.object.current_directory_mut()
     }
@@ -288,6 +301,7 @@ impl ConstellationTraitObject {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::constellation::directory::Directory;
     use crate::constellation::{ConstellationDataType, ConstellationTraitObject};

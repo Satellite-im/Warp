@@ -7,6 +7,9 @@ use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
 /// `DirectoryType` handles the supported types for the directory.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug, Display)]
 #[serde(rename_all = "lowercase")]
@@ -36,6 +39,7 @@ pub enum DirectoryHookType {
 
 /// `Directory` handles folders and its contents.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Directory {
     /// ID of the `Directory`
     id: Uuid,
@@ -77,6 +81,7 @@ impl Default for Directory {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Directory {
     /// Create a `Directory` instance
     ///
@@ -94,6 +99,7 @@ impl Directory {
     ///     let test = root.get_item("test").and_then(Item::get_directory).unwrap();
     ///     assert_eq!(test.has_item("test2"), true);
     /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new(name: &str) -> Self {
         let mut directory = Directory::default();
         // let name = name.trim();
@@ -162,7 +168,6 @@ impl Directory {
     ///     let sub = Directory::new("Sub Directory");
     ///     root.add_item(sub).unwrap();
     /// ```
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn add_item<I: Into<Item>>(&mut self, item: I) -> Result<()> {
         let item = item.into();
         if self.has_item(&item.name()) {
@@ -551,29 +556,43 @@ impl Directory {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Directory {
-    pub fn id(&self) -> Uuid {
-        self.id
-    }
-
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn name(&self) -> String {
         self.name.to_owned()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_name(&mut self, name: &str) {
         self.name = name.to_string()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn description(&self) -> String {
         self.description.to_owned()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_description(&mut self, desc: &str) {
         self.description = desc.to_string()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn size(&self) -> i64 {
         self.get_items().iter().map(Item::size).sum()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn set_modified(&mut self) {
+        self.modified = Utc::now()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Directory {
+    pub fn id(&self) -> Uuid {
+        self.id
     }
 
     pub fn creation(&self) -> DateTime<Utc> {
@@ -583,12 +602,25 @@ impl Directory {
     pub fn modified(&self) -> DateTime<Utc> {
         self.modified
     }
+}
 
-    pub fn set_modified(&mut self) {
-        self.modified = Utc::now()
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl Directory {
+    pub fn id(&self) -> String {
+        self.id.to_string()
+    }
+
+    pub fn creation(&self) -> i64 {
+        self.creation.timestamp()
+    }
+
+    pub fn modified(&self) -> i64 {
+        self.modified.timestamp()
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::constellation::file::File;
     use crate::constellation::Directory;

@@ -140,8 +140,8 @@ fn main() {
     file.set_size(100);
 
     let mut directory = Directory::new("Test Directory");
-    directory.add_item(file0).unwrap()
-    directory.add_item(file1).unwrap()
+    directory.add_item(file0).unwrap();
+    directory.add_item(file1).unwrap();
 
     let directory_item = Item::from(directory);
     
