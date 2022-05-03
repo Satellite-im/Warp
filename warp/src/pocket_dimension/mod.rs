@@ -1,24 +1,34 @@
 pub mod query;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
 use std::path::PathBuf;
 
 use crate::data::{DataObject, DataType};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::Error;
 use crate::Extension;
 use query::QueryBuilder;
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsError as Error;
+
 pub(super) type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
+#[cfg(not(target_arch = "wasm32"))]
 pub enum DimensionData {
     Buffer { name: String, buffer: Vec<u8> },
     BufferNoFile { name: String, internal: Vec<u8> },
     Path { name: Option<String>, path: PathBuf },
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl DimensionData {
     pub fn from_path<P: AsRef<std::path::Path>>(path: P) -> Self {
         let path = path.as_ref().to_path_buf();
