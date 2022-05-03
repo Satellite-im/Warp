@@ -334,7 +334,7 @@ impl GroupChat {
 
     fn get_invite_by_group_id(&self, id: &str) -> anyhow::Result<Invitation> {
         let group_key = self.group_address_from_id(id)?;
-        println!("Group Key: {}", group_key);
+
         let recipient = self.program.payer();
 
         let invite = self.get_invitation_accounts(vec![
