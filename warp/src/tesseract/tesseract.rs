@@ -11,6 +11,8 @@ use std::io::prelude::*;
 pub struct Tesseract {
     internal: HashMap<String, Vec<u8>>,
     enc_pass: Vec<u8>,
+    file: Option<String>,
+    autosave: bool,
     unlock: bool,
 }
 
@@ -42,8 +44,12 @@ impl Tesseract {
     /// let tesseract = Tesseract::from_file("test_file").unwrap();
     /// ```
     pub fn from_file<S: AsRef<Path>>(file: S) -> Result<Self> {
-        let mut fs = std::fs::File::open(file)?;
-        Tesseract::from_reader(&mut fs)
+        let mut store = Tesseract::default();
+        let fs = std::fs::File::open(&file)?;
+        let data = serde_json::from_reader(fs)?;
+        store.set_file(&file.as_ref().to_string_lossy());
+        store.internal = data;
+        Ok(store)
     }
 
     /// Loads the keystore from a stream
@@ -97,6 +103,43 @@ impl Tesseract {
         Ok(())
     }
 
+    /// Set file for the saving using `Tesseract::save`
+    pub fn set_file<P: AsRef<str>>(&mut self, file: P) {
+        self.file = Some(file.as_ref().to_string())
+    }
+
+    /// Internal file handle
+    pub fn file(&self) -> Option<String> {
+        self.file.clone()
+    }
+
+    /// Enable the ability to autosave
+    pub fn set_autosave(&mut self) {
+        self.autosave = !self.autosave;
+    }
+
+    /// Check to determine if `Tesseract::autosave` is true or false
+    pub fn autosave_enabled(&self) -> bool {
+        self.autosave
+    }
+
+    /// To save to file using internal file path.
+    /// Note: Because we do not want to interrupt the functions due to it failing to
+    ///       save for whatever reason, this function will return `Result::Ok`
+    ///       regardless of success or error.
+    ///
+    /// TODO: Handle error without subjecting function to `Result::Err`
+    pub fn save(&mut self) -> Result<()> {
+        if self.autosave_enabled() {
+            if let Some(path) = &self.file {
+                if let Err(_e) = self.to_file(path) {
+                    //TODO: Logging
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Import and encrypt a hashmap into tesseract
     ///
     /// # Example
@@ -134,7 +177,7 @@ impl Tesseract {
         let pkey = crate::crypto::cipher::aes256gcm_self_decrypt(&self.enc_pass)?;
         let data = crate::crypto::cipher::aes256gcm_encrypt(&pkey, value.as_bytes())?;
         self.internal.insert(key.to_string(), data);
-        Ok(())
+        self.save()
     }
 
     /// Check to see if the key store contains the key
@@ -184,7 +227,7 @@ impl Tesseract {
         self.internal
             .remove(key)
             .ok_or_else(|| anyhow::anyhow!("Could not remove key. Item does not exist"))?;
-        Ok(())
+        self.save()
     }
 
     /// Used to clear the whole keystore.
@@ -200,6 +243,7 @@ impl Tesseract {
     /// ```
     pub fn clear(&mut self) {
         self.internal.clear();
+        if self.save().is_ok() {}
     }
 
     /// Decrypts and export tesseract contents to a `HashMap`
@@ -254,6 +298,7 @@ impl Tesseract {
 
     /// Encrypts and remove password and plaintext from memory.
     pub fn lock(&mut self) {
+        if self.save().is_ok() {}
         self.enc_pass.zeroize();
         self.unlock = false;
     }
