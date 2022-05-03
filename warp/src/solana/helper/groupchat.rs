@@ -2,11 +2,14 @@ use crate::crypto::x25519_dalek::PublicKey;
 use crate::solana::manager::SolanaManager;
 use crate::solana::wallet::SolanaWallet;
 use anchor_client::anchor_lang::prelude::Pubkey;
+use anchor_client::solana_client::rpc_filter::{
+    Memcmp, MemcmpEncodedBytes, MemcmpEncoding, RpcFilterType,
+};
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
 use anchor_client::solana_sdk::signature::Keypair;
 use anchor_client::{Client, Cluster, Program};
-use anyhow::anyhow;
-use groupchats::{Group, Invitation};
+use anyhow::{anyhow, bail};
+pub use groupchats::{Group, Invitation};
 use std::rc::Rc;
 
 #[allow(unused)]
@@ -76,7 +79,7 @@ impl GroupChat {
                 _group_hash: hash
                     .try_into()
                     .map_err(|_| anyhow!("Invalid length of hash"))?,
-                group_id: id.to_string(),
+                group_id: invite.group_id,
                 open_invites: true,
                 name: name.to_string(),
                 encryption_key: invite.encryption_key,
@@ -169,8 +172,8 @@ impl GroupChat {
             .args(groupchats::instruction::Invite {
                 group_id: id.to_string(),
                 recipient,
-                encryption_key: String::new(),
-                db_type: 1,
+                encryption_key: encrypted.encryption_key,
+                db_type: 0,
             })
             .send()?;
         Ok(())
@@ -258,7 +261,6 @@ impl GroupChat {
         Ok(())
     }
 
-    //TODO
     pub fn close(&self, group: &str) -> anyhow::Result<()> {
         let group_key = self.group_address_from_id(group)?;
         let group = self.get_group(group_key)?;
@@ -297,7 +299,7 @@ impl GroupChat {
         crate::crypto::hash::sha256_hash(id.as_bytes(), None)
     }
 
-    fn group_address_from_id(&self, id: &str) -> anyhow::Result<Pubkey> {
+    pub fn group_address_from_id(&self, id: &str) -> anyhow::Result<Pubkey> {
         let hash = self.group_hash(id);
         let (key, _) = self.group_pubkey(&hash)?;
         Ok(key)
@@ -308,20 +310,41 @@ impl GroupChat {
         Ok(account)
     }
 
-    pub fn get_invitation_accounts(&self) -> anyhow::Result<Vec<Invitation>> {
+    pub fn get_invitation_accounts(
+        &self,
+        filter: Vec<InvitationAccountFilter>,
+    ) -> anyhow::Result<Vec<Invitation>> {
+        println!("{:?}", filter);
+
+        let filter = filter
+            .iter()
+            .map(|invite| RpcFilterType::Memcmp(invite.to_memcmp()))
+            .collect::<Vec<_>>();
+
         let list = self
             .program
-            .accounts(vec![])?
+            .accounts(filter)?
             .iter()
             .map(|(_, inv)| inv)
             .cloned()
-            .collect::<Vec<Invitation>>();
+            .collect::<Vec<_>>();
 
         Ok(list)
     }
 
     fn get_invite_by_group_id(&self, id: &str) -> anyhow::Result<Invitation> {
-        unimplemented!()
+        let group_key = self.group_address_from_id(id)?;
+        println!("Group Key: {}", group_key);
+        let recipient = self.program.payer();
+
+        let invite = self.get_invitation_accounts(vec![
+            InvitationAccountFilter::GroupKey(group_key),
+            InvitationAccountFilter::Recipient(recipient),
+        ])?;
+        if let Some(invite) = invite.first().cloned() {
+            return self.decrypt_invite(invite);
+        }
+        bail!("No invitation found");
     }
 
     pub fn get_group(&self, addr: Pubkey) -> anyhow::Result<Group> {
@@ -331,5 +354,85 @@ impl GroupChat {
 
     pub fn get_user_groups(&self, addr: Pubkey) -> anyhow::Result<Vec<Group>> {
         unimplemented!()
+    }
+}
+
+// #[derive(Clone, Debug, PartialEq, Eq)]
+// pub struct DirectInvitation {
+//     pub sender: Pubkey,
+//     pub group_key: Pubkey,
+//     pub recipient: Pubkey,
+//     pub group_id: String,
+//     pub encryption_key: String,
+//     pub db_type: u8,
+// }
+//
+// impl DirectInvitation {
+//     pub fn from_invite(invite: &Invitation) -> Self {
+//         DirectInvitation {
+//             sender: invite.sender,
+//             group_key: invite.group_key,
+//             recipient: invite.recipient,
+//             group_id: invite.group_id.clone(),
+//             encryption_key: invite.encryption_key.clone(),
+//             db_type: invite.db_type,
+//         }
+//     }
+// }
+
+// For compat for wasm, though this may not be used
+// #[derive(Debug, Clone, PartialEq, Eq)]
+// pub struct InvitationAccountFilter(InvitationAccountFilterInner);
+//
+// impl InvitationAccountFilter {
+//     pub fn recipient(key: Pubkey) -> Self {
+//         InvitationAccountFilter(InvitationAccountFilterInner::Recipient(key))
+//     }
+//
+//     pub fn sender(key: Pubkey) -> Self {
+//         InvitationAccountFilter(InvitationAccountFilterInner::Sender(key))
+//     }
+//
+//     pub fn group_key(key: Pubkey) -> Self {
+//         InvitationAccountFilter(InvitationAccountFilterInner::GroupKey(key))
+//     }
+// }
+//
+// impl AsRef<InvitationAccountFilterInner> for InvitationAccountFilter {
+//     fn as_ref(&self) -> &InvitationAccountFilterInner {
+//         &self.0
+//     }
+// }
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum InvitationAccountFilter {
+    Recipient(Pubkey),
+    Sender(Pubkey),
+    GroupKey(Pubkey),
+}
+
+impl InvitationAccountFilter {
+    pub fn to_offset(&self) -> usize {
+        match self {
+            Self::Sender(_) => 8,
+            Self::GroupKey(_) => 40,
+            Self::Recipient(_) => 72,
+        }
+    }
+
+    pub fn to_key(&self) -> Pubkey {
+        match self {
+            Self::Sender(key) => *key,
+            Self::GroupKey(key) => *key,
+            Self::Recipient(key) => *key,
+        }
+    }
+
+    pub fn to_memcmp(&self) -> Memcmp {
+        Memcmp {
+            offset: self.to_offset(),
+            bytes: MemcmpEncodedBytes::Base58(self.to_key().to_string()),
+            encoding: Some(MemcmpEncoding::Binary),
+        }
     }
 }
