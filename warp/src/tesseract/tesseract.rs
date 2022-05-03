@@ -5,13 +5,14 @@ use zeroize::Zeroize;
 use crate::error::Error;
 
 use std::io::prelude::*;
+use std::path::PathBuf;
 
 /// The key store that holds encrypted strings that can be used for later use.
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct Tesseract {
     internal: HashMap<String, Vec<u8>>,
     enc_pass: Vec<u8>,
-    file: Option<String>,
+    file: Option<PathBuf>,
     autosave: bool,
     unlock: bool,
 }
@@ -47,7 +48,8 @@ impl Tesseract {
         let mut store = Tesseract::default();
         let fs = std::fs::File::open(&file)?;
         let data = serde_json::from_reader(fs)?;
-        store.set_file(&file.as_ref().to_string_lossy());
+        let file = std::fs::canonicalize(&file).unwrap_or_else(|_| file.as_ref().to_path_buf());
+        store.set_file(file);
         store.internal = data;
         Ok(store)
     }
@@ -104,13 +106,13 @@ impl Tesseract {
     }
 
     /// Set file for the saving using `Tesseract::save`
-    pub fn set_file<P: AsRef<str>>(&mut self, file: P) {
-        self.file = Some(file.as_ref().to_string())
+    pub fn set_file<P: AsRef<Path>>(&mut self, file: P) {
+        self.file = Some(file.as_ref().to_path_buf())
     }
 
     /// Internal file handle
     pub fn file(&self) -> Option<String> {
-        self.file.clone()
+        self.file.as_ref().map(|s| s.to_string_lossy().to_string())
     }
 
     /// Enable the ability to autosave
