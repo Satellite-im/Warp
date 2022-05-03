@@ -10,6 +10,7 @@ use crate::tesseract::Tesseract;
 pub unsafe extern "C" fn tesseract_new() -> *mut Tesseract {
     Box::into_raw(Box::new(Tesseract::default())) as *mut Tesseract
 }
+
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
 pub unsafe extern "C" fn tesseract_from_file(file: *const c_char) -> *mut Tesseract {
@@ -38,6 +39,60 @@ pub unsafe extern "C" fn tesseract_to_file(tesseract: *mut Tesseract, file: *con
     let tesseract = &mut *tesseract;
     let cname = CStr::from_ptr(file).to_string_lossy().to_string();
     tesseract.to_file(cname).is_ok()
+}
+
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn tesseract_set_file(
+    tesseract: *mut Tesseract,
+    file: *const c_char,
+) -> bool {
+    if tesseract.is_null() {
+        return false;
+    }
+
+    if file.is_null() {
+        return false;
+    }
+
+    let tesseract = &mut *tesseract;
+    let cname = CStr::from_ptr(file).to_string_lossy().to_string();
+    tesseract.set_file(cname);
+    true
+}
+
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn tesseract_set_autosave(tesseract: *mut Tesseract) -> bool {
+    if tesseract.is_null() {
+        return false;
+    }
+
+    let tesseract = &mut *tesseract;
+    tesseract.set_autosave();
+    true
+}
+
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn tesseract_autosave_enabled(tesseract: *mut Tesseract) -> bool {
+    if tesseract.is_null() {
+        return false;
+    }
+
+    let tesseract = &*tesseract;
+    tesseract.autosave_enabled()
+}
+
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn tesseract_save(tesseract: *mut Tesseract) -> bool {
+    if tesseract.is_null() {
+        return false;
+    }
+
+    let tesseract = &mut *tesseract;
+    tesseract.save().is_ok()
 }
 
 #[allow(clippy::missing_safety_doc)]
