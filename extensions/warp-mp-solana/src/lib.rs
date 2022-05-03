@@ -536,7 +536,7 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
     let (user, pubkey) = match pubkey {
         Some(pubkey) => {
             let pkey = Pubkey::new(pubkey);
-            let user = helper.get_user(&pkey)?;
+            let user = helper.get_user(pkey)?;
             (user, pkey)
         }
         None => {
