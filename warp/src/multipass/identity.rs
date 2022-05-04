@@ -359,17 +359,70 @@ impl<S: AsRef<str>> From<S> for Identifier {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum IdentityUpdate {
-    /// Update Username
-    Username(String),
-
-    /// Update graphics
-    Graphics {
-        picture: Option<String>,
-        banner: Option<String>,
-    },
-
-    /// Update status message
-    StatusMessage(Option<String>),
+#[derive(Debug, Clone, Default)]
+pub struct IdentityUpdate {
+    username: Option<String>,
+    graphics_picture: Option<String>,
+    graphics_banner: Option<String>,
+    status_message: Option<Option<String>>,
 }
+
+impl IdentityUpdate {
+    pub fn set_username(username: String) -> IdentityUpdate {
+        IdentityUpdate {
+            username: Some(username),
+            ..Default::default()
+        }
+    }
+
+    pub fn set_graphics_picture(graphics: String) -> IdentityUpdate {
+        IdentityUpdate {
+            graphics_picture: Some(graphics),
+            ..Default::default()
+        }
+    }
+
+    pub fn set_graphics_banner(graphics: String) -> IdentityUpdate {
+        IdentityUpdate {
+            graphics_banner: Some(graphics),
+            ..Default::default()
+        }
+    }
+
+    pub fn set_status_message(status_message: Option<String>) -> IdentityUpdate {
+        IdentityUpdate {
+            status_message: Some(status_message),
+            ..Default::default()
+        }
+    }
+
+    pub fn username(&self) -> Option<String> {
+        self.username.clone()
+    }
+
+    pub fn graphics_picture(&self) -> Option<String> {
+        self.graphics_picture.clone()
+    }
+
+    pub fn graphics_banner(&self) -> Option<String> {
+        self.graphics_banner.clone()
+    }
+
+    pub fn status_message(&self) -> Option<Option<String>> {
+        self.status_message.clone()
+    }
+}
+
+// pub enum IdentityUpdate {
+//     /// Update Username
+//     Username(String),
+//
+//     /// Update graphics
+//     Graphics {
+//         picture: Option<String>,
+//         banner: Option<String>,
+//     },
+//
+//     /// Update status message
+//     StatusMessage(Option<String>),
+// }

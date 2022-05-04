@@ -281,29 +281,33 @@ impl MultiPass for SolanaAccount {
 
         let mut identity = user_to_identity(&helper, None)?;
         let old_identity = identity.clone();
-        match option {
-            IdentityUpdate::Username(username) => {
+        match (
+            option.username(),
+            option.graphics_picture(),
+            option.graphics_banner(),
+            option.status_message(),
+        ) {
+            (Some(username), None, None, None) => {
                 helper.set_name(&format!("{username}#{}", identity.short_id()))?;
                 identity.set_username(&username)
             }
-            IdentityUpdate::Graphics { picture, banner } => {
-                if let Some(hash) = picture {
-                    helper.set_photo(&hash)?;
-                    let mut graphics = identity.graphics();
-                    graphics.set_profile_picture(&hash);
-                    identity.set_graphics(graphics);
-                }
-                if let Some(hash) = banner {
-                    helper.set_banner_image(&hash)?;
-                    let mut graphics = identity.graphics();
-                    graphics.set_profile_banner(&hash);
-                    identity.set_graphics(graphics);
-                }
+            (None, Some(hash), None, None) => {
+                helper.set_photo(&hash)?;
+                let mut graphics = identity.graphics();
+                graphics.set_profile_picture(&hash);
+                identity.set_graphics(graphics);
             }
-            IdentityUpdate::StatusMessage(status) => {
+            (None, None, Some(hash), None) => {
+                helper.set_banner_image(&hash)?;
+                let mut graphics = identity.graphics();
+                graphics.set_profile_banner(&hash);
+                identity.set_graphics(graphics);
+            }
+            (None, None, None, Some(status)) => {
                 helper.set_status(&status.clone().unwrap_or_default())?;
                 identity.set_status_message(status)
             }
+            _ => return Err(Error::Any(anyhow!("Invalid update option"))),
         }
 
         if let Ok(mut cache) = self.get_cache() {
@@ -584,7 +588,7 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
 pub mod ffi {
     use std::ffi::c_void;
     use std::sync::{Arc, Mutex};
-    use warp::multipass::{MultiPass, MultiPassTraitObject};
+    use warp::multipass::MultiPassTraitObject;
     use warp::pocket_dimension::PocketDimensionTraitObject;
     use warp::tesseract::Tesseract;
 

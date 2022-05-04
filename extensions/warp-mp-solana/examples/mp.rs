@@ -8,7 +8,7 @@ use warp_mp_solana::SolanaAccount;
 use warp_pd_flatfile::FlatfileStorage;
 
 fn update_name(account: &mut impl MultiPass, name: &str) -> anyhow::Result<()> {
-    account.update_identity(IdentityUpdate::Username(name.to_string()))?;
+    account.update_identity(IdentityUpdate::set_username(name.to_string()))?;
     let ident = account.get_own_identity()?;
     println!();
     println!("Updated Identity: {}", serde_json::to_string(&ident)?);
@@ -16,7 +16,7 @@ fn update_name(account: &mut impl MultiPass, name: &str) -> anyhow::Result<()> {
 }
 
 fn update_status(account: &mut impl MultiPass, status: &str) -> anyhow::Result<()> {
-    account.update_identity(IdentityUpdate::StatusMessage(Some(status.to_string())))?;
+    account.update_identity(IdentityUpdate::set_status_message(Some(status.to_string())))?;
     let ident = account.get_own_identity()?;
     println!();
     println!("Updated Identity: {}", serde_json::to_string(&ident)?);
