@@ -20,7 +20,7 @@ pub struct UserHelper {
 
 impl UserHelper {
     pub fn new_with_manager(manager: &SolanaManager) -> anyhow::Result<Self> {
-        manager.get_payer_account().map(Self::new_with_keypair)
+        Self::new_with_wallet(&manager.wallet)
     }
 
     pub fn new_with_wallet(wallet: &SolanaWallet) -> anyhow::Result<Self> {

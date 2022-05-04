@@ -1,7 +1,6 @@
 use crate::solana::manager::SolanaManager;
 use crate::solana::wallet::SolanaWallet;
 use anchor_client::solana_client::rpc_filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType};
-#[allow(unused_imports)]
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::solana_sdk::signature::{Keypair, Signature};
@@ -11,7 +10,6 @@ use anyhow::anyhow;
 use friends::{FriendRequest, Status};
 #[allow(unused_imports)]
 use std::rc::Rc;
-use users::User;
 
 pub type RequestList = Vec<(Pubkey, FriendRequest)>;
 
@@ -25,7 +23,7 @@ pub struct Friends {
 #[allow(unused)]
 impl Friends {
     pub fn new_with_manager(manager: &SolanaManager) -> anyhow::Result<Self> {
-        manager.get_payer_account().map(Self::new_with_keypair)
+        Self::new_with_wallet(&manager.wallet)
     }
 
     pub fn new_with_wallet(wallet: &SolanaWallet) -> anyhow::Result<Self> {

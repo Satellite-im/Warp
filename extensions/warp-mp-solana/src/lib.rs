@@ -10,23 +10,20 @@ use warp::multipass::generator::generate_name;
 use warp::multipass::{identity::*, Friends, MultiPass};
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::pocket_dimension::PocketDimension;
-use warp::solana::anchor_client::solana_client::rpc_client::RpcClient;
 use warp::solana::anchor_client::solana_sdk::pubkey::Pubkey;
 use warp::solana::anchor_client::solana_sdk::signature::Keypair;
 use warp::solana::helper::friends::{DirectFriendRequest, DirectStatus};
 use warp::solana::helper::user::UserHelper;
 use warp::solana::manager::SolanaManager;
 use warp::solana::wallet::{PhraseType, SolanaWallet};
-use warp::solana::{helper, EndPoint};
+use warp::solana::{anchor_client::Cluster, helper};
 use warp::tesseract::Tesseract;
 use warp::Extension;
 
 type Result<T> = std::result::Result<T, Error>;
 
 pub struct SolanaAccount {
-    pub endpoint: EndPoint,
-    pub connection: Option<RpcClient>,
-    pub identity: Option<Identity>,
+    pub endpoint: Cluster,
     pub contacts: Option<Vec<PublicKey>>,
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     pub tesseract: Option<Arc<Mutex<Tesseract>>>,
@@ -36,9 +33,7 @@ pub struct SolanaAccount {
 impl Default for SolanaAccount {
     fn default() -> Self {
         Self {
-            identity: None,
-            connection: None,
-            endpoint: EndPoint::DevNet,
+            endpoint: Cluster::Devnet,
             contacts: None,
             cache: None,
             tesseract: None,
@@ -48,25 +43,31 @@ impl Default for SolanaAccount {
 }
 
 impl SolanaAccount {
-    pub fn new(endpoint: EndPoint) -> Self {
-        let connection = Some(RpcClient::new(endpoint.to_string()));
+    pub fn new(endpoint: Cluster) -> Self {
         Self {
             endpoint,
-            connection,
             ..Default::default()
         }
     }
 
     pub fn with_devnet() -> Self {
-        Self::new(EndPoint::DevNet)
+        Self::new(Cluster::Devnet)
     }
 
     pub fn with_mainnet() -> Self {
-        Self::new(EndPoint::MainNetBeta)
+        Self::new(Cluster::Mainnet)
     }
 
     pub fn with_testnet() -> Self {
-        Self::new(EndPoint::TestNet)
+        Self::new(Cluster::Testnet)
+    }
+
+    pub fn with_localnet() -> Self {
+        Self::new(Cluster::Localnet)
+    }
+
+    pub fn with_custom(url: &str, ws: &str) -> Self {
+        Self::new(Cluster::Custom(url.to_string(), ws.to_string()))
     }
 
     pub fn set_cache(&mut self, cache: Arc<Mutex<Box<dyn PocketDimension>>>) {
@@ -198,8 +199,7 @@ impl MultiPass for SolanaAccount {
             }
         }
 
-        let mut manager = SolanaManager::new();
-        manager.initiralize_from_solana_wallet(&wallet)?;
+        let manager = SolanaManager::new(self.endpoint.clone(), &wallet)?;
 
         if manager.get_account_balance()? == 0 {
             manager.request_air_drop()?;
@@ -215,8 +215,6 @@ impl MultiPass for SolanaAccount {
         }
 
         let identity = user_to_identity(&helper, None)?;
-
-        self.identity = Some(identity.clone());
 
         if let Ok(mut cache) = self.get_cache() {
             let object = DataObject::new(DataType::from(Module::Accounts), &identity)?;
@@ -327,7 +325,7 @@ impl MultiPass for SolanaAccount {
                 )?;
             }
         }
-        self.identity = Some(identity);
+
         Ok(())
     }
 
