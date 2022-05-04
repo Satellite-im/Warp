@@ -3,6 +3,7 @@ pub mod query;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::data::{DataObject, DataType};
 #[cfg(not(target_arch = "wasm32"))]
@@ -110,36 +111,48 @@ pub trait PocketDimension: Extension + Send + Sync {
 }
 
 pub struct PocketDimensionTraitObject {
-    object: Box<dyn PocketDimension>,
+    object: Arc<Mutex<Box<dyn PocketDimension>>>,
 }
 
 impl PocketDimensionTraitObject {
-    pub fn new(object: Box<dyn PocketDimension>) -> Self {
+    pub fn new(object: Arc<Mutex<Box<dyn PocketDimension>>>) -> Self {
         PocketDimensionTraitObject { object }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn inner(&self) -> Arc<Mutex<Box<dyn PocketDimension>>> {
+        self.object.clone()
+    }
+
+    pub fn inner_guard(&self) -> MutexGuard<Box<dyn PocketDimension>> {
+        match self.object.lock() {
+            Ok(i) => i,
+            Err(e) => e.into_inner(),
+        }
+    }
+
     pub fn add_data(&mut self, dim: DataType, data: &DataObject) -> Result<()> {
-        self.object.add_data(dim, data)
+        self.inner_guard().add_data(dim, data)
     }
 
     pub fn has_data(&mut self, dim: DataType, query: &QueryBuilder) -> Result<()> {
-        self.object.has_data(dim, query)
+        self.inner_guard().has_data(dim, query)
     }
 
     pub fn get_data(&self, dim: DataType, query: Option<&QueryBuilder>) -> Result<Vec<DataObject>> {
-        self.object.get_data(dim, query)
+        self.inner_guard().get_data(dim, query)
     }
 
     pub fn size(&self, dim: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
-        self.object.size(dim, query)
+        self.inner_guard().size(dim, query)
     }
 
     pub fn count(&self, dim: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
-        self.object.count(dim, query)
+        self.inner_guard().count(dim, query)
     }
 
     pub fn empty(&mut self, dimension: DataType) -> Result<()> {
-        self.object.empty(dimension)
+        self.inner_guard().empty(dimension)
     }
 }
 

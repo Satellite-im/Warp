@@ -1,3 +1,4 @@
+use std::sync::{Arc, Mutex, MutexGuard};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -37,24 +38,31 @@ pub trait MultiPass: Extension + Friends + Sync + Send {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct MultiPassTraitObject {
-    object: Box<dyn MultiPass>,
+    object: Arc<Mutex<Box<dyn MultiPass>>>,
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl MultiPassTraitObject {
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn new(object: Box<dyn MultiPass>) -> Self {
+    pub fn new(object: Arc<Mutex<Box<dyn MultiPass>>>) -> Self {
         MultiPassTraitObject { object }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn get_inner(&self) -> &Box<dyn MultiPass> {
-        &self.object
+    pub fn get_inner(&self) -> Arc<Mutex<Box<dyn MultiPass>>> {
+        self.object.clone()
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn get_inner_mut(&mut self) -> &mut Box<dyn MultiPass> {
-        &mut self.object
+    pub fn inner_guard(&self) -> MutexGuard<Box<dyn MultiPass>> {
+        match self.object.lock() {
+            Ok(i) => i,
+            Err(e) => e.into_inner(),
+        }
+    }
+
+    pub fn inner_ptr(&self) -> *const std::ffi::c_void {
+        Arc::into_raw(self.object.clone()) as *const std::ffi::c_void
     }
 }
 
@@ -134,7 +142,7 @@ pub mod ffi {
         };
 
         let mp = &mut *(ctx);
-        mp.get_inner_mut()
+        mp.inner_guard()
             .create_identity(username.as_deref(), passphrase.as_deref())
             .is_ok()
     }
@@ -155,7 +163,7 @@ pub mod ffi {
 
         let mp = &*(ctx);
         let id = &*(identifier as *mut Identifier);
-        match mp.get_inner().get_identity(id.clone()) {
+        match mp.inner_guard().get_identity(id.clone()) {
             Ok(identity) => Box::into_raw(Box::new(identity)) as *mut Identity,
             Err(_) => std::ptr::null_mut(),
         }
@@ -171,7 +179,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match mp.get_inner().get_own_identity() {
+        match mp.inner_guard().get_own_identity() {
             Ok(identity) => Box::into_raw(Box::new(identity)) as *mut Identity,
             Err(_) => std::ptr::null_mut(),
         }
@@ -189,7 +197,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let option = &*(option as *mut IdentityUpdate);
-        mp.get_inner_mut().update_identity(option.clone()).is_ok()
+        mp.inner_guard().update_identity(option.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -209,7 +217,7 @@ pub mod ffi {
             true => None,
         };
         let mp = &*(ctx);
-        match mp.get_inner().decrypt_private_key(passphrase.as_deref()) {
+        match mp.inner_guard().decrypt_private_key(passphrase.as_deref()) {
             Ok(key) => key.as_ptr(),
             Err(_) => std::ptr::null_mut(),
         }
@@ -223,7 +231,7 @@ pub mod ffi {
         }
 
         let mp = &mut *(ctx);
-        if mp.get_inner_mut().refresh_cache().is_ok() {}
+        if mp.inner_guard().refresh_cache().is_ok() {}
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -241,7 +249,7 @@ pub mod ffi {
         }
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        mp.get_inner_mut().send_request(pk.clone()).is_ok()
+        mp.inner_guard().send_request(pk.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -260,7 +268,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        mp.get_inner_mut().accept_request(pk.clone()).is_ok()
+        mp.inner_guard().accept_request(pk.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -279,7 +287,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        mp.get_inner_mut().deny_request(pk.clone()).is_ok()
+        mp.inner_guard().deny_request(pk.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -298,7 +306,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        mp.get_inner_mut().close_request(pk.clone()).is_ok()
+        mp.inner_guard().close_request(pk.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -311,7 +319,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match mp.get_inner().list_incoming_request() {
+        match mp.inner_guard().list_incoming_request() {
             Ok(list) => {
                 let ptr = list.as_ptr() as *const *const _;
                 ptr
@@ -330,7 +338,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match mp.get_inner().list_outgoing_request() {
+        match mp.inner_guard().list_outgoing_request() {
             Ok(list) => {
                 let ptr = list.as_ptr() as *const *const _;
                 std::mem::forget(list);
@@ -350,7 +358,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match mp.get_inner().list_all_request() {
+        match mp.inner_guard().list_all_request() {
             Ok(list) => {
                 let ptr = list.as_ptr() as *const *const _;
                 std::mem::forget(list);
@@ -376,7 +384,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        mp.get_inner_mut().remove_friend(pk.clone()).is_ok()
+        mp.inner_guard().remove_friend(pk.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -395,7 +403,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        mp.get_inner_mut().block_key(pk.clone()).is_ok()
+        mp.inner_guard().block_key(pk.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -408,7 +416,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match mp.get_inner().list_friends() {
+        match mp.inner_guard().list_friends() {
             Ok(list) => {
                 let ptr = list.as_ptr() as *const *const _;
                 std::mem::forget(list);
@@ -434,7 +442,7 @@ pub mod ffi {
 
         let mp = &*(ctx);
         let pk = &*pubkey;
-        mp.get_inner().has_friend(pk.clone()).is_ok()
+        mp.inner_guard().has_friend(pk.clone()).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
