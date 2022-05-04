@@ -1,5 +1,6 @@
 use crate::solana::manager::SolanaManager;
 use crate::solana::wallet::SolanaWallet;
+use anchor_client::solana_client::rpc_filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType};
 #[allow(unused_imports)]
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
 use anchor_client::solana_sdk::pubkey::Pubkey;
@@ -153,6 +154,45 @@ impl Friends {
         Ok(sig)
     }
 
+    pub fn list_by_status(
+        &self,
+        status: DirectStatus,
+    ) -> anyhow::Result<(Vec<(Pubkey, FriendRequest)>, Vec<(Pubkey, FriendRequest)>)> {
+        let payer = self.program.payer();
+        let status = borsh::to_vec(&Status::from(status))?;
+
+        let outgoing_filter = vec![
+            RpcFilterType::Memcmp(Memcmp {
+                offset: 8,
+                bytes: MemcmpEncodedBytes::Base58(payer.to_string()),
+                encoding: None,
+            }),
+            RpcFilterType::Memcmp(Memcmp {
+                offset: 40,
+                bytes: MemcmpEncodedBytes::Base58(bs58::encode(&status).into_string()),
+                encoding: None,
+            }),
+        ];
+
+        let incoming_filter = vec![
+            RpcFilterType::Memcmp(Memcmp {
+                offset: 40,
+                bytes: MemcmpEncodedBytes::Base58(bs58::encode(&status).into_string()),
+                encoding: None,
+            }),
+            RpcFilterType::Memcmp(Memcmp {
+                offset: 41,
+                bytes: MemcmpEncodedBytes::Base58(payer.to_string()),
+                encoding: None,
+            }),
+        ];
+
+        let outgoing = self.program.accounts(outgoing_filter)?;
+        let incoming = self.program.accounts(incoming_filter)?;
+
+        Ok((outgoing, incoming))
+    }
+
     pub fn list_requests(&self) -> anyhow::Result<Vec<(Pubkey, FriendRequest)>> {
         let requests = self.program.accounts(vec![])?;
         Ok(requests)
@@ -210,6 +250,19 @@ impl From<Status> for DirectStatus {
             Status::Denied => DirectStatus::Denied,
             Status::RemovedFriend => DirectStatus::RequestRemoved,
             Status::RequestRemoved => DirectStatus::RequestRemoved,
+        }
+    }
+}
+
+impl From<DirectStatus> for Status {
+    fn from(status: DirectStatus) -> Self {
+        match status {
+            DirectStatus::Uninitilized => Status::Uninitilized,
+            DirectStatus::Pending => Status::Pending,
+            DirectStatus::Accepted => Status::Accepted,
+            DirectStatus::Denied => Status::Denied,
+            DirectStatus::RemovedFriend => Status::RemovedFriend,
+            DirectStatus::RequestRemoved => Status::RequestRemoved,
         }
     }
 }

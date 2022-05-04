@@ -1,3 +1,4 @@
+//TODO: Refactor to remove unneeded functions and fields
 use crate::solana::EndPoint;
 use anchor_client::solana_client::rpc_client::RpcClient;
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
@@ -177,7 +178,11 @@ impl SolanaManager {
             .send()?
             .json::<ResponseStatus>()?;
 
-        ensure!(response.status == "success", "Error requesting airdrop");
+        ensure!(
+            response.status == "success",
+            "Error requesting airdrop: {}",
+            response.additional
+        );
         Ok(())
     }
 
@@ -188,15 +193,6 @@ impl SolanaManager {
         self.connection
             .confirm_transaction_with_commitment(&sig, CommitmentConfig::confirmed())?;
         Ok(())
-    }
-
-    // TODO: Determine if needed
-    // Note: This function would continuously check for the account until it becomes available.
-    // One solution outside utilizing futures would be performing a check on a separate thread and use channels to communicate when it is found
-    // Another option would be to utilize a future and wait for it to return a result. Last option would be to allow for this to stall on the main
-    // thread until it is completed. Possibly implement a timeout to prevent the loop from continuing forever.
-    pub fn wait_for_account(&self) -> anyhow::Result<()> {
-        todo!()
     }
 }
 

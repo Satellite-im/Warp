@@ -432,7 +432,7 @@ impl InvitationAccountFilter {
         Memcmp {
             offset: self.to_offset(),
             bytes: MemcmpEncodedBytes::Base58(self.to_key().to_string()),
-            encoding: Some(MemcmpEncoding::Binary),
+            encoding: None,
         }
     }
 }
