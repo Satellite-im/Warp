@@ -2,9 +2,7 @@ use crate::crypto::x25519_dalek::PublicKey;
 use crate::solana::manager::SolanaManager;
 use crate::solana::wallet::SolanaWallet;
 use anchor_client::anchor_lang::prelude::Pubkey;
-use anchor_client::solana_client::rpc_filter::{
-    Memcmp, MemcmpEncodedBytes, MemcmpEncoding, RpcFilterType,
-};
+use anchor_client::solana_client::rpc_filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType};
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
 use anchor_client::solana_sdk::signature::Keypair;
 use anchor_client::{Client, Cluster, Program};

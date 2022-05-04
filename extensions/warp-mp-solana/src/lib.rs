@@ -430,25 +430,29 @@ impl Friends for SolanaAccount {
     }
 
     fn list_incoming_request(&self) -> Result<Vec<FriendRequest>> {
-        let ident = self.get_own_identity()?;
-        self.list_all_request().map(|fr| {
-            fr.iter()
-                .filter(|fr| fr.to() == ident.public_key())
-                .filter(|fr| fr.status() == FriendRequestStatus::Pending)
-                .cloned()
-                .collect::<Vec<_>>()
-        })
+        let helper = self.friend_helper()?;
+        let list = helper
+            .list_incoming_request()?
+            .iter()
+            .map(|(_, request)| request)
+            .map(DirectFriendRequest::from)
+            .map(fr_to_fr)
+            .filter(|fr| fr.status() == FriendRequestStatus::Pending)
+            .collect::<Vec<_>>();
+        Ok(list)
     }
 
     fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>> {
-        let ident = self.get_own_identity()?;
-        self.list_all_request().map(|fr| {
-            fr.iter()
-                .filter(|fr| fr.from() == ident.public_key())
-                .filter(|fr| fr.status() == FriendRequestStatus::Pending)
-                .cloned()
-                .collect::<Vec<_>>()
-        })
+        let helper = self.friend_helper()?;
+        let list = helper
+            .list_outgoing_request()?
+            .iter()
+            .map(|(_, request)| request)
+            .map(DirectFriendRequest::from)
+            .map(fr_to_fr)
+            .filter(|fr| fr.status() == FriendRequestStatus::Pending)
+            .collect::<Vec<_>>();
+        Ok(list)
     }
 
     fn list_all_request(&self) -> Result<Vec<FriendRequest>> {
@@ -513,7 +517,7 @@ impl Friends for SolanaAccount {
             return Ok(());
         }
 
-        Err(Error::Unimplemented)
+        Err(Error::Any(anyhow!("Account is not friends")))
     }
 
     fn key_exchange(&self, _: Identity) -> Result<Vec<u8>> {
