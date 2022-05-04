@@ -252,3 +252,124 @@ cfg_if! {
         }
     }
 }
+
+//Note: This is to allow for passing serde object into FFI
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SerdeContainer(Value);
+
+impl SerdeContainer {
+    pub fn into_inner(&self) -> Value {
+        self.0.clone()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ffi {
+    use crate::data::{Data, DataType};
+    use libc::c_char;
+    use std::ffi::CString;
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn data_id(data: *mut Data) -> *mut c_char {
+        if data.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let data = &*data;
+        let id = data.id();
+
+        match CString::new(id.to_string()) {
+            Ok(inner) => inner.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn data_update_time(data: *mut Data) {
+        if data.is_null() {
+            return;
+        }
+
+        let data = &mut *data;
+        data.update_time()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn data_set_version(data: *mut Data, version: u32) {
+        if data.is_null() {
+            return;
+        }
+
+        let data = &mut *data;
+        data.set_version(version)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn data_set_data_type(data: *mut Data, data_type: DataType) {
+        if data.is_null() {
+            return;
+        }
+
+        let data = &mut *data;
+        data.set_data_type(data_type)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn data_set_size(data: *mut Data, size: u64) {
+        if data.is_null() {
+            return;
+        }
+
+        let data = &mut *data;
+        data.set_size(size)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn data_size(data: *mut Data) -> u64 {
+        if data.is_null() {
+            return 0;
+        }
+
+        let data = &*data;
+        data.size()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn data_timestamp(data: *mut Data) -> i64 {
+        if data.is_null() {
+            return 0;
+        }
+
+        let data = &*data;
+        data.timestamp()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn data_version(data: *mut Data) -> u32 {
+        if data.is_null() {
+            return 0;
+        }
+
+        let data = &*data;
+        data.version()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn data_type(data: *mut Data) -> DataType {
+        if data.is_null() {
+            return DataType::Unknown;
+        }
+
+        let data = &*data;
+        data.data_type()
+    }
+}
