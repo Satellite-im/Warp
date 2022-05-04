@@ -46,8 +46,8 @@ where
 
 /// Allows for creation of a new hook
 impl Hook {
-    pub fn new<S: AsRef<str>>(name: S, module: Module) -> Self {
-        let name = name.as_ref().to_string();
+    pub fn new(module: Module, name: &str) -> Self {
+        let name = name.to_string();
         Self {
             name,
             data_type: DataType::from(module),
@@ -124,12 +124,11 @@ impl Hooks {
     ///     use warp::hooks::{Hook, Hooks};
     /// use warp::module::Module;
     /// let mut system = Hooks::default();
-    ///     let hook = system.create("new_file", Module::FileSystem).unwrap();
-    ///     assert_eq!(hook, Hook::new("new_file", Module::FileSystem));
+    ///     let hook = system.create(Module::FileSystem, "new_file").unwrap();
+    ///     assert_eq!(hook, Hook::new(Module::FileSystem, "new_file"));
     /// ```
-    pub fn create<S: AsRef<str>>(&mut self, name: S, module: Module) -> Result<Hook> {
-        let name = name.as_ref().to_owned();
-        let hook = Hook::new(name, module);
+    pub fn create(&mut self, module: Module, name: &str) -> Result<Hook> {
+        let hook = Hook::new(module, name);
 
         if self.hooks.contains(&hook) {
             return Err(Error::DuplicateHook);
@@ -149,7 +148,7 @@ impl Hooks {
     ///     use warp::hooks::Hooks;
     /// use warp::module::Module;
     /// let mut system = Hooks::default();
-    ///     let hook = system.create("new_file", Module::FileSystem).unwrap();
+    ///     let hook = system.create(Module::FileSystem, "new_file").unwrap();
     ///     let hooks = system.hooks();
     ///     assert_eq!(hooks.get(0).unwrap(), &hook);
     /// ```
@@ -168,9 +167,9 @@ impl Hooks {
     /// use warp::hooks::{Hook, Hooks};
     /// use warp::module::Module;
     /// let mut system = Hooks::default();
-    ///     let hook = system.create("new_file", Module::FileSystem).unwrap();
+    ///     let hook = system.create(Module::FileSystem, "new_file").unwrap();
     ///     //Check to see if hook already exist
-    ///     assert_eq!(system.create("new_file", Module::FileSystem).is_err(), true);
+    ///     assert_eq!(system.create(Module::FileSystem, "new_file").is_err(), true);
     ///     //Check to see if hook havent been registered
     ///     assert_eq!(system.subscribe(Hook::from("unknown::new_file"), |_, _|{}).is_err(), true);
     ///     system.subscribe("filesystem::new_file", |hook, data| {
@@ -208,7 +207,7 @@ impl Hooks {
     /// use warp::hooks::{Hook, Hooks};
     /// use warp::module::Module;
     ///     let mut system = Hooks::default();
-    ///     let hook = system.create("new_file", Module::FileSystem).unwrap();
+    ///     let hook = system.create(Module::FileSystem, "new_file").unwrap();
     ///     system.subscribe("filesystem::new_file", |hook, data| {
     ///         assert_eq!(hook.name.as_str(), "new_file");
     ///         assert_eq!(hook.data_type, DataType::from(Module::FileSystem));
@@ -218,11 +217,7 @@ impl Hooks {
     ///     let data = DataObject::new(DataType::from(Module::FileSystem), File::new("test.txt")).unwrap();
     ///     system.trigger("filesystem::new_file", &data);
     /// ```
-    pub fn trigger<S>(&self, name: S, data: &DataObject)
-    where
-        S: AsRef<str>,
-    {
-        let name = name.as_ref();
+    pub fn trigger(&self, name: &str, data: &DataObject) {
         let hook = Hook::from(name);
         if let Some(subscribers) = self.subscribers.get(name) {
             for subscriber in subscribers {
