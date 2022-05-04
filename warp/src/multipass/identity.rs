@@ -360,6 +360,7 @@ impl<S: AsRef<str>> From<S> for Identifier {
 }
 
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct IdentityUpdate {
     username: Option<String>,
     graphics_picture: Option<String>,
@@ -367,6 +368,7 @@ pub struct IdentityUpdate {
     status_message: Option<Option<String>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl IdentityUpdate {
     pub fn set_username(username: String) -> IdentityUpdate {
         IdentityUpdate {

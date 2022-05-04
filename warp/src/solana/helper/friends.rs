@@ -154,6 +154,28 @@ impl Friends {
         Ok(sig)
     }
 
+    pub fn list_outgoing_request(&self) -> anyhow::Result<Vec<(Pubkey, FriendRequest)>> {
+        let outgoing_filter = vec![RpcFilterType::Memcmp(Memcmp {
+            offset: 8,
+            bytes: MemcmpEncodedBytes::Base58(self.program.payer().to_string()),
+            encoding: None,
+        })];
+
+        let outgoing = self.program.accounts(outgoing_filter)?;
+        Ok(outgoing)
+    }
+
+    pub fn list_incoming_request(&self) -> anyhow::Result<Vec<(Pubkey, FriendRequest)>> {
+        let incoming_filter = vec![RpcFilterType::Memcmp(Memcmp {
+            offset: 41,
+            bytes: MemcmpEncodedBytes::Base58(self.program.payer().to_string()),
+            encoding: None,
+        })];
+
+        let incoming = self.program.accounts(incoming_filter)?;
+        Ok(incoming)
+    }
+
     pub fn list_by_status(
         &self,
         status: DirectStatus,
