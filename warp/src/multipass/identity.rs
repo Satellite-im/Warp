@@ -413,16 +413,438 @@ impl IdentityUpdate {
     }
 }
 
-// pub enum IdentityUpdate {
-//     /// Update Username
-//     Username(String),
-//
-//     /// Update graphics
-//     Graphics {
-//         picture: Option<String>,
-//         banner: Option<String>,
-//     },
-//
-//     /// Update status message
-//     StatusMessage(Option<String>),
-// }
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ffi {
+    use crate::multipass::identity::{
+        Badge, FriendRequest, FriendRequestStatus, Graphics, Identifier, Identity, IdentityUpdate,
+        PublicKey, Role,
+    };
+    use libc::{c_char, c_void};
+    use std::ffi::{CStr, CString};
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_role_name(role: *mut Role) -> *mut c_char {
+        if role.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let role = &*role;
+
+        match CString::new(role.name()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_role_level(role: *mut Role) -> u8 {
+        if role.is_null() {
+            return 0;
+        }
+
+        let role = &*role;
+
+        role.level()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_badge_name(badge: *mut Badge) -> *mut c_char {
+        if badge.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let badge = &*badge;
+
+        match CString::new(badge.name()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_badge_icon(badge: *mut Badge) -> *mut c_char {
+        if badge.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let badge = &*badge;
+
+        match CString::new(badge.icon()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_graphics_profile_picture(
+        graphics: *mut Graphics,
+    ) -> *mut c_char {
+        if graphics.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let graphics = &*graphics;
+
+        match CString::new(graphics.profile_picture()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_graphics_profile_banner(
+        graphics: *mut Graphics,
+    ) -> *mut c_char {
+        if graphics.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let graphics = &*graphics;
+
+        match CString::new(graphics.profile_banner()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_username(identity: *mut Identity) -> *mut c_char {
+        if identity.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let identity = &*identity;
+
+        match CString::new(identity.username()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_short_id(identity: *mut Identity) -> u16 {
+        if identity.is_null() {
+            return 0;
+        }
+
+        let identity = &*identity;
+
+        identity.short_id()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_public_key(
+        identity: *mut Identity,
+    ) -> *mut PublicKey {
+        if identity.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let identity = &*identity;
+
+        Box::into_raw(Box::new(identity.public_key())) as *mut PublicKey
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_graphics(identity: *mut Identity) -> *mut Graphics {
+        if identity.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let identity = &*identity;
+
+        Box::into_raw(Box::new(identity.graphics())) as *mut Graphics
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_status_message(
+        identity: *mut Identity,
+    ) -> *mut c_char {
+        if identity.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let identity = &*identity;
+
+        match identity.status_message() {
+            Some(status) => match CString::new(status) {
+                Ok(c) => c.into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            },
+            None => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_roles(identity: *mut Identity) -> *const Role {
+        if identity.is_null() {
+            return std::ptr::null();
+        }
+
+        let identity = &*identity;
+        //TODO
+        std::ptr::null()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_available_badge(
+        identity: *mut Identity,
+    ) -> *const Badge {
+        if identity.is_null() {
+            return std::ptr::null();
+        }
+
+        let identity = &*identity;
+        //TODO
+        std::ptr::null()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_active_badge(
+        identity: *mut Identity,
+    ) -> *mut Badge {
+        if identity.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let identity = &*identity;
+        Box::into_raw(Box::new(identity.active_badge())) as *mut Badge
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_linked_accounts(
+        identity: *mut Identity,
+    ) -> *mut c_void {
+        if identity.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let identity = &*identity;
+        //TODO
+        std::ptr::null_mut()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_friend_request_from(
+        request: *mut FriendRequest,
+    ) -> *mut PublicKey {
+        if request.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let request = &*request;
+        Box::into_raw(Box::new(request.from())) as *mut PublicKey
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_friend_request_to(
+        request: *mut FriendRequest,
+    ) -> *mut PublicKey {
+        if request.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let request = &*request;
+        Box::into_raw(Box::new(request.to())) as *mut PublicKey
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_friend_request_status(
+        request: *mut FriendRequest,
+    ) -> *const FriendRequestStatus {
+        if request.is_null() {
+            return std::ptr::null();
+        }
+
+        let request = &*request;
+        Box::into_raw(Box::new(request.status())) as *const FriendRequestStatus
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identifier_user_name(
+        name: *const c_char,
+    ) -> *mut Identifier {
+        if name.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let name = CStr::from_ptr(name).to_string_lossy().to_string();
+
+        Box::into_raw(Box::new(Identifier::user_name(&name))) as *mut Identifier
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identifier_public_key(
+        key: *const PublicKey,
+    ) -> *mut Identifier {
+        if key.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let key = &*key;
+
+        Box::into_raw(Box::new(Identifier::public_key(key.clone()))) as *mut Identifier
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identifier_own() -> *mut Identifier {
+        Box::into_raw(Box::new(Identifier::own())) as *mut Identifier
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_update_set_username(
+        name: *const c_char,
+    ) -> *mut IdentityUpdate {
+        if name.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let name = CStr::from_ptr(name).to_string_lossy().to_string();
+
+        Box::into_raw(Box::new(IdentityUpdate::set_username(name))) as *mut IdentityUpdate
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_update_set_graphics_picture(
+        name: *const c_char,
+    ) -> *mut IdentityUpdate {
+        if name.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let name = CStr::from_ptr(name).to_string_lossy().to_string();
+
+        Box::into_raw(Box::new(IdentityUpdate::set_graphics_picture(name))) as *mut IdentityUpdate
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_update_set_graphics_banner(
+        name: *const c_char,
+    ) -> *mut IdentityUpdate {
+        if name.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let name = CStr::from_ptr(name).to_string_lossy().to_string();
+
+        Box::into_raw(Box::new(IdentityUpdate::set_graphics_banner(name))) as *mut IdentityUpdate
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_update_set_status_message(
+        name: *const c_char,
+    ) -> *mut IdentityUpdate {
+        let update = if name.is_null() {
+            let name = CStr::from_ptr(name).to_string_lossy().to_string();
+            IdentityUpdate::set_status_message(Some(name))
+        } else {
+            IdentityUpdate::set_status_message(None)
+        };
+
+        Box::into_raw(Box::new(update)) as *mut IdentityUpdate
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_update_username(
+        update: *const IdentityUpdate,
+    ) -> *mut c_char {
+        if update.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let update = &*update;
+
+        match update.username() {
+            Some(data) => match CString::new(data) {
+                Ok(data) => data.into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            },
+            None => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_update_graphics_picture(
+        update: *const IdentityUpdate,
+    ) -> *mut c_char {
+        if update.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let update = &*update;
+
+        match update.graphics_picture() {
+            Some(data) => match CString::new(data) {
+                Ok(data) => data.into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            },
+            None => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_update_graphics_banner(
+        update: *const IdentityUpdate,
+    ) -> *mut c_char {
+        if update.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let update = &*update;
+
+        match update.graphics_banner() {
+            Some(data) => match CString::new(data) {
+                Ok(data) => data.into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            },
+            None => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_update_status_message(
+        update: *const IdentityUpdate,
+    ) -> *mut c_char {
+        if update.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let update = &*update;
+
+        if let Some(Some(inner)) = update.status_message() {
+            if let Ok(data) = CString::new(inner) {
+                return data.into_raw();
+            }
+        }
+        std::ptr::null_mut()
+    }
+}
