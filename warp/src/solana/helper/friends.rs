@@ -11,6 +11,9 @@ use anyhow::anyhow;
 use friends::{FriendRequest, Status};
 #[allow(unused_imports)]
 use std::rc::Rc;
+use users::User;
+
+pub type RequestList = Vec<(Pubkey, FriendRequest)>;
 
 #[allow(unused)]
 pub struct Friends {
@@ -154,7 +157,7 @@ impl Friends {
         Ok(sig)
     }
 
-    pub fn list_outgoing_request(&self) -> anyhow::Result<Vec<(Pubkey, FriendRequest)>> {
+    pub fn list_outgoing_request(&self) -> anyhow::Result<RequestList> {
         let outgoing_filter = vec![RpcFilterType::Memcmp(Memcmp {
             offset: 8,
             bytes: MemcmpEncodedBytes::Base58(self.program.payer().to_string()),
@@ -165,7 +168,7 @@ impl Friends {
         Ok(outgoing)
     }
 
-    pub fn list_incoming_request(&self) -> anyhow::Result<Vec<(Pubkey, FriendRequest)>> {
+    pub fn list_incoming_request(&self) -> anyhow::Result<RequestList> {
         let incoming_filter = vec![RpcFilterType::Memcmp(Memcmp {
             offset: 41,
             bytes: MemcmpEncodedBytes::Base58(self.program.payer().to_string()),
@@ -176,10 +179,31 @@ impl Friends {
         Ok(incoming)
     }
 
-    pub fn list_by_status(
+    pub fn list_all(&self) -> anyhow::Result<(RequestList, RequestList)> {
+        let payer = self.program.payer();
+
+        let outgoing_filter = vec![RpcFilterType::Memcmp(Memcmp {
+            offset: 8,
+            bytes: MemcmpEncodedBytes::Base58(payer.to_string()),
+            encoding: None,
+        })];
+
+        let incoming_filter = vec![RpcFilterType::Memcmp(Memcmp {
+            offset: 41,
+            bytes: MemcmpEncodedBytes::Base58(payer.to_string()),
+            encoding: None,
+        })];
+
+        let outgoing = self.program.accounts(outgoing_filter)?;
+        let incoming = self.program.accounts(incoming_filter)?;
+
+        Ok((outgoing, incoming))
+    }
+
+    pub fn list_all_by_status(
         &self,
         status: DirectStatus,
-    ) -> anyhow::Result<(Vec<(Pubkey, FriendRequest)>, Vec<(Pubkey, FriendRequest)>)> {
+    ) -> anyhow::Result<(RequestList, RequestList)> {
         let payer = self.program.payer();
         let status = borsh::to_vec(&Status::from(status))?;
 
@@ -215,9 +239,10 @@ impl Friends {
         Ok((outgoing, incoming))
     }
 
-    pub fn list_requests(&self) -> anyhow::Result<Vec<(Pubkey, FriendRequest)>> {
-        let requests = self.program.accounts(vec![])?;
-        Ok(requests)
+    pub fn list_requests(&self) -> anyhow::Result<RequestList> {
+        let (mut outgoing, incoming) = self.list_all()?;
+        outgoing.extend(incoming);
+        Ok(outgoing)
     }
 
     fn compute_account_keys(&self, to: Pubkey) -> anyhow::Result<(Pubkey, Pubkey, Pubkey)> {
