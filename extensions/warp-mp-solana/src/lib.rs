@@ -584,27 +584,90 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
 pub mod ffi {
     use std::ffi::c_void;
     use std::sync::{Arc, Mutex};
-    use warp::multipass::MultiPass;
+    use warp::multipass::{MultiPass, MultiPassTraitObject};
+    use warp::pocket_dimension::PocketDimensionTraitObject;
     use warp::tesseract::Tesseract;
 
     use crate::SolanaAccount;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_mp_solana_new_wth_devnet(
-        tesseract: *mut Tesseract,
+    pub unsafe extern "C" fn multipass_mp_solana_new_with_devnet(
+        pocketdimension: *mut c_void,
+        tesseract: *mut c_void,
     ) -> *mut c_void {
         let mut account = SolanaAccount::with_devnet();
         let tesseract = match tesseract.is_null() {
-            true => {
-                let tesseract = &*tesseract;
+            false => {
+                let tesseract = &*(tesseract as *mut Tesseract);
                 tesseract.clone()
             }
-            false => Tesseract::default(),
+            true => Tesseract::default(),
         };
+        match pocketdimension.is_null() {
+            true => {}
+            false => {
+                let pd = &*(pocketdimension as *mut PocketDimensionTraitObject);
+                account.set_cache(pd.inner().clone());
+            }
+        }
         account.set_tesseract(Arc::new(Mutex::new(tesseract)));
 
-        let mp = Box::new(Box::new(account));
-        Box::into_raw(mp) as *mut Box<dyn MultiPass> as *mut c_void
+        let mp = MultiPassTraitObject::new(Arc::new(Mutex::new(Box::new(account))));
+        Box::into_raw(Box::new(mp)) as *mut MultiPassTraitObject as *mut c_void
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_mp_solana_new_with_testnet(
+        pocketdimension: *mut c_void,
+        tesseract: *mut c_void,
+    ) -> *mut c_void {
+        let mut account = SolanaAccount::with_testnet();
+        let tesseract = match tesseract.is_null() {
+            false => {
+                let tesseract = &*(tesseract as *mut Tesseract);
+                tesseract.clone()
+            }
+            true => Tesseract::default(),
+        };
+        match pocketdimension.is_null() {
+            true => {}
+            false => {
+                let pd = &*(pocketdimension as *mut PocketDimensionTraitObject);
+                account.set_cache(pd.inner().clone());
+            }
+        }
+        account.set_tesseract(Arc::new(Mutex::new(tesseract)));
+
+        let mp = MultiPassTraitObject::new(Arc::new(Mutex::new(Box::new(account))));
+        Box::into_raw(Box::new(mp)) as *mut MultiPassTraitObject as *mut c_void
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_mp_solana_new_with_mainnet(
+        pocketdimension: *mut c_void,
+        tesseract: *mut c_void,
+    ) -> *mut c_void {
+        let mut account = SolanaAccount::with_mainnet();
+        let tesseract = match tesseract.is_null() {
+            false => {
+                let tesseract = &*(tesseract as *mut Tesseract);
+                tesseract.clone()
+            }
+            true => Tesseract::default(),
+        };
+        match pocketdimension.is_null() {
+            true => {}
+            false => {
+                let pd = &*(pocketdimension as *mut PocketDimensionTraitObject);
+                account.set_cache(pd.inner().clone());
+            }
+        }
+        account.set_tesseract(Arc::new(Mutex::new(tesseract)));
+
+        let mp = MultiPassTraitObject::new(Arc::new(Mutex::new(Box::new(account))));
+        Box::into_raw(Box::new(mp)) as *mut MultiPassTraitObject as *mut c_void
     }
 }
