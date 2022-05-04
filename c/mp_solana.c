@@ -46,9 +46,30 @@ int main() {
         printf("Unable to create identity\n");
         return -1;
     }
-
+    
     //TODO: Access to Identity struct
 
+    struct Identity *id = multipass_get_own_identity(mp);
+
+    if (!id) {
+        printf("Unable to get identity\n");
+        return -1;
+    }
+
+    char *username = multipass_identity_username(id);
+
+    if (!username) {
+        printf("Unable to get username");
+        return -1;
+    }
+
+    uint16_t short_code = multipass_identity_short_id(id);
+
+    printf("Identity Username: %s#%d\n", username, short_code);
+
+    free(username);
+
+    free(id);
     
     multipass_free(mp);
     return 0;
