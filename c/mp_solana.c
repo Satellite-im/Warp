@@ -6,71 +6,160 @@
 #include "../warp/warp.h"
 
 
-int main() {
-    
+MultiPassTraitObject *new_account() {
     struct Tesseract *tesseract = tesseract_new();
 
     if (!tesseract) {
-        printf("Error creating tesseract context\n");
-        return -1;
+        return NULL;
     }
 
     if (!tesseract_unlock(tesseract, "this is my super key")) {
-        printf("Error unlocking tesseract\n");
-        return -1;
-    }
-
-    if (!tesseract_set_file(tesseract, "datastore")) {
-        printf("Error setting file\n");
-        return -1;
-    }
-
-    if (!tesseract_set_autosave(tesseract)) {
-        printf("Error setting autosave flag\n");
-        return -1;
+        return NULL;
     }
 
     void *mp = multipass_mp_solana_new_with_devnet(NULL, tesseract);
 
     if (!mp) {
-        printf("Unable to create multipass context\n");
-        return -1;
+        return NULL;
     }
-
-    //Doing this because the pointer is cloned internally for mp and no longer needed
-    //TODO: Create a Arc<Mutex<_>> handle of Tesseract to pass into mp from ffi so tesseract can continue to be used
 
     tesseract_free(tesseract);
 
-    if(!multipass_create_identity(mp, NULL, NULL)) {
-        printf("Unable to create identity\n");
-        return -1;
-    }
-    
-    //TODO: Access to Identity struct
 
-    struct Identity *id = multipass_get_own_identity(mp);
+    if(!multipass_create_identity(mp, NULL, NULL)) {
+        return NULL;
+    }
+
+
+    
+    return (MultiPassTraitObject *)mp;
+}
+
+bool print_identity(struct Identity *id) {
 
     if (!id) {
         printf("Unable to get identity\n");
-        return -1;
+        return false;
     }
 
     char *username = multipass_identity_username(id);
 
     if (!username) {
         printf("Unable to get username");
-        return -1;
+        return false;
     }
 
     uint16_t short_code = multipass_identity_short_id(id);
 
-    printf("Identity Username: %s#%d\n", username, short_code);
+    printf("Account Username: %s#%d\n", username, short_code);
 
     free(username);
 
-    free(id);
+    return true;
+}
+
+int main() {
     
-    multipass_free(mp);
+    MultiPassTraitObject *account_a = new_account();
+
+    if(!account_a) {
+        printf("Account A is NULL\n");
+        return -1;
+    }
+
+    MultiPassTraitObject *account_b = new_account();
+    if(!account_b) {
+        printf("Account B is NULL\n");
+        return -1;
+    }
+
+
+    struct Identity *ident_a = multipass_get_own_identity(account_a);
+    struct Identity *ident_b = multipass_get_own_identity(account_b);
+
+    print_identity(ident_a);
+
+    print_identity(ident_b);
+
+    //Assuming that the identity isnt null
+    struct PublicKey *acct_a_key = multipass_identity_public_key(ident_a);
+    struct PublicKey *acct_b_key = multipass_identity_public_key(ident_b);
+
+    if(!multipass_send_request(account_a, acct_b_key)) {
+        printf("Unable to send friend request\n");
+        goto drop;
+    }
+
+    // List account_b request and check to see if account_a sent a request
+    // const struct FriendRequest *requests[] = {multipass_list_incoming_request(account_b)};
+
+    // int request_len = sizeof(requests) / sizeof(requests[0]);
+
+    // if (request_len == 0) {
+    //     printf("No incoming friend request\n");
+    //     goto drop;
+    // }
+
+    // bool match = false;
+
+    // for(int i = 0; i<request_len; i++) {
+    //     const struct FriendRequest *request = requests[i];
+    //     struct PublicKey*from_key = multipass_friend_request_from((struct FriendRequest *)request);
+
+    //     if (!from_key) {
+    //         printf("Public key is null at index[%d]\n", i);
+    //         free((void *)request);
+    //         continue;
+    //     }
+
+    //     if(from_key == acct_a_key) {
+    //         printf("Request is not from account a\n");
+    //         free((void *)from_key);
+    //         free((void *)request);
+    //         continue;
+    //     }
+
+    //     match = true;
+    //     free((void *)from_key);
+    //     free((void *)request);
+    // }
+
+    // if (!match) {
+    //     printf("Keys do not match\n");
+    //     goto drop;
+    // }
+
+    if(!multipass_accept_request(account_b, acct_a_key)) {
+        printf("Unable to accept friend request\n");
+        goto drop;
+    }
+
+    const struct Identity *friends[] = {multipass_list_friends(account_a)};
+
+    int len = sizeof(friends)/sizeof(friends[0]);
+
+
+    for(int i = 0; i<len; i++) {
+        const struct Identity *friend = friends[i];
+        char *friend_name = multipass_identity_username((struct Identity *)friend);
+        if (!friend_name) {
+            printf("Unable to get username in iter %d\n", i);
+            continue;
+        }
+
+        uint16_t sc = multipass_identity_short_id((struct Identity *)friend);
+
+        printf("Friend Identity Username: %s#%d\n", friend_name, sc);
+        free(friend_name);
+        free((void*)friend);
+    }
+
+    drop:
+    free(acct_a_key);
+    free(acct_b_key);
+    free(ident_a);
+    free(ident_b);
+    multipass_free(account_a);
+    multipass_free(account_b);
     return 0;
 }
