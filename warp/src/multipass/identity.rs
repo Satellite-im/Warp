@@ -595,9 +595,12 @@ pub mod ffi {
             return std::ptr::null();
         }
 
-        let _identity = &*identity;
-        //TODO
-        std::ptr::null()
+        let identity = &*identity;
+
+        let contents = identity.roles();
+        let ptr = contents.as_ptr();
+        std::mem::forget(contents);
+        ptr
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -609,9 +612,12 @@ pub mod ffi {
             return std::ptr::null();
         }
 
-        let _identity = &*identity;
-        //TODO
-        std::ptr::null()
+        let identity = &*identity;
+
+        let contents = identity.available_badges();
+        let ptr = contents.as_ptr();
+        std::mem::forget(contents);
+        ptr
     }
 
     #[allow(clippy::missing_safety_doc)]

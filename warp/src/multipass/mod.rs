@@ -313,7 +313,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_incoming_request(
         ctx: *mut MultiPassTraitObject,
-    ) -> *const *const FriendRequest {
+    ) -> *const FriendRequest {
         if ctx.is_null() {
             return std::ptr::null();
         }
@@ -321,7 +321,8 @@ pub mod ffi {
         let mp = &*(ctx);
         match mp.inner_guard().list_incoming_request() {
             Ok(list) => {
-                let ptr = list.as_ptr() as *const *const _;
+                let ptr = list.as_ptr();
+                std::mem::forget(list);
                 ptr
             }
             Err(_) => std::ptr::null(),
@@ -332,7 +333,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_outcoming_request(
         ctx: *mut MultiPassTraitObject,
-    ) -> *const *const FriendRequest {
+    ) -> *const FriendRequest {
         if ctx.is_null() {
             return std::ptr::null();
         }
@@ -340,7 +341,7 @@ pub mod ffi {
         let mp = &*(ctx);
         match mp.inner_guard().list_outgoing_request() {
             Ok(list) => {
-                let ptr = list.as_ptr() as *const *const _;
+                let ptr = list.as_ptr();
                 std::mem::forget(list);
                 ptr
             }
@@ -352,7 +353,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_all_request(
         ctx: *mut MultiPassTraitObject,
-    ) -> *const *const FriendRequest {
+    ) -> *const FriendRequest {
         if ctx.is_null() {
             return std::ptr::null();
         }
@@ -360,7 +361,7 @@ pub mod ffi {
         let mp = &*(ctx);
         match mp.inner_guard().list_all_request() {
             Ok(list) => {
-                let ptr = list.as_ptr() as *const *const _;
+                let ptr = list.as_ptr();
                 std::mem::forget(list);
                 ptr
             }
@@ -410,7 +411,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_friends(
         ctx: *mut MultiPassTraitObject,
-    ) -> *const *const Identity {
+    ) -> *const Identity {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
@@ -418,7 +419,7 @@ pub mod ffi {
         let mp = &*(ctx);
         match mp.inner_guard().list_friends() {
             Ok(list) => {
-                let ptr = list.as_ptr() as *const *const _;
+                let ptr = list.as_ptr();
                 std::mem::forget(list);
                 ptr
             }
