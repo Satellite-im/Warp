@@ -145,13 +145,13 @@ impl SolanaAccount {
 
     pub fn user_helper(&self) -> anyhow::Result<UserHelper> {
         let kp = self.get_private_key()?;
-        let helper = UserHelper::new_with_keypair(&kp);
+        let helper = UserHelper::new_with_cluster(self.endpoint.clone(), &kp);
         Ok(helper)
     }
 
     pub fn friend_helper(&self) -> anyhow::Result<helper::friends::Friends> {
         let kp = self.get_private_key()?;
-        let helper = helper::friends::Friends::new_with_keypair(&kp);
+        let helper = helper::friends::Friends::new_with_cluster(self.endpoint.clone(), &kp);
         Ok(helper)
     }
 }
@@ -173,7 +173,7 @@ impl Extension for SolanaAccount {
 impl MultiPass for SolanaAccount {
     fn create_identity(&mut self, username: Option<&str>, _: Option<&str>) -> Result<PublicKey> {
         if let Ok(keypair) = &self.get_private_key() {
-            if UserHelper::new_with_keypair(keypair)
+            if UserHelper::new_with_cluster(self.endpoint.clone(), keypair)
                 .get_current_user()
                 .is_ok()
             {
@@ -191,7 +191,8 @@ impl MultiPass for SolanaAccount {
             Err(_) => SolanaWallet::create_random(PhraseType::Standard, None)?,
         };
 
-        let mut helper = UserHelper::new_with_wallet(&wallet)?;
+        let mut helper =
+            UserHelper::new_with_cluster(self.endpoint.clone(), &wallet.get_keypair()?);
 
         if let Ok(identity) = user_to_identity(&helper, None) {
             if identity.username() == username {

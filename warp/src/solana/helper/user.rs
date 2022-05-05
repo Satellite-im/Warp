@@ -1,13 +1,15 @@
 use anchor_client::{
     solana_client::rpc_filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType},
     solana_sdk::{commitment_config::CommitmentConfig, signature::Keypair},
-    Client, Cluster, Program,
+    Client, ClientError, Cluster, Program,
 };
 
 pub use users::User;
 
+use crate::solana::error::UserError;
 use crate::solana::manager::SolanaManager;
 use crate::solana::wallet::SolanaWallet;
+use anchor_client::anchor_lang::prelude::ProgramError;
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anyhow::anyhow;
 use std::rc::Rc;
@@ -20,20 +22,35 @@ pub struct UserHelper {
 
 impl UserHelper {
     pub fn new_with_manager(manager: &SolanaManager) -> anyhow::Result<Self> {
-        Self::new_with_wallet(&manager.wallet)
+        Ok(Self::new_with_cluster(
+            manager.cluster.clone(),
+            &manager.wallet.get_keypair()?,
+        ))
     }
 
-    pub fn new_with_wallet(wallet: &SolanaWallet) -> anyhow::Result<Self> {
+    pub fn devnet_with_wallet(wallet: &SolanaWallet) -> anyhow::Result<Self> {
         let kp = wallet.get_keypair()?;
-        Ok(Self::new_with_keypair(&kp))
+        Ok(Self::new_with_cluster(Cluster::Devnet, &kp))
     }
 
-    pub fn new_with_keypair(kp: &Keypair) -> Self {
-        //"cheap" way of copying keypair since it does not support copy or clone
+    pub fn devnet_keypair(kp: &Keypair) -> Self {
+        Self::new_with_cluster(Cluster::Devnet, kp)
+    }
+
+    pub fn mainnet_with_wallet(wallet: &SolanaWallet) -> anyhow::Result<Self> {
+        let kp = wallet.get_keypair()?;
+        Ok(Self::new_with_cluster(Cluster::Mainnet, &kp))
+    }
+
+    pub fn mainnet_keypair(kp: &Keypair) -> Self {
+        Self::new_with_cluster(Cluster::Mainnet, kp)
+    }
+
+    pub fn new_with_cluster(cluster: Cluster, kp: &Keypair) -> Self {
         let kp_str = kp.to_base58_string();
         let kp = Keypair::from_base58_string(&kp_str);
         let client = Client::new_with_options(
-            Cluster::Devnet,
+            cluster,
             Rc::new(Keypair::from_base58_string(&kp_str)),
             CommitmentConfig::confirmed(),
         );
@@ -65,7 +82,13 @@ impl UserHelper {
                 photo_hash: photo_hash.to_string(),
                 status: status.to_string(),
             })
-            .send()?;
+            .send()
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(UserError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
         Ok(())
     }
 
@@ -99,7 +122,13 @@ impl UserHelper {
                 name: name.to_string(),
             })
             .signer(&self.kp)
-            .send()?;
+            .send()
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(UserError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
 
         Ok(())
     }
@@ -119,7 +148,13 @@ impl UserHelper {
                 photo_hash: hash.to_string(),
             })
             .signer(&self.kp)
-            .send()?;
+            .send()
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(UserError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
 
         Ok(())
     }
@@ -139,7 +174,13 @@ impl UserHelper {
                 status: status.to_string(),
             })
             .signer(&self.kp)
-            .send()?;
+            .send()
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(UserError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
 
         Ok(())
     }
@@ -159,7 +200,13 @@ impl UserHelper {
                 banner_image_hash: hash.to_string(),
             })
             .signer(&self.kp)
-            .send()?;
+            .send()
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(UserError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
 
         Ok(())
     }
@@ -179,7 +226,13 @@ impl UserHelper {
                 extra_1: data.to_string(),
             })
             .signer(&self.kp)
-            .send()?;
+            .send()
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(UserError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
 
         Ok(())
     }
@@ -199,7 +252,13 @@ impl UserHelper {
                 extra_2: data.to_string(),
             })
             .signer(&self.kp)
-            .send()?;
+            .send()
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(UserError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
 
         Ok(())
     }
@@ -214,7 +273,13 @@ impl UserHelper {
         });
 
         self.program
-            .accounts(vec![filter])?
+            .accounts(vec![filter])
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(UserError::from(code))
+                }
+                _ => anyhow!(e),
+            })?
             .iter()
             .cloned()
             .map(|(_, account)| account)

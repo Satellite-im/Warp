@@ -1,11 +1,13 @@
+use crate::solana::error::FriendsError;
 use crate::solana::manager::SolanaManager;
 use crate::solana::wallet::SolanaWallet;
+use anchor_client::anchor_lang::prelude::ProgramError;
 use anchor_client::solana_client::rpc_filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType};
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::solana_sdk::signature::{Keypair, Signature};
 use anchor_client::solana_sdk::system_program;
-use anchor_client::{Client, Cluster, Program};
+use anchor_client::{Client, ClientError, Cluster, Program};
 use anyhow::anyhow;
 use friends::{FriendRequest, Status};
 #[allow(unused_imports)]
@@ -23,20 +25,35 @@ pub struct Friends {
 #[allow(unused)]
 impl Friends {
     pub fn new_with_manager(manager: &SolanaManager) -> anyhow::Result<Self> {
-        Self::new_with_wallet(&manager.wallet)
+        Ok(Self::new_with_cluster(
+            manager.cluster.clone(),
+            &manager.wallet.get_keypair()?,
+        ))
     }
 
-    pub fn new_with_wallet(wallet: &SolanaWallet) -> anyhow::Result<Self> {
+    pub fn devnet_with_wallet(wallet: &SolanaWallet) -> anyhow::Result<Self> {
         let kp = wallet.get_keypair()?;
-        Ok(Self::new_with_keypair(&kp))
+        Ok(Self::new_with_cluster(Cluster::Devnet, &kp))
     }
 
-    pub fn new_with_keypair(kp: &Keypair) -> Self {
-        //"cheap" way of copying keypair since it does not support copy or clone
+    pub fn devnet_keypair(kp: &Keypair) -> Self {
+        Self::new_with_cluster(Cluster::Devnet, kp)
+    }
+
+    pub fn mainnet_with_wallet(wallet: &SolanaWallet) -> anyhow::Result<Self> {
+        let kp = wallet.get_keypair()?;
+        Ok(Self::new_with_cluster(Cluster::Mainnet, &kp))
+    }
+
+    pub fn mainnet_keypair(kp: &Keypair) -> Self {
+        Self::new_with_cluster(Cluster::Mainnet, kp)
+    }
+
+    pub fn new_with_cluster(cluster: Cluster, kp: &Keypair) -> Self {
         let kp_str = kp.to_base58_string();
         let kp = Keypair::from_base58_string(&kp_str);
         let client = Client::new_with_options(
-            Cluster::Devnet,
+            cluster,
             Rc::new(Keypair::from_base58_string(&kp_str)),
             CommitmentConfig::confirmed(),
         );
@@ -67,13 +84,24 @@ impl Friends {
                 user2: to,
                 k: key.to_string(),
             })
-            .send()?;
+            .send()
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(FriendsError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
         Ok(())
     }
 
     pub fn get_request(&self, key: Pubkey) -> anyhow::Result<friends::FriendRequest> {
         let (request, _, _) = self.compute_account_keys(key)?;
-        let account = self.program.account(request)?;
+        let account = self.program.account(request).map_err(|e| match e {
+            ClientError::ProgramError(ProgramError::Custom(code)) => {
+                anyhow!(FriendsError::from(code))
+            }
+            _ => anyhow!(e),
+        })?;
         Ok(account)
     }
 
@@ -88,7 +116,13 @@ impl Friends {
                 user: self.program.payer(),
             })
             .args(friends::instruction::AcceptRequest { k: key.to_string() })
-            .send()?;
+            .send()
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(FriendsError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
         Ok(sig)
     }
 
@@ -103,7 +137,13 @@ impl Friends {
                 user: self.program.payer(),
             })
             .args(friends::instruction::DenyRequest)
-            .send()?;
+            .send()
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(FriendsError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
         Ok(sig)
     }
 
@@ -118,7 +158,13 @@ impl Friends {
                 user: self.program.payer(),
             })
             .args(friends::instruction::RemoveRequest)
-            .send()?;
+            .send()
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(FriendsError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
         Ok(sig)
     }
 
@@ -135,7 +181,13 @@ impl Friends {
                 payer,
             })
             .args(friends::instruction::CloseRequest)
-            .send()?;
+            .send()
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(FriendsError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
         Ok(sig)
     }
 
@@ -151,7 +203,13 @@ impl Friends {
                 user: payer,
             })
             .args(friends::instruction::RemoveFriend)
-            .send()?;
+            .send()
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(FriendsError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
         Ok(sig)
     }
 
@@ -162,7 +220,15 @@ impl Friends {
             encoding: None,
         })];
 
-        let outgoing = self.program.accounts(outgoing_filter)?;
+        let outgoing = self
+            .program
+            .accounts(outgoing_filter)
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(FriendsError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
         Ok(outgoing)
     }
 
@@ -173,7 +239,15 @@ impl Friends {
             encoding: None,
         })];
 
-        let incoming = self.program.accounts(incoming_filter)?;
+        let incoming = self
+            .program
+            .accounts(incoming_filter)
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(FriendsError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
         Ok(incoming)
     }
 
@@ -192,8 +266,24 @@ impl Friends {
             encoding: None,
         })];
 
-        let outgoing = self.program.accounts(outgoing_filter)?;
-        let incoming = self.program.accounts(incoming_filter)?;
+        let outgoing = self
+            .program
+            .accounts(outgoing_filter)
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(FriendsError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
+        let incoming = self
+            .program
+            .accounts(incoming_filter)
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(FriendsError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
 
         Ok((outgoing, incoming))
     }
@@ -231,8 +321,24 @@ impl Friends {
             }),
         ];
 
-        let outgoing = self.program.accounts(outgoing_filter)?;
-        let incoming = self.program.accounts(incoming_filter)?;
+        let outgoing = self
+            .program
+            .accounts(outgoing_filter)
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(FriendsError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
+        let incoming = self
+            .program
+            .accounts(incoming_filter)
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(FriendsError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
 
         Ok((outgoing, incoming))
     }

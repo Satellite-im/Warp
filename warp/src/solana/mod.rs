@@ -1,6 +1,7 @@
 // Based on https://github.com/Satellite-im/Core-PWA/blob/dev/libraries/Solana/SolanaManager/SolanaManager.ts
 // Note: This is a reference for `warp-mp-solana`.
 
+pub mod error;
 pub mod helper;
 pub mod manager;
 pub mod wallet;
