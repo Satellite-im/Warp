@@ -231,7 +231,7 @@ impl FlatfileStorage {
 impl PocketDimension for FlatfileStorage {
     fn add_data(&mut self, dimension: DataType, data: &warp::data::DataObject) -> Result<()> {
         let mut data = data.clone();
-        data.set_data_type(dimension.clone());
+        data.set_data_type(dimension);
 
         let version = self
             .index
@@ -498,4 +498,40 @@ fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<DataObject>>
         }
     }
     Ok(list)
+}
+
+pub mod ffi {
+    use crate::FlatfileStorage;
+    use std::ffi::{c_void, CStr};
+    use std::os::raw::c_char;
+    use std::sync::{Arc, Mutex};
+    use warp::pocket_dimension::PocketDimensionTraitObject;
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn pocket_dimension_flatfile_new(
+        path: *const c_char,
+        index_file: *const c_char,
+    ) -> *mut c_void {
+        if path.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let path = CStr::from_ptr(path).to_string_lossy().to_string();
+
+        let index_file = match index_file.is_null() {
+            true => String::from("index-file"),
+            false => CStr::from_ptr(index_file).to_string_lossy().to_string(),
+        };
+
+        let flatfile = match FlatfileStorage::new_with_index_file(path, index_file) {
+            Ok(flatfile) => {
+                PocketDimensionTraitObject::new(Arc::new(Mutex::new(Box::new(flatfile))))
+            }
+            Err(_) => return std::ptr::null_mut(),
+        };
+
+        let obj = Box::new(flatfile);
+        Box::into_raw(obj) as *mut PocketDimensionTraitObject as *mut c_void
+    }
 }

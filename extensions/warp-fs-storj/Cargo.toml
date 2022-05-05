@@ -27,3 +27,6 @@ chrono = { version = "0.4", features = ["serde"] }
 default = ["s3"]
 s3 = ["rust-s3", "aws-config", "aws-sdk-s3", "aws-endpoint"]
 uplink = []
+
+[build-dependencies]
+cbindgen = "0.23"

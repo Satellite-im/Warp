@@ -21,3 +21,6 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
 dyn-clone = "1.0"
 uuid = { version = "0.8", features = ["serde", "v4"] }
+
+[build-dependencies]
+cbindgen = "0.23"

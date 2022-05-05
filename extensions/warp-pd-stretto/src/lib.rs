@@ -56,7 +56,7 @@ impl PocketDimension for StrettoClient {
         data: &DataObject,
     ) -> std::result::Result<(), warp::error::Error> {
         let mut data = data.clone();
-        data.set_data_type(dimension.clone());
+        data.set_data_type(dimension);
 
         if let Some(mut value) = self.client.get_mut(&dimension) {
             let version = value
@@ -298,5 +298,24 @@ mod test {
         assert_eq!(count, 5);
 
         Ok(())
+    }
+}
+
+pub mod ffi {
+    use crate::StrettoClient;
+    use std::ffi::c_void;
+    use std::sync::{Arc, Mutex};
+    use warp::pocket_dimension::PocketDimensionTraitObject;
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn pocketdimension_stretto_new() -> *mut c_void {
+        let client = match StrettoClient::new() {
+            Ok(client) => PocketDimensionTraitObject::new(Arc::new(Mutex::new(Box::new(client)))),
+            Err(_) => return std::ptr::null_mut(),
+        };
+
+        let obj = Box::new(client);
+        Box::into_raw(obj) as *mut PocketDimensionTraitObject as *mut c_void
     }
 }

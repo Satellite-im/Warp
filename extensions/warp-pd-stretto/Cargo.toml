@@ -15,3 +15,6 @@ uuid = { version = "0.8", features = ["serde", "v4"] }
 
 stretto = { version = "0.3", features = ["full"] }
 thiserror = "1.0"
+
+[build-dependencies]
+cbindgen = "0.23"

@@ -567,3 +567,51 @@ mod test {
         Ok(())
     }
 }
+
+pub mod ffi {
+    use crate::IpfsFileSystem;
+    use std::ffi::{c_void, CStr};
+    use std::os::raw::c_char;
+    use warp::constellation::ConstellationTraitObject;
+    use warp::pocket_dimension::PocketDimensionTraitObject;
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_fs_ipfs_new(pd: *mut c_void) -> *mut c_void {
+        let mut ipfs = IpfsFileSystem::new();
+
+        if pd.is_null() {
+            let pd = &*(pd as *mut PocketDimensionTraitObject);
+            ipfs.set_cache(pd.inner().clone());
+        }
+
+        let obj = Box::new(ConstellationTraitObject::new(Box::new(ipfs)));
+        Box::into_raw(obj) as *mut ConstellationTraitObject as *mut c_void
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_fs_ipfs_new_with_uri(
+        uri: *const c_char,
+        pd: *mut c_void,
+    ) -> *mut c_void {
+        if uri.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let uri = CStr::from_ptr(uri).to_string_lossy().to_string();
+
+        let mut ipfs = match IpfsFileSystem::new_with_uri(uri) {
+            Ok(ipfs) => ipfs,
+            Err(_) => return std::ptr::null_mut(),
+        };
+
+        if pd.is_null() {
+            let pd = &*(pd as *mut PocketDimensionTraitObject);
+            ipfs.set_cache(pd.inner().clone());
+        }
+
+        let obj = Box::new(ConstellationTraitObject::new(Box::new(ipfs)));
+        Box::into_raw(obj) as *mut ConstellationTraitObject as *mut c_void
+    }
+}

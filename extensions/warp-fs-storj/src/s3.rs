@@ -518,3 +518,41 @@ async fn presign_url(acc: &str, sec: &str, bucket: &str, obj: &str) -> anyhow::R
 
     Ok(presigned_request.uri().to_string())
 }
+
+pub mod ffi {
+    use crate::StorjFilesystem;
+    use std::ffi::{c_void, CStr};
+    use std::os::raw::c_char;
+    use warp::constellation::ConstellationTraitObject;
+    use warp::pocket_dimension::PocketDimensionTraitObject;
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_fs_storj_new(
+        pd: *mut c_void,
+        akey: *const c_char,
+        skey: *const c_char,
+    ) -> *mut c_void {
+        if akey.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        if skey.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let akey = CStr::from_ptr(akey).to_string_lossy().to_string();
+
+        let skey = CStr::from_ptr(skey).to_string_lossy().to_string();
+
+        let mut client = StorjFilesystem::new(akey, skey);
+
+        if pd.is_null() {
+            let pd = &*(pd as *mut PocketDimensionTraitObject);
+            client.set_cache(pd.inner().clone());
+        }
+
+        let obj = Box::new(ConstellationTraitObject::new(Box::new(client)));
+        Box::into_raw(obj) as *mut ConstellationTraitObject as *mut c_void
+    }
+}
