@@ -156,22 +156,165 @@ impl PocketDimensionTraitObject {
     }
 }
 
-// pub mod ffi {
-//     use std::ffi::{c_void, CString};
-//     use std::os::raw::c_char;
-//     use warp_data::{DataObject, DataType};
-//
-//     use crate::PocketDimension;
-//
-//     pub type PocketDimensionPointer = *mut c_void;
-//     pub type PocketDimensionBoxPointer = *mut Box<dyn PocketDimension>;
-//
-//     #[allow(clippy::missing_safety_doc)]
-//     #[no_mangle]
-//     pub unsafe extern "C" fn pocket_dimension_add_data(
-//         ctx: PocketDimensionPointer,
-//         dimension: *mut DataType,
-//         data: *mut DataObject,
-//     ) {
-//     }
-// }
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ffi {
+    use crate::data::{Data, DataType};
+    use crate::pocket_dimension::query::QueryBuilder;
+    use crate::pocket_dimension::PocketDimensionTraitObject;
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn pocket_dimension_add_data(
+        ctx: *mut PocketDimensionTraitObject,
+        dimension: *mut DataType,
+        data: *mut Data,
+    ) -> bool {
+        if ctx.is_null() {
+            return false;
+        }
+
+        if dimension.is_null() {
+            return false;
+        }
+
+        if data.is_null() {
+            return false;
+        }
+
+        let pd = &mut *ctx;
+        let dimension = &*dimension;
+        let data = &*data;
+
+        pd.add_data(*dimension, data).is_ok()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn pocket_dimension_has_data(
+        ctx: *mut PocketDimensionTraitObject,
+        dimension: *mut DataType,
+        query: *mut QueryBuilder,
+    ) -> bool {
+        if ctx.is_null() {
+            return false;
+        }
+
+        if dimension.is_null() {
+            return false;
+        }
+
+        if query.is_null() {
+            return false;
+        }
+
+        let pd = &mut *ctx;
+        let dimension = &*dimension;
+        let query = &*query;
+
+        pd.has_data(*dimension, query).is_ok()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn pocket_dimension_get_data(
+        ctx: *mut PocketDimensionTraitObject,
+        dimension: *mut DataType,
+        query: *mut QueryBuilder,
+    ) -> *const Data {
+        if ctx.is_null() {
+            return std::ptr::null();
+        }
+
+        if dimension.is_null() {
+            return std::ptr::null();
+        }
+
+        let query = match query.is_null() {
+            true => None,
+            false => Some(&*query),
+        };
+
+        let pd = &mut *ctx;
+        let dimension = &*dimension;
+
+        match pd.get_data(*dimension, query) {
+            Ok(list) => {
+                let list = std::mem::ManuallyDrop::new(list);
+                list.as_ptr()
+            }
+            Err(_) => std::ptr::null(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn pocket_dimension_size(
+        ctx: *mut PocketDimensionTraitObject,
+        dimension: *mut DataType,
+        query: *mut QueryBuilder,
+    ) -> i64 {
+        if ctx.is_null() {
+            return 0;
+        }
+
+        if dimension.is_null() {
+            return 0;
+        }
+
+        let query = match query.is_null() {
+            true => None,
+            false => Some(&*query),
+        };
+
+        let pd = &mut *ctx;
+        let dimension = &*dimension;
+
+        pd.size(*dimension, query).unwrap_or(0)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn pocket_dimension_count(
+        ctx: *mut PocketDimensionTraitObject,
+        dimension: *mut DataType,
+        query: *mut QueryBuilder,
+    ) -> i64 {
+        if ctx.is_null() {
+            return 0;
+        }
+
+        if dimension.is_null() {
+            return 0;
+        }
+
+        let query = match query.is_null() {
+            true => None,
+            false => Some(&*query),
+        };
+
+        let pd = &mut *ctx;
+        let dimension = &*dimension;
+
+        pd.count(*dimension, query).unwrap_or(0)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn pocket_dimension_empty(
+        ctx: *mut PocketDimensionTraitObject,
+        dimension: *mut DataType,
+    ) -> bool {
+        if ctx.is_null() {
+            return false;
+        }
+
+        if dimension.is_null() {
+            return false;
+        }
+
+        let pd = &mut *ctx;
+        let dimension = &*dimension;
+
+        pd.empty(*dimension).is_ok()
+    }
+}
