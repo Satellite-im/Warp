@@ -37,7 +37,7 @@ fn main() -> anyhow::Result<()> {
         DataType::from(Module::FileSystem),
         DimensionData::from_buffer_nofile("test", b"Hello, World"),
     )?;
-    storage.add_data(DataType::File, &bufdata)?;
+    storage.add_data(DataType::FileSystem, &bufdata)?;
 
     let mut query = QueryBuilder::default();
     query.filter(Comparator::Eq, "name", "testbin")?;

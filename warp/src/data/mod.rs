@@ -70,8 +70,6 @@ pub enum DataType {
     Cache,
     #[display(fmt = "http")]
     Http,
-    #[display(fmt = "file")]
-    File,
     #[display(fmt = "data_export")]
     DataExport,
     #[display(fmt = "unknown")]
@@ -87,7 +85,6 @@ impl<S: AsRef<str>> From<S> for DataType {
             "accounts" => DataType::Accounts,
             "cache" => DataType::Cache,
             "http" => DataType::Http,
-            "file" => DataType::File,
             "data_export" | "dataexport" => DataType::DataExport,
             _ => DataType::Unknown,
         }

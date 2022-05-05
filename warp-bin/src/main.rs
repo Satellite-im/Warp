@@ -603,7 +603,6 @@ async fn main() -> AnyResult<()> {
                                         DataType::Accounts,
                                         DataType::Messaging,
                                         DataType::Cache,
-                                        DataType::File,
                                         DataType::Unknown,
                                     ]
                                 }
@@ -620,7 +619,6 @@ async fn main() -> AnyResult<()> {
                             DataType::Accounts,
                             DataType::Messaging,
                             DataType::Cache,
-                            DataType::File,
                             DataType::Unknown,
                         ]
                     }
@@ -673,7 +671,7 @@ fn import_from_cache(
 ) -> AnyResult<DataObject> {
     let mut handle = handle.lock().unwrap();
     let cache = cache.lock().unwrap();
-    let obj = cache.get_data(warp::data::DataType::File, None)?;
+    let obj = cache.get_data(warp::data::DataType::DataExport, None)?;
 
     if !obj.is_empty() {
         if let Some(data) = obj.last() {
@@ -701,7 +699,7 @@ fn export_to_cache(
     object.set_size(data.len() as u64);
     object.set_payload(serde_json::from_str::<Value>(&data)?)?;
 
-    cache.add_data(warp::data::DataType::File, &object)?;
+    cache.add_data(warp::data::DataType::DataExport, &object)?;
 
     Ok(())
 }
