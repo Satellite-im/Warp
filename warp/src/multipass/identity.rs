@@ -595,7 +595,7 @@ pub mod ffi {
             return std::ptr::null();
         }
 
-        let identity = &*identity;
+        let _identity = &*identity;
         //TODO
         std::ptr::null()
     }
@@ -623,7 +623,7 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
 
-        let _identity = &*identity;
+        let identity = &*identity;
         Box::into_raw(Box::new(identity.active_badge())) as *mut Badge
     }
 
