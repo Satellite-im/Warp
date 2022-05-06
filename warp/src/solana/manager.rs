@@ -12,40 +12,15 @@ pub struct SolanaManager {
     pub cluster: Cluster,
 }
 
-//Note: We should not be cloning the manager
-// impl Clone for SolanaManager {
-//     fn clone(&self) -> Self {
-//         Self {
-//             account: self.account.clone(),
-//             connection: {
-//                 let kp = match self.account.get_keypair() {
-//                     Ok(kp) => kp,
-//                     Err(_) => Keypair::example()
-//                 };
-//                 Client::new(self.cluster_endpoint, Rc::new(kp))
-//             },
-//             user_account: match &self.user_account {
-//                 Some(kp) => {
-//                     let inner = kp.to_base58_string();
-//                     Some(Keypair::from_base58_string(&inner))
-//                 }
-//                 None => None,
-//             },
-//             cluster_endpoint: self.cluster_endpoint,
-//         }
-//     }
-// }
-
-// impl std::fmt::Debug for SolanaManager {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.debug_struct("SolanaManager")
-//             .field("accounts", &self.accounts)
-//             .field("payer_account", &self.payer_account)
-//             .field("user_account", &self.user_account)
-//             .field("cluster_endpoint", &self.cluster_endpoint)
-//             .finish()
-//     }
-// }
+impl std::fmt::Debug for SolanaManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SolanaManager")
+            .field("wallet", &self.wallet.get_pubkey())
+            .field("connection", &"<>")
+            .field("cluster", &self.cluster)
+            .finish()
+    }
+}
 
 impl SolanaManager {
     pub fn new(cluster: Cluster, wallet: &SolanaWallet) -> anyhow::Result<Self> {

@@ -26,8 +26,8 @@ impl Clone for SolanaWallet {
 impl std::fmt::Debug for SolanaWallet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SolanaWallet")
-            .field("mnemonic", &self.mnemonic)
-            .field("keypair", &self.keypair)
+            .field("mnemonic", &"<>")
+            .field("keypair", &"<>")
             .finish()
     }
 }
