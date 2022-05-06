@@ -2,13 +2,11 @@
 pub mod constellation;
 pub mod crypto;
 pub mod data;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod error;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hooks;
 pub mod module;
 pub mod multipass;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod pocket_dimension;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod raygun;

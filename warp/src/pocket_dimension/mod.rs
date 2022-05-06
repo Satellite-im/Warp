@@ -110,6 +110,7 @@ pub trait PocketDimension: Extension + Send + Sync {
     fn empty(&mut self, dimension: DataType) -> Result<()>;
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct PocketDimensionTraitObject {
     object: Arc<Mutex<Box<dyn PocketDimension>>>,
 }
@@ -119,7 +120,6 @@ impl PocketDimensionTraitObject {
         PocketDimensionTraitObject { object }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn inner(&self) -> Arc<Mutex<Box<dyn PocketDimension>>> {
         self.object.clone()
     }
@@ -130,29 +130,53 @@ impl PocketDimensionTraitObject {
             Err(e) => e.into_inner(),
         }
     }
+}
 
-    pub fn add_data(&mut self, dim: DataType, data: &DataObject) -> Result<()> {
-        self.inner_guard().add_data(dim, data)
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+impl PocketDimensionTraitObject {
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn add_data(&mut self, dim: DataType, data: DataObject) -> Result<()> {
+        self.inner_guard().add_data(dim, &data)
     }
 
-    pub fn has_data(&mut self, dim: DataType, query: &QueryBuilder) -> Result<()> {
-        self.inner_guard().has_data(dim, query)
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn has_data(&mut self, dim: DataType, query: QueryBuilder) -> Result<()> {
+        self.inner_guard().has_data(dim, &query)
     }
 
-    pub fn get_data(&self, dim: DataType, query: Option<&QueryBuilder>) -> Result<Vec<DataObject>> {
-        self.inner_guard().get_data(dim, query)
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn size(&self, dim: DataType, query: Option<QueryBuilder>) -> Result<i64> {
+        self.inner_guard().size(dim, query.as_ref())
     }
 
-    pub fn size(&self, dim: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
-        self.inner_guard().size(dim, query)
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn count(&self, dim: DataType, query: Option<QueryBuilder>) -> Result<i64> {
+        self.inner_guard().count(dim, query.as_ref())
     }
 
-    pub fn count(&self, dim: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
-        self.inner_guard().count(dim, query)
-    }
-
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn empty(&mut self, dimension: DataType) -> Result<()> {
         self.inner_guard().empty(dimension)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PocketDimensionTraitObject {
+    pub fn get_data(&self, dim: DataType, query: Option<QueryBuilder>) -> Result<Vec<DataObject>> {
+        self.inner_guard().get_data(dim, query.as_ref())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl PocketDimensionTraitObject {
+    #[wasm_bindgen]
+    pub fn get_data(&self, dim: DataType, query: Option<QueryBuilder>) -> Result<Vec<JsValue>> {
+        self.inner_guard().get_data(dim, query.as_ref()).map(|s| {
+            s.iter()
+                .map(|i| serde_wasm_bindgen::to_value(&i).unwrap())
+                .collect::<Vec<_>>()
+        })
     }
 }
 
@@ -185,7 +209,7 @@ pub mod ffi {
         let dimension = &*dimension;
         let data = &*data;
 
-        pd.add_data(*dimension, data).is_ok()
+        pd.inner_guard().add_data(*dimension, data).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -211,7 +235,7 @@ pub mod ffi {
         let dimension = &*dimension;
         let query = &*query;
 
-        pd.has_data(*dimension, query).is_ok()
+        pd.inner_guard().has_data(*dimension, query).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -237,7 +261,7 @@ pub mod ffi {
         let pd = &mut *ctx;
         let dimension = &*dimension;
 
-        match pd.get_data(*dimension, query) {
+        match pd.inner_guard().get_data(*dimension, query) {
             Ok(list) => {
                 let list = std::mem::ManuallyDrop::new(list);
                 list.as_ptr()
@@ -269,7 +293,7 @@ pub mod ffi {
         let pd = &mut *ctx;
         let dimension = &*dimension;
 
-        pd.size(*dimension, query).unwrap_or(0)
+        pd.inner_guard().size(*dimension, query).unwrap_or(0)
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -295,7 +319,7 @@ pub mod ffi {
         let pd = &mut *ctx;
         let dimension = &*dimension;
 
-        pd.count(*dimension, query).unwrap_or(0)
+        pd.inner_guard().count(*dimension, query).unwrap_or(0)
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -315,7 +339,7 @@ pub mod ffi {
         let pd = &mut *ctx;
         let dimension = &*dimension;
 
-        pd.empty(*dimension).is_ok()
+        pd.inner_guard().empty(*dimension).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
