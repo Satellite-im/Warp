@@ -72,3 +72,7 @@ return an error.
 
 This returns an array of bytes that is related for your private key. You would need to import them into the proper keypair to utilize them directly.
 
+
+### Sending/Receiving Friend Request and Managing Friends List
+
+***TODO***

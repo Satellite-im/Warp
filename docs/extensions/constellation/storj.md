@@ -70,7 +70,8 @@ This will show all the keys stored in tesseract after entering your password.
 #### Uploading Content
 
 ```rust
-use warp::fs_storj::StorjFilesystem;
+use warp::constellation::Constellation;
+use warp_extensions::fs_ipfs::IpfsFileSystem;
 
 let mut tesseract = Tesseract::from_file(warp_directory.join("datastore")).unwrap_or_default();
 tesseract.unlock(&b"<PASSWORD/KEY HERE>").unwrap();

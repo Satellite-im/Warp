@@ -5,9 +5,6 @@
 **Dimension**
 The Dimension is a  value you provide used to group data. Generally you'll provide the module name as the dimension such as `messaging` but realistically you can provide any `String` value.
 
-**DimensionData**
-**TODO**
-
 **DimensionQuery**
 Dimension queries support the following query types...**TODO**
 

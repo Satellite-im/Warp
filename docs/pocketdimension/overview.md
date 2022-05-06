@@ -21,7 +21,7 @@ If we were to create the following data for example:
   version: 0,
   timestamp: 1643250387466,
   size: 387192,
-  type: {module: "messaging"},
+  type: "messaging",
   payload: ...,
 }
 ```
@@ -79,7 +79,7 @@ Example:
       version: 1,
       timestamp: 1643250387466,
       size: 387192,
-      type: {module: "messaging"},
+      type: "messaging",
       payload: ...,
     },
     {
@@ -87,7 +87,7 @@ Example:
       version: 2,
       timestamp: 1643250387466,
       size: 387192,
-      type: {module: "messaging"},
+      type: "messaging",
       payload: ...,
     }
 ]

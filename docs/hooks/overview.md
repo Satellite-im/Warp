@@ -16,7 +16,7 @@ use warp::module::Module;
 
 fn main() {
     let mut system = Hooks::default();
-    let hook = system.create("new_file", Module::FileSystem).unwrap();
+    let hook = system.create(Module::FileSystem, "new_file").unwrap();
 }
 ```
 
@@ -30,7 +30,7 @@ use warp::module::Module;
 
 fn main() {
     let mut system = Hooks::default();
-    let hook = system.create("new_file", Module::FileSystem).unwrap();
+    let hook = system.create(Module::FileSystem, "new_file").unwrap();
     system.trigger("filesystem::new_file", &hook, &data);
 }
 ```
@@ -45,7 +45,7 @@ use warp::module::Module;
 
 fn main() {
     let mut system = Hooks::default();
-    system.create("new_file", Module::FileSystem).unwrap();
+    system.create(Module::FileSystem, "new_file").unwrap();
     system.subscribe("filesystem::new_file", |hook, data| {
         // Hook and Hook data provided in this scope
     })?;
@@ -62,7 +62,7 @@ use warp_module::Module;
 
 fn main() {
     let mut system = Hooks::default();
-    system.create("new_file", Module::FileSystem).unwrap();
+    system.create(Module::FileSystem, "new_file").unwrap();
     let hooks = system.hooks();
 }
 ```
