@@ -1,4 +1,3 @@
-#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 use derive_more::Display;
@@ -6,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 pub struct Role {
     /// Name of the role
     name: String,
@@ -15,21 +14,21 @@ pub struct Role {
     level: u8,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 impl Role {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen(getter)]
     pub fn name(&self) -> String {
         self.name.clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen(getter)]
     pub fn level(&self) -> u8 {
         self.level
     }
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 pub struct Badge {
     /// TBD
     name: String,
@@ -38,21 +37,21 @@ pub struct Badge {
     icon: String,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 impl Badge {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen(getter)]
     pub fn name(&self) -> String {
         self.name.clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen(getter)]
     pub fn icon(&self) -> String {
         self.icon.clone()
     }
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 pub struct Graphics {
     /// Hash to profile picture
     profile_picture: String,
@@ -61,34 +60,34 @@ pub struct Graphics {
     profile_banner: String,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 impl Graphics {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    #[wasm_bindgen(setter)]
     pub fn set_profile_picture(&mut self, picture: &str) {
         self.profile_picture = picture.to_string();
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    #[wasm_bindgen(setter)]
     pub fn set_profile_banner(&mut self, banner: &str) {
         self.profile_banner = banner.to_string();
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 impl Graphics {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen(getter)]
     pub fn profile_picture(&self) -> String {
         self.profile_picture.clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen(getter)]
     pub fn profile_banner(&self) -> String {
         self.profile_banner.clone()
     }
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 pub struct Identity {
     /// Username of the identity
     username: String,
@@ -118,29 +117,29 @@ pub struct Identity {
     linked_accounts: HashMap<String, String>,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 impl Identity {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    #[wasm_bindgen(setter)]
     pub fn set_username(&mut self, user: &str) {
         self.username = user.to_string()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    #[wasm_bindgen(setter)]
     pub fn set_short_id(&mut self, id: u16) {
         self.short_id = id
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    #[wasm_bindgen(setter)]
     pub fn set_public_key(&mut self, pubkey: PublicKey) {
         self.public_key = pubkey
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    #[wasm_bindgen(setter)]
     pub fn set_graphics(&mut self, graphics: Graphics) {
         self.graphics = graphics
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    #[wasm_bindgen(setter)]
     pub fn set_status_message(&mut self, message: Option<String>) {
         self.status_message = message
     }
@@ -150,44 +149,34 @@ impl Identity {
     // pub fn set_linked_accounts(&mut self) {}
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 impl Identity {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen(getter)]
     pub fn username(&self) -> String {
         self.username.clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen(getter)]
     pub fn short_id(&self) -> u16 {
         self.short_id
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen(getter)]
     pub fn public_key(&self) -> PublicKey {
         self.public_key.clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen(getter)]
     pub fn graphics(&self) -> Graphics {
         self.graphics.clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen(getter)]
     pub fn status_message(&self) -> Option<String> {
         self.status_message.clone()
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn roles(&self) -> Vec<Role> {
-        self.roles.clone()
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn available_badges(&self) -> Vec<Badge> {
-        self.available_badges.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen(getter)]
     pub fn active_badge(&self) -> Badge {
         self.active_badge.clone()
     }
@@ -198,8 +187,33 @@ impl Identity {
     // }
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl Identity {
+    #[wasm_bindgen]
+    pub fn roles(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.roles).unwrap()
+    }
+
+    #[wasm_bindgen]
+    pub fn available_badges(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.available_badges).unwrap()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Identity {
+    pub fn roles(&self) -> Vec<Role> {
+        self.roles.clone()
+    }
+
+    pub fn available_badges(&self) -> Vec<Badge> {
+        self.available_badges.clone()
+    }
+}
+
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 pub struct FriendRequest {
     /// The account where the request came from
     from: PublicKey,
@@ -211,37 +225,37 @@ pub struct FriendRequest {
     status: FriendRequestStatus,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 impl FriendRequest {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    #[wasm_bindgen(setter)]
     pub fn set_from(&mut self, key: PublicKey) {
         self.from = key
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    #[wasm_bindgen(setter)]
     pub fn set_to(&mut self, key: PublicKey) {
         self.to = key
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    #[wasm_bindgen(setter)]
     pub fn set_status(&mut self, status: FriendRequestStatus) {
         self.status = status
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 impl FriendRequest {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen(getter)]
     pub fn from(&self) -> PublicKey {
         self.from.clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen(getter)]
     pub fn to(&self) -> PublicKey {
         self.to.clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen(getter)]
     pub fn status(&self) -> FriendRequestStatus {
         self.status
     }
@@ -249,7 +263,7 @@ impl FriendRequest {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Display)]
 #[repr(C)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
+#[wasm_bindgen]
 pub enum FriendRequestStatus {
     #[display(fmt = "uninitialized")]
     Uninitialized,
@@ -272,7 +286,7 @@ impl Default for FriendRequestStatus {
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+#[wasm_bindgen]
 pub struct PublicKey(Vec<u8>);
 
 impl AsRef<[u8]> for PublicKey {
@@ -281,29 +295,25 @@ impl AsRef<[u8]> for PublicKey {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 impl PublicKey {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn from_vec(bytes: Vec<u8>) -> Self {
         Self(bytes)
     }
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn from_bytes(bytes: &[u8]) -> Self {
         Self(bytes.to_vec())
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn to_bytes(&self) -> &[u8] {
-        self.as_ref()
-    }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn into_bytes(&self) -> Vec<u8> {
         self.0.clone()
     }
 }
 
 #[derive(Default, Debug, Clone)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 pub struct Identifier {
     /// Select identity based on public key
     public_key: Option<PublicKey>,
@@ -313,23 +323,25 @@ pub struct Identifier {
     own: bool,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 impl Identifier {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn user_name(name: &str) -> Self {
         Identifier {
             user_name: Some(name.to_string()),
             ..Default::default()
         }
     }
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+
+    #[wasm_bindgen]
     pub fn public_key(key: PublicKey) -> Self {
         Identifier {
             public_key: Some(key),
             ..Default::default()
         }
     }
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+
+    #[wasm_bindgen]
     pub fn own() -> Self {
         Identifier {
             own: true,
@@ -363,7 +375,7 @@ impl<S: AsRef<str>> From<S> for Identifier {
 }
 
 #[derive(Debug, Clone, Default)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 pub struct IdentityUpdate {
     /// Setting Username
     username: Option<String>,
@@ -378,8 +390,9 @@ pub struct IdentityUpdate {
     status_message: Option<Option<String>>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[wasm_bindgen]
 impl IdentityUpdate {
+    #[wasm_bindgen]
     pub fn set_username(username: String) -> IdentityUpdate {
         IdentityUpdate {
             username: Some(username),
@@ -387,6 +400,7 @@ impl IdentityUpdate {
         }
     }
 
+    #[wasm_bindgen]
     pub fn set_graphics_picture(graphics: String) -> IdentityUpdate {
         IdentityUpdate {
             graphics_picture: Some(graphics),
@@ -394,6 +408,7 @@ impl IdentityUpdate {
         }
     }
 
+    #[wasm_bindgen]
     pub fn set_graphics_banner(graphics: String) -> IdentityUpdate {
         IdentityUpdate {
             graphics_banner: Some(graphics),
@@ -401,13 +416,17 @@ impl IdentityUpdate {
         }
     }
 
+    #[wasm_bindgen]
     pub fn set_status_message(status_message: Option<String>) -> IdentityUpdate {
         IdentityUpdate {
             status_message: Some(status_message),
             ..Default::default()
         }
     }
+}
 
+#[cfg(not(target_arch = "wasm32"))]
+impl IdentityUpdate {
     pub fn username(&self) -> Option<String> {
         self.username.clone()
     }
@@ -422,6 +441,30 @@ impl IdentityUpdate {
 
     pub fn status_message(&self) -> Option<Option<String>> {
         self.status_message.clone()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl IdentityUpdate {
+    #[wasm_bindgen(getter)]
+    pub fn username(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.username).unwrap()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn graphics_picture(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.graphics_picture).unwrap()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn graphics_banner(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.graphics_banner).unwrap()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn status_message(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.status_message).unwrap()
     }
 }
 

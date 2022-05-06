@@ -12,7 +12,7 @@ use identity::Identity;
 type Result<T> = std::result::Result<T, crate::error::Error>;
 
 #[cfg(target_arch = "wasm32")]
-type Result<T> = std::result::Result<T, JsError>;
+type Result<T> = std::result::Result<T, wasm_bindgen::JsError>;
 
 use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate, PublicKey};
 
@@ -101,9 +101,9 @@ impl MultiPassTraitObject {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 impl MultiPassTraitObject {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn create_identity(
         &mut self,
         username: Option<String>,
@@ -113,68 +113,58 @@ impl MultiPassTraitObject {
             .create_identity(username.as_deref(), passphrase.as_deref())
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn get_identity(&self, id: Identifier) -> Result<Identity> {
-        self.inner_guard().get_identity(id)
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn get_own_identity(&self) -> Result<Identity> {
-        self.inner_guard().get_own_identity()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn update_identity(&mut self, option: IdentityUpdate) -> Result<()> {
         self.inner_guard().update_identity(option)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn decrypt_private_key(&self, passphrase: Option<String>) -> Result<Vec<u8>> {
         self.inner_guard()
             .decrypt_private_key(passphrase.as_deref())
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn refresh_cache(&mut self) -> Result<()> {
         self.inner_guard().refresh_cache()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn send_request(&mut self, pubkey: PublicKey) -> Result<()> {
         self.inner_guard().send_request(pubkey)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn accept_request(&mut self, pubkey: PublicKey) -> Result<()> {
         self.inner_guard().accept_request(pubkey)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn deny_request(&mut self, pubkey: PublicKey) -> Result<()> {
         self.inner_guard().deny_request(pubkey)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn close_request(&mut self, pubkey: PublicKey) -> Result<()> {
         self.inner_guard().close_request(pubkey)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn remove_friend(&mut self, pubkey: PublicKey) -> Result<()> {
         self.inner_guard().remove_friend(pubkey)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn block_key(&mut self, pubkey: PublicKey) -> Result<()> {
         self.inner_guard().block_key(pubkey)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn has_friend(&self, pubkey: PublicKey) -> Result<()> {
         self.inner_guard().has_friend(pubkey)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn key_exchange(&self, identity: Identity) -> Result<Vec<u8>> {
         self.inner_guard().key_exchange(identity)
     }
@@ -182,6 +172,14 @@ impl MultiPassTraitObject {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl MultiPassTraitObject {
+    pub fn get_identity(&self, id: Identifier) -> Result<Identity> {
+        self.inner_guard().get_identity(id)
+    }
+
+    pub fn get_own_identity(&self) -> Result<Identity> {
+        self.inner_guard().get_own_identity()
+    }
+
     pub fn list_incoming_request(&self) -> Result<Vec<FriendRequest>> {
         self.inner_guard().list_incoming_request()
     }
@@ -203,25 +201,36 @@ cfg_if::cfg_if! {
     if #[cfg(target_arch = "wasm32")] {
         #[wasm_bindgen]
         impl MultiPassTraitObject {
+
+            #[wasm_bindgen]
+            pub fn get_identity(&self, id: Identifier) -> Result<JsValue> {
+                self.inner_guard().get_identity(id).map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
+            }
+
+            #[wasm_bindgen]
+            pub fn get_own_identity(&self) -> Result<JsValue> {
+                self.inner_guard().get_own_identity().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
+            }
+
             #[wasm_bindgen]
             pub fn list_incoming_request(&self) -> Result<JsValue> {
-                self.inner_guard().list_incoming_request().map(|v| v.into())
+                self.inner_guard().list_incoming_request().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
             }
 
             #[wasm_bindgen]
-            pub fn list_outgoing_request(&self) -> Result<JaVa> {
-                self.inner_guard().list_outgoing_request().map(|v| v.into())
+            pub fn list_outgoing_request(&self) -> Result<JsValue> {
+                self.inner_guard().list_outgoing_request().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
             }
 
             #[wasm_bindgen]
-            pub fn list_friends(&self) -> Result<js_sys::Array> {
-                self.inner_guard().list_friends().map(|v| v.into())
+            pub fn list_friends(&self) -> Result<JsValue> {
+                self.inner_guard().list_friends().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
             }
 
-    //          #[wasm_bindgen]
-    //             pub fn list_all_request(&self) -> Result<Vec<FriendRequest>> {
-    //     self.inner_guard().list_all_request()
-    // }
+            #[wasm_bindgen]
+            pub fn list_all_request(&self) -> Result<JsValue> {
+                self.inner_guard().list_all_request().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
+            }
         }
     }
 }
