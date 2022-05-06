@@ -4,8 +4,11 @@ pub mod ffi;
 #[cfg(not(target_arch = "wasm32"))]
 use anyhow::{self, bail, ensure, Result};
 
-use std::{collections::HashMap, fmt::Debug, path::Path};
+use std::{collections::HashMap, fmt::Debug};
 use zeroize::Zeroize;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::error::Error;
