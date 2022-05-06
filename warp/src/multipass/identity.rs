@@ -305,8 +305,11 @@ impl PublicKey {
 #[derive(Default, Debug, Clone)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Identifier {
+    /// Select identity based on public key
     public_key: Option<PublicKey>,
+    /// Select identity based on Username (eg `Username#0000`)
     user_name: Option<String>,
+    /// Select own identity.
     own: bool,
 }
 
@@ -362,9 +365,16 @@ impl<S: AsRef<str>> From<S> for Identifier {
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct IdentityUpdate {
+    /// Setting Username
     username: Option<String>,
+
+    /// Path of picture
     graphics_picture: Option<String>,
+
+    /// Path of banner
     graphics_banner: Option<String>,
+
+    /// Setting Status Message
     status_message: Option<Option<String>>,
 }
 

@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex, MutexGuard};
-#[cfg(target_arch = "wasm32")]
+
 use wasm_bindgen::prelude::*;
 
 pub mod generator;
@@ -41,31 +41,6 @@ pub struct MultiPassTraitObject {
     object: Arc<Mutex<Box<dyn MultiPass>>>,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl MultiPassTraitObject {
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn new(object: Arc<Mutex<Box<dyn MultiPass>>>) -> Self {
-        MultiPassTraitObject { object }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn get_inner(&self) -> Arc<Mutex<Box<dyn MultiPass>>> {
-        self.object.clone()
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn inner_guard(&self) -> MutexGuard<Box<dyn MultiPass>> {
-        match self.object.lock() {
-            Ok(i) => i,
-            Err(e) => e.into_inner(),
-        }
-    }
-
-    pub fn inner_ptr(&self) -> *const std::ffi::c_void {
-        Arc::into_raw(self.object.clone()) as *const std::ffi::c_void
-    }
-}
-
 // #[warp_common::async_trait::async_trait]
 pub trait Friends: Sync + Send {
     /// Send friend request to corresponding public key
@@ -103,6 +78,152 @@ pub trait Friends: Sync + Send {
 
     /// Returns a diffie-hellman key that is found between one private key and another public key
     fn key_exchange(&self, identity: Identity) -> Result<Vec<u8>>;
+}
+
+impl MultiPassTraitObject {
+    pub fn new(object: Arc<Mutex<Box<dyn MultiPass>>>) -> Self {
+        MultiPassTraitObject { object }
+    }
+
+    pub fn get_inner(&self) -> Arc<Mutex<Box<dyn MultiPass>>> {
+        self.object.clone()
+    }
+
+    pub fn inner_guard(&self) -> MutexGuard<Box<dyn MultiPass>> {
+        match self.object.lock() {
+            Ok(i) => i,
+            Err(e) => e.into_inner(),
+        }
+    }
+
+    pub fn inner_ptr(&self) -> *const std::ffi::c_void {
+        Arc::into_raw(self.object.clone()) as *const std::ffi::c_void
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+impl MultiPassTraitObject {
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn create_identity(
+        &mut self,
+        username: Option<String>,
+        passphrase: Option<String>,
+    ) -> Result<PublicKey> {
+        self.inner_guard()
+            .create_identity(username.as_deref(), passphrase.as_deref())
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn get_identity(&self, id: Identifier) -> Result<Identity> {
+        self.inner_guard().get_identity(id)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn get_own_identity(&self) -> Result<Identity> {
+        self.inner_guard().get_own_identity()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn update_identity(&mut self, option: IdentityUpdate) -> Result<()> {
+        self.inner_guard().update_identity(option)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn decrypt_private_key(&self, passphrase: Option<String>) -> Result<Vec<u8>> {
+        self.inner_guard()
+            .decrypt_private_key(passphrase.as_deref())
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn refresh_cache(&mut self) -> Result<()> {
+        self.inner_guard().refresh_cache()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn send_request(&mut self, pubkey: PublicKey) -> Result<()> {
+        self.inner_guard().send_request(pubkey)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn accept_request(&mut self, pubkey: PublicKey) -> Result<()> {
+        self.inner_guard().accept_request(pubkey)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn deny_request(&mut self, pubkey: PublicKey) -> Result<()> {
+        self.inner_guard().deny_request(pubkey)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn close_request(&mut self, pubkey: PublicKey) -> Result<()> {
+        self.inner_guard().close_request(pubkey)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn remove_friend(&mut self, pubkey: PublicKey) -> Result<()> {
+        self.inner_guard().remove_friend(pubkey)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn block_key(&mut self, pubkey: PublicKey) -> Result<()> {
+        self.inner_guard().block_key(pubkey)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn has_friend(&self, pubkey: PublicKey) -> Result<()> {
+        self.inner_guard().has_friend(pubkey)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn key_exchange(&self, identity: Identity) -> Result<Vec<u8>> {
+        self.inner_guard().key_exchange(identity)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl MultiPassTraitObject {
+    pub fn list_incoming_request(&self) -> Result<Vec<FriendRequest>> {
+        self.inner_guard().list_incoming_request()
+    }
+
+    pub fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>> {
+        self.inner_guard().list_outgoing_request()
+    }
+
+    pub fn list_friends(&self) -> Result<Vec<Identity>> {
+        self.inner_guard().list_friends()
+    }
+
+    pub fn list_all_request(&self) -> Result<Vec<FriendRequest>> {
+        self.inner_guard().list_all_request()
+    }
+}
+
+cfg_if::cfg_if! {
+    if #[cfg(target_arch = "wasm32")] {
+        #[wasm_bindgen]
+        impl MultiPassTraitObject {
+            #[wasm_bindgen]
+            pub fn list_incoming_request(&self) -> Result<JsValue> {
+                self.inner_guard().list_incoming_request().map(|v| v.into())
+            }
+
+            #[wasm_bindgen]
+            pub fn list_outgoing_request(&self) -> Result<JaVa> {
+                self.inner_guard().list_outgoing_request().map(|v| v.into())
+            }
+
+            #[wasm_bindgen]
+            pub fn list_friends(&self) -> Result<js_sys::Array> {
+                self.inner_guard().list_friends().map(|v| v.into())
+            }
+
+    //          #[wasm_bindgen]
+    //             pub fn list_all_request(&self) -> Result<Vec<FriendRequest>> {
+    //     self.inner_guard().list_all_request()
+    // }
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
