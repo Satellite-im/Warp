@@ -317,4 +317,13 @@ pub mod ffi {
 
         pd.empty(*dimension).is_ok()
     }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn pocket_dimension_free(ctx: *mut PocketDimensionTraitObject) {
+        if ctx.is_null() {
+            return;
+        }
+        drop(Box::from_raw(ctx))
+    }
 }

@@ -146,14 +146,14 @@ pub(crate) fn execute(
             continue;
         }
         let object = object.as_object().ok_or(warp::error::Error::Other)?;
-        for (key, val) in query.r#where.iter() {
+        for (key, val) in query.get_where().iter() {
             if let Some(result) = object.get(key) {
                 if val == result {
                     list.push(data.clone());
                 }
             }
         }
-        for comp in query.comparator.iter() {
+        for comp in query.get_comparator().iter() {
             match comp {
                 ComparatorFilter::Eq(key, val) => {
                     if let Some(result) = object.get(key) {
@@ -226,7 +226,7 @@ pub(crate) fn execute(
             }
         }
 
-        if let Some(limit) = query.limit {
+        if let Some(limit) = query.get_limit() {
             if list.len() > limit {
                 list = list.drain(..limit).collect();
             }

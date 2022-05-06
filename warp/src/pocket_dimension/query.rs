@@ -1,9 +1,13 @@
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
 use super::Result;
 use serde::Serialize;
 use serde_json::{self, Value};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum Comparator {
     Eq,
     Gt,
@@ -13,7 +17,7 @@ pub enum Comparator {
     Ne,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ComparatorFilter {
     Eq(String, Value),
     Gt(String, Value),
@@ -36,11 +40,26 @@ impl From<(Comparator, String, Value)> for ComparatorFilter {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct QueryBuilder {
-    pub r#where: Vec<(String, Value)>,
-    pub comparator: Vec<ComparatorFilter>,
-    pub limit: Option<usize>,
+    r#where: Vec<(String, Value)>,
+    comparator: Vec<ComparatorFilter>,
+    limit: Option<usize>,
+}
+
+impl QueryBuilder {
+    pub fn get_where(&self) -> Vec<(String, Value)> {
+        self.r#where.clone()
+    }
+
+    pub fn get_comparator(&self) -> Vec<ComparatorFilter> {
+        self.comparator.clone()
+    }
+
+    pub fn get_limit(&self) -> Option<usize> {
+        self.limit
+    }
 }
 
 impl QueryBuilder {
