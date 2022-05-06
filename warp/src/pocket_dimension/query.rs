@@ -147,4 +147,13 @@ pub mod ffi {
 
         query.limit(limit);
     }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn querybuilder_free(ctx: *mut QueryBuilder) {
+        if ctx.is_null() {
+            return;
+        }
+        drop(Box::from_raw(ctx))
+    }
 }

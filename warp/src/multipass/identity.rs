@@ -841,7 +841,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_identity_update_status_message(
         update: *const IdentityUpdate,
-    ) -> *mut c_char {
+    ) -> *const c_char {
         if update.is_null() {
             return std::ptr::null_mut();
         }
@@ -850,9 +850,45 @@ pub mod ffi {
 
         if let Some(Some(inner)) = update.status_message() {
             if let Ok(data) = CString::new(inner) {
-                return data.into_raw();
+                return data.as_ptr();
             }
         }
         std::ptr::null_mut()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_public_key_free(ctx: *mut PublicKey) {
+        if ctx.is_null() {
+            return;
+        }
+        drop(Box::from_raw(ctx))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identifier_free(ctx: *mut Identifier) {
+        if ctx.is_null() {
+            return;
+        }
+        drop(Box::from_raw(ctx))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_update_free(ctx: *mut IdentityUpdate) {
+        if ctx.is_null() {
+            return;
+        }
+        drop(Box::from_raw(ctx))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_free(ctx: *mut Identity) {
+        if ctx.is_null() {
+            return;
+        }
+        drop(Box::from_raw(ctx))
     }
 }
