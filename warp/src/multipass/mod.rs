@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
+#[allow(unused_imports)]
 use wasm_bindgen::prelude::*;
 
 pub mod generator;
@@ -101,9 +102,9 @@ impl MultiPassTraitObject {
     }
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl MultiPassTraitObject {
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn create_identity(
         &mut self,
         username: Option<String>,
@@ -113,58 +114,58 @@ impl MultiPassTraitObject {
             .create_identity(username.as_deref(), passphrase.as_deref())
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn update_identity(&mut self, option: IdentityUpdate) -> Result<()> {
         self.inner_guard().update_identity(option)
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn decrypt_private_key(&self, passphrase: Option<String>) -> Result<Vec<u8>> {
         self.inner_guard()
             .decrypt_private_key(passphrase.as_deref())
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn refresh_cache(&mut self) -> Result<()> {
         self.inner_guard().refresh_cache()
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn send_request(&mut self, pubkey: PublicKey) -> Result<()> {
         self.inner_guard().send_request(pubkey)
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn accept_request(&mut self, pubkey: PublicKey) -> Result<()> {
         self.inner_guard().accept_request(pubkey)
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn deny_request(&mut self, pubkey: PublicKey) -> Result<()> {
         self.inner_guard().deny_request(pubkey)
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn close_request(&mut self, pubkey: PublicKey) -> Result<()> {
         self.inner_guard().close_request(pubkey)
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn remove_friend(&mut self, pubkey: PublicKey) -> Result<()> {
         self.inner_guard().remove_friend(pubkey)
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn block_key(&mut self, pubkey: PublicKey) -> Result<()> {
         self.inner_guard().block_key(pubkey)
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn has_friend(&self, pubkey: PublicKey) -> Result<()> {
         self.inner_guard().has_friend(pubkey)
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn key_exchange(&self, identity: Identity) -> Result<Vec<u8>> {
         self.inner_guard().key_exchange(identity)
     }
