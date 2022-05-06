@@ -68,3 +68,18 @@ store.unlock(&b"MY_PASSPHRASE").unwrap();
 let value = store.retrieve("MY_KEY").unwrap();
 ```
 
+
+#### Enabling Autosave
+
+Tesseract has the ability to autosave when data is being set into the data store.
+
+```rust
+use warp::tesseract::Tesseract;
+let mut store = Tesseract::from_file("my_encrypted_data").unwrap();
+store.unlock(&b"MY_PASSPHRASE").unwrap();
+store.set_autosave();
+store.set("MY_KEY", "MY_VALUE").unwrap(); //the datastore will automatically save
+```
+
+***Note: While it will attempt to automatically save, it will not return an error if it has issues saving.***
+
