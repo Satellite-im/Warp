@@ -328,12 +328,15 @@ impl Extension for MemorySystem {
 pub mod ffi {
     use crate::MemorySystem;
     use std::ffi::c_void;
+    use std::sync::{Arc, Mutex};
     use warp::constellation::ConstellationTraitObject;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_fs_memory_create_context() -> *mut c_void {
-        let obj = Box::new(ConstellationTraitObject::new(Box::new(MemorySystem::new())));
+        let obj = Box::new(ConstellationTraitObject::new(Arc::new(Mutex::new(
+            Box::new(MemorySystem::new()),
+        ))));
         Box::into_raw(obj) as *mut ConstellationTraitObject as *mut c_void
     }
 }

@@ -316,7 +316,7 @@ async fn main() -> AnyResult<()> {
                         println!("Username: {}#{}", identity.username(), identity.short_id());
                         println!(
                             "Public Key: {}",
-                            bs58::encode(identity.public_key().to_bytes()).into_string()
+                            bs58::encode(identity.public_key().into_bytes()).into_string()
                         ); // Using bs58 due to account being solana related.
                         println!();
                         tesseract
@@ -359,7 +359,7 @@ async fn main() -> AnyResult<()> {
                         println!("Username: {}#{}", ident.username(), ident.short_id());
                         println!(
                             "Public Key: {}",
-                            bs58::encode(ident.public_key().to_bytes()).into_string()
+                            bs58::encode(ident.public_key().into_bytes()).into_string()
                         );
                         println!();
                         tesseract
@@ -405,7 +405,7 @@ async fn main() -> AnyResult<()> {
                 for friend in friends {
                     table.add_row(vec![
                         &format!("{}#{}", &friend.username(), &friend.short_id()),
-                        &bs58::encode(friend.public_key().to_bytes()).into_string(),
+                        &bs58::encode(friend.public_key().into_bytes()).into_string(),
                     ]);
                 }
                 println!("{table}")
@@ -423,7 +423,7 @@ async fn main() -> AnyResult<()> {
                     let ident = account.get_identity(Identifier::from(request.from()))?;
                     table.add_row(vec![
                         &format!("{}#{}", &ident.username(), &ident.short_id()),
-                        &bs58::encode(ident.public_key().to_bytes()).into_string(),
+                        &bs58::encode(ident.public_key().into_bytes()).into_string(),
                         &request.status().to_string(),
                     ]);
                 }
@@ -442,7 +442,7 @@ async fn main() -> AnyResult<()> {
                     let ident = account.get_identity(Identifier::from(request.to()))?;
                     table.add_row(vec![
                         &format!("{}#{}", &ident.username(), &ident.short_id()),
-                        &bs58::encode(ident.public_key().to_bytes()).into_string(),
+                        &bs58::encode(ident.public_key().into_bytes()).into_string(),
                         &request.status().to_string(),
                     ]);
                 }

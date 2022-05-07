@@ -572,6 +572,7 @@ pub mod ffi {
     use crate::IpfsFileSystem;
     use std::ffi::{c_void, CStr};
     use std::os::raw::c_char;
+    use std::sync::{Arc, Mutex};
     use warp::constellation::ConstellationTraitObject;
     use warp::pocket_dimension::PocketDimensionTraitObject;
 
@@ -585,7 +586,9 @@ pub mod ffi {
             ipfs.set_cache(pd.inner().clone());
         }
 
-        let obj = Box::new(ConstellationTraitObject::new(Box::new(ipfs)));
+        let obj = Box::new(ConstellationTraitObject::new(Arc::new(Mutex::new(
+            Box::new(ipfs),
+        ))));
         Box::into_raw(obj) as *mut ConstellationTraitObject as *mut c_void
     }
 
@@ -611,7 +614,9 @@ pub mod ffi {
             ipfs.set_cache(pd.inner().clone());
         }
 
-        let obj = Box::new(ConstellationTraitObject::new(Box::new(ipfs)));
+        let obj = Box::new(ConstellationTraitObject::new(Arc::new(Mutex::new(
+            Box::new(ipfs),
+        ))));
         Box::into_raw(obj) as *mut ConstellationTraitObject as *mut c_void
     }
 }

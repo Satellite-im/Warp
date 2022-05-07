@@ -523,6 +523,7 @@ pub mod ffi {
     use crate::StorjFilesystem;
     use std::ffi::{c_void, CStr};
     use std::os::raw::c_char;
+    use std::sync::{Arc, Mutex};
     use warp::constellation::ConstellationTraitObject;
     use warp::pocket_dimension::PocketDimensionTraitObject;
 
@@ -552,7 +553,9 @@ pub mod ffi {
             client.set_cache(pd.inner().clone());
         }
 
-        let obj = Box::new(ConstellationTraitObject::new(Box::new(client)));
+        let obj = Box::new(ConstellationTraitObject::new(Arc::new(Mutex::new(
+            Box::new(client),
+        ))));
         Box::into_raw(obj) as *mut ConstellationTraitObject as *mut c_void
     }
 }
