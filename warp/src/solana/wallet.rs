@@ -1,14 +1,25 @@
-use anchor_client::anchor_lang::prelude::Pubkey;
-use anchor_client::solana_sdk::derivation_path::DerivationPath;
-use anchor_client::solana_sdk::signature::{
-    keypair_from_seed_and_derivation_path, Keypair, Signer,
-};
+#[cfg(not(target_arch = "wasm32"))]
 use anyhow::anyhow;
+
+#[cfg(not(target_arch = "wasm32"))]
+use anchor_client::solana_sdk::{
+    derivation_path::DerivationPath,
+    pubkey::Pubkey,
+    signature::{keypair_from_seed_and_derivation_path, Keypair, Signer},
+};
 use bip39::{Language, Mnemonic, MnemonicType, Seed};
 use derive_more::Display;
+#[cfg(target_arch = "wasm32")]
+use solana_sdk::{
+    derivation_path::DerivationPath,
+    pubkey::Pubkey,
+    signature::{keypair_from_seed_and_derivation_path, Keypair, Signer},
+};
+use wasm_bindgen::prelude::*;
 use zeroize::Zeroize;
 
 #[derive(Zeroize)]
+#[wasm_bindgen]
 pub struct SolanaWallet {
     mnemonic: Vec<u8>,
     keypair: [u8; 64],
@@ -32,7 +43,9 @@ impl std::fmt::Debug for SolanaWallet {
     }
 }
 
-#[derive(Clone, Display)]
+#[derive(Clone, Display, Copy)]
+#[repr(C)]
+#[wasm_bindgen]
 pub enum PhraseType {
     #[display(fmt = "standard")]
     Standard,
@@ -46,6 +59,7 @@ impl Default for PhraseType {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl SolanaWallet {
     /// Generate a random keypair
     pub fn create_random(
@@ -114,6 +128,63 @@ impl SolanaWallet {
     /// ```
     pub fn get_mnemonic_phrase(&self) -> anyhow::Result<String> {
         let phrase = Mnemonic::from_entropy(&self.mnemonic, Language::English)?;
+        Ok(phrase.phrase().to_string())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl SolanaWallet {
+    /// Generate a random keypair
+    #[wasm_bindgen]
+    pub fn create_random(
+        phrase: PhraseType,
+        password: Option<String>,
+    ) -> std::result::Result<SolanaWallet, JsError> {
+        let m_type = match phrase {
+            PhraseType::Standard => MnemonicType::Words12,
+            PhraseType::Secure => MnemonicType::Words24,
+        };
+        let mnemonic = Mnemonic::new(m_type, Language::English);
+        Self::restore_from_mnemonic(password, mnemonic.phrase())
+    }
+
+    /// Restore keypair from a mnemonic phrase
+    #[wasm_bindgen]
+    pub fn restore_from_mnemonic(
+        password: Option<String>,
+        mnemonic: &str,
+    ) -> std::result::Result<SolanaWallet, JsError> {
+        let mnemonic = Mnemonic::from_phrase(mnemonic, Language::English)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let seed = Seed::new(&mnemonic, password.as_deref().unwrap_or_default());
+
+        let path = DerivationPath::new_bip44(Some(0), Some(0));
+        let keypair = keypair_from_seed_and_derivation_path(seed.as_ref(), Some(path))
+            .map_err(|_| JsError::new("Unable to derive keypair from path"))?
+            .to_bytes();
+
+        let mnemonic = mnemonic.entropy().to_vec();
+        Ok(SolanaWallet { mnemonic, keypair })
+    }
+
+    #[wasm_bindgen]
+    pub fn get_keypair(&self) -> std::result::Result<Keypair, JsError> {
+        let kp = Keypair::from_bytes(&self.keypair).map_err(|e| JsError::from(e))?;
+        Ok(kp)
+    }
+
+    #[wasm_bindgen]
+    pub fn get_pubkey(&self) -> std::result::Result<Pubkey, JsError> {
+        let kp = self.get_keypair().map_err(|e| JsError::from(e))?;
+        Ok(kp.pubkey())
+    }
+
+    /// Obtains the mnemonic phrase
+    #[wasm_bindgen]
+    pub fn get_mnemonic_phrase(&self) -> std::result::Result<String, JsError> {
+        let phrase = Mnemonic::from_entropy(&self.mnemonic, Language::English)
+            .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(phrase.phrase().to_string())
     }
 }
