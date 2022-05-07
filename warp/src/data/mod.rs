@@ -1,10 +1,8 @@
 use chrono::{DateTime, Utc};
 use derive_more::Display;
 
-#[cfg(not(target_arch = "wasm32"))]
 use crate::error::Error;
 
-#[cfg(not(target_arch = "wasm32"))]
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +18,7 @@ type Result<T> = std::result::Result<T, Error>;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::module::Module;
 
+use crate::error::into_error;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -201,13 +200,17 @@ impl Data {
         self.payload = serde_json::to_value(payload)?;
         Ok(())
     }
+}
 
+impl Data {
     /// Returns the type from `Payload` for `Data`
     pub fn payload<T>(&self) -> Result<T>
     where
         T: DeserializeOwned,
     {
-        serde_json::from_value(self.payload.clone()).map_err(Error::from)
+        serde_json::from_value(self.payload.clone())
+            .map_err(Error::from)
+            .map_err(into_error)
     }
 }
 

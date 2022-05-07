@@ -255,7 +255,7 @@ impl MultiPass for SolanaAccount {
                         }
                     }
                 }
-                user_to_identity(&helper, Some(pkey.to_bytes()))?
+                user_to_identity(&helper, Some(pkey.as_ref()))?
             }
             (None, None, true) => user_to_identity(&helper, None)?,
             _ => return Err(Error::Any(anyhow!("Invalid identifier condition provided. Must be either public key, username, or your own identity")))
@@ -358,7 +358,7 @@ impl Friends for SolanaAccount {
 
         let helper = self.friend_helper()?;
 
-        helper.create_friend_request(Pubkey::new(pubkey.to_bytes()), "")?;
+        helper.create_friend_request(Pubkey::new(pubkey.as_ref()), "")?;
         Ok(())
     }
 
@@ -381,7 +381,7 @@ impl Friends for SolanaAccount {
 
         let helper = self.friend_helper()?;
 
-        helper.accept_friend_request(Pubkey::new(pubkey.to_bytes()), "")?;
+        helper.accept_friend_request(Pubkey::new(pubkey.as_ref()), "")?;
         Ok(())
     }
 
@@ -401,7 +401,7 @@ impl Friends for SolanaAccount {
 
         let helper = self.friend_helper()?;
 
-        helper.deny_friend_request(Pubkey::new(pubkey.to_bytes()))?;
+        helper.deny_friend_request(Pubkey::new(pubkey.as_ref()))?;
         Ok(())
     }
 
@@ -424,7 +424,7 @@ impl Friends for SolanaAccount {
 
         let helper = self.friend_helper()?;
 
-        helper.close_friend_request(Pubkey::new(pubkey.to_bytes()))?;
+        helper.close_friend_request(Pubkey::new(pubkey.as_ref()))?;
         Ok(())
     }
 
@@ -479,7 +479,7 @@ impl Friends for SolanaAccount {
 
         let helper = self.friend_helper()?;
 
-        helper.remove_friend(Pubkey::new(pubkey.to_bytes()))?;
+        helper.remove_friend(Pubkey::new(pubkey.as_ref()))?;
         Ok(())
     }
 
@@ -509,7 +509,7 @@ impl Friends for SolanaAccount {
     fn has_friend(&self, pubkey: PublicKey) -> Result<()> {
         let helper = self.friend_helper()?;
         let request = helper
-            .get_request(Pubkey::new(pubkey.to_bytes()))
+            .get_request(Pubkey::new(pubkey.as_ref()))
             .map(DirectFriendRequest::from)?;
 
         if request.status == DirectStatus::Accepted {
