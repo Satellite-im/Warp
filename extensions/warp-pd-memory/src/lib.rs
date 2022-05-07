@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use warp::{
     data::{DataObject, DataType},
     module::Module,
@@ -9,8 +8,11 @@ use warp::{
 use serde_json;
 use warp::error::{into_error, Error};
 use warp::pocket_dimension::query::{ComparatorFilter, QueryBuilder};
-use warp::pocket_dimension::{PocketDimension, PocketDimensionTraitObject};
+use warp::pocket_dimension::PocketDimension;
+#[cfg(target_arch = "wasm32")]
+use warp::pocket_dimension::PocketDimensionTraitObject;
 
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
@@ -201,8 +203,9 @@ pub(crate) fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<D
     Ok(list)
 }
 
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn pd_memory_init() -> PocketDimensionTraitObject {
     let client = MemoryClient::new();
-    PocketDimensionTraitObject::new(Arc::new(Mutex::new(Box::new(client))))
+    PocketDimensionTraitObject::new(std::sync::Arc::new(std::sync::Mutex::new(Box::new(client))))
 }
