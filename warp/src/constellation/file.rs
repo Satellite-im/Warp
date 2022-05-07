@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use std::io::{Read, Seek, SeekFrom};
 use uuid::Uuid;
 
-#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 /// `FileType` describes all supported file types.
@@ -15,7 +14,8 @@ use wasm_bindgen::prelude::*;
 /// TODO: Use mime to define the filetype
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[repr(C)]
+#[wasm_bindgen]
 pub enum FileType {
     #[display(fmt = "generic")]
     Generic,
@@ -258,27 +258,43 @@ pub struct Hash {
     blake2: Option<String>,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[cfg(not(target_arch = "wasm32"))]
 impl Hash {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn sha1(&self) -> Option<String> {
         self.sha1.clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn sha256(&self) -> Option<String> {
         self.sha256.clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn blake2(&self) -> Option<String> {
         self.blake2.clone()
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl Hash {
+    #[wasm_bindgen]
+    pub fn sha1(&self) -> JsValue {
+        serde_wasm_bindgen::from_value(&self.sha1).unwrap()
+    }
+
+    #[wasm_bindgen]
+    pub fn sha256(&self) -> Option<String> {
+        serde_wasm_bindgen::from_value(&self.sha256).unwrap()
+    }
+
+    #[wasm_bindgen]
+    pub fn blake2(&self) -> Option<String> {
+        serde_wasm_bindgen::from_value(&self.blake2).unwrap()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl Hash {
     /// Use to generate a hash from file
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn hash_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<()> {
         self.sha1hash_from_file(&path)?;
         self.sha256hash_from_file(&path)?;
@@ -299,13 +315,67 @@ impl Hash {
     /// assert_eq!(hash.sha1(), Some(String::from("0A0A9F2A6772942557AB5355D76AF442F8F65E01")))    ;///
     /// assert_eq!(hash.sha256(), Some(String::from("DFFD6021BB2BD5B0AF676290809EC3A53191DD81C7F70A4B28688A362182986F")));
     /// ```
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn hash_from_reader<R: Read + Seek>(&mut self, reader: &mut R) -> Result<()> {
         self.sha1hash_from_reader(reader)?;
         self.sha256hash_from_reader(reader)?;
         Ok(())
     }
 
+    /// Use to generate a sha1 hash of a file
+    pub fn sha1hash_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<()> {
+        let mut file = std::fs::File::open(path)?;
+        self.sha1hash_from_reader(&mut file)
+    }
+
+    /// Use to generate a sha1 hash from a reader
+    ///
+    /// # Example
+    /// ```
+    /// use std::io::Cursor;
+    /// use warp::constellation::file::Hash;
+    ///
+    /// let mut cursor = Cursor::new(b"Hello, World!");
+    /// let mut hash = Hash::default();
+    /// hash.sha1hash_from_reader(&mut cursor).unwrap();
+    ///
+    /// assert_eq!(hash.sha1(), Some(String::from("0A0A9F2A6772942557AB5355D76AF442F8F65E01")))
+    /// ```
+    pub fn sha1hash_from_reader<R: Read + Seek>(&mut self, reader: &mut R) -> Result<()> {
+        let res = crate::crypto::hash::sha1_hash_stream(reader, None)?;
+        reader.seek(SeekFrom::Start(0))?;
+        self.sha1 = Some(hex::encode(res).to_uppercase());
+        Ok(())
+    }
+
+    /// Use to generate a sha256 hash of a file
+    pub fn sha256hash_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<()> {
+        let mut file = std::fs::File::open(path)?;
+        self.sha256hash_from_reader(&mut file)
+    }
+
+    /// Use to generate a sha256 hash from a reader
+    ///
+    /// # Example
+    /// ```
+    /// use std::io::Cursor;
+    /// use warp::constellation::file::Hash;
+    ///
+    /// let mut cursor = Cursor::new(b"Hello, World!");
+    /// let mut hash = Hash::default();
+    /// hash.sha256hash_from_reader(&mut cursor).unwrap();
+    ///
+    /// assert_eq!(hash.sha256(), Some(String::from("DFFD6021BB2BD5B0AF676290809EC3A53191DD81C7F70A4B28688A362182986F")))
+    /// ```
+    pub fn sha256hash_from_reader<R: Read + Seek>(&mut self, reader: &mut R) -> Result<()> {
+        let res = crate::crypto::hash::sha256_hash_stream(reader, None)?;
+        reader.seek(SeekFrom::Start(0))?;
+        self.sha256 = Some(hex::encode(res).to_uppercase());
+        Ok(())
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+impl Hash {
     /// Used to generate a hash from slice
     ///
     /// # Example
@@ -325,34 +395,6 @@ impl Hash {
         self.sha256hash_from_slice(data);
     }
 
-    /// Use to generate a sha1 hash of a file
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn sha1hash_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<()> {
-        let mut file = std::fs::File::open(path)?;
-        self.sha1hash_from_reader(&mut file)
-    }
-
-    /// Use to generate a sha1 hash from a reader
-    ///
-    /// # Example
-    /// ```
-    /// use std::io::Cursor;
-    /// use warp::constellation::file::Hash;
-    ///
-    /// let mut cursor = Cursor::new(b"Hello, World!");
-    /// let mut hash = Hash::default();
-    /// hash.sha1hash_from_reader(&mut cursor).unwrap();
-    ///
-    /// assert_eq!(hash.sha1(), Some(String::from("0A0A9F2A6772942557AB5355D76AF442F8F65E01")))
-    /// ```
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn sha1hash_from_reader<R: Read + Seek>(&mut self, reader: &mut R) -> Result<()> {
-        let res = crate::crypto::hash::sha1_hash_stream(reader, None)?;
-        reader.seek(SeekFrom::Start(0))?;
-        self.sha1 = Some(hex::encode(res).to_uppercase());
-        Ok(())
-    }
-
     /// Use to generate a sha1 hash from a reader
     ///
     /// # Example
@@ -368,34 +410,6 @@ impl Hash {
     pub fn sha1hash_from_slice(&mut self, slice: &[u8]) {
         let res = crate::crypto::hash::sha1_hash(slice, None);
         self.sha1 = Some(hex::encode(res).to_uppercase());
-    }
-
-    /// Use to generate a sha256 hash of a file
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn sha256hash_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<()> {
-        let mut file = std::fs::File::open(path)?;
-        self.sha256hash_from_reader(&mut file)
-    }
-
-    /// Use to generate a sha256 hash from a reader
-    ///
-    /// # Example
-    /// ```
-    /// use std::io::Cursor;
-    /// use warp::constellation::file::Hash;
-    ///
-    /// let mut cursor = Cursor::new(b"Hello, World!");
-    /// let mut hash = Hash::default();
-    /// hash.sha256hash_from_reader(&mut cursor).unwrap();
-    ///
-    /// assert_eq!(hash.sha256(), Some(String::from("DFFD6021BB2BD5B0AF676290809EC3A53191DD81C7F70A4B28688A362182986F")))
-    /// ```
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn sha256hash_from_reader<R: Read + Seek>(&mut self, reader: &mut R) -> Result<()> {
-        let res = crate::crypto::hash::sha256_hash_stream(reader, None)?;
-        reader.seek(SeekFrom::Start(0))?;
-        self.sha256 = Some(hex::encode(res).to_uppercase());
-        Ok(())
     }
 
     /// Use to generate a sha256 hash from a reader

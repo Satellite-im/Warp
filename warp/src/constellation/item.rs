@@ -73,8 +73,9 @@ impl Item {
     pub fn new_directory(directory: Directory) -> Item {
         Item(ItemInner::Directory(directory))
     }
+}
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+impl Item {
     pub fn file(&self) -> Option<&File> {
         match &self.0 {
             ItemInner::File(item) => Some(item),
@@ -82,7 +83,6 @@ impl Item {
         }
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn directory(&self) -> Option<&Directory> {
         match &self.0 {
             ItemInner::Directory(item) => Some(item),
@@ -166,6 +166,28 @@ impl Item {
     }
 }
 
+impl Item {
+    /// Convert `Item` to `Directory`
+    pub fn get_directory(&self) -> Result<&Directory> {
+        self.directory().ok_or(Error::InvalidConversion)
+    }
+
+    /// Convert `Item` to `File`
+    pub fn get_file(&self) -> Result<&File> {
+        self.file().ok_or(Error::InvalidConversion)
+    }
+
+    /// Convert `Item` to `Directory`
+    pub fn get_directory_mut(&mut self) -> Result<&mut Directory> {
+        self.directory_mut().ok_or(Error::InvalidConversion)
+    }
+
+    /// Convert `Item` to `File`
+    pub fn get_file_mut(&mut self) -> Result<&mut File> {
+        self.file_mut().ok_or(Error::InvalidConversion)
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Item {
     /// Get string of `Item`
@@ -214,26 +236,6 @@ impl Item {
             return Ok(());
         }
         Err(Error::Other)
-    }
-
-    /// Convert `Item` to `Directory`
-    pub fn get_directory(&self) -> Result<&Directory> {
-        self.directory().ok_or(Error::InvalidConversion)
-    }
-
-    /// Convert `Item` to `File`
-    pub fn get_file(&self) -> Result<&File> {
-        self.file().ok_or(Error::InvalidConversion)
-    }
-
-    /// Convert `Item` to `Directory`
-    pub fn get_directory_mut(&mut self) -> Result<&mut Directory> {
-        self.directory_mut().ok_or(Error::InvalidConversion)
-    }
-
-    /// Convert `Item` to `File`
-    pub fn get_file_mut(&mut self) -> Result<&mut File> {
-        self.file_mut().ok_or(Error::InvalidConversion)
     }
 
     /// Check to see if `Item` is `Directory`

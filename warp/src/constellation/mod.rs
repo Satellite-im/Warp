@@ -3,6 +3,7 @@ pub mod file;
 pub mod item;
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::error::Error;
 use crate::Extension;
@@ -52,13 +53,15 @@ pub trait Constellation: Extension + Sync + Send {
         let current_pathbuf = self.get_path();
 
         if current_pathbuf == &path {
-            return Err(Error::Any(anyhow!("Path has not change")));
+            return Err(crate::error::into_error(Error::Any(anyhow!(
+                "Path has not change"
+            ))));
         }
 
         let item = self.current_directory().get_item(&path.to_string_lossy())?;
 
         if !item.is_directory() {
-            return Err(Error::DirectoryNotFound);
+            return Err(crate::error::into_error(Error::DirectoryNotFound));
         }
 
         let new_path = Path::new(current_pathbuf).join(path);
@@ -75,7 +78,7 @@ pub trait Constellation: Extension + Sync + Send {
     /// Go back to the previous directory
     fn go_back(&mut self) -> Result<()> {
         if !self.get_path_mut().pop() {
-            return Err(Error::DirectoryNotFound);
+            return Err(crate::error::into_error(Error::DirectoryNotFound));
         }
         Ok(())
     }
@@ -101,43 +104,43 @@ pub trait Constellation: Extension + Sync + Send {
 
     /// Use to upload file to the filesystem
     async fn put(&mut self, _: &str, _: &str) -> Result<()> {
-        Err(Error::Unimplemented)
+        Err(crate::error::into_error(Error::Unimplemented))
     }
 
     /// Use to download a file from the filesystem
     async fn get(&self, _: &str, _: &str) -> Result<()> {
-        Err(Error::Unimplemented)
+        Err(crate::error::into_error(Error::Unimplemented))
     }
 
     /// Use to upload file to the filesystem with data from buffer
     #[allow(clippy::wrong_self_convention)]
     async fn from_buffer(&mut self, _: &str, _: &Vec<u8>) -> Result<()> {
-        Err(Error::Unimplemented)
+        Err(crate::error::into_error(Error::Unimplemented))
     }
 
     /// Use to download data from the filesystem into a buffer
     async fn to_buffer(&self, _: &str, _: &mut Vec<u8>) -> Result<()> {
-        Err(Error::Unimplemented)
+        Err(crate::error::into_error(Error::Unimplemented))
     }
 
     /// Use to remove data from the filesystem
     async fn remove(&mut self, _: &str, _: bool) -> Result<()> {
-        Err(Error::Unimplemented)
+        Err(crate::error::into_error(Error::Unimplemented))
     }
 
     /// Use to move data within the filesystem
     async fn move_item(&mut self, _: &str, _: &str) -> Result<()> {
-        Err(Error::Unimplemented)
+        Err(crate::error::into_error(Error::Unimplemented))
     }
 
     /// Use to create a directory within the filesystem.
     async fn create_directory(&mut self, _: &str, _: bool) -> Result<()> {
-        Err(Error::Unimplemented)
+        Err(crate::error::into_error(Error::Unimplemented))
     }
 
     /// Used to sync references within the filesystem for a file
     async fn sync_ref(&mut self, _: &str) -> Result<()> {
-        Err(Error::Unimplemented)
+        Err(crate::error::into_error(Error::Unimplemented))
     }
 
     /// Use to export the filesystem to a specific structure. Currently supports `Json`, `Toml`, and `Yaml`
@@ -176,6 +179,7 @@ pub trait Constellation: Extension + Sync + Send {
 /// types to be use for import and export.
 #[derive(Debug, PartialEq, Clone)]
 #[repr(C)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum ConstellationDataType {
     Json,
     Yaml,
@@ -195,111 +199,125 @@ impl<S: AsRef<str>> From<S> for ConstellationDataType {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct ConstellationTraitObject {
-    object: Box<dyn Constellation>,
+    object: Arc<Mutex<Box<dyn Constellation>>>,
+}
+
+impl ConstellationTraitObject {
+    pub fn new(object: Arc<Mutex<Box<dyn Constellation>>>) -> ConstellationTraitObject {
+        ConstellationTraitObject { object }
+    }
+
+    pub fn inner(&self) -> Arc<Mutex<Box<dyn Constellation>>> {
+        self.object.clone()
+    }
+
+    pub fn inner_guard(&self) -> MutexGuard<Box<dyn Constellation>> {
+        match self.object.lock() {
+            Ok(i) => i,
+            Err(e) => e.into_inner(),
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl ConstellationTraitObject {
+    #[wasm_bindgen]
+    pub fn modified(&self) -> i64 {
+        self.inner_guard().modified().timestamp()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ConstellationTraitObject {
+    pub fn modified(&self) -> DateTime<Utc> {
+        self.inner_guard().modified()
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl ConstellationTraitObject {
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn new(obj: Box<dyn Constellation>) -> ConstellationTraitObject {
-        ConstellationTraitObject { object: obj }
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn version(&self) -> String {
+        let constellation = self.inner_guard();
+        constellation.version().to_string()
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn get_inner(&self) -> &Box<dyn Constellation> {
-        &self.object
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn root_directory(&self) -> Directory {
+        self.inner_guard().root_directory().clone()
     }
 
-    pub fn version(&self) -> &str {
-        self.object.version()
-    }
-
-    pub fn modified(&self) -> DateTime<Utc> {
-        self.object.modified()
-    }
-
-    pub fn root_directory(&self) -> &Directory {
-        self.object.root_directory()
-    }
-
-    pub fn root_directory_mut(&mut self) -> &mut Directory {
-        self.object.root_directory_mut()
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn current_directory(&self) -> Directory {
+        self.inner_guard().current_directory().clone()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn current_directory(&self) -> &Directory {
-        self.object.current_directory()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn current_directory_mut(&mut self) -> Result<&mut Directory> {
-        self.object.current_directory_mut()
-    }
-
     pub fn select(&mut self, path: &str) -> Result<()> {
-        self.object.select(path)
+        self.inner_guard().select(path)
     }
 
-    pub fn set_path(&mut self, path: PathBuf) {
-        self.object.set_path(path)
-    }
-
-    pub fn get_path(&mut self) -> &PathBuf {
-        self.object.get_path()
-    }
-
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn go_back(&mut self) -> Result<()> {
-        self.object.go_back()
+        self.inner_guard().go_back()
     }
 
-    pub fn get_path_mut(&mut self) -> &mut PathBuf {
-        self.object.get_path_mut()
-    }
-
-    pub fn open_directory(&mut self, path: &str) -> Result<&mut Directory> {
-        self.object.open_directory(path)
-    }
-
-    pub async fn put(&mut self, remote: &str, local: &str) -> Result<()> {
-        self.object.put(remote, local).await
-    }
-
-    pub async fn get(&self, remote: &str, local: &str) -> Result<()> {
-        self.object.get(remote, local).await
-    }
-
-    pub async fn from_buffer(&mut self, remote: &str, data: &Vec<u8>) -> Result<()> {
-        self.object.from_buffer(remote, data).await
-    }
-
-    pub async fn to_buffer(&self, remote: &str, data: &mut Vec<u8>) -> Result<()> {
-        self.object.to_buffer(remote, data).await
-    }
-
-    pub async fn remove(&mut self, remote: &str, recursive: bool) -> Result<()> {
-        self.object.remove(remote, recursive).await
-    }
-
-    pub async fn move_item(&mut self, from: &str, to: &str) -> Result<()> {
-        self.object.move_item(from, to).await
-    }
-
-    pub async fn create_directory(&mut self, remote: &str, recursive: bool) -> Result<()> {
-        self.object.create_directory(remote, recursive).await
-    }
-
-    pub async fn sync_ref(&mut self, remote: &str) -> Result<()> {
-        self.object.sync_ref(remote).await
-    }
-
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn export(&self, r#type: ConstellationDataType) -> Result<String> {
-        self.object.export(r#type)
+        self.inner_guard().export(r#type)
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn import(&mut self, r#type: ConstellationDataType, data: String) -> Result<()> {
-        self.object.import(r#type, data)
+        self.inner_guard().import(r#type, data)
     }
 }
+
+// #[cfg(not(target_arch = "wasm32"))]
+// impl ConstellationTraitObject {
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub async fn put(&mut self, remote: &str, local: &str) -> Result<()> {
+//         self.inner_guard().put(remote, local).await
+//     }
+//
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub async fn get(&self, remote: &str, local: &str) -> Result<()> {
+//         self.inner_guard().get(remote, local).await
+//     }
+//
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub async fn from_buffer(&mut self, remote: &str, data: Vec<u8>) -> Result<()> {
+//         self.inner_guard().from_buffer(remote, &data).await
+//     }
+//
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(skip))]
+//     pub async fn to_buffer(&self, remote: &str) -> Result<Vec<u8>> {
+//         let mut data = vec![];
+//         self.inner_guard().to_buffer(remote, &mut data).await?;
+//         Ok(data)
+//     }
+//
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub async fn remove(&mut self, remote: &str, recursive: bool) -> Result<()> {
+//         self.inner_guard().remove(remote, recursive).await
+//     }
+//
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub async fn move_item(&mut self, from: &str, to: &str) -> Result<()> {
+//         self.inner_guard().move_item(from, to).await
+//     }
+//
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub async fn create_directory(&mut self, remote: &str, recursive: bool) -> Result<()> {
+//         self.inner_guard().create_directory(remote, recursive).await
+//     }
+//
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub async fn sync_ref(&mut self, remote: &str) -> Result<()> {
+//         self.inner_guard().sync_ref(remote).await
+//     }
+// }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
@@ -325,7 +343,7 @@ pub mod ffi {
         let cname = CStr::from_ptr(name).to_string_lossy().to_string();
 
         let constellation = &mut *(ctx);
-        constellation.select(&cname).is_ok()
+        constellation.inner_guard().select(&cname).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -336,7 +354,7 @@ pub mod ffi {
         }
 
         let constellation = &mut *(ctx);
-        constellation.go_back().is_ok()
+        constellation.inner_guard().go_back().is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -356,7 +374,7 @@ pub mod ffi {
         let cname = CStr::from_ptr(name).to_string_lossy().to_string();
 
         let constellation = &mut *(ctx);
-        match constellation.open_directory(&cname) {
+        match constellation.inner_guard().open_directory(&cname) {
             Ok(directory) => Box::into_raw(Box::new(directory)) as *mut Directory,
             Err(_) => std::ptr::null_mut(),
         }
@@ -371,6 +389,7 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
         let constellation = &*(ctx);
+        let constellation = constellation.inner_guard();
         let directory = constellation.root_directory();
         Box::into_raw(Box::new(directory)) as *const Directory
     }
@@ -384,7 +403,8 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
         let constellation = &*(ctx);
-        let current_directory = constellation.get_inner().current_directory();
+        let constellation = constellation.inner_guard();
+        let current_directory = constellation.current_directory();
         Box::into_raw(Box::new(current_directory)) as *mut Directory
     }
 
@@ -398,7 +418,7 @@ pub mod ffi {
         }
 
         let constellation = &mut *(ctx);
-        match constellation.current_directory_mut() {
+        match constellation.inner_guard().current_directory_mut() {
             Ok(directory) => {
                 let directory = std::mem::ManuallyDrop::new(directory);
                 Box::into_raw(Box::new(directory)) as *mut Directory
@@ -433,7 +453,7 @@ pub mod ffi {
             .enable_all()
             .build()
             .unwrap();
-        rt.block_on(async { constellation.put(&remote, &local).await })
+        rt.block_on(async { constellation.inner_guard().put(&remote, &local).await })
             .is_ok()
     }
 
@@ -468,6 +488,7 @@ pub mod ffi {
 
         rt.block_on(async move {
             constellation
+                .inner_guard()
                 .from_buffer(&remote.to_string_lossy().to_string(), &slice.to_vec())
                 .await
         })
@@ -498,7 +519,7 @@ pub mod ffi {
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let local = CStr::from_ptr(local).to_string_lossy().to_string();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move { constellation.get(&remote, &local).await })
+        rt.block_on(async move { constellation.inner_guard().get(&remote, &local).await })
             .is_ok()
     }
 
@@ -523,7 +544,11 @@ pub mod ffi {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let ptr = rt.block_on(async move {
             {
-                match constellation.to_buffer(&remote, &mut temp_buf).await {
+                match constellation
+                    .inner_guard()
+                    .to_buffer(&remote, &mut temp_buf)
+                    .await
+                {
                     Ok(_) => {
                         let buf = temp_buf.as_ptr();
                         std::mem::forget(temp_buf);
@@ -559,7 +584,7 @@ pub mod ffi {
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move { constellation.remove(&remote, recursive).await })
+        rt.block_on(async move { constellation.inner_guard().remove(&remote, recursive).await })
             .is_ok()
     }
 
@@ -581,8 +606,13 @@ pub mod ffi {
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move { constellation.create_directory(&remote, recursive).await })
-            .is_ok()
+        rt.block_on(async move {
+            constellation
+                .inner_guard()
+                .create_directory(&remote, recursive)
+                .await
+        })
+        .is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -608,7 +638,7 @@ pub mod ffi {
         let src = CStr::from_ptr(src).to_string_lossy().to_string();
         let dst = CStr::from_ptr(dst).to_string_lossy().to_string();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move { constellation.move_item(&src, &dst).await })
+        rt.block_on(async move { constellation.inner_guard().move_item(&src, &dst).await })
             .is_ok()
     }
 
@@ -629,7 +659,7 @@ pub mod ffi {
         let constellation = &mut *(ctx);
         let src = CStr::from_ptr(src).to_string_lossy().to_string();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move { constellation.sync_ref(&src).await })
+        rt.block_on(async move { constellation.inner_guard().sync_ref(&src).await })
             .is_ok()
     }
 
@@ -651,7 +681,7 @@ pub mod ffi {
 
         let data_type = &*(datatype);
 
-        match constellation.export(data_type.clone()) {
+        match constellation.inner_guard().export(data_type.clone()) {
             Ok(export) => match CString::new(export) {
                 Ok(export) => export.into_raw(),
                 Err(_) => std::ptr::null_mut(),
@@ -670,7 +700,7 @@ pub mod ffi {
         }
         let constellation = &*(ctx);
         match constellation
-            .get_inner()
+            .inner_guard()
             .export(ConstellationDataType::Json)
         {
             Ok(export) => match CString::new(export) {
@@ -698,6 +728,7 @@ pub mod ffi {
         let constellation = &mut *(ctx);
         let data = CStr::from_ptr(data).to_string_lossy().to_string();
         constellation
+            .inner_guard()
             .import(ConstellationDataType::Json, data)
             .is_ok()
     }

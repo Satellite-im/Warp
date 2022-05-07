@@ -1,4 +1,3 @@
-use cfg_if::cfg_if;
 use chrono::{DateTime, Utc};
 use derive_more::Display;
 
@@ -11,9 +10,6 @@ use serde::{Deserialize, Serialize};
 
 use serde_json::Value;
 use uuid::Uuid;
-
-// #[cfg(not(target_arch = "wasm32"))]
-// use warp_common::Result;
 
 #[cfg(target_arch = "wasm32")]
 type Result<T> = std::result::Result<T, JsError>;
@@ -168,85 +164,80 @@ impl Data {
     }
 }
 
-cfg_if! {
-    if #[cfg(not(target_arch = "wasm32"))] {
-        impl Data {
-
-            /// Creates a instance of `Data` with `Module` and `Payload`
-            pub fn new<T>(data_type: DataType, payload: T) -> Result<Self>
-            where
-                T: Serialize,
-            {
-                let payload = serde_json::to_value(payload)?;
-                Ok(Data {
-                    data_type,
-                    payload,
-                    ..Default::default()
-                })
-            }
-
-            /// Return the UUID of the data object
-            pub fn id(&self) -> Uuid {
-                self.id
-            }
-
-            /// Set the `Module` for `Data`
-            pub fn set_data_type(&mut self, data_type: DataType) {
-                self.data_type = data_type;
-            }
-
-            /// Set the payload for `Data`
-            pub fn set_payload<T>(&mut self, payload: T) -> Result<()>
-            where
-                T: Serialize,
-            {
-                self.payload = serde_json::to_value(payload)?;
-                Ok(())
-            }
-
-            /// Returns the type from `Payload` for `Data`
-            pub fn payload<T>(&self) -> Result<T>
-            where
-                T: DeserializeOwned,
-            {
-                serde_json::from_value(self.payload.clone()).map_err(Error::from)
-            }
-
-        }
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+impl Data {
+    /// Set the `Module` for `Data`
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_data_type(&mut self, data_type: DataType) {
+        self.data_type = data_type;
     }
 }
 
-cfg_if! {
-    if #[cfg(target_arch = "wasm32")] {
-        #[wasm_bindgen]
-        impl Data {
+#[cfg(not(target_arch = "wasm32"))]
+impl Data {
+    /// Creates a instance of `Data` with `Module` and `Payload`
+    pub fn new<T>(data_type: DataType, payload: T) -> Result<Self>
+    where
+        T: Serialize,
+    {
+        let payload = serde_json::to_value(payload)?;
+        Ok(Data {
+            data_type,
+            payload,
+            ..Default::default()
+        })
+    }
 
-            /// Creates a instance of `Data` with `Module` and `Payload`
-            #[wasm_bindgen(constructor)]
-            pub fn new(data_type: DataType, payload: JsValue) -> Result<Data>
-            {
-                let payload = serde_wasm_bindgen::from_value(payload).map_err(|e| JsError::new(&e.to_string()))?;
-                Ok(Data {
-                    data_type,
-                    payload,
-                    ..Default::default()
-                })
-            }
+    /// Return the UUID of the data object
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
 
-            /// Return the UUID of the data object
-            #[wasm_bindgen(getter)]
-            pub fn id(&self) -> String {
-                self.id.to_string()
-            }
+    /// Set the payload for `Data`
+    pub fn set_payload<T>(&mut self, payload: T) -> Result<()>
+    where
+        T: Serialize,
+    {
+        self.payload = serde_json::to_value(payload)?;
+        Ok(())
+    }
 
-            /// Set the payload for `Data`
-            #[wasm_bindgen(setter)]
-            pub fn set_payload(&mut self, payload: JsValue) -> Result<()>
-            {
-                self.payload = serde_wasm_bindgen::from_value(payload).map_err(|e| JsError::new(&e.to_string()))?;
-                Ok(())
-            }
-        }
+    /// Returns the type from `Payload` for `Data`
+    pub fn payload<T>(&self) -> Result<T>
+    where
+        T: DeserializeOwned,
+    {
+        serde_json::from_value(self.payload.clone()).map_err(Error::from)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl Data {
+    /// Creates a instance of `Data` with `Module` and `Payload`
+    #[wasm_bindgen(constructor)]
+    pub fn new(data_type: DataType, payload: JsValue) -> Result<Data> {
+        let payload =
+            serde_wasm_bindgen::from_value(payload).map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(Data {
+            data_type,
+            payload,
+            ..Default::default()
+        })
+    }
+
+    /// Return the UUID of the data object
+    #[wasm_bindgen(getter)]
+    pub fn id(&self) -> String {
+        self.id.to_string()
+    }
+
+    /// Set the payload for `Data`
+    #[wasm_bindgen(setter)]
+    pub fn set_payload(&mut self, payload: JsValue) -> Result<()> {
+        self.payload =
+            serde_wasm_bindgen::from_value(payload).map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(())
     }
 }
 

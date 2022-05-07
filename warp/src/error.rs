@@ -73,3 +73,13 @@ pub enum Error {
     #[error("An unknown error has occurred")]
     Other,
 }
+
+#[cfg(target_arch = "wasm32")]
+pub fn into_error(error: Error) -> wasm_bindgen::JsError {
+    wasm_bindgen::JsError::from(error)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn into_error(error: Error) -> Error {
+    error
+}

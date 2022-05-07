@@ -2,6 +2,7 @@ pub mod query;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -10,6 +11,8 @@ use crate::data::{DataObject, DataType};
 use crate::error::Error;
 use crate::Extension;
 use query::QueryBuilder;
+
+#[cfg(not(target_arch = "wasm32"))]
 use serde::{Deserialize, Serialize};
 
 #[cfg(target_arch = "wasm32")]

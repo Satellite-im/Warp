@@ -125,7 +125,9 @@ impl Directory {
         }
         directory
     }
+}
 
+impl Directory {
     /// List all the `Item` within the `Directory`
     pub fn get_items(&self) -> &Vec<Item> {
         &self.items
