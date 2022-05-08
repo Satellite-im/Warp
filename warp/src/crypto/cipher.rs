@@ -358,6 +358,7 @@ pub fn xchacha20poly1305_self_decrypt_stream(
     xchacha20poly1305_decrypt_stream(&key, reader, writer)
 }
 
+//TODO: Remove and rollback
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct ExtractedData {
     extract_a: Vec<u8>,
@@ -373,6 +374,7 @@ impl ExtractedData {
     }
 }
 
+//TODO: Remove `ExtractedData` and rollback to using slices
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn extract_data_slice(data: &[u8], size: usize) -> ExtractedData {
     let extracted = &data[data.len() - size..];
