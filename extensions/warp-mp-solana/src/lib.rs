@@ -519,7 +519,7 @@ impl Friends for SolanaAccount {
         Err(Error::Any(anyhow!("Account is not friends")))
     }
 
-    fn key_exchange(&self, _: Identity) -> Result<Vec<u8>> {
+    fn key_exchange(&self, public_key: &[u8]) -> Result<Vec<u8>> {
         Err(Error::Unimplemented)
     }
 }
