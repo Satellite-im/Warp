@@ -78,7 +78,7 @@ pub trait Friends: Sync + Send {
     fn has_friend(&self, pubkey: PublicKey) -> Result<()>;
 
     /// Returns a diffie-hellman key that is found between one private key and another public key
-    fn key_exchange(&self, public_key: &[u8]) -> Result<Vec<u8>>;
+    fn key_exchange(&self, public_key: PublicKey) -> Result<Vec<u8>>;
 }
 
 impl MultiPassTraitObject {
@@ -166,7 +166,7 @@ impl MultiPassTraitObject {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn key_exchange(&self, pubkey: &[u8]) -> Result<Vec<u8>> {
+    pub fn key_exchange(&self, pubkey: PublicKey) -> Result<Vec<u8>> {
         self.inner_guard().key_exchange(pubkey)
     }
 }
