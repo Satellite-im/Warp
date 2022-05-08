@@ -70,14 +70,14 @@ fn main() -> anyhow::Result<()> {
     println!(
         "{} with {}",
         username(&ident_a),
-        Pubkey::new(ident_a.public_key().to_bytes())
+        Pubkey::new(ident_a.public_key().as_ref())
     );
 
     let ident_b = account_b.get_own_identity()?;
     println!(
         "{} with {}",
         username(&ident_b),
-        Pubkey::new(ident_b.public_key().to_bytes())
+        Pubkey::new(ident_b.public_key().as_ref())
     );
 
     println!();
@@ -120,10 +120,7 @@ fn main() -> anyhow::Result<()> {
 
             for friend in account_a.list_friends()? {
                 println!("Username: {}", username(&friend));
-                println!(
-                    "Public Key: {}",
-                    Pubkey::new(friend.public_key().to_bytes())
-                );
+                println!("Public Key: {}", Pubkey::new(friend.public_key().as_ref()));
                 println!();
             }
 
@@ -131,10 +128,7 @@ fn main() -> anyhow::Result<()> {
 
             for friend in account_b.list_friends()? {
                 println!("Username: {}", username(&friend));
-                println!(
-                    "Public Key: {}",
-                    Pubkey::new(friend.public_key().to_bytes())
-                );
+                println!("Public Key: {}", Pubkey::new(friend.public_key().as_ref()));
                 println!();
             }
 
