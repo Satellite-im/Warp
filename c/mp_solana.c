@@ -151,14 +151,14 @@ int main() {
 
         printf("Friend Identity Username: %s#%d\n", friend_name, sc);
         free(friend_name);
-        free((void*)friend);
+        multipass_identity_free(friend);
     }
 
     drop:
-    free(acct_a_key);
-    free(acct_b_key);
-    free(ident_a);
-    free(ident_b);
+    multipass_public_key_free(acct_a_key);
+    multipass_public_key_free(acct_b_key);
+    multipass_identity_free(ident_a);
+    multipass_identity_free(ident_b);
     multipass_free(account_a);
     multipass_free(account_b);
     return 0;
