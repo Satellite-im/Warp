@@ -138,8 +138,8 @@ mod test {
         }
 
         {
-            let for_alice = aes256gcm_encrypt(&a_dh, &b"Hello Alice"[..])?;
-            let plaintext = aes256gcm_decrypt(&b_dh, &for_alice)
+            let for_alice = aes256gcm_encrypt(&b_dh, &b"Hello Alice"[..])?;
+            let plaintext = aes256gcm_decrypt(&a_dh, &for_alice)
                 .map(|ptxt| String::from_utf8_lossy(&ptxt).to_string())?;
             assert_eq!(plaintext, String::from("Hello Alice"));
         }
@@ -167,8 +167,8 @@ mod test {
         }
 
         {
-            let for_alice = aes256gcm_encrypt(&a_dh, &b"Hello Alice"[..])?;
-            let plaintext = aes256gcm_decrypt(&b_dh, &for_alice)
+            let for_alice = aes256gcm_encrypt(&b_dh, &b"Hello Alice"[..])?;
+            let plaintext = aes256gcm_decrypt(&a_dh, &for_alice)
                 .map(|ptxt| String::from_utf8_lossy(&ptxt).to_string())?;
             assert_eq!(plaintext, String::from("Hello Alice"));
         }

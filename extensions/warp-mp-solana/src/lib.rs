@@ -520,7 +520,28 @@ impl Friends for SolanaAccount {
     }
 
     fn key_exchange(&self, public_key: PublicKey) -> Result<Vec<u8>> {
-        Err(Error::Unimplemented)
+        let private_key = self.decrypt_private_key(None)?;
+
+        let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&private_key)
+            .map_err(|e| anyhow!(e))
+            .map_err(Error::from)?;
+
+        let x25519_key = warp::crypto::exchange::ed25519_to_x25519(&kp);
+
+        let pubkey: [u8; 32] = public_key
+            .as_ref()
+            .try_into()
+            .map_err(|e| anyhow!("{}", e))
+            .map_err(Error::from)?;
+
+        let ecdh_key = warp::crypto::exchange::x25519_key_exchange(
+            &x25519_key,
+            warp::crypto::x25519_dalek::PublicKey::from(pubkey),
+            None,
+            true,
+        );
+
+        Ok(ecdh_key)
     }
 }
 
