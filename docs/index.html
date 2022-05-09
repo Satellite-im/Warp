@@ -54,9 +54,19 @@
     .sidebar, .sidebar-toggle {
       background-color: #cac0b7;
     }
+    .disclaimer {
+      position: fixed;
+      background-color: #ff9f43;
+      width: 100%;
+      z-index: 100;
+      padding: 0.5rem;
+      text-align: center;
+      color: white;
+    }
   </style>
 </head>
 <body>
+  <div class="disclaimer">⚠️ Warp and the associated docs are under active development. <b>Expect frequent changes to documentation and code.</b></div>
   <div id="app"></div>
   <script>
     window.$docsify = {
