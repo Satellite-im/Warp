@@ -185,7 +185,7 @@ async fn main() -> AnyResult<()> {
     //TODO: Have keyfile encrypted
     let mut key = match cli.keyfile {
         Some(ref path) => read_file(path).await?,
-        None => cli::password_line()?,
+        None => cli::password_line()?, //TODO: Securely read commandline
     };
 
     //TODO: push this to TUI
@@ -248,7 +248,7 @@ async fn main() -> AnyResult<()> {
         }
     }
 
-    // If cache is abled, check cache for filesystem structure and import it into constellation
+    // If cache is enabled, check cache for filesystem structure and import it into constellation
     let mut data = DataObject::default();
     if let Ok(cache) = manager.get_cache() {
         info!("Cache Extension is available");
@@ -590,6 +590,13 @@ async fn main() -> AnyResult<()> {
                 }
             }
             Command::ClearCache { data_type, force } => {
+                let modules = vec![
+                    DataType::FileSystem,
+                    DataType::Accounts,
+                    DataType::Messaging,
+                    DataType::Cache,
+                    DataType::Unknown,
+                ];
                 let data_type = match data_type {
                     Some(dtype) => {
                         let data_type = DataType::from(&dtype);
@@ -598,13 +605,7 @@ async fn main() -> AnyResult<()> {
                             match force {
                                 Some(true) => {
                                     println!("Clearing all available dimensions");
-                                    vec![
-                                        DataType::FileSystem,
-                                        DataType::Accounts,
-                                        DataType::Messaging,
-                                        DataType::Cache,
-                                        DataType::Unknown,
-                                    ]
+                                    modules
                                 }
                                 _ => vec![],
                             }
@@ -614,13 +615,7 @@ async fn main() -> AnyResult<()> {
                     }
                     None => {
                         println!("Clearing all available dimensions");
-                        vec![
-                            DataType::FileSystem,
-                            DataType::Accounts,
-                            DataType::Messaging,
-                            DataType::Cache,
-                            DataType::Unknown,
-                        ]
+                        modules
                     }
                 };
 
@@ -675,6 +670,7 @@ fn import_from_cache(
 
     if !obj.is_empty() {
         if let Some(data) = obj.last() {
+            //TODO: use if let conditions
             let inner = data.payload::<Value>()?;
             let inner = serde_json::to_string(&inner)?;
             handle.import(ConstellationDataType::Json, inner)?;
