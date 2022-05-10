@@ -2,7 +2,6 @@
 members = [
   "config/warp-configuration",
   "extensions/*",
-  "examples/*",
   "warp",
   "warp-bin",
   "warp-extensions",
