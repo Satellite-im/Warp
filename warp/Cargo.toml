@@ -33,6 +33,7 @@ anyhow = { version = "1" }
 zeroize = "1"
 cfg-if = "1.0"
 rand = { version = "0.7"  }
+parking_lot = { version = "0.12" }
 
 uuid = { version = "0.8", features = ["serde", "v4"] }
 base64 = { version = "0.13" }
@@ -66,8 +67,6 @@ reqwest = { version = "0.11", features = ["blocking", "json"] }
 libc = "0.2"
 borsh = "0.9.3"
 
-
-
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 uuid = { version = "0.8", features = ["serde", "v4", "wasm-bindgen"] }
 getrandom = { version = "0.2", features = ["js"] }
@@ -75,6 +74,10 @@ solana-sdk = "1.9.20"
 web-sys = { version = "0.3" }
 js-sys = { version = "0.3" }
 serde-wasm-bindgen = "0.4.2"
+
+[features]
+default = []
+
 
 [build-dependencies]
 cbindgen = "0.23"

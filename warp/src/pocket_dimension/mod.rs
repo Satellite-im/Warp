@@ -1,16 +1,15 @@
 pub mod query;
 
+use crate::data::{DataObject, DataType};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::Error;
+use crate::sync::{Arc, Mutex, MutexGuard};
+use crate::Extension;
+use query::QueryBuilder;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard};
-
-use crate::data::{DataObject, DataType};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::error::Error;
-use crate::Extension;
-use query::QueryBuilder;
 
 #[cfg(not(target_arch = "wasm32"))]
 use serde::{Deserialize, Serialize};
@@ -128,10 +127,7 @@ impl PocketDimensionTraitObject {
     }
 
     pub fn inner_guard(&self) -> MutexGuard<Box<dyn PocketDimension>> {
-        match self.object.lock() {
-            Ok(i) => i,
-            Err(e) => e.into_inner(),
-        }
+        self.object.lock()
     }
 }
 

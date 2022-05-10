@@ -2,12 +2,12 @@
 mod tests {
     #[allow(unused)]
     use std::str::FromStr;
-    use std::sync::{Arc, Mutex};
     #[allow(unused)]
     use warp::multipass::identity::{Identifier, IdentityUpdate, PublicKey};
     use warp::multipass::MultiPass;
     use warp::solana::anchor_client::anchor_lang::prelude::Pubkey;
     use warp::solana::wallet::{PhraseType, SolanaWallet};
+    use warp::sync::{Arc, Mutex};
     use warp::tesseract::Tesseract;
     use warp_mp_solana::SolanaAccount;
 
@@ -49,7 +49,7 @@ mod tests {
 
         let ident = account.get_own_identity()?;
 
-        let pubkey = Pubkey::new(ident.public_key().to_bytes());
+        let pubkey = Pubkey::new(ident.public_key().as_ref());
 
         assert_eq!(
             pubkey.to_string(),

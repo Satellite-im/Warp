@@ -504,8 +504,8 @@ pub mod ffi {
     use crate::FlatfileStorage;
     use std::ffi::{c_void, CStr};
     use std::os::raw::c_char;
-    use std::sync::{Arc, Mutex};
     use warp::pocket_dimension::PocketDimensionTraitObject;
+    use warp::sync::{Arc, Mutex};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]

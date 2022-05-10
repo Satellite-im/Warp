@@ -2,10 +2,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use warp::constellation::directory::Directory;
 use warp::constellation::{Constellation, ConstellationDataType};
 use warp::data::{DataObject, DataType};
+use warp::sync::{Arc, Mutex};
 
 use base64;
 
@@ -35,7 +35,7 @@ pub struct ConstellationStatus {
 /// Return the active constellation stats
 #[get("/constellation/status")]
 pub fn version(state: &State<FsSystem>) -> Json<Value> {
-    let fs = state.as_ref().lock().unwrap();
+    let fs = state.as_ref().lock();
 
     let mut response = ApiResponse::default();
     let status = ConstellationStatus {
@@ -52,7 +52,7 @@ pub fn version(state: &State<FsSystem>) -> Json<Value> {
 /// Export the current in-memory filesystem index
 #[get("/constellation/export/<format>")]
 pub fn export(state: &State<FsSystem>, format: &str) -> Json<Value> {
-    let fs = state.as_ref().lock().unwrap();
+    let fs = state.as_ref().lock();
     let data = fs
         .export(ConstellationDataType::from(format))
         .unwrap_or_default();
@@ -75,7 +75,7 @@ pub fn export(state: &State<FsSystem>, format: &str) -> Json<Value> {
 /// Add a new directory to the FS at the current working directory.
 #[put("/constellation/directory/create/<name>")]
 pub fn create_directory(state: &State<FsSystem>, name: &str) -> Json<Value> {
-    let mut fs = state.as_ref().lock().unwrap();
+    let mut fs = state.as_ref().lock();
     let directory = Directory::new(name);
 
     //TODO: Remove unwrap
@@ -90,7 +90,7 @@ pub fn create_directory(state: &State<FsSystem>, name: &str) -> Json<Value> {
 
 #[get("/constellation/directory/goto/<path..>")]
 pub fn go_to(state: &State<FsSystem>, path: PathBuf) -> Json<Value> {
-    let mut fs = state.as_ref().lock().unwrap();
+    let mut fs = state.as_ref().lock();
     let joined_path = Path::new("/").join(path).to_string_lossy().to_string();
 
     let response = if let Err(e) = fs.select(&joined_path) {

@@ -1,7 +1,7 @@
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use warp::sync::{Arc, Mutex, MutexGuard};
 // use warp_common::futures::TryStreamExt;
 use warp::module::Module;
 
@@ -122,11 +122,7 @@ impl IpfsFileSystem {
             .as_ref()
             .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
 
-        let inner = match cache.lock() {
-            Ok(inner) => inner,
-            Err(e) => e.into_inner(),
-        };
-
+        let inner = cache.lock();
         Ok(inner)
     }
 }
@@ -253,7 +249,7 @@ impl Constellation for IpfsFileSystem {
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
-            let hook = hook.lock().unwrap();
+            let hook = hook.lock();
             hook.trigger("filesystem::new_file", &object)
         }
 
@@ -399,7 +395,7 @@ impl Constellation for IpfsFileSystem {
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
-            let hook = hook.lock().unwrap();
+            let hook = hook.lock();
             hook.trigger("filesystem::new_file", &object)
         }
 
@@ -476,7 +472,7 @@ impl Constellation for IpfsFileSystem {
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), ())?;
-            let hook = hook.lock().unwrap();
+            let hook = hook.lock();
             hook.trigger("filesystem::remove_file", &object)
         }
         Ok(())
@@ -513,7 +509,7 @@ impl Constellation for IpfsFileSystem {
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), directory)?;
-            let hook = hook.lock().unwrap();
+            let hook = hook.lock();
             hook.trigger("filesystem::create_directory", &object)
         }
 
@@ -572,9 +568,9 @@ pub mod ffi {
     use crate::IpfsFileSystem;
     use std::ffi::{c_void, CStr};
     use std::os::raw::c_char;
-    use std::sync::{Arc, Mutex};
     use warp::constellation::ConstellationTraitObject;
     use warp::pocket_dimension::PocketDimensionTraitObject;
+    use warp::sync::{Arc, Mutex};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]

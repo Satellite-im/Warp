@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use gundb::{Node, NodeConfig};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard};
+use warp::sync::{Arc, Mutex, MutexGuard};
 
 use uuid::Uuid;
 use warp::error::Error;
@@ -71,27 +71,21 @@ impl GunMessaging {
     }
 
     pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
-        match self
+        let cache = self
             .cache
             .as_ref()
-            .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?
-            .lock()
-        {
-            Ok(inner) => Ok(inner),
-            Err(e) => Ok(e.into_inner()),
-        }
+            .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
+
+        Ok(cache.lock())
     }
 
     pub fn get_account(&self) -> anyhow::Result<MutexGuard<Box<dyn MultiPass>>> {
-        match self
+        let account = self
             .account
             .as_ref()
-            .ok_or_else(|| anyhow!("MultiPass Extension is not set"))?
-            .lock()
-        {
-            Ok(inner) => Ok(inner),
-            Err(e) => Ok(e.into_inner()),
-        }
+            .ok_or_else(|| anyhow!("MultiPass Extension is not set"))?;
+
+        Ok(account.lock())
     }
 }
 
