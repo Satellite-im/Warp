@@ -7,7 +7,6 @@ use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 /// `DirectoryType` handles the supported types for the directory.
@@ -560,27 +559,27 @@ impl Directory {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Directory {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn name(&self) -> String {
         self.name.to_owned()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_name(&mut self, name: &str) {
         self.name = name.to_string()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn description(&self) -> String {
         self.description.to_owned()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_description(&mut self, desc: &str) {
         self.description = desc.to_string()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn size(&self) -> i64 {
         self.get_items().iter().map(Item::size).sum()
     }
@@ -609,14 +608,17 @@ impl Directory {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 impl Directory {
+    #[wasm_bindgen(getter)]
     pub fn id(&self) -> String {
         self.id.to_string()
     }
 
+    #[wasm_bindgen(getter)]
     pub fn creation(&self) -> i64 {
         self.creation.timestamp()
     }
 
+    #[wasm_bindgen(getter)]
     pub fn modified(&self) -> i64 {
         self.modified.timestamp()
     }

@@ -1,4 +1,6 @@
+#[cfg(not(target_arch = "wasm32"))]
 use chrono::{DateTime, Utc};
+
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use uuid::Uuid;
@@ -8,7 +10,6 @@ use super::file::File;
 use super::Result;
 use crate::error::Error;
 
-#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 /// `Item` is a type that handles both `File` and `Directory`
@@ -139,6 +140,7 @@ impl Item {
 #[wasm_bindgen]
 impl Item {
     /// Get id of `Item`
+    #[wasm_bindgen(getter)]
     pub fn id(&self) -> String {
         match (self.file(), self.directory()) {
             (Some(file), None) => file.id(),
@@ -148,20 +150,22 @@ impl Item {
     }
 
     /// Get the creation date of `Item`
+    #[wasm_bindgen(getter)]
     pub fn creation(&self) -> i64 {
         match (self.file(), self.directory()) {
             (Some(file), None) => file.creation(),
             (None, Some(directory)) => directory.creation(),
-            _ => Utc::now().timestamp(),
+            _ => 0,
         }
     }
 
     /// Get the modified date of `Item`
+    #[wasm_bindgen(getter)]
     pub fn modified(&self) -> i64 {
         match (self.file(), self.directory()) {
             (Some(file), None) => file.modified(),
             (None, Some(directory)) => directory.modified(),
-            _ => Utc::now().timestamp(),
+            _ => 0,
         }
     }
 }
@@ -188,7 +192,6 @@ impl Item {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Item {
     /// Get string of `Item`
     pub fn name(&self) -> String {

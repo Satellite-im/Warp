@@ -13,13 +13,8 @@ use chrono::{DateTime, Utc};
 use directory::Directory;
 use item::Item;
 
-#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-#[cfg(target_arch = "wasm32")]
-pub(super) type Result<T> = std::result::Result<T, JsError>;
-
-#[cfg(not(target_arch = "wasm32"))]
 pub(super) type Result<T> = std::result::Result<T, Error>;
 
 /// Interface that would provide functionality around the filesystem.
@@ -54,15 +49,13 @@ pub trait Constellation: Extension + Sync + Send {
         let current_pathbuf = self.get_path();
 
         if current_pathbuf == &path {
-            return Err(crate::error::into_error(Error::Any(anyhow!(
-                "Path has not change"
-            ))));
+            return Err(Error::Any(anyhow!("Path has not change")));
         }
 
         let item = self.current_directory().get_item(&path.to_string_lossy())?;
 
         if !item.is_directory() {
-            return Err(crate::error::into_error(Error::DirectoryNotFound));
+            return Err(Error::DirectoryNotFound);
         }
 
         let new_path = Path::new(current_pathbuf).join(path);
@@ -79,7 +72,7 @@ pub trait Constellation: Extension + Sync + Send {
     /// Go back to the previous directory
     fn go_back(&mut self) -> Result<()> {
         if !self.get_path_mut().pop() {
-            return Err(crate::error::into_error(Error::DirectoryNotFound));
+            return Err(Error::DirectoryNotFound);
         }
         Ok(())
     }
@@ -105,43 +98,43 @@ pub trait Constellation: Extension + Sync + Send {
 
     /// Use to upload file to the filesystem
     async fn put(&mut self, _: &str, _: &str) -> Result<()> {
-        Err(crate::error::into_error(Error::Unimplemented))
+        Err(Error::Unimplemented)
     }
 
     /// Use to download a file from the filesystem
     async fn get(&self, _: &str, _: &str) -> Result<()> {
-        Err(crate::error::into_error(Error::Unimplemented))
+        Err(Error::Unimplemented)
     }
 
     /// Use to upload file to the filesystem with data from buffer
     #[allow(clippy::wrong_self_convention)]
     async fn from_buffer(&mut self, _: &str, _: &Vec<u8>) -> Result<()> {
-        Err(crate::error::into_error(Error::Unimplemented))
+        Err(Error::Unimplemented)
     }
 
     /// Use to download data from the filesystem into a buffer
     async fn to_buffer(&self, _: &str, _: &mut Vec<u8>) -> Result<()> {
-        Err(crate::error::into_error(Error::Unimplemented))
+        Err(Error::Unimplemented)
     }
 
     /// Use to remove data from the filesystem
     async fn remove(&mut self, _: &str, _: bool) -> Result<()> {
-        Err(crate::error::into_error(Error::Unimplemented))
+        Err(Error::Unimplemented)
     }
 
     /// Use to move data within the filesystem
     async fn move_item(&mut self, _: &str, _: &str) -> Result<()> {
-        Err(crate::error::into_error(Error::Unimplemented))
+        Err(Error::Unimplemented)
     }
 
     /// Use to create a directory within the filesystem.
     async fn create_directory(&mut self, _: &str, _: bool) -> Result<()> {
-        Err(crate::error::into_error(Error::Unimplemented))
+        Err(Error::Unimplemented)
     }
 
     /// Used to sync references within the filesystem for a file
     async fn sync_ref(&mut self, _: &str) -> Result<()> {
-        Err(crate::error::into_error(Error::Unimplemented))
+        Err(Error::Unimplemented)
     }
 
     /// Use to export the filesystem to a specific structure. Currently supports `Json`, `Toml`, and `Yaml`
@@ -224,51 +217,53 @@ impl ConstellationAdapter {
     pub fn modified(&self) -> i64 {
         self.inner_guard().modified().timestamp()
     }
-}
 
-#[cfg(not(target_arch = "wasm32"))]
-impl ConstellationAdapter {
-    pub fn modified(&self) -> DateTime<Utc> {
-        self.inner_guard().modified()
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl ConstellationAdapter {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    #[wasm_bindgen]
     pub fn version(&self) -> String {
         let constellation = self.inner_guard();
         constellation.version().to_string()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen]
     pub fn root_directory(&self) -> Directory {
         self.inner_guard().root_directory().clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    #[wasm_bindgen]
     pub fn current_directory(&self) -> Directory {
         self.inner_guard().current_directory().clone()
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn select(&mut self, path: &str) -> Result<()> {
-        self.inner_guard().select(path)
+    #[wasm_bindgen]
+    pub fn select(&mut self, path: &str) -> std::result::Result<(), JsError> {
+        self.inner_guard()
+            .select(path)
+            .map_err(crate::error::into_error)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn go_back(&mut self) -> Result<()> {
-        self.inner_guard().go_back()
+    #[wasm_bindgen]
+    pub fn go_back(&mut self) -> std::result::Result<(), JsError> {
+        self.inner_guard()
+            .go_back()
+            .map_err(crate::error::into_error)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn export(&self, r#type: ConstellationDataType) -> Result<String> {
-        self.inner_guard().export(r#type)
+    #[wasm_bindgen]
+    pub fn export(&self, data_type: ConstellationDataType) -> std::result::Result<String, JsError> {
+        self.inner_guard()
+            .export(data_type)
+            .map_err(crate::error::into_error)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn import(&mut self, r#type: ConstellationDataType, data: String) -> Result<()> {
-        self.inner_guard().import(r#type, data)
+    #[wasm_bindgen]
+    pub fn import(
+        &mut self,
+        data_type: ConstellationDataType,
+        data: String,
+    ) -> std::result::Result<(), JsError> {
+        self.inner_guard()
+            .import(data_type, data)
+            .map_err(crate::error::into_error)
     }
 }
 

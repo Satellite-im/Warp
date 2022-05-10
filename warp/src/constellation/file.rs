@@ -1,7 +1,9 @@
+#[cfg(not(target_arch = "wasm32"))]
 use super::Result;
 use chrono::{DateTime, Utc};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Seek, SeekFrom};
 use uuid::Uuid;
 
@@ -278,17 +280,17 @@ impl Hash {
 impl Hash {
     #[wasm_bindgen]
     pub fn sha1(&self) -> JsValue {
-        serde_wasm_bindgen::from_value(&self.sha1).unwrap()
+        serde_wasm_bindgen::to_value(&self.sha1).unwrap()
     }
 
     #[wasm_bindgen]
-    pub fn sha256(&self) -> Option<String> {
-        serde_wasm_bindgen::from_value(&self.sha256).unwrap()
+    pub fn sha256(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.sha256).unwrap()
     }
 
     #[wasm_bindgen]
-    pub fn blake2(&self) -> Option<String> {
-        serde_wasm_bindgen::from_value(&self.blake2).unwrap()
+    pub fn blake2(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.blake2).unwrap()
     }
 }
 

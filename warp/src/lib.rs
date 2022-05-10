@@ -1,10 +1,8 @@
 pub mod sync {
-    //TODO: use `alloc::sync::Arc` in the future
     pub use parking_lot::{Mutex, MutexGuard};
     pub use std::sync::Arc;
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub mod constellation;
 pub mod crypto;
 pub mod data;
