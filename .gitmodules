@@ -1,3 +1,3 @@
 [submodule "docs"]
 	path = docs
-	url = git@github.com:Satellite-im/warp-docs.git
+	url = https://github.com/Satellite-im/warp-docs
