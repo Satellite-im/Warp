@@ -80,7 +80,7 @@ impl SolanaWallet {
     ///
     /// ```
     ///
-    /// use warp::solana::wallet::SolanaWallet;
+    /// use warp_solana::wallet::SolanaWallet;
     /// let wallet = SolanaWallet::restore_from_mnemonic(None,
     ///         "morning caution dose lab six actress pond humble pause enact virtual train",
     /// ).unwrap();
@@ -119,7 +119,7 @@ impl SolanaWallet {
     ///
     /// ```
     ///
-    /// use warp::solana::wallet::SolanaWallet;
+    /// use warp_solana::wallet::SolanaWallet;
     /// let wallet = SolanaWallet::restore_from_mnemonic(None,
     ///         "morning caution dose lab six actress pond humble pause enact virtual train",
     /// ).unwrap();

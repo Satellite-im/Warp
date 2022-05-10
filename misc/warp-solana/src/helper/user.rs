@@ -6,9 +6,9 @@ use anchor_client::{
 
 pub use users::User;
 
-use crate::solana::error::UserError;
-use crate::solana::manager::SolanaManager;
-use crate::solana::wallet::SolanaWallet;
+use crate::error::UserError;
+use crate::manager::SolanaManager;
+use crate::wallet::SolanaWallet;
 use anchor_client::anchor_lang::prelude::ProgramError;
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anyhow::anyhow;

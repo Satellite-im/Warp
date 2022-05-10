@@ -1,6 +1,3 @@
-// Based on https://github.com/Satellite-im/Core-PWA/blob/dev/libraries/Solana/SolanaManager/SolanaManager.ts
-// Note: This is a reference for `warp-mp-solana`.
-
 pub mod error;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod helper;

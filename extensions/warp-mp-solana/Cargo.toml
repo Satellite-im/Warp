@@ -8,6 +8,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 
 [dependencies]
 warp = { path = "../../warp" }
+warp-solana = { path = "../../misc/warp-solana" }
 anyhow = "1"
 
 [dev-dependencies]

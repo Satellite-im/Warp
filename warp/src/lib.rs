@@ -16,8 +16,6 @@ pub mod multipass;
 pub mod pocket_dimension;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod raygun;
-
-pub mod solana;
 pub mod tesseract;
 
 #[cfg(not(target_arch = "wasm32"))]

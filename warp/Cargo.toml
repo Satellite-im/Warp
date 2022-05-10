@@ -45,7 +45,6 @@ toml = "0.5"
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1.5"
 bs58 = "0.4.0"
-tiny-bip39 = "0.8"
 hex = "0.4"
 
 derive_more = "0.99"

@@ -5,6 +5,7 @@ members = [
   "examples/*",
   "warp",
   "warp-bin",
-  "warp-extensions"
+  "warp-extensions",
+  "misc/warp-solana"
 ]
-exclude = ["misc/*"]
+exclude = ["misc/warp-tui"]

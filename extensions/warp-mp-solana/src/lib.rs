@@ -8,16 +8,17 @@ use warp::multipass::generator::generate_name;
 use warp::multipass::{identity::*, Friends, MultiPass};
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::pocket_dimension::PocketDimension;
-use warp::solana::anchor_client::solana_sdk::pubkey::Pubkey;
-use warp::solana::anchor_client::solana_sdk::signature::Keypair;
-use warp::solana::helper::friends::{DirectFriendRequest, DirectStatus};
-use warp::solana::helper::user::UserHelper;
-use warp::solana::manager::SolanaManager;
-use warp::solana::wallet::{PhraseType, SolanaWallet};
-use warp::solana::{anchor_client::Cluster, helper};
 use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::tesseract::Tesseract;
 use warp::Extension;
+
+use warp_solana::anchor_client::solana_sdk::pubkey::Pubkey;
+use warp_solana::anchor_client::solana_sdk::signature::Keypair;
+use warp_solana::helper::friends::{DirectFriendRequest, DirectStatus};
+use warp_solana::helper::user::UserHelper;
+use warp_solana::manager::SolanaManager;
+use warp_solana::wallet::{PhraseType, SolanaWallet};
+use warp_solana::{anchor_client::Cluster, helper};
 
 type Result<T> = std::result::Result<T, Error>;
 

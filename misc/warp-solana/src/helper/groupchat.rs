@@ -1,7 +1,6 @@
-use crate::crypto::x25519_dalek::PublicKey;
-use crate::solana::error::GroupError;
-use crate::solana::manager::SolanaManager;
-use crate::solana::wallet::SolanaWallet;
+use crate::error::GroupError;
+use crate::manager::SolanaManager;
+use crate::wallet::SolanaWallet;
 use anchor_client::anchor_lang::prelude::{ProgramError, Pubkey};
 use anchor_client::solana_client::rpc_filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType};
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
@@ -10,6 +9,7 @@ use anchor_client::{Client, ClientError, Cluster, Program};
 use anyhow::{anyhow, bail};
 pub use groupchats::{Group, Invitation};
 use std::rc::Rc;
+use warp::crypto::x25519_dalek::PublicKey;
 
 #[allow(unused)]
 pub struct GroupChat {
@@ -68,7 +68,7 @@ impl GroupChat {
         let group_key = self.group_address_from_id(id)?;
         let invite_key = self.invite_pubkey(payer, group_key)?;
 
-        let crypto_key = crate::crypto::generate(16);
+        let crypto_key = warp::crypto::generate(16);
 
         let invite = self.encrypt_invite(Invitation {
             sender: payer,
@@ -116,17 +116,17 @@ impl GroupChat {
             group_id,
             ..
         } = invitation;
-        let kp = ed25519_dalek::Keypair::from_bytes(&self.kp.to_bytes())?;
-        let secret = crate::crypto::exchange::ed25519_to_x25519(&kp);
+        let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&self.kp.to_bytes())?;
+        let secret = warp::crypto::exchange::ed25519_to_x25519(&kp);
 
-        let dh_key = crate::crypto::exchange::x25519_key_exchange(
+        let dh_key = warp::crypto::exchange::x25519_key_exchange(
             &secret,
             PublicKey::from(recipient.to_bytes()),
             None,
             true,
         );
 
-        let group_id = crate::crypto::cipher::aes256gcm_encrypt(&dh_key, group_id.as_bytes())
+        let group_id = warp::crypto::cipher::aes256gcm_encrypt(&dh_key, group_id.as_bytes())
             .map(hex::encode)?;
 
         Ok(Invitation {
@@ -144,17 +144,17 @@ impl GroupChat {
             ..
         } = invitation;
         let group_id = hex::decode(group_id)?;
-        let kp = crate::crypto::ed25519_dalek::Keypair::from_bytes(&self.kp.to_bytes())?;
-        let secret = crate::crypto::exchange::ed25519_to_x25519(&kp);
+        let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&self.kp.to_bytes())?;
+        let secret = warp::crypto::exchange::ed25519_to_x25519(&kp);
 
-        let dh_key = crate::crypto::exchange::x25519_key_exchange(
+        let dh_key = warp::crypto::exchange::x25519_key_exchange(
             &secret,
             PublicKey::from(sender.to_bytes()),
             None,
             true,
         );
 
-        let group_id = crate::crypto::cipher::aes256gcm_decrypt(&dh_key, &group_id)?;
+        let group_id = warp::crypto::cipher::aes256gcm_decrypt(&dh_key, &group_id)?;
         let group_id = String::from_utf8_lossy(&group_id).to_string();
 
         Ok(Invitation {
@@ -358,7 +358,7 @@ impl GroupChat {
     }
 
     fn group_hash(&self, id: &str) -> Vec<u8> {
-        crate::crypto::hash::sha256_hash(id.as_bytes(), None)
+        warp::crypto::hash::sha256_hash(id.as_bytes(), None)
     }
 
     pub fn group_address_from_id(&self, id: &str) -> anyhow::Result<Pubkey> {
