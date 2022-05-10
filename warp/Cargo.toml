@@ -50,6 +50,7 @@ hex = "0.4"
 derive_more = "0.99"
 
 wasm-bindgen = { version = "0.2" }
+wasm-bindgen-futures = "0.4.30"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = { version = "0.2" }

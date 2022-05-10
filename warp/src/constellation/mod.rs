@@ -10,10 +10,18 @@ use crate::error::Error;
 use crate::Extension;
 use anyhow::anyhow;
 use chrono::{DateTime, Utc};
+
 use directory::Directory;
 use item::Item;
 
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+use js_sys::Promise;
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::future_to_promise;
 
 pub(super) type Result<T> = std::result::Result<T, Error>;
 
@@ -267,50 +275,129 @@ impl ConstellationAdapter {
     }
 }
 
-// #[cfg(not(target_arch = "wasm32"))]
-// impl ConstellationAdapter {
-//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-//     pub async fn put(&mut self, remote: &str, local: &str) -> Result<()> {
-//         self.inner_guard().put(remote, local).await
-//     }
-//
-//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-//     pub async fn get(&self, remote: &str, local: &str) -> Result<()> {
-//         self.inner_guard().get(remote, local).await
-//     }
-//
-//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-//     pub async fn from_buffer(&mut self, remote: &str, data: Vec<u8>) -> Result<()> {
-//         self.inner_guard().from_buffer(remote, &data).await
-//     }
-//
-//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(skip))]
-//     pub async fn to_buffer(&self, remote: &str) -> Result<Vec<u8>> {
-//         let mut data = vec![];
-//         self.inner_guard().to_buffer(remote, &mut data).await?;
-//         Ok(data)
-//     }
-//
-//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-//     pub async fn remove(&mut self, remote: &str, recursive: bool) -> Result<()> {
-//         self.inner_guard().remove(remote, recursive).await
-//     }
-//
-//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-//     pub async fn move_item(&mut self, from: &str, to: &str) -> Result<()> {
-//         self.inner_guard().move_item(from, to).await
-//     }
-//
-//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-//     pub async fn create_directory(&mut self, remote: &str, recursive: bool) -> Result<()> {
-//         self.inner_guard().create_directory(remote, recursive).await
-//     }
-//
-//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-//     pub async fn sync_ref(&mut self, remote: &str) -> Result<()> {
-//         self.inner_guard().sync_ref(remote).await
-//     }
-// }
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl ConstellationAdapter {
+    #[wasm_bindgen]
+    pub fn put(&mut self, remote: String, local: String) -> Promise {
+        let inner = self.inner().clone();
+        future_to_promise(async move {
+            let mut inner = inner.lock();
+            inner
+                .put(&remote, &local)
+                .await
+                .map_err(crate::error::into_error)
+                .map_err(JsValue::from)?;
+
+            Ok(JsValue::from_bool(true))
+        })
+    }
+
+    #[wasm_bindgen]
+    pub fn get(&self, remote: String, local: String) -> Promise {
+        let inner = self.inner().clone();
+        future_to_promise(async move {
+            let inner = inner.lock();
+            inner
+                .get(&remote, &local)
+                .await
+                .map_err(crate::error::into_error)
+                .map_err(JsValue::from)?;
+
+            Ok(JsValue::from_bool(true))
+        })
+    }
+
+    #[wasm_bindgen]
+    pub fn from_buffer(&mut self, remote: String, data: Vec<u8>) -> Promise {
+        let inner = self.inner().clone();
+        future_to_promise(async move {
+            let mut inner = inner.lock();
+            inner
+                .from_buffer(&remote, &data)
+                .await
+                .map_err(crate::error::into_error)
+                .map_err(JsValue::from)?;
+
+            Ok(JsValue::from_bool(true))
+        })
+    }
+
+    #[wasm_bindgen]
+    pub fn to_buffer(&self, remote: String) -> Promise {
+        let inner = self.inner().clone();
+        future_to_promise(async move {
+            let inner = inner.lock();
+            let mut data = vec![];
+            inner
+                .to_buffer(&remote, &mut data)
+                .await
+                .map_err(crate::error::into_error)?;
+            let val = serde_wasm_bindgen::to_value(&data).unwrap();
+            Ok(val)
+        })
+    }
+
+    #[wasm_bindgen]
+    pub fn remove(&mut self, remote: String, recursive: bool) -> Promise {
+        let inner = self.inner().clone();
+        future_to_promise(async move {
+            let mut inner = inner.lock();
+            inner
+                .remove(&remote, recursive)
+                .await
+                .map_err(crate::error::into_error)
+                .map_err(JsValue::from)?;
+
+            Ok(JsValue::from_bool(true))
+        })
+    }
+
+    #[wasm_bindgen]
+    pub fn move_item(&mut self, from: String, to: String) -> Promise {
+        let inner = self.inner().clone();
+        future_to_promise(async move {
+            let mut inner = inner.lock();
+            inner
+                .move_item(&from, &to)
+                .await
+                .map_err(crate::error::into_error)
+                .map_err(JsValue::from)?;
+
+            Ok(JsValue::from_bool(true))
+        })
+    }
+
+    #[wasm_bindgen]
+    pub fn create_directory(&mut self, remote: String, recursive: bool) -> Promise {
+        let inner = self.inner().clone();
+        future_to_promise(async move {
+            let mut inner = inner.lock();
+            inner
+                .create_directory(&remote, recursive)
+                .await
+                .map_err(crate::error::into_error)
+                .map_err(JsValue::from)?;
+
+            Ok(JsValue::from_bool(true))
+        })
+    }
+
+    #[wasm_bindgen]
+    pub fn sync_ref(&mut self, remote: String) -> Promise {
+        let inner = self.inner().clone();
+        future_to_promise(async move {
+            let mut inner = inner.lock();
+            inner
+                .sync_ref(&remote)
+                .await
+                .map_err(crate::error::into_error)
+                .map_err(JsValue::from)?;
+
+            Ok(JsValue::from_bool(true))
+        })
+    }
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {

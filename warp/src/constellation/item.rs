@@ -10,6 +10,7 @@ use super::file::File;
 use super::Result;
 use crate::error::Error;
 
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 /// `Item` is a type that handles both `File` and `Directory`
