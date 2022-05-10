@@ -264,7 +264,7 @@ async fn main() -> AnyResult<()> {
 
     match (cli.ui, cli.cli, cli.http, cli.command) {
         //<TUI> <CLI> <HTTP>
-        (true, false, false, None) => todo!(),
+        (true, false, false, None) => terminal::load_terminal().await?,
         (false, true, false, None) => todo!(),
         (false, false, true, None) => http::http_main(&mut manager).await?,
         (false, false, false, None) => {

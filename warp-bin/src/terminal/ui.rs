@@ -1,4 +1,4 @@
-use crate::WarpApp;
+use super::WarpApp;
 use tui::backend::Backend;
 use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use tui::style::{Color, Modifier, Style};
@@ -6,8 +6,8 @@ use tui::text::{Span, Spans};
 use tui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Row, Table, Tabs, Wrap};
 use tui::Frame;
 use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget};
-use warp_constellation::item::Item;
-use warp_data::DataType;
+use warp::constellation::item::Item;
+use warp::data::DataType;
 
 impl<'a> WarpApp<'a> {
     pub fn draw_ui<B: Backend>(&mut self, frame: &mut Frame<B>) {
@@ -149,7 +149,6 @@ impl<'a> WarpApp<'a> {
             .hooks_trigger
             .clone()
             .lock()
-            .unwrap()
             .iter()
             .map(|i| ListItem::new(vec![Spans::from(Span::from(i.to_string()))]))
             .collect();
@@ -204,8 +203,8 @@ impl<'a> WarpApp<'a> {
                     format!("{}", item.size()),
                     format!("{}", item.creation()),
                     if item.is_file() {
-                        if let Item::File(file) = item {
-                            file.hash().sha256.unwrap_or_default()
+                        if let Ok(file) = item.get_file() {
+                            file.hash().sha256().unwrap_or_default()
                         } else {
                             String::new()
                         }
@@ -240,7 +239,7 @@ impl<'a> WarpApp<'a> {
             .split(area);
 
         let cache = match self.cache.as_ref() {
-            Some(cache) => cache.lock().unwrap(),
+            Some(cache) => cache.lock(),
             None => return,
         };
 
