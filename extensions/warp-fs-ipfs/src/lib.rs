@@ -568,8 +568,8 @@ pub mod ffi {
     use crate::IpfsFileSystem;
     use std::ffi::{c_void, CStr};
     use std::os::raw::c_char;
-    use warp::constellation::ConstellationTraitObject;
-    use warp::pocket_dimension::PocketDimensionTraitObject;
+    use warp::constellation::ConstellationAdapter;
+    use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::sync::{Arc, Mutex};
 
     #[allow(clippy::missing_safety_doc)]
@@ -578,14 +578,14 @@ pub mod ffi {
         let mut ipfs = IpfsFileSystem::new();
 
         if pd.is_null() {
-            let pd = &*(pd as *mut PocketDimensionTraitObject);
+            let pd = &*(pd as *mut PocketDimensionAdapter);
             ipfs.set_cache(pd.inner().clone());
         }
 
-        let obj = Box::new(ConstellationTraitObject::new(Arc::new(Mutex::new(
-            Box::new(ipfs),
-        ))));
-        Box::into_raw(obj) as *mut ConstellationTraitObject as *mut c_void
+        let obj = Box::new(ConstellationAdapter::new(Arc::new(Mutex::new(Box::new(
+            ipfs,
+        )))));
+        Box::into_raw(obj) as *mut ConstellationAdapter as *mut c_void
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -606,13 +606,13 @@ pub mod ffi {
         };
 
         if pd.is_null() {
-            let pd = &*(pd as *mut PocketDimensionTraitObject);
+            let pd = &*(pd as *mut PocketDimensionAdapter);
             ipfs.set_cache(pd.inner().clone());
         }
 
-        let obj = Box::new(ConstellationTraitObject::new(Arc::new(Mutex::new(
-            Box::new(ipfs),
-        ))));
-        Box::into_raw(obj) as *mut ConstellationTraitObject as *mut c_void
+        let obj = Box::new(ConstellationAdapter::new(Arc::new(Mutex::new(Box::new(
+            ipfs,
+        )))));
+        Box::into_raw(obj) as *mut ConstellationAdapter as *mut c_void
     }
 }

@@ -113,13 +113,13 @@ pub trait PocketDimension: Extension + Send + Sync {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct PocketDimensionTraitObject {
+pub struct PocketDimensionAdapter {
     object: Arc<Mutex<Box<dyn PocketDimension>>>,
 }
 
-impl PocketDimensionTraitObject {
+impl PocketDimensionAdapter {
     pub fn new(object: Arc<Mutex<Box<dyn PocketDimension>>>) -> Self {
-        PocketDimensionTraitObject { object }
+        PocketDimensionAdapter { object }
     }
 
     pub fn inner(&self) -> Arc<Mutex<Box<dyn PocketDimension>>> {
@@ -132,7 +132,7 @@ impl PocketDimensionTraitObject {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl PocketDimensionTraitObject {
+impl PocketDimensionAdapter {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn add_data(&mut self, dim: DataType, data: DataObject) -> Result<()> {
         self.inner_guard().add_data(dim, &data)
@@ -160,7 +160,7 @@ impl PocketDimensionTraitObject {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl PocketDimensionTraitObject {
+impl PocketDimensionAdapter {
     pub fn get_data(&self, dim: DataType, query: Option<QueryBuilder>) -> Result<Vec<DataObject>> {
         self.inner_guard().get_data(dim, query.as_ref())
     }
@@ -168,7 +168,7 @@ impl PocketDimensionTraitObject {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-impl PocketDimensionTraitObject {
+impl PocketDimensionAdapter {
     #[wasm_bindgen]
     pub fn get_data(&self, dim: DataType, query: Option<QueryBuilder>) -> Result<Vec<JsValue>> {
         self.inner_guard().get_data(dim, query.as_ref()).map(|s| {
@@ -183,12 +183,12 @@ impl PocketDimensionTraitObject {
 pub mod ffi {
     use crate::data::{Data, DataType};
     use crate::pocket_dimension::query::QueryBuilder;
-    use crate::pocket_dimension::PocketDimensionTraitObject;
+    use crate::pocket_dimension::PocketDimensionAdapter;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocket_dimension_add_data(
-        ctx: *mut PocketDimensionTraitObject,
+        ctx: *mut PocketDimensionAdapter,
         dimension: *mut DataType,
         data: *mut Data,
     ) -> bool {
@@ -214,7 +214,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocket_dimension_has_data(
-        ctx: *mut PocketDimensionTraitObject,
+        ctx: *mut PocketDimensionAdapter,
         dimension: *mut DataType,
         query: *mut QueryBuilder,
     ) -> bool {
@@ -240,7 +240,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocket_dimension_get_data(
-        ctx: *mut PocketDimensionTraitObject,
+        ctx: *mut PocketDimensionAdapter,
         dimension: *mut DataType,
         query: *mut QueryBuilder,
     ) -> *const Data {
@@ -272,7 +272,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocket_dimension_size(
-        ctx: *mut PocketDimensionTraitObject,
+        ctx: *mut PocketDimensionAdapter,
         dimension: *mut DataType,
         query: *mut QueryBuilder,
     ) -> i64 {
@@ -298,7 +298,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocket_dimension_count(
-        ctx: *mut PocketDimensionTraitObject,
+        ctx: *mut PocketDimensionAdapter,
         dimension: *mut DataType,
         query: *mut QueryBuilder,
     ) -> i64 {
@@ -324,7 +324,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocket_dimension_empty(
-        ctx: *mut PocketDimensionTraitObject,
+        ctx: *mut PocketDimensionAdapter,
         dimension: *mut DataType,
     ) -> bool {
         if ctx.is_null() {
@@ -343,7 +343,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn pocket_dimension_free(ctx: *mut PocketDimensionTraitObject) {
+    pub unsafe extern "C" fn pocket_dimension_free(ctx: *mut PocketDimensionAdapter) {
         if ctx.is_null() {
             return;
         }

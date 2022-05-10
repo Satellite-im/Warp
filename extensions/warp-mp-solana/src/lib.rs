@@ -606,8 +606,8 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
 
 pub mod ffi {
     use std::ffi::c_void;
-    use warp::multipass::MultiPassTraitObject;
-    use warp::pocket_dimension::PocketDimensionTraitObject;
+    use warp::multipass::MultiPassAdapter;
+    use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::sync::{Arc, Mutex};
     use warp::tesseract::Tesseract;
 
@@ -630,14 +630,14 @@ pub mod ffi {
         match pocketdimension.is_null() {
             true => {}
             false => {
-                let pd = &*(pocketdimension as *mut PocketDimensionTraitObject);
+                let pd = &*(pocketdimension as *mut PocketDimensionAdapter);
                 account.set_cache(pd.inner().clone());
             }
         }
         account.set_tesseract(Arc::new(Mutex::new(tesseract)));
 
-        let mp = MultiPassTraitObject::new(Arc::new(Mutex::new(Box::new(account))));
-        Box::into_raw(Box::new(mp)) as *mut MultiPassTraitObject as *mut c_void
+        let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
+        Box::into_raw(Box::new(mp)) as *mut MultiPassAdapter as *mut c_void
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -657,14 +657,14 @@ pub mod ffi {
         match pocketdimension.is_null() {
             true => {}
             false => {
-                let pd = &*(pocketdimension as *mut PocketDimensionTraitObject);
+                let pd = &*(pocketdimension as *mut PocketDimensionAdapter);
                 account.set_cache(pd.inner().clone());
             }
         }
         account.set_tesseract(Arc::new(Mutex::new(tesseract)));
 
-        let mp = MultiPassTraitObject::new(Arc::new(Mutex::new(Box::new(account))));
-        Box::into_raw(Box::new(mp)) as *mut MultiPassTraitObject as *mut c_void
+        let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
+        Box::into_raw(Box::new(mp)) as *mut MultiPassAdapter as *mut c_void
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -684,13 +684,13 @@ pub mod ffi {
         match pocketdimension.is_null() {
             true => {}
             false => {
-                let pd = &*(pocketdimension as *mut PocketDimensionTraitObject);
+                let pd = &*(pocketdimension as *mut PocketDimensionAdapter);
                 account.set_cache(pd.inner().clone());
             }
         }
         account.set_tesseract(Arc::new(Mutex::new(tesseract)));
 
-        let mp = MultiPassTraitObject::new(Arc::new(Mutex::new(Box::new(account))));
-        Box::into_raw(Box::new(mp)) as *mut MultiPassTraitObject as *mut c_void
+        let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
+        Box::into_raw(Box::new(mp)) as *mut MultiPassAdapter as *mut c_void
     }
 }

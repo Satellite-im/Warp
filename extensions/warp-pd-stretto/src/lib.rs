@@ -304,18 +304,18 @@ mod test {
 pub mod ffi {
     use crate::StrettoClient;
     use std::ffi::c_void;
-    use warp::pocket_dimension::PocketDimensionTraitObject;
+    use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::sync::{Arc, Mutex};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocketdimension_stretto_new() -> *mut c_void {
         let client = match StrettoClient::new() {
-            Ok(client) => PocketDimensionTraitObject::new(Arc::new(Mutex::new(Box::new(client)))),
+            Ok(client) => PocketDimensionAdapter::new(Arc::new(Mutex::new(Box::new(client)))),
             Err(_) => return std::ptr::null_mut(),
         };
 
         let obj = Box::new(client);
-        Box::into_raw(obj) as *mut PocketDimensionTraitObject as *mut c_void
+        Box::into_raw(obj) as *mut PocketDimensionAdapter as *mut c_void
     }
 }

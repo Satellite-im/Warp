@@ -199,13 +199,13 @@ impl<S: AsRef<str>> From<S> for ConstellationDataType {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct ConstellationTraitObject {
+pub struct ConstellationAdapter {
     object: Arc<Mutex<Box<dyn Constellation>>>,
 }
 
-impl ConstellationTraitObject {
-    pub fn new(object: Arc<Mutex<Box<dyn Constellation>>>) -> ConstellationTraitObject {
-        ConstellationTraitObject { object }
+impl ConstellationAdapter {
+    pub fn new(object: Arc<Mutex<Box<dyn Constellation>>>) -> ConstellationAdapter {
+        ConstellationAdapter { object }
     }
 
     pub fn inner(&self) -> Arc<Mutex<Box<dyn Constellation>>> {
@@ -219,7 +219,7 @@ impl ConstellationTraitObject {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-impl ConstellationTraitObject {
+impl ConstellationAdapter {
     #[wasm_bindgen]
     pub fn modified(&self) -> i64 {
         self.inner_guard().modified().timestamp()
@@ -227,14 +227,14 @@ impl ConstellationTraitObject {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl ConstellationTraitObject {
+impl ConstellationAdapter {
     pub fn modified(&self) -> DateTime<Utc> {
         self.inner_guard().modified()
     }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl ConstellationTraitObject {
+impl ConstellationAdapter {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn version(&self) -> String {
         let constellation = self.inner_guard();
@@ -273,7 +273,7 @@ impl ConstellationTraitObject {
 }
 
 // #[cfg(not(target_arch = "wasm32"))]
-// impl ConstellationTraitObject {
+// impl ConstellationAdapter {
 //     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 //     pub async fn put(&mut self, remote: &str, local: &str) -> Result<()> {
 //         self.inner_guard().put(remote, local).await
@@ -320,14 +320,14 @@ impl ConstellationTraitObject {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::constellation::directory::Directory;
-    use crate::constellation::{ConstellationDataType, ConstellationTraitObject};
+    use crate::constellation::{ConstellationAdapter, ConstellationDataType};
     use std::ffi::{CStr, CString};
     use std::os::raw::c_char;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_select(
-        ctx: *mut ConstellationTraitObject,
+        ctx: *mut ConstellationAdapter,
         name: *const c_char,
     ) -> bool {
         if ctx.is_null() {
@@ -346,7 +346,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn constellation_go_back(ctx: *mut ConstellationTraitObject) -> bool {
+    pub unsafe extern "C" fn constellation_go_back(ctx: *mut ConstellationAdapter) -> bool {
         if ctx.is_null() {
             return false;
         }
@@ -358,7 +358,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_open_directory(
-        ctx: *mut ConstellationTraitObject,
+        ctx: *mut ConstellationAdapter,
         name: *const c_char,
     ) -> *mut Directory {
         if ctx.is_null() {
@@ -381,7 +381,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_root_directory(
-        ctx: *mut ConstellationTraitObject,
+        ctx: *mut ConstellationAdapter,
     ) -> *const Directory {
         if ctx.is_null() {
             return std::ptr::null_mut();
@@ -395,7 +395,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_current_directory(
-        ctx: *mut ConstellationTraitObject,
+        ctx: *mut ConstellationAdapter,
     ) -> *mut Directory {
         if ctx.is_null() {
             return std::ptr::null_mut();
@@ -409,7 +409,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_current_directory_mut(
-        ctx: *mut ConstellationTraitObject,
+        ctx: *mut ConstellationAdapter,
     ) -> *mut Directory {
         if ctx.is_null() {
             return std::ptr::null_mut();
@@ -428,7 +428,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_put(
-        ctx: *mut ConstellationTraitObject,
+        ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         local: *const c_char,
     ) -> bool {
@@ -458,7 +458,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_from_buffer(
-        ctx: *mut ConstellationTraitObject,
+        ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         buffer: *const u8,
         buffer_size: u32,
@@ -496,7 +496,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_get(
-        ctx: *mut ConstellationTraitObject,
+        ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         local: *const c_char,
     ) -> bool {
@@ -524,7 +524,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_to_buffer(
-        ctx: *mut ConstellationTraitObject,
+        ctx: *mut ConstellationAdapter,
         remote: *const c_char,
     ) -> *mut u8 {
         if ctx.is_null() {
@@ -567,7 +567,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_remove(
-        ctx: *mut ConstellationTraitObject,
+        ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         recursive: bool,
     ) -> bool {
@@ -589,7 +589,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_create_directory(
-        ctx: *mut ConstellationTraitObject,
+        ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         recursive: bool,
     ) -> bool {
@@ -616,7 +616,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_move_item(
-        ctx: *mut ConstellationTraitObject,
+        ctx: *mut ConstellationAdapter,
         src: *const c_char,
         dst: *const c_char,
     ) -> bool {
@@ -643,7 +643,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_sync_ref(
-        ctx: *mut ConstellationTraitObject,
+        ctx: *mut ConstellationAdapter,
         src: *const c_char,
     ) -> bool {
         if ctx.is_null() {
@@ -664,7 +664,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_export(
-        ctx: *mut ConstellationTraitObject,
+        ctx: *mut ConstellationAdapter,
         datatype: *mut ConstellationDataType,
     ) -> *mut c_char {
         if ctx.is_null() {
@@ -691,7 +691,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_export_json(
-        ctx: *mut ConstellationTraitObject,
+        ctx: *mut ConstellationAdapter,
     ) -> *mut c_char {
         if ctx.is_null() {
             return std::ptr::null_mut();
@@ -712,7 +712,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_import_json(
-        ctx: *mut ConstellationTraitObject,
+        ctx: *mut ConstellationAdapter,
         data: *const c_char,
     ) -> bool {
         if ctx.is_null() {
@@ -733,7 +733,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn constellation_free(ctx: *mut ConstellationTraitObject) {
+    pub unsafe extern "C" fn constellation_free(ctx: *mut ConstellationAdapter) {
         let constellation = Box::from_raw(ctx);
         drop(constellation)
     }

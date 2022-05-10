@@ -504,7 +504,7 @@ pub mod ffi {
     use crate::FlatfileStorage;
     use std::ffi::{c_void, CStr};
     use std::os::raw::c_char;
-    use warp::pocket_dimension::PocketDimensionTraitObject;
+    use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::sync::{Arc, Mutex};
 
     #[allow(clippy::missing_safety_doc)]
@@ -525,13 +525,11 @@ pub mod ffi {
         };
 
         let flatfile = match FlatfileStorage::new_with_index_file(path, index_file) {
-            Ok(flatfile) => {
-                PocketDimensionTraitObject::new(Arc::new(Mutex::new(Box::new(flatfile))))
-            }
+            Ok(flatfile) => PocketDimensionAdapter::new(Arc::new(Mutex::new(Box::new(flatfile)))),
             Err(_) => return std::ptr::null_mut(),
         };
 
         let obj = Box::new(flatfile);
-        Box::into_raw(obj) as *mut PocketDimensionTraitObject as *mut c_void
+        Box::into_raw(obj) as *mut PocketDimensionAdapter as *mut c_void
     }
 }
