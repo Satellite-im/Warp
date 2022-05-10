@@ -1,3 +1,5 @@
+pub mod solana;
+
 use anyhow::anyhow;
 use warp::crypto::rand::Rng;
 use warp::data::{DataObject, DataType};
@@ -8,16 +10,17 @@ use warp::multipass::generator::generate_name;
 use warp::multipass::{identity::*, Friends, MultiPass};
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::pocket_dimension::PocketDimension;
-use warp::solana::anchor_client::solana_sdk::pubkey::Pubkey;
-use warp::solana::anchor_client::solana_sdk::signature::Keypair;
-use warp::solana::helper::friends::{DirectFriendRequest, DirectStatus};
-use warp::solana::helper::user::UserHelper;
-use warp::solana::manager::SolanaManager;
-use warp::solana::wallet::{PhraseType, SolanaWallet};
-use warp::solana::{anchor_client::Cluster, helper};
 use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::tesseract::Tesseract;
 use warp::Extension;
+
+use crate::solana::helper::friends::{DirectFriendRequest, DirectStatus};
+use crate::solana::helper::user::UserHelper;
+use crate::solana::manager::SolanaManager;
+use crate::solana::wallet::{PhraseType, SolanaWallet};
+use crate::solana::{anchor_client::Cluster, helper};
+use anchor_client::solana_sdk::pubkey::Pubkey;
+use anchor_client::solana_sdk::signature::Keypair;
 
 type Result<T> = std::result::Result<T, Error>;
 

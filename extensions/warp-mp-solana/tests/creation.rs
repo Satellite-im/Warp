@@ -5,10 +5,10 @@ mod tests {
     #[allow(unused)]
     use warp::multipass::identity::{Identifier, IdentityUpdate, PublicKey};
     use warp::multipass::MultiPass;
-    use warp::solana::anchor_client::anchor_lang::prelude::Pubkey;
-    use warp::solana::wallet::{PhraseType, SolanaWallet};
     use warp::sync::{Arc, Mutex};
     use warp::tesseract::Tesseract;
+    use warp_mp_solana::solana::anchor_client::anchor_lang::prelude::Pubkey;
+    use warp_mp_solana::solana::wallet::{PhraseType, SolanaWallet};
     use warp_mp_solana::SolanaAccount;
 
     #[allow(unused)]
