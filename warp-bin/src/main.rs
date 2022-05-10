@@ -11,17 +11,16 @@ use comfy_table::Table;
 use log::{error, info, warn};
 use manager::ModuleManager;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail, Result as AnyResult};
 use serde_json::Value;
-
 use warp::constellation::{Constellation, ConstellationDataType};
 use warp::crypto::zeroize::Zeroize;
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, PublicKey};
 use warp::pocket_dimension::PocketDimension;
+use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
 use warp_configuration::Config;
 use warp_extensions::fs_ipfs::IpfsFileSystem;
@@ -189,7 +188,7 @@ async fn main() -> AnyResult<()> {
     };
 
     //TODO: push this to TUI
-    tesseract.lock().unwrap().unlock(&key)?;
+    tesseract.lock().unlock(&key)?;
 
     key.zeroize();
 
@@ -217,7 +216,7 @@ async fn main() -> AnyResult<()> {
     }
 
     if config.modules.constellation {
-        let tesseract = tesseract.lock().unwrap();
+        let tesseract = tesseract.lock();
         register_fs_ext(&cli, &config, &mut manager, &tesseract)?;
         if let Some(fs_ext) = cli
             .constellation_module
@@ -277,12 +276,12 @@ async fn main() -> AnyResult<()> {
         //TODO: Store keyfile and datastore in a specific path.
         (false, false, false, Some(command)) => match command {
             Command::Import { key, value } => {
-                let mut tesseract = tesseract.lock().unwrap();
+                let mut tesseract = tesseract.lock();
                 tesseract.set(&key, &value)?;
                 tesseract.to_file(warp_directory.join("datastore"))?;
             }
             Command::Export { key } => {
-                let tesseract = tesseract.lock().unwrap();
+                let tesseract = tesseract.lock();
                 let data = tesseract.retrieve(&key)?;
                 let mut table = Table::new();
                 table
@@ -292,7 +291,7 @@ async fn main() -> AnyResult<()> {
                 println!("{table}")
             }
             Command::Unset { key } => {
-                let mut tesseract = tesseract.lock().unwrap();
+                let mut tesseract = tesseract.lock();
                 tesseract.delete(&key)?;
                 tesseract.to_file(warp_directory.join("datastore"))?;
             }
@@ -304,7 +303,7 @@ async fn main() -> AnyResult<()> {
                 match tokio::task::spawn_blocking(
                     move || -> anyhow::Result<warp::multipass::identity::Identity> {
                         let username = username.as_deref();
-                        let mut account = account.lock().unwrap();
+                        let mut account = account.lock();
                         account.create_identity(username, None)?;
                         account.get_own_identity().map_err(|e| anyhow!(e))
                     },
@@ -319,10 +318,7 @@ async fn main() -> AnyResult<()> {
                             bs58::encode(identity.public_key().into_bytes()).into_string()
                         ); // Using bs58 due to account being solana related.
                         println!();
-                        tesseract
-                            .lock()
-                            .unwrap()
-                            .to_file(warp_directory.join("datastore"))?;
+                        tesseract.lock().to_file(warp_directory.join("datastore"))?;
                     }
                     Err(e) => {
                         warn!("Could not create account: {}", e);
@@ -330,7 +326,7 @@ async fn main() -> AnyResult<()> {
                 };
             }
             Command::Dump => {
-                let tesseract = tesseract.lock().unwrap();
+                let tesseract = tesseract.lock();
                 let mut table = Table::new();
                 table.set_header(vec!["Key", "Value"]);
                 for (key, val) in tesseract.export()? {
@@ -340,10 +336,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::ViewAccount { pubkey } => {
                 let account = manager.get_account()?;
-                let account = match account.lock() {
-                    Ok(a) => a,
-                    Err(e) => e.into_inner(),
-                };
+                let account = account.lock();
 
                 let ident = match pubkey {
                     Some(puk) => {
@@ -362,10 +355,7 @@ async fn main() -> AnyResult<()> {
                             bs58::encode(ident.public_key().into_bytes()).into_string()
                         );
                         println!();
-                        tesseract
-                            .lock()
-                            .unwrap()
-                            .to_file(warp_directory.join("datastore"))?;
+                        tesseract.lock().to_file(warp_directory.join("datastore"))?;
                     }
                     Err(e) => {
                         println!("Error obtaining account: {}", e);
@@ -375,10 +365,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::ListAllRequest => {
                 let account = manager.get_account()?;
-                let account = match account.lock() {
-                    Ok(a) => a,
-                    Err(e) => e.into_inner(),
-                };
+                let account = account.lock();
 
                 let mut table = Table::new();
                 table.set_header(vec!["From", "To", "Status"]);
@@ -395,10 +382,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::ListFriends => {
                 let account = manager.get_account()?;
-                let account = match account.lock() {
-                    Ok(a) => a,
-                    Err(e) => e.into_inner(),
-                };
+                let account = account.lock();
                 let friends = account.list_friends()?;
                 let mut table = Table::new();
                 table.set_header(vec!["Username", "Address"]);
@@ -412,10 +396,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::ListIncomingRequest => {
                 let account = manager.get_account()?;
-                let account = match account.lock() {
-                    Ok(a) => a,
-                    Err(e) => e.into_inner(),
-                };
+                let account = account.lock();
 
                 let mut table = Table::new();
                 table.set_header(vec!["From", "Address", "Status"]);
@@ -431,10 +412,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::ListOutgoingRequest => {
                 let account = manager.get_account()?;
-                let account = match account.lock() {
-                    Ok(a) => a,
-                    Err(e) => e.into_inner(),
-                };
+                let account = account.lock();
 
                 let mut table = Table::new();
                 table.set_header(vec!["To", "Address", "Status"]);
@@ -450,10 +428,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::SendFriendRequest { pubkey } => {
                 let account = manager.get_account()?;
-                let mut account = match account.lock() {
-                    Ok(a) => a,
-                    Err(e) => e.into_inner(),
-                };
+                let mut account = account.lock();
                 let decoded_pubkey = bs58::decode(pubkey).into_vec().map(PublicKey::from_vec)?;
                 account.send_request(decoded_pubkey.clone())?;
                 let ident = account.get_identity(Identifier::from(decoded_pubkey))?;
@@ -465,10 +440,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::AcceptFriendRequest { pubkey } => {
                 let account = manager.get_account()?;
-                let mut account = match account.lock() {
-                    Ok(a) => a,
-                    Err(e) => e.into_inner(),
-                };
+                let mut account = account.lock();
                 let decoded_pubkey = bs58::decode(pubkey).into_vec().map(PublicKey::from_vec)?;
                 account.accept_request(decoded_pubkey.clone())?;
                 let friend = account.get_identity(Identifier::from(decoded_pubkey))?;
@@ -480,10 +452,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::DenyFriendRequest { pubkey } => {
                 let account = manager.get_account()?;
-                let mut account = match account.lock() {
-                    Ok(a) => a,
-                    Err(e) => e.into_inner(),
-                };
+                let mut account = account.lock();
                 let decoded_pubkey = bs58::decode(pubkey).into_vec().map(PublicKey::from_vec)?;
                 account.deny_request(decoded_pubkey.clone())?;
                 let friend = account.get_identity(Identifier::from(decoded_pubkey))?;
@@ -495,10 +464,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::RemoveFriend { pubkey } => {
                 let account = manager.get_account()?;
-                let mut account = match account.lock() {
-                    Ok(a) => a,
-                    Err(e) => e.into_inner(),
-                };
+                let mut account = account.lock();
                 let decoded_pubkey = bs58::decode(pubkey).into_vec().map(PublicKey::from_vec)?;
                 account.remove_friend(decoded_pubkey.clone())?;
                 let friend = account.get_identity(Identifier::from(decoded_pubkey))?;
@@ -520,10 +486,7 @@ async fn main() -> AnyResult<()> {
                 }
 
                 let filesystem = manager.get_filesystem()?;
-                let mut filesystem = match filesystem.lock() {
-                    Ok(a) => a,
-                    Err(e) => e.into_inner(),
-                };
+                let mut filesystem = filesystem.lock();
 
                 let remote =
                     remote.unwrap_or(file.file_name().unwrap().to_string_lossy().to_string());
@@ -544,10 +507,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::DownloadFile { remote, local } => {
                 let filesystem = manager.get_filesystem()?;
-                let filesystem = match filesystem.lock() {
-                    Ok(a) => a,
-                    Err(e) => e.into_inner(),
-                };
+                let filesystem = filesystem.lock();
 
                 match filesystem.get(&remote, &local).await {
                     Ok(_) => println!("File is downloaded to {local}"),
@@ -556,10 +516,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::DeleteFile { remote } => {
                 let filesystem = manager.get_filesystem()?;
-                let mut filesystem = match filesystem.lock() {
-                    Ok(a) => a,
-                    Err(e) => e.into_inner(),
-                };
+                let mut filesystem = filesystem.lock();
 
                 match filesystem.remove(&remote, true).await {
                     Ok(_) => println!("{remote} is deleted"),
@@ -568,10 +525,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::FileReference { remote } => {
                 let filesystem = manager.get_filesystem()?;
-                let mut filesystem = match filesystem.lock() {
-                    Ok(a) => a,
-                    Err(e) => e.into_inner(),
-                };
+                let mut filesystem = filesystem.lock();
 
                 match filesystem.sync_ref(&remote).await {
                     Ok(_) => {}
@@ -620,10 +574,7 @@ async fn main() -> AnyResult<()> {
                 };
 
                 let cache = manager.get_cache()?;
-                let mut cache = match cache.lock() {
-                    Ok(a) => a,
-                    Err(e) => e.into_inner(),
-                };
+                let mut cache = cache.lock();
 
                 if !data_type.is_empty() {
                     for data_type in data_type.iter() {
@@ -664,8 +615,8 @@ fn import_from_cache(
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
     handle: Arc<Mutex<Box<dyn Constellation>>>,
 ) -> AnyResult<DataObject> {
-    let mut handle = handle.lock().unwrap();
-    let cache = cache.lock().unwrap();
+    let mut handle = handle.lock();
+    let cache = cache.lock();
     let obj = cache.get_data(warp::data::DataType::DataExport, None)?;
 
     if !obj.is_empty() {
@@ -686,8 +637,8 @@ fn export_to_cache(
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
     handle: Arc<Mutex<Box<dyn Constellation>>>,
 ) -> AnyResult<()> {
-    let handle = handle.lock().unwrap();
-    let mut cache = cache.lock().unwrap();
+    let handle = handle.lock();
+    let mut cache = cache.lock();
 
     let data = handle.export(ConstellationDataType::Json)?;
 

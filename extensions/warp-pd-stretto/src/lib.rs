@@ -304,8 +304,8 @@ mod test {
 pub mod ffi {
     use crate::StrettoClient;
     use std::ffi::c_void;
-    use std::sync::{Arc, Mutex};
     use warp::pocket_dimension::PocketDimensionTraitObject;
+    use warp::sync::{Arc, Mutex};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]

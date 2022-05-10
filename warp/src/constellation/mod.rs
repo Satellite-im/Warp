@@ -3,7 +3,8 @@ pub mod file;
 pub mod item;
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+
+use crate::sync::{Arc, Mutex, MutexGuard};
 
 use crate::error::Error;
 use crate::Extension;
@@ -212,10 +213,7 @@ impl ConstellationTraitObject {
     }
 
     pub fn inner_guard(&self) -> MutexGuard<Box<dyn Constellation>> {
-        match self.object.lock() {
-            Ok(i) => i,
-            Err(e) => e.into_inner(),
-        }
+        self.object.lock()
     }
 }
 

@@ -1,8 +1,10 @@
-use std::sync::{Arc, Mutex};
 use warp::error::Error;
 use warp::{
-    constellation::Constellation, multipass::MultiPass, pocket_dimension::PocketDimension,
+    constellation::Constellation,
+    multipass::MultiPass,
+    pocket_dimension::PocketDimension,
     raygun::RayGun,
+    sync::{Arc, Mutex},
 };
 
 pub trait Information {
@@ -18,10 +20,10 @@ pub struct FileSystem {
 
 impl Information for FileSystem {
     fn name(&self) -> String {
-        self.handle.lock().unwrap().name()
+        self.handle.lock().name()
     }
     fn id(&self) -> String {
-        self.handle.lock().unwrap().id()
+        self.handle.lock().id()
     }
 }
 
@@ -45,10 +47,10 @@ impl AsRef<Arc<Mutex<Box<dyn PocketDimension>>>> for Cache {
 
 impl Information for Cache {
     fn name(&self) -> String {
-        self.handle.lock().unwrap().name()
+        self.handle.lock().name()
     }
     fn id(&self) -> String {
-        self.handle.lock().unwrap().id()
+        self.handle.lock().id()
     }
 }
 
@@ -66,10 +68,10 @@ impl AsRef<Arc<Mutex<Box<dyn MultiPass>>>> for Account {
 
 impl Information for Messaging {
     fn name(&self) -> String {
-        self.handle.lock().unwrap().name()
+        self.handle.lock().name()
     }
     fn id(&self) -> String {
-        self.handle.lock().unwrap().id()
+        self.handle.lock().id()
     }
 }
 
@@ -87,10 +89,10 @@ impl AsRef<Arc<Mutex<Box<dyn RayGun>>>> for Messaging {
 
 impl Information for Account {
     fn name(&self) -> String {
-        self.handle.lock().unwrap().name()
+        self.handle.lock().name()
     }
     fn id(&self) -> String {
-        self.handle.lock().unwrap().id()
+        self.handle.lock().id()
     }
 }
 
@@ -107,7 +109,7 @@ impl ModuleManager {
         if self
             .filesystem
             .iter()
-            .filter(|fs| fs.id() == handle.lock().unwrap().id())
+            .filter(|fs| fs.id() == handle.lock().id())
             .count()
             != 0
         {
@@ -182,7 +184,7 @@ impl ModuleManager {
         if self
             .cache
             .iter()
-            .filter(|cs| cs.id() == handle.lock().unwrap().id())
+            .filter(|cs| cs.id() == handle.lock().id())
             .count()
             != 0
         {
@@ -228,7 +230,7 @@ impl ModuleManager {
         if self
             .account
             .iter()
-            .filter(|cs| cs.id() == handle.lock().unwrap().id())
+            .filter(|cs| cs.id() == handle.lock().id())
             .count()
             != 0
         {

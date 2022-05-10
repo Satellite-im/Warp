@@ -1,6 +1,4 @@
 use anyhow::anyhow;
-use std::sync::{Arc, Mutex, MutexGuard};
-
 use warp::crypto::rand::Rng;
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
@@ -17,6 +15,7 @@ use warp::solana::helper::user::UserHelper;
 use warp::solana::manager::SolanaManager;
 use warp::solana::wallet::{PhraseType, SolanaWallet};
 use warp::solana::{anchor_client::Cluster, helper};
+use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::tesseract::Tesseract;
 use warp::Extension;
 
@@ -124,23 +123,16 @@ impl SolanaAccount {
             .tesseract
             .as_ref()
             .ok_or_else(|| anyhow!("Tesseract is not available"))?;
-        let inner = match tesseract.lock() {
-            Ok(inner) => inner,
-            Err(e) => e.into_inner(),
-        };
-        Ok(inner)
+        Ok(tesseract.lock())
     }
 
     pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
-        match self
+        let cache = self
             .cache
             .as_ref()
-            .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?
-            .lock()
-        {
-            Ok(inner) => Ok(inner),
-            Err(e) => Ok(e.into_inner()),
-        }
+            .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
+
+        Ok(cache.lock())
     }
 
     pub fn user_helper(&self) -> anyhow::Result<UserHelper> {
@@ -611,9 +603,9 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
 
 pub mod ffi {
     use std::ffi::c_void;
-    use std::sync::{Arc, Mutex};
     use warp::multipass::MultiPassTraitObject;
     use warp::pocket_dimension::PocketDimensionTraitObject;
+    use warp::sync::{Arc, Mutex};
     use warp::tesseract::Tesseract;
 
     use crate::SolanaAccount;

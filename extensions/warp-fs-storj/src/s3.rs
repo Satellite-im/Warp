@@ -2,11 +2,8 @@ use anyhow::{anyhow, bail};
 use aws_endpoint::partition::endpoint;
 use aws_endpoint::{CredentialScope, Partition, PartitionResolver};
 use aws_sdk_s3::presigning::config::PresigningConfig;
-use std::sync::MutexGuard;
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use std::path::PathBuf;
+use warp::sync::{Arc, Mutex, MutexGuard};
 
 use warp::module::Module;
 
@@ -163,10 +160,7 @@ impl StorjFilesystem {
             .as_ref()
             .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
 
-        let inner = match cache.lock() {
-            Ok(inner) => inner,
-            Err(e) => e.into_inner(),
-        };
+        let inner = cache.lock();
 
         Ok(inner)
     }
@@ -250,7 +244,7 @@ impl Constellation for StorjFilesystem {
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
-            let hook = hook.lock().unwrap();
+            let hook = hook.lock();
             hook.trigger("filesystem::new_file", &object)
         }
         Ok(())
@@ -363,7 +357,7 @@ impl Constellation for StorjFilesystem {
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
-            let hook = hook.lock().unwrap();
+            let hook = hook.lock();
             hook.trigger("filesystem::new_file", &object)
         }
         Ok(())
@@ -425,7 +419,7 @@ impl Constellation for StorjFilesystem {
         let item = self.current_directory_mut()?.remove_item(&name)?;
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), &item)?;
-            let hook = hook.lock().unwrap();
+            let hook = hook.lock();
             //TODO: Add a proper check
             let hook_name = if item.is_directory() {
                 "filesystem::remove_directory"
@@ -523,9 +517,9 @@ pub mod ffi {
     use crate::StorjFilesystem;
     use std::ffi::{c_void, CStr};
     use std::os::raw::c_char;
-    use std::sync::{Arc, Mutex};
     use warp::constellation::ConstellationTraitObject;
     use warp::pocket_dimension::PocketDimensionTraitObject;
+    use warp::sync::{Arc, Mutex};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]

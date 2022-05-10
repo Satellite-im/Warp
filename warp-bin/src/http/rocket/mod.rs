@@ -1,7 +1,7 @@
 mod constellation;
 use crate::manager::ModuleManager;
-use std::sync::{Arc, Mutex};
 use warp::pocket_dimension::PocketDimension;
+use warp::sync::{Arc, Mutex};
 
 #[allow(unused_imports)]
 use rocket::{
@@ -34,7 +34,6 @@ pub async fn http_main(manage: &mut ModuleManager) -> anyhow::Result<()> {
     //TODO: Remove
     if fs
         .lock()
-        .unwrap()
         .from_buffer("readme.txt", &b"This file was uploaded from Warp".to_vec())
         .await
         .is_err()

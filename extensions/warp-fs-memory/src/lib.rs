@@ -7,11 +7,11 @@ use item::Item;
 use serde::{Deserialize, Serialize};
 use std::io::ErrorKind;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard};
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::pocket_dimension::{DimensionData, PocketDimension};
+use warp::sync::{Arc, Mutex, MutexGuard};
 
 use warp::constellation::directory::Directory;
 use warp::constellation::Constellation;
@@ -88,11 +88,7 @@ impl MemorySystem {
             .as_ref()
             .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
 
-        let inner = match cache.lock() {
-            Ok(inner) => inner,
-            Err(e) => e.into_inner(),
-        };
-
+        let inner = cache.lock();
         Ok(inner)
     }
 }
@@ -152,7 +148,7 @@ impl Constellation for MemorySystem {
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
-            let hook = hook.lock().unwrap();
+            let hook = hook.lock();
             hook.trigger("filesystem::new_file", &object)
         }
         Ok(())
@@ -215,7 +211,7 @@ impl Constellation for MemorySystem {
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
-            let hook = hook.lock().unwrap();
+            let hook = hook.lock();
             hook.trigger("filesystem::new_file", &object)
         }
         Ok(())
@@ -302,7 +298,7 @@ impl Constellation for MemorySystem {
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), ())?;
-            let hook = hook.lock().unwrap();
+            let hook = hook.lock();
             hook.trigger("filesystem::create_directory", &object)
         }
         Ok(())
@@ -328,8 +324,8 @@ impl Extension for MemorySystem {
 pub mod ffi {
     use crate::MemorySystem;
     use std::ffi::c_void;
-    use std::sync::{Arc, Mutex};
     use warp::constellation::ConstellationTraitObject;
+    use warp::sync::{Arc, Mutex};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]

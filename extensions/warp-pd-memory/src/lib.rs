@@ -207,5 +207,7 @@ pub(crate) fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<D
 #[wasm_bindgen]
 pub fn pd_memory_init() -> PocketDimensionTraitObject {
     let client = MemoryClient::new();
-    PocketDimensionTraitObject::new(std::sync::Arc::new(std::sync::Mutex::new(Box::new(client))))
+    PocketDimensionTraitObject::new(warp::sync::Arc::new(warp::sync::Mutex::new(Box::new(
+        client,
+    ))))
 }
