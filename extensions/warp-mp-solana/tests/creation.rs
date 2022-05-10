@@ -7,9 +7,9 @@ mod tests {
     use warp::multipass::MultiPass;
     use warp::sync::{Arc, Mutex};
     use warp::tesseract::Tesseract;
+    use warp_mp_solana::solana::anchor_client::anchor_lang::prelude::Pubkey;
+    use warp_mp_solana::solana::wallet::{PhraseType, SolanaWallet};
     use warp_mp_solana::SolanaAccount;
-    use warp_solana::anchor_client::anchor_lang::prelude::Pubkey;
-    use warp_solana::wallet::{PhraseType, SolanaWallet};
 
     #[allow(unused)]
     fn pregenerated_wallet() -> anyhow::Result<SolanaWallet> {

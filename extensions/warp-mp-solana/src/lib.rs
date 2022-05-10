@@ -1,3 +1,5 @@
+pub mod solana;
+
 use anyhow::anyhow;
 use warp::crypto::rand::Rng;
 use warp::data::{DataObject, DataType};
@@ -12,13 +14,13 @@ use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::tesseract::Tesseract;
 use warp::Extension;
 
-use warp_solana::anchor_client::solana_sdk::pubkey::Pubkey;
-use warp_solana::anchor_client::solana_sdk::signature::Keypair;
-use warp_solana::helper::friends::{DirectFriendRequest, DirectStatus};
-use warp_solana::helper::user::UserHelper;
-use warp_solana::manager::SolanaManager;
-use warp_solana::wallet::{PhraseType, SolanaWallet};
-use warp_solana::{anchor_client::Cluster, helper};
+use crate::solana::helper::friends::{DirectFriendRequest, DirectStatus};
+use crate::solana::helper::user::UserHelper;
+use crate::solana::manager::SolanaManager;
+use crate::solana::wallet::{PhraseType, SolanaWallet};
+use crate::solana::{anchor_client::Cluster, helper};
+use anchor_client::solana_sdk::pubkey::Pubkey;
+use anchor_client::solana_sdk::signature::Keypair;
 
 type Result<T> = std::result::Result<T, Error>;
 

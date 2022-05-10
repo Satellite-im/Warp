@@ -1,6 +1,6 @@
-use crate::error::FriendsError;
-use crate::manager::SolanaManager;
-use crate::wallet::SolanaWallet;
+use crate::solana::error::FriendsError;
+use crate::solana::manager::SolanaManager;
+use crate::solana::wallet::SolanaWallet;
 use anchor_client::anchor_lang::prelude::ProgramError;
 use anchor_client::solana_client::rpc_filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType};
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;

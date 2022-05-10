@@ -1,7 +1,7 @@
-use crate::error::GroupError;
-use crate::manager::SolanaManager;
-use crate::wallet::SolanaWallet;
-use anchor_client::anchor_lang::prelude::{ProgramError, Pubkey};
+use crate::solana::anchor_client::anchor_lang::prelude::{ProgramError, Pubkey};
+use crate::solana::error::GroupError;
+use crate::solana::manager::SolanaManager;
+use crate::solana::wallet::SolanaWallet;
 use anchor_client::solana_client::rpc_filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType};
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
 use anchor_client::solana_sdk::signature::Keypair;

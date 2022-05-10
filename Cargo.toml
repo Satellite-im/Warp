@@ -6,6 +6,5 @@ members = [
   "warp",
   "warp-bin",
   "warp-extensions",
-  "misc/warp-solana"
 ]
 exclude = ["misc/warp-tui"]

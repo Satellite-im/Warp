@@ -4,7 +4,7 @@ use anchor_client::{Client, Cluster};
 use anyhow::ensure;
 use std::rc::Rc;
 
-use crate::wallet::SolanaWallet;
+use crate::solana::wallet::SolanaWallet;
 
 pub struct SolanaManager {
     pub wallet: SolanaWallet,
