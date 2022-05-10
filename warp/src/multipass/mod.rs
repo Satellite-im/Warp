@@ -458,7 +458,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_list_outcoming_request(
+    pub unsafe extern "C" fn multipass_list_outgoing_request(
         ctx: *mut MultiPassAdapter,
     ) -> *const FriendRequest {
         if ctx.is_null() {
