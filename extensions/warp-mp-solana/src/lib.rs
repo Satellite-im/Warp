@@ -106,7 +106,7 @@ impl SolanaAccount {
                     tesseract.set("privkey", kp.as_str())?;
                     kp
                 } else {
-                    return Err(e);
+                    return Err(anyhow!(e));
                 }
             }
         };
