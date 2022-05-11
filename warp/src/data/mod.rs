@@ -3,22 +3,18 @@ use derive_more::Display;
 
 use crate::error::Error;
 
+#[allow(unused_imports)]
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use serde_json::Value;
 use uuid::Uuid;
 
-#[cfg(target_arch = "wasm32")]
-type Result<T> = std::result::Result<T, JsError>;
-
-#[cfg(not(target_arch = "wasm32"))]
 type Result<T> = std::result::Result<T, Error>;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
 use crate::module::Module;
 
-use crate::error::into_error;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -161,10 +157,7 @@ impl Data {
     pub fn timestamp(&self) -> i64 {
         self.timestamp.timestamp()
     }
-}
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl Data {
     /// Set the `Module` for `Data`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_data_type(&mut self, data_type: DataType) {
@@ -200,17 +193,13 @@ impl Data {
         self.payload = serde_json::to_value(payload)?;
         Ok(())
     }
-}
 
-impl Data {
     /// Returns the type from `Payload` for `Data`
     pub fn payload<T>(&self) -> Result<T>
     where
         T: DeserializeOwned,
     {
-        serde_json::from_value(self.payload.clone())
-            .map_err(Error::from)
-            .map_err(into_error)
+        serde_json::from_value(self.payload.clone()).map_err(Error::from)
     }
 }
 
@@ -220,8 +209,7 @@ impl Data {
     /// Creates a instance of `Data` with `Module` and `Payload`
     #[wasm_bindgen(constructor)]
     pub fn new(data_type: DataType, payload: JsValue) -> Result<Data> {
-        let payload =
-            serde_wasm_bindgen::from_value(payload).map_err(|e| JsError::new(&e.to_string()))?;
+        let payload = serde_wasm_bindgen::from_value(payload).map_err(|_| Error::Other)?;
         Ok(Data {
             data_type,
             payload,
@@ -238,9 +226,13 @@ impl Data {
     /// Set the payload for `Data`
     #[wasm_bindgen(setter)]
     pub fn set_payload(&mut self, payload: JsValue) -> Result<()> {
-        self.payload =
-            serde_wasm_bindgen::from_value(payload).map_err(|e| JsError::new(&e.to_string()))?;
+        self.payload = serde_wasm_bindgen::from_value(payload).map_err(|_| Error::Other)?;
         Ok(())
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn payload(&self) -> Result<JsValue> {
+        serde_wasm_bindgen::to_value(&self.payload).map_err(|_| Error::Other)
     }
 }
 

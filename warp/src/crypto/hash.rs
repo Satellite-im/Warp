@@ -6,9 +6,11 @@ use sha2::Sha256;
 use std::io::Read;
 
 use crate::error::Error;
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+#[allow(dead_code)]
 type Result<T> = std::result::Result<T, Error>;
 
 //TODO: Implement multiple hashes, including streaming data for each one
