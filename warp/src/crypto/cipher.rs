@@ -68,29 +68,23 @@ pub fn aes256gcm_self_encrypt(data: &[u8]) -> Result<Vec<u8>> {
 /// Note: If key is less than or greater than 256bits/32bytes, it will hash the key with sha256 with nonce being its salt
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn aes256gcm_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
-    let ExtractedData {
-        extract_a: nonce,
-        extract_b: payload,
-    } = extract_data_slice(data, 12);
+    let (nonce, payload) = extract_data_slice(data, 12);
 
     let e_key = match key.len() {
         32 => key.to_vec(),
-        _ => sha256_hash(key, Some(nonce.clone())),
+        _ => sha256_hash(key, Some(nonce.to_vec())),
     };
 
     let key = Key::from_slice(&e_key);
     let nonce = Nonce::from_slice(&nonce);
 
     let cipher = Aes256Gcm::new(key);
-    try_or_err(cipher.decrypt(nonce, payload.as_slice()))
+    try_or_err(cipher.decrypt(nonce, payload))
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn aes256gcm_self_decrypt(data: &[u8]) -> Result<Vec<u8>> {
-    let ExtractedData {
-        extract_a: key,
-        extract_b: payload,
-    } = extract_data_slice(data, 34);
+    let (key, payload) = extract_data_slice(data, 34);
     aes256gcm_decrypt(&key, &payload)
 }
 
@@ -231,10 +225,7 @@ pub fn xchacha20poly1305_self_encrypt(data: &[u8]) -> Result<Vec<u8>> {
 /// Note: If key is less than or greater than 256bits/32bytes, it will hash the key with sha256 with nonce being its salt
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn xchacha20poly1305_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
-    let ExtractedData {
-        extract_a: nonce,
-        extract_b: payload,
-    } = extract_data_slice(data, 24);
+    let (nonce, payload) = extract_data_slice(data, 24);
 
     let e_key = match key.len() {
         32 => key.to_vec(),
@@ -243,15 +234,12 @@ pub fn xchacha20poly1305_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
 
     let chacha = XChaCha20Poly1305::new(e_key.as_slice().into());
 
-    try_or_err(chacha.decrypt(nonce.as_slice().into(), payload.as_ref()))
+    try_or_err(chacha.decrypt(nonce.into(), payload.as_ref()))
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn xchacha20poly1305_self_decrypt(data: &[u8]) -> Result<Vec<u8>> {
-    let ExtractedData {
-        extract_a: key,
-        extract_b: payload,
-    } = extract_data_slice(data, 34);
+    let (key, payload) = extract_data_slice(data, 34);
     xchacha20poly1305_decrypt(&key, &payload)
 }
 
@@ -358,31 +346,10 @@ pub fn xchacha20poly1305_self_decrypt_stream(
     xchacha20poly1305_decrypt_stream(&key, reader, writer)
 }
 
-//TODO: Remove and rollback
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct ExtractedData {
-    extract_a: Vec<u8>,
-    extract_b: Vec<u8>,
-}
-
-impl ExtractedData {
-    pub fn extract_a(&self) -> Vec<u8> {
-        self.extract_a.clone()
-    }
-    pub fn extract_b(&self) -> Vec<u8> {
-        self.extract_b.clone()
-    }
-}
-
-//TODO: Remove `ExtractedData` and rollback to using slices
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub fn extract_data_slice(data: &[u8], size: usize) -> ExtractedData {
+pub fn extract_data_slice(data: &[u8], size: usize) -> (&[u8], &[u8]) {
     let extracted = &data[data.len() - size..];
     let payload = &data[..data.len() - size];
-    ExtractedData {
-        extract_a: extracted.to_vec(),
-        extract_b: payload.to_vec(),
-    }
+    (extracted, payload)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
