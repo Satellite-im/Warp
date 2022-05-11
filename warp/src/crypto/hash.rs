@@ -5,12 +5,15 @@ use sha2::Sha256;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Read;
 
+use crate::error::Error;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+type Result<T> = std::result::Result<T, Error>;
+
 //TODO: Implement multiple hashes, including streaming data for each one
 #[cfg(not(target_arch = "wasm32"))]
-pub fn sha1_hash_stream(reader: &mut impl Read, salt: Option<Vec<u8>>) -> anyhow::Result<Vec<u8>> {
+pub fn sha1_hash_stream(reader: &mut impl Read, salt: Option<Vec<u8>>) -> Result<Vec<u8>> {
     let mut hasher = Sha1::new();
     std::io::copy(reader, &mut hasher)?;
     if let Some(salt) = salt {
@@ -20,10 +23,7 @@ pub fn sha1_hash_stream(reader: &mut impl Read, salt: Option<Vec<u8>>) -> anyhow
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn sha256_hash_stream(
-    reader: &mut impl Read,
-    salt: Option<Vec<u8>>,
-) -> anyhow::Result<Vec<u8>> {
+pub fn sha256_hash_stream(reader: &mut impl Read, salt: Option<Vec<u8>>) -> Result<Vec<u8>> {
     let mut hasher = Sha256::new();
     std::io::copy(reader, &mut hasher)?;
     if let Some(salt) = salt {
@@ -33,10 +33,7 @@ pub fn sha256_hash_stream(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn blake2s_hash_stream(
-    reader: &mut impl Read,
-    salt: Option<Vec<u8>>,
-) -> anyhow::Result<Vec<u8>> {
+pub fn blake2s_hash_stream(reader: &mut impl Read, salt: Option<Vec<u8>>) -> Result<Vec<u8>> {
     let mut hasher = Blake2s256::new();
     std::io::copy(reader, &mut hasher)?;
     if let Some(salt) = salt {

@@ -55,6 +55,14 @@ pub enum Error {
     DirectoryNotFound,
     #[error("To be determined")]
     ToBeDetermined,
+    #[error("Unable to encrypt data")]
+    EncryptionError,
+    #[error("Unable to decrypt data")]
+    DecryptionError,
+    #[error("Unable to encrypt stream")]
+    EncryptionStreamError,
+    #[error("Unable to decrypt stream")]
+    DecryptionStreamError,
     #[error("{0}")]
     SerdeJsonError(#[from] serde_json::Error),
     #[error("{0}")]

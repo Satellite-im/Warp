@@ -9,30 +9,14 @@ use aead::{Aead, NewAead};
 #[cfg(not(target_arch = "wasm32"))]
 use aead::stream::{DecryptorBE32, EncryptorBE32};
 
+use crate::error::Error;
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use chacha20poly1305::XChaCha20Poly1305;
 
-use cfg_if::cfg_if;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
 
-cfg_if! {
-    if #[cfg(target_arch = "wasm32")] {
-        use wasm_bindgen::prelude::*;
-        type Result<T> = std::result::Result<T, JsError>;
-
-        #[allow(unused)]
-        fn try_or_err(result: aead::Result<Vec<u8>>) -> std::result::Result<Vec<u8>, JsError> {
-            match result {
-                Ok(data) => Ok(data),
-                Err(_) => Err(JsError::new("Error")),
-            }
-        }
-    } else {
-        use anyhow::{bail, Result};
-        fn try_or_err(result: aead::Result<Vec<u8>>) -> Result<Vec<u8>> {
-            result.map_err(|e| anyhow::anyhow!(e))
-        }
-    }
-}
+type Result<T> = std::result::Result<T, Error>;
 
 /// Used to encrypt data with AES256-GCM using a 256bit key.
 /// Note: If key is less than or greater than 256bits/32bytes, it will hash the key with sha256 with nonce being its salt
@@ -49,7 +33,9 @@ pub fn aes256gcm_encrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     let a_nonce = Nonce::from_slice(&nonce);
 
     let cipher = Aes256Gcm::new(key);
-    let mut edata = try_or_err(cipher.encrypt(a_nonce, data))?;
+    let mut edata = cipher
+        .encrypt(a_nonce, data)
+        .map_err(|_| Error::EncryptionError)?;
 
     edata.extend(nonce);
 
@@ -79,7 +65,9 @@ pub fn aes256gcm_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     let nonce = Nonce::from_slice(&nonce);
 
     let cipher = Aes256Gcm::new(key);
-    try_or_err(cipher.decrypt(nonce, payload))
+    cipher
+        .decrypt(nonce, payload)
+        .map_err(|_| Error::DecryptionError)
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -113,18 +101,18 @@ pub fn aes256gcm_encrypt_stream(
             Ok(512) => {
                 let ciphertext = stream
                     .encrypt_next(buffer.as_slice())
-                    .map_err(|err| anyhow::anyhow!(err))?;
+                    .map_err(|_| Error::EncryptionStreamError)?;
                 writer.write_all(&ciphertext)?;
             }
             Ok(read_count) => {
                 let ciphertext = stream
                     .encrypt_last(&buffer[..read_count])
-                    .map_err(|err| anyhow::anyhow!(err))?;
+                    .map_err(|_| Error::EncryptionStreamError)?;
                 writer.write_all(&ciphertext)?;
                 break;
             }
             Err(e) if e.kind() == ErrorKind::Interrupted => continue,
-            Err(e) => bail!(e),
+            Err(e) => return Err(Error::from(e)),
         }
     }
     Ok(())
@@ -164,7 +152,7 @@ pub fn aes256gcm_decrypt_stream(
             Ok(528) => {
                 let plaintext = stream
                     .decrypt_next(buffer.as_slice())
-                    .map_err(|e| anyhow::anyhow!(e))?;
+                    .map_err(|_| Error::DecryptionStreamError)?;
 
                 writer.write_all(&plaintext)?
             }
@@ -172,12 +160,12 @@ pub fn aes256gcm_decrypt_stream(
             Ok(read_count) => {
                 let plaintext = stream
                     .decrypt_last(&buffer[..read_count])
-                    .map_err(|e| anyhow::anyhow!(e))?;
+                    .map_err(|_| Error::DecryptionStreamError)?;
                 writer.write_all(&plaintext)?;
                 break;
             }
             Err(e) if e.kind() == ErrorKind::Interrupted => continue,
-            Err(e) => bail!(e),
+            Err(e) => return Err(Error::from(e)),
         };
     }
     writer.flush()?;
@@ -206,7 +194,9 @@ pub fn xchacha20poly1305_encrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     };
 
     let chacha = XChaCha20Poly1305::new(e_key.as_slice().into());
-    let mut cipher = try_or_err(chacha.encrypt(nonce.as_slice().into(), data))?;
+    let mut cipher = chacha
+        .encrypt(nonce.as_slice().into(), data)
+        .map_err(|_| Error::EncryptionError)?;
 
     cipher.extend(nonce);
 
@@ -234,7 +224,9 @@ pub fn xchacha20poly1305_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
 
     let chacha = XChaCha20Poly1305::new(e_key.as_slice().into());
 
-    try_or_err(chacha.decrypt(nonce.into(), payload.as_ref()))
+    chacha
+        .decrypt(nonce.into(), payload.as_ref())
+        .map_err(|_| Error::DecryptionError)
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -267,18 +259,18 @@ pub fn xchacha20poly1305_encrypt_stream(
             Ok(512) => {
                 let ciphertext = stream
                     .encrypt_next(buffer.as_slice())
-                    .map_err(|err| anyhow::anyhow!(err))?;
+                    .map_err(|_| Error::EncryptionStreamError)?;
                 writer.write_all(&ciphertext)?;
             }
             Ok(read_count) => {
                 let ciphertext = stream
                     .encrypt_last(&buffer[..read_count])
-                    .map_err(|err| anyhow::anyhow!(err))?;
+                    .map_err(|_| Error::EncryptionStreamError)?;
                 writer.write_all(&ciphertext)?;
                 break;
             }
             Err(e) if e.kind() == ErrorKind::Interrupted => continue,
-            Err(e) => bail!(e),
+            Err(e) => return Err(Error::from(e)),
         }
     }
     writer.flush()?;
@@ -316,7 +308,7 @@ pub fn xchacha20poly1305_decrypt_stream(
             Ok(528) => {
                 let plaintext = stream
                     .decrypt_next(buffer.as_slice())
-                    .map_err(|e| anyhow::anyhow!(e))?;
+                    .map_err(|_| Error::DecryptionStreamError)?;
 
                 writer.write_all(&plaintext)?
             }
@@ -324,12 +316,12 @@ pub fn xchacha20poly1305_decrypt_stream(
             Ok(read_count) => {
                 let plaintext = stream
                     .decrypt_last(&buffer[..read_count])
-                    .map_err(|e| anyhow::anyhow!(e))?;
+                    .map_err(|_| Error::DecryptionStreamError)?;
                 writer.write_all(&plaintext)?;
                 break;
             }
             Err(e) if e.kind() == ErrorKind::Interrupted => continue,
-            Err(e) => bail!(e),
+            Err(e) => return Err(Error::from(e)),
         };
     }
     writer.flush()?;
@@ -346,7 +338,7 @@ pub fn xchacha20poly1305_self_decrypt_stream(
     xchacha20poly1305_decrypt_stream(&key, reader, writer)
 }
 
-pub fn extract_data_slice(data: &[u8], size: usize) -> (&[u8], &[u8]) {
+fn extract_data_slice(data: &[u8], size: usize) -> (&[u8], &[u8]) {
     let extracted = &data[data.len() - size..];
     let payload = &data[..data.len() - size];
     (extracted, payload)
