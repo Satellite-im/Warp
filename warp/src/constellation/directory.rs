@@ -125,18 +125,6 @@ impl Directory {
         }
         directory
     }
-}
-
-impl Directory {
-    /// List all the `Item` within the `Directory`
-    pub fn get_items(&self) -> &Vec<Item> {
-        &self.items
-    }
-
-    /// List all mutable `Item` within the `Directory`
-    pub fn get_items_mut(&mut self) -> &mut Vec<Item> {
-        &mut self.items
-    }
 
     /// Checks to see if the `Directory` has a `Item`
     ///
@@ -151,6 +139,7 @@ impl Directory {
     ///
     ///     assert_eq!(root.has_item("Sub Directory"), true);
     /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn has_item(&self, item_name: &str) -> bool {
         self.get_items()
             .iter()
@@ -159,27 +148,8 @@ impl Directory {
             == 1
     }
 
-    /// Add an item to the `Directory`
-    ///
-    /// # Examples
-    ///
-    /// ```
-    ///     use warp::constellation::{directory::{Directory, DirectoryType}, item::Item};
-    ///
-    ///     let mut root = Directory::new("Test Directory");
-    ///     let sub = Directory::new("Sub Directory");
-    ///     root.add_item(sub).unwrap();
-    /// ```
-    pub fn add_item<I: Into<Item>>(&mut self, item: I) -> Result<()> {
-        let item = item.into();
-        if self.has_item(&item.name()) {
-            return Err(Error::DuplicateName);
-        }
-        self.items.push(item);
-        Ok(())
-    }
-
     /// Add a file to the `Directory`
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn add_file(&mut self, file: File) -> Result<()> {
         if self.has_item(&file.name()) {
             return Err(Error::DuplicateName);
@@ -190,6 +160,7 @@ impl Directory {
     }
 
     /// Add a directory to the `Directory`
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn add_directory(&mut self, directory: Directory) -> Result<()> {
         if self.has_item(&directory.name()) {
             return Err(Error::DuplicateName);
@@ -221,11 +192,184 @@ impl Directory {
     ///     assert_eq!(root.get_item_index("Sub3 Directory").is_err(), true);
     ///
     /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn get_item_index(&self, item_name: &str) -> Result<usize> {
         self.items
             .iter()
             .position(|item| item.name() == item_name)
             .ok_or(Error::ArrayPositionNotFound)
+    }
+
+    /// Used to rename a child within a `Directory`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///     use warp::constellation::{directory::{Directory}};
+    ///
+    ///
+    ///     let mut root = Directory::new("Test Directory");
+    ///     let sub = Directory::new("Sub Directory");
+    ///     root.add_item(sub).unwrap();
+    ///     assert_eq!(root.has_item("Sub Directory"), true);
+    ///
+    ///     root.rename_item("Sub Directory", "Test Directory").unwrap();
+    ///
+    ///     assert_eq!(root.has_item("Test Directory"), true);
+    ///
+    /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn rename_item(&mut self, current_name: &str, new_name: &str) -> Result<()> {
+        self.get_item_mut_by_path(current_name)?.rename(new_name)
+    }
+
+    /// Used to remove the child within a `Directory`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///     use warp::constellation::{directory::{Directory}};
+    ///
+    ///     let mut root = Directory::new("Test Directory");
+    ///     let sub = Directory::new("Sub Directory");
+    ///     root.add_item(sub).unwrap();
+    ///
+    ///     assert_eq!(root.has_item("Sub Directory"), true);
+    ///     let _ = root.remove_item("Sub Directory").unwrap();
+    ///     assert_eq!(root.has_item("Sub Directory"), false);
+    /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn remove_item(&mut self, item_name: &str) -> Result<Item> {
+        if !self.has_item(item_name) {
+            return Err(Error::ItemInvalid);
+        }
+        let index = self.get_item_index(item_name)?;
+        let item = self.items.remove(index);
+        self.modified = Utc::now();
+        Ok(item)
+    }
+
+    /// Used to remove the child within a `Directory` path
+    ///
+    /// TODO: Implement within `Directory::remove_item` in a single path
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///         use warp::constellation::directory::{Directory};
+    ///
+    ///         let mut root = Directory::new("Test Directory");
+    ///         let sub0 = Directory::new("Sub Directory 1");
+    ///         let sub1 = Directory::new("Sub Directory 2");
+    ///         let sub2 = Directory::new("Sub Directory 3");
+    ///         root.add_item(sub0).unwrap();
+    ///         root.add_item(sub1).unwrap();
+    ///         root.add_item(sub2).unwrap();
+    ///
+    ///         assert_eq!(root.has_item("Sub Directory 1"), true);
+    ///         assert_eq!(root.has_item("Sub Directory 2"), true);
+    ///         assert_eq!(root.has_item("Sub Directory 3"), true);
+    ///
+    ///         root.move_item_to("Sub Directory 2", "Sub Directory 1").unwrap();
+    ///         root.move_item_to("Sub Directory 3", "Sub Directory 1/Sub Directory 2").unwrap();
+    ///
+    ///         assert_ne!(root.has_item("Sub Directory 2"), true);
+    ///         assert_ne!(root.has_item("Sub Directory 3"), true);
+    ///
+    ///         root.remove_item_from_path("/Sub Directory 1/Sub Directory 2", "Sub Directory 3").unwrap();
+    ///
+    ///         assert_eq!(root.get_item_by_path("Sub Directory 1/Sub Directory 2/Sub Directory 3").is_err(), true);
+    /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn remove_item_from_path(&mut self, directory: &str, item: &str) -> Result<Item> {
+        self.get_item_mut_by_path(directory)?
+            .get_directory_mut()?
+            .remove_item(item)
+    }
+
+    /// Used to move the child to another `Directory`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///     use warp::constellation::{directory::Directory};
+    ///
+    ///     let mut root = Directory::new("Test Directory");
+    ///     let sub0 = Directory::new("Sub Directory 1");
+    ///     let sub1 = Directory::new("Sub Directory 2");
+    ///     root.add_item(sub0).unwrap();
+    ///     root.add_item(sub1).unwrap();
+    ///
+    ///     assert_eq!(root.has_item("Sub Directory 1"), true);
+    ///     assert_eq!(root.has_item("Sub Directory 2"), true);
+    ///
+    ///     root.move_item_to("Sub Directory 2", "Sub Directory 1").unwrap();
+    ///
+    ///     assert_ne!(root.has_item("Sub Directory 2"), true);
+    /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn move_item_to(&mut self, child: &str, dst: &str) -> Result<()> {
+        let (child, dst) = (child.trim(), dst.trim());
+
+        if self.get_item_by_path(dst)?.is_file() {
+            return Err(Error::ItemNotDirectory);
+        }
+
+        if self.get_item_by_path(dst)?.get_directory()?.has_item(child) {
+            return Err(Error::DuplicateName);
+        }
+
+        let item = self.remove_item(child)?;
+
+        // If there is an error, place the item back into the current directory
+        match self
+            .get_item_mut_by_path(dst)
+            .and_then(Item::get_directory_mut)
+        {
+            Ok(directory) => {
+                if let Err(e) = directory.add_item(item.clone()) {
+                    self.add_item(item)?;
+                    return Err(e);
+                }
+            }
+            Err(e) => {
+                self.add_item(item)?;
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Directory {
+    /// List all the `Item` within the `Directory`
+    pub fn get_items(&self) -> &Vec<Item> {
+        &self.items
+    }
+
+    /// List all mutable `Item` within the `Directory`
+    pub fn get_items_mut(&mut self) -> &mut Vec<Item> {
+        &mut self.items
+    }
+
+    /// Add an item to the `Directory`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///     use warp::constellation::{directory::{Directory, DirectoryType}, item::Item};
+    ///
+    ///     let mut root = Directory::new("Test Directory");
+    ///     let sub = Directory::new("Sub Directory");
+    ///     root.add_item(sub).unwrap();
+    /// ```
+    pub fn add_item<I: Into<Item>>(&mut self, item: I) -> Result<()> {
+        let item = item.into();
+        if self.has_item(&item.name()) {
+            return Err(Error::DuplicateName);
+        }
+        self.items.push(item);
+        Ok(())
     }
 
     /// Used to get the child within a `Directory`
@@ -280,142 +424,6 @@ impl Directory {
         }
         let index = self.get_item_index(item_name)?;
         self.items.get_mut(index).ok_or(Error::ItemInvalid)
-    }
-
-    /// Used to rename a child within a `Directory`
-    ///
-    /// # Examples
-    ///
-    /// ```
-    ///     use warp::constellation::{directory::{Directory}};
-    ///
-    ///
-    ///     let mut root = Directory::new("Test Directory");
-    ///     let sub = Directory::new("Sub Directory");
-    ///     root.add_item(sub).unwrap();
-    ///     assert_eq!(root.has_item("Sub Directory"), true);
-    ///
-    ///     root.rename_item("Sub Directory", "Test Directory").unwrap();
-    ///
-    ///     assert_eq!(root.has_item("Test Directory"), true);
-    ///
-    /// ```
-    pub fn rename_item(&mut self, current_name: &str, new_name: &str) -> Result<()> {
-        self.get_item_mut_by_path(current_name)?.rename(new_name)
-    }
-
-    /// Used to remove the child within a `Directory`
-    ///
-    /// # Examples
-    ///
-    /// ```
-    ///     use warp::constellation::{directory::{Directory}};
-    ///
-    ///     let mut root = Directory::new("Test Directory");
-    ///     let sub = Directory::new("Sub Directory");
-    ///     root.add_item(sub).unwrap();
-    ///
-    ///     assert_eq!(root.has_item("Sub Directory"), true);
-    ///     let _ = root.remove_item("Sub Directory").unwrap();
-    ///     assert_eq!(root.has_item("Sub Directory"), false);
-    /// ```
-    pub fn remove_item(&mut self, item_name: &str) -> Result<Item> {
-        if !self.has_item(item_name) {
-            return Err(Error::ItemInvalid);
-        }
-        let index = self.get_item_index(item_name)?;
-        let item = self.items.remove(index);
-        self.modified = Utc::now();
-        Ok(item)
-    }
-
-    /// Used to remove the child within a `Directory` path
-    ///
-    /// TODO: Implement within `Directory::remove_item` in a single path
-    ///
-    /// # Examples
-    ///
-    /// ```
-    ///         use warp::constellation::directory::{Directory};
-    ///
-    ///         let mut root = Directory::new("Test Directory");
-    ///         let sub0 = Directory::new("Sub Directory 1");
-    ///         let sub1 = Directory::new("Sub Directory 2");
-    ///         let sub2 = Directory::new("Sub Directory 3");
-    ///         root.add_item(sub0).unwrap();
-    ///         root.add_item(sub1).unwrap();
-    ///         root.add_item(sub2).unwrap();
-    ///
-    ///         assert_eq!(root.has_item("Sub Directory 1"), true);
-    ///         assert_eq!(root.has_item("Sub Directory 2"), true);
-    ///         assert_eq!(root.has_item("Sub Directory 3"), true);
-    ///
-    ///         root.move_item_to("Sub Directory 2", "Sub Directory 1").unwrap();
-    ///         root.move_item_to("Sub Directory 3", "Sub Directory 1/Sub Directory 2").unwrap();
-    ///
-    ///         assert_ne!(root.has_item("Sub Directory 2"), true);
-    ///         assert_ne!(root.has_item("Sub Directory 3"), true);
-    ///
-    ///         root.remove_item_from_path("/Sub Directory 1/Sub Directory 2", "Sub Directory 3").unwrap();
-    ///
-    ///         assert_eq!(root.get_item_by_path("Sub Directory 1/Sub Directory 2/Sub Directory 3").is_err(), true);
-    /// ```
-    pub fn remove_item_from_path(&mut self, directory: &str, item: &str) -> Result<Item> {
-        self.get_item_mut_by_path(directory)?
-            .get_directory_mut()?
-            .remove_item(item)
-    }
-
-    /// Used to move the child to another `Directory`
-    ///
-    /// # Examples
-    ///
-    /// ```
-    ///     use warp::constellation::{directory::Directory};
-    ///
-    ///     let mut root = Directory::new("Test Directory");
-    ///     let sub0 = Directory::new("Sub Directory 1");
-    ///     let sub1 = Directory::new("Sub Directory 2");
-    ///     root.add_item(sub0).unwrap();
-    ///     root.add_item(sub1).unwrap();
-    ///
-    ///     assert_eq!(root.has_item("Sub Directory 1"), true);
-    ///     assert_eq!(root.has_item("Sub Directory 2"), true);
-    ///
-    ///     root.move_item_to("Sub Directory 2", "Sub Directory 1").unwrap();
-    ///
-    ///     assert_ne!(root.has_item("Sub Directory 2"), true);
-    /// ```
-    pub fn move_item_to(&mut self, child: &str, dst: &str) -> Result<()> {
-        let (child, dst) = (child.trim(), dst.trim());
-
-        if self.get_item_by_path(dst)?.is_file() {
-            return Err(Error::ItemNotDirectory);
-        }
-
-        if self.get_item_by_path(dst)?.get_directory()?.has_item(child) {
-            return Err(Error::DuplicateName);
-        }
-
-        let item = self.remove_item(child)?;
-
-        // If there is an error, place the item back into the current directory
-        match self
-            .get_item_mut_by_path(dst)
-            .and_then(Item::get_directory_mut)
-        {
-            Ok(directory) => {
-                if let Err(e) = directory.add_item(item.clone()) {
-                    self.add_item(item)?;
-                    return Err(e);
-                }
-            }
-            Err(e) => {
-                self.add_item(item)?;
-                return Err(e);
-            }
-        }
-        Ok(())
     }
 
     /// Used to find an item throughout the `Directory` and its children

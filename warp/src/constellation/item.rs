@@ -171,30 +171,10 @@ impl Item {
     }
 }
 
-impl Item {
-    /// Convert `Item` to `Directory`
-    pub fn get_directory(&self) -> Result<&Directory> {
-        self.directory().ok_or(Error::InvalidConversion)
-    }
-
-    /// Convert `Item` to `File`
-    pub fn get_file(&self) -> Result<&File> {
-        self.file().ok_or(Error::InvalidConversion)
-    }
-
-    /// Convert `Item` to `Directory`
-    pub fn get_directory_mut(&mut self) -> Result<&mut Directory> {
-        self.directory_mut().ok_or(Error::InvalidConversion)
-    }
-
-    /// Convert `Item` to `File`
-    pub fn get_file_mut(&mut self) -> Result<&mut File> {
-        self.file_mut().ok_or(Error::InvalidConversion)
-    }
-}
-
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Item {
     /// Get string of `Item`
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn name(&self) -> String {
         match (self.file(), self.directory()) {
             (Some(file), None) => file.name(),
@@ -204,6 +184,7 @@ impl Item {
     }
 
     /// Get description of `Item`
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn description(&self) -> String {
         match (self.file(), self.directory()) {
             (Some(file), None) => file.description(),
@@ -215,6 +196,7 @@ impl Item {
     /// Get size of `Item`.
     /// If `Item` is a `File` it will return the size of the `File`.
     /// If `Item` is a `Directory` it will return the size of all files within the `Directory`, including files located within a sub directory
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn size(&self) -> i64 {
         match (self.file(), self.directory()) {
             (Some(file), None) => file.size(),
@@ -224,6 +206,7 @@ impl Item {
     }
 
     /// Rename the name of `Item`
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn rename(&mut self, name: &str) -> Result<()> {
         let name = name.trim();
         if self.name() == name {
@@ -243,16 +226,19 @@ impl Item {
     }
 
     /// Check to see if `Item` is `Directory`
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn is_directory(&self) -> bool {
         self.directory().is_some() && self.file().is_none()
     }
 
     /// Check to see if `Item` is `File`
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn is_file(&self) -> bool {
         self.directory().is_none() && self.file().is_some()
     }
 
     /// Set description of `Item`
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_description(&mut self, desc: &str) {
         if let Some(file) = self.file_mut() {
             file.set_description(desc);
@@ -264,12 +250,35 @@ impl Item {
     }
 
     /// Set size of `Item` if its a `File`
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_size(&mut self, size: i64) -> Result<()> {
         if let Some(file) = self.file_mut() {
             file.set_size(size);
             return Ok(());
         }
         Err(Error::ItemNotFile)
+    }
+}
+
+impl Item {
+    /// Convert `Item` to `Directory`
+    pub fn get_directory(&self) -> Result<&Directory> {
+        self.directory().ok_or(Error::InvalidConversion)
+    }
+
+    /// Convert `Item` to `File`
+    pub fn get_file(&self) -> Result<&File> {
+        self.file().ok_or(Error::InvalidConversion)
+    }
+
+    /// Convert `Item` to `Directory`
+    pub fn get_directory_mut(&mut self) -> Result<&mut Directory> {
+        self.directory_mut().ok_or(Error::InvalidConversion)
+    }
+
+    /// Convert `Item` to `File`
+    pub fn get_file_mut(&mut self) -> Result<&mut File> {
+        self.file_mut().ok_or(Error::InvalidConversion)
     }
 }
 
