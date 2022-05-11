@@ -1,5 +1,6 @@
 /// Errors that would host custom errors for modules, utilities, etc.
 use thiserror::Error;
+use wasm_bindgen::JsValue;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -72,6 +73,12 @@ pub enum Error {
     Unimplemented,
     #[error("An unknown error has occurred")]
     Other,
+}
+
+impl Into<JsValue> for Error {
+    fn into(self) -> JsValue {
+        JsValue::from_str(&self.to_string())
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

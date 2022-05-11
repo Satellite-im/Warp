@@ -243,41 +243,25 @@ impl ConstellationAdapter {
     }
 
     #[wasm_bindgen]
-    pub fn select(&mut self, path: &str) -> std::result::Result<(), JsError> {
-        self.inner_guard()
-            .select(path)
-            .map_err(crate::error::into_error)
+    pub fn select(&mut self, path: &str) -> Result<()> {
+        self.inner_guard().select(path)
     }
 
     #[wasm_bindgen]
-    pub fn go_back(&mut self) -> std::result::Result<(), JsError> {
-        self.inner_guard()
-            .go_back()
-            .map_err(crate::error::into_error)
+    pub fn go_back(&mut self) -> Result<()> {
+        self.inner_guard().go_back()
     }
 
     #[wasm_bindgen]
-    pub fn export(&self, data_type: ConstellationDataType) -> std::result::Result<String, JsError> {
-        self.inner_guard()
-            .export(data_type)
-            .map_err(crate::error::into_error)
+    pub fn export(&self, data_type: ConstellationDataType) -> Result<String> {
+        self.inner_guard().export(data_type)
     }
 
     #[wasm_bindgen]
-    pub fn import(
-        &mut self,
-        data_type: ConstellationDataType,
-        data: String,
-    ) -> std::result::Result<(), JsError> {
-        self.inner_guard()
-            .import(data_type, data)
-            .map_err(crate::error::into_error)
+    pub fn import(&mut self, data_type: ConstellationDataType, data: String) -> Result<()> {
+        self.inner_guard().import(data_type, data)
     }
-}
 
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl ConstellationAdapter {
     #[wasm_bindgen]
     pub fn put(&mut self, remote: String, local: String) -> Promise {
         let inner = self.inner().clone();
