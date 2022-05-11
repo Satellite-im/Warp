@@ -63,6 +63,8 @@ pub enum Error {
     EncryptionStreamError,
     #[error("Unable to decrypt stream")]
     DecryptionStreamError,
+    #[error("Tesseract is locked")]
+    TesseractLocked,
     #[error("{0}")]
     SerdeJsonError(#[from] serde_json::Error),
     #[error("{0}")]

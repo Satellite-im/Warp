@@ -1,16 +1,12 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi;
 
-#[cfg(not(target_arch = "wasm32"))]
-use anyhow::{self, bail, ensure, Result};
-
 use std::{collections::HashMap, fmt::Debug};
 use zeroize::Zeroize;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
-#[cfg(not(target_arch = "wasm32"))]
 use crate::error::Error;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -19,6 +15,8 @@ use std::io::prelude::*;
 use std::path::PathBuf;
 
 use wasm_bindgen::prelude::*;
+
+type Result<T> = std::result::Result<T, Error>;
 
 /// The key store that holds encrypted strings that can be used for later use.
 #[derive(Default, Clone, PartialEq, Eq)]
@@ -140,23 +138,6 @@ impl Tesseract {
         self.autosave
     }
 
-    /// To save to file using internal file path.
-    /// Note: Because we do not want to interrupt the functions due to it failing to
-    ///       save for whatever reason, this function will return `Result::Ok`
-    ///       regardless of success or error.
-    ///
-    /// TODO: Handle error without subjecting function to `Result::Err`
-    pub fn save(&mut self) -> Result<()> {
-        if self.autosave_enabled() {
-            if let Some(path) = &self.file {
-                if let Err(_e) = self.to_file(path) {
-                    //TODO: Logging
-                }
-            }
-        }
-        Ok(())
-    }
-
     /// Import and encrypt a hashmap into tesseract
     ///
     /// # Example
@@ -178,6 +159,59 @@ impl Tesseract {
         Ok(tesseract)
     }
 
+    /// Decrypts and export tesseract contents to a `HashMap`
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
+    ///  tesseract.set("API", "MYKEY").unwrap();
+    ///  
+    ///  let map = tesseract.export().unwrap();
+    ///  assert_eq!(map.contains_key("API"), true);
+    ///  assert_eq!(map.get("API"), Some(&String::from("MYKEY")));
+    /// ```
+    pub fn export(&self) -> Result<HashMap<String, String>> {
+        if !self.is_unlock() {
+            return Err(Error::TesseractLocked);
+        }
+        let mut map = HashMap::new();
+        for key in self.internal.keys() {
+            let value = match self.retrieve(key) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            map.insert(key.clone(), value);
+        }
+        Ok(map)
+    }
+
+    /// To save to file using internal file path.
+    /// Note: Because we do not want to interrupt the functions due to it failing to
+    ///       save for whatever reason, this function will return `Result::Ok`
+    ///       regardless of success or error.
+    ///
+    /// TODO: Handle error without subjecting function to `Result::Err`
+    pub fn save(&mut self) -> Result<()> {
+        if self.autosave_enabled() {
+            if let Some(path) = &self.file {
+                if let Err(_e) = self.to_file(path) {
+                    //TODO: Logging
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+impl Tesseract {
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
+    pub fn new() -> Tesseract {
+        Tesseract::default()
+    }
+
     /// To store a value to be encrypted into the keystore. If the key already exist, it
     /// will be overwritten.
     ///
@@ -189,8 +223,11 @@ impl Tesseract {
     ///  tesseract.set("API", "MYKEY").unwrap();
     ///  assert_eq!(tesseract.exist("API"), true);
     /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set(&mut self, key: &str, value: &str) -> Result<()> {
-        ensure!(self.is_unlock(), "Data is secured");
+        if !self.is_unlock() {
+            return Err(Error::TesseractLocked);
+        }
         let pkey = crate::crypto::cipher::aes256gcm_self_decrypt(&self.enc_pass)?;
         let data = crate::crypto::cipher::aes256gcm_encrypt(&pkey, value.as_bytes())?;
         self.internal.insert(key.to_string(), data);
@@ -208,16 +245,20 @@ impl Tesseract {
     ///  assert_eq!(tesseract.exist("API"), true);
     ///  assert_eq!(tesseract.exist("NOT_API"), false);
     /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn exist(&self, key: &str) -> bool {
         self.internal.contains_key(key)
     }
 
     /// Used to retrieve and decrypt the value stored for the key
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn retrieve(&self, key: &str) -> Result<String> {
-        ensure!(self.is_unlock(), "Data is secured");
+        if !self.is_unlock() {
+            return Err(Error::TesseractLocked);
+        }
 
         if !self.exist(key) {
-            bail!(Error::ObjectNotFound)
+            return Err(Error::ObjectNotFound);
         }
 
         let pkey = crate::crypto::cipher::aes256gcm_self_decrypt(&self.enc_pass)?;
@@ -240,10 +281,11 @@ impl Tesseract {
     ///  tesseract.delete("API").unwrap();
     ///  assert_eq!(tesseract.exist("API"), false);
     /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn delete(&mut self, key: &str) -> Result<()> {
         self.internal
             .remove(key)
-            .ok_or_else(|| anyhow::anyhow!("Could not remove key. Item does not exist"))?;
+            .ok_or_else(|| Error::ObjectNotFound)?;
         self.save()
     }
 
@@ -258,35 +300,10 @@ impl Tesseract {
     ///  tesseract.clear();
     ///  assert_eq!(tesseract.exist("API"), false);
     /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn clear(&mut self) {
         self.internal.clear();
         if self.save().is_ok() {}
-    }
-
-    /// Decrypts and export tesseract contents to a `HashMap`
-    ///
-    /// # Example
-    ///
-    /// ```
-    ///  let mut tesseract = warp::tesseract::Tesseract::default();
-    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
-    ///  tesseract.set("API", "MYKEY").unwrap();
-    ///  
-    ///  let map = tesseract.export().unwrap();
-    ///  assert_eq!(map.contains_key("API"), true);
-    ///  assert_eq!(map.get("API"), Some(&String::from("MYKEY")));
-    /// ```
-    pub fn export(&self) -> Result<HashMap<String, String>> {
-        ensure!(self.is_unlock(), "Data is secured");
-        let mut map = HashMap::new();
-        for key in self.internal.keys() {
-            let value = match self.retrieve(key) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            map.insert(key.clone(), value);
-        }
-        Ok(map)
     }
 
     /// Checks to see if tesseract is secured and not "unlocked"
@@ -302,18 +319,21 @@ impl Tesseract {
     ///  tesseract.lock();
     ///  assert!(!tesseract.is_unlock())
     /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn is_unlock(&self) -> bool {
         !self.enc_pass.is_empty() && self.unlock
     }
 
     /// Decrypts and store the password and plaintext contents in memory
-    pub fn unlock(&mut self, passphrase: &[u8]) -> anyhow::Result<()> {
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn unlock(&mut self, passphrase: &[u8]) -> Result<()> {
         self.enc_pass = crate::crypto::cipher::aes256gcm_self_encrypt(passphrase)?;
         self.unlock = true;
         Ok(())
     }
 
     /// Encrypts and remove password and plaintext from memory.
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn lock(&mut self) {
         if self.save().is_ok() {}
         self.enc_pass.zeroize();
@@ -323,17 +343,13 @@ impl Tesseract {
 
 cfg_if::cfg_if! {
     if #[cfg(target_arch = "wasm32")] {
-        #[wasm_bindgen]
+            #[wasm_bindgen]
             impl Tesseract {
-                #[wasm_bindgen(constructor)]
-                pub fn new() -> Tesseract {
-                    Tesseract::default()
-                }
 
                 /// Import and encrypt a hashmap into tesseract
                 #[wasm_bindgen]
-                pub fn import(passphrase: &[u8], map: JsValue) -> Result<Tesseract, JsError> {
-                    let map: HashMap<String, String> = serde_wasm_bindgen::from_value(map).unwrap();
+                pub fn import(passphrase: &[u8], map: JsValue) -> Result<Tesseract> {
+                    let map: HashMap<String, String> = serde_wasm_bindgen::from_value(map).map_err(|_| Error::Other)?;
                     let mut tesseract = Tesseract::default();
                     tesseract.unlock(passphrase)?;
                     for (key, val) in map {
@@ -342,58 +358,11 @@ cfg_if::cfg_if! {
                     Ok(tesseract)
                 }
 
-                /// To store a value to be encrypted into the keystore. If the key already exist, it
-                /// will be overwritten.
-                pub fn set(&mut self, key: &str, value: &str) -> Result<(), JsError> {
-                    if !self.is_unlock() {
-                        return Err(JsError::new("Data is secured."));
-                    }
-                    let pkey = crate::crypto::cipher::aes256gcm_self_decrypt(&self.enc_pass)?;
-                    let data = crate::crypto::cipher::aes256gcm_encrypt(&pkey, value.as_bytes())?;
-                    self.internal.insert(key.to_string(), data);
-                    Ok(())
-                }
-
-                /// Check to see if the key store contains the key
-                pub fn exist(&self, key: &str) -> bool {
-                    self.internal.contains_key(key)
-                }
-
-                /// Used to retreive and decrypt the value stored for the key
-                pub fn retrieve(&self, key: &str) -> Result<String, JsError> {
-                    if !self.is_unlock() {
-                        return Err(JsError::new("Data is secured."));
-                    }
-
-                    if !self.exist(key) {
-                        return Err(JsError::new("Key is not found"));
-                    }
-
-                    let pkey = crate::crypto::cipher::aes256gcm_self_decrypt(&self.enc_pass)?;
-
-                    let data = self.internal.get(key).unwrap();
-                    let slice = crate::crypto::cipher::aes256gcm_decrypt(&pkey, data)?;
-                    let plain_text = String::from_utf8_lossy(&slice[..]).to_string();
-                    Ok(plain_text)
-                }
-
-                /// Used to delete the value from the keystore
-                pub fn delete(&mut self, key: &str) -> Result<(), JsError> {
-                    self.internal
-                        .remove(key)
-                        .ok_or_else(|| JsError::new("Could not remove key. Item does not exist"))?;
-                    Ok(())
-                }
-
-                /// Used to clear the whole keystore.
-                pub fn clear(&mut self) {
-                    self.internal.clear();
-                }
-
                 /// Decrypts and export tesseract contents to a `HashMap`
-                pub fn export(&self) -> Result<JsValue, JsError> {
+                #[wasm_bindgen]
+                pub fn export(&self) -> Result<JsValue> {
                     if !self.is_unlock() {
-                        return Err(JsError::new("Data is secured."));
+                        return Err(Error::TesseractLocked);
                     }
                     let mut map = HashMap::new();
                     for key in self.internal.keys() {
@@ -403,27 +372,13 @@ cfg_if::cfg_if! {
                         };
                         map.insert(key.clone(), value);
                     }
-                    Ok(serde_wasm_bindgen::to_value(&map).unwrap())
+                    serde_wasm_bindgen::to_value(&map).map_err(|_| Error::Other)
                 }
 
-                /// Checks to see if tesseract is secured and not "unlocked"
-                pub fn is_unlock(&self) -> bool {
-                    !self.enc_pass.is_empty() && self.unlock
-                }
-
-                /// Decrypts and store the password and plaintext contents in memory
-                pub fn unlock(&mut self, passphrase: &[u8]) -> Result<(), JsError> {
-                    self.enc_pass = crate::crypto::cipher::aes256gcm_self_encrypt(passphrase)?;
-                    self.unlock = true;
+                /// Used to save contents.
+                /// Note: This does nothing in WASM right now
+                pub fn save(&mut self) -> Result<()> {
                     Ok(())
-                }
-
-                /// Encrypts and remove password and plaintext from memory.
-                ///
-                /// Note: This will override existing contents within Tesseract.
-                pub fn lock(&mut self) {
-                    self.enc_pass.zeroize();
-                    self.unlock = false;
                 }
             }
 
