@@ -8,7 +8,20 @@ edition = "2021"
 [dependencies]
 warp = { path = "../../warp" }
 
-#libp2p = { git = "https://github.com/libp2p/rust-libp2p", features = ["tcp-tokio"] } # TODO: Lock to a specific commit until version is publish
+libp2p = { git = "https://github.com/libp2p/rust-libp2p", features = ["tcp-tokio", "dns-tokio"] } # TODO: Lock to a specific commit until version is publish
+uuid = { version = "0.8", features = ["serde", "v4"] }
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.6", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+futures = { version = "0.3" }
+async-trait = { version = "0.1" }
+anyhow = { version = "1" }
+#crossbeam = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+
+[dev-dependencies]
+warp-mp-solana = { path = "../warp-mp-solana" }
 
 [features]
 default = []
