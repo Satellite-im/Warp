@@ -184,7 +184,7 @@ impl Constellation for MemorySystem {
         Ok(())
     }
 
-    async fn from_buffer(
+    async fn put_buffer(
         &mut self,
         name: &str,
         buf: &Vec<u8>,
@@ -218,11 +218,7 @@ impl Constellation for MemorySystem {
     }
 
     /// Use to download a file from the filesystem
-    async fn to_buffer(
-        &self,
-        name: &str,
-        buf: &mut Vec<u8>,
-    ) -> std::result::Result<(), warp::error::Error> {
+    async fn get_buffer(&self, name: &str) -> std::result::Result<Vec<u8>, warp::error::Error> {
         if !self.current_directory().has_item(name) {
             return Err(warp::error::Error::IoError(std::io::Error::from(
                 ErrorKind::InvalidData,
@@ -238,7 +234,9 @@ impl Constellation for MemorySystem {
                     let obj = list.last().unwrap();
 
                     if let Ok(data) = obj.payload::<DimensionData>() {
-                        return data.write_from_path(buf);
+                        let mut buffer = vec![];
+                        data.write_from_path(&mut buffer)?;
+                        return Ok(buffer);
                     }
                 }
             }
@@ -250,8 +248,7 @@ impl Constellation for MemorySystem {
             .get_item_from_path(String::from(name))
             .map_err(|_| Error::Other)?;
 
-        *buf = file.data();
-        Ok(())
+        Ok(file.data())
     }
 
     async fn remove(&mut self, path: &str, _: bool) -> WarpResult<()> {

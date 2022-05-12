@@ -329,7 +329,7 @@ impl Constellation for IpfsFileSystem {
         Ok(())
     }
 
-    async fn from_buffer(&mut self, name: &str, buffer: &Vec<u8>) -> Result<()> {
+    async fn put_buffer(&mut self, name: &str, buffer: &Vec<u8>) -> Result<()> {
         let name = affix_root(name);
 
         let fs = std::io::Cursor::new(buffer.clone());
@@ -402,7 +402,7 @@ impl Constellation for IpfsFileSystem {
         Ok(())
     }
 
-    async fn to_buffer(&self, name: &str, buffer: &mut Vec<u8>) -> Result<()> {
+    async fn get_buffer(&self, name: &str) -> Result<Vec<u8>> {
         let name = affix_root(name);
 
         if let Ok(cache) = self.get_cache() {
@@ -419,8 +419,9 @@ impl Constellation for IpfsFileSystem {
                 if !list.is_empty() {
                     let obj = list.last().unwrap();
                     if let Ok(data) = obj.payload::<DimensionData>() {
-                        data.write_from_path(buffer)?;
-                        return Ok(());
+                        let mut buffer = vec![];
+                        data.write_from_path(&mut buffer)?;
+                        return Ok(buffer);
                     }
                 }
             }
@@ -440,12 +441,14 @@ impl Constellation for IpfsFileSystem {
 
                 let mut reader_stream = StreamReader::new(stream);
 
-                tokio::io::copy(&mut reader_stream, buffer).await?;
-            }
-            _ => return Err(Error::Unimplemented),
-        }
+                let mut buffer = vec![];
 
-        Ok(())
+                tokio::io::copy(&mut reader_stream, &mut buffer).await?;
+
+                Ok(buffer)
+            }
+            _ => Err(Error::Unimplemented),
+        }
     }
 
     async fn remove(&mut self, name: &str, recursive: bool) -> Result<()> {

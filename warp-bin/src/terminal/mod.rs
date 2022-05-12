@@ -424,7 +424,7 @@ impl<'a> WarpApp<'a> {
             .filesystem
             .as_mut()
             .unwrap()
-            .from_buffer(cargo_file.0.as_str(), &cargo_file.1)
+            .put_buffer(cargo_file.0.as_str(), &cargo_file.1)
             .await
         {
             Ok(()) => {}
@@ -437,7 +437,7 @@ impl<'a> WarpApp<'a> {
             .filesystem
             .as_mut()
             .unwrap()
-            .from_buffer(main_file.0.as_str(), &main_file.1)
+            .put_buffer(main_file.0.as_str(), &main_file.1)
             .await
         {
             Ok(()) => {}
@@ -450,7 +450,7 @@ impl<'a> WarpApp<'a> {
             .filesystem
             .as_mut()
             .unwrap()
-            .from_buffer(ui_file.0.as_str(), &ui_file.1)
+            .put_buffer(ui_file.0.as_str(), &ui_file.1)
             .await
         {
             Ok(()) => {}

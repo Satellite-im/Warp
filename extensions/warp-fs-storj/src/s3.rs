@@ -310,7 +310,7 @@ impl Constellation for StorjFilesystem {
         Ok(())
     }
 
-    async fn from_buffer(&mut self, name: &str, buffer: &Vec<u8>) -> Result<()> {
+    async fn put_buffer(&mut self, name: &str, buffer: &Vec<u8>) -> Result<()> {
         let (bucket, name) = split_for(name)?;
 
         //TODO: Allow for custom bucket name
@@ -363,7 +363,7 @@ impl Constellation for StorjFilesystem {
         Ok(())
     }
 
-    async fn to_buffer(&self, name: &str, buffer: &mut Vec<u8>) -> Result<()> {
+    async fn get_buffer(&self, name: &str) -> Result<Vec<u8>> {
         let (bucket, name) = split_for(name)?;
 
         if let Ok(cache) = self.get_cache() {
@@ -373,8 +373,9 @@ impl Constellation for StorjFilesystem {
                 if !list.is_empty() {
                     let obj = list.last().ok_or(Error::ArrayPositionNotFound)?;
                     if let Ok(data) = obj.payload::<DimensionData>() {
-                        data.write_from_path(buffer)?;
-                        return Ok(());
+                        let mut buffer = vec![];
+                        data.write_from_path(&mut buffer)?;
+                        return Ok(buffer);
                     }
                 }
             }
@@ -394,9 +395,7 @@ impl Constellation for StorjFilesystem {
             )));
         }
 
-        *buffer = buf;
-
-        Ok(())
+        Ok(buf)
     }
 
     async fn remove(&mut self, path: &str, _: bool) -> Result<()> {

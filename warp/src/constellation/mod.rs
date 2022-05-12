@@ -115,13 +115,12 @@ pub trait Constellation: Extension + Sync + Send {
     }
 
     /// Use to upload file to the filesystem with data from buffer
-    #[allow(clippy::wrong_self_convention)]
-    async fn from_buffer(&mut self, _: &str, _: &Vec<u8>) -> Result<()> {
+    async fn put_buffer(&mut self, _: &str, _: &Vec<u8>) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
     /// Use to download data from the filesystem into a buffer
-    async fn to_buffer(&self, _: &str, _: &mut Vec<u8>) -> Result<()> {
+    async fn get_buffer(&self, _: &str) -> Result<Vec<u8>> {
         Err(Error::Unimplemented)
     }
 
@@ -293,12 +292,12 @@ impl ConstellationAdapter {
     }
 
     #[wasm_bindgen]
-    pub fn from_buffer(&mut self, remote: String, data: Vec<u8>) -> Promise {
+    pub fn put_buffer(&mut self, remote: String, data: Vec<u8>) -> Promise {
         let inner = self.inner().clone();
         future_to_promise(async move {
             let mut inner = inner.lock();
             inner
-                .from_buffer(&remote, &data)
+                .put_buffer(&remote, &data)
                 .await
                 .map_err(crate::error::into_error)
                 .map_err(JsValue::from)?;
@@ -308,13 +307,12 @@ impl ConstellationAdapter {
     }
 
     #[wasm_bindgen]
-    pub fn to_buffer(&self, remote: String) -> Promise {
+    pub fn get_buffer(&self, remote: String) -> Promise {
         let inner = self.inner().clone();
         future_to_promise(async move {
             let inner = inner.lock();
-            let mut data = vec![];
-            inner
-                .to_buffer(&remote, &mut data)
+            let data = inner
+                .get_buffer(&remote)
                 .await
                 .map_err(crate::error::into_error)?;
             let val = serde_wasm_bindgen::to_value(&data).unwrap();
@@ -523,7 +521,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn constellation_from_buffer(
+    pub unsafe extern "C" fn constellation_put_buffer(
         ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         buffer: *const u8,
@@ -553,7 +551,7 @@ pub mod ffi {
         rt.block_on(async move {
             constellation
                 .inner_guard()
-                .from_buffer(&remote.to_string_lossy().to_string(), &slice.to_vec())
+                .put_buffer(&remote.to_string_lossy().to_string(), &slice.to_vec())
                 .await
         })
         .is_ok()
@@ -589,7 +587,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn constellation_to_buffer(
+    pub unsafe extern "C" fn constellation_get_buffer(
         ctx: *mut ConstellationAdapter,
         remote: *const c_char,
     ) -> *mut u8 {
@@ -601,19 +599,13 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
 
-        let mut temp_buf = vec![];
-
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let rt = tokio::runtime::Runtime::new().unwrap();
         let ptr = rt.block_on(async move {
             {
-                match constellation
-                    .inner_guard()
-                    .to_buffer(&remote, &mut temp_buf)
-                    .await
-                {
-                    Ok(_) => {
+                match constellation.inner_guard().get_buffer(&remote).await {
+                    Ok(temp_buf) => {
                         let buf = temp_buf.as_ptr();
                         std::mem::forget(temp_buf);
                         buf

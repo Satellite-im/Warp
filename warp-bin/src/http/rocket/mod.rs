@@ -34,7 +34,7 @@ pub async fn http_main(manage: &mut ModuleManager) -> anyhow::Result<()> {
     //TODO: Remove
     if fs
         .lock()
-        .from_buffer("readme.txt", &b"This file was uploaded from Warp".to_vec())
+        .put_buffer("readme.txt", &b"This file was uploaded from Warp".to_vec())
         .await
         .is_err()
     {}
