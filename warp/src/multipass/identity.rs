@@ -285,7 +285,7 @@ impl Default for FriendRequestStatus {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[wasm_bindgen]
 pub struct PublicKey(Vec<u8>);
 
