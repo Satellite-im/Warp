@@ -39,7 +39,7 @@ pub trait Constellation: Extension + Sync + Send {
     /// Get root directory
     fn root_directory(&self) -> &Directory;
 
-    /// Get root directory
+    /// Get a mutable root directory
     fn root_directory_mut(&mut self) -> &mut Directory;
 
     /// Get current directory
@@ -88,7 +88,7 @@ pub trait Constellation: Extension + Sync + Send {
     /// Obtain a mutable reference of the current directory path
     fn get_path_mut(&mut self) -> &mut PathBuf;
 
-    /// Get a current directory that is mutable.
+    /// Get the current directory that is mutable.
     fn current_directory_mut(&mut self) -> Result<&mut Directory> {
         self.open_directory(&self.get_path().clone().to_string_lossy())
     }
@@ -104,37 +104,37 @@ pub trait Constellation: Extension + Sync + Send {
         }
     }
 
-    /// Use to upload file to the filesystem
+    /// Used to upload file to the filesystem
     async fn put(&mut self, _: &str, _: &str) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
-    /// Use to download a file from the filesystem
+    /// Used to download a file from the filesystem
     async fn get(&self, _: &str, _: &str) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
-    /// Use to upload file to the filesystem with data from buffer
+    /// Used to upload file to the filesystem with data from buffer
     async fn put_buffer(&mut self, _: &str, _: &Vec<u8>) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
-    /// Use to download data from the filesystem into a buffer
+    /// Used to download data from the filesystem into a buffer
     async fn get_buffer(&self, _: &str) -> Result<Vec<u8>> {
         Err(Error::Unimplemented)
     }
 
-    /// Use to remove data from the filesystem
+    /// Used to remove data from the filesystem
     async fn remove(&mut self, _: &str, _: bool) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
-    /// Use to move data within the filesystem
+    /// Used to move data within the filesystem
     async fn move_item(&mut self, _: &str, _: &str) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
-    /// Use to create a directory within the filesystem.
+    /// Used to create a directory within the filesystem.
     async fn create_directory(&mut self, _: &str, _: bool) -> Result<()> {
         Err(Error::Unimplemented)
     }
@@ -144,7 +144,7 @@ pub trait Constellation: Extension + Sync + Send {
         Err(Error::Unimplemented)
     }
 
-    /// Use to export the filesystem to a specific structure. Currently supports `Json`, `Toml`, and `Yaml`
+    /// Used to export the filesystem to a specific structure. Currently supports `Json`, `Toml`, and `Yaml`
     fn export(&self, r#type: ConstellationDataType) -> Result<String> {
         match r#type {
             ConstellationDataType::Json => {
