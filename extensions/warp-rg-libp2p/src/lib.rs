@@ -12,11 +12,13 @@ use libp2p::tcp::TokioTcpConfig;
 use uuid::Uuid;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    Callback, Conversation, EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState,
+    Callback, EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState,
 };
 use warp::sync::{Arc, Mutex};
 use warp::{error::Error, pocket_dimension::PocketDimension};
 use warp::{module::Module, Extension};
+
+use serde::{Deserialize, Serialize};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -30,7 +32,7 @@ pub struct Libp2pMessaging {
     // topic of conversation
     pub current_conversation: Option<Uuid>,
     //TODO: Support multiple conversations
-    pub conversations: Arc<Mutex<Conversation>>,
+    pub conversations: Arc<Mutex<Vec<Message>>>,
 }
 
 #[derive(NetworkBehaviour)]
@@ -39,20 +41,85 @@ pub struct RayGunBehavior {
     pub floodsub: Floodsub,
     pub mdns: Mdns,
     #[behaviour(ignore)]
-    pub inner: Arc<Mutex<Conversation>>,
+    pub inner: Arc<Mutex<Vec<Message>>>,
 }
 
 impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
     fn inject_event(&mut self, message: FloodsubEvent) {
         if let FloodsubEvent::Message(message) = message {
-            if let Ok(val) = serde_json::from_slice::<Message>(&message.data) {
-                println!("{:?}", val);
-                self.inner
-                    .lock()
-                    .as_mut()
-                    .entry(val.conversation_id)
-                    .or_insert_with(Vec::new)
-                    .push(val);
+            if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
+                match events {
+                    MessagingEvents::NewMessage(message) => {
+                        println!("{:?}", &message);
+                        self.inner.lock().push(message)
+                    }
+                    MessagingEvents::EditMessage(convo_id, message_id, val) => {
+                        let mut messages = self.inner.lock();
+                        let index = messages
+                            .iter()
+                            .position(|conv| {
+                                conv.conversation_id == convo_id && conv.id == message_id
+                            })
+                            .ok_or(Error::ArrayPositionNotFound);
+
+                        if index.is_err() {
+                            return;
+                        }
+
+                        let index = index.unwrap();
+
+                        let message = match messages.get_mut(index) {
+                            Some(msg) => msg,
+                            None => return,
+                        };
+
+                        *message.value_mut() = val;
+                    }
+                    MessagingEvents::DeleteMessage(convo_id, message_id) => {
+                        let mut messages = self.inner.lock();
+                        let index = messages
+                            .iter()
+                            .position(|conv| {
+                                conv.conversation_id == convo_id && conv.id == message_id
+                            })
+                            .ok_or(Error::ArrayPositionNotFound);
+
+                        if index.is_err() {
+                            return;
+                        }
+
+                        let index = index.unwrap();
+
+                        let _ = messages.remove(index);
+                    }
+                    MessagingEvents::PinMessage(convo_id, message_id, state) => {
+                        let mut messages = self.inner.lock();
+                        let index = messages
+                            .iter()
+                            .position(|conv| {
+                                conv.conversation_id == convo_id && conv.id == message_id
+                            })
+                            .ok_or(Error::ArrayPositionNotFound);
+
+                        if index.is_err() {
+                            return;
+                        }
+
+                        let index = index.unwrap();
+
+                        let message = match messages.get_mut(index) {
+                            Some(msg) => msg,
+                            None => return,
+                        };
+
+                        match state {
+                            PinState::Pin => *message.pinned_mut() = true,
+                            PinState::Unpin => *message.pinned_mut() = false,
+                        }
+                    }
+                    MessagingEvents::ReactMessage(_, _, _) => {}
+                    MessagingEvents::DeleteConversation(_) => {}
+                }
             }
         }
     }
@@ -92,7 +159,7 @@ impl Libp2pMessaging {
             relay_addr: None,
             listen_addr: None,
             current_conversation: None,
-            conversations: Arc::new(Mutex::new(Conversation::default())),
+            conversations: Arc::new(Mutex::new(Vec::new())),
             response_channel: None,
         };
         Ok(message)
@@ -126,6 +193,7 @@ impl Libp2pMessaging {
                 inner: self.conversations.clone(),
             };
 
+            //TODO: Have peers subscribe directly
             behaviour.floodsub.subscribe(topic.clone());
 
             libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
@@ -158,10 +226,19 @@ impl Libp2pMessaging {
                 tokio::select! {
                     rg_event = into_rx.recv() => {
                         match rg_event {
-                            Some(MessagingEvents::NewMessage(message)) => {
-                                let conversation_id = message.conversation_id;
-                                let topic = Topic::new(conversation_id.to_string());
-                                match serde_json::to_vec(&message) {
+                            Some(event) => {
+                                let topic = match &event {
+                                    MessagingEvents::NewMessage(message) => message.conversation_id,
+                                    MessagingEvents::EditMessage(id, _, _) => *id,
+                                    MessagingEvents::DeleteMessage(id, _) => *id,
+                                    MessagingEvents::PinMessage(id, _, _) => *id,
+                                    MessagingEvents::DeleteConversation(id) => *id,
+                                    MessagingEvents::ReactMessage(id, _, _) => *id,
+                                };
+
+                                let topic = Topic::new(topic.to_string());
+
+                                match serde_json::to_vec(&event) {
                                     Ok(bytes) => {
                                         swarm
                                             .behaviour_mut()
@@ -179,7 +256,7 @@ impl Libp2pMessaging {
                                         }
                                     }
                                 }
-                            },
+                            }
                             _ => continue
                         }
                     },
@@ -219,11 +296,14 @@ impl Extension for Libp2pMessaging {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessagingEvents {
     NewMessage(Message),
-    ModifiedMessage(Uuid, Message),
-    DeleteMessage(Uuid),
-    PinMessage(Uuid),
+    EditMessage(Uuid, Uuid, Vec<String>),
+    DeleteMessage(Uuid, Uuid),
+    DeleteConversation(Uuid),
+    PinMessage(Uuid, Uuid, PinState),
+    ReactMessage(Uuid, Uuid, ReactionState),
 }
 
 #[async_trait::async_trait]
@@ -234,17 +314,15 @@ impl RayGun for Libp2pMessaging {
         _: MessageOptions,
         _: Option<Callback>,
     ) -> Result<Vec<Message>> {
-        let conversation = {
-            self.conversations
-                .lock()
-                .as_ref()
-                .get(&conversation_id)
-                .cloned()
-                .ok_or(Error::ObjectNotFound)?
-        };
-        //TODO: Implement a check across options
+        let messages = self.conversations.lock();
 
-        Ok(conversation)
+        let list = messages
+            .iter()
+            .filter(|conv| conv.conversation_id == conversation_id)
+            .cloned()
+            .collect::<Vec<Message>>();
+
+        Ok(list)
     }
 
     async fn send(
@@ -280,34 +358,22 @@ impl RayGun for Libp2pMessaging {
             None => return Err(Error::ToBeDetermined),
         };
 
-        self.conversations
-            .lock()
-            .as_mut()
-            .entry(message.conversation_id)
-            .or_insert_with(Vec::new)
-            .push(message);
+        self.conversations.lock().push(message);
 
         return Ok(());
     }
 
     async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()> {
         //TODO: Option to signal to peer to remove message from their side as well
-        //TODO: Check to see if multiple messages have been selected. This may not be required since the client can submit multiple delete request.
-        if self
-            .conversations
-            .lock()
-            .as_mut()
-            .entry(conversation_id)
-            .or_insert_with(Vec::new)
+        let mut messages = self.conversations.lock();
+        let index = messages
             .iter()
-            .filter(|message| message.id == message_id)
-            .collect::<Vec<_>>()
-            .get(0)
-            .is_some()
-        {
-            return Ok(());
-        }
-        Err(Error::Unimplemented)
+            .position(|conv| conv.conversation_id == conversation_id && conv.id == message_id)
+            .ok_or(Error::ArrayPositionNotFound)?;
+
+        messages.remove(index);
+
+        Ok(())
     }
 
     async fn react(

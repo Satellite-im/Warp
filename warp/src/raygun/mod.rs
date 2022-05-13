@@ -17,18 +17,27 @@ pub struct MessageOptions {
     pub skip: Option<i64>,
 }
 
-/// Instance for holding a conversation with the key being the UUID of the conversation.
-#[derive(Default, Debug)]
-pub struct Conversation(pub HashMap<Uuid, Vec<Message>>);
+impl MessageOptions {
+    pub fn data_range(&self) -> Option<(DateTime<Utc>, DateTime<Utc>)> {
+        self.date_range
+    }
 
-impl AsRef<HashMap<Uuid, Vec<Message>>> for Conversation {
-    fn as_ref(&self) -> &HashMap<Uuid, Vec<Message>> {
-        &self.0
+    pub fn id_range(&self) -> Option<(Uuid, Uuid)> {
+        self.id_range
     }
 }
-impl AsMut<HashMap<Uuid, Vec<Message>>> for Conversation {
-    fn as_mut(&mut self) -> &mut HashMap<Uuid, Vec<Message>> {
-        &mut self.0
+
+impl MessageOptions {
+    pub fn smart(&self) -> Option<bool> {
+        self.smart
+    }
+
+    pub fn limit(&self) -> Option<i64> {
+        self.limit
+    }
+
+    pub fn skip(&self) -> Option<i64> {
+        self.skip
     }
 }
 
@@ -54,6 +63,10 @@ pub struct Message {
 
     /// Message context for `Message`
     pub value: Vec<String>,
+
+    /// Metadata related to the message
+    #[serde(flatten)]
+    pub metadata: HashMap<String, String>,
 }
 
 impl Default for Message {
@@ -66,6 +79,7 @@ impl Default for Message {
             pinned: false,
             reactions: Vec::new(),
             value: Vec::new(),
+            metadata: HashMap::new(),
         }
     }
 }
@@ -76,13 +90,91 @@ impl Message {
     }
 }
 
+// Getter functions
 impl Message {
-    pub fn pin_message(&mut self) {
-        self.pinned = true
+    pub fn id(&self) -> Uuid {
+        self.id
     }
 
-    pub fn unpin_message(&mut self) {
-        self.pinned = false
+    pub fn conversation_id(&self) -> Uuid {
+        self.conversation_id
+    }
+
+    pub fn sender(&self) -> Uuid {
+        self.sender
+    }
+
+    pub fn date(&self) -> DateTime<Utc> {
+        self.date
+    }
+
+    pub fn pinned(&self) -> bool {
+        self.pinned
+    }
+
+    pub fn reactions(&self) -> Vec<Reaction> {
+        self.reactions.clone()
+    }
+
+    pub fn value(&self) -> Vec<String> {
+        self.value.clone()
+    }
+
+    pub fn metadata(&self) -> HashMap<String, String> {
+        self.metadata.clone()
+    }
+}
+
+impl Message {
+    pub fn set_id(&mut self, id: Uuid) {
+        self.id = id
+    }
+
+    pub fn set_conversation_id(&mut self, id: Uuid) {
+        self.conversation_id = id
+    }
+
+    pub fn set_sender(&mut self, id: Uuid) {
+        self.sender = id
+    }
+
+    pub fn set_date(&mut self, date: DateTime<Utc>) {
+        self.date = date
+    }
+
+    pub fn set_pinned(&mut self, pin: bool) {
+        self.pinned = pin
+    }
+
+    pub fn set_reactions(&mut self, reaction: Vec<Reaction>) {
+        self.reactions = reaction
+    }
+
+    pub fn set_value(&mut self, val: Vec<String>) {
+        self.value = val
+    }
+
+    pub fn set_metadata(&mut self, metadata: HashMap<String, String>) {
+        self.metadata = metadata
+    }
+}
+
+// Mutable functions
+impl Message {
+    pub fn pinned_mut(&mut self) -> &mut bool {
+        &mut self.pinned
+    }
+
+    pub fn reactions_mut(&mut self) -> &mut Vec<Reaction> {
+        &mut self.reactions
+    }
+
+    pub fn value_mut(&mut self) -> &mut Vec<String> {
+        &mut self.value
+    }
+
+    pub fn metadata_mut(&mut self) -> &mut HashMap<String, String> {
+        &mut self.metadata
     }
 }
 
@@ -95,19 +187,19 @@ pub struct Reaction {
     pub users: Vec<Uuid>,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum ReactionState {
     Add,
     Remove,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum PinState {
     Pin,
     Unpin,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum EmbedState {
     Enabled,
     Disable,

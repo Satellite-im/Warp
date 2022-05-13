@@ -1,4 +1,7 @@
 use anyhow::bail;
+// use futures::prelude::*;
+// use rustyline_async::{Readline, ReadlineError};
+// use std::io::Write;
 use tokio::io::AsyncBufReadExt;
 use uuid::Uuid;
 use warp::multipass::MultiPass;
@@ -27,6 +30,15 @@ async fn create_account() -> anyhow::Result<Arc<Mutex<Box<dyn MultiPass>>>> {
     }
 }
 
+#[allow(dead_code)]
+fn import_account(
+    tesseract: Arc<Mutex<Tesseract>>,
+) -> anyhow::Result<Arc<Mutex<Box<dyn MultiPass>>>> {
+    let mut account = SolanaAccount::with_devnet();
+    account.set_tesseract(tesseract.clone());
+    Ok(Arc::new(Mutex::new(Box::new(account))))
+}
+
 async fn create_rg(
     account: Arc<Mutex<Box<dyn MultiPass>>>,
     topic: Uuid,
@@ -40,9 +52,12 @@ async fn create_rg(
 async fn main() -> anyhow::Result<()> {
     let topic = Uuid::nil();
     let new_account = create_account().await?;
+    // let identity = new_account.lock().get_own_identity()?;
     let chat = create_rg(new_account.clone(), topic).await?;
-    let mut stdin = tokio::io::BufReader::new(tokio::io::stdin()).lines();
     println!("Type anything and press enter to send...");
+
+    let mut stdin = tokio::io::BufReader::new(tokio::io::stdin()).lines();
+
     loop {
         tokio::select! {
             line = stdin.next_line() => {
@@ -55,3 +70,44 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 }
+
+/*
+       tokio::select! {
+           line = stdin.next_line() => {
+               let line = line?.expect("stdin closed");
+               if let Err(e) = chat.lock().send(topic, None, vec![line.to_string()]).await {
+                   println!("Error sending message: {}", e);
+                   continue
+               }
+           }
+       }
+*/
+
+// let (mut rl, mut stdout) =
+//     Readline::new(format!("{}#{}> ", identity.username(), identity.short_id())).unwrap();
+//
+// loop {
+//     tokio::select! {
+//         line = rl.readline().fuse() => match line {
+//             Ok(line) => {
+//                 match line.trim() {
+//                     "list" => {
+//                         let messages = chat.lock().get_messages(topic, MessageOptions::default(), None).await?;
+//                         for message in messages.iter() {
+//                             writeln!(stdout, "{:?}", message)?;
+//                         }
+//                     },
+//                     line => if let Err(e) = chat.lock().send(topic, None, vec![line.to_string()]).await {
+//                        writeln!(stdout, "Error sending message: {}", e)?;
+//                        continue
+//                    }
+//                 }
+//             },
+//             Err(ReadlineError::Interrupted) => break,
+//             Err(ReadlineError::Eof) => break,
+//             Err(e) => {
+//                 writeln!(stdout, "Error: {}", e)?;
+//             }
+//         }
+//     }
+// }
