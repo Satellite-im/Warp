@@ -23,10 +23,10 @@ pub trait HookType: std::fmt::Display {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hook {
     /// Name of the hook/event
-    pub name: String,
+    name: String,
 
     /// Type in which the hook is meant for
-    pub data_type: DataType,
+    data_type: DataType,
 }
 
 impl<A> From<A> for Hook
@@ -53,6 +53,14 @@ impl Hook {
             data_type: DataType::from(module),
         }
     }
+
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    pub fn data_type(&self) -> DataType {
+        self.data_type
+    }
 }
 
 /// Formats the Hook into a unique, human readable, identifier
@@ -69,10 +77,10 @@ pub type HookData = Box<dyn Fn(&Hook, &DataObject) + Sync + Send>;
 #[derive(Default)]
 pub struct Hooks {
     /// List of hooks.
-    pub hooks: Vec<Hook>,
+    hooks: Vec<Hook>,
 
     /// A map of hooks with an array of executable functions
-    pub subscribers: HashMap<String, Vec<HookData>>,
+    subscribers: HashMap<String, Vec<HookData>>,
 }
 
 /// Create a new `Hook` registered to the system.
@@ -173,8 +181,8 @@ impl Hooks {
     ///     //Check to see if hook havent been registered
     ///     assert_eq!(system.subscribe(Hook::from("unknown::new_file"), |_, _|{}).is_err(), true);
     ///     system.subscribe("filesystem::new_file", |hook, data| {
-    ///         assert_eq!(hook.name.as_str(), "new_file");
-    ///         assert_eq!(hook.data_type, DataType::from(Module::FileSystem));
+    ///         assert_eq!(hook.name().as_str(), "new_file");
+    ///         assert_eq!(hook.data_type(), DataType::from(Module::FileSystem));
     ///         let file: File = data.payload().unwrap();
     ///         assert_eq!(file.name().as_str(), "test.txt");
     ///     }).unwrap();
@@ -209,8 +217,8 @@ impl Hooks {
     ///     let mut system = Hooks::default();
     ///     let hook = system.create(Module::FileSystem, "new_file").unwrap();
     ///     system.subscribe("filesystem::new_file", |hook, data| {
-    ///         assert_eq!(hook.name.as_str(), "new_file");
-    ///         assert_eq!(hook.data_type, DataType::from(Module::FileSystem));
+    ///         assert_eq!(hook.name().as_str(), "new_file");
+    ///         assert_eq!(hook.data_type(), DataType::from(Module::FileSystem));
     ///         let file: File = data.payload().unwrap();
     ///         assert_eq!(file.name().as_str(), "test.txt");
     ///     }).unwrap();
