@@ -15,7 +15,6 @@ type Result<T> = std::result::Result<T, Error>;
 #[allow(unused_imports)]
 use crate::module::Module;
 
-#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 pub type DataObject = Data;
@@ -23,7 +22,7 @@ pub type DataObject = Data;
 /// Standard DataObject used throughout warp.
 /// Unifies output from all modules
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 pub struct Data {
     /// ID of the Data Object
     id: Uuid,
@@ -49,7 +48,7 @@ pub struct Data {
 #[derive(Hash, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 pub enum DataType {
     #[display(fmt = "messaging")]
     Messaging,
@@ -67,7 +66,6 @@ pub enum DataType {
     Unknown,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl<S: AsRef<str>> From<S> for DataType {
     fn from(data: S) -> Self {
         match data.as_ref().to_lowercase().as_str() {
@@ -82,7 +80,6 @@ impl<S: AsRef<str>> From<S> for DataType {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl From<Module> for DataType {
     fn from(module: Module) -> Self {
         match module {

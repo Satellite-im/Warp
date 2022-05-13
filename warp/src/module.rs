@@ -45,14 +45,12 @@ pub enum Module {
     Unknown,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl Default for Module {
     fn default() -> Self {
         Self::Unknown
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl<A> From<A> for Module
 where
     A: AsRef<str>,
