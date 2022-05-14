@@ -22,8 +22,9 @@ serde_json = { version = "1.0" }
 bs58 = "0.4"
 
 [dev-dependencies]
+warp-pd-stretto = { path = "../warp-pd-stretto" }
 warp-mp-solana = { path = "../warp-mp-solana" }
-rustyline = "9.1"
+rustyline-async = "0.2"
 
 [features]
 default = []

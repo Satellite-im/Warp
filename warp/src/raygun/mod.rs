@@ -1,4 +1,5 @@
 use crate::error::Error;
+use crate::multipass::identity::PublicKey;
 use crate::Extension;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -51,7 +52,7 @@ pub struct Message {
     pub conversation_id: Uuid,
 
     /// ID of the sender of the message
-    pub sender: Uuid,
+    pub sender: SenderId,
 
     /// Timestamp of the message
     pub date: DateTime<Utc>,
@@ -74,12 +75,50 @@ pub struct Message {
     pub metadata: HashMap<String, String>,
 }
 
+/// Use to identify the sender
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+pub struct SenderId(MessageSender);
+
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum MessageSender {
+    /// UUID of the Sender
+    Id(Uuid),
+
+    /// Public Key of the Sender
+    PublicKey(PublicKey),
+}
+
+impl SenderId {
+    pub fn from_id(id: Uuid) -> SenderId {
+        SenderId(MessageSender::Id(id))
+    }
+
+    pub fn from_public_key(pubkey: PublicKey) -> SenderId {
+        SenderId(MessageSender::PublicKey(pubkey))
+    }
+
+    pub fn get_id(&self) -> Option<Uuid> {
+        match &self.0 {
+            MessageSender::Id(id) => Some(*id),
+            MessageSender::PublicKey(_) => None,
+        }
+    }
+
+    pub fn get_public_key(&self) -> Option<PublicKey> {
+        match &self.0 {
+            MessageSender::Id(_) => None,
+            MessageSender::PublicKey(k) => Some(k.clone()),
+        }
+    }
+}
+
 impl Default for Message {
     fn default() -> Self {
         Self {
             id: Uuid::new_v4(),
             conversation_id: Uuid::nil(),
-            sender: Uuid::nil(),
+            sender: SenderId::from_id(Uuid::nil()),
             date: Utc::now(),
             pinned: false,
             reactions: Vec::new(),
@@ -106,8 +145,8 @@ impl Message {
         self.conversation_id
     }
 
-    pub fn sender(&self) -> Uuid {
-        self.sender
+    pub fn sender(&self) -> SenderId {
+        self.sender.clone()
     }
 
     pub fn date(&self) -> DateTime<Utc> {
@@ -140,7 +179,7 @@ impl Message {
         self.conversation_id = id
     }
 
-    pub fn set_sender(&mut self, id: Uuid) {
+    pub fn set_sender(&mut self, id: SenderId) {
         self.sender = id
     }
 

@@ -2,24 +2,25 @@ use anyhow::anyhow;
 use libp2p::floodsub::{Floodsub, FloodsubEvent, Topic};
 use libp2p::mdns::{Mdns, MdnsConfig, MdnsEvent};
 use libp2p::swarm::{NetworkBehaviourEventProcess, SwarmEvent};
-use libp2p::NetworkBehaviour;
 use libp2p::{identity, mplex, noise, Multiaddr, PeerId, Transport};
+use libp2p::{ping, NetworkBehaviour};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use futures::StreamExt;
 use libp2p::core::transport::upgrade;
+use libp2p::ping::{Ping, PingEvent};
 use libp2p::tcp::TokioTcpConfig;
 use uuid::Uuid;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    Callback, EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState,
+    Callback, EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState, SenderId,
 };
 use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::{error::Error, pocket_dimension::PocketDimension};
 use warp::{module::Module, Extension};
 
+use crate::ping::Event;
 use serde::{Deserialize, Serialize};
-use warp::crypto::hash::sha256_hash;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -41,6 +42,7 @@ pub struct Libp2pMessaging {
 pub struct RayGunBehavior {
     pub floodsub: Floodsub,
     pub mdns: Mdns,
+    pub ping: Ping,
     #[behaviour(ignore)]
     pub inner: Arc<Mutex<Vec<Message>>>,
     #[behaviour(ignore)]
@@ -127,6 +129,14 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
     }
 }
 
+impl NetworkBehaviourEventProcess<PingEvent> for RayGunBehavior {
+    fn inject_event(&mut self, event: PingEvent) {
+        match event {
+            Event { .. } => {}
+        }
+    }
+}
+
 impl NetworkBehaviourEventProcess<MdnsEvent> for RayGunBehavior {
     // Called when `mdns` produces an event.
     fn inject_event(&mut self, event: MdnsEvent) {
@@ -188,9 +198,13 @@ impl Libp2pMessaging {
             .boxed();
 
         let mut swarm = {
+            let mut mdns_config = MdnsConfig::default();
+            mdns_config.enable_ipv6 = true;
+
             let behaviour = RayGunBehavior {
                 floodsub: Floodsub::new(peer.clone()),
-                mdns: Mdns::new(MdnsConfig::default()).await?,
+                mdns: Mdns::new(mdns_config).await?,
+                ping: Ping::new(ping::Config::new().with_keep_alive(true)),
                 inner: self.conversations.clone(),
                 account: self.account.clone(),
             };
@@ -297,21 +311,16 @@ impl Libp2pMessaging {
             .as_mut()
             .ok_or_else(|| anyhow!("Channel unavailable"))?;
 
-        match response.recv().await {
-            Some(Ok(_)) => {}
-            Some(Err(e)) => return Err(anyhow!(e)),
-            None => return Err(anyhow!(Error::ToBeDetermined)),
-        };
-        Ok(())
+        response
+            .recv()
+            .await
+            .ok_or_else(|| anyhow!(Error::ToBeDetermined))?
+            .map_err(|e| anyhow!(e))
     }
 
-    pub fn sender_id(&self) -> anyhow::Result<(Uuid, String)> {
+    pub fn sender_id(&self) -> anyhow::Result<warp::multipass::identity::PublicKey> {
         let ident = self.account.lock().get_own_identity()?;
-        let hash = sha256_hash(ident.public_key().as_ref(), None);
-        Ok((
-            Uuid::from_slice(&hash[..hash.len() / 2]).unwrap_or_default(),
-            bs58::encode(ident.public_key().into_bytes()).into_string(),
-        ))
+        Ok(ident.public_key())
     }
 }
 
@@ -366,11 +375,10 @@ impl RayGun for Libp2pMessaging {
     ) -> Result<()> {
         //TODO: Implement editing message
         //TODO: Check to see if message was sent or if its still sending
-        let (id, pubkey) = self.sender_id()?;
+        let pubkey = self.sender_id()?;
         let mut message = Message::new();
         message.conversation_id = conversation_id;
-        message.sender = id;
-        message.metadata_mut().insert("public_key".into(), pubkey);
+        message.sender = SenderId::from_public_key(pubkey);
 
         message.value = value;
 
