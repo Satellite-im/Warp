@@ -61,6 +61,10 @@ pub struct Message {
     /// List of the reactions for the `Message`
     pub reactions: Vec<Reaction>,
 
+    /// ID of the message being replied to
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replied: Option<Uuid>,
+
     /// Message context for `Message`
     pub value: Vec<String>,
 
@@ -78,6 +82,7 @@ impl Default for Message {
             date: Utc::now(),
             pinned: false,
             reactions: Vec::new(),
+            replied: None,
             value: Vec::new(),
             metadata: HashMap::new(),
         }
