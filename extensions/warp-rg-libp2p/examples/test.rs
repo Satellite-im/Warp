@@ -7,7 +7,7 @@ use rustyline::Editor;
 use uuid::Uuid;
 use warp::crypto::hash::sha256_hash;
 use warp::multipass::MultiPass;
-use warp::raygun::{MessageOptions, RayGun};
+use warp::raygun::{MessageOptions, PinState, RayGun};
 use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
 use warp_mp_solana::SolanaAccount;
@@ -69,23 +69,47 @@ async fn main() -> anyhow::Result<()> {
     loop {
         let readline = rl.readline(">>> ");
         match readline {
-            Ok(line) => match line.trim() {
-                "list" => {
-                    let messages = chat
-                        .lock()
-                        .get_messages(topic, MessageOptions::default(), None)
-                        .await?;
-                    for message in messages.iter() {
-                        println!("{:?}", message);
+            Ok(line) => {
+                let command = line.trim().split(" ").collect::<Vec<&str>>();
+                match command.get(0).map(|s| s.as_ref()) {
+                    Some("list") => {
+                        let messages = chat
+                            .lock()
+                            .get_messages(topic, MessageOptions::default(), None)
+                            .await?;
+                        for message in messages.iter() {
+                            println!("{:?}", message);
+                        }
+                    }
+                    Some("pin-all") => {
+                        let messages = chat
+                            .lock()
+                            .get_messages(topic, MessageOptions::default(), None)
+                            .await?;
+                        for message in messages.iter() {
+                            chat.lock().pin(topic, message.id, PinState::Pin).await?;
+                            println!("Pinned {}", message.id);
+                        }
+                    }
+                    Some("unpin-all") => {
+                        let messages = chat
+                            .lock()
+                            .get_messages(topic, MessageOptions::default(), None)
+                            .await?;
+                        for message in messages.iter() {
+                            chat.lock().pin(topic, message.id, PinState::Unpin).await?;
+                            println!("Unpinned {}", message.id);
+                        }
+                    }
+                    None | _ => {
+                        if let Err(e) = chat.lock().send(topic, None, vec![line.to_string()]).await
+                        {
+                            println!("Error sending message: {}", e);
+                            continue;
+                        }
                     }
                 }
-                line => {
-                    if let Err(e) = chat.lock().send(topic, None, vec![line.to_string()]).await {
-                        println!("Error sending message: {}", e);
-                        continue;
-                    }
-                }
-            },
+            }
             Err(ReadlineError::Interrupted) => break,
             Err(ReadlineError::Eof) => break,
             Err(e) => {

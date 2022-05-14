@@ -43,6 +43,8 @@ pub struct RayGunBehavior {
     pub mdns: Mdns,
     #[behaviour(ignore)]
     pub inner: Arc<Mutex<Vec<Message>>>,
+    #[behaviour(ignore)]
+    pub account: Arc<Mutex<Box<dyn MultiPass>>>,
 }
 
 impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
@@ -166,10 +168,11 @@ impl Libp2pMessaging {
     }
 
     pub async fn construct_connection(&mut self) -> anyhow::Result<()> {
-        let mut prikey = self.account.lock().decrypt_private_key(None)?;
-        let _id_kp = identity::ed25519::Keypair::decode(&mut prikey)?;
-        //TODO: Investigate why libp2p wont use keypair from multipass (or atleast warp-mp-solana).
-        let keypair = identity::Keypair::generate_ed25519(); //Ed25519(id_kp);
+        let prikey = self.account.lock().decrypt_private_key(None)?;
+        let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&prikey)?;
+        let mut sec_key = id_kp.secret.to_bytes();
+        let id_secret = identity::ed25519::SecretKey::from_bytes(&mut sec_key)?;
+        let keypair = identity::Keypair::Ed25519(id_secret.into());
 
         let peer = PeerId::from(keypair.public());
 
@@ -189,6 +192,7 @@ impl Libp2pMessaging {
                 floodsub: Floodsub::new(peer.clone()),
                 mdns: Mdns::new(MdnsConfig::default()).await?,
                 inner: self.conversations.clone(),
+                account: self.account.clone(),
             };
 
             libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
@@ -412,8 +416,25 @@ impl RayGun for Libp2pMessaging {
             message_id,
             state,
         ))
-        .await
-        .map_err(Error::Any)
+        .await?;
+
+        let mut messages = self.conversations.lock();
+
+        let index = messages
+            .iter()
+            .position(|conv| conv.conversation_id == conversation_id && conv.id == message_id)
+            .ok_or(Error::ArrayPositionNotFound)?;
+
+        let message = messages
+            .get_mut(index)
+            .ok_or(Error::ArrayPositionNotFound)?;
+
+        match state {
+            PinState::Pin => *message.pinned_mut() = true,
+            PinState::Unpin => *message.pinned_mut() = false,
+        }
+
+        Ok(())
     }
 
     async fn ping(&mut self, id: Uuid) -> Result<()> {
