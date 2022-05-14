@@ -64,6 +64,8 @@ async fn main() -> anyhow::Result<()> {
 
     let mut rl = tokio::task::spawn_blocking(Editor::<()>::new).await?;
 
+    chat.lock().ping(topic).await?;
+
     loop {
         let readline = rl.readline(">>> ");
         match readline {

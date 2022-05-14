@@ -412,6 +412,12 @@ impl RayGun for Libp2pMessaging {
         .map_err(Error::Any)
     }
 
+    async fn ping(&mut self, id: Uuid) -> Result<()> {
+        self.send_event(MessagingEvents::Ping(id))
+            .await
+            .map_err(Error::Any)
+    }
+
     async fn reply(
         &mut self,
         _conversation_id: Uuid,
