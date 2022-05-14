@@ -14,7 +14,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Debug results: {:?}", system.root_directory());
 
-    let mut buf = system.get_buffer("Cargo.toml").await?;
+    let buf = system.get_buffer("Cargo.toml").await?;
 
     println!("Content: {}", String::from_utf8_lossy(&buf));
     system.remove("hello", false).await?;

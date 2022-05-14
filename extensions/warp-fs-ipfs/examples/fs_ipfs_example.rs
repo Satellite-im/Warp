@@ -19,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Debug results: {:?}", system.root_directory());
 
-    let mut buffer: Vec<u8> = system.get_buffer("testfile").await?;
+    let buffer: Vec<u8> = system.get_buffer("testfile").await?;
 
     println!("Output: {}", String::from_utf8_lossy(&buffer).to_string());
 
