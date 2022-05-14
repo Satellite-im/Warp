@@ -300,6 +300,15 @@ impl Libp2pMessaging {
         };
         Ok(())
     }
+
+    pub fn sender_id(&self) -> anyhow::Result<(Uuid, String)> {
+        let ident = self.account.lock().get_own_identity()?;
+        let hash = sha256_hash(ident.public_key().as_ref(), None);
+        Ok((
+            Uuid::from_slice(&hash[..hash.len() / 2]).unwrap_or_default(),
+            bs58::encode(ident.public_key().into_bytes()).into_string(),
+        ))
+    }
 }
 
 impl Extension for Libp2pMessaging {
@@ -353,16 +362,11 @@ impl RayGun for Libp2pMessaging {
     ) -> Result<()> {
         //TODO: Implement editing message
         //TODO: Check to see if message was sent or if its still sending
-
-        let ident = self.account.lock().get_own_identity()?;
+        let (id, pubkey) = self.sender_id()?;
         let mut message = Message::new();
         message.conversation_id = conversation_id;
-        let hash = sha256_hash(ident.public_key().as_ref(), None);
-        message.sender = Uuid::from_slice(&hash[..hash.len() / 2]).unwrap_or_default();
-        message.metadata_mut().insert(
-            "public_key".into(),
-            bs58::encode(ident.public_key().into_bytes()).into_string(),
-        );
+        message.sender = id;
+        message.metadata_mut().insert("public_key".into(), pubkey);
 
         message.value = value;
 
