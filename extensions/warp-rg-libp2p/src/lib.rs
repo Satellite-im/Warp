@@ -28,7 +28,7 @@ pub struct Libp2pMessaging {
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     pub into_thread: Option<Sender<MessagingEvents>>,
     pub response_channel: Option<Receiver<Result<()>>>,
-    pub relay_addr: Option<Multiaddr>,
+    pub relay_addr: Vec<Multiaddr>,
     pub listen_addr: Option<Multiaddr>,
     // topic of conversation
     pub current_conversation: Option<Uuid>,
@@ -51,15 +51,7 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
         if let FloodsubEvent::Message(message) = message {
             if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
                 match events {
-                    MessagingEvents::NewMessage(msg) => {
-                        //TODO: Replace with a realistic ID
-                        let peer = message.source;
-                        let sender = sha256_hash(&peer.to_bytes(), None);
-                        let mut message = msg.clone();
-                        message.sender =
-                            Uuid::from_slice(&sender[..sender.len() / 2]).unwrap_or_default();
-                        self.inner.lock().push(message)
-                    }
+                    MessagingEvents::NewMessage(message) => self.inner.lock().push(message),
                     MessagingEvents::EditMessage(convo_id, message_id, val) => {
                         let mut messages = self.inner.lock();
                         let index = messages
@@ -164,7 +156,7 @@ impl Libp2pMessaging {
             account,
             cache,
             into_thread: None,
-            relay_addr: None,
+            relay_addr: vec![],
             listen_addr: None,
             current_conversation: None,
             conversations: Arc::new(Mutex::new(Vec::new())),
@@ -206,8 +198,10 @@ impl Libp2pMessaging {
                 .build()
         };
 
-        if let Some(relay) = &self.relay_addr {
-            swarm.dial(relay.clone())?;
+        for addr in self.relay_addr.iter() {
+            if let Err(_) = swarm.dial(addr.clone()) {
+                //TODO: Log
+            }
         }
 
         let address = match &self.listen_addr {
@@ -277,7 +271,7 @@ impl Libp2pMessaging {
 
     pub fn set_relay<S: Into<Multiaddr>>(&mut self, relay: S) {
         let address = relay.into();
-        self.relay_addr = Some(address);
+        self.relay_addr.push(address);
     }
 
     pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
