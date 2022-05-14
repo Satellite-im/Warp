@@ -6,21 +6,20 @@ mod test {
     use warp::data::{DataObject, DataType};
     use warp::hooks::Hooks;
     use warp::module::Module;
-    use warp_common::Result;
 
     lazy_static! {
         pub static ref HOOKS: Arc<Mutex<Hooks>> = Arc::new(Mutex::new(Hooks::default()));
     }
 
     #[test]
-    fn test() -> Result<()> {
+    fn test() -> anyhow::Result<()> {
         let mut system = HOOKS.lock().unwrap();
 
-        let hook = system.create("new_file", Module::FileSystem)?;
+        let hook = system.create(Module::FileSystem, "new_file")?;
 
         system.subscribe(hook, |hook, data| {
-            assert_eq!(hook.name.as_str(), "new_file");
-            assert_eq!(hook.data_type, DataType::from(Module::FileSystem));
+            assert_eq!(hook.name().as_str(), "new_file");
+            assert_eq!(hook.data_type(), DataType::from(Module::FileSystem));
 
             assert_eq!(data.data_type(), DataType::from(Module::FileSystem));
 
