@@ -14,17 +14,18 @@ use warp::multipass::MultiPass;
 use warp::raygun::{
     Callback, EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState,
 };
-use warp::sync::{Arc, Mutex};
+use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::{error::Error, pocket_dimension::PocketDimension};
 use warp::{module::Module, Extension};
 
 use serde::{Deserialize, Serialize};
+use warp::crypto::hash::sha256_hash;
 
 type Result<T> = std::result::Result<T, Error>;
 
 pub struct Libp2pMessaging {
     pub account: Arc<Mutex<Box<dyn MultiPass>>>,
-    // pub cache: Arc<Mutex<Box<dyn PocketDimension>>>,
+    pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     pub into_thread: Option<Sender<MessagingEvents>>,
     pub response_channel: Option<Receiver<Result<()>>>,
     pub relay_addr: Option<Multiaddr>,
@@ -46,11 +47,17 @@ pub struct RayGunBehavior {
 
 impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
     fn inject_event(&mut self, message: FloodsubEvent) {
+        //TODO: Check topic and compare that to the conv id
         if let FloodsubEvent::Message(message) = message {
             if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
                 match events {
-                    MessagingEvents::NewMessage(message) => {
-                        println!("{:?}", &message);
+                    MessagingEvents::NewMessage(msg) => {
+                        //TODO: Replace with a realistic ID
+                        let peer = message.source;
+                        let sender = sha256_hash(&peer.to_bytes(), None);
+                        let mut message = msg.clone();
+                        message.sender =
+                            Uuid::from_slice(&sender[..sender.len() / 2]).unwrap_or_default();
                         self.inner.lock().push(message)
                     }
                     MessagingEvents::EditMessage(convo_id, message_id, val) => {
@@ -119,6 +126,7 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
                     }
                     MessagingEvents::ReactMessage(_, _, _) => {}
                     MessagingEvents::DeleteConversation(_) => {}
+                    MessagingEvents::Ping(_) => {}
                 }
             }
         }
@@ -131,7 +139,6 @@ impl NetworkBehaviourEventProcess<MdnsEvent> for RayGunBehavior {
         match event {
             MdnsEvent::Discovered(list) => {
                 for (peer, _addr) in list {
-                    // println!("Peer {} - {}", peer.to_base58(), addr.to_string());
                     self.floodsub.add_node_to_partial_view(peer);
                 }
             }
@@ -149,12 +156,13 @@ impl NetworkBehaviourEventProcess<MdnsEvent> for RayGunBehavior {
 impl Libp2pMessaging {
     pub fn new(
         account: Arc<Mutex<Box<dyn MultiPass>>>,
-        _cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+        cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
         let account = account.clone();
 
         let message = Libp2pMessaging {
             account,
+            cache,
             into_thread: None,
             relay_addr: None,
             listen_addr: None,
@@ -165,10 +173,10 @@ impl Libp2pMessaging {
         Ok(message)
     }
 
-    pub async fn construct_connection(&mut self, topic: Uuid) -> anyhow::Result<()> {
+    pub async fn construct_connection(&mut self) -> anyhow::Result<()> {
         let mut prikey = self.account.lock().decrypt_private_key(None)?;
         let _id_kp = identity::ed25519::Keypair::decode(&mut prikey)?;
-        //TODO: Investigate why libp2p wont use keypair from multipass.
+        //TODO: Investigate why libp2p wont use keypair from multipass (or atleast warp-mp-solana).
         let keypair = identity::Keypair::generate_ed25519(); //Ed25519(id_kp);
 
         let peer = PeerId::from(keypair.public());
@@ -184,17 +192,12 @@ impl Libp2pMessaging {
             .multiplex(mplex::MplexConfig::new())
             .boxed();
 
-        let topic = Topic::new(topic.to_string());
-
         let mut swarm = {
-            let mut behaviour = RayGunBehavior {
+            let behaviour = RayGunBehavior {
                 floodsub: Floodsub::new(peer.clone()),
                 mdns: Mdns::new(MdnsConfig::default()).await?,
                 inner: self.conversations.clone(),
             };
-
-            //TODO: Have peers subscribe directly
-            behaviour.floodsub.subscribe(topic.clone());
 
             libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
                 .executor(Box::new(|fut| {
@@ -234,12 +237,15 @@ impl Libp2pMessaging {
                                     MessagingEvents::PinMessage(id, _, _) => *id,
                                     MessagingEvents::DeleteConversation(id) => *id,
                                     MessagingEvents::ReactMessage(id, _, _) => *id,
+                                    MessagingEvents::Ping(id) => *id
                                 };
 
                                 let topic = Topic::new(topic.to_string());
 
                                 match serde_json::to_vec(&event) {
                                     Ok(bytes) => {
+                                        //TODO: Resolve initial connection/subscribe
+                                        swarm.behaviour_mut().floodsub.subscribe(topic.clone());
                                         swarm
                                             .behaviour_mut()
                                             .floodsub
@@ -261,10 +267,7 @@ impl Libp2pMessaging {
                         }
                     },
                     event = swarm.select_next_some() => {
-                        if let SwarmEvent::NewListenAddr { address:_, .. } = event {
-                            //TODO: Log
-                            // println!("Listening on {:?}", address);
-                        }
+                        if let SwarmEvent::NewListenAddr { address:_, .. } = event {}
                     }
                 }
             }
@@ -272,15 +275,37 @@ impl Libp2pMessaging {
         Ok(())
     }
 
-    pub fn set_circuit_relay<S: Into<Multiaddr>>(&mut self, relay: S) {
+    pub fn set_relay<S: Into<Multiaddr>>(&mut self, relay: S) {
         let address = relay.into();
         self.relay_addr = Some(address);
     }
 
-    // pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
-    //     let cache = self.cache.clone().ok_or_else(|| Error::ToBeDetermined)?;
-    //     Ok(cache.lock())
-    // }
+    pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
+        let cache = self.cache.as_ref().ok_or_else(|| Error::ToBeDetermined)?;
+        Ok(cache.lock())
+    }
+
+    pub async fn send_event(&mut self, event: MessagingEvents) -> anyhow::Result<()> {
+        let inner_tx = self
+            .into_thread
+            .as_ref()
+            .ok_or_else(|| anyhow!("Channel unavailable"))?;
+
+        //TODO: Implement a timeout
+        inner_tx.send(event).await.map_err(|e| anyhow!("{}", e))?;
+
+        let response = self
+            .response_channel
+            .as_mut()
+            .ok_or_else(|| anyhow!("Channel unavailable"))?;
+
+        match response.recv().await {
+            Some(Ok(_)) => {}
+            Some(Err(e)) => return Err(anyhow!(e)),
+            None => return Err(anyhow!(Error::ToBeDetermined)),
+        };
+        Ok(())
+    }
 }
 
 impl Extension for Libp2pMessaging {
@@ -304,6 +329,7 @@ pub enum MessagingEvents {
     DeleteConversation(Uuid),
     PinMessage(Uuid, Uuid, PinState),
     ReactMessage(Uuid, Uuid, ReactionState),
+    Ping(Uuid),
 }
 
 #[async_trait::async_trait]
@@ -333,30 +359,21 @@ impl RayGun for Libp2pMessaging {
     ) -> Result<()> {
         //TODO: Implement editing message
         //TODO: Check to see if message was sent or if its still sending
+
+        let ident = self.account.lock().get_own_identity()?;
         let mut message = Message::new();
         message.conversation_id = conversation_id;
+        let hash = sha256_hash(ident.public_key().as_ref(), None);
+        message.sender = Uuid::from_slice(&hash[..hash.len() / 2]).unwrap_or_default();
+        message.metadata_mut().insert(
+            "public_key".into(),
+            bs58::encode(ident.public_key().into_bytes()).into_string(),
+        );
+
         message.value = value;
 
-        let inner_tx = match &self.into_thread {
-            Some(inner) => inner,
-            None => return Err(Error::ToBeDetermined),
-        };
-        //TODO: Implement a timeout
-        inner_tx
-            .send(MessagingEvents::NewMessage(message.clone()))
-            .await
-            .map_err(|e| anyhow!("{}", e))?;
-
-        let response = match self.response_channel.as_mut() {
-            Some(result) => result,
-            None => return Err(Error::ToBeDetermined),
-        };
-
-        match response.recv().await {
-            Some(Ok(_)) => {}
-            Some(Err(e)) => return Err(e),
-            None => return Err(Error::ToBeDetermined),
-        };
+        self.send_event(MessagingEvents::NewMessage(message.clone()))
+            .await?;
 
         self.conversations.lock().push(message);
 
@@ -388,11 +405,17 @@ impl RayGun for Libp2pMessaging {
 
     async fn pin(
         &mut self,
-        _conversation_id: Uuid,
-        _message_id: Uuid,
-        _state: PinState,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: PinState,
     ) -> Result<()> {
-        Err(Error::Unimplemented)
+        self.send_event(MessagingEvents::PinMessage(
+            conversation_id,
+            message_id,
+            state,
+        ))
+        .await
+        .map_err(Error::Any)
     }
 
     async fn reply(

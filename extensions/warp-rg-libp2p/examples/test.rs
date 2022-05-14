@@ -1,11 +1,13 @@
 use anyhow::bail;
+use rustyline::error::ReadlineError;
+use rustyline::Editor;
 // use futures::prelude::*;
 // use rustyline_async::{Readline, ReadlineError};
 // use std::io::Write;
-use tokio::io::AsyncBufReadExt;
 use uuid::Uuid;
+use warp::crypto::hash::sha256_hash;
 use warp::multipass::MultiPass;
-use warp::raygun::RayGun;
+use warp::raygun::{MessageOptions, RayGun};
 use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
 use warp_mp_solana::SolanaAccount;
@@ -41,34 +43,55 @@ fn import_account(
 
 async fn create_rg(
     account: Arc<Mutex<Box<dyn MultiPass>>>,
-    topic: Uuid,
 ) -> anyhow::Result<Arc<Mutex<Box<dyn RayGun>>>> {
     let mut p2p_chat = Libp2pMessaging::new(account, None)?;
-    p2p_chat.construct_connection(topic).await?;
+    p2p_chat.construct_connection().await?;
     Ok(Arc::new(Mutex::new(Box::new(p2p_chat))))
+}
+
+pub fn topic() -> Uuid {
+    let topic_hash = sha256_hash(b"warp-rg-libp2p", None);
+    Uuid::from_slice(&topic_hash[..topic_hash.len() / 2]).unwrap_or_default()
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let topic = Uuid::nil();
+    let topic = topic();
     let new_account = create_account().await?;
     // let identity = new_account.lock().get_own_identity()?;
-    let chat = create_rg(new_account.clone(), topic).await?;
+    let chat = create_rg(new_account.clone()).await?;
     println!("Type anything and press enter to send...");
 
-    let mut stdin = tokio::io::BufReader::new(tokio::io::stdin()).lines();
+    let mut rl = tokio::task::spawn_blocking(Editor::<()>::new).await?;
 
     loop {
-        tokio::select! {
-            line = stdin.next_line() => {
-                let line = line?.expect("stdin closed");
-                if let Err(e) = chat.lock().send(topic, None, vec![line.to_string()]).await {
-                    println!("Error sending message: {}", e);
-                    continue
+        let readline = rl.readline(">>> ");
+        match readline {
+            Ok(line) => match line.trim() {
+                "list" => {
+                    let messages = chat
+                        .lock()
+                        .get_messages(topic, MessageOptions::default(), None)
+                        .await?;
+                    for message in messages.iter() {
+                        println!("{:?}", message);
+                    }
                 }
+                line => {
+                    if let Err(e) = chat.lock().send(topic, None, vec![line.to_string()]).await {
+                        println!("Error sending message: {}", e);
+                        continue;
+                    }
+                }
+            },
+            Err(ReadlineError::Interrupted) => break,
+            Err(ReadlineError::Eof) => break,
+            Err(e) => {
+                println!("Error: {}", e);
             }
         }
     }
+    Ok(())
 }
 
 /*
