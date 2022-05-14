@@ -1,3 +1,4 @@
+use crate::error::Error;
 use crate::Extension;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -251,6 +252,10 @@ pub trait RayGun: Extension + Sync + Send {
         message_id: Uuid,
         message: Vec<String>,
     ) -> Result<()>;
+
+    async fn ping(&mut self, _: Uuid) -> Result<()> {
+        Err(Error::Unimplemented)
+    }
 
     async fn embeds(
         &mut self,
