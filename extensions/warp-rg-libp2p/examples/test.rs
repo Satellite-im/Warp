@@ -51,8 +51,7 @@ fn import_account(
 }
 
 async fn create_rg(account: Arc<Mutex<Box<dyn MultiPass>>>) -> anyhow::Result<Box<dyn RayGun>> {
-    let mut p2p_chat = Libp2pMessaging::new(account, None)?;
-    p2p_chat.construct_connection().await?;
+    let p2p_chat = Libp2pMessaging::new(account, None, None, vec![]).await?;
     Ok(Box::new(p2p_chat))
 }
 
@@ -107,13 +106,14 @@ async fn main() -> anyhow::Result<()> {
             line = rl.readline().fuse() => match line {
                 Ok(line) => {
                     match line.trim() {
-                        "list" => {
+                        "/list" => {
                             let messages = chat.get_messages(topic, MessageOptions::default(), None).await?;
                             for message in messages.iter() {
+                                //TODO: Print it out in a table
                                 writeln!(stdout, "{:?}", message)?;
                             }
                         },
-                        "pin-all" => {
+                        "/pin-all" => {
                            let messages = chat
                                .get_messages(topic, MessageOptions::default(), None)
                                .await?;
@@ -122,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
                                writeln!(stdout, "Pinned {}", message.id)?;
                            }
                         }
-                        "unpin-all" => {
+                        "/unpin-all" => {
                            let messages = chat
                                .get_messages(topic, MessageOptions::default(), None)
                                .await?;

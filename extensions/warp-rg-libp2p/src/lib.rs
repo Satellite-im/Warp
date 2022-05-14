@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use libp2p::floodsub::{Floodsub, FloodsubEvent, Topic};
 use libp2p::mdns::{Mdns, MdnsConfig, MdnsEvent};
-use libp2p::swarm::{NetworkBehaviourEventProcess, SwarmEvent};
+use libp2p::swarm::NetworkBehaviourEventProcess;
 use libp2p::{identity, mplex, noise, Multiaddr, PeerId, Transport};
 use libp2p::{ping, NetworkBehaviour};
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -158,31 +158,34 @@ impl NetworkBehaviourEventProcess<MdnsEvent> for RayGunBehavior {
 }
 
 impl Libp2pMessaging {
-    pub fn new(
+    pub async fn new(
         account: Arc<Mutex<Box<dyn MultiPass>>>,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+        listen_addr: Option<Multiaddr>,
+        relay_addr: Vec<Multiaddr>,
     ) -> anyhow::Result<Self> {
         let account = account.clone();
 
-        let message = Libp2pMessaging {
+        let mut message = Libp2pMessaging {
             account,
             cache,
             into_thread: None,
-            relay_addr: vec![],
-            listen_addr: None,
+            relay_addr,
+            listen_addr,
             current_conversation: None,
             conversations: Arc::new(Mutex::new(Vec::new())),
             response_channel: None,
         };
-        Ok(message)
-    }
 
-    pub async fn construct_connection(&mut self) -> anyhow::Result<()> {
-        let prikey = self.account.lock().decrypt_private_key(None)?;
-        let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&prikey)?;
-        let mut sec_key = id_kp.secret.to_bytes();
-        let id_secret = identity::ed25519::SecretKey::from_bytes(&mut sec_key)?;
-        let keypair = identity::Keypair::Ed25519(id_secret.into());
+        let keypair = match message.account.lock().decrypt_private_key(None) {
+            Ok(prikey) => {
+                let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&prikey)?;
+                let mut sec_key = id_kp.secret.to_bytes();
+                let id_secret = identity::ed25519::SecretKey::from_bytes(&mut sec_key)?;
+                identity::Keypair::Ed25519(id_secret.into())
+            }
+            Err(_) => identity::Keypair::generate_ed25519(),
+        };
 
         let peer = PeerId::from(keypair.public());
 
@@ -205,8 +208,8 @@ impl Libp2pMessaging {
                 floodsub: Floodsub::new(peer.clone()),
                 mdns: Mdns::new(mdns_config).await?,
                 ping: Ping::new(ping::Config::new().with_keep_alive(true)),
-                inner: self.conversations.clone(),
-                account: self.account.clone(),
+                inner: message.conversations.clone(),
+                account: message.account.clone(),
             };
 
             libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
@@ -216,13 +219,13 @@ impl Libp2pMessaging {
                 .build()
         };
 
-        for addr in self.relay_addr.iter() {
+        for addr in message.relay_addr.iter() {
             if let Err(_) = swarm.dial(addr.clone()) {
                 //TODO: Log
             }
         }
 
-        let address = match &self.listen_addr {
+        let address = match &message.listen_addr {
             Some(addr) => addr.clone(),
             None => "/ip4/0.0.0.0/tcp/0".parse()?,
         };
@@ -232,9 +235,9 @@ impl Libp2pMessaging {
         let (into_tx, mut into_rx) = tokio::sync::mpsc::channel(32);
         let (outer_tx, outer_rx) = tokio::sync::mpsc::channel(32);
 
-        self.into_thread = Some(into_tx);
+        message.into_thread = Some(into_tx);
 
-        self.response_channel = Some(outer_rx);
+        message.response_channel = Some(outer_rx);
 
         tokio::spawn(async move {
             loop {
@@ -278,18 +281,11 @@ impl Libp2pMessaging {
                             _ => continue
                         }
                     },
-                    event = swarm.select_next_some() => {
-                        if let SwarmEvent::NewListenAddr { address:_, .. } = event {}
-                    }
+                    _event = swarm.select_next_some() => {}
                 }
             }
         });
-        Ok(())
-    }
-
-    pub fn set_relay<S: Into<Multiaddr>>(&mut self, relay: S) {
-        let address = relay.into();
-        self.relay_addr.push(address);
+        Ok(message)
     }
 
     pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
@@ -453,11 +449,24 @@ impl RayGun for Libp2pMessaging {
 
     async fn reply(
         &mut self,
-        _conversation_id: Uuid,
-        _message_id: Uuid,
-        _message: Vec<String>,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        value: Vec<String>,
     ) -> Result<()> {
-        Err(Error::Unimplemented)
+        let pubkey = self.sender_id()?;
+        let mut message = Message::new();
+        message.conversation_id = conversation_id;
+        message.replied = Some(message_id);
+        message.sender = SenderId::from_public_key(pubkey);
+
+        message.value = value;
+
+        self.send_event(MessagingEvents::NewMessage(message.clone()))
+            .await?;
+
+        self.conversations.lock().push(message);
+
+        return Ok(());
     }
 
     async fn embeds(
