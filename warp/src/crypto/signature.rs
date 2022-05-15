@@ -5,7 +5,6 @@ use wasm_bindgen::prelude::wasm_bindgen;
 use zeroize::Zeroize;
 
 /// An Ed25519 Keypair Helper
-#[derive(Debug)]
 #[wasm_bindgen]
 pub struct Ed25519Keypair(Keypair);
 
@@ -30,8 +29,7 @@ impl Ed25519Keypair {
     /// Creates a new keypair
     #[wasm_bindgen(constructor)]
     pub fn new() -> Ed25519Keypair {
-        let mut csprng = OsRng {};
-        Ed25519Keypair(Keypair::generate(&mut csprng))
+        Ed25519Keypair(Keypair::generate(&mut OsRng))
     }
 
     /// Import keypair from 64 bytes

@@ -58,9 +58,8 @@ fn main() -> anyhow::Result<()> {
 
 fn ecdh_public_key(account: &impl MultiPass) -> anyhow::Result<PublicKey> {
     let privkey = account.decrypt_private_key(None)?;
-    let keypair = warp::crypto::ed25519_dalek::Keypair::from_bytes(&privkey)?;
-    let secret = ed25519_to_x25519(&keypair);
-    let pubkey =
-        PublicKey::from_bytes(warp::crypto::x25519_dalek::PublicKey::from(&secret).as_bytes());
+    let keypair = warp::crypto::signature::Ed25519Keypair::from_bytes(&privkey)?;
+    let secret = warp::crypto::exchange::X25519Secret::from_ed25519_keypair(&keypair)?;
+    let pubkey = PublicKey::from_bytes(&secret.public_key().to_inner().as_bytes());
     Ok(pubkey)
 }

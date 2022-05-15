@@ -9,7 +9,7 @@ use anchor_client::{Client, ClientError, Cluster, Program};
 use anyhow::{anyhow, bail};
 pub use groupchats::{Group, Invitation};
 use std::rc::Rc;
-use warp::crypto::x25519_dalek::PublicKey;
+use warp::crypto::exchange::X25519PublicKey;
 
 #[allow(unused)]
 pub struct GroupChat {
@@ -116,15 +116,10 @@ impl GroupChat {
             group_id,
             ..
         } = invitation;
-        let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&self.kp.to_bytes())?;
-        let secret = warp::crypto::exchange::ed25519_to_x25519(&kp);
+        let kp = warp::crypto::signature::Ed25519Keypair::from_bytes(&self.kp.to_bytes())?;
+        let secret = warp::crypto::exchange::X25519Secret::from_ed25519_keypair(&kp)?;
 
-        let dh_key = warp::crypto::exchange::x25519_key_exchange(
-            &secret,
-            PublicKey::from(recipient.to_bytes()),
-            None,
-            true,
-        );
+        let dh_key = secret.key_exchange(X25519PublicKey::from_bytes(&recipient.to_bytes()));
 
         let group_id = warp::crypto::cipher::aes256gcm_encrypt(&dh_key, group_id.as_bytes())
             .map(hex::encode)?;
@@ -144,15 +139,10 @@ impl GroupChat {
             ..
         } = invitation;
         let group_id = hex::decode(group_id)?;
-        let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&self.kp.to_bytes())?;
-        let secret = warp::crypto::exchange::ed25519_to_x25519(&kp);
+        let kp = warp::crypto::signature::Ed25519Keypair::from_bytes(&self.kp.to_bytes())?;
+        let secret = warp::crypto::exchange::X25519Secret::from_ed25519_keypair(&kp)?;
 
-        let dh_key = warp::crypto::exchange::x25519_key_exchange(
-            &secret,
-            PublicKey::from(sender.to_bytes()),
-            None,
-            true,
-        );
+        let dh_key = secret.key_exchange(X25519PublicKey::from_bytes(&sender.to_bytes()));
 
         let group_id = warp::crypto::cipher::aes256gcm_decrypt(&dh_key, &group_id)?;
         let group_id = String::from_utf8_lossy(&group_id).to_string();
