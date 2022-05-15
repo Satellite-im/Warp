@@ -42,6 +42,10 @@ pub enum Error {
     #[error("Data object does not exist within tje dimension")]
     DataObjectNotFound,
 
+    //Crypto Errors
+    #[error("{0}")]
+    Ed25519Error(#[from] ed25519_dalek::SignatureError),
+
     //Misc
     #[error("Invalid data type")]
     InvalidDataType,

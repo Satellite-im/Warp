@@ -17,11 +17,11 @@ pub use zeroize;
 pub mod cipher;
 pub mod exchange;
 pub mod hash;
+pub mod signature;
 
-#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[wasm_bindgen]
 pub fn generate(limit: usize) -> Vec<u8> {
     let mut buf = vec![0u8; limit];
     getrandom::getrandom(&mut buf).unwrap();
