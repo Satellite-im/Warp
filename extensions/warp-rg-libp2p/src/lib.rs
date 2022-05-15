@@ -1,14 +1,15 @@
 use anyhow::anyhow;
 use libp2p::floodsub::{Floodsub, FloodsubEvent, Topic};
 use libp2p::mdns::{Mdns, MdnsConfig, MdnsEvent};
-use libp2p::swarm::NetworkBehaviourEventProcess;
+use libp2p::swarm::{NetworkBehaviourEventProcess, SwarmEvent};
 use libp2p::{identity, mplex, noise, Multiaddr, PeerId, Transport};
 use libp2p::{ping, NetworkBehaviour};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use futures::StreamExt;
 use libp2p::core::transport::upgrade;
-use libp2p::ping::{Ping, PingEvent};
+use libp2p::ping::{Event, Ping, PingEvent};
+use libp2p::relay::v2::relay::{Event as RelayEvent, Relay};
 use libp2p::tcp::TokioTcpConfig;
 use uuid::Uuid;
 use warp::multipass::MultiPass;
@@ -19,7 +20,6 @@ use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::{error::Error, pocket_dimension::PocketDimension};
 use warp::{module::Module, Extension};
 
-use crate::ping::Event;
 use serde::{Deserialize, Serialize};
 
 type Result<T> = std::result::Result<T, Error>;
@@ -43,6 +43,7 @@ pub struct RayGunBehavior {
     pub floodsub: Floodsub,
     pub mdns: Mdns,
     pub ping: Ping,
+    pub relay: Relay,
     #[behaviour(ignore)]
     pub inner: Arc<Mutex<Vec<Message>>>,
     #[behaviour(ignore)]
@@ -134,6 +135,10 @@ impl NetworkBehaviourEventProcess<PingEvent> for RayGunBehavior {
     }
 }
 
+impl NetworkBehaviourEventProcess<RelayEvent> for RayGunBehavior {
+    fn inject_event(&mut self, _: RelayEvent) {}
+}
+
 impl NetworkBehaviourEventProcess<MdnsEvent> for RayGunBehavior {
     // Called when `mdns` produces an event.
     fn inject_event(&mut self, event: MdnsEvent) {
@@ -205,6 +210,7 @@ impl Libp2pMessaging {
                 floodsub: Floodsub::new(peer.clone()),
                 mdns: Mdns::new(mdns_config).await?,
                 ping: Ping::new(ping::Config::new().with_keep_alive(true)),
+                relay: Relay::new(peer.clone(), Default::default()),
                 inner: message.conversations.clone(),
                 account: message.account.clone(),
             };
@@ -217,8 +223,9 @@ impl Libp2pMessaging {
         };
 
         for addr in message.relay_addr.iter() {
-            if let Err(_) = swarm.dial(addr.clone()) {
+            if let Err(e) = swarm.dial(addr.clone()) {
                 //TODO: Log
+                println!("{}", e);
             }
         }
 
@@ -278,7 +285,12 @@ impl Libp2pMessaging {
                             _ => continue
                         }
                     },
-                    _event = swarm.select_next_some() => {}
+                    event = swarm.select_next_some() => {
+                        if let SwarmEvent::NewListenAddr { address, .. } = event {
+                            //TODO: Log
+                            println!("Listening on {:?}", address);
+                        }
+                    }
                 }
             }
         });
