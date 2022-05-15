@@ -1,7 +1,9 @@
 use anyhow::bail;
 use futures::prelude::*;
+use libp2p::Multiaddr;
 use rustyline_async::{Readline, ReadlineError};
 use std::io::Write;
+use std::str::FromStr;
 use uuid::Uuid;
 use warp::crypto::hash::sha256_hash;
 use warp::multipass::MultiPass;
@@ -50,8 +52,11 @@ fn import_account(
     Ok(Arc::new(Mutex::new(Box::new(account))))
 }
 
-async fn create_rg(account: Arc<Mutex<Box<dyn MultiPass>>>) -> anyhow::Result<Box<dyn RayGun>> {
-    let p2p_chat = Libp2pMessaging::new(account, None, None, vec![]).await?;
+async fn create_rg(
+    account: Arc<Mutex<Box<dyn MultiPass>>>,
+    relay: Vec<Multiaddr>,
+) -> anyhow::Result<Box<dyn RayGun>> {
+    let p2p_chat = Libp2pMessaging::new(account, None, None, relay).await?;
     Ok(Box::new(p2p_chat))
 }
 
@@ -62,6 +67,15 @@ pub fn topic() -> Uuid {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let mut relay = vec![];
+
+    for arg in std::env::args() {
+        if let Ok(addr) = Multiaddr::from_str(&arg) {
+            println!("Adding {}", &addr);
+            relay.push(addr)
+        }
+    }
+
     let cache = cache_setup()?;
 
     let topic = topic();
@@ -75,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     println!("Connecting to {}", topic);
-    let mut chat = create_rg(new_account.clone()).await?;
+    let mut chat = create_rg(new_account.clone(), relay).await?;
     println!("Type anything and press enter to send...");
 
     chat.ping(topic).await?;
