@@ -54,9 +54,10 @@ fn import_account(
 
 async fn create_rg(
     account: Arc<Mutex<Box<dyn MultiPass>>>,
+    addr: Option<Multiaddr>,
     relay: Vec<Multiaddr>,
 ) -> anyhow::Result<Box<dyn RayGun>> {
-    let p2p_chat = Libp2pMessaging::new(account, None, None, relay).await?;
+    let p2p_chat = Libp2pMessaging::new(account, None, addr, relay).await?;
     Ok(Box::new(p2p_chat))
 }
 
@@ -68,6 +69,10 @@ pub fn topic() -> Uuid {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut relay = vec![];
+    let addr = {
+        let env = std::env::var("LIBP2P_ADDR").unwrap_or(format!("/ip4/0.0.0.0/tcp/0"));
+        Multiaddr::from_str(&env).ok()
+    };
 
     for arg in std::env::args() {
         if let Ok(addr) = Multiaddr::from_str(&arg) {
@@ -89,7 +94,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     println!("Connecting to {}", topic);
-    let mut chat = create_rg(new_account.clone(), relay).await?;
+    let mut chat = create_rg(new_account.clone(), addr, relay).await?;
     println!("Type anything and press enter to send...");
 
     chat.ping(topic).await?;

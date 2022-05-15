@@ -4,10 +4,13 @@ use libp2p::mdns::{Mdns, MdnsConfig, MdnsEvent};
 use libp2p::swarm::{NetworkBehaviourEventProcess, SwarmEvent};
 use libp2p::{identity, mplex, noise, Multiaddr, PeerId, Transport};
 use libp2p::{ping, NetworkBehaviour};
+use std::str::FromStr;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use futures::StreamExt;
 use libp2p::core::transport::upgrade;
+use libp2p::kad::store::MemoryStore;
+use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent};
 use libp2p::ping::{Event, Ping, PingEvent};
 use libp2p::relay::v2::relay::{Event as RelayEvent, Relay};
 use libp2p::tcp::TokioTcpConfig;
@@ -44,10 +47,15 @@ pub struct RayGunBehavior {
     pub mdns: Mdns,
     pub ping: Ping,
     pub relay: Relay,
+    pub kademlia: Kademlia<MemoryStore>,
     #[behaviour(ignore)]
     pub inner: Arc<Mutex<Vec<Message>>>,
     #[behaviour(ignore)]
     pub account: Arc<Mutex<Box<dyn MultiPass>>>,
+}
+
+impl NetworkBehaviourEventProcess<KademliaEvent> for RayGunBehavior {
+    fn inject_event(&mut self, _: KademliaEvent) {}
 }
 
 impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
@@ -144,14 +152,16 @@ impl NetworkBehaviourEventProcess<MdnsEvent> for RayGunBehavior {
     fn inject_event(&mut self, event: MdnsEvent) {
         match event {
             MdnsEvent::Discovered(list) => {
-                for (peer, _addr) in list {
+                for (peer, addr) in list {
                     self.floodsub.add_node_to_partial_view(peer);
+                    self.kademlia.add_address(&peer, addr);
                 }
             }
             MdnsEvent::Expired(list) => {
-                for (peer, _) in list {
+                for (peer, addr) in list {
                     if !self.mdns.has_node(&peer) {
                         self.floodsub.remove_node_from_partial_view(&peer);
+                        self.kademlia.remove_address(&peer, &addr);
                     }
                 }
             }
@@ -201,19 +211,43 @@ impl Libp2pMessaging {
             .authenticate(noise::NoiseConfig::xx(noise_keys).into_authenticated())
             .multiplex(mplex::MplexConfig::new())
             .boxed();
-
+        //"/dnsaddr/bootstrap.libp2p.io"
         let mut swarm = {
             let mut mdns_config = MdnsConfig::default();
             mdns_config.enable_ipv6 = true;
 
-            let behaviour = RayGunBehavior {
-                floodsub: Floodsub::new(peer.clone()),
+            let kad_config = KademliaConfig::default();
+            // cfg.set_query_timeout(Duration::from_secs(5 * 60));
+            let store = MemoryStore::new(peer);
+
+            let mut behaviour = RayGunBehavior {
+                floodsub: Floodsub::new(peer),
                 mdns: Mdns::new(mdns_config).await?,
                 ping: Ping::new(ping::Config::new().with_keep_alive(true)),
-                relay: Relay::new(peer.clone(), Default::default()),
+                relay: Relay::new(peer, Default::default()),
+                kademlia: Kademlia::with_config(peer, store, kad_config),
                 inner: message.conversations.clone(),
                 account: message.account.clone(),
             };
+
+            let nodes = vec![
+                "QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+                "QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
+                "QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
+                "QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+            ];
+
+            if let Ok(addr) = Multiaddr::from_str("/dnsaddr/bootstrap.libp2p.io") {
+                for peer in &nodes {
+                    let node_peer = PeerId::from_str(peer)?;
+                    behaviour.kademlia.add_address(&node_peer, addr.clone());
+                }
+            }
+
+            if let Err(e) = behaviour.kademlia.bootstrap() {
+                //TODO: Log
+                println!("{}", e);
+            }
 
             libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
                 .executor(Box::new(|fut| {
