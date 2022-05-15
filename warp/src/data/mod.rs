@@ -233,16 +233,6 @@ impl Data {
     }
 }
 
-//Note: This is to allow for passing serde object into FFI
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SerdeContainer(Value);
-
-impl SerdeContainer {
-    pub fn into_inner(&self) -> Value {
-        self.0.clone()
-    }
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::data::{Data, DataType};
