@@ -58,18 +58,17 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
                     MessagingEvents::NewMessage(message) => self.inner.lock().push(message),
                     MessagingEvents::EditMessage(convo_id, message_id, val) => {
                         let mut messages = self.inner.lock();
-                        let index = messages
+
+                        let index = match messages
                             .iter()
                             .position(|conv| {
                                 conv.conversation_id == convo_id && conv.id == message_id
                             })
-                            .ok_or(Error::ArrayPositionNotFound);
-
-                        if index.is_err() {
-                            return;
-                        }
-
-                        let index = index.unwrap();
+                            .ok_or(Error::ArrayPositionNotFound)
+                        {
+                            Ok(index) => index,
+                            Err(_) => return,
+                        };
 
                         let message = match messages.get_mut(index) {
                             Some(msg) => msg,
@@ -80,35 +79,33 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
                     }
                     MessagingEvents::DeleteMessage(convo_id, message_id) => {
                         let mut messages = self.inner.lock();
-                        let index = messages
+
+                        let index = match messages
                             .iter()
                             .position(|conv| {
                                 conv.conversation_id == convo_id && conv.id == message_id
                             })
-                            .ok_or(Error::ArrayPositionNotFound);
-
-                        if index.is_err() {
-                            return;
-                        }
-
-                        let index = index.unwrap();
+                            .ok_or(Error::ArrayPositionNotFound)
+                        {
+                            Ok(index) => index,
+                            Err(_) => return,
+                        };
 
                         let _ = messages.remove(index);
                     }
                     MessagingEvents::PinMessage(convo_id, message_id, state) => {
                         let mut messages = self.inner.lock();
-                        let index = messages
+
+                        let index = match messages
                             .iter()
                             .position(|conv| {
                                 conv.conversation_id == convo_id && conv.id == message_id
                             })
-                            .ok_or(Error::ArrayPositionNotFound);
-
-                        if index.is_err() {
-                            return;
-                        }
-
-                        let index = index.unwrap();
+                            .ok_or(Error::ArrayPositionNotFound)
+                        {
+                            Ok(index) => index,
+                            Err(_) => return,
+                        };
 
                         let message = match messages.get_mut(index) {
                             Some(msg) => msg,
@@ -387,8 +384,11 @@ impl RayGun for Libp2pMessaging {
     }
 
     async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()> {
-        //TODO: Option to signal to peer to remove message from their side as well
+        self.send_event(MessagingEvents::DeleteMessage(conversation_id, message_id))
+            .await?;
+
         let mut messages = self.conversations.lock();
+
         let index = messages
             .iter()
             .position(|conv| conv.conversation_id == conversation_id && conv.id == message_id)
