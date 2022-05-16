@@ -1,4 +1,3 @@
-use warp::crypto::exchange::ed25519_to_x25519;
 use warp::multipass::identity::{Identity, PublicKey};
 use warp::multipass::{Friends, MultiPass};
 use warp::sync::{Arc, Mutex};
@@ -60,6 +59,6 @@ fn ecdh_public_key(account: &impl MultiPass) -> anyhow::Result<PublicKey> {
     let privkey = account.decrypt_private_key(None)?;
     let keypair = warp::crypto::signature::Ed25519Keypair::from_bytes(&privkey)?;
     let secret = warp::crypto::exchange::X25519Secret::from_ed25519_keypair(&keypair)?;
-    let pubkey = PublicKey::from_bytes(&secret.public_key().to_inner().as_bytes());
+    let pubkey = PublicKey::from_bytes(secret.public_key().to_inner().as_bytes());
     Ok(pubkey)
 }
