@@ -1,6 +1,8 @@
 use crate::error::Error;
 use crate::multipass::identity::PublicKey;
+use crate::sync::{Arc, Mutex, MutexGuard};
 use crate::Extension;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -292,6 +294,7 @@ pub trait RayGun: Extension + Sync + Send {
         message: Vec<String>,
     ) -> Result<()>;
 
+    /// Ping conversation for a response
     async fn ping(&mut self, _: Uuid) -> Result<()> {
         Err(Error::Unimplemented)
     }
@@ -302,4 +305,27 @@ pub trait RayGun: Extension + Sync + Send {
         message_id: Uuid,
         state: EmbedState,
     ) -> Result<()>;
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub struct RayGunAdapter {
+    object: Arc<Mutex<Box<dyn RayGun>>>,
+}
+
+impl RayGunAdapter {
+    pub fn new(object: Arc<Mutex<Box<dyn RayGun>>>) -> Self {
+        RayGunAdapter { object }
+    }
+
+    pub fn get_inner(&self) -> Arc<Mutex<Box<dyn RayGun>>> {
+        self.object.clone()
+    }
+
+    pub fn inner_guard(&self) -> MutexGuard<Box<dyn RayGun>> {
+        self.object.lock()
+    }
+}
+
+pub mod ffi {
+    //TODO
 }
