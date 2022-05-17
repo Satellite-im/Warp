@@ -18,9 +18,6 @@ use warp::pocket_dimension::{
     DimensionData, PocketDimension,
 };
 
-#[allow(unused_imports)]
-use libflate::gzip;
-
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Default, Debug)]
