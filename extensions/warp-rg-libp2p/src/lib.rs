@@ -53,7 +53,6 @@ pub struct RayGunBehavior {
     pub sub: Gossipsub,
     pub mdns: Mdns,
     pub ping: Ping,
-    pub relay: Relay,
     pub kademlia: Kademlia<MemoryStore>,
     pub identity: Identify,
     #[behaviour(ignore)]
@@ -361,7 +360,7 @@ impl Libp2pMessaging {
         Ok(message)
     }
 
-    #[cfg(any(feature = "floodsub", feature = "gossipsub"))]
+    #[cfg(feature = "floodsub")]
     fn separate_loop(
         &self,
         mut swarm: Swarm<RayGunBehavior>,
@@ -412,6 +411,99 @@ impl Libp2pMessaging {
                                             .behaviour_mut()
                                             .sub
                                             .publish(topic, bytes);
+
+                                        if let Err(e) = outer_tx.send(Ok(())).await {
+                                            //TODO: Log error
+                                            println!("{}", e);
+                                        }
+                                    },
+                                    Err(e) => {
+                                        if let Err(e) = outer_tx.send(Err(Error::from(e))).await {
+                                            //TODO: Log error
+                                            println!("{}", e);
+                                        }
+                                    }
+                                }
+                            }
+                            _ => continue
+                        }
+                    },
+                    event = swarm.select_next_some() => {
+                        if let SwarmEvent::NewListenAddr { address, .. } = event {
+                            //TODO: Log
+                            println!("Listening on {:?}", address);
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    #[cfg(feature = "gossipsub")]
+    fn separate_loop(
+        &self,
+        mut swarm: Swarm<RayGunBehavior>,
+        mut into_rx: Receiver<MessagingEvents>,
+        outer_tx: Sender<Result<()>>,
+        mut command_rx: Receiver<SwarmCommands>,
+    ) {
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    swm_event = command_rx.recv() => {
+                        match swm_event {
+                            Some(SwarmCommands::DialPeer(peer)) => {
+                                if let Err(e) = swarm.dial(peer) {
+                                    //TODO: Log
+                                    println!("{}", e);
+                                }
+                            }
+                            Some(SwarmCommands::DialAddr(addr)) => {
+                                if let Err(e) = swarm.dial(addr) {
+                                    println!("{}", e);
+                                }
+                            },
+                            _ => continue
+                        }
+                    }
+                    rg_event = into_rx.recv() => {
+                        match rg_event {
+                            Some(event) => {
+                                let topic = match &event {
+                                    MessagingEvents::NewMessage(message) => message.conversation_id(),
+                                    MessagingEvents::EditMessage(id, _, _) => *id,
+                                    MessagingEvents::DeleteMessage(id, _) => *id,
+                                    MessagingEvents::PinMessage(id, _, _) => *id,
+                                    MessagingEvents::DeleteConversation(id) => *id,
+                                    MessagingEvents::ReactMessage(id, _, _) => *id,
+                                    MessagingEvents::Ping(id) => *id
+                                };
+
+                                let topic = Topic::new(topic.to_string());
+
+                                match serde_json::to_vec(&event) {
+                                    Ok(bytes) => {
+                                        //TODO: Resolve initial connection/subscribe
+                                        match swarm.behaviour_mut().sub.subscribe(&topic) {
+                                            Ok(_) => {},
+                                            Err(e) => {
+                                                if let Err(e) = outer_tx.send(Err(Error::Any(anyhow!(e)))).await {
+                                                    println!("{}", e);
+                                                }
+                                            }
+                                        };
+
+                                        match swarm
+                                            .behaviour_mut()
+                                            .sub
+                                            .publish(topic, bytes) {
+                                                Ok(_) => {},
+                                                Err(e) => {
+                                                    if let Err(e) = outer_tx.send(Err(Error::Any(anyhow!(e)))).await {
+                                                        println!("{}", e);
+                                                    }
+                                                }
+                                        };
 
                                         if let Err(e) = outer_tx.send(Ok(())).await {
                                             //TODO: Log error
