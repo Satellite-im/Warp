@@ -48,33 +48,33 @@ impl MessageOptions {
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub struct Message {
     /// ID of the Message
-    pub id: Uuid,
+    id: Uuid,
 
     /// Conversion id where `Message` is associated with.
-    pub conversation_id: Uuid,
+    conversation_id: Uuid,
 
     /// ID of the sender of the message
-    pub sender: SenderId,
+    sender: SenderId,
 
     /// Timestamp of the message
-    pub date: DateTime<Utc>,
+    date: DateTime<Utc>,
 
     /// TBD
-    pub pinned: bool,
+    pinned: bool,
 
     /// List of the reactions for the `Message`
-    pub reactions: Vec<Reaction>,
+    reactions: Vec<Reaction>,
 
     /// ID of the message being replied to
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub replied: Option<Uuid>,
+    replied: Option<Uuid>,
 
     /// Message context for `Message`
-    pub value: Vec<String>,
+    value: Vec<String>,
 
     /// Metadata related to the message
     #[serde(flatten)]
-    pub metadata: HashMap<String, String>,
+    metadata: HashMap<String, String>,
 }
 
 /// Use to identify the sender
@@ -170,6 +170,10 @@ impl Message {
     pub fn metadata(&self) -> HashMap<String, String> {
         self.metadata.clone()
     }
+
+    pub fn replied(&self) -> Option<Uuid> {
+        self.replied
+    }
 }
 
 impl Message {
@@ -204,6 +208,10 @@ impl Message {
     pub fn set_metadata(&mut self, metadata: HashMap<String, String>) {
         self.metadata = metadata
     }
+
+    pub fn set_replied(&mut self, replied: Option<Uuid>) {
+        self.replied = replied
+    }
 }
 
 // Mutable functions
@@ -228,10 +236,10 @@ impl Message {
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub struct Reaction {
     /// Emoji unicode for `Reaction`
-    pub emoji: String,
+    emoji: String,
 
     /// ID of the user who reacted to `Message`
-    pub users: Vec<Uuid>,
+    users: Vec<Uuid>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]

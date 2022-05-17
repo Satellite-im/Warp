@@ -96,7 +96,7 @@ impl GunMessaging {
                                             let index = match messages
                                                 .iter()
                                                 .position(|conv| {
-                                                    conv.conversation_id == convo_id && conv.id == message_id
+                                                    conv.conversation_id() == convo_id && conv.id() == message_id
                                                 })
                                                 .ok_or(Error::ArrayPositionNotFound)
                                             {
@@ -117,7 +117,7 @@ impl GunMessaging {
                                             let index = match messages
                                                 .iter()
                                                 .position(|conv| {
-                                                    conv.conversation_id == convo_id && conv.id == message_id
+                                                    conv.conversation_id() == convo_id && conv.id() == message_id
                                                 })
                                                 .ok_or(Error::ArrayPositionNotFound)
                                             {
@@ -133,7 +133,7 @@ impl GunMessaging {
                                             let index = match messages
                                                 .iter()
                                                 .position(|conv| {
-                                                    conv.conversation_id == convo_id && conv.id == message_id
+                                                    conv.conversation_id() == convo_id && conv.id() == message_id
                                                 })
                                                 .ok_or(Error::ArrayPositionNotFound)
                                             {
@@ -256,7 +256,7 @@ impl RayGun for GunMessaging {
 
         let list = messages
             .iter()
-            .filter(|conv| conv.conversation_id == conversation_id)
+            .filter(|conv| conv.conversation_id() == conversation_id)
             .cloned()
             .collect::<Vec<Message>>();
 
@@ -273,10 +273,10 @@ impl RayGun for GunMessaging {
         //TODO: Check to see if message was sent or if its still sending
         let pubkey = self.sender_id()?;
         let mut message = Message::new();
-        message.conversation_id = conversation_id;
-        message.sender = SenderId::from_public_key(pubkey);
+        message.set_conversation_id(conversation_id);
+        message.set_sender(SenderId::from_public_key(pubkey));
 
-        message.value = value;
+        message.set_value(value);
 
         self.send_event(MessagingEvents::NewMessage(message.clone()))
             .await?;
@@ -294,7 +294,7 @@ impl RayGun for GunMessaging {
 
         let index = messages
             .iter()
-            .position(|conv| conv.conversation_id == conversation_id && conv.id == message_id)
+            .position(|conv| conv.conversation_id() == conversation_id && conv.id() == message_id)
             .ok_or(Error::ArrayPositionNotFound)?;
 
         messages.remove(index);
@@ -329,7 +329,7 @@ impl RayGun for GunMessaging {
 
         let index = messages
             .iter()
-            .position(|conv| conv.conversation_id == conversation_id && conv.id == message_id)
+            .position(|conv| conv.conversation_id() == conversation_id && conv.id() == message_id)
             .ok_or(Error::ArrayPositionNotFound)?;
 
         let message = messages
@@ -358,11 +358,11 @@ impl RayGun for GunMessaging {
     ) -> Result<()> {
         let pubkey = self.sender_id()?;
         let mut message = Message::new();
-        message.conversation_id = conversation_id;
-        message.replied = Some(message_id);
-        message.sender = SenderId::from_public_key(pubkey);
+        message.set_conversation_id(conversation_id);
+        message.set_replied(Some(message_id));
+        message.set_sender(SenderId::from_public_key(pubkey));
 
-        message.value = value;
+        message.set_value(value);
 
         self.send_event(MessagingEvents::NewMessage(message.clone()))
             .await?;

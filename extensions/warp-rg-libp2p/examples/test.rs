@@ -123,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
                     convo_size = msg.len();
                     let msg = msg.last().unwrap();
 
-                    writeln!(stdout, "[{}] @> {}", msg.id(), msg.value.join("\n"))?;
+                    writeln!(stdout, "[{}] @> {}", msg.id(), msg.value().join("\n"))?;
                 }
             }
             line = rl.readline().fuse() => match line {
@@ -152,8 +152,8 @@ async fn main() -> anyhow::Result<()> {
                                        .get_messages(topic, MessageOptions::default(), None)
                                        .await?;
                                    for message in messages.iter() {
-                                       chat.pin(topic, message.id, PinState::Pin).await?;
-                                       writeln!(stdout, "Pinned {}", message.id)?;
+                                       chat.pin(topic, message.id(), PinState::Pin).await?;
+                                       writeln!(stdout, "Pinned {}", message.id())?;
                                    }
                                 },
                                 Some(id) => {
@@ -177,8 +177,8 @@ async fn main() -> anyhow::Result<()> {
                                        .get_messages(topic, MessageOptions::default(), None)
                                        .await?;
                                    for message in messages.iter() {
-                                       chat.pin(topic, message.id, PinState::Unpin).await?;
-                                       writeln!(stdout, "Unpinned {}", message.id)?;
+                                       chat.pin(topic, message.id(), PinState::Unpin).await?;
+                                       writeln!(stdout, "Unpinned {}", message.id())?;
                                    }
                                 },
                                 Some(id) => {
