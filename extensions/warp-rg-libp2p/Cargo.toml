@@ -27,4 +27,6 @@ warp-mp-solana = { path = "../warp-mp-solana" }
 rustyline-async = "0.2"
 
 [features]
-default = []
+default = ["floodsub"]
+gossipsub = []
+floodsub = []
