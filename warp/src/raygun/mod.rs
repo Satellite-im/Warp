@@ -3,6 +3,9 @@ use crate::multipass::identity::PublicKey;
 use crate::sync::{Arc, Mutex, MutexGuard};
 use crate::Extension;
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
