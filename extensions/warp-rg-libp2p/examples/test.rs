@@ -101,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Type anything and press enter to send...");
 
-    chat.ping(topic).await?;
+    if let Err(_) = chat.ping(topic).await {}
 
     let identity = new_account.lock().get_own_identity()?;
 
@@ -130,13 +130,33 @@ async fn main() -> anyhow::Result<()> {
                 Ok(line) => {
                     let mut cmd_line = line.trim().split(" ");
                     match cmd_line.next() {
+                        //This is used directly with the struct and not apart of the trait
                         // Some("/connect") => {
-                        //     let id = match cmd_line.next() {
-                        //         Some(id) => Multiaddr::from_str(&id)?,
-                        //         None => continue
+                        //     let command = match cmd_line.next() {
+                        //         Some("peer") => match cmd_line.next() {
+                        //             Some(peer) => match PeerId::from_str(peer) {
+                        //                 Ok(p) => SwarmCommands::DialPeer(p),
+                        //                 Err(e) => {
+                        //                     writeln!(stdout, "Error: {}", e)?;
+                        //                     continue
+                        //                 }
+                        //             },
+                        //             None => continue
+                        //         },
+                        //         Some("addr") => match cmd_line.next() {
+                        //             Some(addr) => match Multiaddr::from_str(addr) {
+                        //                 Ok(p) => SwarmCommands::DialAddr(p),
+                        //                 Err(e) => {
+                        //                     writeln!(stdout, "Error: {}", e)?;
+                        //                     continue
+                        //                 }
+                        //             },
+                        //             None => continue
+                        //         },
+                        //         None | _ => continue
                         //     };
                         //
-                        //     chat.send_command(SwarmCommands::DialAddr(id)).await?
+                        //     chat.send_command(command).await?
                         // },
                         Some("/list") => {
                             let messages = chat.get_messages(topic, MessageOptions::default(), None).await?;
@@ -145,6 +165,14 @@ async fn main() -> anyhow::Result<()> {
                                 writeln!(stdout, "{:?}", message)?;
                             }
                         },
+                        Some("/ping") => {
+                            match chat.ping(topic).await {
+                                Ok(()) => {},
+                                Err(e) => {
+                                    writeln!(stdout, "Error: {}", e)?;
+                                }
+                            }
+                        }
                         Some("/pin") => {
                             match cmd_line.next() {
                                 Some("all") => {
