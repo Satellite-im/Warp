@@ -3,6 +3,9 @@ name = "warp-rg-gun"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+crate-type = ["cdylib", "rlib", "staticlib"]
+
 [dependencies]
 async-trait = "0.1"
 warp = { path = "../../warp" }
