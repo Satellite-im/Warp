@@ -165,6 +165,26 @@ impl MultiPassAdapter {
     pub fn key_exchange(&self, pubkey: PublicKey) -> Result<Vec<u8>> {
         self.inner_guard().key_exchange(pubkey)
     }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn id(&self) -> String {
+        self.inner_guard().id()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn name(&self) -> String {
+        self.inner_guard().name()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn description(&self) -> String {
+        self.inner_guard().description()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn module(&self) -> crate::module::Module {
+        self.inner_guard().module()
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

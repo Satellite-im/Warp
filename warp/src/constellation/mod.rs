@@ -379,6 +379,26 @@ impl ConstellationAdapter {
             Ok(JsValue::from_bool(true))
         })
     }
+
+    #[wasm_bindgen]
+    pub fn id(&self) -> String {
+        self.inner_guard().id()
+    }
+
+    #[wasm_bindgen]
+    pub fn name(&self) -> String {
+        self.inner_guard().name()
+    }
+
+    #[wasm_bindgen]
+    pub fn description(&self) -> String {
+        self.inner_guard().description()
+    }
+
+    #[wasm_bindgen]
+    pub fn module(&self) -> crate::module::Module {
+        self.inner_guard().module()
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

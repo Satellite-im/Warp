@@ -157,6 +157,26 @@ impl PocketDimensionAdapter {
     pub fn empty(&mut self, dimension: DataType) -> Result<()> {
         self.inner_guard().empty(dimension)
     }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn id(&self) -> String {
+        self.inner_guard().id()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn name(&self) -> String {
+        self.inner_guard().name()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn description(&self) -> String {
+        self.inner_guard().description()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn module(&self) -> crate::module::Module {
+        self.inner_guard().module()
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
