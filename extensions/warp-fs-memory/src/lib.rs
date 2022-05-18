@@ -1,4 +1,3 @@
-pub mod error;
 pub mod item;
 
 use anyhow::anyhow;
@@ -19,8 +18,8 @@ use warp::hooks::Hooks;
 use warp::module::Module;
 use warp::Extension;
 
-pub type Result<T> = std::result::Result<T, error::Error>;
-pub type WarpResult<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
+
 #[derive(Debug, Clone)]
 pub struct MemorySystemInternal(item::directory::Directory);
 
@@ -125,7 +124,7 @@ impl Constellation for MemorySystem {
         &mut self.path
     }
 
-    async fn put(&mut self, name: &str, path: &str) -> WarpResult<()> {
+    async fn put(&mut self, name: &str, path: &str) -> Result<()> {
         let mut internal_file = item::file::File::new(name);
         let bytes = internal_file.insert_from_path(path).unwrap_or_default();
         self.internal
@@ -154,7 +153,7 @@ impl Constellation for MemorySystem {
         Ok(())
     }
 
-    async fn get(&self, name: &str, path: &str) -> WarpResult<()> {
+    async fn get(&self, name: &str, path: &str) -> Result<()> {
         if let Ok(cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
             query.r#where("name", name.to_string())?;
@@ -251,7 +250,7 @@ impl Constellation for MemorySystem {
         Ok(file.data())
     }
 
-    async fn remove(&mut self, path: &str, _: bool) -> WarpResult<()> {
+    async fn remove(&mut self, path: &str, _: bool) -> Result<()> {
         if !self.current_directory().has_item(path) {
             return Err(Error::Other);
         }
@@ -269,12 +268,12 @@ impl Constellation for MemorySystem {
         Ok(())
     }
 
-    async fn move_item(&mut self, _: &str, _: &str) -> WarpResult<()> {
+    async fn move_item(&mut self, _: &str, _: &str) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
     /// Use to create a directory within the filesystem.
-    async fn create_directory(&mut self, path: &str, recursive: bool) -> WarpResult<()> {
+    async fn create_directory(&mut self, path: &str, recursive: bool) -> Result<()> {
         let inner_directory = if recursive {
             item::directory::Directory::new_recursive(path)?
         } else {

@@ -1,4 +1,5 @@
-use crate::error::Error;
+use warp::error::Error;
+
 use crate::item::directory::Directory;
 use crate::item::{ItemMut, ItemType};
 use crate::Item;
@@ -94,7 +95,7 @@ impl File {
                 Ok(0) => break,
                 Ok(n) => size += n,
                 Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-                Err(e) => return Err(crate::error::Error::from(e)),
+                Err(e) => return Err(warp::error::Error::from(e)),
             }
         }
 
