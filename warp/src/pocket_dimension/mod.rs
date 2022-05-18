@@ -1,7 +1,6 @@
 pub mod query;
 
 use crate::data::{DataObject, DataType};
-#[cfg(not(target_arch = "wasm32"))]
 use crate::error::Error;
 use crate::sync::{Arc, Mutex, MutexGuard};
 use crate::Extension;
@@ -11,14 +10,10 @@ use std::io::Write;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
-#[cfg(not(target_arch = "wasm32"))]
 use serde::{Deserialize, Serialize};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
-
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::JsError as Error;
 
 pub(super) type Result<T> = std::result::Result<T, Error>;
 

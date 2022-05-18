@@ -6,19 +6,14 @@ use warp::{
 };
 
 use serde_json;
-use warp::error::{into_error, Error};
+use warp::error::Error;
 use warp::pocket_dimension::query::{ComparatorFilter, QueryBuilder};
 use warp::pocket_dimension::PocketDimension;
-#[cfg(target_arch = "wasm32")]
-use warp::pocket_dimension::PocketDimensionTraitObject;
 
-#[cfg(target_arch = "wasm32")]
+use warp::pocket_dimension::PocketDimensionAdapter;
+
 use wasm_bindgen::prelude::*;
 
-#[cfg(target_arch = "wasm32")]
-pub type Result<T> = std::result::Result<T, JsError>;
-
-#[cfg(not(target_arch = "wasm32"))]
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone)]
@@ -69,7 +64,7 @@ impl PocketDimension for MemoryClient {
     fn has_data(&mut self, dimension: DataType, query: &QueryBuilder) -> Result<()> {
         self.client
             .get(&dimension)
-            .ok_or(into_error(Error::DataObjectNotFound))
+            .ok_or(Error::DataObjectNotFound)
             .and_then(|data| execute(data, query).map(|_| ()))
     }
 
@@ -81,7 +76,7 @@ impl PocketDimension for MemoryClient {
         let data = self
             .client
             .get(&dimension)
-            .ok_or(into_error(Error::DataObjectNotFound))?;
+            .ok_or(Error::DataObjectNotFound)?;
 
         match query {
             Some(query) => execute(data, query),
@@ -106,14 +101,28 @@ impl PocketDimension for MemoryClient {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn get_payload_as_value(data: &DataObject) -> Result<serde_json::Value> {
+    data.payload().map_err(Error::from)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn get_payload_as_value(data: &DataObject) -> Result<serde_json::Value> {
+    let jsvalue = data.payload()?;
+    serde_wasm_bindgen::from_value(jsvalue)
+        .map_err(|e| anyhow::anyhow!("{}", e))
+        .map_err(Error::Any)
+}
+
 pub(crate) fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<DataObject>> {
     let mut list = Vec::new();
     for data in data.iter() {
-        let object = data.payload::<serde_json::Value>()?;
+        let object = get_payload_as_value(&data)?;
+
         if !object.is_object() {
             continue;
         }
-        let object = object.as_object().ok_or(into_error(Error::Other))?;
+        let object = object.as_object().ok_or(Error::Other)?;
         for (key, val) in query.get_where().iter() {
             if let Some(result) = object.get(key) {
                 if val == result {
@@ -205,9 +214,9 @@ pub(crate) fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<D
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn pd_memory_init() -> PocketDimensionTraitObject {
+pub fn pd_memory_init() -> PocketDimensionAdapter {
     let client = MemoryClient::new();
-    PocketDimensionTraitObject::new(warp::sync::Arc::new(warp::sync::Mutex::new(Box::new(
+    PocketDimensionAdapter::new(warp::sync::Arc::new(warp::sync::Mutex::new(Box::new(
         client,
     ))))
 }
