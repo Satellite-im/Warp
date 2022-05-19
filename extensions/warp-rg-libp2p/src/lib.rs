@@ -18,7 +18,7 @@ use libp2p::gossipsub::{
 };
 use libp2p::identify::{Identify, IdentifyConfig, IdentifyEvent, IdentifyInfo};
 use libp2p::kad::store::MemoryStore;
-use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent, QueryResult};
+use libp2p::kad::{Kademlia, KademliaBucketInserts, KademliaConfig, KademliaEvent, QueryResult};
 use libp2p::ping::{Event, Ping, PingEvent};
 use uuid::Uuid;
 use warp::multipass::MultiPass;
@@ -28,6 +28,8 @@ use warp::raygun::{
 use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::{error::Error, pocket_dimension::PocketDimension};
 use warp::{module::Module, Extension};
+
+use libp2p::autonat;
 
 use serde::{Deserialize, Serialize};
 
@@ -55,6 +57,7 @@ pub struct RayGunBehavior {
     pub ping: Ping,
     pub kademlia: Kademlia<MemoryStore>,
     pub identity: Identify,
+    pub autonat: autonat::Behaviour,
     #[behaviour(ignore)]
     pub inner: Arc<Mutex<Vec<Message>>>,
     #[behaviour(ignore)]
@@ -70,6 +73,7 @@ pub struct RayGunBehavior {
     pub ping: Ping,
     pub kademlia: Kademlia<MemoryStore>,
     pub identity: Identify,
+    pub autonat: autonat::Behaviour,
     #[behaviour(ignore)]
     pub inner: Arc<Mutex<Vec<Message>>>,
     #[behaviour(ignore)]
@@ -124,6 +128,10 @@ impl NetworkBehaviourEventProcess<IdentifyEvent> for RayGunBehavior {
             }
         }
     }
+}
+
+impl NetworkBehaviourEventProcess<autonat::Event> for RayGunBehavior {
+    fn inject_event(&mut self, event: autonat::Event) {}
 }
 
 #[cfg(feature = "gossipsub")]
@@ -576,7 +584,6 @@ impl Libp2pMessaging {
             .heartbeat_interval(Duration::from_secs(10))
             .validation_mode(ValidationMode::Strict)
             .message_id_fn(message_id_fn)
-            .do_px()
             .build()
             .map_err(|e| anyhow!(e))?;
 
@@ -589,7 +596,11 @@ impl Libp2pMessaging {
             mdns_config.enable_ipv6 = true;
 
             let mut kad_config = KademliaConfig::default();
-            kad_config.set_query_timeout(Duration::from_secs(5 * 60));
+            kad_config
+                .set_query_timeout(Duration::from_secs(5 * 60))
+                .set_kbucket_inserts(KademliaBucketInserts::OnConnected)
+                .set_connection_idle_timeout(Duration::from_secs(5 * 60))
+                .set_provider_publication_interval(Some(Duration::from_secs(60)));
             let store = MemoryStore::new(peer);
 
             let behaviour = RayGunBehavior {
@@ -600,6 +611,7 @@ impl Libp2pMessaging {
                 inner: self.conversations.clone(),
                 account: self.account.clone(),
                 identity: Identify::new(IdentifyConfig::new("/ipfs/1.0.0".into(), pubkey)),
+                autonat: autonat::Behaviour::new(peer, Default::default()),
             };
 
             libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
@@ -628,7 +640,11 @@ impl Libp2pMessaging {
             mdns_config.enable_ipv6 = true;
 
             let mut kad_config = KademliaConfig::default();
-            kad_config.set_query_timeout(Duration::from_secs(5 * 60));
+            kad_config
+                .set_query_timeout(Duration::from_secs(5 * 60))
+                .set_kbucket_inserts(KademliaBucketInserts::OnConnected)
+                .set_connection_idle_timeout(Duration::from_secs(5 * 60))
+                .set_provider_publication_interval(Some(Duration::from_secs(60)));
             let store = MemoryStore::new(peer);
 
             let behaviour = RayGunBehavior {
@@ -639,6 +655,7 @@ impl Libp2pMessaging {
                 inner: self.conversations.clone(),
                 account: self.account.clone(),
                 identity: Identify::new(IdentifyConfig::new("/ipfs/1.0.0".into(), pubkey)),
+                autonat: autonat::Behaviour::new(peer, Default::default()),
             };
 
             libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
