@@ -10,6 +10,7 @@ use crate::error::Error;
 use crate::Extension;
 use anyhow::anyhow;
 use chrono::{DateTime, Utc};
+use futures::stream::BoxStream;
 
 use directory::Directory;
 use item::Item;
@@ -121,6 +122,16 @@ pub trait Constellation: Extension + Sync + Send {
 
     /// Used to download data from the filesystem into a buffer
     async fn get_buffer(&self, _: &str) -> Result<Vec<u8>> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Use to stream a file to the filesystem
+    async fn put_stream(&self, _: &str, _: &BoxStream<Vec<u8>>) -> Result<()> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Used to stream a file from the filesystem
+    async fn get_stream(&self, _: &str) -> Result<BoxStream<Vec<u8>>> {
         Err(Error::Unimplemented)
     }
 

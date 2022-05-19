@@ -14,9 +14,6 @@ pub mod pocket_dimension;
 pub mod raygun;
 pub mod tesseract;
 
-#[cfg(not(target_arch = "wasm32"))]
-pub mod common;
-
 pub trait Extension {
     /// Returns an id of the extension. Should be the crate name (eg in a `warp-module-ext` format)
     fn id(&self) -> String;
