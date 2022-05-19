@@ -293,13 +293,12 @@ pub mod ffi {
     #[allow(unused)]
     use std::os::raw::{c_char, c_int};
 
-    pub type ItemPointer = *mut Item;
-    // pub type ItemPointer = *mut c_void;
-    pub type ItemStructPointer = *mut Item;
-
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn directory_into_item(directory: *mut Directory) -> *mut Item {
+        if directory.is_null() {
+            return std::ptr::null_mut();
+        }
         let directory = &*directory;
         let item = Box::new(Item::new_directory(directory.clone()));
         Box::into_raw(item) as *mut Item
@@ -308,6 +307,9 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn file_into_item(file: *mut File) -> *mut Item {
+        if file.is_null() {
+            return std::ptr::null_mut();
+        }
         let file = &*file;
         let item = Box::new(Item::new_file(file.clone()));
         Box::into_raw(item) as *mut Item
@@ -316,6 +318,9 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn item_into_directory(item: *mut Item) -> *mut Directory {
+        if item.is_null() {
+            return std::ptr::null_mut();
+        }
         let item = &*(item);
         match item.get_directory() {
             Ok(directory) => {
@@ -329,6 +334,9 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn item_into_file(item: *mut Item) -> *mut File {
+        if item.is_null() {
+            return std::ptr::null_mut();
+        }
         let item = &*(item);
         match item.get_file() {
             Ok(file) => {
