@@ -29,6 +29,10 @@ warp-pd-stretto = { path = "../warp-pd-stretto" }
 warp-mp-solana = { path = "../warp-mp-solana" }
 rustyline-async = "0.2"
 
+[build-dependencies]
+cbindgen = "0.23"
+
+
 [features]
 default = ["floodsub"]
 gossipsub = []

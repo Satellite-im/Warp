@@ -131,7 +131,7 @@ impl NetworkBehaviourEventProcess<GossipsubEvent> for RayGunBehavior {
     fn inject_event(&mut self, message: GossipsubEvent) {
         //TODO: Check topic and compare that to the conv id
         if let GossipsubEvent::Message {
-            propagation_source: peer_id,
+            propagation_source: _,
             message_id: _,
             message,
         } = message
