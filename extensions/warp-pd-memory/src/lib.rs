@@ -10,8 +10,7 @@ use warp::error::Error;
 use warp::pocket_dimension::query::{ComparatorFilter, QueryBuilder};
 use warp::pocket_dimension::PocketDimension;
 
-use warp::pocket_dimension::PocketDimensionAdapter;
-
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -214,9 +213,25 @@ pub(crate) fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<D
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn pd_memory_init() -> PocketDimensionAdapter {
+pub fn pd_memory_init() -> warp::pocket_dimension::PocketDimensionAdapter {
     let client = MemoryClient::new();
-    PocketDimensionAdapter::new(warp::sync::Arc::new(warp::sync::Mutex::new(Box::new(
-        client,
-    ))))
+    warp::pocket_dimension::PocketDimensionAdapter::new(warp::sync::Arc::new(
+        warp::sync::Mutex::new(Box::new(client)),
+    ))
+}
+
+pub mod ffi {
+    use crate::MemoryClient;
+    use std::ffi::c_void;
+    use warp::pocket_dimension::PocketDimensionAdapter;
+    use warp::sync::{Arc, Mutex};
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn pocketdimension_memory_new() -> *mut c_void {
+        let obj = Box::new(PocketDimensionAdapter::new(Arc::new(Mutex::new(Box::new(
+            MemoryClient::new(),
+        )))));
+        Box::into_raw(obj) as *mut PocketDimensionAdapter as *mut c_void
+    }
 }

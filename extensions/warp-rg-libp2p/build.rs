@@ -12,8 +12,8 @@ fn main() {
     cbindgen::Builder::new()
         .with_crate(crate_dir)
         .with_language(lang)
-        .with_include_guard("_WARP_FS_IPFS_H_")
+        .with_include_guard("_WARP_RG_LIBP2P_H_")
         .generate()
         .expect("Unable to generate bindings")
-        .write_to_file("warp-fs-ipfs.h");
+        .write_to_file("warp-rg-libp2p.h");
 }

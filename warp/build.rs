@@ -12,6 +12,7 @@ fn main() {
     cbindgen::Builder::new()
         .with_crate(crate_dir)
         .with_language(lang)
+        .with_include_guard("_WARP_H_")
         .generate()
         .expect("Unable to generate bindings")
         .write_to_file("warp.h");
