@@ -4,9 +4,7 @@ use crate::item::directory::Directory;
 use crate::item::{ItemMut, ItemType};
 use crate::Item;
 use chrono::{DateTime, Utc};
-use std::fs;
-use std::io::Read;
-use std::path::Path;
+
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -87,7 +85,15 @@ impl File {
         false
     }
 
-    pub fn insert_stream<R: Read>(&mut self, reader: &mut R) -> crate::Result<usize> {
+    pub fn insert_buffer(&mut self, data: Vec<u8>) -> crate::Result<usize> {
+        self.data = data;
+        Ok(self.data.len())
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl File {
+    pub fn insert_stream<R: std::io::Read>(&mut self, reader: &mut R) -> crate::Result<usize> {
         let mut buf = vec![];
         let mut size = 0;
         loop {
@@ -104,13 +110,8 @@ impl File {
         Ok(size)
     }
 
-    pub fn insert_buffer(&mut self, data: Vec<u8>) -> crate::Result<usize> {
-        self.data = data;
-        Ok(self.data.len())
-    }
-
-    pub fn insert_from_path<P: AsRef<Path>>(&mut self, path: P) -> crate::Result<usize> {
-        let data = fs::read(path)?;
+    pub fn insert_from_path<P: AsRef<std::path::Path>>(&mut self, path: P) -> crate::Result<usize> {
+        let data = std::fs::read(path)?;
 
         self.insert_buffer(data)
     }

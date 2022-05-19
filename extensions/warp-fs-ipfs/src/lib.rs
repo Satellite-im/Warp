@@ -242,7 +242,7 @@ impl Constellation for IpfsFileSystem {
         if let Ok(mut cache) = self.get_cache() {
             let object = DataObject::new(
                 DataType::from(Module::FileSystem),
-                DimensionData::from_path(path),
+                DimensionData::from(path),
             )?;
             cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }

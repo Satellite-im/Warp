@@ -211,14 +211,16 @@ impl File {
     }
 }
 
+impl File {
+    pub fn hash_mut(&mut self) -> &mut Hash {
+        &mut self.hash
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 impl File {
     pub fn id(&self) -> Uuid {
         self.id
-    }
-
-    pub fn hash_mut(&mut self) -> &mut Hash {
-        &mut self.hash
     }
 
     pub fn creation(&self) -> DateTime<Utc> {

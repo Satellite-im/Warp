@@ -6,6 +6,7 @@ use crate::Item;
 use anyhow::bail;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Directory {
     pub id: Uuid,
@@ -117,7 +118,7 @@ impl Directory {
             .content
             .iter()
             .position(|item| item.name() == *name.as_ref())
-            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))?;
+            .ok_or_else(|| Error::ArrayPositionNotFound)?;
 
         let item = self.content.remove(index);
 
@@ -141,7 +142,7 @@ impl Directory {
             .content
             .iter()
             .position(|item| item.name() == *name)
-            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))?;
+            .ok_or_else(|| Error::ArrayPositionNotFound)?;
         self.content.get(index).ok_or(Error::Other)
     }
 
@@ -153,9 +154,7 @@ impl Directory {
             .filter(|&s| !s.is_empty())
             .collect::<Vec<_>>();
         if path.is_empty() {
-            return Err(Error::IoError(std::io::Error::from(
-                std::io::ErrorKind::NotFound,
-            )));
+            return Err(Error::ItemInvalid);
         }
         let name = path.remove(0);
         let item = self.get_item(name)?;
@@ -199,7 +198,7 @@ impl Directory {
             .content
             .iter()
             .position(|item| item.name() == *name)
-            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))?;
+            .ok_or_else(|| Error::ArrayPositionNotFound)?;
 
         self.content.get_mut(index).ok_or(Error::Other)
     }
@@ -214,9 +213,7 @@ impl Directory {
             .filter(|&s| !s.is_empty())
             .collect::<Vec<_>>();
         if path.is_empty() {
-            return Err(Error::IoError(std::io::Error::from(
-                std::io::ErrorKind::NotFound,
-            )));
+            return Err(Error::Other);
         }
         let name = path.remove(0);
         let item = self.get_item_mut(name)?;

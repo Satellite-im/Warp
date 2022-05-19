@@ -15,7 +15,7 @@ use warp::data::{DataObject, DataType};
 use warp::module::Module;
 use warp::pocket_dimension::{
     query::{ComparatorFilter, QueryBuilder},
-    DimensionData, PocketDimension,
+    DimensionData, DimensionDataInner, PocketDimension,
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -241,15 +241,15 @@ impl PocketDimension for FlatfileStorage {
 
         match dimension {
             DataType::FileSystem => {
-                match data.payload::<DimensionData>()? {
-                    DimensionData::Path { name, path } => {
+                match data.payload::<DimensionData>()?.get_inner() {
+                    DimensionDataInner::Path { name, path } => {
                         let old_path = path;
                         if !old_path.is_file() {
                             return Err(Error::ItemNotFile);
                         }
                         let size = std::fs::metadata(&old_path)?.len();
 
-                        let filename = name.ok_or(Error::FileNotFound)?;
+                        let filename = name.as_ref().ok_or(Error::FileNotFound)?;
 
                         data.set_size(size);
 
@@ -259,10 +259,10 @@ impl PocketDimension for FlatfileStorage {
                             path
                         };
 
-                        data.set_payload(DimensionData::Path {
-                            name: Some(filename),
+                        data.set_payload(DimensionData(DimensionDataInner::Path {
+                            name: Some(filename.clone()),
                             path: new_path.clone(),
-                        })?;
+                        }))?;
                         let mut writer = std::fs::File::create(&new_path)?;
 
                         let mut reader = std::fs::File::open(old_path)?;
@@ -274,7 +274,7 @@ impl PocketDimension for FlatfileStorage {
                             return Err(e);
                         }
                     }
-                    DimensionData::Buffer { name, buffer } => {
+                    DimensionDataInner::Buffer { name, buffer } => {
                         //
                         let size = buffer.len();
                         data.set_size(size as u64);
@@ -285,10 +285,10 @@ impl PocketDimension for FlatfileStorage {
                             path
                         };
 
-                        data.set_payload(DimensionData::Path {
-                            name: Some(name),
+                        data.set_payload(DimensionData(DimensionDataInner::Path {
+                            name: Some(name.clone()),
                             path: new_path.clone(),
-                        })?;
+                        }))?;
 
                         let mut writer = std::fs::File::create(&new_path)?;
 
@@ -301,7 +301,7 @@ impl PocketDimension for FlatfileStorage {
                             return Err(e);
                         }
                     }
-                    DimensionData::BufferNoFile { internal, .. } => {
+                    DimensionDataInner::BufferNoFile { internal, .. } => {
                         let size = internal.len();
                         data.set_size(size as u64);
                         self.index.insert(data)?
@@ -386,7 +386,9 @@ impl PocketDimension for FlatfileStorage {
             .filter(|data| data.data_type() == dimension)
         {
             if let DataType::FileSystem = &item.data_type() {
-                if let DimensionData::Path { path, .. } = item.payload::<DimensionData>()? {
+                if let DimensionDataInner::Path { path, .. } =
+                    item.payload::<DimensionData>()?.get_inner()
+                {
                     std::fs::remove_file(path)?;
                 }
             }
