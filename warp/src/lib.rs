@@ -33,3 +33,12 @@ pub trait Extension {
     /// Returns the module type the extension is meant to be used for
     fn module(&self) -> crate::module::Module;
 }
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+#[cfg(all(target_arch = "wasm32", feature = "wasm_debug"))]
+#[wasm_bindgen(start)]
+pub fn initialize() {
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+}
