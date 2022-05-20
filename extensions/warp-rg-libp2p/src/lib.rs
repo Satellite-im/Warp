@@ -131,7 +131,7 @@ impl NetworkBehaviourEventProcess<IdentifyEvent> for RayGunBehavior {
 }
 
 impl NetworkBehaviourEventProcess<autonat::Event> for RayGunBehavior {
-    fn inject_event(&mut self, event: autonat::Event) {}
+    fn inject_event(&mut self, _: autonat::Event) {}
 }
 
 #[cfg(feature = "gossipsub")]

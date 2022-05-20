@@ -93,8 +93,8 @@ impl QueryBuilder {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::pocket_dimension::query::{Comparator, QueryBuilder};
-    use libc::c_char;
     use std::ffi::CStr;
+    use std::os::raw::c_char;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]

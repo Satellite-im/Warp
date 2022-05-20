@@ -7,7 +7,6 @@ pub use digest;
 pub use ed25519_dalek;
 pub use getrandom;
 pub use rand;
-pub use rsa;
 pub use sha1;
 pub use sha2;
 pub use sha3;
