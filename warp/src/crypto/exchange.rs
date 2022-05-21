@@ -1,6 +1,5 @@
 use crate::crypto::signature::Ed25519Keypair;
 use crate::error::Error;
-use rand::rngs::OsRng;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 use x25519_dalek::{PublicKey, StaticSecret};
