@@ -70,6 +70,8 @@ pub enum Error {
     #[error("Tesseract is locked")]
     TesseractLocked,
     #[error("{0}")]
+    GetRandomError(#[from] getrandom::Error),
+    #[error("{0}")]
     SerdeJsonError(#[from] serde_json::Error),
     #[error("{0}")]
     SerdeYamlError(#[from] serde_yaml::Error),

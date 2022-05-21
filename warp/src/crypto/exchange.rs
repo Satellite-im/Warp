@@ -32,7 +32,9 @@ impl X25519PublicKey {
 impl X25519Secret {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new() -> X25519Secret {
-        X25519Secret(x25519_dalek::StaticSecret::new(&mut OsRng))
+        let mut key = [0u8; 32];
+        getrandom::getrandom(&mut key).unwrap();
+        X25519Secret::from_bytes(&key)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
