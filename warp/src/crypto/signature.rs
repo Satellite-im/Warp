@@ -1,6 +1,8 @@
 use crate::error::Error;
-use ed25519_dalek::{Keypair, PublicKey, Signature, Signer};
-use rand::rngs::OsRng;
+use ed25519_dalek::{
+    Keypair, PublicKey, SecretKey, Signature, Signer, KEYPAIR_LENGTH, SECRET_KEY_LENGTH,
+};
+use getrandom::getrandom;
 use wasm_bindgen::prelude::wasm_bindgen;
 use zeroize::Zeroize;
 
@@ -28,8 +30,17 @@ impl Drop for Ed25519Keypair {
 impl Ed25519Keypair {
     /// Creates a new keypair
     #[wasm_bindgen(constructor)]
-    pub fn new() -> Ed25519Keypair {
-        Ed25519Keypair(Keypair::generate(&mut OsRng))
+    pub fn new() -> Result<Ed25519Keypair, Error> {
+        let mut secret_key = [0u8; 32];
+        getrandom(&mut secret_key).map_err(|e| anyhow::anyhow!(e))?;
+        let secret_key = SecretKey::from_bytes(&secret_key)?;
+        let public_key: PublicKey = (&secret_key).into();
+        let mut bytes: [u8; KEYPAIR_LENGTH] = [0u8; KEYPAIR_LENGTH];
+
+        bytes[..SECRET_KEY_LENGTH].copy_from_slice(secret_key.as_bytes());
+        bytes[SECRET_KEY_LENGTH..].copy_from_slice(public_key.as_bytes());
+
+        Ed25519Keypair::from_bytes(&bytes)
     }
 
     /// Import keypair from 64 bytes
