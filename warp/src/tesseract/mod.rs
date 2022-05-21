@@ -128,16 +128,6 @@ impl Tesseract {
         self.file.as_ref().map(|s| s.to_string_lossy().to_string())
     }
 
-    /// Enable the ability to autosave
-    pub fn set_autosave(&mut self) {
-        self.autosave = !self.autosave;
-    }
-
-    /// Check to determine if `Tesseract::autosave` is true or false
-    pub fn autosave_enabled(&self) -> bool {
-        self.autosave
-    }
-
     /// Import and encrypt a hashmap into tesseract
     ///
     /// # Example
@@ -207,9 +197,20 @@ impl Tesseract {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Tesseract {
+    /// To create an instance of Tesseract
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new() -> Tesseract {
         Tesseract::default()
+    }
+
+    /// Enable the ability to autosave
+    pub fn set_autosave(&mut self) {
+        self.autosave = !self.autosave;
+    }
+
+    /// Check to determine if `Tesseract::autosave` is true or false
+    pub fn autosave_enabled(&self) -> bool {
+        self.autosave
     }
 
     /// To store a value to be encrypted into the keystore. If the key already exist, it
@@ -375,11 +376,37 @@ cfg_if::cfg_if! {
                     serde_wasm_bindgen::to_value(&map).map_err(|_| Error::Other)
                 }
 
-                /// Used to save contents.
-                /// Note: This does nothing in WASM right now
+                /// Used to save contents to local storage
                 pub fn save(&mut self) -> Result<()> {
+                    use gloo::storage::{Storage, LocalStorage};
+
+                    if self.autosave_enabled() {
+                        for (k, v) in &self.internal {
+                            LocalStorage::set(k, v).unwrap();
+                        }
+                    }
+
                     Ok(())
                 }
+
+                /// Used to load contents from local storage
+                pub fn load_from_storage(&mut self) -> Result<()> {
+                    use gloo::storage::{Storage, LocalStorage};
+
+                    let local_storage = LocalStorage::raw();
+                    let length = LocalStorage::length();
+
+                    for index in 0..length {
+                        let key = local_storage
+                            .key(index).unwrap()
+                            .unwrap_throw();
+                        let value: Vec<u8> = LocalStorage::get(&key).unwrap();
+                        self.internal.insert(key, value);
+                    }
+
+                    Ok(())
+                }
+
             }
 
     }
