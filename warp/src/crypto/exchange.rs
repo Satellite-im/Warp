@@ -106,8 +106,8 @@ mod test {
 
     #[test]
     fn ed25519_key_exchange() -> anyhow::Result<()> {
-        let alice_keypair = Ed25519Keypair::new();
-        let bob_keypair = Ed25519Keypair::new();
+        let alice_keypair = Ed25519Keypair::new()?;
+        let bob_keypair = Ed25519Keypair::new()?;
 
         let alice_secret = X25519Secret::from_ed25519_keypair(&alice_keypair)?;
         let alice_pubkey = alice_secret.public_key();
@@ -125,8 +125,8 @@ mod test {
 
     #[test]
     fn ed25519_key_exchange_encryption() -> anyhow::Result<()> {
-        let alice_keypair = Ed25519Keypair::new();
-        let bob_keypair = Ed25519Keypair::new();
+        let alice_keypair = Ed25519Keypair::new()?;
+        let bob_keypair = Ed25519Keypair::new()?;
 
         let alice_secret = X25519Secret::from_ed25519_keypair(&alice_keypair)?;
         let alice_pubkey = alice_secret.public_key();
