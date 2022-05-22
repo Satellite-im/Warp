@@ -119,11 +119,30 @@ impl Tesseract {
     }
 
     /// Set file for the saving using `Tesseract::save`
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use warp::tesseract::Tesseract;
+    /// let mut tesseract = Tesseract::default();
+    /// tesseract.set_file("my_file");
+    /// assert!(tesseract.file().is_some());
+    /// ```
     pub fn set_file<P: AsRef<Path>>(&mut self, file: P) {
         self.file = Some(file.as_ref().to_path_buf())
     }
 
     /// Internal file handle
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use warp::tesseract::Tesseract;
+    /// let mut tesseract = Tesseract::default();
+    /// assert!(tesseract.file().is_none());
+    /// tesseract.set_file("my_file");
+    /// assert!(tesseract.file().is_some());
+    /// ```
     pub fn file(&self) -> Option<String> {
         self.file.as_ref().map(|s| s.to_string_lossy().to_string())
     }
@@ -204,11 +223,26 @@ impl Tesseract {
     }
 
     /// Enable the ability to autosave
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let mut tesseract = warp::tesseract::Tesseract::default();
+    /// tesseract.set_autosave();
+    /// assert!(tesseract.autosave_enabled());
+    /// ```
     pub fn set_autosave(&mut self) {
         self.autosave = !self.autosave;
     }
 
     /// Check to determine if `Tesseract::autosave` is true or false
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let mut tesseract = warp::tesseract::Tesseract::default();
+    /// assert!(!tesseract.autosave_enabled());
+    /// ```
     pub fn autosave_enabled(&self) -> bool {
         self.autosave
     }
@@ -252,6 +286,17 @@ impl Tesseract {
     }
 
     /// Used to retrieve and decrypt the value stored for the key
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
+    ///  tesseract.set("API", "MYKEY").unwrap();
+    ///  assert!(tesseract.exist("API"));
+    ///  let val = tesseract.retrieve("API").unwrap();
+    ///  assert_eq!(val, String::from("MYKEY"));
+    /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn retrieve(&self, key: &str) -> Result<String> {
         if !self.is_unlock() {
@@ -325,7 +370,15 @@ impl Tesseract {
         !self.enc_pass.is_empty() && self.unlock
     }
 
-    /// Decrypts and store the password and plaintext contents in memory
+    /// Store password in memory to be used to decrypt contents.
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
+    ///  assert!(tesseract.is_unlock());
+    /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn unlock(&mut self, passphrase: &[u8]) -> Result<()> {
         self.enc_pass = crate::crypto::cipher::aes256gcm_self_encrypt(passphrase)?;
@@ -333,7 +386,17 @@ impl Tesseract {
         Ok(())
     }
 
-    /// Encrypts and remove password and plaintext from memory.
+    /// Remove password from memory securely
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(&warp::crypto::generate(32)).unwrap();
+    ///  assert!(tesseract.is_unlock());
+    ///  tesseract.lock();
+    ///  assert!(!tesseract.is_unlock());
+    /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn lock(&mut self) {
         if self.save().is_ok() {}
@@ -450,6 +513,28 @@ mod test {
         tesseract.set("API", "MYKEY")?;
         let data = tesseract.retrieve("API")?;
         assert_eq!(data, String::from("MYKEY"));
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_with_invalid_passphrase() -> anyhow::Result<()> {
+        let mut tesseract = Tesseract::default();
+        tesseract.unlock(
+            &b"This is a secret key that will be used for encryption. Totally not 256bit key"[..],
+        )?;
+        tesseract.set("API", "MYKEY")?;
+        let data = tesseract.retrieve("API")?;
+        assert_eq!(data, String::from("MYKEY"));
+        tesseract.lock();
+        tesseract.unlock(b"this is a dif key")?;
+        assert_eq!(tesseract.retrieve("API").is_err(), true);
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_with_lock_store_default() -> anyhow::Result<()> {
+        let mut tesseract = Tesseract::default();
+        assert_eq!(tesseract.set("API", "MYKEY").is_err(), true);
         Ok(())
     }
 }
