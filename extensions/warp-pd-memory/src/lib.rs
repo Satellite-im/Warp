@@ -213,7 +213,7 @@ pub(crate) fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<D
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn pd_memory_init() -> warp::pocket_dimension::PocketDimensionAdapter {
+pub fn pocketdimension_pd_memory() -> warp::pocket_dimension::PocketDimensionAdapter {
     let client = MemoryClient::new();
     warp::pocket_dimension::PocketDimensionAdapter::new(warp::sync::Arc::new(
         warp::sync::Mutex::new(Box::new(client)),
