@@ -194,7 +194,10 @@ impl Tesseract {
         for key in self.internal.keys() {
             let value = match self.retrieve(key) {
                 Ok(v) => v,
-                Err(_) => continue,
+                Err(e) => match self.is_key_check_enabled() {
+                    true => return Err(e),
+                    false => continue,
+                },
             };
             map.insert(key.clone(), value);
         }
