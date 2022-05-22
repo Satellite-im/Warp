@@ -91,7 +91,7 @@ pub struct Hooks {
 ///
 ///     use warp::hooks::{Hook, Hooks};
 /// let systems = Hooks::from(vec!["filesystem::new_file"]);
-///     assert_eq!(systems.hooks(), vec![Hook::from("filesystem::new_file")])
+///     assert_eq!(systems.list(), vec![Hook::from("filesystem::new_file")])
 /// ```
 impl<A: AsRef<str>> From<Vec<A>> for Hooks {
     fn from(h: Vec<A>) -> Self {
@@ -118,7 +118,7 @@ impl Hooks {
     ///
     ///     use warp::hooks::{Hook, Hooks};
     /// let systems = Hooks::from(vec!["filesystem::new_file"]);
-    ///     assert_eq!(systems.hooks(), vec![Hook::from("filesystem::new_file")])
+    ///     assert_eq!(systems.list(), vec![Hook::from("filesystem::new_file")])
     pub fn new_from_vec(list: Vec<&str>) -> Self {
         Hooks::from(list)
     }
@@ -157,10 +157,10 @@ impl Hooks {
     /// use warp::module::Module;
     /// let mut system = Hooks::default();
     ///     let hook = system.create(Module::FileSystem, "new_file").unwrap();
-    ///     let hooks = system.hooks();
+    ///     let hooks = system.list();
     ///     assert_eq!(hooks.get(0).unwrap(), &hook);
     /// ```
-    pub fn hooks(&self) -> Vec<Hook> {
+    pub fn list(&self) -> Vec<Hook> {
         self.hooks.clone()
     }
 
