@@ -168,13 +168,13 @@ impl PocketDimensionAdapter {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl PocketDimensionAdapter {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn add_data(&mut self, dim: DataType, data: DataObject) -> Result<()> {
-        self.inner_guard().add_data(dim, &data)
+    pub fn add_data(&mut self, dim: DataType, data: &DataObject) -> Result<()> {
+        self.inner_guard().add_data(dim, data)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn has_data(&mut self, dim: DataType, query: QueryBuilder) -> Result<()> {
-        self.inner_guard().has_data(dim, &query)
+    pub fn has_data(&mut self, dim: DataType, query: &QueryBuilder) -> Result<()> {
+        self.inner_guard().has_data(dim, query)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
