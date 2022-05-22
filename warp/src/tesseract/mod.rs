@@ -258,19 +258,42 @@ impl Tesseract {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```
     /// use warp::tesseract::Tesseract;
-    /// let mut tesseract = Tesseract::from_file("datastore").unwrap();
+    /// let mut tesseract = Tesseract::default();
+    ///
+    /// assert!(!tesseract.is_key_check_enabled());
+    ///
+    /// tesseract.enable_key_check();
     ///
     /// assert!(tesseract.is_key_check_enabled());
     ///
     /// tesseract.disable_key_check();
     ///
-    /// assert!(!tesseract.is_key_check_enabled())
+    /// assert!(!tesseract.is_key_check_enabled());
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn disable_key_check(&mut self) {
         self.check = false;
+    }
+
+    /// Enable the key check to allow any passphrase to be used when unlocking the datastore
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use warp::tesseract::Tesseract;
+    /// let mut tesseract = Tesseract::default();
+    ///
+    /// assert!(!tesseract.is_key_check_enabled());
+    ///
+    /// tesseract.enable_key_check();
+    ///
+    /// assert!(tesseract.is_key_check_enabled())
+    /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn enable_key_check(&mut self) {
+        self.check = true;
     }
 
     /// Check to determine if the key check is enabled
