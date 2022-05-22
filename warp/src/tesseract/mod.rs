@@ -26,6 +26,7 @@ pub struct Tesseract {
     enc_pass: Vec<u8>,
     file: Option<PathBuf>,
     autosave: bool,
+    check: bool,
     unlock: bool,
 }
 
@@ -33,6 +34,8 @@ impl Debug for Tesseract {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Tesseract")
             .field("internal", &self.internal)
+            .field("file", &self.file)
+            .field("autosave", &self.autosave)
             .field("unlock", &self.unlock)
             .finish()
     }
@@ -59,6 +62,7 @@ impl Tesseract {
     /// ```
     pub fn from_file<S: AsRef<Path>>(file: S) -> Result<Self> {
         let mut store = Tesseract::default();
+        store.check = true;
         let fs = std::fs::File::open(&file)?;
         let data = serde_json::from_reader(fs)?;
         let file = std::fs::canonicalize(&file).unwrap_or_else(|_| file.as_ref().to_path_buf());
@@ -80,6 +84,7 @@ impl Tesseract {
     /// ```
     pub fn from_reader<S: Read>(reader: &mut S) -> Result<Self> {
         let mut store = Tesseract::default();
+        store.check = true;
         let data = serde_json::from_reader(reader)?;
         store.internal = data;
         Ok(store)
@@ -231,6 +236,7 @@ impl Tesseract {
     /// tesseract.set_autosave();
     /// assert!(tesseract.autosave_enabled());
     /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_autosave(&mut self) {
         self.autosave = !self.autosave;
     }
@@ -243,8 +249,43 @@ impl Tesseract {
     /// let mut tesseract = warp::tesseract::Tesseract::default();
     /// assert!(!tesseract.autosave_enabled());
     /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn autosave_enabled(&self) -> bool {
         self.autosave
+    }
+
+    /// Disable the key check to allow any passphrase to be used when unlocking the datastore
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use warp::tesseract::Tesseract;
+    /// let mut tesseract = Tesseract::from_file("datastore").unwrap();
+    ///
+    /// assert!(tesseract.is_key_check_enabled());
+    ///
+    /// tesseract.disable_key_check();
+    ///
+    /// assert!(!tesseract.is_key_check_enabled())
+    /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn disable_key_check(&mut self) {
+        self.check = false;
+    }
+
+    /// Check to determine if the key check is enabled
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use warp::tesseract::Tesseract;
+    /// let mut tesseract = Tesseract::new();
+    /// assert!(!tesseract.is_key_check_enabled());
+    /// //TODO: Perform a check with it enabled
+    /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn is_key_check_enabled(&self) -> bool {
+        self.check
     }
 
     /// To store a value to be encrypted into the keystore. If the key already exist, it
@@ -383,6 +424,14 @@ impl Tesseract {
     pub fn unlock(&mut self, passphrase: &[u8]) -> Result<()> {
         self.enc_pass = crate::crypto::cipher::aes256gcm_self_encrypt(passphrase)?;
         self.unlock = true;
+        if self.is_key_check_enabled() {
+            for (key, _) in &self.internal {
+                if let Err(e) = self.retrieve(key) {
+                    self.lock();
+                    return Err(e);
+                }
+            }
+        }
         Ok(())
     }
 
