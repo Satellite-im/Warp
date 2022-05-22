@@ -332,6 +332,16 @@ impl ConstellationAdapter {
     }
 
     #[wasm_bindgen]
+    pub fn put_stream(&mut self, remote: String, stream: Promise) -> Result<()> {
+        Err(Error::Unimplemented)
+    }
+
+    #[wasm_bindgen]
+    pub fn get_stream(&self, remote: String) -> Result<Promise> {
+        Err(Error::Unimplemented)
+    }
+
+    #[wasm_bindgen]
     pub fn remove(&mut self, remote: String, recursive: bool) -> Promise {
         let inner = self.inner().clone();
         future_to_promise(async move {
