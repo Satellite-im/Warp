@@ -107,3 +107,20 @@ impl Ed25519Keypair {
             .map_err(Error::from)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::crypto::signature::Ed25519Keypair;
+
+    #[test]
+    fn default_test() -> anyhow::Result<()> {
+        let message = b"This is a default message";
+
+        let keypair = Ed25519Keypair::new()?;
+
+        let signature = keypair.sign(message);
+
+        keypair.verify(message, &signature)?;
+        Ok(())
+    }
+}
