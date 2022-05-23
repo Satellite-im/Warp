@@ -218,9 +218,7 @@ impl MultiPass for SolanaAccount {
 
         //Note: This is used so that we can obtain the public key when we look up an account by username
         let pubkey = wallet.get_pubkey()?;
-        if let Err(_) = helper.set_extra_one(&pubkey.to_string()) {
-            //TODO: Log error here
-        }
+        helper.set_extra_one(&pubkey.to_string())?;
 
         if self.get_wallet().is_err() {
             self.insert_solana_wallet(wallet)?;
