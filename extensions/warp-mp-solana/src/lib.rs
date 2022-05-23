@@ -139,6 +139,15 @@ impl SolanaAccount {
         Ok(cache.lock())
     }
 
+    pub fn get_hooks(&self) -> anyhow::Result<MutexGuard<Hooks>> {
+        let hook = self
+            .hooks
+            .as_ref()
+            .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
+
+        Ok(hook.lock())
+    }
+
     pub fn user_helper(&self) -> anyhow::Result<UserHelper> {
         let kp = self.get_private_key()?;
         let helper = UserHelper::new_with_cluster(self.endpoint.clone(), &kp);
@@ -216,6 +225,10 @@ impl MultiPass for SolanaAccount {
         if let Ok(mut cache) = self.get_cache() {
             let object = DataObject::new(DataType::from(Module::Accounts), &identity)?;
             cache.add_data(DataType::from(Module::Accounts), &object)?;
+        }
+        if let Ok(hooks) = self.get_hooks() {
+            let object = DataObject::new(DataType::Accounts, identity.clone())?;
+            hooks.trigger("accounts::new_identity", &object);
         }
         Ok(identity.public_key())
     }
@@ -323,6 +336,11 @@ impl MultiPass for SolanaAccount {
             }
         }
 
+        if let Ok(hooks) = self.get_hooks() {
+            let object = DataObject::new(DataType::Accounts, identity.clone())?;
+            hooks.trigger("accounts::update_identity", &object);
+        }
+
         Ok(())
     }
 
@@ -355,6 +373,19 @@ impl Friends for SolanaAccount {
         let helper = self.friend_helper()?;
 
         helper.create_friend_request(Pubkey::new(pubkey.as_ref()), "")?;
+
+        if let Ok(hooks) = self.get_hooks() {
+            if let Some(request) = self
+                .list_outgoing_request()?
+                .iter()
+                .filter(|request| request.to() == pubkey)
+                .collect::<Vec<_>>()
+                .first()
+            {
+                let object = DataObject::new(DataType::Accounts, request)?;
+                hooks.trigger("accounts::send_friend_request", &object);
+            }
+        }
         Ok(())
     }
 
@@ -378,6 +409,19 @@ impl Friends for SolanaAccount {
         let helper = self.friend_helper()?;
 
         helper.accept_friend_request(Pubkey::new(pubkey.as_ref()), "")?;
+
+        if let Ok(hooks) = self.get_hooks() {
+            if let Some(request) = self
+                .list_friends()?
+                .iter()
+                .filter(|identity| identity.public_key() == pubkey)
+                .collect::<Vec<_>>()
+                .first()
+            {
+                let object = DataObject::new(DataType::Accounts, request)?;
+                hooks.trigger("accounts::accept_friend_request", &object);
+            }
+        }
         Ok(())
     }
 
@@ -398,6 +442,18 @@ impl Friends for SolanaAccount {
         let helper = self.friend_helper()?;
 
         helper.deny_friend_request(Pubkey::new(pubkey.as_ref()))?;
+        if let Ok(hooks) = self.get_hooks() {
+            if let Some(request) = self
+                .list_incoming_request()?
+                .iter()
+                .filter(|request| request.from() == pubkey)
+                .collect::<Vec<_>>()
+                .first()
+            {
+                let object = DataObject::new(DataType::Accounts, request)?;
+                hooks.trigger("accounts::deny_friend_request", &object);
+            }
+        }
         Ok(())
     }
 
@@ -421,6 +477,18 @@ impl Friends for SolanaAccount {
         let helper = self.friend_helper()?;
 
         helper.close_friend_request(Pubkey::new(pubkey.as_ref()))?;
+        if let Ok(hooks) = self.get_hooks() {
+            if let Some(request) = self
+                .list_incoming_request()?
+                .iter()
+                .filter(|request| request.from() == pubkey)
+                .collect::<Vec<_>>()
+                .first()
+            {
+                let object = DataObject::new(DataType::Accounts, request)?;
+                hooks.trigger("accounts::close_friend_request", &object);
+            }
+        }
         Ok(())
     }
 
@@ -476,6 +544,18 @@ impl Friends for SolanaAccount {
         let helper = self.friend_helper()?;
 
         helper.remove_friend(Pubkey::new(pubkey.as_ref()))?;
+        if let Ok(hooks) = self.get_hooks() {
+            if let Some(request) = self
+                .list_all_request()?
+                .iter()
+                .filter(|request| request.from() == pubkey || request.to() == pubkey)
+                .collect::<Vec<_>>()
+                .first()
+            {
+                let object = DataObject::new(DataType::Accounts, request)?;
+                hooks.trigger("accounts::remove_friend", &object);
+            }
+        }
         Ok(())
     }
 
