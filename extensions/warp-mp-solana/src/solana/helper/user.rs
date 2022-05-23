@@ -13,6 +13,7 @@ use anchor_client::anchor_lang::prelude::ProgramError;
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anyhow::anyhow;
 use std::rc::Rc;
+use std::str::FromStr;
 
 pub struct UserHelper {
     pub client: Client,
@@ -55,7 +56,9 @@ impl UserHelper {
             CommitmentConfig::confirmed(),
         );
 
-        let program = client.program(users::id());
+        //TODO: Change back to users::id() when the program is updated to use the correct key
+        let program = client
+            .program(Pubkey::from_str("8n2ct4HBadJdtr8T31JvYPTvmYeZyCuLUjkt3CwcSsh9").unwrap());
         Self {
             client,
             program,
