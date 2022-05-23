@@ -444,7 +444,7 @@ impl Friends for SolanaAccount {
         helper.deny_friend_request(Pubkey::new(pubkey.as_ref()))?;
         if let Ok(hooks) = self.get_hooks() {
             if let Some(request) = self
-                .list_incoming_request()?
+                .list_all_request()?
                 .iter()
                 .filter(|request| request.from() == pubkey)
                 .collect::<Vec<_>>()
@@ -479,7 +479,7 @@ impl Friends for SolanaAccount {
         helper.close_friend_request(Pubkey::new(pubkey.as_ref()))?;
         if let Ok(hooks) = self.get_hooks() {
             if let Some(request) = self
-                .list_incoming_request()?
+                .list_all_request()?
                 .iter()
                 .filter(|request| request.from() == pubkey)
                 .collect::<Vec<_>>()
