@@ -1,4 +1,3 @@
-#[cfg(not(target_arch = "wasm32"))]
 use super::Result;
 use chrono::{DateTime, Utc};
 use derive_more::Display;
