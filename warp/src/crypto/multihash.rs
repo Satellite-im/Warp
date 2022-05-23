@@ -52,8 +52,8 @@ macro_rules! create_hash_functions {
             }
 
             #[cfg(not(target_arch = "wasm32"))]
-            pub fn [<$code:lower _multihash_file>](file: &str) -> Result<Vec<u8>, crate::error::Error> {
-                multihash_file::<$code>(Code::$code, file).map_err(crate::error::Error::from)
+            pub fn [<$code:lower _multihash_file>]<P: AsRef<std::path::Path>>(file: P) -> Result<Vec<u8>, crate::error::Error> {
+                multihash_file::<$code, _>(Code::$code, file).map_err(crate::error::Error::from)
             }
         }
     };
@@ -78,9 +78,11 @@ pub fn multihash_reader<H: Hasher + Default + std::io::Write>(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn multihash_file<H: Hasher + Default>(code: Code, file: &str) -> anyhow::Result<Vec<u8>> {
+pub fn multihash_file<H: Hasher + Default, P: AsRef<std::path::Path>>(
+    code: Code,
+    file: P,
+) -> anyhow::Result<Vec<u8>> {
     use std::io::Read;
-
     let mut hasher = H::default();
     let mut reader = std::fs::File::open(file)?;
     loop {
