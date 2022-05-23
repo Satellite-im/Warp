@@ -327,8 +327,9 @@ impl Hash {
 
     /// Use to generate a sha1 hash of a file
     pub fn sha1hash_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<()> {
-        let mut file = std::fs::File::open(path)?;
-        self.sha1hash_from_reader(&mut file)
+        let res = crate::crypto::multihash::sha1_multihash_file(path)?;
+        self.sha1 = Some(bs58::encode(res).into_string());
+        Ok(())
     }
 
     /// Use to generate a sha1 hash from a reader
@@ -353,8 +354,9 @@ impl Hash {
 
     /// Use to generate a sha256 hash of a file
     pub fn sha256hash_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<()> {
-        let mut file = std::fs::File::open(path)?;
-        self.sha256hash_from_reader(&mut file)
+        let res = crate::crypto::multihash::sha2_256_multihash_file(path)?;
+        self.sha256 = Some(bs58::encode(res).into_string());
+        Ok(())
     }
 
     /// Use to generate a sha256 hash from a reader
@@ -390,13 +392,13 @@ impl Hash {
     /// let mut hash = Hash::default();
     /// hash.hash_from_slice(b"Hello, World!");
     ///
-    /// assert_eq!(hash.sha1(), Some(String::from("0A0A9F2A6772942557AB5355D76AF442F8F65E01")));
-    /// assert_eq!(hash.sha256(), Some(String::from("DFFD6021BB2BD5B0AF676290809EC3A53191DD81C7F70A4B28688A362182986F")));
+    /// assert_eq!(hash.sha1(), Some(String::from("5dqvXR93VnV1Grn96DBGdqEQAbJe1e")));
+    /// assert_eq!(hash.sha256(), Some(String::from("QmdR1iHsUocy7pmRHBhNa9znM8eh8Mwqq5g5vcw8MDMXTt")));
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn hash_from_slice(&mut self, data: &[u8]) {
-        self.sha1hash_from_slice(data);
-        self.sha256hash_from_slice(data);
+    pub fn hash_from_slice(&mut self, data: &[u8]) -> Result<()> {
+        self.sha1hash_from_slice(data)?;
+        self.sha256hash_from_slice(data)
     }
 
     /// Use to generate a sha1 hash from a reader
@@ -408,12 +410,13 @@ impl Hash {
     /// let mut hash = Hash::default();
     /// hash.sha1hash_from_slice(b"Hello, World!");
     ///
-    /// assert_eq!(hash.sha1(), Some(String::from("0A0A9F2A6772942557AB5355D76AF442F8F65E01")))
+    /// assert_eq!(hash.sha1(), Some(String::from("5dqvXR93VnV1Grn96DBGdqEQAbJe1e")))
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn sha1hash_from_slice(&mut self, slice: &[u8]) {
-        let res = crate::crypto::hash::sha1_hash(slice, None);
-        self.sha1 = Some(hex::encode(res).to_uppercase());
+    pub fn sha1hash_from_slice(&mut self, slice: &[u8]) -> Result<()> {
+        let res = crate::crypto::multihash::sha1_multihash_slice(slice)?;
+        self.sha1 = Some(bs58::encode(res).into_string());
+        Ok(())
     }
 
     /// Use to generate a sha256 hash from a reader
@@ -425,12 +428,13 @@ impl Hash {
     /// let mut hash = Hash::default();
     /// hash.sha256hash_from_slice(b"Hello, World!");
     ///
-    /// assert_eq!(hash.sha256(), Some(String::from("DFFD6021BB2BD5B0AF676290809EC3A53191DD81C7F70A4B28688A362182986F")))
+    /// assert_eq!(hash.sha256(), Some(String::from("QmdR1iHsUocy7pmRHBhNa9znM8eh8Mwqq5g5vcw8MDMXTt")))
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn sha256hash_from_slice(&mut self, slice: &[u8]) {
-        let res = crate::crypto::hash::sha256_hash(slice, None);
-        self.sha256 = Some(hex::encode(res).to_uppercase());
+    pub fn sha256hash_from_slice(&mut self, slice: &[u8]) -> Result<()> {
+        let res = crate::crypto::multihash::sha2_256_multihash_slice(slice)?;
+        self.sha256 = Some(bs58::encode(res).into_string());
+        Ok(())
     }
 }
 

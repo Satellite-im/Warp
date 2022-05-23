@@ -32,6 +32,7 @@ aes-gcm = { version = "0.9" }
 aead = { version = "0.4", default-features = false }
 zeroize = "1"
 rand = { version = "0.7"  }
+multihash = { version = "0.16", features = ["sha1"] }
 
 # Error handling crates
 anyhow = { version = "1" }
@@ -57,7 +58,7 @@ hex = "0.4"
 uuid = { version = "1.0", features = ["serde", "v4"] }
 regex = "1.5"
 derive_more = "0.99"
-
+paste = "1.0"
 # WASM Crates
 wasm-bindgen = { version = "0.2" }
 wasm-bindgen-futures = "0.4.30"

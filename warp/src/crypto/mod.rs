@@ -16,6 +16,7 @@ pub use zeroize;
 pub mod cipher;
 pub mod exchange;
 pub mod hash;
+pub mod multihash;
 pub mod signature;
 
 use wasm_bindgen::prelude::*;
