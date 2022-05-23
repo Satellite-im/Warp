@@ -77,6 +77,9 @@ enum Command {
     ViewAccount {
         pubkey: Option<String>,
     },
+    ViewAccountByUsername {
+        username: String,
+    },
     ListAllRequest,
     ListIncomingRequest,
     ListOutgoingRequest,
@@ -321,6 +324,7 @@ async fn main() -> AnyResult<()> {
                         tesseract.lock().to_file(warp_directory.join("datastore"))?;
                     }
                     Err(e) => {
+                        println!("{}", e);
                         warn!("Could not create account: {}", e);
                     }
                 };
@@ -347,6 +351,27 @@ async fn main() -> AnyResult<()> {
                 };
 
                 match ident {
+                    Ok(ident) => {
+                        println!("Account Found\n");
+                        println!("Username: {}#{}", ident.username(), ident.short_id());
+                        println!(
+                            "Public Key: {}",
+                            bs58::encode(ident.public_key().into_bytes()).into_string()
+                        );
+                        println!();
+                        tesseract.lock().to_file(warp_directory.join("datastore"))?;
+                    }
+                    Err(e) => {
+                        println!("Error obtaining account: {}", e);
+                        error!("Error obtaining account: {}", e.to_string());
+                    }
+                }
+            }
+            Command::ViewAccountByUsername { username } => {
+                let account = manager.get_account()?;
+                let account = account.lock();
+
+                match account.get_identity(Identifier::from(username)) {
                     Ok(ident) => {
                         println!("Account Found\n");
                         println!("Username: {}#{}", ident.username(), ident.short_id());

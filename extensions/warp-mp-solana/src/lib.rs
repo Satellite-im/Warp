@@ -216,6 +216,12 @@ impl MultiPass for SolanaAccount {
 
         helper.create(&uname, "", "We have lift off")?;
 
+        //Note: This is used so that we can obtain the public key when we look up an account by username
+        let pubkey = wallet.get_pubkey()?;
+        if let Err(_) = helper.set_extra_one(&pubkey.to_string()) {
+            //TODO: Log error here
+        }
+
         if self.get_wallet().is_err() {
             self.insert_solana_wallet(wallet)?;
         }
@@ -249,7 +255,23 @@ impl MultiPass for SolanaAccount {
                         }
                     }
                 }
-                return Err(Error::Any(anyhow!("Unable to find identity by username")));
+                let user = helper.get_user_by_name(&username)?;
+                // If this field is empty or cannot be decoded from base58 we should return an error
+                // Note: We may have to cross check the public key against the account that holds it
+                //       for security purpose 
+                if user.extra_1.is_empty() {
+                    return Err(Error::Any(anyhow!("Unable to obtain identity by username (Incompatible Account)")));
+                }
+
+                match bs58::decode(&user.extra_1).into_vec().map_err(|e| anyhow!(e)) {
+                    Ok(pkey) => {
+                        if pkey.is_empty() || pkey.len() < 31 {
+                            return Err(Error::Any(anyhow!("Length of public key is invalid")));
+                        }
+                        user_to_identity(&helper, Some(&pkey))?
+                    },
+                    Err(e) => return Err(Error::Any(e))
+                }
             }
             (Some(pkey), None, false) => {
                 if let Ok(cache) = self.get_cache() {
@@ -435,6 +457,7 @@ impl Friends for SolanaAccount {
         if self.get_identity(Identifier::from(pubkey.clone())).is_err() {
             return Err(Error::Any(anyhow!("Account does not exist")));
         }
+
         if self.has_friend(pubkey.clone()).is_ok() {
             return Err(Error::Any(anyhow!("You are already friends")));
         }
