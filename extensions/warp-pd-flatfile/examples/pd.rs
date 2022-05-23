@@ -22,7 +22,7 @@ fn main() -> anyhow::Result<()> {
 
     let data = DataObject::new(
         DataType::from(Module::FileSystem),
-        DimensionData::from_path("Cargo.toml"),
+        DimensionData::from("Cargo.toml"),
     )?;
 
     storage.add_data(DataType::from(Module::FileSystem), &data)?;
