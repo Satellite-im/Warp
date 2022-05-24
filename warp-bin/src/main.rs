@@ -44,6 +44,8 @@ struct CommandArgs {
     ui: bool,
     #[clap(long)]
     cli: bool,
+    #[clap(long)]
+    bypass_key_check: bool,
     #[clap(short, long)]
     path: Option<String>,
     #[clap(long)]
@@ -183,6 +185,10 @@ async fn main() -> AnyResult<()> {
     let tesseract = Arc::new(Mutex::new(
         Tesseract::from_file(warp_directory.join("datastore")).unwrap_or_default(),
     ));
+
+    if cli.bypass_key_check {
+        tesseract.lock().disable_key_check();
+    }
 
     //TODO: Have keyfile encrypted
     let mut key = match cli.keyfile {
