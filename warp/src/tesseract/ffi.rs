@@ -86,6 +86,41 @@ pub unsafe extern "C" fn tesseract_autosave_enabled(tesseract: *mut Tesseract) -
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
+pub unsafe extern "C" fn tesseract_disable_key_check(tesseract: *mut Tesseract) -> bool {
+    if tesseract.is_null() {
+        return false;
+    }
+
+    let tesseract = &mut *tesseract;
+    tesseract.disable_key_check();
+    true
+}
+
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn tesseract_enable_key_check(tesseract: *mut Tesseract) -> bool {
+    if tesseract.is_null() {
+        return false;
+    }
+
+    let tesseract = &mut *tesseract;
+    tesseract.enable_key_check();
+    true
+}
+
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn tesseract_is_key_check_enabled(tesseract: *const Tesseract) -> bool {
+    if tesseract.is_null() {
+        return false;
+    }
+
+    let tesseract = &*tesseract;
+    tesseract.is_key_check_enabled()
+}
+
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
 pub unsafe extern "C" fn tesseract_save(tesseract: *mut Tesseract) -> bool {
     if tesseract.is_null() {
         return false;
