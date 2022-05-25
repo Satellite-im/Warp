@@ -6,7 +6,7 @@
 #include "../warp/warp.h"
 
 
-MultiPassTraitObject *new_account() {
+MultiPassAdapter *new_account() {
     struct Tesseract *tesseract = tesseract_new();
 
     if (!tesseract) {
@@ -32,7 +32,7 @@ MultiPassTraitObject *new_account() {
 
 
     
-    return (MultiPassTraitObject *)mp;
+    return (MultiPassAdapter *)mp;
 }
 
 bool print_identity(struct Identity *id) {
@@ -60,14 +60,14 @@ bool print_identity(struct Identity *id) {
 
 int main() {
     
-    MultiPassTraitObject *account_a = new_account();
+    MultiPassAdapter *account_a = new_account();
 
     if(!account_a) {
         printf("Account A is NULL\n");
         return -1;
     }
 
-    MultiPassTraitObject *account_b = new_account();
+    MultiPassAdapter *account_b = new_account();
     if(!account_b) {
         printf("Account B is NULL\n");
         return -1;
