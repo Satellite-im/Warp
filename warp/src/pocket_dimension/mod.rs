@@ -284,7 +284,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocket_dimension_get_data(
-        ctx: *mut PocketDimensionAdapter,
+        ctx: *const PocketDimensionAdapter,
         dimension: DataType,
         query: *const QueryBuilder,
     ) -> *const Data {
