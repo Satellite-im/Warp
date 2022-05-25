@@ -292,10 +292,6 @@ pub mod ffi {
             return std::ptr::null();
         }
 
-        if dimension.is_null() {
-            return std::ptr::null();
-        }
-
         let query = match query.is_null() {
             true => None,
             false => Some(&*query),
