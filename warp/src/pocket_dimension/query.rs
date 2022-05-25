@@ -2,12 +2,13 @@
 use wasm_bindgen::prelude::*;
 
 use super::Result;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[repr(C)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[serde(rename_all = "lowercase")]
 pub enum Comparator {
     Eq,
     Gt,
@@ -17,7 +18,8 @@ pub enum Comparator {
     Ne,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
 pub enum ComparatorFilter {
     Eq(String, Value),
     Gt(String, Value),
@@ -40,7 +42,7 @@ impl From<(Comparator, String, Value)> for ComparatorFilter {
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct QueryBuilder {
     r#where: Vec<(String, Value)>,
@@ -100,6 +102,22 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn querybuilder_new() -> *mut QueryBuilder {
         Box::into_raw(Box::new(QueryBuilder::default())) as *mut QueryBuilder
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn querybuilder_import(data: *const c_char) -> *mut QueryBuilder {
+        if data.is_null() {
+            return std::ptr::null_mut();
+        }
+        let data = CStr::from_ptr(data).to_string_lossy().to_string();
+
+        let query: QueryBuilder = match serde_json::from_str(&data) {
+            Ok(q) => q,
+            Err(_) => return std::ptr::null_mut(),
+        };
+
+        Box::into_raw(Box::new(query)) as *mut QueryBuilder
     }
 
     #[allow(clippy::missing_safety_doc)]
