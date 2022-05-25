@@ -288,6 +288,7 @@ pub mod ffi {
     use crate::constellation::directory::Directory;
     use crate::constellation::file::File;
     use crate::constellation::Item;
+    use std::ffi::CStr;
     #[allow(unused)]
     use std::ffi::{c_void, CString};
     #[allow(unused)]
@@ -358,5 +359,138 @@ pub mod ffi {
             Ok(c) => c.into_raw(),
             Err(_) => std::ptr::null_mut(),
         }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_creation(item: *const Item) -> *mut c_char {
+        if item.is_null() {
+            return std::ptr::null_mut();
+        }
+        let item = &*(item);
+        match CString::new(item.creation().to_string()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_modified(item: *const Item) -> *mut c_char {
+        if item.is_null() {
+            return std::ptr::null_mut();
+        }
+        let item = &*(item);
+        match CString::new(item.modified().to_string()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_name(item: *const Item) -> *mut c_char {
+        if item.is_null() {
+            return std::ptr::null_mut();
+        }
+        let item = &*(item);
+        match CString::new(item.name()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_description(item: *const Item) -> *mut c_char {
+        if item.is_null() {
+            return std::ptr::null_mut();
+        }
+        let item = &*(item);
+        match CString::new(item.description()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_size(item: *const Item) -> i64 {
+        if item.is_null() {
+            return 0;
+        }
+        let item = &*(item);
+        item.size()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_rename(item: *mut Item, name: *const c_char) -> bool {
+        if item.is_null() {
+            return false;
+        }
+
+        if name.is_null() {
+            return false;
+        }
+
+        let item = &mut *(item);
+        let name = CStr::from_ptr(name).to_string_lossy().to_string();
+        match item.rename(&name) {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_is_directory(item: *const Item) -> bool {
+        if item.is_null() {
+            return false;
+        }
+        let item = &*(item);
+        item.is_directory()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_is_file(item: *const Item) -> bool {
+        if item.is_null() {
+            return false;
+        }
+        let item = &*(item);
+        item.is_file()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_set_description(item: *mut Item, desc: *const c_char) -> bool {
+        if item.is_null() {
+            return false;
+        }
+
+        if desc.is_null() {
+            return false;
+        }
+
+        let item = &mut *(item);
+
+        let desc = CStr::from_ptr(desc).to_string_lossy().to_string();
+
+        item.set_description(&desc);
+
+        true
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_set_size(item: *mut Item, size: i64) -> bool {
+        if item.is_null() {
+            return false;
+        }
+
+        let item = &mut *(item);
+
+        item.set_size(size).is_ok()
     }
 }
