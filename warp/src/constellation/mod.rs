@@ -426,6 +426,7 @@ impl ConstellationAdapter {
 pub mod ffi {
     use crate::constellation::directory::Directory;
     use crate::constellation::{ConstellationAdapter, ConstellationDataType};
+    use crate::runtime_handle;
     use std::ffi::{CStr, CString};
     use std::os::raw::c_char;
 
@@ -486,7 +487,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_root_directory(
-        ctx: *mut ConstellationAdapter,
+        ctx: *const ConstellationAdapter,
     ) -> *const Directory {
         if ctx.is_null() {
             return std::ptr::null_mut();
@@ -500,15 +501,15 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_current_directory(
-        ctx: *mut ConstellationAdapter,
-    ) -> *mut Directory {
+        ctx: *const ConstellationAdapter,
+    ) -> *const Directory {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
         let constellation = &*(ctx);
         let constellation = constellation.inner_guard();
         let current_directory = constellation.current_directory();
-        Box::into_raw(Box::new(current_directory)) as *mut Directory
+        Box::into_raw(Box::new(current_directory)) as *const Directory
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -552,10 +553,7 @@ pub mod ffi {
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let local = CStr::from_ptr(local).to_string_lossy().to_string();
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = runtime_handle();
         rt.block_on(async { constellation.inner_guard().put(&remote, &local).await })
             .is_ok()
     }
@@ -584,10 +582,7 @@ pub mod ffi {
 
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote);
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = runtime_handle();
 
         rt.block_on(async move {
             constellation
@@ -621,7 +616,7 @@ pub mod ffi {
 
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let local = CStr::from_ptr(local).to_string_lossy().to_string();
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = runtime_handle();
         rt.block_on(async move { constellation.inner_guard().get(&remote, &local).await })
             .is_ok()
     }
@@ -629,7 +624,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_get_buffer(
-        ctx: *mut ConstellationAdapter,
+        ctx: *const ConstellationAdapter,
         remote: *const c_char,
     ) -> *mut u8 {
         if ctx.is_null() {
@@ -640,9 +635,9 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
 
-        let constellation = &mut *(ctx);
+        let constellation = &*ctx;
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = runtime_handle();
         let ptr = rt.block_on(async move {
             {
                 match constellation.inner_guard().get_buffer(&remote).await {
@@ -680,7 +675,7 @@ pub mod ffi {
 
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = runtime_handle();
         rt.block_on(async move { constellation.inner_guard().remove(&remote, recursive).await })
             .is_ok()
     }
@@ -702,7 +697,7 @@ pub mod ffi {
 
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = runtime_handle();
         rt.block_on(async move {
             constellation
                 .inner_guard()
@@ -734,7 +729,7 @@ pub mod ffi {
         let constellation = &mut *(ctx);
         let src = CStr::from_ptr(src).to_string_lossy().to_string();
         let dst = CStr::from_ptr(dst).to_string_lossy().to_string();
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = runtime_handle();
         rt.block_on(async move { constellation.inner_guard().move_item(&src, &dst).await })
             .is_ok()
     }
@@ -755,7 +750,7 @@ pub mod ffi {
 
         let constellation = &mut *(ctx);
         let src = CStr::from_ptr(src).to_string_lossy().to_string();
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = runtime_handle();
         rt.block_on(async move { constellation.inner_guard().sync_ref(&src).await })
             .is_ok()
     }
@@ -764,21 +759,15 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn constellation_export(
         ctx: *mut ConstellationAdapter,
-        datatype: *mut ConstellationDataType,
+        datatype: ConstellationDataType,
     ) -> *mut c_char {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
 
-        if datatype.is_null() {
-            return std::ptr::null_mut();
-        }
-
         let constellation = &*(ctx);
 
-        let data_type = &*(datatype);
-
-        match constellation.inner_guard().export(data_type.clone()) {
+        match constellation.inner_guard().export(datatype) {
             Ok(export) => match CString::new(export) {
                 Ok(export) => export.into_raw(),
                 Err(_) => std::ptr::null_mut(),
@@ -789,8 +778,28 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn constellation_export_json(
+    pub unsafe extern "C" fn constellation_import(
         ctx: *mut ConstellationAdapter,
+        datatype: ConstellationDataType,
+        data: *const c_char,
+    ) -> bool {
+        if ctx.is_null() {
+            return false;
+        }
+
+        if data.is_null() {
+            return false;
+        }
+
+        let constellation = &mut *(ctx);
+        let data = CStr::from_ptr(data).to_string_lossy().to_string();
+        constellation.inner_guard().import(datatype, data).is_ok()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_export_json(
+        ctx: *const ConstellationAdapter,
     ) -> *mut c_char {
         if ctx.is_null() {
             return std::ptr::null_mut();

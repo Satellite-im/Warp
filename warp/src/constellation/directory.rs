@@ -697,12 +697,12 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_id(dir: *mut Directory) -> *mut c_char {
+    pub unsafe extern "C" fn directory_id(dir: *const Directory) -> *mut c_char {
         if dir.is_null() {
             return std::ptr::null_mut();
         }
 
-        let dir: &Directory = &*dir;
+        let dir = &*dir;
 
         match CString::new(dir.id().to_string()) {
             Ok(c) => c.into_raw(),
@@ -712,7 +712,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_name(dir: *mut Directory) -> *mut c_char {
+    pub unsafe extern "C" fn directory_name(dir: *const Directory) -> *mut c_char {
         if dir.is_null() {
             return std::ptr::null_mut();
         }
@@ -727,7 +727,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_description(dir: *mut Directory) -> *mut c_char {
+    pub unsafe extern "C" fn directory_description(dir: *const Directory) -> *mut c_char {
         if dir.is_null() {
             return std::ptr::null_mut();
         }
@@ -742,7 +742,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_size(dir: *mut Directory) -> i64 {
+    pub unsafe extern "C" fn directory_size(dir: *const Directory) -> i64 {
         if dir.is_null() {
             return 0;
         }
@@ -754,7 +754,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_creation(dir: *mut Directory) -> i64 {
+    pub unsafe extern "C" fn directory_creation(dir: *const Directory) -> i64 {
         if dir.is_null() {
             return 0;
         }
@@ -766,7 +766,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_modified(dir: *mut Directory) -> i64 {
+    pub unsafe extern "C" fn directory_modified(dir: *const Directory) -> i64 {
         if dir.is_null() {
             return 0;
         }

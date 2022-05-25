@@ -14,6 +14,14 @@ pub mod pocket_dimension;
 pub mod raygun;
 pub mod tesseract;
 
+#[cfg(not(target_arch = "wasm32"))]
+static RUNTIME: once_cell::sync::Lazy<tokio::runtime::Runtime> = once_cell::sync::Lazy::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+});
+
 pub trait Extension {
     /// Returns an id of the extension. Should be the crate name (eg in a `warp-module-ext` format)
     fn id(&self) -> String;
@@ -43,6 +51,11 @@ pub fn initialize() {
     // Any other code that would be used in a manner for initialization can be put here
     // assuming it would compile and be compatible with WASM
 
-    // Allows us to show detailed error messages in console 
+    // Allows us to show detailed error messages in console
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn runtime_handle() -> tokio::runtime::Handle {
+    RUNTIME.handle().clone()
 }

@@ -295,7 +295,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_into_item(directory: *mut Directory) -> *mut Item {
+    pub unsafe extern "C" fn directory_into_item(directory: *const Directory) -> *mut Item {
         if directory.is_null() {
             return std::ptr::null_mut();
         }
@@ -306,7 +306,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn file_into_item(file: *mut File) -> *mut Item {
+    pub unsafe extern "C" fn file_into_item(file: *const File) -> *mut Item {
         if file.is_null() {
             return std::ptr::null_mut();
         }
@@ -317,7 +317,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_into_directory(item: *mut Item) -> *mut Directory {
+    pub unsafe extern "C" fn item_into_directory(item: *const Item) -> *mut Directory {
         if item.is_null() {
             return std::ptr::null_mut();
         }
@@ -333,7 +333,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_into_file(item: *mut Item) -> *mut File {
+    pub unsafe extern "C" fn item_into_file(item: *const Item) -> *mut File {
         if item.is_null() {
             return std::ptr::null_mut();
         }
@@ -343,6 +343,19 @@ pub mod ffi {
                 let file = Box::new(file.clone());
                 Box::into_raw(file) as *mut File
             }
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_id(item: *const Item) -> *mut c_char {
+        if item.is_null() {
+            return std::ptr::null_mut();
+        }
+        let item = &*(item);
+        match CString::new(item.name()) {
+            Ok(c) => c.into_raw(),
             Err(_) => std::ptr::null_mut(),
         }
     }
