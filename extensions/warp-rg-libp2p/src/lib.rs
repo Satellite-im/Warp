@@ -32,6 +32,8 @@ use warp::{module::Module, Extension};
 use libp2p::autonat;
 
 use serde::{Deserialize, Serialize};
+use warp::data::{DataObject, DataType};
+use warp::pocket_dimension::query::QueryBuilder;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -100,10 +102,14 @@ impl NetworkBehaviourEventProcess<IdentifyEvent> for RayGunBehavior {
                 IdentifyInfo {
                     listen_addrs,
                     protocols,
+                    agent_version,
                     ..
                 },
         } = event
         {
+            if !agent_version.ne(&agent_name()) {
+                return;
+            }
             if protocols
                 .iter()
                 .any(|p| p.as_bytes() == libp2p::kad::protocol::DEFAULT_PROTO_NAME)
@@ -114,6 +120,10 @@ impl NetworkBehaviourEventProcess<IdentifyEvent> for RayGunBehavior {
             }
         }
     }
+}
+
+pub fn agent_name() -> String {
+    format!("warp-rg-libp2p/{}", env!("CARGO_PKG_VERSION"))
 }
 
 impl NetworkBehaviourEventProcess<autonat::Event> for RayGunBehavior {
@@ -226,28 +236,24 @@ impl NetworkBehaviourEventProcess<MdnsEvent> for RayGunBehavior {
     fn inject_event(&mut self, event: MdnsEvent) {
         match event {
             MdnsEvent::Discovered(list) => {
-                for (peer, addr) in list {
+                for (peer, _addr) in list {
                     cfg_if::cfg_if! {
                         if #[cfg(feature = "gossipsub")] {
                             self.sub.add_explicit_peer(&peer);
-                            self.kademlia.add_address(&peer, addr);
                         } else if #[cfg(feature = "floodsub")] {
                             self.sub.add_node_to_partial_view(peer);
-                            self.kademlia.add_address(&peer, addr);
                         }
                     }
                 }
             }
             MdnsEvent::Expired(list) => {
-                for (peer, addr) in list {
+                for (peer, _addr) in list {
                     if !self.mdns.has_node(&peer) {
                         cfg_if::cfg_if! {
                             if #[cfg(feature = "gossipsub")] {
                                 self.sub.remove_explicit_peer(&peer);
-                                self.kademlia.remove_address(&peer, &addr);
                             } else if #[cfg(feature = "floodsub")] {
                                 self.sub.remove_node_from_partial_view(&peer);
-                                self.kademlia.remove_address(&peer, &addr);
                             }
                         }
                     }
@@ -329,28 +335,16 @@ impl Libp2pMessaging {
             .kademlia
             .get_closest_peers(random_peer);
 
-        let (into_tx, into_rx) = tokio::sync::mpsc::channel(32);
+        let (into_tx, mut into_rx) = tokio::sync::mpsc::channel(32);
         let (outer_tx, outer_rx) = tokio::sync::mpsc::channel(32);
-        let (command_tx, command_rx) = tokio::sync::mpsc::channel(32);
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(32);
 
         message.into_thread = Some(into_tx);
 
         message.response_channel = Some(outer_rx);
 
-        message.command_channel = Some(command_tx);
+        message.command_channel = Some(command_tx.clone());
 
-        message.separate_loop(swarm, into_rx, outer_tx, command_rx);
-
-        Ok(message)
-    }
-
-    fn separate_loop(
-        &self,
-        mut swarm: Swarm<RayGunBehavior>,
-        mut into_rx: Receiver<MessagingEvents>,
-        outer_tx: Sender<Result<()>>,
-        mut command_rx: Receiver<SwarmCommands>,
-    ) {
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -384,6 +378,8 @@ impl Libp2pMessaging {
                 }
             }
         });
+
+        Ok(message)
     }
 
     pub async fn send_command(&self, command: SwarmCommands) -> anyhow::Result<()> {
@@ -397,35 +393,42 @@ impl Libp2pMessaging {
         Ok(())
     }
 
-    #[cfg(feature = "gossipsub")]
+    #[cfg(any(feature = "gossipsub", feature = "floodsub"))]
     async fn create_swarm(
         &mut self,
         keypair: identity::Keypair,
     ) -> anyhow::Result<Swarm<RayGunBehavior>> {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
         let pubkey = keypair.public();
 
         let peer = PeerId::from(keypair.public());
 
         let transport = tokio_development_transport(keypair.clone())?;
-        let message_id_fn = |message: &GossipsubMessage| {
-            let mut s = DefaultHasher::new();
-            message.data.hash(&mut s);
-            MessageId::from(s.finish().to_string())
+
+        let sub = {
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "gossipsub")] {
+                    use std::collections::hash_map::DefaultHasher;
+                    use std::hash::{Hash, Hasher};
+
+                    let message_id_fn = |message: &GossipsubMessage| {
+                        let mut s = DefaultHasher::new();
+                        message.data.hash(&mut s);
+                        MessageId::from(s.finish().to_string())
+                    };
+                    let gossipsub_config = gossipsub::GossipsubConfigBuilder::default()
+                        .heartbeat_interval(Duration::from_secs(10))
+                        .validation_mode(ValidationMode::Strict)
+                        .message_id_fn(message_id_fn)
+                        .build()
+                        .map_err(|e| anyhow!(e))?;
+
+                     gossipsub::Gossipsub::new(MessageAuthenticity::Signed(keypair), gossipsub_config)
+                            .map_err(|e| anyhow!(e))?
+                } else if #[cfg(feature = "floodsub")] {
+                    Floodsub::new(peer)
+                }
+            }
         };
-
-        let gossipsub_config = gossipsub::GossipsubConfigBuilder::default()
-            .heartbeat_interval(Duration::from_secs(10))
-            .validation_mode(ValidationMode::Strict)
-            .message_id_fn(message_id_fn)
-            .build()
-            .map_err(|e| anyhow!(e))?;
-
-        let gsub =
-            gossipsub::Gossipsub::new(MessageAuthenticity::Signed(keypair), gossipsub_config)
-                .map_err(|e| anyhow!(e))?;
 
         let swarm = {
             let mut mdns_config = MdnsConfig::default();
@@ -437,60 +440,20 @@ impl Libp2pMessaging {
                 .set_kbucket_inserts(KademliaBucketInserts::OnConnected)
                 .set_connection_idle_timeout(Duration::from_secs(5 * 60))
                 .set_provider_publication_interval(Some(Duration::from_secs(60)));
+
             let store = MemoryStore::new(peer);
 
             let behaviour = RayGunBehavior {
-                sub: gsub,
+                sub,
                 mdns: Mdns::new(mdns_config).await?,
                 ping: Ping::new(ping::Config::new().with_keep_alive(true)),
                 kademlia: Kademlia::with_config(peer, store, kad_config),
                 inner: self.conversations.clone(),
                 account: self.account.clone(),
-                identity: Identify::new(IdentifyConfig::new("/ipfs/1.0.0".into(), pubkey)),
-                autonat: autonat::Behaviour::new(peer, Default::default()),
-            };
-
-            libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
-                .executor(Box::new(|fut| {
-                    tokio::spawn(fut);
-                }))
-                .build()
-        };
-
-        Ok(swarm)
-    }
-
-    #[cfg(feature = "floodsub")]
-    async fn create_swarm(
-        &mut self,
-        keypair: identity::Keypair,
-    ) -> anyhow::Result<Swarm<RayGunBehavior>> {
-        let pubkey = keypair.public();
-
-        let peer = PeerId::from(keypair.public());
-
-        let transport = tokio_development_transport(keypair.clone())?;
-
-        let swarm = {
-            let mut mdns_config = MdnsConfig::default();
-            mdns_config.enable_ipv6 = true;
-
-            let mut kad_config = KademliaConfig::default();
-            kad_config
-                .set_query_timeout(Duration::from_secs(5 * 60))
-                .set_kbucket_inserts(KademliaBucketInserts::OnConnected)
-                .set_connection_idle_timeout(Duration::from_secs(5 * 60))
-                .set_provider_publication_interval(Some(Duration::from_secs(60)));
-            let store = MemoryStore::new(peer);
-
-            let behaviour = RayGunBehavior {
-                sub: Floodsub::new(peer),
-                mdns: Mdns::new(mdns_config).await?,
-                ping: Ping::new(ping::Config::new().with_keep_alive(true)),
-                kademlia: Kademlia::with_config(peer, store, kad_config),
-                inner: self.conversations.clone(),
-                account: self.account.clone(),
-                identity: Identify::new(IdentifyConfig::new("/ipfs/1.0.0".into(), pubkey)),
+                identity: Identify::new(
+                    IdentifyConfig::new("/ipfs/1.0.0".into(), pubkey)
+                        .with_agent_version(agent_name()),
+                ),
                 autonat: autonat::Behaviour::new(peer, Default::default()),
             };
 
@@ -699,6 +662,14 @@ impl RayGun for Libp2pMessaging {
         _: MessageOptions,
         _: Option<Callback>,
     ) -> Result<Vec<Message>> {
+        if let Ok(cache) = self.get_cache() {
+            let mut query = QueryBuilder::default();
+            query.r#where("conversation_id", conversation_id)?;
+            if let Ok(_list) = cache.get_data(DataType::Messaging, Some(&query)) {
+                //TODO
+            }
+        }
+
         let messages = self.conversations.lock();
 
         let list = messages
@@ -728,7 +699,14 @@ impl RayGun for Libp2pMessaging {
         self.send_event(MessagingEvents::NewMessage(message.clone()))
             .await?;
 
-        self.conversations.lock().push(message);
+        self.conversations.lock().push(message.clone());
+
+        if let Ok(mut cache) = self.get_cache() {
+            let data = DataObject::new(DataType::Messaging, message)?;
+            if let Err(_) = cache.add_data(DataType::Messaging, &data) {
+                //TODO: Log error
+            }
+        }
 
         return Ok(());
     }
@@ -788,13 +766,14 @@ impl RayGun for Libp2pMessaging {
             PinState::Unpin => *message.pinned_mut() = false,
         }
 
-        Ok(())
-    }
+        if let Ok(mut cache) = self.get_cache() {
+            let data = DataObject::new(DataType::Messaging, message)?;
+            if let Err(_) = cache.add_data(DataType::Messaging, &data) {
+                //TODO: Log error
+            }
+        }
 
-    async fn ping(&mut self, id: Uuid) -> Result<()> {
-        self.send_event(MessagingEvents::Ping(id))
-            .await
-            .map_err(Error::Any)
+        Ok(())
     }
 
     async fn reply(
@@ -814,9 +793,22 @@ impl RayGun for Libp2pMessaging {
         self.send_event(MessagingEvents::NewMessage(message.clone()))
             .await?;
 
-        self.conversations.lock().push(message);
+        self.conversations.lock().push(message.clone());
+
+        if let Ok(mut cache) = self.get_cache() {
+            let data = DataObject::new(DataType::Messaging, message)?;
+            if let Err(_) = cache.add_data(DataType::Messaging, &data) {
+                //TODO: Log error
+            }
+        }
 
         return Ok(());
+    }
+
+    async fn ping(&mut self, id: Uuid) -> Result<()> {
+        self.send_event(MessagingEvents::Ping(id))
+            .await
+            .map_err(Error::Any)
     }
 
     async fn embeds(
