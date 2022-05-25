@@ -243,14 +243,10 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn pocket_dimension_add_data(
         ctx: *mut PocketDimensionAdapter,
-        dimension: *mut DataType,
+        dimension: DataType,
         data: *mut Data,
     ) -> bool {
         if ctx.is_null() {
-            return false;
-        }
-
-        if dimension.is_null() {
             return false;
         }
 
@@ -259,24 +255,19 @@ pub mod ffi {
         }
 
         let pd = &mut *ctx;
-        let dimension = &*dimension;
         let data = &*data;
 
-        pd.inner_guard().add_data(*dimension, data).is_ok()
+        pd.inner_guard().add_data(dimension, data).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocket_dimension_has_data(
         ctx: *mut PocketDimensionAdapter,
-        dimension: *mut DataType,
+        dimension: DataType,
         query: *mut QueryBuilder,
     ) -> bool {
         if ctx.is_null() {
-            return false;
-        }
-
-        if dimension.is_null() {
             return false;
         }
 
@@ -285,17 +276,16 @@ pub mod ffi {
         }
 
         let pd = &mut *ctx;
-        let dimension = &*dimension;
         let query = &*query;
 
-        pd.inner_guard().has_data(*dimension, query).is_ok()
+        pd.inner_guard().has_data(dimension, query).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocket_dimension_get_data(
         ctx: *mut PocketDimensionAdapter,
-        dimension: *mut DataType,
+        dimension: DataType,
         query: *mut QueryBuilder,
     ) -> *const Data {
         if ctx.is_null() {
@@ -311,10 +301,9 @@ pub mod ffi {
             false => Some(&*query),
         };
 
-        let pd = &mut *ctx;
-        let dimension = &*dimension;
+        let pd = &*ctx;
 
-        match pd.inner_guard().get_data(*dimension, query) {
+        match pd.inner_guard().get_data(dimension, query) {
             Ok(list) => {
                 let list = std::mem::ManuallyDrop::new(list);
                 list.as_ptr()
@@ -327,14 +316,10 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn pocket_dimension_size(
         ctx: *mut PocketDimensionAdapter,
-        dimension: *mut DataType,
+        dimension: DataType,
         query: *mut QueryBuilder,
     ) -> i64 {
         if ctx.is_null() {
-            return 0;
-        }
-
-        if dimension.is_null() {
             return 0;
         }
 
@@ -344,23 +329,18 @@ pub mod ffi {
         };
 
         let pd = &mut *ctx;
-        let dimension = &*dimension;
 
-        pd.inner_guard().size(*dimension, query).unwrap_or(0)
+        pd.inner_guard().size(dimension, query).unwrap_or(0)
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocket_dimension_count(
         ctx: *mut PocketDimensionAdapter,
-        dimension: *mut DataType,
+        dimension: DataType,
         query: *mut QueryBuilder,
     ) -> i64 {
         if ctx.is_null() {
-            return 0;
-        }
-
-        if dimension.is_null() {
             return 0;
         }
 
@@ -370,29 +350,23 @@ pub mod ffi {
         };
 
         let pd = &mut *ctx;
-        let dimension = &*dimension;
 
-        pd.inner_guard().count(*dimension, query).unwrap_or(0)
+        pd.inner_guard().count(dimension, query).unwrap_or(0)
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocket_dimension_empty(
         ctx: *mut PocketDimensionAdapter,
-        dimension: *mut DataType,
+        dimension: DataType,
     ) -> bool {
         if ctx.is_null() {
             return false;
         }
 
-        if dimension.is_null() {
-            return false;
-        }
-
         let pd = &mut *ctx;
-        let dimension = &*dimension;
 
-        pd.inner_guard().empty(*dimension).is_ok()
+        pd.inner_guard().empty(dimension).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]

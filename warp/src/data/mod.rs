@@ -236,12 +236,34 @@ impl Data {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::data::{Data, DataType};
-    use std::ffi::CString;
+    use std::ffi::{CStr, CString};
     use std::os::raw::c_char;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn data_id(data: *mut Data) -> *mut c_char {
+    pub unsafe extern "C" fn data_new(data: DataType, payload: *const c_char) -> *mut Data {
+        if payload.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let payload_str = CStr::from_ptr(payload).to_string_lossy().to_string();
+
+        let payload_value = match serde_json::from_str::<serde_json::Value>(&payload_str) {
+            Ok(v) => v,
+            Err(_) => return std::ptr::null_mut(),
+        };
+
+        let data = match Data::new(data, payload_value) {
+            Ok(data) => data,
+            Err(_) => return std::ptr::null_mut(),
+        };
+
+        Box::into_raw(Box::new(data)) as *mut Data
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn data_id(data: *const Data) -> *mut c_char {
         if data.is_null() {
             return std::ptr::null_mut();
         }
@@ -301,7 +323,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn data_size(data: *mut Data) -> u64 {
+    pub unsafe extern "C" fn data_size(data: *const Data) -> u64 {
         if data.is_null() {
             return 0;
         }
@@ -312,7 +334,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn data_timestamp(data: *mut Data) -> i64 {
+    pub unsafe extern "C" fn data_timestamp(data: *const Data) -> i64 {
         if data.is_null() {
             return 0;
         }
@@ -323,7 +345,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn data_version(data: *mut Data) -> u32 {
+    pub unsafe extern "C" fn data_version(data: *const Data) -> u32 {
         if data.is_null() {
             return 0;
         }
@@ -334,12 +356,41 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn data_type(data: *mut Data) -> DataType {
+    pub unsafe extern "C" fn data_type(data: *const Data) -> DataType {
         if data.is_null() {
             return DataType::Unknown;
         }
 
         let data = &*data;
         data.data_type()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn data_payload(data: *const Data) -> *mut c_char {
+        if data.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let data = &*data;
+
+        //Since C does not know Data::payload<T>(), we convert this into a json object and
+        //return the string
+        let payload = match data.payload::<serde_json::Value>() {
+            Ok(payload) => payload,
+            Err(_) => {
+                return std::ptr::null_mut();
+            }
+        };
+
+        let payload_str = match serde_json::to_string(&payload) {
+            Ok(str) => str,
+            Err(_) => return std::ptr::null_mut(),
+        };
+
+        match CString::new(payload_str) {
+            Ok(cstr) => cstr.into_raw(),
+            Err(_) => return std::ptr::null_mut(),
+        }
     }
 }
