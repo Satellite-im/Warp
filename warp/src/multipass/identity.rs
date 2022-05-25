@@ -676,20 +676,20 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_identity_active_badge(
-        identity: *mut Identity,
-    ) -> *mut Badge {
+        identity: *const Identity,
+    ) -> *const Badge {
         if identity.is_null() {
-            return std::ptr::null_mut();
+            return std::ptr::null();
         }
 
         let identity = &*identity;
-        Box::into_raw(Box::new(identity.active_badge())) as *mut Badge
+        Box::into_raw(Box::new(identity.active_badge())) as *const Badge
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_identity_linked_accounts(
-        identity: *mut Identity,
+        identity: *const Identity,
     ) -> *mut c_void {
         if identity.is_null() {
             return std::ptr::null_mut();
@@ -703,33 +703,33 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_friend_request_from(
-        request: *mut FriendRequest,
-    ) -> *mut PublicKey {
+        request: *const FriendRequest,
+    ) -> *const PublicKey {
         if request.is_null() {
-            return std::ptr::null_mut();
+            return std::ptr::null();
         }
 
         let request = &*request;
-        Box::into_raw(Box::new(request.from())) as *mut PublicKey
+        Box::into_raw(Box::new(request.from())) as *const PublicKey
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_friend_request_to(
-        request: *mut FriendRequest,
-    ) -> *mut PublicKey {
+        request: *const FriendRequest,
+    ) -> *const PublicKey {
         if request.is_null() {
             return std::ptr::null_mut();
         }
 
         let request = &*request;
-        Box::into_raw(Box::new(request.to())) as *mut PublicKey
+        Box::into_raw(Box::new(request.to())) as *const PublicKey
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_friend_request_status(
-        request: *mut FriendRequest,
+        request: *const FriendRequest,
     ) -> *const FriendRequestStatus {
         if request.is_null() {
             return std::ptr::null();
@@ -743,83 +743,83 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_identifier_user_name(
         name: *const c_char,
-    ) -> *mut Identifier {
+    ) -> *const Identifier {
         if name.is_null() {
-            return std::ptr::null_mut();
+            return std::ptr::null();
         }
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(Identifier::user_name(&name))) as *mut Identifier
+        Box::into_raw(Box::new(Identifier::user_name(&name))) as *const Identifier
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_identifier_public_key(
         key: *const PublicKey,
-    ) -> *mut Identifier {
+    ) -> *const Identifier {
         if key.is_null() {
-            return std::ptr::null_mut();
+            return std::ptr::null();
         }
 
         let key = &*key;
 
-        Box::into_raw(Box::new(Identifier::public_key(key.clone()))) as *mut Identifier
+        Box::into_raw(Box::new(Identifier::public_key(key.clone()))) as *const Identifier
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_identifier_own() -> *mut Identifier {
-        Box::into_raw(Box::new(Identifier::own())) as *mut Identifier
+    pub unsafe extern "C" fn multipass_identifier_own() -> *const Identifier {
+        Box::into_raw(Box::new(Identifier::own())) as *const Identifier
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_identity_update_set_username(
         name: *const c_char,
-    ) -> *mut IdentityUpdate {
+    ) -> *const IdentityUpdate {
         if name.is_null() {
-            return std::ptr::null_mut();
+            return std::ptr::null();
         }
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::set_username(name))) as *mut IdentityUpdate
+        Box::into_raw(Box::new(IdentityUpdate::set_username(name))) as *const IdentityUpdate
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_identity_update_set_graphics_picture(
         name: *const c_char,
-    ) -> *mut IdentityUpdate {
+    ) -> *const IdentityUpdate {
         if name.is_null() {
             return std::ptr::null_mut();
         }
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::set_graphics_picture(name))) as *mut IdentityUpdate
+        Box::into_raw(Box::new(IdentityUpdate::set_graphics_picture(name))) as *const IdentityUpdate
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_identity_update_set_graphics_banner(
         name: *const c_char,
-    ) -> *mut IdentityUpdate {
+    ) -> *const IdentityUpdate {
         if name.is_null() {
-            return std::ptr::null_mut();
+            return std::ptr::null();
         }
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::set_graphics_banner(name))) as *mut IdentityUpdate
+        Box::into_raw(Box::new(IdentityUpdate::set_graphics_banner(name))) as *const IdentityUpdate
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_identity_update_set_status_message(
         name: *const c_char,
-    ) -> *mut IdentityUpdate {
+    ) -> *const IdentityUpdate {
         let update = if name.is_null() {
             let name = CStr::from_ptr(name).to_string_lossy().to_string();
             IdentityUpdate::set_status_message(Some(name))
@@ -827,7 +827,7 @@ pub mod ffi {
             IdentityUpdate::set_status_message(None)
         };
 
-        Box::into_raw(Box::new(update)) as *mut IdentityUpdate
+        Box::into_raw(Box::new(update)) as *const IdentityUpdate
     }
 
     #[allow(clippy::missing_safety_doc)]

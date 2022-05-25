@@ -244,7 +244,7 @@ pub mod ffi {
     pub unsafe extern "C" fn pocket_dimension_add_data(
         ctx: *mut PocketDimensionAdapter,
         dimension: DataType,
-        data: *mut Data,
+        data: *const Data,
     ) -> bool {
         if ctx.is_null() {
             return false;
@@ -265,7 +265,7 @@ pub mod ffi {
     pub unsafe extern "C" fn pocket_dimension_has_data(
         ctx: *mut PocketDimensionAdapter,
         dimension: DataType,
-        query: *mut QueryBuilder,
+        query: *const QueryBuilder,
     ) -> bool {
         if ctx.is_null() {
             return false;
@@ -286,7 +286,7 @@ pub mod ffi {
     pub unsafe extern "C" fn pocket_dimension_get_data(
         ctx: *mut PocketDimensionAdapter,
         dimension: DataType,
-        query: *mut QueryBuilder,
+        query: *const QueryBuilder,
     ) -> *const Data {
         if ctx.is_null() {
             return std::ptr::null();
@@ -311,9 +311,9 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocket_dimension_size(
-        ctx: *mut PocketDimensionAdapter,
+        ctx: *const PocketDimensionAdapter,
         dimension: DataType,
-        query: *mut QueryBuilder,
+        query: *const QueryBuilder,
     ) -> i64 {
         if ctx.is_null() {
             return 0;
@@ -324,7 +324,7 @@ pub mod ffi {
             false => Some(&*query),
         };
 
-        let pd = &mut *ctx;
+        let pd = &*ctx;
 
         pd.inner_guard().size(dimension, query).unwrap_or(0)
     }
@@ -332,9 +332,9 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocket_dimension_count(
-        ctx: *mut PocketDimensionAdapter,
+        ctx: *const PocketDimensionAdapter,
         dimension: DataType,
-        query: *mut QueryBuilder,
+        query: *const QueryBuilder,
     ) -> i64 {
         if ctx.is_null() {
             return 0;
@@ -345,7 +345,7 @@ pub mod ffi {
             false => Some(&*query),
         };
 
-        let pd = &mut *ctx;
+        let pd = &*ctx;
 
         pd.inner_guard().count(dimension, query).unwrap_or(0)
     }

@@ -60,6 +60,7 @@ uuid = { version = "1.0", features = ["serde", "v4"] }
 regex = "1.5"
 derive_more = "0.99"
 paste = "1.0"
+libc = "0.2"
 
 # WASM Crates
 wasm-bindgen = { version = "0.2" }

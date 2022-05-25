@@ -111,6 +111,16 @@ impl MultiPassAdapter {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn get_identity(&self, id: Identifier) -> Result<Identity> {
+        self.inner_guard().get_identity(id)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn get_own_identity(&self) -> Result<Identity> {
+        self.inner_guard().get_own_identity()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn update_identity(&mut self, option: IdentityUpdate) -> Result<()> {
         self.inner_guard().update_identity(option)
     }
@@ -189,14 +199,6 @@ impl MultiPassAdapter {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl MultiPassAdapter {
-    pub fn get_identity(&self, id: Identifier) -> Result<Identity> {
-        self.inner_guard().get_identity(id)
-    }
-
-    pub fn get_own_identity(&self) -> Result<Identity> {
-        self.inner_guard().get_own_identity()
-    }
-
     pub fn list_incoming_request(&self) -> Result<Vec<FriendRequest>> {
         self.inner_guard().list_incoming_request()
     }
@@ -218,17 +220,6 @@ cfg_if::cfg_if! {
     if #[cfg(target_arch = "wasm32")] {
         #[wasm_bindgen]
         impl MultiPassAdapter {
-
-            #[wasm_bindgen]
-            pub fn get_identity(&self, id: Identifier) -> Result<JsValue> {
-                self.inner_guard().get_identity(id).map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
-            }
-
-            #[wasm_bindgen]
-            pub fn get_own_identity(&self) -> Result<JsValue> {
-                self.inner_guard().get_own_identity().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
-            }
-
             #[wasm_bindgen]
             pub fn list_incoming_request(&self) -> Result<JsValue> {
                 self.inner_guard().list_incoming_request().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
@@ -297,8 +288,8 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_get_identity(
-        ctx: *mut MultiPassAdapter,
-        identifier: *mut Identifier,
+        ctx: *const MultiPassAdapter,
+        identifier: *const Identifier,
     ) -> *mut Identity {
         if ctx.is_null() {
             return std::ptr::null_mut();
@@ -319,7 +310,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_get_own_identity(
-        ctx: *mut MultiPassAdapter,
+        ctx: *const MultiPassAdapter,
     ) -> *mut Identity {
         if ctx.is_null() {
             return std::ptr::null_mut();
@@ -336,14 +327,14 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_update_identity(
         ctx: *mut MultiPassAdapter,
-        option: *mut IdentityUpdate,
+        option: *const IdentityUpdate,
     ) -> bool {
         if ctx.is_null() {
             return false;
         }
 
         let mp = &mut *(ctx);
-        let option = &*(option as *mut IdentityUpdate);
+        let option = &*option;
         mp.inner_guard().update_identity(option.clone()).is_ok()
     }
 
@@ -385,7 +376,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_send_request(
         ctx: *mut MultiPassAdapter,
-        pubkey: *mut PublicKey,
+        pubkey: *const PublicKey,
     ) -> bool {
         if ctx.is_null() {
             return false;
@@ -403,7 +394,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_accept_request(
         ctx: *mut MultiPassAdapter,
-        pubkey: *mut PublicKey,
+        pubkey: *const PublicKey,
     ) -> bool {
         if ctx.is_null() {
             return false;
@@ -422,7 +413,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_deny_request(
         ctx: *mut MultiPassAdapter,
-        pubkey: *mut PublicKey,
+        pubkey: *const PublicKey,
     ) -> bool {
         if ctx.is_null() {
             return false;
@@ -441,7 +432,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_close_request(
         ctx: *mut MultiPassAdapter,
-        pubkey: *mut PublicKey,
+        pubkey: *const PublicKey,
     ) -> bool {
         if ctx.is_null() {
             return false;
@@ -459,7 +450,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_incoming_request(
-        ctx: *mut MultiPassAdapter,
+        ctx: *const MultiPassAdapter,
     ) -> *const FriendRequest {
         if ctx.is_null() {
             return std::ptr::null();
@@ -479,7 +470,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_outgoing_request(
-        ctx: *mut MultiPassAdapter,
+        ctx: *const MultiPassAdapter,
     ) -> *const FriendRequest {
         if ctx.is_null() {
             return std::ptr::null();
@@ -499,7 +490,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_all_request(
-        ctx: *mut MultiPassAdapter,
+        ctx: *const MultiPassAdapter,
     ) -> *const FriendRequest {
         if ctx.is_null() {
             return std::ptr::null();
@@ -520,7 +511,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_remove_friend(
         ctx: *mut MultiPassAdapter,
-        pubkey: *mut PublicKey,
+        pubkey: *const PublicKey,
     ) -> bool {
         if ctx.is_null() {
             return false;
@@ -539,7 +530,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_block_key(
         ctx: *mut MultiPassAdapter,
-        pubkey: *mut PublicKey,
+        pubkey: *const PublicKey,
     ) -> bool {
         if ctx.is_null() {
             return false;
@@ -556,7 +547,9 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_list_friends(ctx: *mut MultiPassAdapter) -> *const Identity {
+    pub unsafe extern "C" fn multipass_list_friends(
+        ctx: *const MultiPassAdapter,
+    ) -> *const Identity {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
@@ -575,8 +568,8 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_has_friend(
-        ctx: *mut MultiPassAdapter,
-        pubkey: *mut PublicKey,
+        ctx: *const MultiPassAdapter,
+        pubkey: *const PublicKey,
     ) -> bool {
         if ctx.is_null() {
             return false;

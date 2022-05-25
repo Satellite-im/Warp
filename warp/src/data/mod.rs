@@ -31,7 +31,6 @@ pub struct Data {
     version: u32,
 
     /// Timestamp of the Data Object upon creation
-    #[serde(with = "chrono::serde::ts_seconds")]
     timestamp: DateTime<Utc>,
 
     /// Size of the Data Object
@@ -146,7 +145,7 @@ impl Data {
     /// Returns the data type of the object
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn data_type(&self) -> DataType {
-        self.data_type.clone()
+        self.data_type
     }
 
     /// Returns the timestamp of `Data`

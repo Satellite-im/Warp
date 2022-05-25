@@ -65,27 +65,3 @@ where
         }
     }
 }
-
-// cfg_if! {
-//     if #[cfg(target_arch = "wasm32")] {
-//         #[cfg(wasm_bindgen)]
-//         #[derive(Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Display)]
-//         #[serde(rename_all = "lowercase")]
-//         pub enum Module {
-//             #[display(fmt = "messaging")]
-//             Messaging,
-//
-//             #[display(fmt = "filesystem")]
-//             FileSystem,
-//
-//             #[display(fmt = "accounts")]
-//             Accounts,
-//
-//             #[display(fmt = "cache")]
-//             Cache,
-//
-//             #[display(fmt = "unknown")]
-//             Unknown,
-//         }
-//     }
-// }

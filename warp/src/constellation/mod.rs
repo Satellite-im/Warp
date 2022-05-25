@@ -332,12 +332,12 @@ impl ConstellationAdapter {
     }
 
     #[wasm_bindgen]
-    pub fn put_stream(&mut self, remote: String, stream: Promise) -> Result<()> {
+    pub fn put_stream(&mut self, _: String, _: Promise) -> Result<()> {
         Err(Error::Unimplemented)
     }
 
     #[wasm_bindgen]
-    pub fn get_stream(&self, remote: String) -> Result<Promise> {
+    pub fn get_stream(&self, _: String) -> Result<Promise> {
         Err(Error::Unimplemented)
     }
 
