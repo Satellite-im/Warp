@@ -8,6 +8,9 @@ build_static_tesseract:
 build_static_fs_memory:
 				mkdir -p bin && clang -Wall -Wextra fs_memory.c -o bin/fs_memory ../target/debug/libwarp.a ../target/debug/libwarp_fs_memory.a -lm
 
+build_static_fs_storj:
+				mkdir -p bin && clang -Wall -Wextra fs_storj.c -o bin/fs_storj ../target/debug/libwarp.a ../target/debug/libwarp_fs_storj.a ../target/debug/libwarp_pd_flatfile.a -lm -lssl -lcrypto
+
 build_shared_tesseract:
 				mkdir -p bin && clang -Wall -Wextra tesseract.c -o bin/tesseract -L ../target/debug -lwarp -lpthread -ldl -lssl -lcrypto -lbz2 -lm -ludev
 

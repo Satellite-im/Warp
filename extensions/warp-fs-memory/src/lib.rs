@@ -117,18 +117,18 @@ impl Extension for MemorySystem {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::MemorySystem;
-    use std::ffi::c_void;
     use warp::constellation::ConstellationAdapter;
     use warp::sync::{Arc, Mutex};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn constellation_fs_memory_create_context() -> *mut c_void {
+    pub unsafe extern "C" fn constellation_fs_memory_create_context() -> *mut ConstellationAdapter {
         let obj = Box::new(ConstellationAdapter::new(Arc::new(Mutex::new(Box::new(
             MemorySystem::new(),
         )))));
-        Box::into_raw(obj) as *mut ConstellationAdapter as *mut c_void
+        Box::into_raw(obj) as *mut ConstellationAdapter
     }
 }
