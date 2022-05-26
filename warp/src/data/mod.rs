@@ -235,6 +235,7 @@ impl Data {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::data::{Data, DataType};
+    use crate::ffi::create_ffiarray_functions;
     use std::ffi::{CStr, CString};
     use std::os::raw::c_char;
 
@@ -392,4 +393,6 @@ pub mod ffi {
             Err(_) => return std::ptr::null_mut(),
         }
     }
+
+    create_ffiarray_functions!(Data);
 }

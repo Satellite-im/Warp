@@ -87,12 +87,9 @@ impl DimensionData {
     }
 
     pub fn write_to_buffer(&self, buffer: &mut Vec<u8>) -> Result<()> {
-        match self.get_inner() {
-            DimensionDataInner::BufferNoFile { internal, .. } => {
-                buffer.copy_from_slice(internal);
-                return Ok(());
-            }
-            _ => {}
+        if let DimensionDataInner::BufferNoFile { internal, .. } = self.get_inner() {
+            buffer.copy_from_slice(internal);
+            return Ok(());
         }
         Err(Error::Other)
     }
@@ -236,6 +233,7 @@ impl PocketDimensionAdapter {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::data::{Data, DataType};
+    use crate::ffi::FFIArray;
     use crate::pocket_dimension::query::QueryBuilder;
     use crate::pocket_dimension::PocketDimensionAdapter;
 
@@ -287,9 +285,9 @@ pub mod ffi {
         ctx: *const PocketDimensionAdapter,
         dimension: DataType,
         query: *const QueryBuilder,
-    ) -> *const Data {
+    ) -> *mut FFIArray<Data> {
         if ctx.is_null() {
-            return std::ptr::null();
+            return std::ptr::null_mut();
         }
 
         let query = match query.is_null() {
@@ -300,11 +298,8 @@ pub mod ffi {
         let pd = &*ctx;
 
         match pd.inner_guard().get_data(dimension, query) {
-            Ok(list) => {
-                let list = std::mem::ManuallyDrop::new(list);
-                list.as_ptr()
-            }
-            Err(_) => std::ptr::null(),
+            Ok(list) => Box::into_raw(Box::new(FFIArray::new(list))) as *mut FFIArray<Data>,
+            Err(_) => std::ptr::null_mut(),
         }
     }
 

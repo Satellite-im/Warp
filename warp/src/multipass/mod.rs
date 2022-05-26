@@ -245,6 +245,7 @@ cfg_if::cfg_if! {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
+    use crate::ffi::{create_ffiarray_functions, FFIArray};
     use crate::multipass::{
         identity::{FriendRequest, Identifier, Identity, IdentityUpdate, PublicKey},
         MultiPassAdapter,
@@ -451,18 +452,14 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_incoming_request(
         ctx: *const MultiPassAdapter,
-    ) -> *const FriendRequest {
+    ) -> *const FFIArray<FriendRequest> {
         if ctx.is_null() {
             return std::ptr::null();
         }
 
         let mp = &*(ctx);
         match mp.inner_guard().list_incoming_request() {
-            Ok(list) => {
-                let ptr = list.as_ptr();
-                std::mem::forget(list);
-                ptr
-            }
+            Ok(list) => Box::into_raw(Box::new(FFIArray::new(list))) as *const _,
             Err(_) => std::ptr::null(),
         }
     }
@@ -471,18 +468,14 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_outgoing_request(
         ctx: *const MultiPassAdapter,
-    ) -> *const FriendRequest {
+    ) -> *const FFIArray<FriendRequest> {
         if ctx.is_null() {
             return std::ptr::null();
         }
 
         let mp = &*(ctx);
         match mp.inner_guard().list_outgoing_request() {
-            Ok(list) => {
-                let ptr = list.as_ptr();
-                std::mem::forget(list);
-                ptr
-            }
+            Ok(list) => Box::into_raw(Box::new(FFIArray::new(list))) as *const _,
             Err(_) => std::ptr::null(),
         }
     }
@@ -491,21 +484,19 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_all_request(
         ctx: *const MultiPassAdapter,
-    ) -> *const FriendRequest {
+    ) -> *const FFIArray<FriendRequest> {
         if ctx.is_null() {
             return std::ptr::null();
         }
 
         let mp = &*(ctx);
         match mp.inner_guard().list_all_request() {
-            Ok(list) => {
-                let ptr = list.as_ptr();
-                std::mem::forget(list);
-                ptr
-            }
+            Ok(list) => Box::into_raw(Box::new(FFIArray::new(list))) as *const _,
             Err(_) => std::ptr::null(),
         }
     }
+
+    create_ffiarray_functions!(FriendRequest);
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]

@@ -59,3 +59,55 @@ pub fn initialize() {
 pub fn runtime_handle() -> tokio::runtime::Handle {
     RUNTIME.handle().clone()
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ffi {
+
+    macro_rules! create_ffiarray_functions {
+        ($code:expr) => {
+            paste::item! {
+                #[no_mangle]
+                pub extern "C" fn [<ffiarray_ $code:lower _get>](ptr: *const crate::ffi::FFIArray<$code>, index: usize) -> *const $code {
+                    unsafe {
+                        if ptr.is_null() {
+                            return std::ptr::null();
+                        }
+                        let array = &*(ptr);
+                        match array.get(index).cloned() {
+                            Some(data) => Box::into_raw(Box::new(data)) as *const $code,
+                            None => std::ptr::null(),
+                        }
+                    }
+                }
+
+                #[no_mangle]
+                pub unsafe extern "C" fn [<ffiarray_ $code:lower _length>](ptr: *const crate::ffi::FFIArray<$code>) -> usize {
+                    if ptr.is_null() {
+                        return 0;
+                    }
+                    let array = &*(ptr);
+                    array.length()
+                }
+            }
+        };
+    }
+
+    pub(crate) use create_ffiarray_functions;
+
+    pub struct FFIArray<T> {
+        value: Vec<T>,
+    }
+
+    impl<T> FFIArray<T> {
+        pub fn new(value: Vec<T>) -> FFIArray<T> {
+            FFIArray { value }
+        }
+
+        pub fn get(&self, index: usize) -> Option<&T> {
+            self.value.get(index)
+        }
+        pub fn length(&self) -> usize {
+            self.value.len()
+        }
+    }
+}
