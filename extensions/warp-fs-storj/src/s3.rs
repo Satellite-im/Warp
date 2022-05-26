@@ -514,7 +514,7 @@ async fn presign_url(acc: &str, sec: &str, bucket: &str, obj: &str) -> anyhow::R
 
 pub mod ffi {
     use crate::StorjFilesystem;
-    use std::ffi::{c_void, CStr};
+    use std::ffi::{CStr};
     use std::os::raw::c_char;
     use warp::constellation::ConstellationAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
@@ -523,10 +523,10 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_fs_storj_new(
-        pd: *mut c_void,
+        pd: *mut PocketDimensionAdapter,
         akey: *const c_char,
         skey: *const c_char,
-    ) -> *mut c_void {
+    ) -> *mut ConstellationAdapter {
         if akey.is_null() {
             return std::ptr::null_mut();
         }
@@ -541,7 +541,7 @@ pub mod ffi {
 
         let mut client = StorjFilesystem::new(akey, skey);
 
-        if pd.is_null() {
+        if !pd.is_null() {
             let pd = &*(pd as *mut PocketDimensionAdapter);
             client.set_cache(pd.inner().clone());
         }
@@ -549,6 +549,6 @@ pub mod ffi {
         let obj = Box::new(ConstellationAdapter::new(Arc::new(Mutex::new(Box::new(
             client,
         )))));
-        Box::into_raw(obj) as *mut ConstellationAdapter as *mut c_void
+        Box::into_raw(obj) as *mut ConstellationAdapter
     }
 }
