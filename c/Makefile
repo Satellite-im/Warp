@@ -3,10 +3,19 @@ clean:
 				rm -rf bin
 
 build_static_tesseract:
-				mkdir -p bin && clang -Wall -Wextra tesseract.c -o bin/tesseract ../target/debug/libwarp.a -lssl -lcrypto -lbz2 -lm -ludev
+				mkdir -p bin && clang -Wall -Wextra tesseract.c -o bin/tesseract ../target/debug/libwarp.a -lm
+
+build_static_fs_memory:
+				mkdir -p bin && clang -Wall -Wextra fs_memory.c -o bin/fs_memory ../target/debug/libwarp.a ../target/debug/libwarp_fs_memory.a -lm
 
 build_shared_tesseract:
 				mkdir -p bin && clang -Wall -Wextra tesseract.c -o bin/tesseract -L ../target/debug -lwarp -lpthread -ldl -lssl -lcrypto -lbz2 -lm -ludev
 
 build_static_mp_solana:
-				mkdir -p bin && clang -Wall -Wextra mp_solana.c -o bin/mp_solana ../target/debug/libwarp.a ../target/debug/libwarp_mp_solana.a -lssl -lcrypto -lbz2 -lm -ludev
+				mkdir -p bin && clang -Wall -Wextra mp_solana.c -o bin/mp_solana ../target/debug/libwarp.a ../target/debug/libwarp_mp_solana.a -lz -lssl -lcrypto -lbz2 -lm -ludev
+
+build_static_pd_flatfile:
+				mkdir -p bin && clang -Wall -Wextra pd_flatfile.c -o bin/pd_flatfile ../target/debug/libwarp.a ../target/debug/libwarp_pd_flatfile.a -lm
+
+build_shared_pd_flatfile:
+				mkdir -p bin && clang -Wall -Wextra pd_flatfile.c -o bin/pd_flatfile -L ../target/debug -lwarp -lwarp_pd_flatfile -lpthread -ldl -lm

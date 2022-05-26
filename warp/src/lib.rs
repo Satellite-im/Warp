@@ -62,7 +62,7 @@ pub fn runtime_handle() -> tokio::runtime::Handle {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-
+    #[allow(unused_macros)]
     macro_rules! create_ffiarray_functions {
         ($code:expr) => {
             paste::item! {
@@ -92,6 +92,7 @@ pub mod ffi {
         };
     }
 
+    #[allow(unused_imports)]
     pub(crate) use create_ffiarray_functions;
 
     pub struct FFIArray<T> {

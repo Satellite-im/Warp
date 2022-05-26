@@ -245,7 +245,7 @@ cfg_if::cfg_if! {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use crate::ffi::{create_ffiarray_functions, FFIArray};
+    use crate::ffi::FFIArray;
     use crate::multipass::{
         identity::{FriendRequest, Identifier, Identity, IdentityUpdate, PublicKey},
         MultiPassAdapter,
@@ -452,15 +452,15 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_incoming_request(
         ctx: *const MultiPassAdapter,
-    ) -> *const FFIArray<FriendRequest> {
+    ) -> *mut FFIArray<FriendRequest> {
         if ctx.is_null() {
-            return std::ptr::null();
+            return std::ptr::null_mut();
         }
 
         let mp = &*(ctx);
         match mp.inner_guard().list_incoming_request() {
-            Ok(list) => Box::into_raw(Box::new(FFIArray::new(list))) as *const _,
-            Err(_) => std::ptr::null(),
+            Ok(list) => Box::into_raw(Box::new(FFIArray::new(list))) as *mut _,
+            Err(_) => std::ptr::null_mut(),
         }
     }
 
@@ -468,15 +468,15 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_outgoing_request(
         ctx: *const MultiPassAdapter,
-    ) -> *const FFIArray<FriendRequest> {
+    ) -> *mut FFIArray<FriendRequest> {
         if ctx.is_null() {
-            return std::ptr::null();
+            return std::ptr::null_mut();
         }
 
         let mp = &*(ctx);
         match mp.inner_guard().list_outgoing_request() {
-            Ok(list) => Box::into_raw(Box::new(FFIArray::new(list))) as *const _,
-            Err(_) => std::ptr::null(),
+            Ok(list) => Box::into_raw(Box::new(FFIArray::new(list))) as *mut _,
+            Err(_) => std::ptr::null_mut(),
         }
     }
 
@@ -484,19 +484,47 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_all_request(
         ctx: *const MultiPassAdapter,
-    ) -> *const FFIArray<FriendRequest> {
+    ) -> *mut FFIArray<FriendRequest> {
         if ctx.is_null() {
-            return std::ptr::null();
+            return std::ptr::null_mut();
         }
 
         let mp = &*(ctx);
         match mp.inner_guard().list_all_request() {
-            Ok(list) => Box::into_raw(Box::new(FFIArray::new(list))) as *const _,
-            Err(_) => std::ptr::null(),
+            Ok(list) => Box::into_raw(Box::new(FFIArray::new(list))) as *mut _,
+            Err(_) => std::ptr::null_mut(),
         }
     }
 
-    create_ffiarray_functions!(FriendRequest);
+    // create_ffiarray_functions!(Identity);
+
+    #[no_mangle]
+    pub extern "C" fn ffiarray_friendrequest_get(
+        ptr: *const crate::ffi::FFIArray<FriendRequest>,
+        index: usize,
+    ) -> *mut FriendRequest {
+        unsafe {
+            if ptr.is_null() {
+                return std::ptr::null_mut();
+            }
+            let array = &*(ptr);
+            match array.get(index).cloned() {
+                Some(data) => Box::into_raw(Box::new(data)) as *mut FriendRequest,
+                None => std::ptr::null_mut(),
+            }
+        }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn ffiarray_friendrequest_length(
+        ptr: *const crate::ffi::FFIArray<FriendRequest>,
+    ) -> usize {
+        if ptr.is_null() {
+            return 0;
+        }
+        let array = &*(ptr);
+        array.length()
+    }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -540,19 +568,15 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_friends(
         ctx: *const MultiPassAdapter,
-    ) -> *const Identity {
+    ) -> *mut FFIArray<Identity> {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
 
         let mp = &*(ctx);
         match mp.inner_guard().list_friends() {
-            Ok(list) => {
-                let ptr = list.as_ptr();
-                std::mem::forget(list);
-                ptr
-            }
-            Err(_) => std::ptr::null(),
+            Ok(list) => Box::into_raw(Box::new(FFIArray::new(list))) as *mut _,
+            Err(_) => std::ptr::null_mut(),
         }
     }
 

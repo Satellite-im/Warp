@@ -19,6 +19,15 @@ int main() {
         return -1;
     }
 
+    if (!tesseract_enable_key_check(tesseract)) {
+        printf("Unable to enable key check\n");
+        return -1;     
+    }
+
+    if (!tesseract_is_key_check_enabled(tesseract)) {
+        printf("Key check is disabled\n");
+        return -1;
+    }
 
     if (!tesseract_set(tesseract, "MYAPI", "MYVAL")) {
         printf("Unable to insert key into tesseract\n");

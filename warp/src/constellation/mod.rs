@@ -495,7 +495,7 @@ pub mod ffi {
         let constellation = &*(ctx);
         let constellation = constellation.inner_guard();
         let directory = constellation.root_directory();
-        Box::into_raw(Box::new(directory)) as *const Directory
+        Box::into_raw(Box::new(directory.clone())) as *const Directory
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -509,7 +509,7 @@ pub mod ffi {
         let constellation = &*(ctx);
         let constellation = constellation.inner_guard();
         let current_directory = constellation.current_directory();
-        Box::into_raw(Box::new(current_directory)) as *const Directory
+        Box::into_raw(Box::new(current_directory.clone())) as *const Directory
     }
 
     #[allow(clippy::missing_safety_doc)]

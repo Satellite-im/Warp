@@ -25,13 +25,10 @@ MultiPassAdapter *new_account() {
 
     tesseract_free(tesseract);
 
-
     if(!multipass_create_identity(mp, NULL, NULL)) {
         return NULL;
     }
 
-
-    
     return (MultiPassAdapter *)mp;
 }
 
@@ -73,7 +70,6 @@ int main() {
         return -1;
     }
 
-
     struct Identity *ident_a = multipass_get_own_identity(account_a);
     struct Identity *ident_b = multipass_get_own_identity(account_b);
 
@@ -82,8 +78,8 @@ int main() {
     print_identity(ident_b);
 
     //Assuming that the identity isnt null
-    struct PublicKey *acct_a_key = multipass_identity_public_key(ident_a);
-    struct PublicKey *acct_b_key = multipass_identity_public_key(ident_b);
+    const struct PublicKey *acct_a_key = multipass_identity_public_key(ident_a);
+    const struct PublicKey *acct_b_key = multipass_identity_public_key(ident_b);
 
     if(!multipass_send_request(account_a, acct_b_key)) {
         printf("Unable to send friend request\n");
@@ -134,13 +130,12 @@ int main() {
         goto drop;
     }
 
-    const struct Identity *friends[] = {multipass_list_friends(account_a)};
+    const struct FFIArray_Identity *friends = multipass_list_friends(account_a);
 
-    int len = sizeof(friends)/sizeof(friends[0]);
-
+    int len = ffiarray_identity_length(friends);
 
     for(int i = 0; i<len; i++) {
-        const struct Identity *friend = friends[i];
+        const struct Identity *friend = ffiarray_identity_get(friends, i);
         char *friend_name = multipass_identity_username((struct Identity *)friend);
         if (!friend_name) {
             printf("Unable to get username in iter %d\n", i);
@@ -151,12 +146,9 @@ int main() {
 
         printf("Friend Identity Username: %s#%d\n", friend_name, sc);
         free(friend_name);
-        multipass_identity_free(friend);
     }
 
     drop:
-    multipass_public_key_free(acct_a_key);
-    multipass_public_key_free(acct_b_key);
     multipass_identity_free(ident_a);
     multipass_identity_free(ident_b);
     multipass_free(account_a);

@@ -235,7 +235,7 @@ impl Data {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::data::{Data, DataType};
-    use crate::ffi::create_ffiarray_functions;
+    // use crate::ffi::create_ffiarray_functions;
     use std::ffi::{CStr, CString};
     use std::os::raw::c_char;
 
@@ -394,5 +394,31 @@ pub mod ffi {
         }
     }
 
-    create_ffiarray_functions!(Data);
+    // create_ffiarray_functions!(Data);
+
+    #[no_mangle]
+    pub extern "C" fn ffiarray_data_get(
+        ptr: *const crate::ffi::FFIArray<Data>,
+        index: usize,
+    ) -> *const Data {
+        unsafe {
+            if ptr.is_null() {
+                return std::ptr::null();
+            }
+            let array = &*(ptr);
+            match array.get(index).cloned() {
+                Some(data) => Box::into_raw(Box::new(data)) as *const Data,
+                None => std::ptr::null(),
+            }
+        }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn ffiarray_data_length(ptr: *const crate::ffi::FFIArray<Data>) -> usize {
+        if ptr.is_null() {
+            return 0;
+        }
+        let array = &*(ptr);
+        array.length()
+    }
 }

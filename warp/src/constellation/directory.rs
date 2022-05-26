@@ -636,7 +636,9 @@ impl Directory {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::constellation::file::File;
+    use crate::constellation::item::Item;
     use crate::constellation::Directory;
+    use crate::ffi::FFIArray;
     use std::ffi::CStr;
     use std::ffi::CString;
     use std::os::raw::c_char;
@@ -655,9 +657,33 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
+    pub unsafe extern "C" fn directory_add_item(
+        dir_ptr: *mut Directory,
+        item: *const Item,
+    ) -> bool {
+        if dir_ptr.is_null() {
+            return false;
+        }
+
+        if item.is_null() {
+            return false;
+        }
+
+        let dir_ptr = &mut *(dir_ptr);
+
+        let item = &*(item);
+
+        match dir_ptr.add_item(item.clone()) {
+            Ok(_) => true,
+            Err(_) => true,
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
     pub unsafe extern "C" fn directory_add_directory(
         dir_ptr: *mut Directory,
-        directory: *mut Directory,
+        directory: *const Directory,
     ) -> bool {
         if dir_ptr.is_null() {
             return false;
@@ -679,7 +705,10 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_add_file(dir_ptr: *mut Directory, file: *mut File) -> bool {
+    pub unsafe extern "C" fn directory_add_file(
+        dir_ptr: *mut Directory,
+        file: *const File,
+    ) -> bool {
         if dir_ptr.is_null() {
             return false;
         }
@@ -693,6 +722,195 @@ pub mod ffi {
         let new_file = &*file;
 
         dir_ptr.add_file(new_file.clone()).is_ok()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_get_item_index(
+        dir_ptr: *const Directory,
+        name: *const c_char,
+    ) -> isize {
+        if dir_ptr.is_null() {
+            return -1;
+        }
+
+        if name.is_null() {
+            return -1;
+        }
+
+        let dir_ptr = &*dir_ptr;
+
+        let name = CStr::from_ptr(name).to_string_lossy().to_string();
+
+        match dir_ptr.get_item_index(&name) {
+            Ok(size) => size as isize,
+            Err(_) => -1,
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_rename_item(
+        dir_ptr: *mut Directory,
+        current_name: *const c_char,
+        new_name: *const c_char,
+    ) -> bool {
+        if dir_ptr.is_null() {
+            return false;
+        }
+
+        if current_name.is_null() {
+            return false;
+        }
+
+        if new_name.is_null() {
+            return false;
+        }
+
+        let dir_ptr = &mut *dir_ptr;
+
+        let current_name = CStr::from_ptr(current_name).to_string_lossy().to_string();
+        let new_name = CStr::from_ptr(new_name).to_string_lossy().to_string();
+
+        dir_ptr.rename_item(&current_name, &new_name).is_ok()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_remove_item(
+        dir_ptr: *mut Directory,
+        name: *const c_char,
+    ) -> *mut Item {
+        if dir_ptr.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        if name.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let dir_ptr = &mut *dir_ptr;
+
+        let name = CStr::from_ptr(name).to_string_lossy().to_string();
+
+        match dir_ptr.remove_item(&name) {
+            Ok(item) => Box::into_raw(Box::new(item)) as *mut _,
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_has_item(
+        ptr: *const Directory,
+        item: *const c_char,
+    ) -> bool {
+        if ptr.is_null() {
+            return false;
+        }
+
+        if item.is_null() {
+            return false;
+        }
+
+        let directory = &*ptr;
+
+        let item = CStr::from_ptr(item).to_string_lossy().to_string();
+
+        directory.has_item(&item)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_get_items(ptr: *const Directory) -> *const FFIArray<Item> {
+        if ptr.is_null() {
+            return std::ptr::null();
+        }
+
+        let directory = &*ptr;
+
+        Box::into_raw(Box::new(FFIArray::new(directory.get_items().clone()))) as *const _
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_get_item(
+        ptr: *const Directory,
+        item: *const c_char,
+    ) -> *mut Item {
+        if ptr.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        if item.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let directory = &*ptr;
+
+        let item = CStr::from_ptr(item).to_string_lossy().to_string();
+
+        match directory.get_item(&item) {
+            Ok(item) => Box::into_raw(Box::new(item.clone())) as *mut _,
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_remove_item_from_path(
+        ptr: *mut Directory,
+        directory: *const c_char,
+        item: *const c_char,
+    ) -> *mut Item {
+        if ptr.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        if directory.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        if item.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let dir = &mut *ptr;
+
+        let directory = CStr::from_ptr(directory).to_string_lossy().to_string();
+        let item = CStr::from_ptr(item).to_string_lossy().to_string();
+
+        match dir.remove_item_from_path(&directory, &item) {
+            Ok(item) => Box::into_raw(Box::new(item.clone())) as *mut _,
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_move_item_to(
+        ptr: *mut Directory,
+        src: *const c_char,
+        dst: *const c_char,
+    ) -> bool {
+        if ptr.is_null() {
+            return false;
+        }
+
+        if src.is_null() {
+            return false;
+        }
+
+        if dst.is_null() {
+            return false;
+        }
+
+        let dir = &mut *ptr;
+
+        let src = CStr::from_ptr(src).to_string_lossy().to_string();
+        let dst = CStr::from_ptr(dst).to_string_lossy().to_string();
+
+        dir.move_item_to(&src, &dst).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -783,5 +1001,31 @@ pub mod ffi {
             return;
         }
         drop(Box::from_raw(dir))
+    }
+
+    // crate::ffi::create_ffiarray_functions!(Item);
+    #[no_mangle]
+    pub extern "C" fn ffiarray_item_get(
+        ptr: *const crate::ffi::FFIArray<Item>,
+        index: usize,
+    ) -> *const Item {
+        unsafe {
+            if ptr.is_null() {
+                return std::ptr::null();
+            }
+            let array = &*(ptr);
+            match array.get(index).cloned() {
+                Some(data) => Box::into_raw(Box::new(data)) as *const Item,
+                None => std::ptr::null(),
+            }
+        }
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn ffiarray_item_length(ptr: *const crate::ffi::FFIArray<Item>) -> usize {
+        if ptr.is_null() {
+            return 0;
+        }
+        let array = &*(ptr);
+        array.length()
     }
 }
