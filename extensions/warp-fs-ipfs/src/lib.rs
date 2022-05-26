@@ -569,7 +569,7 @@ mod test {
 
 pub mod ffi {
     use crate::IpfsFileSystem;
-    use std::ffi::{c_void, CStr};
+    use std::ffi::{CStr};
     use std::os::raw::c_char;
     use warp::constellation::ConstellationAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
@@ -577,26 +577,26 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn constellation_fs_ipfs_new(pd: *mut c_void) -> *mut c_void {
+    pub unsafe extern "C" fn constellation_fs_ipfs_new(pd: *mut PocketDimensionAdapter) -> *mut ConstellationAdapter {
         let mut ipfs = IpfsFileSystem::new();
 
-        if pd.is_null() {
-            let pd = &*(pd as *mut PocketDimensionAdapter);
+        if !pd.is_null() {
+            let pd = &*(pd);
             ipfs.set_cache(pd.inner().clone());
         }
 
         let obj = Box::new(ConstellationAdapter::new(Arc::new(Mutex::new(Box::new(
             ipfs,
         )))));
-        Box::into_raw(obj) as *mut ConstellationAdapter as *mut c_void
+        Box::into_raw(obj) as *mut ConstellationAdapter
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_fs_ipfs_new_with_uri(
+        pd: *mut PocketDimensionAdapter,
         uri: *const c_char,
-        pd: *mut c_void,
-    ) -> *mut c_void {
+    ) -> *mut ConstellationAdapter {
         if uri.is_null() {
             return std::ptr::null_mut();
         }
@@ -608,7 +608,7 @@ pub mod ffi {
             Err(_) => return std::ptr::null_mut(),
         };
 
-        if pd.is_null() {
+        if !pd.is_null() {
             let pd = &*(pd as *mut PocketDimensionAdapter);
             ipfs.set_cache(pd.inner().clone());
         }
@@ -616,6 +616,6 @@ pub mod ffi {
         let obj = Box::new(ConstellationAdapter::new(Arc::new(Mutex::new(Box::new(
             ipfs,
         )))));
-        Box::into_raw(obj) as *mut ConstellationAdapter as *mut c_void
+        Box::into_raw(obj) as *mut ConstellationAdapter
     }
 }
