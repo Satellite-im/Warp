@@ -2,6 +2,7 @@
 use wasm_bindgen::prelude::*;
 
 use super::Result;
+use crate::error::Error;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
 
@@ -48,6 +49,14 @@ pub struct QueryBuilder {
     r#where: Vec<(String, Value)>,
     comparator: Vec<ComparatorFilter>,
     limit: Option<usize>,
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+impl QueryBuilder {
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn import(data: &str) -> Result<QueryBuilder> {
+        serde_json::from_str(data).map_err(Error::SerdeJsonError)
+    }
 }
 
 impl QueryBuilder {
