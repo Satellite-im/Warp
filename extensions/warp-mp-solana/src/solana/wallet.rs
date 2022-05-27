@@ -188,3 +188,122 @@ impl SolanaWallet {
         Ok(phrase.phrase().to_string())
     }
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ffi {
+    use crate::{PhraseType, SolanaWallet};
+    use std::ffi::{CStr, CString};
+    use std::os::raw::c_char;
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn solana_wallet_new(
+        phrase: PhraseType,
+        password: *const c_char,
+    ) -> *mut SolanaWallet {
+        let password = match password.is_null() {
+            true => None,
+            false => {
+                let passphrase = CStr::from_ptr(password).to_string_lossy().to_string();
+                Some(passphrase)
+            }
+        };
+
+        let wallet = match SolanaWallet::create_random(phrase, password.as_deref()) {
+            Ok(wallet) => wallet,
+            Err(_) => return std::ptr::null_mut(),
+        };
+
+        Box::into_raw(Box::new(wallet)) as *mut _
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn solana_wallet_restore_from_mnemonic(
+        mnemonic: *const c_char,
+        passphrase: *const c_char,
+    ) -> *mut SolanaWallet {
+        if mnemonic.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let passphrase = match passphrase.is_null() {
+            true => None,
+            false => {
+                let passphrase = CStr::from_ptr(passphrase).to_string_lossy().to_string();
+                Some(passphrase)
+            }
+        };
+
+        let mnemonic = CStr::from_ptr(mnemonic).to_string_lossy().to_string();
+
+        let wallet = match SolanaWallet::restore_from_mnemonic(passphrase.as_deref(), &mnemonic) {
+            Ok(wallet) => wallet,
+            Err(_) => return std::ptr::null_mut(),
+        };
+
+        Box::into_raw(Box::new(wallet)) as *mut _
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn solana_wallet_get_keypair(wallet: *const SolanaWallet) -> *mut c_char {
+        if wallet.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let wallet = &*wallet;
+
+        let kp = match wallet.get_keypair() {
+            Ok(kp) => kp,
+            Err(_) => return std::ptr::null_mut(),
+        };
+
+        match CString::new(kp.to_base58_string()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn solana_wallet_get_pubkey(wallet: *const SolanaWallet) -> *mut c_char {
+        if wallet.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let wallet = &*wallet;
+
+        let pubkey = match wallet.get_pubkey() {
+            Ok(kp) => kp,
+            Err(_) => return std::ptr::null_mut(),
+        };
+
+        match CString::new(pubkey.to_string()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn solana_wallet_get_mnemonic_phrase(
+        wallet: *const SolanaWallet,
+    ) -> *mut c_char {
+        if wallet.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let wallet = &*wallet;
+
+        let phrase = match wallet.get_mnemonic_phrase() {
+            Ok(kp) => kp,
+            Err(_) => return std::ptr::null_mut(),
+        };
+
+        match CString::new(phrase) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+}
