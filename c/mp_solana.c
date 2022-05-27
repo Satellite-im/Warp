@@ -2,12 +2,16 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../extensions/warp-mp-solana/warp-mp-solana.h"
 #include "../warp/warp.h"
+#include "../extensions/warp-mp-solana/warp-mp-solana.h"
 
 
-MultiPassAdapter *new_account() {
-    struct Tesseract *tesseract = tesseract_new();
+MultiPassAdapter *new_account(const char* file) {
+    struct Tesseract *tesseract;
+    
+    if (!(tesseract = tesseract_from_file(file))) {
+        tesseract = tesseract_new();
+    }
 
     if (!tesseract) {
         return NULL;
@@ -17,7 +21,19 @@ MultiPassAdapter *new_account() {
         return NULL;
     }
 
-    void *mp = multipass_mp_solana_new_with_devnet(NULL, tesseract);
+    if (!tesseract_set_file(tesseract, file)) {
+        printf("Unable to set file for tesseract with \"%s\". Skipped...\n", file);
+    }
+
+    if (!tesseract_set_autosave(tesseract)) {
+        printf("Unable to enable autosave for tesseract. Skipped...\n");
+    }
+
+    if (!tesseract_autosave_enabled(tesseract)) {
+        printf("Autosave is disabled\n");
+    }
+
+    struct MultiPassAdapter *mp = multipass_mp_solana_new_with_devnet(NULL, tesseract);
 
     if (!mp) {
         return NULL;
@@ -26,7 +42,9 @@ MultiPassAdapter *new_account() {
     tesseract_free(tesseract);
 
     if(!multipass_create_identity(mp, NULL, NULL)) {
-        return NULL;
+        if (!multipass_get_own_identity(mp)) {
+            return NULL;
+        }
     }
 
     return (MultiPassAdapter *)mp;
@@ -57,14 +75,14 @@ bool print_identity(struct Identity *id) {
 
 int main() {
     
-    MultiPassAdapter *account_a = new_account();
+    MultiPassAdapter *account_a = new_account("account_a");
 
     if(!account_a) {
         printf("Account A is NULL\n");
         return -1;
     }
 
-    MultiPassAdapter *account_b = new_account();
+    MultiPassAdapter *account_b = new_account("account_b");
     if(!account_b) {
         printf("Account B is NULL\n");
         return -1;
@@ -81,53 +99,16 @@ int main() {
     const struct PublicKey *acct_a_key = multipass_identity_public_key(ident_a);
     const struct PublicKey *acct_b_key = multipass_identity_public_key(ident_b);
 
-    if(!multipass_send_request(account_a, acct_b_key)) {
-        printf("Unable to send friend request\n");
-        goto drop;
-    }
+    if(!multipass_has_friend(account_a, acct_b_key)) {
+        if(!multipass_send_request(account_a, acct_b_key)) {
+            printf("Unable to send friend request\n");
+            goto drop;
+        }
 
-    // List account_b request and check to see if account_a sent a request
-    // const struct FriendRequest *requests[] = {multipass_list_incoming_request(account_b)};
-
-    // int request_len = sizeof(requests) / sizeof(requests[0]);
-
-    // if (request_len == 0) {
-    //     printf("No incoming friend request\n");
-    //     goto drop;
-    // }
-
-    // bool match = false;
-
-    // for(int i = 0; i<request_len; i++) {
-    //     const struct FriendRequest *request = requests[i];
-    //     struct PublicKey*from_key = multipass_friend_request_from((struct FriendRequest *)request);
-
-    //     if (!from_key) {
-    //         printf("Public key is null at index[%d]\n", i);
-    //         free((void *)request);
-    //         continue;
-    //     }
-
-    //     if(from_key == acct_a_key) {
-    //         printf("Request is not from account a\n");
-    //         free((void *)from_key);
-    //         free((void *)request);
-    //         continue;
-    //     }
-
-    //     match = true;
-    //     free((void *)from_key);
-    //     free((void *)request);
-    // }
-
-    // if (!match) {
-    //     printf("Keys do not match\n");
-    //     goto drop;
-    // }
-
-    if(!multipass_accept_request(account_b, acct_a_key)) {
-        printf("Unable to accept friend request\n");
-        goto drop;
+        if(!multipass_accept_request(account_b, acct_a_key)) {
+            printf("Unable to accept friend request\n");
+            goto drop;
+        }
     }
 
     const struct FFIArray_Identity *friends = multipass_list_friends(account_a);

@@ -691,7 +691,6 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
 }
 
 pub mod ffi {
-    use std::ffi::c_void;
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::sync::{Arc, Mutex};
@@ -702,9 +701,9 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_mp_solana_new_with_devnet(
-        pocketdimension: *mut c_void,
-        tesseract: *mut c_void,
-    ) -> *mut c_void {
+        pocketdimension: *mut MultiPassAdapter,
+        tesseract: *mut Tesseract,
+    ) -> *mut MultiPassAdapter {
         let mut account = SolanaAccount::with_devnet();
         let tesseract = match tesseract.is_null() {
             false => {
@@ -723,15 +722,15 @@ pub mod ffi {
         account.set_tesseract(Arc::new(Mutex::new(tesseract)));
 
         let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
-        Box::into_raw(Box::new(mp)) as *mut MultiPassAdapter as *mut c_void
+        Box::into_raw(Box::new(mp)) as *mut MultiPassAdapter
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_mp_solana_new_with_testnet(
-        pocketdimension: *mut c_void,
-        tesseract: *mut c_void,
-    ) -> *mut c_void {
+        pocketdimension: *mut MultiPassAdapter,
+        tesseract: *mut Tesseract,
+    ) -> *mut MultiPassAdapter {
         let mut account = SolanaAccount::with_testnet();
         let tesseract = match tesseract.is_null() {
             false => {
@@ -750,15 +749,15 @@ pub mod ffi {
         account.set_tesseract(Arc::new(Mutex::new(tesseract)));
 
         let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
-        Box::into_raw(Box::new(mp)) as *mut MultiPassAdapter as *mut c_void
+        Box::into_raw(Box::new(mp)) as *mut MultiPassAdapter
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_mp_solana_new_with_mainnet(
-        pocketdimension: *mut c_void,
-        tesseract: *mut c_void,
-    ) -> *mut c_void {
+        pocketdimension: *mut MultiPassAdapter,
+        tesseract: *mut Tesseract,
+    ) -> *mut MultiPassAdapter {
         let mut account = SolanaAccount::with_mainnet();
         let tesseract = match tesseract.is_null() {
             false => {
@@ -777,6 +776,6 @@ pub mod ffi {
         account.set_tesseract(Arc::new(Mutex::new(tesseract)));
 
         let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
-        Box::into_raw(Box::new(mp)) as *mut MultiPassAdapter as *mut c_void
+        Box::into_raw(Box::new(mp)) as *mut MultiPassAdapter
     }
 }
