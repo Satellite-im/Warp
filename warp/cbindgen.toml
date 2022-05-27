@@ -1,0 +1,7 @@
+language = "C"
+
+[parse]
+parse_deps = false
+
+[parse.expand]
+crates = ["warp", "warp-derive"]
