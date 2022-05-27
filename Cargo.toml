@@ -3,7 +3,7 @@ members = [
   "config/warp-configuration",
   "extensions/*",
   "warp",
+  "warp/warp-derive",
   "warp-bin",
   "warp-extensions",
 ]
-exclude = ["misc/warp-tui"]

@@ -3,8 +3,9 @@ use wasm_bindgen::prelude::*;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use warp_derive::FFIArray;
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray)]
 #[wasm_bindgen]
 pub struct Role {
     /// Name of the role
@@ -27,7 +28,7 @@ impl Role {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray)]
 #[wasm_bindgen]
 pub struct Badge {
     /// TBD
@@ -86,7 +87,7 @@ impl Graphics {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray)]
 #[wasm_bindgen]
 pub struct Identity {
     /// Username of the identity
@@ -212,7 +213,7 @@ impl Identity {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray)]
 #[wasm_bindgen]
 pub struct FriendRequest {
     /// The account where the request came from
@@ -944,33 +945,5 @@ pub mod ffi {
             return;
         }
         drop(Box::from_raw(ctx))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn ffiarray_identity_get(
-        ptr: *const crate::ffi::FFIArray<Identity>,
-        index: usize,
-    ) -> *const Identity {
-        unsafe {
-            if ptr.is_null() {
-                return std::ptr::null();
-            }
-            let array = &*(ptr);
-            match array.get(index).cloned() {
-                Some(data) => Box::into_raw(Box::new(data)) as *mut Identity,
-                None => std::ptr::null(),
-            }
-        }
-    }
-
-    #[no_mangle]
-    pub unsafe extern "C" fn ffiarray_identity_length(
-        ptr: *const crate::ffi::FFIArray<Identity>,
-    ) -> usize {
-        if ptr.is_null() {
-            return 0;
-        }
-        let array = &*(ptr);
-        array.length()
     }
 }

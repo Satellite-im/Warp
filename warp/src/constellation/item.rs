@@ -9,12 +9,13 @@ use super::directory::Directory;
 use super::file::File;
 use super::Result;
 use crate::error::Error;
+use warp_derive::FFIArray;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 /// `Item` is a type that handles both `File` and `Directory`
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, FFIArray)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Item(ItemInner);
 

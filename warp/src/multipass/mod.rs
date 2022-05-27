@@ -496,36 +496,6 @@ pub mod ffi {
         }
     }
 
-    // create_ffiarray_functions!(Identity);
-
-    #[no_mangle]
-    pub extern "C" fn ffiarray_friendrequest_get(
-        ptr: *const crate::ffi::FFIArray<FriendRequest>,
-        index: usize,
-    ) -> *mut FriendRequest {
-        unsafe {
-            if ptr.is_null() {
-                return std::ptr::null_mut();
-            }
-            let array = &*(ptr);
-            match array.get(index).cloned() {
-                Some(data) => Box::into_raw(Box::new(data)) as *mut FriendRequest,
-                None => std::ptr::null_mut(),
-            }
-        }
-    }
-
-    #[no_mangle]
-    pub unsafe extern "C" fn ffiarray_friendrequest_length(
-        ptr: *const crate::ffi::FFIArray<FriendRequest>,
-    ) -> usize {
-        if ptr.is_null() {
-            return 0;
-        }
-        let array = &*(ptr);
-        array.length()
-    }
-
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_remove_friend(
