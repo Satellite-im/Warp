@@ -2,6 +2,7 @@
 pub mod ffi;
 
 use std::{collections::HashMap, fmt::Debug};
+use warp_derive::FFIFree;
 use zeroize::Zeroize;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -19,7 +20,7 @@ use wasm_bindgen::prelude::*;
 type Result<T> = std::result::Result<T, Error>;
 
 /// The key store that holds encrypted strings that can be used for later use.
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Default, Clone, PartialEq, Eq, FFIFree)]
 #[wasm_bindgen]
 pub struct Tesseract {
     internal: HashMap<String, Vec<u8>>,
@@ -396,9 +397,7 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn delete(&mut self, key: &str) -> Result<()> {
-        self.internal
-            .remove(key)
-            .ok_or_else(|| Error::ObjectNotFound)?;
+        self.internal.remove(key).ok_or(Error::ObjectNotFound)?;
         self.save()
     }
 

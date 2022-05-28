@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Seek, SeekFrom};
 use uuid::Uuid;
-use warp_derive::FFIArray;
+use warp_derive::{FFIArray, FFIFree};
 use wasm_bindgen::prelude::*;
 
 /// `FileType` describes all supported file types.
@@ -40,7 +40,7 @@ pub enum FileHookType {
 }
 
 /// `File` represents the files uploaded to the FileSystem (`Constellation`).
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, FFIArray)]
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, FFIArray, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct File {
     /// ID of the `File`

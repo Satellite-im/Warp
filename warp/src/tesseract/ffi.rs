@@ -257,12 +257,3 @@ pub unsafe extern "C" fn tesseract_lock(tesseract: *mut Tesseract) -> bool {
     tesseract.lock();
     true
 }
-
-#[allow(clippy::missing_safety_doc)]
-#[no_mangle]
-pub unsafe extern "C" fn tesseract_free(tesseract: *mut Tesseract) {
-    if tesseract.is_null() {
-        return;
-    }
-    drop(Box::from_raw(tesseract))
-}

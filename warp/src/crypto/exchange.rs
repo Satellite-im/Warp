@@ -1,13 +1,15 @@
 use crate::crypto::signature::Ed25519Keypair;
 use crate::error::Error;
+use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[derive(FFIFree)]
 pub struct X25519Secret(StaticSecret);
 
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct X25519PublicKey(PublicKey);
 

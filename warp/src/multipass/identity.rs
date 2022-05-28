@@ -3,9 +3,9 @@ use wasm_bindgen::prelude::*;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use warp_derive::FFIArray;
+use warp_derive::{FFIArray, FFIFree};
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray, FFIFree)]
 #[wasm_bindgen]
 pub struct Role {
     /// Name of the role
@@ -28,7 +28,7 @@ impl Role {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray, FFIFree)]
 #[wasm_bindgen]
 pub struct Badge {
     /// TBD
@@ -51,7 +51,7 @@ impl Badge {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIFree)]
 #[wasm_bindgen]
 pub struct Graphics {
     /// Hash to profile picture
@@ -87,7 +87,7 @@ impl Graphics {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray, FFIFree)]
 #[wasm_bindgen]
 pub struct Identity {
     /// Username of the identity
@@ -213,7 +213,7 @@ impl Identity {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray, FFIFree)]
 #[wasm_bindgen]
 pub struct FriendRequest {
     /// The account where the request came from
@@ -286,7 +286,7 @@ impl Default for FriendRequestStatus {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIArray, FFIFree)]
 #[wasm_bindgen]
 pub struct PublicKey(Vec<u8>);
 
@@ -313,7 +313,7 @@ impl PublicKey {
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, FFIFree)]
 #[wasm_bindgen]
 pub struct Identifier {
     /// Select identity based on public key
@@ -375,7 +375,7 @@ impl<S: AsRef<str>> From<S> for Identifier {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, FFIFree)]
 #[wasm_bindgen]
 pub struct IdentityUpdate {
     /// Setting Username
@@ -909,41 +909,5 @@ pub mod ffi {
             }
         }
         std::ptr::null_mut()
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_public_key_free(ctx: *mut PublicKey) {
-        if ctx.is_null() {
-            return;
-        }
-        drop(Box::from_raw(ctx))
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identifier_free(ctx: *mut Identifier) {
-        if ctx.is_null() {
-            return;
-        }
-        drop(Box::from_raw(ctx))
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_update_free(ctx: *mut IdentityUpdate) {
-        if ctx.is_null() {
-            return;
-        }
-        drop(Box::from_raw(ctx))
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_free(ctx: *mut Identity) {
-        if ctx.is_null() {
-            return;
-        }
-        drop(Box::from_raw(ctx))
     }
 }

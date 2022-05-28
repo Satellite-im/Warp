@@ -3,6 +3,7 @@ use crate::multipass::identity::PublicKey;
 use crate::sync::{Arc, Mutex, MutexGuard};
 use crate::Extension;
 
+use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -319,6 +320,7 @@ pub trait RayGun: Extension + Sync + Send {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[derive(FFIFree)]
 pub struct RayGunAdapter {
     object: Arc<Mutex<Box<dyn RayGun>>>,
 }

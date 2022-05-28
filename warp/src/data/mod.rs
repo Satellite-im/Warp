@@ -15,14 +15,14 @@ type Result<T> = std::result::Result<T, Error>;
 #[allow(unused_imports)]
 use crate::module::Module;
 
-use warp_derive::FFIArray;
+use warp_derive::{FFIArray, FFIFree};
 use wasm_bindgen::prelude::*;
 
 pub type DataObject = Data;
 
 /// Standard DataObject used throughout warp.
 /// Unifies output from all modules
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIArray)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIArray, FFIFree)]
 #[wasm_bindgen]
 pub struct Data {
     /// ID of the Data Object
@@ -236,7 +236,6 @@ impl Data {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::data::{Data, DataType};
-    // use crate::ffi::create_ffiarray_functions;
     use std::ffi::{CStr, CString};
     use std::os::raw::c_char;
 

@@ -8,6 +8,7 @@ use query::QueryBuilder;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
 use std::path::PathBuf;
+use warp_derive::FFIFree;
 
 use serde::{Deserialize, Serialize};
 
@@ -144,6 +145,7 @@ pub trait PocketDimension: Extension + Send + Sync {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[derive(FFIFree)]
 pub struct PocketDimensionAdapter {
     object: Arc<Mutex<Box<dyn PocketDimension>>>,
 }

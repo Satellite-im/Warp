@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use warp_derive::FFIArray;
+use warp_derive::{FFIArray, FFIFree};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -39,7 +39,7 @@ pub enum DirectoryHookType {
 }
 
 /// `Directory` handles folders and its contents.
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, FFIArray)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, FFIArray, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Directory {
     /// ID of the `Directory`
@@ -993,14 +993,5 @@ pub mod ffi {
         let dir: &Directory = &*dir;
 
         dir.modified().timestamp()
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn directory_free(dir: *mut Directory) {
-        if dir.is_null() {
-            return;
-        }
-        drop(Box::from_raw(dir))
     }
 }
