@@ -59,7 +59,7 @@ mod tests {
         Ok(())
     }
 
-    //TODO: Add a skip when there is an error
+    //TODO: Add a skip when there is an error due to network or retry test
 
     // #[test]
     // fn use_mp_with_new_wallet() -> anyhow::Result<()> {

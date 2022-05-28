@@ -11,7 +11,7 @@ use crate::solana::manager::SolanaManager;
 use crate::solana::wallet::SolanaWallet;
 use anchor_client::anchor_lang::prelude::ProgramError;
 use anchor_client::solana_sdk::pubkey::Pubkey;
-use anyhow::anyhow;
+use anyhow::{anyhow, ensure};
 use std::rc::Rc;
 use std::str::FromStr;
 
@@ -67,6 +67,17 @@ impl UserHelper {
     }
 
     pub fn create(&mut self, name: &str, photo_hash: &str, status: &str) -> anyhow::Result<()> {
+        let name_length = name.chars().count();
+        let photo_hash_length = photo_hash.len();
+        let status_length = status.chars().count();
+
+        ensure!(
+            name_length > 3 || name_length <= 32,
+            UserError::IncorrectField
+        );
+        ensure!(photo_hash_length <= 64, UserError::IncorrectField);
+        ensure!(status_length <= 128, UserError::IncorrectField);
+
         let payer = self.program.payer();
 
         let user = self.program_key(payer)?;
@@ -111,6 +122,12 @@ impl UserHelper {
     }
 
     pub fn set_name(&mut self, name: &str) -> anyhow::Result<()> {
+        let name_length = name.chars().count();
+        ensure!(
+            name_length > 3 || name_length <= 32,
+            UserError::IncorrectField
+        );
+
         let payer = self.program.payer();
 
         let user = self.program_key(payer)?;
@@ -137,6 +154,9 @@ impl UserHelper {
     }
 
     pub fn set_photo(&mut self, hash: &str) -> anyhow::Result<()> {
+        let hash_length = hash.len();
+        ensure!(hash_length == 64, UserError::IncorrectField);
+
         let payer = self.program.payer();
 
         let user = self.program_key(payer)?;
@@ -163,6 +183,12 @@ impl UserHelper {
     }
 
     pub fn set_status(&mut self, status: &str) -> anyhow::Result<()> {
+        let status_length = status.chars().count();
+        ensure!(
+            status_length > 3 || status_length <= 128,
+            UserError::IncorrectField
+        );
+
         let payer = self.program.payer();
 
         let user = self.program_key(payer)?;
@@ -189,6 +215,9 @@ impl UserHelper {
     }
 
     pub fn set_banner_image(&mut self, hash: &str) -> anyhow::Result<()> {
+        let hash_length = hash.len();
+        ensure!(hash_length == 64, UserError::IncorrectField);
+
         let payer = self.program.payer();
 
         let user = self.program_key(payer)?;
@@ -215,6 +244,9 @@ impl UserHelper {
     }
 
     pub fn set_extra_one(&mut self, data: &str) -> anyhow::Result<()> {
+        let extra_length = data.chars().count();
+        ensure!(extra_length <= 64, UserError::IncorrectField);
+
         let payer = self.program.payer();
 
         let user = self.program_key(payer)?;
@@ -241,6 +273,9 @@ impl UserHelper {
     }
 
     pub fn set_extra_two(&mut self, data: &str) -> anyhow::Result<()> {
+        let extra_length = data.chars().count();
+        ensure!(extra_length <= 64, UserError::IncorrectField);
+
         let payer = self.program.payer();
 
         let user = self.program_key(payer)?;
@@ -267,6 +302,12 @@ impl UserHelper {
     }
 
     pub fn get_user_by_name(&self, name: &str) -> anyhow::Result<User> {
+        let name_length = name.chars().count();
+        ensure!(
+            name_length > 3 || name_length <= 32,
+            UserError::IncorrectField
+        );
+
         let name = bs58::encode(name).into_string();
 
         let filter = RpcFilterType::Memcmp(Memcmp {
