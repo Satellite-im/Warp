@@ -6,24 +6,43 @@
 
 #[cfg(feature = "build-header")]
 fn main() {
-    //install nightly
+    let install_cbindgen_results = if cfg!(feature = "force-install") {
+        //install nightly
 
-    let install_nightly_results = std::process::Command::new("rustup")
-        .args(["install", "nightly"])
-        .stdout(std::process::Stdio::inherit())
-        .output()
-        .unwrap();
+        println!("cargo:warning=Running `rustup install nightly`");
+        let install_nightly_results = std::process::Command::new("rustup")
+            .args(["install", "nightly"])
+            .stdout(std::process::Stdio::inherit())
+            .output()
+            .unwrap();
 
-    println!("cargo:warning={:?}", install_nightly_results);
+        println!(
+            "cargo:warning=Status Success:{}",
+            install_nightly_results.status.success()
+        );
 
-    let install_cbindgen_results = std::process::Command::new("cargo")
-        .args(["install", "cbindgen", "--force"])
-        .stdout(std::process::Stdio::inherit())
-        .output()
-        .unwrap();
+        println!("cargo:warning=Running `cargo install cbindgen`");
 
-    println!("cargo:warning={:?}", install_cbindgen_results);
+        std::process::Command::new("cargo")
+            .args(["install", "cbindgen"])
+            .arg("--force")
+            .stdout(std::process::Stdio::inherit())
+            .output()
+            .unwrap()
+    } else {
+        println!("cargo:warning=Running `cargo install cbindgen`");
+        std::process::Command::new("cargo")
+            .args(["install", "cbindgen"])
+            .stdout(std::process::Stdio::inherit())
+            .output()
+            .unwrap()
+    };
+    println!(
+        "cargo:warning=Status Success:{}",
+        install_cbindgen_results.status.success()
+    );
 
+    println!("cargo:warning=Running `rustup run nightly -- cbindgen -c cbindgen.toml -o warp.h`");
     let run_cbindgen_results = std::process::Command::new("rustup")
         .args([
             "run",
@@ -39,18 +58,10 @@ fn main() {
         .output()
         .unwrap();
 
-    println!("cargo:warning={:?}", run_cbindgen_results.status);
-    // let crate_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR does not exist");
-    // let lang = Language::from_str(&env::var("CBINDGEN_LANG").unwrap_or_else(|_| String::from("C")))
-    //     .unwrap_or(Language::C);
-    //
-    // cbindgen::Builder::new()
-    //     .with_crate(crate_dir)
-    //     .with_language(lang)
-    //     .with_include_guard("_WARP_H_")
-    //     .generate()
-    //     .expect("Unable to generate bindings")
-    //     .write_to_file("warp.h");
+    println!(
+        "cargo:warning=Status Success:{}",
+        run_cbindgen_results.status.success()
+    );
 }
 
 #[cfg(not(feature = "build-header"))]
