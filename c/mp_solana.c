@@ -130,9 +130,9 @@ int main() {
     }
 
     drop:
-    multipass_identity_free(ident_a);
-    multipass_identity_free(ident_b);
-    multipass_free(account_a);
-    multipass_free(account_b);
+    identity_free(ident_a);
+    identity_free(ident_b);
+    multipassadapter_free(account_a);
+    multipassadapter_free(account_b);
     return 0;
 }

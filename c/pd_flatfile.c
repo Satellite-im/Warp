@@ -18,8 +18,8 @@ int main() {
     DataType data_t = FileSystem; 
 
     //Based on `DimensionData::from_buffer` but in json format
-    struct Data *data_set1 = data_new(data_t, "{\"name\":\"data_1\",\"buffer\":[100,97,116,97]}");
-    struct Data *data_set2 = data_new(data_t, "{\"name\":\"data_2\",\"buffer\":[100,97,116,97]}");
+    struct Data *data_set1 = data_new(data_t, "{\"name\":\"data_1\",\"internal\":[100,97,116,97]}");
+    struct Data *data_set2 = data_new(data_t, "{\"name\":\"data_2\",\"internal\":[100,97,116,97]}");
 
     if (!pocket_dimension_add_data(pd, data_t, data_set1)) {
         printf("Unable to add object to pd\n");
@@ -65,6 +65,8 @@ int main() {
     }
 
 
+    ffiarray_data_free(internal);
+    querybuilder_free(query);
     return 0;
 }
 

@@ -115,7 +115,7 @@ int main() {
     }
     
     free(return_data);
-    constellation_free(fs_storj);
+    constellationadapter_free(fs_storj);
     pocket_dimension_free(pd);
     return 0;
 }
