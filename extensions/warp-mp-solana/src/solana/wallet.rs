@@ -306,4 +306,13 @@ pub mod ffi {
             Err(_) => std::ptr::null_mut(),
         }
     }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn solana_wallet_free(wallet: *mut SolanaWallet) {
+        if wallet.is_null() {
+            return;
+        }
+        drop(Box::from_raw(wallet))
+    }
 }
