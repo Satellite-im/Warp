@@ -62,7 +62,7 @@ pub fn aes256gcm_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     };
 
     let key = Key::from_slice(&e_key);
-    let nonce = Nonce::from_slice(&nonce);
+    let nonce = Nonce::from_slice(nonce);
 
     let cipher = Aes256Gcm::new(key);
     cipher
@@ -73,7 +73,7 @@ pub fn aes256gcm_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn aes256gcm_self_decrypt(data: &[u8]) -> Result<Vec<u8>> {
     let (key, payload) = extract_data_slice(data, 34);
-    aes256gcm_decrypt(&key, &payload)
+    aes256gcm_decrypt(key, payload)
 }
 
 #[cfg(not(target_arch = "wasm32"))]

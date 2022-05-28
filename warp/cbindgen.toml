@@ -2,6 +2,7 @@ language = "C"
 
 [parse]
 parse_deps = false
+clean = false
 
 [parse.expand]
-crates = ["warp", "warp-derive"]
+crates = ["warp"]

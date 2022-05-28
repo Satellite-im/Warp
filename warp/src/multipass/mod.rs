@@ -1,4 +1,5 @@
 use crate::sync::{Arc, Mutex, MutexGuard};
+use warp_derive::FFIFree;
 #[allow(unused_imports)]
 use wasm_bindgen::prelude::*;
 
@@ -8,11 +9,7 @@ pub mod identity;
 use crate::Extension;
 use identity::Identity;
 
-#[cfg(not(target_arch = "wasm32"))]
 type Result<T> = std::result::Result<T, crate::error::Error>;
-
-#[cfg(target_arch = "wasm32")]
-type Result<T> = std::result::Result<T, wasm_bindgen::JsError>;
 
 use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate, PublicKey};
 
@@ -37,11 +34,11 @@ pub trait MultiPass: Extension + Friends + Sync + Send {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[derive(FFIFree)]
 pub struct MultiPassAdapter {
     object: Arc<Mutex<Box<dyn MultiPass>>>,
 }
 
-// #[warp_common::async_trait::async_trait]
 pub trait Friends: Sync + Send {
     /// Send friend request to corresponding public key
     fn send_request(&mut self, pubkey: PublicKey) -> Result<()>;
@@ -496,36 +493,6 @@ pub mod ffi {
         }
     }
 
-    // create_ffiarray_functions!(Identity);
-
-    #[no_mangle]
-    pub extern "C" fn ffiarray_friendrequest_get(
-        ptr: *const crate::ffi::FFIArray<FriendRequest>,
-        index: usize,
-    ) -> *mut FriendRequest {
-        unsafe {
-            if ptr.is_null() {
-                return std::ptr::null_mut();
-            }
-            let array = &*(ptr);
-            match array.get(index).cloned() {
-                Some(data) => Box::into_raw(Box::new(data)) as *mut FriendRequest,
-                None => std::ptr::null_mut(),
-            }
-        }
-    }
-
-    #[no_mangle]
-    pub unsafe extern "C" fn ffiarray_friendrequest_length(
-        ptr: *const crate::ffi::FFIArray<FriendRequest>,
-    ) -> usize {
-        if ptr.is_null() {
-            return 0;
-        }
-        let array = &*(ptr);
-        array.length()
-    }
-
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_remove_friend(
@@ -597,14 +564,5 @@ pub mod ffi {
         let mp = &*(ctx);
         let pk = &*pubkey;
         mp.inner_guard().has_friend(pk.clone()).is_ok()
-    }
-
-    //TODO: Key Exchange
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_free(ctx: *mut MultiPassAdapter) {
-        let mp: Box<MultiPassAdapter> = Box::from_raw(ctx);
-        drop(mp)
     }
 }

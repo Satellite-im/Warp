@@ -15,13 +15,14 @@ type Result<T> = std::result::Result<T, Error>;
 #[allow(unused_imports)]
 use crate::module::Module;
 
+use warp_derive::{FFIArray, FFIFree};
 use wasm_bindgen::prelude::*;
 
 pub type DataObject = Data;
 
 /// Standard DataObject used throughout warp.
 /// Unifies output from all modules
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIArray, FFIFree)]
 #[wasm_bindgen]
 pub struct Data {
     /// ID of the Data Object
@@ -235,7 +236,6 @@ impl Data {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::data::{Data, DataType};
-    // use crate::ffi::create_ffiarray_functions;
     use std::ffi::{CStr, CString};
     use std::os::raw::c_char;
 
@@ -392,33 +392,5 @@ pub mod ffi {
             Ok(cstr) => cstr.into_raw(),
             Err(_) => return std::ptr::null_mut(),
         }
-    }
-
-    // create_ffiarray_functions!(Data);
-
-    #[no_mangle]
-    pub extern "C" fn ffiarray_data_get(
-        ptr: *const crate::ffi::FFIArray<Data>,
-        index: usize,
-    ) -> *const Data {
-        unsafe {
-            if ptr.is_null() {
-                return std::ptr::null();
-            }
-            let array = &*(ptr);
-            match array.get(index).cloned() {
-                Some(data) => Box::into_raw(Box::new(data)) as *const Data,
-                None => std::ptr::null(),
-            }
-        }
-    }
-
-    #[no_mangle]
-    pub unsafe extern "C" fn ffiarray_data_length(ptr: *const crate::ffi::FFIArray<Data>) -> usize {
-        if ptr.is_null() {
-            return 0;
-        }
-        let array = &*(ptr);
-        array.length()
     }
 }

@@ -15,6 +15,7 @@ use futures::stream::BoxStream;
 use directory::Directory;
 use item::Item;
 
+use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -210,6 +211,7 @@ impl<S: AsRef<str>> From<S> for ConstellationDataType {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[derive(FFIFree)]
 pub struct ConstellationAdapter {
     object: Arc<Mutex<Box<dyn Constellation>>>,
 }
@@ -837,12 +839,5 @@ pub mod ffi {
             .inner_guard()
             .import(ConstellationDataType::Json, data)
             .is_ok()
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn constellation_free(ctx: *mut ConstellationAdapter) {
-        let constellation = Box::from_raw(ctx);
-        drop(constellation)
     }
 }

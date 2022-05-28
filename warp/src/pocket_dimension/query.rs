@@ -5,6 +5,7 @@ use super::Result;
 use crate::error::Error;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
+use warp_derive::FFIFree;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[repr(C)]
@@ -43,7 +44,7 @@ impl From<(Comparator, String, Value)> for ComparatorFilter {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct QueryBuilder {
     r#where: Vec<(String, Value)>,
@@ -192,14 +193,5 @@ pub mod ffi {
         let query = &mut *ctx;
 
         query.limit(limit);
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn querybuilder_free(ctx: *mut QueryBuilder) {
-        if ctx.is_null() {
-            return;
-        }
-        drop(Box::from_raw(ctx))
     }
 }

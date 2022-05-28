@@ -61,7 +61,7 @@ regex = "1.5"
 derive_more = "0.99"
 paste = "1.0"
 libc = "0.2"
-
+warp-derive = { path = "./warp-derive" }
 # WASM Crates
 wasm-bindgen = { version = "0.2" }
 wasm-bindgen-futures = "0.4.30"
@@ -83,6 +83,11 @@ console_error_panic_hook = { version = "0.1.6" }
 [features]
 default = []
 wasm_debug = []
+
+# These are use for build.rs to install cbindgen and nightly toolchain to generate headers
+# Note this will change in the future once its fixed upstream
+build-header = []
+force-install = []
 
 [build-dependencies]
 cbindgen = "0.23"

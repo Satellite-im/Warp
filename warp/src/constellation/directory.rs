@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use warp_derive::{FFIArray, FFIFree};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -38,7 +39,7 @@ pub enum DirectoryHookType {
 }
 
 /// `Directory` handles folders and its contents.
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, FFIArray, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Directory {
     /// ID of the `Directory`
@@ -992,40 +993,5 @@ pub mod ffi {
         let dir: &Directory = &*dir;
 
         dir.modified().timestamp()
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn directory_free(dir: *mut Directory) {
-        if dir.is_null() {
-            return;
-        }
-        drop(Box::from_raw(dir))
-    }
-
-    // crate::ffi::create_ffiarray_functions!(Item);
-    #[no_mangle]
-    pub extern "C" fn ffiarray_item_get(
-        ptr: *const crate::ffi::FFIArray<Item>,
-        index: usize,
-    ) -> *const Item {
-        unsafe {
-            if ptr.is_null() {
-                return std::ptr::null();
-            }
-            let array = &*(ptr);
-            match array.get(index).cloned() {
-                Some(data) => Box::into_raw(Box::new(data)) as *const Item,
-                None => std::ptr::null(),
-            }
-        }
-    }
-    #[no_mangle]
-    pub unsafe extern "C" fn ffiarray_item_length(ptr: *const crate::ffi::FFIArray<Item>) -> usize {
-        if ptr.is_null() {
-            return 0;
-        }
-        let array = &*(ptr);
-        array.length()
     }
 }

@@ -37,7 +37,7 @@ int main() {
 
     printf("%s\n", export);
 
-    constellation_free(memory);
+    constellationadapter_free(memory);
 
     return 0;
 }
