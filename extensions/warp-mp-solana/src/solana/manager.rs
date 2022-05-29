@@ -50,11 +50,24 @@ impl SolanaManager {
 
     pub fn request_air_drop(&self) -> anyhow::Result<()> {
         let payer = self.wallet.get_pubkey()?.to_string();
-        let response = reqwest::blocking::Client::new()
-            .post("https://faucet.satellite.one")
-            .json(&serde_json::json!({ "address": payer }))
-            .send()?
-            .json::<ResponseStatus>()?;
+        let fut = async {
+            reqwest::Client::new()
+                .post("https://faucet.satellite.one")
+                .json(&serde_json::json!({ "address": payer }))
+                .send()
+                .await?
+                .json::<ResponseStatus>()
+                .await
+        };
+        let response = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            tokio::task::block_in_place(|| handle.block_on(fut))?
+        } else {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?
+                .handle()
+                .block_on(fut)?
+        };
 
         ensure!(
             response.status == "success",

@@ -25,7 +25,8 @@ users = { git = "https://github.com/Satellite-im/solana-programs", features = ["
 friends = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"] }
 groupchats = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"] }
 anchor-client = "0.24.2"
-reqwest = { version = "0.11", features = ["blocking", "json"] }
+tokio = { version = "1", features = ["full"]}
+reqwest = { version = "0.11", features = ["json"] }
 borsh = "0.9.3"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

@@ -309,16 +309,11 @@ async fn main() -> AnyResult<()> {
                 let account = manager.get_account()?;
 
                 //Note `spawn_blocking` is used due to reqwest using a separate runtime in its blocking feature in `warp-solana-utils`
-                match tokio::task::spawn_blocking(
-                    move || -> anyhow::Result<warp::multipass::identity::Identity> {
-                        let username = username.as_deref();
-                        let mut account = account.lock();
-                        account.create_identity(username, None)?;
-                        account.get_own_identity().map_err(|e| anyhow!(e))
-                    },
-                )
-                .await?
-                {
+
+                let username = username.as_deref();
+                let mut account = account.lock();
+                account.create_identity(username, None)?;
+                match account.get_own_identity().map_err(|e| anyhow!(e)) {
                     Ok(identity) => {
                         println!();
                         println!("Username: {}#{}", identity.username(), identity.short_id());
