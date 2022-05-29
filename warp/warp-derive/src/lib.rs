@@ -85,6 +85,37 @@ pub fn construct_ffi(_item: TokenStream) -> TokenStream {
                 self.value.len()
             }
         }
+
+        #[repr(C)]
+        pub struct FFIResult<T> {
+            pub data: *mut T,
+            pub error: *mut ::libc::c_char,
+        }
+
+        impl<T> From<Result<T, crate::error::Error>> for FFIResult<T> {
+            fn from(res: Result<T, crate::error::Error>) -> Self {
+                match res {
+                    Ok(t) => Self::ok(t),
+                    Err(err) => Self::err(err),
+                }
+            }
+        }
+
+        impl<T> FFIResult<T> {
+            pub fn ok(data: T) -> Self {
+                Self {
+                    data: Box::into_raw(Box::new(data)),
+                    error: std::ptr::null_mut(),
+                }
+            }
+
+            pub fn err(err: crate::error::Error) -> Self {
+                Self{
+                    data: std::ptr::null_mut(),
+                    error: std::ffi::CString::new(err.to_string()).unwrap().into_raw(),
+                }
+            }
+        }
     };
 
     ffi.into()
