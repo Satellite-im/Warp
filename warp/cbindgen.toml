@@ -1,5 +1,7 @@
 language = "C"
 
+cpp_compat = true
+
 [parse]
 parse_deps = false
 clean = false
