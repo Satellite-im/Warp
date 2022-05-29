@@ -81,6 +81,7 @@ pub fn construct_ffi(_item: TokenStream) -> TokenStream {
             pub fn get(&self, index: usize) -> Option<&T> {
                 self.value.get(index)
             }
+
             pub fn length(&self) -> usize {
                 self.value.len()
             }
@@ -89,7 +90,7 @@ pub fn construct_ffi(_item: TokenStream) -> TokenStream {
         #[repr(C)]
         pub struct FFIResult<T> {
             pub data: *mut T,
-            pub error: *mut ::libc::c_char,
+            pub error: *mut std::os::raw::c_char,
         }
 
         impl<T> From<Result<T, crate::error::Error>> for FFIResult<T> {
@@ -110,7 +111,7 @@ pub fn construct_ffi(_item: TokenStream) -> TokenStream {
             }
 
             pub fn err(err: crate::error::Error) -> Self {
-                Self{
+                Self {
                     data: std::ptr::null_mut(),
                     error: std::ffi::CString::new(err.to_string()).unwrap().into_raw(),
                 }
