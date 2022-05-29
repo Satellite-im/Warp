@@ -153,6 +153,25 @@ impl Tesseract {
         self.file.as_ref().map(|s| s.to_string_lossy().to_string())
     }
 
+    /// To save to file using internal file path.
+    /// Note: Because we do not want to interrupt the functions due to it failing to
+    ///       save for whatever reason, this function will return `Result::Ok`
+    ///       regardless of success or error.
+    ///
+    /// TODO: Handle error without subjecting function to `Result::Err`
+    pub fn save(&mut self) -> Result<()> {
+        if self.autosave_enabled() {
+            if let Some(path) = &self.file {
+                if let Err(_e) = self.to_file(path) {
+                    //TODO: Logging
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Tesseract {
     /// Import and encrypt a hashmap into tesseract
     ///
     /// # Example
@@ -203,23 +222,6 @@ impl Tesseract {
             map.insert(key.clone(), value);
         }
         Ok(map)
-    }
-
-    /// To save to file using internal file path.
-    /// Note: Because we do not want to interrupt the functions due to it failing to
-    ///       save for whatever reason, this function will return `Result::Ok`
-    ///       regardless of success or error.
-    ///
-    /// TODO: Handle error without subjecting function to `Result::Err`
-    pub fn save(&mut self) -> Result<()> {
-        if self.autosave_enabled() {
-            if let Some(path) = &self.file {
-                if let Err(_e) = self.to_file(path) {
-                    //TODO: Logging
-                }
-            }
-        }
-        Ok(())
     }
 }
 
