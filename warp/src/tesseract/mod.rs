@@ -481,73 +481,66 @@ impl Tesseract {
     }
 }
 
-cfg_if::cfg_if! {
-    if #[cfg(target_arch = "wasm32")] {
-            #[wasm_bindgen]
-            impl Tesseract {
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl Tesseract {
+    /// Import and encrypt a hashmap into tesseract
+    #[wasm_bindgen]
+    pub fn import(passphrase: &[u8], map: JsValue) -> Result<Tesseract> {
+        let map: HashMap<String, String> =
+            serde_wasm_bindgen::from_value(map).map_err(|_| Error::Other)?;
+        let mut tesseract = Tesseract::default();
+        tesseract.unlock(passphrase)?;
+        for (key, val) in map {
+            tesseract.set(key.as_str(), val.as_str())?;
+        }
+        Ok(tesseract)
+    }
 
-                /// Import and encrypt a hashmap into tesseract
-                #[wasm_bindgen]
-                pub fn import(passphrase: &[u8], map: JsValue) -> Result<Tesseract> {
-                    let map: HashMap<String, String> = serde_wasm_bindgen::from_value(map).map_err(|_| Error::Other)?;
-                    let mut tesseract = Tesseract::default();
-                    tesseract.unlock(passphrase)?;
-                    for (key, val) in map {
-                        tesseract.set(key.as_str(), val.as_str())?;
-                    }
-                    Ok(tesseract)
-                }
+    /// Decrypts and export tesseract contents to a `HashMap`
+    #[wasm_bindgen]
+    pub fn export(&self) -> Result<JsValue> {
+        if !self.is_unlock() {
+            return Err(Error::TesseractLocked);
+        }
+        let mut map = HashMap::new();
+        for key in self.internal.keys() {
+            let value = match self.retrieve(key) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            map.insert(key.clone(), value);
+        }
+        serde_wasm_bindgen::to_value(&map).map_err(|_| Error::Other)
+    }
 
-                /// Decrypts and export tesseract contents to a `HashMap`
-                #[wasm_bindgen]
-                pub fn export(&self) -> Result<JsValue> {
-                    if !self.is_unlock() {
-                        return Err(Error::TesseractLocked);
-                    }
-                    let mut map = HashMap::new();
-                    for key in self.internal.keys() {
-                        let value = match self.retrieve(key) {
-                            Ok(v) => v,
-                            Err(_) => continue,
-                        };
-                        map.insert(key.clone(), value);
-                    }
-                    serde_wasm_bindgen::to_value(&map).map_err(|_| Error::Other)
-                }
+    /// Used to save contents to local storage
+    pub fn save(&mut self) -> Result<()> {
+        use gloo::storage::{LocalStorage, Storage};
 
-                /// Used to save contents to local storage
-                pub fn save(&mut self) -> Result<()> {
-                    use gloo::storage::{Storage, LocalStorage};
-
-                    if self.autosave_enabled() {
-                        for (k, v) in &self.internal {
-                            LocalStorage::set(k, v).unwrap();
-                        }
-                    }
-
-                    Ok(())
-                }
-
-                /// Used to load contents from local storage
-                pub fn load_from_storage(&mut self) -> Result<()> {
-                    use gloo::storage::{Storage, LocalStorage};
-
-                    let local_storage = LocalStorage::raw();
-                    let length = LocalStorage::length();
-
-                    for index in 0..length {
-                        let key = local_storage
-                            .key(index).unwrap()
-                            .unwrap_throw();
-                        let value: Vec<u8> = LocalStorage::get(&key).unwrap();
-                        self.internal.insert(key, value);
-                    }
-
-                    Ok(())
-                }
-
+        if self.autosave_enabled() {
+            for (k, v) in &self.internal {
+                LocalStorage::set(k, v).unwrap();
             }
+        }
 
+        Ok(())
+    }
+
+    /// Used to load contents from local storage
+    pub fn load_from_storage(&mut self) -> Result<()> {
+        use gloo::storage::{LocalStorage, Storage};
+
+        let local_storage = LocalStorage::raw();
+        let length = LocalStorage::length();
+
+        for index in 0..length {
+            let key = local_storage.key(index).unwrap().unwrap_throw();
+            let value: Vec<u8> = LocalStorage::get(&key).unwrap();
+            self.internal.insert(key, value);
+        }
+
+        Ok(())
     }
 }
 
