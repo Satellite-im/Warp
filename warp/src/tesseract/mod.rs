@@ -169,9 +169,7 @@ impl Tesseract {
         }
         Ok(())
     }
-}
 
-impl Tesseract {
     /// Import and encrypt a hashmap into tesseract
     ///
     /// # Example
