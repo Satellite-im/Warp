@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use self::group::GroupChat;
+
 pub(super) type Result<T> = std::result::Result<T, crate::error::Error>;
 
 pub type Callback = Box<dyn Fn() + Sync + Send>;
@@ -270,7 +272,7 @@ pub enum EmbedState {
 }
 
 #[async_trait::async_trait]
-pub trait RayGun: Extension + Sync + Send {
+pub trait RayGun: Extension + GroupChat + Sync + Send {
     /// Retreive all messages from a conversation
     async fn get_messages(
         &self,

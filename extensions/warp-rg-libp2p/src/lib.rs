@@ -5,6 +5,7 @@ use libp2p::mdns::{Mdns, MdnsConfig, MdnsEvent};
 use libp2p::swarm::{NetworkBehaviour, NetworkBehaviourEventProcess, SwarmEvent};
 use libp2p::{identity, tokio_development_transport, Multiaddr, PeerId, Swarm};
 use libp2p::{ping, NetworkBehaviour};
+use warp::raygun::group::*;
 
 use std::str::FromStr;
 use std::time::Duration;
@@ -814,5 +815,71 @@ impl RayGun for Libp2pMessaging {
         _state: EmbedState,
     ) -> Result<()> {
         Err(Error::Unimplemented)
+    }
+}
+
+impl GroupChat for Libp2pMessaging {
+    fn join_group(&mut self, id: GroupId) -> Result<()> {
+        todo!()
+    }
+
+    fn leave_group(&mut self, id: GroupId) -> Result<()> {
+        todo!()
+    }
+
+    fn list_members(&self) -> Result<Vec<GroupMember>> {
+        todo!()
+    }
+}
+
+impl GroupChatManagement for Libp2pMessaging {
+    fn create_group(&mut self, name: &str) -> Result<Group> {
+        todo!()
+    }
+
+    fn change_group_name(&mut self, id: GroupId, name: &str) -> Result<()> {
+        todo!()
+    }
+
+    fn open_group(&mut self, id: GroupId) -> Result<()> {
+        todo!()
+    }
+
+    fn close_group(&mut self, id: GroupId) -> Result<()> {
+        todo!()
+    }
+
+    fn change_admin(&mut self, id: GroupId, member: GroupMember) -> Result<()> {
+        todo!()
+    }
+
+    fn assign_admin(&mut self, id: GroupId, member: GroupMember) -> Result<()> {
+        todo!()
+    }
+
+    fn kick_member(&mut self, id: GroupId, member: GroupMember) -> Result<()> {
+        todo!()
+    }
+
+    fn ban_member(&mut self, id: GroupId, member: GroupMember) -> Result<()> {
+        todo!()
+    }
+}
+
+impl GroupInvite for Libp2pMessaging {
+    fn send_invite(&mut self, id: GroupId, recipient: GroupMember) -> Result<()> {
+        todo!()
+    }
+
+    fn accept_invite(&mut self, id: GroupId) -> Result<()> {
+        todo!()
+    }
+
+    fn deny_invite(&mut self, id: GroupId) -> Result<()> {
+        todo!()
+    }
+
+    fn block_group(&mut self, id: GroupId) -> Result<()> {
+        todo!()
     }
 }
