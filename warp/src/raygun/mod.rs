@@ -249,18 +249,21 @@ pub struct Reaction {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
 pub enum ReactionState {
     Add,
     Remove,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
 pub enum PinState {
     Pin,
     Unpin,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
 pub enum EmbedState {
     Enabled,
     Disable,
