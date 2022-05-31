@@ -118,7 +118,7 @@ impl Directory {
             .content
             .iter()
             .position(|item| item.name() == *name.as_ref())
-            .ok_or_else(|| Error::ArrayPositionNotFound)?;
+            .ok_or(Error::ArrayPositionNotFound)?;
 
         let item = self.content.remove(index);
 
@@ -142,7 +142,7 @@ impl Directory {
             .content
             .iter()
             .position(|item| item.name() == *name)
-            .ok_or_else(|| Error::ArrayPositionNotFound)?;
+            .ok_or(Error::ArrayPositionNotFound)?;
         self.content.get(index).ok_or(Error::Other)
     }
 
@@ -198,7 +198,7 @@ impl Directory {
             .content
             .iter()
             .position(|item| item.name() == *name)
-            .ok_or_else(|| Error::ArrayPositionNotFound)?;
+            .ok_or(Error::ArrayPositionNotFound)?;
 
         self.content.get_mut(index).ok_or(Error::Other)
     }

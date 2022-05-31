@@ -232,7 +232,7 @@ pub fn xchacha20poly1305_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn xchacha20poly1305_self_decrypt(data: &[u8]) -> Result<Vec<u8>> {
     let (key, payload) = extract_data_slice(data, 34);
-    xchacha20poly1305_decrypt(&key, &payload)
+    xchacha20poly1305_decrypt(key, payload)
 }
 
 #[cfg(not(target_arch = "wasm32"))]

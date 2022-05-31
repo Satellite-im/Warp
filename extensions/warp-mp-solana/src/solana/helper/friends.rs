@@ -353,6 +353,7 @@ impl Friends {
         self.compute_account_keys_direct(self.program.payer(), to)
     }
 
+    #[allow(clippy::unnecessary_sort_by)]
     fn compute_account_keys_direct(
         &self,
         from: Pubkey,

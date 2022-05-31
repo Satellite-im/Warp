@@ -225,9 +225,7 @@ fn process_message_event(conversation: Arc<Mutex<Vec<Message>>>, events: Messagi
 
 impl NetworkBehaviourEventProcess<PingEvent> for RayGunBehavior {
     fn inject_event(&mut self, event: PingEvent) {
-        match event {
-            Event { .. } => {}
-        }
+        let Event { .. } = event;
     }
 }
 
@@ -343,7 +341,7 @@ impl Libp2pMessaging {
 
         message.response_channel = Some(outer_rx);
 
-        message.command_channel = Some(command_tx.clone());
+        message.command_channel = Some(command_tx);
 
         tokio::spawn(async move {
             loop {
@@ -430,6 +428,7 @@ impl Libp2pMessaging {
             }
         };
 
+        #[allow(clippy::field_reassign_with_default)]
         let swarm = {
             let mut mdns_config = MdnsConfig::default();
             mdns_config.enable_ipv6 = true;
@@ -478,7 +477,7 @@ impl Libp2pMessaging {
     }
 
     pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
-        let cache = self.cache.as_ref().ok_or_else(|| Error::ToBeDetermined)?;
+        let cache = self.cache.as_ref().ok_or(Error::ToBeDetermined)?;
         Ok(cache.lock())
     }
 
@@ -572,55 +571,52 @@ async fn swarm_gossipsub_events(
     event: Option<MessagingEvents>,
     tx: Sender<Result<()>>,
 ) -> anyhow::Result<()> {
-    match event {
-        Some(event) => {
-            let topic = match &event {
-                MessagingEvents::NewMessage(message) => message.conversation_id(),
-                MessagingEvents::EditMessage(id, _, _) => *id,
-                MessagingEvents::DeleteMessage(id, _) => *id,
-                MessagingEvents::PinMessage(id, _, _) => *id,
-                MessagingEvents::DeleteConversation(id) => *id,
-                MessagingEvents::ReactMessage(id, _, _) => *id,
-                MessagingEvents::Ping(id) => *id,
-            };
+    if let Some(event) = event {
+        let topic = match &event {
+            MessagingEvents::NewMessage(message) => message.conversation_id(),
+            MessagingEvents::EditMessage(id, _, _) => *id,
+            MessagingEvents::DeleteMessage(id, _) => *id,
+            MessagingEvents::PinMessage(id, _, _) => *id,
+            MessagingEvents::DeleteConversation(id) => *id,
+            MessagingEvents::ReactMessage(id, _, _) => *id,
+            MessagingEvents::Ping(id) => *id,
+        };
 
-            let topic = Topic::new(topic.to_string());
+        let topic = Topic::new(topic.to_string());
 
-            match serde_json::to_vec(&event) {
-                Ok(bytes) => {
-                    //TODO: Resolve initial connection/subscribe
-                    match swarm.behaviour_mut().sub.subscribe(&topic) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            if let Err(e) = tx.send(Err(Error::Any(anyhow!(e)))).await {
-                                println!("{}", e);
-                            }
+        match serde_json::to_vec(&event) {
+            Ok(bytes) => {
+                //TODO: Resolve initial connection/subscribe
+                match swarm.behaviour_mut().sub.subscribe(&topic) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        if let Err(e) = tx.send(Err(Error::Any(anyhow!(e)))).await {
+                            println!("{}", e);
                         }
-                    };
-
-                    match swarm.behaviour_mut().sub.publish(topic, bytes) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            if let Err(e) = tx.send(Err(Error::Any(anyhow!(e)))).await {
-                                println!("{}", e);
-                            }
-                        }
-                    };
-
-                    if let Err(e) = tx.send(Ok(())).await {
-                        //TODO: Log error
-                        println!("{}", e);
                     }
+                };
+
+                match swarm.behaviour_mut().sub.publish(topic, bytes) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        if let Err(e) = tx.send(Err(Error::Any(anyhow!(e)))).await {
+                            println!("{}", e);
+                        }
+                    }
+                };
+
+                if let Err(e) = tx.send(Ok(())).await {
+                    //TODO: Log error
+                    println!("{}", e);
                 }
-                Err(e) => {
-                    if let Err(e) = tx.send(Err(Error::from(e))).await {
-                        //TODO: Log error
-                        println!("{}", e);
-                    }
+            }
+            Err(e) => {
+                if let Err(e) = tx.send(Err(Error::from(e))).await {
+                    //TODO: Log error
+                    println!("{}", e);
                 }
             }
         }
-        _ => {}
     }
     Ok(())
 }
@@ -703,7 +699,7 @@ impl RayGun for Libp2pMessaging {
 
         if let Ok(mut cache) = self.get_cache() {
             let data = DataObject::new(DataType::Messaging, message)?;
-            if let Err(_) = cache.add_data(DataType::Messaging, &data) {
+            if cache.add_data(DataType::Messaging, &data).is_err() {
                 //TODO: Log error
             }
         }
@@ -768,7 +764,7 @@ impl RayGun for Libp2pMessaging {
 
         if let Ok(mut cache) = self.get_cache() {
             let data = DataObject::new(DataType::Messaging, message)?;
-            if let Err(_) = cache.add_data(DataType::Messaging, &data) {
+            if cache.add_data(DataType::Messaging, &data).is_err() {
                 //TODO: Log error
             }
         }
@@ -797,7 +793,7 @@ impl RayGun for Libp2pMessaging {
 
         if let Ok(mut cache) = self.get_cache() {
             let data = DataObject::new(DataType::Messaging, message)?;
-            if let Err(_) = cache.add_data(DataType::Messaging, &data) {
+            if cache.add_data(DataType::Messaging, &data).is_err() {
                 //TODO: Log error
             }
         }

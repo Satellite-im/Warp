@@ -437,10 +437,7 @@ pub mod ffi {
 
         let item = &mut *(item);
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
-        match item.rename(&name) {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        item.rename(&name).is_ok()
     }
 
     #[allow(clippy::missing_safety_doc)]

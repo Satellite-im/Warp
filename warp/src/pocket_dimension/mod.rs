@@ -87,7 +87,7 @@ impl DimensionData {
         }
     }
 
-    pub fn write_to_buffer(&self, buffer: &mut Vec<u8>) -> Result<()> {
+    pub fn write_to_buffer(&self, buffer: &mut [u8]) -> Result<()> {
         if let DimensionDataInner::BufferNoFile { internal, .. } = self.get_inner() {
             buffer.copy_from_slice(internal);
             return Ok(());

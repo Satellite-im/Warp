@@ -426,6 +426,7 @@ impl ConstellationAdapter {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
+
     use crate::constellation::directory::Directory;
     use crate::constellation::{ConstellationAdapter, ConstellationDataType};
     use crate::runtime_handle;
@@ -533,6 +534,7 @@ pub mod ffi {
         }
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_put(
@@ -560,6 +562,7 @@ pub mod ffi {
             .is_ok()
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_put_buffer(
@@ -595,6 +598,7 @@ pub mod ffi {
         .is_ok()
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_get(
@@ -623,6 +627,7 @@ pub mod ffi {
             .is_ok()
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_get_buffer(
@@ -660,6 +665,7 @@ pub mod ffi {
         ptr as *mut _
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_remove(
@@ -682,6 +688,7 @@ pub mod ffi {
             .is_ok()
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_create_directory(
@@ -709,6 +716,7 @@ pub mod ffi {
         .is_ok()
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_move_item(
@@ -736,6 +744,7 @@ pub mod ffi {
             .is_ok()
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_sync_ref(

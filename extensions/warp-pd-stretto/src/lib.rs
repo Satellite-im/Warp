@@ -9,7 +9,7 @@ use warp::{
 use stretto::Cache;
 
 use error::Error;
-use serde_json;
+
 use warp::pocket_dimension::query::{ComparatorFilter, QueryBuilder};
 use warp::pocket_dimension::PocketDimension;
 

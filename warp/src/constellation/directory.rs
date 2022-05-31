@@ -882,7 +882,7 @@ pub mod ffi {
         let item = CStr::from_ptr(item).to_string_lossy().to_string();
 
         match dir.remove_item_from_path(&directory, &item) {
-            Ok(item) => Box::into_raw(Box::new(item.clone())) as *mut _,
+            Ok(item) => Box::into_raw(Box::new(item)) as *mut _,
             Err(_) => std::ptr::null_mut(),
         }
     }

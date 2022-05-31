@@ -61,7 +61,7 @@ where
             "filesystem" => Module::FileSystem,
             "accounts" => Module::Accounts,
             "cache" => Module::Cache,
-            "unknown" | _ => Module::Unknown,
+            _ => Module::Unknown,
         }
     }
 }

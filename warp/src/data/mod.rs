@@ -390,7 +390,7 @@ pub mod ffi {
 
         match CString::new(payload_str) {
             Ok(cstr) => cstr.into_raw(),
-            Err(_) => return std::ptr::null_mut(),
+            Err(_) => std::ptr::null_mut(),
         }
     }
 }

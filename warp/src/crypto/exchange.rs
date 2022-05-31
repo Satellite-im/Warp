@@ -29,11 +29,18 @@ impl X25519PublicKey {
     }
 }
 
+impl Default for X25519Secret {
+    fn default() -> Self {
+        X25519Secret::new()
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl X25519Secret {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new() -> X25519Secret {
         let mut key = [0u8; 32];
+        //Note: This is being unwrapped only to assume that it will not error out
         getrandom::getrandom(&mut key).unwrap();
         X25519Secret::from_bytes(&key)
     }

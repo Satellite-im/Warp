@@ -74,7 +74,7 @@ fn main() {
     which will attempt to run and install the commands mentioned aboved but with no guarantee of success.
 
     This may change in the future to where this is not needed.
-    "#.split("\n").collect::<Vec<_>>();
+    "#.split('\n').collect::<Vec<_>>();
 
     for line in lines {
         println!("cargo:warning={}", line);

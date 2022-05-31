@@ -89,9 +89,9 @@ pub enum Error {
     Other,
 }
 
-impl Into<JsValue> for Error {
-    fn into(self) -> JsValue {
-        JsValue::from_str(&self.to_string())
+impl From<Error> for JsValue {
+    fn from(error: Error) -> JsValue {
+        JsValue::from_str(&error.to_string())
     }
 }
 

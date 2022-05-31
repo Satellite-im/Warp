@@ -450,7 +450,7 @@ impl Tesseract {
         self.enc_pass = crate::crypto::cipher::aes256gcm_self_encrypt(passphrase)?;
         self.unlock = true;
         if self.is_key_check_enabled() {
-            for (key, _) in &self.internal {
+            for key in self.internal.keys() {
                 if let Err(e) = self.retrieve(key) {
                     self.lock();
                     return Err(e);

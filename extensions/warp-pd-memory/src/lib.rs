@@ -5,7 +5,6 @@ use warp::{
     Extension,
 };
 
-use serde_json;
 use warp::error::Error;
 use warp::pocket_dimension::query::{ComparatorFilter, QueryBuilder};
 use warp::pocket_dimension::PocketDimension;
@@ -15,7 +14,7 @@ use wasm_bindgen::prelude::*;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MemoryClient {
     client: HashMap<DataType, Vec<DataObject>>,
 }
@@ -116,7 +115,7 @@ fn get_payload_as_value(data: &DataObject) -> Result<serde_json::Value> {
 pub(crate) fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<DataObject>> {
     let mut list = Vec::new();
     for data in data.iter() {
-        let object = get_payload_as_value(&data)?;
+        let object = get_payload_as_value(data)?;
 
         if !object.is_object() {
             continue;
