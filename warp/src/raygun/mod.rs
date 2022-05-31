@@ -1,3 +1,5 @@
+pub mod group;
+
 use crate::error::Error;
 use crate::multipass::identity::PublicKey;
 use crate::sync::{Arc, Mutex, MutexGuard};
@@ -15,6 +17,16 @@ use uuid::Uuid;
 pub(super) type Result<T> = std::result::Result<T, crate::error::Error>;
 
 pub type Callback = Box<dyn Fn() + Sync + Send>;
+
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum Uid {
+    /// UUID Identifier
+    Id(Uuid),
+
+    /// Public Key Identifier
+    PublicKey(PublicKey),
+}
 
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct MessageOptions {
@@ -83,38 +95,28 @@ pub struct Message {
 
 /// Use to identify the sender
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
-pub struct SenderId(MessageSender);
-
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum MessageSender {
-    /// UUID of the Sender
-    Id(Uuid),
-
-    /// Public Key of the Sender
-    PublicKey(PublicKey),
-}
+pub struct SenderId(Uid);
 
 impl SenderId {
     pub fn from_id(id: Uuid) -> SenderId {
-        SenderId(MessageSender::Id(id))
+        SenderId(Uid::Id(id))
     }
 
     pub fn from_public_key(pubkey: PublicKey) -> SenderId {
-        SenderId(MessageSender::PublicKey(pubkey))
+        SenderId(Uid::PublicKey(pubkey))
     }
 
     pub fn get_id(&self) -> Option<Uuid> {
         match &self.0 {
-            MessageSender::Id(id) => Some(*id),
-            MessageSender::PublicKey(_) => None,
+            Uid::Id(id) => Some(*id),
+            Uid::PublicKey(_) => None,
         }
     }
 
     pub fn get_public_key(&self) -> Option<PublicKey> {
         match &self.0 {
-            MessageSender::Id(_) => None,
-            MessageSender::PublicKey(k) => Some(k.clone()),
+            Uid::Id(_) => None,
+            Uid::PublicKey(k) => Some(k.clone()),
         }
     }
 }
