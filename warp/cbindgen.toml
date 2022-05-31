@@ -1,4 +1,7 @@
 language = "C"
+autogen_warning = "// NOTE: Append the lines below to ios/Classes/WarpPlugin.h"
+#namespace = "ffi"
+#include_guard = "CBINDGEN_BINDINGS_H"
 
 cpp_compat = true
 
@@ -8,3 +11,7 @@ clean = false
 
 [parse.expand]
 crates = ["warp"]
+
+[defines]
+"target_os = ios" = "TARGET_OS_IOS"
+"target_os = macos" = "TARGET_OS_MACOS"
