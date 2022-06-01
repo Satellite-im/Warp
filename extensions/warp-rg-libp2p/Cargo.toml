@@ -24,6 +24,12 @@ serde_json = { version = "1.0" }
 bs58 = "0.4"
 cfg-if = "1.0"
 
+hex = "0.4"
+
+groupchats = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"], optional = true }
+anchor-client = { version = "0.24.2", optional = true }
+borsh = { version = "0.9.3", optional = true }
+
 [dev-dependencies]
 warp-pd-stretto = { path = "../warp-pd-stretto" }
 warp-mp-solana = { path = "../warp-mp-solana" }
@@ -37,4 +43,4 @@ cbindgen = "0.23"
 default = ["gossipsub"]
 gossipsub = []
 floodsub = []
-solana = []
+solana = ["groupchats", "anchor-client", "borsh"]

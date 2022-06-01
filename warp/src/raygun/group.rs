@@ -10,10 +10,24 @@ pub enum GroupStatus {
     Closed,
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+impl Default for GroupStatus {
+    fn default() -> Self {
+        Self::Closed
+    }
+}
+
+#[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub struct GroupId(Uid);
 
 impl GroupId {
+    pub fn new_uuid() -> GroupId {
+        Self(Uid::new_uuid())
+    }
+
+    pub fn new_public_key() -> GroupId {
+        Self(Uid::new_public_key())
+    }
+
     pub fn from_id(id: Uuid) -> GroupId {
         Self(Uid::Id(id))
     }
@@ -37,10 +51,18 @@ impl GroupId {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub struct GroupMember(Uid);
 
 impl GroupMember {
+    pub fn new_uuid() -> GroupMember {
+        Self(Uid::new_uuid())
+    }
+
+    pub fn new_public_key() -> GroupMember {
+        Self(Uid::new_public_key())
+    }
+
     pub fn from_id(id: Uuid) -> GroupMember {
         Self(Uid::Id(id))
     }
@@ -64,7 +86,7 @@ impl GroupMember {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub struct Group {
     id: GroupId,
     name: String,
@@ -97,6 +119,32 @@ impl Group {
 
     pub fn status(&self) -> GroupStatus {
         self.status
+    }
+}
+
+impl Group {
+    pub fn set_id(&mut self, id: GroupId) {
+        self.id = id;
+    }
+
+    pub fn set_name(&mut self, name: &str) {
+        self.name = name.to_string();
+    }
+
+    pub fn set_creator(&mut self, creator: GroupMember) {
+        self.creator = creator;
+    }
+
+    pub fn set_admin(&mut self, admin: GroupMember) {
+        self.admin = admin;
+    }
+
+    pub fn set_members(&mut self, members: u32) {
+        self.members = members;
+    }
+
+    pub fn set_status(&mut self, status: GroupStatus) {
+        self.status = status;
     }
 }
 

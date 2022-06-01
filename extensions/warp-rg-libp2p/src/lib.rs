@@ -1,3 +1,12 @@
+#[cfg(not(any(feature = "gossipsub", feature = "floodsub")))]
+compile_error!("Requires \"gossipsub\" or \"floodsub\" feature not being selected");
+
+#[cfg(all(feature = "gossipsub", feature = "floodsub"))]
+compile_error!("\"gossipsub\" and \"floodsub\" feature cannot be used at the same time");
+
+#[cfg(feature = "solana")]
+pub mod solana;
+
 use anyhow::anyhow;
 #[cfg(feature = "floodsub")]
 use libp2p::floodsub::{Floodsub, FloodsubEvent, Topic};
@@ -507,6 +516,14 @@ impl Libp2pMessaging {
         let ident = self.account.lock().get_own_identity()?;
         Ok(ident.public_key())
     }
+
+    #[cfg(feature = "solana")]
+    pub fn group_helper(&self) -> anyhow::Result<crate::solana::groupchat::GroupChat> {
+        let private_key = self.account.lock().decrypt_private_key(None)?;
+        let kp = anchor_client::solana_sdk::signer::keypair::Keypair::from_bytes(&private_key)?;
+        //TODO: Have option to swithc between devnet and mainnet
+        Ok(crate::solana::groupchat::GroupChat::devnet_keypair(&kp))
+    }
 }
 
 fn swarm_command(
@@ -643,6 +660,17 @@ pub enum SwarmCommands {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessagingEvents {
     NewMessage(Message),
+    EditMessage(Uuid, Uuid, Vec<String>),
+    DeleteMessage(Uuid, Uuid),
+    DeleteConversation(Uuid),
+    PinMessage(Uuid, Uuid, PinState),
+    ReactMessage(Uuid, Uuid, ReactionState),
+    Ping(Uuid),
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum GroupEvents {
+    CreateGroup(Message),
     EditMessage(Uuid, Uuid, Vec<String>),
     DeleteMessage(Uuid, Uuid),
     DeleteConversation(Uuid),
@@ -818,12 +846,13 @@ impl RayGun for Libp2pMessaging {
     }
 }
 
+#[cfg(feature = "solana")]
 impl GroupChat for Libp2pMessaging {
-    fn join_group(&mut self, id: GroupId) -> Result<()> {
+    fn join_group(&mut self, _id: GroupId) -> Result<()> {
         todo!()
     }
 
-    fn leave_group(&mut self, id: GroupId) -> Result<()> {
+    fn leave_group(&mut self, _id: GroupId) -> Result<()> {
         todo!()
     }
 
@@ -832,54 +861,152 @@ impl GroupChat for Libp2pMessaging {
     }
 }
 
-impl GroupChatManagement for Libp2pMessaging {
-    fn create_group(&mut self, name: &str) -> Result<Group> {
+#[cfg(not(feature = "solana"))]
+impl GroupChat for Libp2pMessaging {
+    fn join_group(&mut self, _id: GroupId) -> Result<()> {
         todo!()
     }
 
-    fn change_group_name(&mut self, id: GroupId, name: &str) -> Result<()> {
+    fn leave_group(&mut self, _id: GroupId) -> Result<()> {
         todo!()
     }
 
-    fn open_group(&mut self, id: GroupId) -> Result<()> {
-        todo!()
-    }
-
-    fn close_group(&mut self, id: GroupId) -> Result<()> {
-        todo!()
-    }
-
-    fn change_admin(&mut self, id: GroupId, member: GroupMember) -> Result<()> {
-        todo!()
-    }
-
-    fn assign_admin(&mut self, id: GroupId, member: GroupMember) -> Result<()> {
-        todo!()
-    }
-
-    fn kick_member(&mut self, id: GroupId, member: GroupMember) -> Result<()> {
-        todo!()
-    }
-
-    fn ban_member(&mut self, id: GroupId, member: GroupMember) -> Result<()> {
+    fn list_members(&self) -> Result<Vec<GroupMember>> {
         todo!()
     }
 }
 
+#[cfg(feature = "solana")]
+impl GroupChatManagement for Libp2pMessaging {
+    fn create_group(&mut self, name: &str) -> Result<Group> {
+        if name.chars().count() >= 64 {
+            return Err(Error::Any(anyhow!("Group name is too long")));
+        }
+        let mut helper = self.group_helper()?;
+        //Note: Maybe refactor the trait funciton to supply its own id rather than generating one?
+        let id = GroupId::new_uuid();
+        let group_id = id.get_id().ok_or(Error::Other)?;
+        helper.create_group(&group_id.to_string(), name)?;
+        let group_pubkey = helper.group_address_from_id(&group_id.to_string())?;
+        let group = helper.get_group(group_pubkey)?;
+        let mut new_group = Group::default();
+        new_group.set_id(GroupId::from_public_key(PublicKey::from_bytes(
+            group_pubkey.as_ref(),
+        )));
+        new_group.set_name(name);
+        new_group.set_creator(GroupMember::from_public_key(PublicKey::from_bytes(
+            group.creator.as_ref(),
+        )));
+        new_group.set_admin(GroupMember::from_public_key(PublicKey::from_bytes(
+            group.admin.as_ref(),
+        )));
+        new_group.set_members(group.members as u32);
+        new_group.set_status(match group.open_invites {
+            true => GroupStatus::Opened,
+            false => GroupStatus::Closed,
+        });
+        //TODO: Subscribe to id/topic of group
+        Ok(new_group)
+    }
+
+    fn change_group_name(&mut self, _id: GroupId, _name: &str) -> Result<()> {
+        todo!()
+    }
+
+    fn open_group(&mut self, _id: GroupId) -> Result<()> {
+        todo!()
+    }
+
+    fn close_group(&mut self, _id: GroupId) -> Result<()> {
+        todo!()
+    }
+
+    fn change_admin(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
+        todo!()
+    }
+
+    fn assign_admin(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
+        todo!()
+    }
+
+    fn kick_member(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
+        todo!()
+    }
+
+    fn ban_member(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
+        todo!()
+    }
+}
+
+#[cfg(not(feature = "solana"))]
+impl GroupChatManagement for Libp2pMessaging {
+    fn create_group(&mut self, _name: &str) -> Result<Group> {
+        todo!()
+    }
+
+    fn change_group_name(&mut self, _id: GroupId, _name: &str) -> Result<()> {
+        todo!()
+    }
+
+    fn open_group(&mut self, _id: GroupId) -> Result<()> {
+        todo!()
+    }
+
+    fn close_group(&mut self, _id: GroupId) -> Result<()> {
+        todo!()
+    }
+
+    fn change_admin(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
+        todo!()
+    }
+
+    fn assign_admin(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
+        todo!()
+    }
+
+    fn kick_member(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
+        todo!()
+    }
+
+    fn ban_member(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
+        todo!()
+    }
+}
+
+#[cfg(feature = "solana")]
 impl GroupInvite for Libp2pMessaging {
-    fn send_invite(&mut self, id: GroupId, recipient: GroupMember) -> Result<()> {
+    fn send_invite(&mut self, _id: GroupId, _recipient: GroupMember) -> Result<()> {
         todo!()
     }
 
-    fn accept_invite(&mut self, id: GroupId) -> Result<()> {
+    fn accept_invite(&mut self, _id: GroupId) -> Result<()> {
         todo!()
     }
 
-    fn deny_invite(&mut self, id: GroupId) -> Result<()> {
+    fn deny_invite(&mut self, _id: GroupId) -> Result<()> {
         todo!()
     }
 
-    fn block_group(&mut self, id: GroupId) -> Result<()> {
+    fn block_group(&mut self, _id: GroupId) -> Result<()> {
+        todo!()
+    }
+}
+
+#[cfg(not(feature = "solana"))]
+impl GroupInvite for Libp2pMessaging {
+    fn send_invite(&mut self, _id: GroupId, _recipient: GroupMember) -> Result<()> {
+        todo!()
+    }
+
+    fn accept_invite(&mut self, _id: GroupId) -> Result<()> {
+        todo!()
+    }
+
+    fn deny_invite(&mut self, _id: GroupId) -> Result<()> {
+        todo!()
+    }
+
+    fn block_group(&mut self, _id: GroupId) -> Result<()> {
         todo!()
     }
 }

@@ -30,6 +30,23 @@ pub enum Uid {
     PublicKey(PublicKey),
 }
 
+impl Uid {
+    pub fn new_uuid() -> Uid {
+        Uid::Id(Uuid::new_v4())
+    }
+
+    pub fn new_public_key() -> Uid {
+        let random = crate::crypto::generate(32);
+        Uid::PublicKey(PublicKey::from_vec(random))
+    }
+}
+
+impl Default for Uid {
+    fn default() -> Self {
+        Self::new_uuid()
+    }
+}
+
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct MessageOptions {
     pub smart: Option<bool>,
