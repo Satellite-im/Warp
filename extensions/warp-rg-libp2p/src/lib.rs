@@ -907,16 +907,16 @@ impl GroupChatManagement for Libp2pMessaging {
         let group_pubkey = helper.group_address_from_id(&group_id.to_string())?;
         let group = helper.get_group(group_pubkey)?;
         let mut new_group = Group::default();
-        new_group.set_id(GroupId::from_public_key(PublicKey::from_bytes(
-            group_pubkey.as_ref(),
-        )));
+        new_group.set_id(GroupId::from_public_key(
+            warp::multipass::identity::PublicKey::from_bytes(group_pubkey.as_ref()),
+        ));
         new_group.set_name(name);
-        new_group.set_creator(GroupMember::from_public_key(PublicKey::from_bytes(
-            group.creator.as_ref(),
-        )));
-        new_group.set_admin(GroupMember::from_public_key(PublicKey::from_bytes(
-            group.admin.as_ref(),
-        )));
+        new_group.set_creator(GroupMember::from_public_key(
+            warp::multipass::identity::PublicKey::from_bytes(group.creator.as_ref()),
+        ));
+        new_group.set_admin(GroupMember::from_public_key(
+            warp::multipass::identity::PublicKey::from_bytes(group.admin.as_ref()),
+        ));
         new_group.set_members(group.members as u32);
         new_group.set_status(match group.open_invites {
             true => GroupStatus::Opened,

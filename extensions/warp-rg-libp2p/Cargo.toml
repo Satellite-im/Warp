@@ -18,7 +18,7 @@ tokio = { version = "1", features = ["full"] }
 futures = { version = "0.3" }
 async-trait = { version = "0.1" }
 anyhow = { version = "1" }
-
+thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 bs58 = "0.4"
@@ -40,7 +40,7 @@ cbindgen = "0.23"
 
 
 [features]
-default = ["gossipsub"]
+default = ["gossipsub", "solana"]
 gossipsub = []
 floodsub = []
 solana = ["groupchats", "anchor-client", "borsh"]
