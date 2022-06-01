@@ -512,6 +512,14 @@ impl Libp2pMessaging {
             .map_err(|e| anyhow!(e))
     }
 
+    //TODO: Use as a async function instead of calling tokio runtime handle but for now this is
+    //      used
+    // pub fn send_swarm_command_sync(&mut self, _event: SwarmCommands) -> anyhow::Result<()> {
+    //     let _handle = tokio::runtime::Handle::try_current()?;
+    //
+    //     Ok(())
+    // }
+
     pub fn sender_id(&self) -> anyhow::Result<warp::multipass::identity::PublicKey> {
         let ident = self.account.lock().get_own_identity()?;
         Ok(ident.public_key())
@@ -533,7 +541,25 @@ fn swarm_command(
     match commands {
         Some(SwarmCommands::DialPeer(peer)) => swarm.dial(peer)?,
         Some(SwarmCommands::DialAddr(addr)) => swarm.dial(addr)?,
-        _ => {}
+        Some(SwarmCommands::SubscribeToTopic(topic)) => {
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "floodsub")] {
+                    swarm.behaviour_mut().sub.subscribe(Topic::new(topic));
+                } else if #[cfg(feature = "gossipsub")] {
+                    swarm.behaviour_mut().sub.subscribe(&Topic::new(topic))?;
+                }
+            }
+        }
+        Some(SwarmCommands::UnsubscribeFromTopic(topic)) => {
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "floodsub")] {
+                    swarm.behaviour_mut().sub.unsubscribe(Topic::new(topic));
+                } else if #[cfg(feature = "gossipsub")] {
+                    swarm.behaviour_mut().sub.unsubscribe(&Topic::new(topic))?;
+                }
+            }
+        }
+        _ => {} //TODO: Invalid command?
     }
     Ok(())
 }
@@ -655,22 +681,13 @@ impl Extension for Libp2pMessaging {
 pub enum SwarmCommands {
     DialPeer(PeerId),
     DialAddr(Multiaddr),
+    SubscribeToTopic(String),
+    UnsubscribeFromTopic(String),
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessagingEvents {
     NewMessage(Message),
-    EditMessage(Uuid, Uuid, Vec<String>),
-    DeleteMessage(Uuid, Uuid),
-    DeleteConversation(Uuid),
-    PinMessage(Uuid, Uuid, PinState),
-    ReactMessage(Uuid, Uuid, ReactionState),
-    Ping(Uuid),
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum GroupEvents {
-    CreateGroup(Message),
     EditMessage(Uuid, Uuid, Vec<String>),
     DeleteMessage(Uuid, Uuid),
     DeleteConversation(Uuid),
