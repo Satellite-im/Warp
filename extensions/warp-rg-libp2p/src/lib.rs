@@ -512,13 +512,13 @@ impl Libp2pMessaging {
             .map_err(|e| anyhow!(e))
     }
 
-    //TODO: Use as a async function instead of calling tokio runtime handle but for now this is
+    // TODO: Use as a async function instead of calling tokio runtime handle but for now this is
     //      used
-    // pub fn send_swarm_command_sync(&mut self, _event: SwarmCommands) -> anyhow::Result<()> {
-    //     let _handle = tokio::runtime::Handle::try_current()?;
-    //
-    //     Ok(())
-    // }
+    pub fn send_swarm_command_sync(&self, event: SwarmCommands) -> anyhow::Result<()> {
+        let handle = tokio::runtime::Handle::try_current()?;
+        tokio::task::block_in_place(|| handle.block_on(self.send_command(event)))?;
+        Ok(())
+    }
 
     pub fn sender_id(&self) -> anyhow::Result<warp::multipass::identity::PublicKey> {
         let ident = self.account.lock().get_own_identity()?;
@@ -869,8 +869,15 @@ impl GroupChat for Libp2pMessaging {
         todo!()
     }
 
-    fn leave_group(&mut self, _id: GroupId) -> Result<()> {
-        todo!()
+    fn leave_group(&mut self, id: GroupId) -> Result<()> {
+        let helper = self.group_helper()?;
+        let group = solana_group_to_warp_group(&helper, &id)?;
+        if group.status() == GroupStatus::Closed {
+            return Err(Error::Any(anyhow!("Group is closed")));
+        }
+        let gid_uuid = id.get_id().ok_or(Error::Other)?;
+        helper.modify_open_invites(&gid_uuid.to_string(), true)?;
+        Ok(())
     }
 
     fn list_members(&self) -> Result<Vec<GroupMember>> {
@@ -899,43 +906,50 @@ impl GroupChatManagement for Libp2pMessaging {
         if name.chars().count() >= 64 {
             return Err(Error::Any(anyhow!("Group name is too long")));
         }
-        let mut helper = self.group_helper()?;
+        let helper = self.group_helper()?;
         //Note: Maybe refactor the trait funciton to supply its own id rather than generating one?
         let id = GroupId::new_uuid();
         let group_id = id.get_id().ok_or(Error::Other)?;
         helper.create_group(&group_id.to_string(), name)?;
-        let group_pubkey = helper.group_address_from_id(&group_id.to_string())?;
-        let group = helper.get_group(group_pubkey)?;
-        let mut new_group = Group::default();
-        new_group.set_id(GroupId::from_public_key(
-            warp::multipass::identity::PublicKey::from_bytes(group_pubkey.as_ref()),
-        ));
-        new_group.set_name(name);
-        new_group.set_creator(GroupMember::from_public_key(
-            warp::multipass::identity::PublicKey::from_bytes(group.creator.as_ref()),
-        ));
-        new_group.set_admin(GroupMember::from_public_key(
-            warp::multipass::identity::PublicKey::from_bytes(group.admin.as_ref()),
-        ));
-        new_group.set_members(group.members as u32);
-        new_group.set_status(match group.open_invites {
-            true => GroupStatus::Opened,
-            false => GroupStatus::Closed,
-        });
-        //TODO: Subscribe to id/topic of group
+        self.send_swarm_command_sync(SwarmCommands::SubscribeToTopic(group_id.to_string()))?;
+        let new_group = solana_group_to_warp_group(&helper, &id)?;
         Ok(new_group)
     }
 
-    fn change_group_name(&mut self, _id: GroupId, _name: &str) -> Result<()> {
-        todo!()
+    fn change_group_name(&mut self, id: GroupId, name: &str) -> Result<()> {
+        if name.chars().count() >= 64 {
+            return Err(Error::Any(anyhow!("Group name is too long")));
+        }
+        let helper = self.group_helper()?;
+        let group = solana_group_to_warp_group(&helper, &id)?;
+        if group.name().eq(name) {
+            return Err(Error::Any(anyhow!("Group name is the same")));
+        }
+        let gid_uuid = id.get_id().ok_or(Error::Other)?;
+        helper.modify_name(&gid_uuid.to_string(), name)?;
+        Ok(())
     }
 
-    fn open_group(&mut self, _id: GroupId) -> Result<()> {
-        todo!()
+    fn open_group(&mut self, id: GroupId) -> Result<()> {
+        let helper = self.group_helper()?;
+        let group = solana_group_to_warp_group(&helper, &id)?;
+        if group.status() == GroupStatus::Opened {
+            return Err(Error::Any(anyhow!("Group is opened")));
+        }
+        let gid_uuid = id.get_id().ok_or(Error::Other)?;
+        helper.modify_open_invites(&gid_uuid.to_string(), true)?;
+        Ok(())
     }
 
-    fn close_group(&mut self, _id: GroupId) -> Result<()> {
-        todo!()
+    fn close_group(&mut self, id: GroupId) -> Result<()> {
+        let helper = self.group_helper()?;
+        let group = solana_group_to_warp_group(&helper, &id)?;
+        if group.status() == GroupStatus::Closed {
+            return Err(Error::Any(anyhow!("Group is closed")));
+        }
+        let gid_uuid = id.get_id().ok_or(Error::Other)?;
+        helper.modify_open_invites(&gid_uuid.to_string(), false)?;
+        Ok(())
     }
 
     fn change_admin(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
@@ -1027,3 +1041,42 @@ impl GroupInvite for Libp2pMessaging {
         todo!()
     }
 }
+
+#[cfg(feature = "solana")]
+fn solana_group_to_warp_group(
+    helper: &crate::solana::groupchat::GroupChat,
+    id: &GroupId,
+) -> anyhow::Result<Group> {
+    let group_id = id.get_id().ok_or(Error::Other)?;
+    let group_pubkey = helper.group_address_from_id(&group_id.to_string())?;
+    let raw = helper.get_group(group_pubkey)?;
+
+    let mut group = Group::default();
+    group.set_id(id.clone());
+    group.set_name(&raw.name);
+    group.set_creator(GroupMember::from_public_key(
+        warp::multipass::identity::PublicKey::from_bytes(raw.creator.as_ref()),
+    ));
+    group.set_admin(GroupMember::from_public_key(
+        warp::multipass::identity::PublicKey::from_bytes(raw.admin.as_ref()),
+    ));
+    group.set_members(raw.members as u32);
+    group.set_status(match raw.open_invites {
+        true => GroupStatus::Opened,
+        false => GroupStatus::Closed,
+    });
+    Ok(group)
+}
+
+// #[cfg(feature = "solana")]
+// fn solana_invite_to_warp_invite(
+//     _helper: &crate::solana::groupchat::GroupChat,
+//     _id: &GroupId,
+// ) -> anyhow::Result<GroupInvitation> {
+//     // let id = id.get_id().ok_or(Error::Other)?;
+//     // let raw = helper.get_i(group_pubkey)?;
+
+//     let group = GroupInvitation::default();
+//     //TODO
+//     Ok(group)
+// }
