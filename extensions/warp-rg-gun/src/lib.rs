@@ -384,11 +384,11 @@ impl RayGun for GunMessaging {
 }
 
 impl GroupChat for GunMessaging {
-    fn join_group(&mut self, id: GroupId) -> Result<()> {
+    fn join_group(&mut self, _id: GroupId) -> Result<()> {
         todo!()
     }
 
-    fn leave_group(&mut self, id: GroupId) -> Result<()> {
+    fn leave_group(&mut self, _id: GroupId) -> Result<()> {
         todo!()
     }
 
@@ -398,53 +398,53 @@ impl GroupChat for GunMessaging {
 }
 
 impl GroupChatManagement for GunMessaging {
-    fn create_group(&mut self, name: &str) -> Result<Group> {
+    fn create_group(&mut self, _name: &str) -> Result<Group> {
         todo!()
     }
 
-    fn change_group_name(&mut self, id: GroupId, name: &str) -> Result<()> {
+    fn change_group_name(&mut self, _id: GroupId, _name: &str) -> Result<()> {
         todo!()
     }
 
-    fn open_group(&mut self, id: GroupId) -> Result<()> {
+    fn open_group(&mut self, _id: GroupId) -> Result<()> {
         todo!()
     }
 
-    fn close_group(&mut self, id: GroupId) -> Result<()> {
+    fn close_group(&mut self, _id: GroupId) -> Result<()> {
         todo!()
     }
 
-    fn change_admin(&mut self, id: GroupId, member: GroupMember) -> Result<()> {
+    fn change_admin(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
         todo!()
     }
 
-    fn assign_admin(&mut self, id: GroupId, member: GroupMember) -> Result<()> {
+    fn assign_admin(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
         todo!()
     }
 
-    fn kick_member(&mut self, id: GroupId, member: GroupMember) -> Result<()> {
+    fn kick_member(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
         todo!()
     }
 
-    fn ban_member(&mut self, id: GroupId, member: GroupMember) -> Result<()> {
+    fn ban_member(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
         todo!()
     }
 }
 
 impl GroupInvite for GunMessaging {
-    fn send_invite(&mut self, id: GroupId, recipient: GroupMember) -> Result<()> {
+    fn send_invite(&mut self, _id: GroupId, _recipient: GroupMember) -> Result<()> {
         todo!()
     }
 
-    fn accept_invite(&mut self, id: GroupId) -> Result<()> {
+    fn accept_invite(&mut self, _id: GroupId) -> Result<()> {
         todo!()
     }
 
-    fn deny_invite(&mut self, id: GroupId) -> Result<()> {
+    fn deny_invite(&mut self, _id: GroupId) -> Result<()> {
         todo!()
     }
 
-    fn block_group(&mut self, id: GroupId) -> Result<()> {
+    fn block_group(&mut self, _id: GroupId) -> Result<()> {
         todo!()
     }
 }
