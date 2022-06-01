@@ -2,6 +2,7 @@ use crate::error::Error;
 use crate::multipass::identity::PublicKey;
 use crate::raygun::Uid;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[derive(Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
@@ -148,12 +149,14 @@ impl Group {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub struct GroupInvitation {
     id: Uuid,
     group: GroupId,
     sender: GroupMember,
     recipient: GroupMember,
+    #[serde(flatten)]
+    metadata: HashMap<String, serde_json::Value>,
 }
 
 impl GroupInvitation {
@@ -171,6 +174,32 @@ impl GroupInvitation {
 
     pub fn recipient(&self) -> GroupMember {
         self.recipient.clone()
+    }
+
+    pub fn metadata(&self) -> HashMap<String, serde_json::Value> {
+        self.metadata.clone()
+    }
+}
+
+impl GroupInvitation {
+    pub fn set_id(&mut self, id: Uuid) {
+        self.id = id;
+    }
+
+    pub fn set_group(&mut self, group: GroupId) {
+        self.group = group;
+    }
+
+    pub fn set_sender(&mut self, sender: GroupMember) {
+        self.sender = sender;
+    }
+
+    pub fn set_recipient(&mut self, recipient: GroupMember) {
+        self.recipient = recipient;
+    }
+
+    pub fn set_metadata(&mut self, metadata: HashMap<String, serde_json::Value>) {
+        self.metadata = metadata
     }
 }
 
