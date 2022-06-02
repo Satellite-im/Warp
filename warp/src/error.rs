@@ -89,6 +89,50 @@ pub enum Error {
     Other,
 }
 
+impl Error {
+    pub fn enum_to_string(&self) -> String {
+        match self.clone() {
+            Error::HookUnregistered => String::from("HookUnregistered"),
+            Error::DuplicateHook => String::from("DuplicateHook"),
+            Error::AlreadySubscribed => String::from("AlreadySubscribed"),
+            Error::DuplicateName => String::from("DuplicateName"),
+            Error::DirParadox => String::from("DirParadox"),
+            Error::DirParentParadox => String::from("DirParentParadox"),
+            Error::DirInvalid => String::from("DirInvalid"),
+            Error::ItemInvalid => String::from("ItemInvalid"),
+            Error::ItemNotFile => String::from("ItemNotFile"),
+            Error::ItemNotDirectory => String::from("ItemNotDirectory"),
+            Error::InvalidConversion => String::from("InvalidConversion"),
+            Error::InvalidPath => String::from("InvalidPath"),
+            Error::ArrayPositionNotFound => String::from("ArrayPositionNotFound"),
+            Error::DimensionMismatch => String::from("DimensionMismatch"),
+            Error::DataObjectExist => String::from("DataObjectExist"),
+            Error::DataObjectNotFound => String::from("DataObjectNotFound"),
+            Error::Ed25519Error(_) => String::from("Ed25519Error"),
+            Error::InvalidDataType => String::from("InvalidDataType"),
+            Error::ObjectNotFound => String::from("ObjectNotFound"),
+            Error::InvalidKeyLength => String::from("InvalidKeyLength"),
+            Error::FileNotFound => String::from("FileNotFound"),
+            Error::DirectoryNotFound => String::from("DirectoryNotFound"),
+            Error::ToBeDetermined => String::from("ToBeDetermined"),
+            Error::EncryptionError => String::from("EncryptionError"),
+            Error::DecryptionError => String::from("DecryptionError"),
+            Error::EncryptionStreamError => String::from("EncryptionStreamError"),
+            Error::DecryptionStreamError => String::from("DecryptionStreamError"),
+            Error::TesseractLocked => String::from("TesseractLocked"),
+            Error::SerdeJsonError(_) => String::from("SerdeJsonError"),
+            Error::SerdeYamlError(_) => String::from("SerdeYamlError"),
+            Error::TomlDeserializeError(_) => String::from("TomlDeserializeError"),
+            Error::TomlSerializeError(_) => String::from("TomlSerializeError"),
+            Error::RegexError(_) => String::from("RegexError"),
+            Error::Any(_) => String::from("Any"),
+            Error::IoError(_) => String::from("IoError"),
+            Error::Unimplemented => String::from("Unimplemented"),
+            Error::Other => String::from("Other"),
+        }
+    }
+}
+
 impl From<Error> for JsValue {
     fn from(error: Error) -> JsValue {
         JsValue::from_str(&error.to_string())
