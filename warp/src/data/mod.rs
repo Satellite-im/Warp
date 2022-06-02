@@ -236,29 +236,31 @@ impl Data {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::data::{Data, DataType};
+    use crate::error::Error;
+    use crate::ffi::FFIResult;
     use std::ffi::{CStr, CString};
     use std::os::raw::c_char;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn data_new(data: DataType, payload: *const c_char) -> *mut Data {
+    pub unsafe extern "C" fn data_new(data: DataType, payload: *const c_char) -> FFIResult<Data> {
         if payload.is_null() {
-            return std::ptr::null_mut();
+            //TODO: Determine if providing a NULL should be allowed and converted into `()` type
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Payload is required")));
         }
 
         let payload_str = CStr::from_ptr(payload).to_string_lossy().to_string();
 
-        let payload_value = match serde_json::from_str::<serde_json::Value>(&payload_str) {
-            Ok(v) => v,
-            Err(_) => return std::ptr::null_mut(),
-        };
+        let payload_value =
+            match serde_json::from_str::<serde_json::Value>(&payload_str).map_err(Error::from) {
+                Ok(v) => v,
+                Err(e) => return FFIResult::err(e),
+            };
 
-        let data = match Data::new(data, payload_value) {
-            Ok(data) => data,
-            Err(_) => return std::ptr::null_mut(),
-        };
-
-        Box::into_raw(Box::new(data)) as *mut Data
+        match Data::new(data, payload_value) {
+            Ok(data) => FFIResult::ok(data),
+            Err(e) => FFIResult::err(e),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -367,9 +369,9 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn data_payload(data: *const Data) -> *mut c_char {
+    pub unsafe extern "C" fn data_payload(data: *const Data) -> FFIResult<c_char> {
         if data.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Data is null")));
         }
 
         let data = &*data;
@@ -378,19 +380,9 @@ pub mod ffi {
         //return the string
         let payload = match data.payload::<serde_json::Value>() {
             Ok(payload) => payload,
-            Err(_) => {
-                return std::ptr::null_mut();
-            }
+            Err(e) => return FFIResult::err(e),
         };
 
-        let payload_str = match serde_json::to_string(&payload) {
-            Ok(str) => str,
-            Err(_) => return std::ptr::null_mut(),
-        };
-
-        match CString::new(payload_str) {
-            Ok(cstr) => cstr.into_raw(),
-            Err(_) => std::ptr::null_mut(),
-        }
+        FFIResult::from(serde_json::to_string(&payload).map_err(Error::from))
     }
 }
