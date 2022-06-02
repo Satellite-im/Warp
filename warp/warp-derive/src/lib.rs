@@ -73,6 +73,23 @@ pub fn construct_ffi(_item: TokenStream) -> TokenStream {
             value: Vec<T>,
         }
 
+        #[repr(C)]
+        pub struct FFIVec<T> {
+            pub ptr: *mut T,
+            pub len: usize,
+            pub cap: usize,
+        }
+
+        impl<T> FFIVec<T> {
+            pub fn from(mut vec: Vec<T>) -> Self {
+                let len = vec.len();
+                let cap = vec.capacity();
+                let ptr = vec.as_mut_ptr();
+                std::mem::forget(vec);
+                Self{ptr, len, cap}
+            }
+        }
+
         impl<T> FFIArray<T> {
             pub fn new(value: Vec<T>) -> FFIArray<T> {
                 FFIArray { value }
@@ -97,6 +114,21 @@ pub fn construct_ffi(_item: TokenStream) -> TokenStream {
         pub struct FFIResult<T> {
             pub data: *mut T,
             pub error: *mut FFIError,
+        }
+
+        impl<T> From<Result<Vec<T>, crate::error::Error>> for FFIResult<FFIVec<T>> {
+            fn from(res: Result<Vec<T>, crate::error::Error>) -> Self {
+                match res {
+                    Ok(t) => {
+                        let data = Box::into_raw(Box::new(FFIVec::from(t)));
+                        Self {
+                            data,
+                            error: std::ptr::null_mut(),
+                        }
+                    },
+                    Err(err) => Self::err(err),
+                }
+            }
         }
 
         impl From<Result<String, crate::error::Error>> for FFIResult<std::os::raw::c_char> {
