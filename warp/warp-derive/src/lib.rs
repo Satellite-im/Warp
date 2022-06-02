@@ -99,10 +99,30 @@ pub fn construct_ffi(_item: TokenStream) -> TokenStream {
             pub error: *mut FFIError,
         }
 
-        impl<T> From<Result<T, crate::error::Error>> for FFIResult<T> {
-            fn from(res: Result<T, crate::error::Error>) -> Self {
+        impl From<Result<String, crate::error::Error>> for FFIResult<std::os::raw::c_char> {
+            fn from(res: Result<String, crate::error::Error>) -> Self {
                 match res {
-                    Ok(t) => Self::ok(t),
+                    Ok(t) => {
+                        let data = std::ffi::CString::new(t).unwrap().into_raw();
+                        Self {
+                            data,
+                            error: std::ptr::null_mut(),
+                        }
+                    },
+                    Err(err) => Self::err(err),
+                }
+            }
+        }
+
+        impl From<Result<(), crate::error::Error>> for FFIResult<std::os::raw::c_void> {
+            fn from(res: Result<(), crate::error::Error>) -> Self {
+                match res {
+                    Ok(_) => {
+                        Self {
+                            data: std::ptr::null_mut(),
+                            error: std::ptr::null_mut(),
+                        }
+                    },
                     Err(err) => Self::err(err),
                 }
             }
