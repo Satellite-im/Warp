@@ -429,39 +429,43 @@ pub mod ffi {
 
     use crate::constellation::directory::Directory;
     use crate::constellation::{ConstellationAdapter, ConstellationDataType};
+    use crate::error::Error;
+    use crate::ffi::{FFIResult, FFIVec};
     use crate::runtime_handle;
-    use std::ffi::{CStr, CString};
-    use std::os::raw::c_char;
+    use std::ffi::CStr;
+    use std::os::raw::{c_char, c_void};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_select(
         ctx: *mut ConstellationAdapter,
         name: *const c_char,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if name.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let cname = CStr::from_ptr(name).to_string_lossy().to_string();
 
         let constellation = &mut *(ctx);
-        constellation.inner_guard().select(&cname).is_ok()
+        FFIResult::from(constellation.inner_guard().select(&cname))
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn constellation_go_back(ctx: *mut ConstellationAdapter) -> bool {
+    pub unsafe extern "C" fn constellation_go_back(
+        ctx: *mut ConstellationAdapter,
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let constellation = &mut *(ctx);
-        constellation.inner_guard().go_back().is_ok()
+        FFIResult::from(constellation.inner_guard().go_back())
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -469,21 +473,21 @@ pub mod ffi {
     pub unsafe extern "C" fn constellation_open_directory(
         ctx: *mut ConstellationAdapter,
         name: *const c_char,
-    ) -> *mut Directory {
+    ) -> FFIResult<Directory> {
         if ctx.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if name.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let cname = CStr::from_ptr(name).to_string_lossy().to_string();
 
         let constellation = &mut *(ctx);
         match constellation.inner_guard().open_directory(&cname) {
-            Ok(directory) => Box::into_raw(Box::new(directory)) as *mut Directory,
-            Err(_) => std::ptr::null_mut(),
+            Ok(directory) => FFIResult::ok(directory.clone()),
+            Err(e) => FFIResult::err(e),
         }
     }
 
@@ -541,25 +545,26 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         local: *const c_char,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if remote.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if local.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let local = CStr::from_ptr(local).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async { constellation.inner_guard().put(&remote, &local).await })
-            .is_ok()
+        rt.block_on(async {
+            FFIResult::from(constellation.inner_guard().put(&remote, &local).await)
+        })
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -570,17 +575,17 @@ pub mod ffi {
         remote: *const c_char,
         buffer: *const u8,
         buffer_size: u32,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if remote.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if buffer.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let slice = std::slice::from_raw_parts(buffer, buffer_size as usize);
@@ -590,12 +595,13 @@ pub mod ffi {
         let rt = runtime_handle();
 
         rt.block_on(async move {
-            constellation
-                .inner_guard()
-                .put_buffer(&remote.to_string_lossy().to_string(), &slice.to_vec())
-                .await
+            FFIResult::from(
+                constellation
+                    .inner_guard()
+                    .put_buffer(&remote.to_string_lossy().to_string(), &slice.to_vec())
+                    .await,
+            )
         })
-        .is_ok()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -605,17 +611,17 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         local: *const c_char,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if remote.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if local.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let constellation = &*(ctx);
@@ -623,8 +629,9 @@ pub mod ffi {
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let local = CStr::from_ptr(local).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async move { constellation.inner_guard().get(&remote, &local).await })
-            .is_ok()
+        rt.block_on(async move {
+            FFIResult::from(constellation.inner_guard().get(&remote, &local).await)
+        })
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -633,36 +640,24 @@ pub mod ffi {
     pub unsafe extern "C" fn constellation_get_buffer(
         ctx: *const ConstellationAdapter,
         remote: *const c_char,
-    ) -> *mut u8 {
+    ) -> FFIResult<FFIVec<u8>> {
         if ctx.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if remote.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let constellation = &*ctx;
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let rt = runtime_handle();
-        let ptr = rt.block_on(async move {
-            {
-                match constellation.inner_guard().get_buffer(&remote).await {
-                    Ok(temp_buf) => {
-                        let buf = temp_buf.as_ptr();
-                        std::mem::forget(temp_buf);
-                        buf
-                    }
-                    Err(_) => std::ptr::null(),
-                }
+        rt.block_on(async move {
+            match constellation.inner_guard().get_buffer(&remote).await {
+                Ok(temp_buf) => FFIResult::ok(FFIVec::from(temp_buf)),
+                Err(e) => FFIResult::err(e),
             }
-        });
-
-        if ptr.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        ptr as *mut _
+        })
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -672,20 +667,21 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         recursive: bool,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if remote.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async move { constellation.inner_guard().remove(&remote, recursive).await })
-            .is_ok()
+        rt.block_on(async move {
+            FFIResult::from(constellation.inner_guard().remove(&remote, recursive).await)
+        })
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -695,25 +691,26 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         recursive: bool,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if remote.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let rt = runtime_handle();
         rt.block_on(async move {
-            constellation
-                .inner_guard()
-                .create_directory(&remote, recursive)
-                .await
+            FFIResult::from(
+                constellation
+                    .inner_guard()
+                    .create_directory(&remote, recursive)
+                    .await,
+            )
         })
-        .is_ok()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -723,25 +720,26 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
         src: *const c_char,
         dst: *const c_char,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if src.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if dst.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let constellation = &mut *(ctx);
         let src = CStr::from_ptr(src).to_string_lossy().to_string();
         let dst = CStr::from_ptr(dst).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async move { constellation.inner_guard().move_item(&src, &dst).await })
-            .is_ok()
+        rt.block_on(async move {
+            FFIResult::from(constellation.inner_guard().move_item(&src, &dst).await)
+        })
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -750,20 +748,21 @@ pub mod ffi {
     pub unsafe extern "C" fn constellation_sync_ref(
         ctx: *mut ConstellationAdapter,
         src: *const c_char,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if src.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let constellation = &mut *(ctx);
         let src = CStr::from_ptr(src).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async move { constellation.inner_guard().sync_ref(&src).await })
-            .is_ok()
+        rt.block_on(
+            async move { FFIResult::from(constellation.inner_guard().sync_ref(&src).await) },
+        )
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -771,20 +770,14 @@ pub mod ffi {
     pub unsafe extern "C" fn constellation_export(
         ctx: *mut ConstellationAdapter,
         datatype: ConstellationDataType,
-    ) -> *mut c_char {
+    ) -> FFIResult<c_char> {
         if ctx.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let constellation = &*(ctx);
 
-        match constellation.inner_guard().export(datatype) {
-            Ok(export) => match CString::new(export) {
-                Ok(export) => export.into_raw(),
-                Err(_) => std::ptr::null_mut(),
-            },
-            Err(_) => std::ptr::null_mut(),
-        }
+        FFIResult::from(constellation.inner_guard().export(datatype))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -793,60 +786,60 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
         datatype: ConstellationDataType,
         data: *const c_char,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if data.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let constellation = &mut *(ctx);
         let data = CStr::from_ptr(data).to_string_lossy().to_string();
-        constellation.inner_guard().import(datatype, data).is_ok()
+        FFIResult::from(constellation.inner_guard().import(datatype, data))
     }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn constellation_export_json(
-        ctx: *const ConstellationAdapter,
-    ) -> *mut c_char {
-        if ctx.is_null() {
-            return std::ptr::null_mut();
-        }
-        let constellation = &*(ctx);
-        match constellation
-            .inner_guard()
-            .export(ConstellationDataType::Json)
-        {
-            Ok(export) => match CString::new(export) {
-                Ok(export) => export.into_raw(),
-                Err(_) => std::ptr::null_mut(),
-            },
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn constellation_import_json(
-        ctx: *mut ConstellationAdapter,
-        data: *const c_char,
-    ) -> bool {
-        if ctx.is_null() {
-            return false;
-        }
-
-        if data.is_null() {
-            return false;
-        }
-
-        let constellation = &mut *(ctx);
-        let data = CStr::from_ptr(data).to_string_lossy().to_string();
-        constellation
-            .inner_guard()
-            .import(ConstellationDataType::Json, data)
-            .is_ok()
-    }
+    // #[allow(clippy::missing_safety_doc)]
+    // #[no_mangle]
+    // pub unsafe extern "C" fn constellation_export_json(
+    //     ctx: *const ConstellationAdapter,
+    // ) -> *mut c_char {
+    //     if ctx.is_null() {
+    //         return std::ptr::null_mut();
+    //     }
+    //     let constellation = &*(ctx);
+    //     match constellation
+    //         .inner_guard()
+    //         .export(ConstellationDataType::Json)
+    //     {
+    //         Ok(export) => match CString::new(export) {
+    //             Ok(export) => export.into_raw(),
+    //             Err(_) => std::ptr::null_mut(),
+    //         },
+    //         Err(_) => std::ptr::null_mut(),
+    //     }
+    // }
+    //
+    // #[allow(clippy::missing_safety_doc)]
+    // #[no_mangle]
+    // pub unsafe extern "C" fn constellation_import_json(
+    //     ctx: *mut ConstellationAdapter,
+    //     data: *const c_char,
+    // ) -> bool {
+    //     if ctx.is_null() {
+    //         return false;
+    //     }
+    //
+    //     if data.is_null() {
+    //         return false;
+    //     }
+    //
+    //     let constellation = &mut *(ctx);
+    //     let data = CStr::from_ptr(data).to_string_lossy().to_string();
+    //     constellation
+    //         .inner_guard()
+    //         .import(ConstellationDataType::Json, data)
+    //         .is_ok()
+    // }
 }
