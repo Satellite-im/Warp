@@ -88,9 +88,15 @@ pub fn construct_ffi(_item: TokenStream) -> TokenStream {
         }
 
         #[repr(C)]
+        pub struct FFIError {
+            pub error_type: *mut std::os::raw::c_char,
+            pub error_message: *mut std::os::raw::c_char,
+        }
+
+        #[repr(C)]
         pub struct FFIResult<T> {
             pub data: *mut T,
-            pub error: *mut std::os::raw::c_char,
+            pub error: *mut FFIError,
         }
 
         impl<T> From<Result<T, crate::error::Error>> for FFIResult<T> {
@@ -111,9 +117,15 @@ pub fn construct_ffi(_item: TokenStream) -> TokenStream {
             }
 
             pub fn err(err: crate::error::Error) -> Self {
+                let error_message = std::ffi::CString::new(err.to_string()).unwrap().into_raw();
+                let error_type = std::ffi::CString::new(err.enum_to_string()).unwrap().into_raw();
+                let error_obj = FFIError {
+                    error_type,
+                    error_message,
+                };
                 Self {
                     data: std::ptr::null_mut(),
-                    error: std::ffi::CString::new(err.to_string()).unwrap().into_raw(),
+                    error: Box::into_raw(Box::new(error_obj)),
                 }
             }
         }
