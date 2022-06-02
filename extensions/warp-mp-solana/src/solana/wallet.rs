@@ -192,15 +192,17 @@ impl SolanaWallet {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::{PhraseType, SolanaWallet};
-    use std::ffi::{CStr, CString};
+    use std::ffi::CStr;
     use std::os::raw::c_char;
+    use warp::error::Error;
+    use warp::ffi::FFIResult;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn solana_wallet_new(
         phrase: PhraseType,
         password: *const c_char,
-    ) -> *mut SolanaWallet {
+    ) -> FFIResult<SolanaWallet> {
         let password = match password.is_null() {
             true => None,
             false => {
@@ -209,12 +211,10 @@ pub mod ffi {
             }
         };
 
-        let wallet = match SolanaWallet::create_random(phrase, password.as_deref()) {
-            Ok(wallet) => wallet,
-            Err(_) => return std::ptr::null_mut(),
-        };
-
-        Box::into_raw(Box::new(wallet)) as *mut _
+        match SolanaWallet::create_random(phrase, password.as_deref()) {
+            Ok(wallet) => FFIResult::ok(wallet),
+            Err(e) => FFIResult::err(Error::Any(e)),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -222,9 +222,9 @@ pub mod ffi {
     pub unsafe extern "C" fn solana_wallet_restore_from_mnemonic(
         mnemonic: *const c_char,
         passphrase: *const c_char,
-    ) -> *mut SolanaWallet {
+    ) -> FFIResult<SolanaWallet> {
         if mnemonic.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Mnemonic phrase is required")));
         }
 
         let passphrase = match passphrase.is_null() {
@@ -237,74 +237,62 @@ pub mod ffi {
 
         let mnemonic = CStr::from_ptr(mnemonic).to_string_lossy().to_string();
 
-        let wallet = match SolanaWallet::restore_from_mnemonic(passphrase.as_deref(), &mnemonic) {
-            Ok(wallet) => wallet,
-            Err(_) => return std::ptr::null_mut(),
-        };
-
-        Box::into_raw(Box::new(wallet)) as *mut _
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn solana_wallet_get_keypair(wallet: *const SolanaWallet) -> *mut c_char {
-        if wallet.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let wallet = &*wallet;
-
-        let kp = match wallet.get_keypair() {
-            Ok(kp) => kp,
-            Err(_) => return std::ptr::null_mut(),
-        };
-
-        match CString::new(kp.to_base58_string()) {
-            Ok(c) => c.into_raw(),
-            Err(_) => std::ptr::null_mut(),
+        match SolanaWallet::restore_from_mnemonic(passphrase.as_deref(), &mnemonic) {
+            Ok(wallet) => FFIResult::ok(wallet),
+            Err(e) => FFIResult::err(Error::Any(e)),
         }
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn solana_wallet_get_pubkey(wallet: *const SolanaWallet) -> *mut c_char {
+    pub unsafe extern "C" fn solana_wallet_get_keypair(
+        wallet: *const SolanaWallet,
+    ) -> FFIResult<c_char> {
         if wallet.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Wallet is null")));
         }
 
         let wallet = &*wallet;
 
-        let pubkey = match wallet.get_pubkey() {
-            Ok(kp) => kp,
-            Err(_) => return std::ptr::null_mut(),
-        };
+        FFIResult::from(
+            wallet
+                .get_keypair()
+                .map(|s| s.to_base58_string())
+                .map_err(Error::from),
+        )
+    }
 
-        match CString::new(pubkey.to_string()) {
-            Ok(c) => c.into_raw(),
-            Err(_) => std::ptr::null_mut(),
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn solana_wallet_get_pubkey(
+        wallet: *const SolanaWallet,
+    ) -> FFIResult<c_char> {
+        if wallet.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Wallet is null")));
         }
+
+        let wallet = &*wallet;
+
+        FFIResult::from(
+            wallet
+                .get_pubkey()
+                .map(|s| s.to_string())
+                .map_err(Error::from),
+        )
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn solana_wallet_get_mnemonic_phrase(
         wallet: *const SolanaWallet,
-    ) -> *mut c_char {
+    ) -> FFIResult<c_char> {
         if wallet.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Wallet is null")));
         }
 
         let wallet = &*wallet;
 
-        let phrase = match wallet.get_mnemonic_phrase() {
-            Ok(kp) => kp,
-            Err(_) => return std::ptr::null_mut(),
-        };
-
-        match CString::new(phrase) {
-            Ok(c) => c.into_raw(),
-            Err(_) => std::ptr::null_mut(),
-        }
+        FFIResult::from(wallet.get_mnemonic_phrase().map_err(Error::from))
     }
 
     #[allow(clippy::missing_safety_doc)]

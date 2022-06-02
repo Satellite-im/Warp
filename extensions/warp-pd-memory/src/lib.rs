@@ -221,16 +221,15 @@ pub fn pocketdimension_pd_memory() -> warp::pocket_dimension::PocketDimensionAda
 
 pub mod ffi {
     use crate::MemoryClient;
-    use std::ffi::c_void;
     use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::sync::{Arc, Mutex};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn pocketdimension_memory_new() -> *mut c_void {
+    pub unsafe extern "C" fn pocketdimension_memory_new() -> *mut PocketDimensionAdapter {
         let obj = Box::new(PocketDimensionAdapter::new(Arc::new(Mutex::new(Box::new(
             MemoryClient::new(),
         )))));
-        Box::into_raw(obj) as *mut PocketDimensionAdapter as *mut c_void
+        Box::into_raw(obj) as *mut PocketDimensionAdapter
     }
 }

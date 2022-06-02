@@ -501,8 +501,10 @@ fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<DataObject>>
 
 pub mod ffi {
     use crate::FlatfileStorage;
-    use std::ffi::{c_void, CStr};
+    use std::ffi::CStr;
     use std::os::raw::c_char;
+    use warp::error::Error;
+    use warp::ffi::FFIResult;
     use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::sync::{Arc, Mutex};
 
@@ -511,9 +513,9 @@ pub mod ffi {
     pub unsafe extern "C" fn pocket_dimension_flatfile_new(
         path: *const c_char,
         index_file: *const c_char,
-    ) -> *mut c_void {
+    ) -> FFIResult<PocketDimensionAdapter> {
         if path.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Path is null")));
         }
 
         let path = CStr::from_ptr(path).to_string_lossy().to_string();
@@ -523,12 +525,11 @@ pub mod ffi {
             false => CStr::from_ptr(index_file).to_string_lossy().to_string(),
         };
 
-        let flatfile = match FlatfileStorage::new_with_index_file(path, index_file) {
-            Ok(flatfile) => PocketDimensionAdapter::new(Arc::new(Mutex::new(Box::new(flatfile)))),
-            Err(_) => return std::ptr::null_mut(),
-        };
-
-        let obj = Box::new(flatfile);
-        Box::into_raw(obj) as *mut PocketDimensionAdapter as *mut c_void
+        match FlatfileStorage::new_with_index_file(path, index_file) {
+            Ok(flatfile) => FFIResult::ok(PocketDimensionAdapter::new(Arc::new(Mutex::new(
+                Box::new(flatfile),
+            )))),
+            Err(e) => FFIResult::err(e),
+        }
     }
 }

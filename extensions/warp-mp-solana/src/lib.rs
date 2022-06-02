@@ -701,7 +701,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_mp_solana_new_with_devnet(
-        pocketdimension: *mut MultiPassAdapter,
+        pocketdimension: *const PocketDimensionAdapter,
         tesseract: *mut Tesseract,
     ) -> *mut MultiPassAdapter {
         let mut account = SolanaAccount::with_devnet();
@@ -715,7 +715,7 @@ pub mod ffi {
         match pocketdimension.is_null() {
             true => {}
             false => {
-                let pd = &*(pocketdimension as *mut PocketDimensionAdapter);
+                let pd = &*pocketdimension;
                 account.set_cache(pd.inner().clone());
             }
         }
@@ -728,7 +728,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_mp_solana_new_with_testnet(
-        pocketdimension: *mut MultiPassAdapter,
+        pocketdimension: *const PocketDimensionAdapter,
         tesseract: *mut Tesseract,
     ) -> *mut MultiPassAdapter {
         let mut account = SolanaAccount::with_testnet();
@@ -755,7 +755,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_mp_solana_new_with_mainnet(
-        pocketdimension: *mut MultiPassAdapter,
+        pocketdimension: *const PocketDimensionAdapter,
         tesseract: *mut Tesseract,
     ) -> *mut MultiPassAdapter {
         let mut account = SolanaAccount::with_mainnet();
@@ -769,7 +769,7 @@ pub mod ffi {
         match pocketdimension.is_null() {
             true => {}
             false => {
-                let pd = &*(pocketdimension as *mut PocketDimensionAdapter);
+                let pd = &*pocketdimension;
                 account.set_cache(pd.inner().clone());
             }
         }
