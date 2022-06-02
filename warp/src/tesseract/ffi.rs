@@ -13,15 +13,15 @@ pub unsafe extern "C" fn tesseract_new() -> *mut Tesseract {
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "C" fn tesseract_from_file(file: *const c_char) -> *mut Tesseract {
+pub unsafe extern "C" fn tesseract_from_file(file: *const c_char) -> FFIResult<Tesseract> {
     if file.is_null() {
-        return std::ptr::null_mut();
+        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract is null")));
     }
 
     let cname = CStr::from_ptr(file).to_string_lossy().to_string();
     match Tesseract::from_file(cname) {
-        Ok(tesseract) => Box::into_raw(Box::new(tesseract)) as *mut Tesseract,
-        Err(_) => std::ptr::null_mut(),
+        Ok(tesseract) => FFIResult::ok(tesseract),
+        Err(e) => FFIResult::err(e),
     }
 }
 
