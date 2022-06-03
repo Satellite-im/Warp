@@ -20,7 +20,7 @@ crates = ["warp", "warp-pd-flatfile"]
 #[cfg(feature = "build-header")]
 fn main() {
     std::fs::write("cbindgen.toml", Config).unwrap();
-    println!("cargo:warning=Running cbindgen");
+    println!("cargo:warning=Running `cbindgen`");
     let run_cbindgen_results = std::process::Command::new("rustup")
         .args([
             "run",
