@@ -242,13 +242,14 @@ cfg_if::cfg_if! {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use crate::ffi::FFIArray;
+    use crate::error::Error;
+    use crate::ffi::{FFIArray, FFIResult};
     use crate::multipass::{
         identity::{FriendRequest, Identifier, Identity, IdentityUpdate, PublicKey},
         MultiPassAdapter,
     };
     use std::ffi::CStr;
-    use std::os::raw::c_char;
+    use std::os::raw::{c_char, c_void};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -256,9 +257,9 @@ pub mod ffi {
         ctx: *mut MultiPassAdapter,
         username: *const c_char,
         passphrase: *const c_char,
-    ) -> bool {
+    ) -> FFIResult<PublicKey> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let username = match username.is_null() {
@@ -278,9 +279,13 @@ pub mod ffi {
         };
 
         let mp = &mut *(ctx);
-        mp.inner_guard()
+        match mp
+            .inner_guard()
             .create_identity(username.as_deref(), passphrase.as_deref())
-            .is_ok()
+        {
+            Ok(pkey) => FFIResult::ok(pkey),
+            Err(e) => FFIResult::err(e),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -288,20 +293,20 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_get_identity(
         ctx: *const MultiPassAdapter,
         identifier: *const Identifier,
-    ) -> *mut Identity {
+    ) -> FFIResult<Identity> {
         if ctx.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if identifier.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &*(ctx);
         let id = &*(identifier as *mut Identifier);
         match mp.inner_guard().get_identity(id.clone()) {
-            Ok(identity) => Box::into_raw(Box::new(identity)) as *mut Identity,
-            Err(_) => std::ptr::null_mut(),
+            Ok(identity) => FFIResult::ok(identity),
+            Err(e) => FFIResult::err(e),
         }
     }
 
@@ -309,15 +314,15 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_get_own_identity(
         ctx: *const MultiPassAdapter,
-    ) -> *mut Identity {
+    ) -> FFIResult<Identity> {
         if ctx.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &*(ctx);
         match mp.inner_guard().get_own_identity() {
-            Ok(identity) => Box::into_raw(Box::new(identity)) as *mut Identity,
-            Err(_) => std::ptr::null_mut(),
+            Ok(identity) => FFIResult::ok(identity),
+            Err(e) => FFIResult::err(e),
         }
     }
 
@@ -326,14 +331,14 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_update_identity(
         ctx: *mut MultiPassAdapter,
         option: *const IdentityUpdate,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &mut *(ctx);
         let option = &*option;
-        mp.inner_guard().update_identity(option.clone()).is_ok()
+        FFIResult::from(mp.inner_guard().update_identity(option.clone()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -341,9 +346,9 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_decrypt_private_key(
         ctx: *mut MultiPassAdapter,
         passphrase: *const c_char,
-    ) -> *const u8 {
+    ) -> FFIResult<FFIArray<u8>> {
         if ctx.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
         let passphrase = match passphrase.is_null() {
             false => {
@@ -354,20 +359,22 @@ pub mod ffi {
         };
         let mp = &*(ctx);
         match mp.inner_guard().decrypt_private_key(passphrase.as_deref()) {
-            Ok(key) => key.as_ptr(),
-            Err(_) => std::ptr::null_mut(),
+            Ok(key) => FFIResult::ok(FFIArray::new(key)),
+            Err(e) => FFIResult::err(e),
         }
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_refresh_cache(ctx: *mut MultiPassAdapter) {
+    pub unsafe extern "C" fn multipass_refresh_cache(
+        ctx: *mut MultiPassAdapter,
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &mut *(ctx);
-        if mp.inner_guard().refresh_cache().is_ok() {}
+        FFIResult::from(mp.inner_guard().refresh_cache())
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -375,17 +382,17 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_send_request(
         ctx: *mut MultiPassAdapter,
         pubkey: *const PublicKey,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if pubkey.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        mp.inner_guard().send_request(pk.clone()).is_ok()
+        FFIResult::from(mp.inner_guard().send_request(pk.clone()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -393,18 +400,18 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_accept_request(
         ctx: *mut MultiPassAdapter,
         pubkey: *const PublicKey,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if pubkey.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        mp.inner_guard().accept_request(pk.clone()).is_ok()
+        FFIResult::from(mp.inner_guard().accept_request(pk.clone()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -412,18 +419,18 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_deny_request(
         ctx: *mut MultiPassAdapter,
         pubkey: *const PublicKey,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if pubkey.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        mp.inner_guard().deny_request(pk.clone()).is_ok()
+        FFIResult::from(mp.inner_guard().deny_request(pk.clone()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -431,33 +438,33 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_close_request(
         ctx: *mut MultiPassAdapter,
         pubkey: *const PublicKey,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if pubkey.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        mp.inner_guard().close_request(pk.clone()).is_ok()
+        FFIResult::from(mp.inner_guard().close_request(pk.clone()))
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_incoming_request(
         ctx: *const MultiPassAdapter,
-    ) -> *mut FFIArray<FriendRequest> {
+    ) -> FFIResult<FFIArray<FriendRequest>> {
         if ctx.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &*(ctx);
         match mp.inner_guard().list_incoming_request() {
-            Ok(list) => Box::into_raw(Box::new(FFIArray::new(list))) as *mut _,
-            Err(_) => std::ptr::null_mut(),
+            Ok(list) => FFIResult::ok(FFIArray::new(list)),
+            Err(e) => FFIResult::err(e),
         }
     }
 
@@ -465,15 +472,15 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_outgoing_request(
         ctx: *const MultiPassAdapter,
-    ) -> *mut FFIArray<FriendRequest> {
+    ) -> FFIResult<FFIArray<FriendRequest>> {
         if ctx.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &*(ctx);
         match mp.inner_guard().list_outgoing_request() {
-            Ok(list) => Box::into_raw(Box::new(FFIArray::new(list))) as *mut _,
-            Err(_) => std::ptr::null_mut(),
+            Ok(list) => FFIResult::ok(FFIArray::new(list)),
+            Err(e) => FFIResult::err(e),
         }
     }
 
@@ -481,15 +488,15 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_all_request(
         ctx: *const MultiPassAdapter,
-    ) -> *mut FFIArray<FriendRequest> {
+    ) -> FFIResult<FFIArray<FriendRequest>> {
         if ctx.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &*(ctx);
         match mp.inner_guard().list_all_request() {
-            Ok(list) => Box::into_raw(Box::new(FFIArray::new(list))) as *mut _,
-            Err(_) => std::ptr::null_mut(),
+            Ok(list) => FFIResult::ok(FFIArray::new(list)),
+            Err(e) => FFIResult::err(e),
         }
     }
 
@@ -498,18 +505,18 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_remove_friend(
         ctx: *mut MultiPassAdapter,
         pubkey: *const PublicKey,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if pubkey.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        mp.inner_guard().remove_friend(pk.clone()).is_ok()
+        FFIResult::from(mp.inner_guard().remove_friend(pk.clone()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -517,18 +524,18 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_block_key(
         ctx: *mut MultiPassAdapter,
         pubkey: *const PublicKey,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if pubkey.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        mp.inner_guard().block_key(pk.clone()).is_ok()
+        FFIResult::from(mp.inner_guard().block_key(pk.clone()))
     }
 
     #[allow(clippy::missing_safety_doc)]

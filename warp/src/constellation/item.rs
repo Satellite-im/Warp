@@ -289,11 +289,10 @@ pub mod ffi {
     use crate::constellation::directory::Directory;
     use crate::constellation::file::File;
     use crate::constellation::Item;
-    use std::ffi::CStr;
-    #[allow(unused)]
-    use std::ffi::{c_void, CString};
-    #[allow(unused)]
-    use std::os::raw::{c_char, c_int};
+    use crate::error::Error;
+    use crate::ffi::FFIResult;
+    use std::ffi::{CStr, CString};
+    use std::os::raw::{c_char, c_void};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -426,18 +425,21 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_rename(item: *mut Item, name: *const c_char) -> bool {
+    pub unsafe extern "C" fn item_rename(
+        item: *mut Item,
+        name: *const c_char,
+    ) -> FFIResult<c_void> {
         if item.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         if name.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let item = &mut *(item);
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
-        item.rename(&name).is_ok()
+        FFIResult::from(item.rename(&name))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -482,13 +484,13 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_set_size(item: *mut Item, size: i64) -> bool {
+    pub unsafe extern "C" fn item_set_size(item: *mut Item, size: i64) -> FFIResult<c_void> {
         if item.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let item = &mut *(item);
 
-        item.set_size(size).is_ok()
+        FFIResult::from(item.set_size(size))
     }
 }

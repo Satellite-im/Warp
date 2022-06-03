@@ -104,6 +104,8 @@ impl QueryBuilder {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
+    use crate::error::Error;
+    use crate::ffi::FFIResult;
     use crate::pocket_dimension::query::{Comparator, QueryBuilder};
     use std::ffi::CStr;
     use std::os::raw::c_char;
@@ -116,18 +118,16 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn querybuilder_import(data: *const c_char) -> *mut QueryBuilder {
+    pub unsafe extern "C" fn querybuilder_import(data: *const c_char) -> FFIResult<QueryBuilder> {
         if data.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Query is null")));
         }
         let data = CStr::from_ptr(data).to_string_lossy().to_string();
 
-        let query: QueryBuilder = match serde_json::from_str(&data) {
-            Ok(q) => q,
-            Err(_) => return std::ptr::null_mut(),
-        };
-
-        Box::into_raw(Box::new(query)) as *mut QueryBuilder
+        match serde_json::from_str(&data).map_err(Error::from) {
+            Ok(q) => FFIResult::ok(q),
+            Err(e) => FFIResult::err(e),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]

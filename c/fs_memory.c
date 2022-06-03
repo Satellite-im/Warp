@@ -16,26 +16,26 @@ int main() {
 
     const char *data = "Hello, World!";
     uint32_t data_size = strlen(data);
-
-    if(!constellation_put_buffer(memory, "readme.txt", (const uint8_t*)data, data_size)) {
+    FFIResult_c_void result_ignored_t = constellation_put_buffer(memory, "readme.txt", (const uint8_t*)data, data_size);
+    if(result_ignored_t.error) {
         printf("Error uploading file\n");
         return -1;
     }
 
 
-    uint8_t* return_data = constellation_get_buffer(memory, "readme.txt");
+    FFIResult_FFIVec_u8 result_vu8_t = constellation_get_buffer(memory, "readme.txt");
 
-    if (!return_data) {
+    if (result_vu8_t.error) {
         return -1;
     }
 
-    printf("%s\n", (const char*)data);
+    printf("%s\n", (const char*)result_vu8_t.data->ptr);
 
-    ConstellationDataType data_t = Json;
+    // ConstellationDataType data_t = Json;
 
-    char *export = constellation_export(memory, data_t);
+    // char *export = constellation_export(memory, data_t);
 
-    printf("%s\n", export);
+    // printf("%s\n", export);
 
     constellationadapter_free(memory);
 

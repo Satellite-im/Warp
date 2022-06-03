@@ -235,9 +235,11 @@ impl PocketDimensionAdapter {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::data::{Data, DataType};
-    use crate::ffi::FFIArray;
+    use crate::error::Error;
+    use crate::ffi::{FFIArray, FFIResult};
     use crate::pocket_dimension::query::QueryBuilder;
     use crate::pocket_dimension::PocketDimensionAdapter;
+    use std::os::raw::c_void;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -245,19 +247,19 @@ pub mod ffi {
         ctx: *mut PocketDimensionAdapter,
         dimension: DataType,
         data: *const Data,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Adapter is null")));
         }
 
         if data.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Data is null")));
         }
 
         let pd = &mut *ctx;
         let data = &*data;
 
-        pd.inner_guard().add_data(dimension, data).is_ok()
+        FFIResult::from(pd.inner_guard().add_data(dimension, data))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -266,19 +268,19 @@ pub mod ffi {
         ctx: *mut PocketDimensionAdapter,
         dimension: DataType,
         query: *const QueryBuilder,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Adapter is null")));
         }
 
-        if query.is_null() {
-            return false;
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Query is is required")));
         }
 
         let pd = &mut *ctx;
         let query = &*query;
 
-        pd.inner_guard().has_data(dimension, query).is_ok()
+        FFIResult::from(pd.inner_guard().has_data(dimension, query))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -287,9 +289,9 @@ pub mod ffi {
         ctx: *const PocketDimensionAdapter,
         dimension: DataType,
         query: *const QueryBuilder,
-    ) -> *mut FFIArray<Data> {
+    ) -> FFIResult<FFIArray<Data>> {
         if ctx.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Adapter is null")));
         }
 
         let query = match query.is_null() {
@@ -300,8 +302,8 @@ pub mod ffi {
         let pd = &*ctx;
 
         match pd.inner_guard().get_data(dimension, query) {
-            Ok(list) => Box::into_raw(Box::new(FFIArray::new(list))) as *mut FFIArray<Data>,
-            Err(_) => std::ptr::null_mut(),
+            Ok(list) => FFIResult::ok(FFIArray::new(list)),
+            Err(e) => FFIResult::err(e),
         }
     }
 
@@ -311,9 +313,9 @@ pub mod ffi {
         ctx: *const PocketDimensionAdapter,
         dimension: DataType,
         query: *const QueryBuilder,
-    ) -> i64 {
+    ) -> FFIResult<i64> {
         if ctx.is_null() {
-            return 0;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Adapter is null")));
         }
 
         let query = match query.is_null() {
@@ -323,7 +325,10 @@ pub mod ffi {
 
         let pd = &*ctx;
 
-        pd.inner_guard().size(dimension, query).unwrap_or(0)
+        match pd.inner_guard().size(dimension, query) {
+            Ok(size) => FFIResult::ok(size),
+            Err(e) => FFIResult::err(e),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -332,9 +337,9 @@ pub mod ffi {
         ctx: *const PocketDimensionAdapter,
         dimension: DataType,
         query: *const QueryBuilder,
-    ) -> i64 {
+    ) -> FFIResult<i64> {
         if ctx.is_null() {
-            return 0;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Adapter is null")));
         }
 
         let query = match query.is_null() {
@@ -344,7 +349,10 @@ pub mod ffi {
 
         let pd = &*ctx;
 
-        pd.inner_guard().count(dimension, query).unwrap_or(0)
+        match pd.inner_guard().count(dimension, query) {
+            Ok(size) => FFIResult::ok(size),
+            Err(e) => FFIResult::err(e),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -352,13 +360,13 @@ pub mod ffi {
     pub unsafe extern "C" fn pocket_dimension_empty(
         ctx: *mut PocketDimensionAdapter,
         dimension: DataType,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Adapter is null")));
         }
 
         let pd = &mut *ctx;
 
-        pd.inner_guard().empty(dimension).is_ok()
+        FFIResult::from(pd.inner_guard().empty(dimension))
     }
 }

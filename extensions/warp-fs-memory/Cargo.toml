@@ -29,3 +29,6 @@ cbindgen = "0.23"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
+
+[features]
+build-header = []

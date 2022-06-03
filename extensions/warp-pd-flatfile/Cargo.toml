@@ -16,6 +16,7 @@ uuid = { version = "1.0", features = ["serde", "v4"] }
 
 [features]
 default = []
+build-header = []
 
 [build-dependencies]
 cbindgen = "0.23"

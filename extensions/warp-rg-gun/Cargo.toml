@@ -29,3 +29,6 @@ uuid = { version = "1.0", features = ["serde", "v4"] }
 warp-pd-stretto = { path = "../warp-pd-stretto" }
 warp-mp-solana = { path = "../warp-mp-solana" }
 rustyline-async = "0.2"
+
+[features]
+build-header = []

@@ -1,19 +1,46 @@
-extern crate cbindgen;
+const Config: &'static str = r#"
+language = "C"
 
-use cbindgen::Language;
-use std::env;
-use std::str::FromStr;
+cpp_compat = true
 
+[export]
+
+exclude = ["FFIError", "FFIResult_c_char"]
+
+[parse]
+parse_deps = true
+clean = false
+include = ["warp"]
+
+[parse.expand]
+crates = ["warp", "warp-pd-flatfile"]
+
+"#;
+
+#[cfg(feature = "build-header")]
 fn main() {
-    let crate_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR does not exist");
-    let lang = Language::from_str(&env::var("CBINDGEN_LANG").unwrap_or_else(|_| String::from("C")))
-        .unwrap_or(Language::C);
+    std::fs::write("cbindgen.toml", Config).unwrap();
+    println!("cargo:warning=Running `cbindgen`");
+    let run_cbindgen_results = std::process::Command::new("rustup")
+        .args([
+            "run",
+            "nightly",
+            "--",
+            "cbindgen",
+            "-c",
+            "cbindgen.toml",
+            "-o",
+            "warp-pd-flatfile.h",
+        ])
+        .stdout(std::process::Stdio::inherit())
+        .output()
+        .unwrap();
 
-    cbindgen::Builder::new()
-        .with_crate(crate_dir)
-        .with_language(lang)
-        .with_include_guard("_WARP_PD_FLATFILE_H_")
-        .generate()
-        .expect("Unable to generate bindings")
-        .write_to_file("warp-pd-flatfile.h");
+    println!(
+        "cargo:warning=Status Success:{}",
+        run_cbindgen_results.status.success()
+    );
 }
+
+#[cfg(not(feature = "build-header"))]
+fn main() {}
