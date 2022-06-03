@@ -8,7 +8,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 
 [dependencies]
 warp = { path = "../../warp" }
-
+warp-derive = { path = "../../warp/warp-derive" }
 bs58 = "0.4"
 anyhow = "1.0"
 thiserror = "1.0"
@@ -43,3 +43,6 @@ hex = "0.4.3"
 
 [build-dependencies]
 cbindgen = "0.23"
+
+[features]
+build-header = []
