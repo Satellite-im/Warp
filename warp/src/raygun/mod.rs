@@ -5,7 +5,7 @@ use crate::multipass::identity::PublicKey;
 use crate::sync::{Arc, Mutex, MutexGuard};
 use crate::Extension;
 
-use warp_derive::FFIFree;
+use warp_derive::{FFIArray, FFIFree};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -80,7 +80,7 @@ impl MessageOptions {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, FFIArray)]
 pub struct Message {
     /// ID of the Message
     id: Uuid,
@@ -363,6 +363,356 @@ impl RayGunAdapter {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    //TODO
+    use crate::error::Error;
+    use crate::ffi::{FFIArray, FFIResult};
+    use crate::raygun::{
+        EmbedState, Message, MessageOptions, PinState, RayGunAdapter, ReactionState,
+    };
+    use crate::runtime_handle;
+    use std::ffi::CStr;
+    use std::os::raw::{c_char, c_void};
+    use std::str::{FromStr, Utf8Error};
+    use uuid::Uuid;
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_get_messages(
+        ctx: *const RayGunAdapter,
+        convo_id: *const c_char,
+    ) -> FFIResult<FFIArray<Message>> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        if convo_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
+        {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let adapter = &*ctx;
+        let rt = runtime_handle();
+        match rt.block_on(async {
+            adapter
+                .inner_guard()
+                .get_messages(convo_id, MessageOptions::default(), None)
+                .await
+        }) {
+            Ok(messages) => FFIResult::ok(FFIArray::new(messages)),
+            Err(e) => FFIResult::err(e),
+        }
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_send(
+        ctx: *mut RayGunAdapter,
+        convo_id: *const c_char,
+        message_id: *const c_char,
+        messages: *const *const c_char,
+        lines: usize,
+    ) -> FFIResult<c_void> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        if convo_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        if messages.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
+        {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let msg_id = match message_id.is_null() {
+            false => {
+                match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string()) {
+                    Ok(uuid) => Some(uuid),
+                    Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+                }
+            }
+            true => None,
+        };
+
+        let messages = match pointer_to_vec(messages, lines) {
+            Ok(messages) => messages,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let adapter = &mut *ctx;
+        let rt = runtime_handle();
+        FFIResult::from(
+            rt.block_on(async { adapter.inner_guard().send(convo_id, msg_id, messages).await }),
+        )
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_delete(
+        ctx: *mut RayGunAdapter,
+        convo_id: *const c_char,
+        message_id: *const c_char,
+    ) -> FFIResult<c_void> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        if convo_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        if message_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
+        {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string())
+        {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let adapter = &mut *ctx;
+        let rt = runtime_handle();
+        FFIResult::from(rt.block_on(async { adapter.inner_guard().delete(convo_id, msg_id).await }))
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_react(
+        ctx: *mut RayGunAdapter,
+        convo_id: *const c_char,
+        message_id: *const c_char,
+        state: ReactionState,
+        emoji: *const c_char,
+    ) -> FFIResult<c_void> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        if convo_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        if message_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
+        {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string())
+        {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let emoji = match emoji.is_null() {
+            true => None,
+            false => Some(CStr::from_ptr(emoji).to_string_lossy().to_string()),
+        };
+
+        let adapter = &mut *ctx;
+        let rt = runtime_handle();
+        FFIResult::from(rt.block_on(async {
+            adapter
+                .inner_guard()
+                .react(convo_id, msg_id, state, emoji)
+                .await
+        }))
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_pin(
+        ctx: *mut RayGunAdapter,
+        convo_id: *const c_char,
+        message_id: *const c_char,
+        state: PinState,
+    ) -> FFIResult<c_void> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        if convo_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        if message_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
+        {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string())
+        {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let adapter = &mut *ctx;
+        let rt = runtime_handle();
+        FFIResult::from(
+            rt.block_on(async { adapter.inner_guard().pin(convo_id, msg_id, state).await }),
+        )
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_reply(
+        ctx: *mut RayGunAdapter,
+        convo_id: *const c_char,
+        message_id: *const c_char,
+        messages: *const *const c_char,
+        lines: usize,
+    ) -> FFIResult<c_void> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        if convo_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        if message_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        if messages.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
+        {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string())
+        {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let messages = match pointer_to_vec(messages, lines) {
+            Ok(messages) => messages,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let adapter = &mut *ctx;
+        let rt = runtime_handle();
+        FFIResult::from(rt.block_on(async {
+            adapter
+                .inner_guard()
+                .reply(convo_id, msg_id, messages)
+                .await
+        }))
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_ping(
+        ctx: *mut RayGunAdapter,
+        convo_id: *const c_char,
+    ) -> FFIResult<c_void> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        if convo_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
+        {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let adapter = &mut *ctx;
+        let rt = runtime_handle();
+        FFIResult::from(rt.block_on(async { adapter.inner_guard().ping(convo_id).await }))
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_embeds(
+        ctx: *mut RayGunAdapter,
+        convo_id: *const c_char,
+        message_id: *const c_char,
+        state: EmbedState,
+    ) -> FFIResult<c_void> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        if convo_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        if message_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
+        {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string())
+        {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let adapter = &mut *ctx;
+        let rt = runtime_handle();
+        FFIResult::from(
+            rt.block_on(async { adapter.inner_guard().embeds(convo_id, msg_id, state).await }),
+        )
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    unsafe fn pointer_to_vec(
+        data: *const *const c_char,
+        len: usize,
+    ) -> Result<Vec<String>, Utf8Error> {
+        std::slice::from_raw_parts(data, len)
+            .iter()
+            .map(|arg| CStr::from_ptr(*arg).to_str().map(ToString::to_string))
+            .collect()
+    }
 }
