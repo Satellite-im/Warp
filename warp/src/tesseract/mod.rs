@@ -15,6 +15,8 @@ use std::io::prelude::*;
 
 use std::path::PathBuf;
 
+use crate::sync::{Arc, Mutex};
+
 use wasm_bindgen::prelude::*;
 
 type Result<T> = std::result::Result<T, Error>;
@@ -220,6 +222,13 @@ impl Tesseract {
             map.insert(key.clone(), value);
         }
         Ok(map)
+    }
+
+    /// Creates a TesseractShared
+    ///
+    /// Note: Tesseract itself would be consumed by TesseractShared
+    pub fn shared(self) -> TesseractShared {
+        TesseractShared::new(self)
     }
 }
 
@@ -539,6 +548,23 @@ impl Tesseract {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, FFIFree)]
+pub struct TesseractShared {
+    tesseract: Arc<Mutex<Tesseract>>,
+}
+
+impl TesseractShared {
+    pub fn new(tesseract: Tesseract) -> Self {
+        let tesseract = Arc::new(Mutex::new(tesseract));
+        TesseractShared { tesseract }
+    }
+
+    pub fn to_inner(&self) -> Arc<Mutex<Tesseract>> {
+        self.tesseract.clone()
     }
 }
 

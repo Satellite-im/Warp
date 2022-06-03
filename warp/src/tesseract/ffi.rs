@@ -3,7 +3,7 @@ use crate::ffi::FFIResult;
 use libc::c_void;
 use std::{ffi::CStr, os::raw::c_char};
 
-use crate::tesseract::Tesseract;
+use crate::tesseract::{Tesseract, TesseractShared};
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
@@ -208,6 +208,7 @@ pub unsafe extern "C" fn tesseract_delete(
     let c_key = CStr::from_ptr(key).to_string_lossy().to_string();
     FFIResult::from(tesseract.delete(&c_key))
 }
+
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
 pub unsafe extern "C" fn tesseract_clear(tesseract: *mut Tesseract) {
@@ -217,6 +218,18 @@ pub unsafe extern "C" fn tesseract_clear(tesseract: *mut Tesseract) {
 
     let tesseract = &mut *tesseract;
     tesseract.clear()
+}
+
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+pub unsafe extern "C" fn tesseract_shared(tesseract: *mut Tesseract) -> *mut TesseractShared {
+    if tesseract.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let tesseract: Box<Tesseract> = Box::from_raw(tesseract);
+    let shared = tesseract.shared();
+    Box::into_raw(Box::new(shared))
 }
 
 #[allow(clippy::missing_safety_doc)]
