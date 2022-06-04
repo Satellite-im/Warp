@@ -8,6 +8,7 @@
 void print_error(FFIError* error) {
     printf("Error Type: %s\n", error->error_type);
     printf("Error Message: %s\n", error->error_message);
+    ffierror_free(error);
 }
 
 int main() {
@@ -60,9 +61,7 @@ int main() {
         return -1;
     }
 
-    char *data = result_char_t.data;
-
-    if (strcmp(data, "MYVAL") != 0) {
+    if (strcmp(result_char_t.data, "MYVAL") != 0) {
         printf("Data from tesseract is invalid\n");
         return -1;
     }
@@ -75,9 +74,7 @@ int main() {
         return -1;
     }
 
-    free(data);
-    // free(result_char_t.data);
-    // free(result_char_t.error);
+    free(result_char_t.data);
     tesseract_free(tesseract);
     
     return 0;
