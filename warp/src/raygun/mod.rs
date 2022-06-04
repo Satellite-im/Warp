@@ -258,13 +258,39 @@ impl Message {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub struct Reaction {
     /// Emoji unicode for `Reaction`
     emoji: String,
 
     /// ID of the user who reacted to `Message`
-    users: Vec<Uuid>,
+    users: Vec<SenderId>,
+}
+
+impl Reaction {
+    pub fn emoji(&self) -> String {
+        self.emoji.clone()
+    }
+
+    pub fn users(&self) -> Vec<SenderId> {
+        self.users.clone()
+    }
+}
+
+impl Reaction {
+    pub fn set_emoji(&mut self, emoji: &str) {
+        self.emoji = emoji.to_string()
+    }
+
+    pub fn set_users(&mut self, users: Vec<SenderId>) {
+        self.users = users
+    }
+}
+
+impl Reaction {
+    pub fn users_mut(&mut self) -> &mut Vec<SenderId> {
+        &mut self.users
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
