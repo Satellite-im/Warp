@@ -14,7 +14,7 @@ use libp2p::mdns::{Mdns, MdnsConfig, MdnsEvent};
 use libp2p::swarm::{NetworkBehaviour, NetworkBehaviourEventProcess, SwarmEvent};
 use libp2p::{identity, tokio_development_transport, Multiaddr, PeerId, Swarm};
 use libp2p::{ping, NetworkBehaviour};
-use warp::raygun::group::*;
+use warp::raygun::{group::*, Reaction};
 
 use std::str::FromStr;
 use std::time::Duration;
@@ -205,7 +205,7 @@ fn process_message_event(conversation: Arc<Mutex<Vec<Message>>>, events: Messagi
 
             let _ = messages.remove(index);
         }
-        MessagingEvents::PinMessage(convo_id, message_id, state) => {
+        MessagingEvents::PinMessage(convo_id, _, message_id, state) => {
             let mut messages = conversation.lock();
 
             let index = match messages
@@ -227,9 +227,86 @@ fn process_message_event(conversation: Arc<Mutex<Vec<Message>>>, events: Messagi
                 PinState::Unpin => *message.pinned_mut() = false,
             }
         }
-        MessagingEvents::ReactMessage(_, _, _) => {}
+        MessagingEvents::ReactMessage(convo_id, sender, message_id, state, emoji) => {
+            let mut messages = conversation.lock();
+
+            let index = match messages
+                .iter()
+                .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
+                .ok_or(Error::ArrayPositionNotFound)
+            {
+                Ok(index) => index,
+                Err(_) => return,
+            };
+
+            let message = match messages.get_mut(index) {
+                Some(msg) => msg,
+                None => return,
+            };
+
+            let reactions = message.reactions_mut();
+
+            match state {
+                ReactionState::Add => {
+                    let emoji = match emoji {
+                        Some(e) => e,
+                        None => return,
+                    };
+
+                    let index = match reactions
+                        .iter()
+                        .position(|reaction| reaction.emoji().eq(&emoji))
+                    {
+                        Some(index) => index,
+                        None => {
+                            let mut reaction = Reaction::default();
+                            reaction.set_emoji(&emoji);
+                            reaction.set_users(vec![sender]);
+                            reactions.push(reaction);
+                            return;
+                        }
+                    };
+
+                    let reaction = match reactions.get_mut(index) {
+                        Some(r) => r,
+                        None => return,
+                    };
+
+                    reaction.users_mut().push(sender);
+                }
+                ReactionState::Remove => {
+                    let emoji = match emoji {
+                        Some(e) => e,
+                        None => return,
+                    };
+
+                    let index = match reactions.iter().position(|reaction| {
+                        reaction.users().contains(&sender) && reaction.emoji().eq(&emoji)
+                    }) {
+                        Some(index) => index,
+                        None => return,
+                    };
+
+                    let reaction = match reactions.get_mut(index) {
+                        Some(r) => r,
+                        None => return,
+                    };
+
+                    let user_index = match reaction
+                        .users()
+                        .iter()
+                        .position(|reaction_sender| reaction_sender.eq(&sender))
+                    {
+                        Some(index) => index,
+                        None => return,
+                    };
+
+                    reaction.users_mut().remove(user_index);
+                }
+            }
+        }
         MessagingEvents::DeleteConversation(_) => {}
-        MessagingEvents::Ping(_) => {}
+        MessagingEvents::Ping(_, _) => {}
     }
 }
 
@@ -520,9 +597,9 @@ impl Libp2pMessaging {
         Ok(())
     }
 
-    pub fn sender_id(&self) -> anyhow::Result<warp::multipass::identity::PublicKey> {
+    pub fn sender_id(&self) -> anyhow::Result<SenderId> {
         let ident = self.account.lock().get_own_identity()?;
-        Ok(ident.public_key())
+        Ok(SenderId::from_public_key(ident.public_key()))
     }
 
     #[cfg(feature = "solana")]
@@ -578,8 +655,8 @@ async fn swarm_floodsub_events(
                 MessagingEvents::DeleteMessage(id, _) => *id,
                 MessagingEvents::PinMessage(id, _, _) => *id,
                 MessagingEvents::DeleteConversation(id) => *id,
-                MessagingEvents::ReactMessage(id, _, _) => *id,
-                MessagingEvents::Ping(id) => *id,
+                MessagingEvents::ReactMessage(id, _, _, _, _) => *id,
+                MessagingEvents::Ping(id, _) => *id,
             };
 
             let topic = Topic::new(topic.to_string());
@@ -620,10 +697,10 @@ async fn swarm_gossipsub_events(
             MessagingEvents::NewMessage(message) => message.conversation_id(),
             MessagingEvents::EditMessage(id, _, _) => *id,
             MessagingEvents::DeleteMessage(id, _) => *id,
-            MessagingEvents::PinMessage(id, _, _) => *id,
+            MessagingEvents::PinMessage(id, _, _, _) => *id,
             MessagingEvents::DeleteConversation(id) => *id,
-            MessagingEvents::ReactMessage(id, _, _) => *id,
-            MessagingEvents::Ping(id) => *id,
+            MessagingEvents::ReactMessage(id, _, _, _, _) => *id,
+            MessagingEvents::Ping(id, _) => *id,
         };
 
         let topic = Topic::new(topic.to_string());
@@ -691,9 +768,9 @@ pub enum MessagingEvents {
     EditMessage(Uuid, Uuid, Vec<String>),
     DeleteMessage(Uuid, Uuid),
     DeleteConversation(Uuid),
-    PinMessage(Uuid, Uuid, PinState),
-    ReactMessage(Uuid, Uuid, ReactionState),
-    Ping(Uuid),
+    PinMessage(Uuid, SenderId, Uuid, PinState),
+    ReactMessage(Uuid, SenderId, Uuid, ReactionState, Option<String>),
+    Ping(Uuid, SenderId),
 }
 
 #[async_trait::async_trait]
@@ -731,10 +808,10 @@ impl RayGun for Libp2pMessaging {
     ) -> Result<()> {
         //TODO: Implement editing message
         //TODO: Check to see if message was sent or if its still sending
-        let pubkey = self.sender_id()?;
+        let sender = self.sender_id()?;
         let mut message = Message::new();
         message.set_conversation_id(conversation_id);
-        message.set_sender(SenderId::from_public_key(pubkey));
+        message.set_sender(sender);
 
         message.set_value(value);
 
@@ -771,12 +848,83 @@ impl RayGun for Libp2pMessaging {
 
     async fn react(
         &mut self,
-        _conversation_id: Uuid,
-        _message_id: Uuid,
-        _state: ReactionState,
-        _emoji: Option<String>,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: Option<String>,
     ) -> Result<()> {
-        Err(Error::Unimplemented)
+        let sender = self.sender_id()?;
+        self.send_event(MessagingEvents::ReactMessage(
+            conversation_id,
+            sender.clone(),
+            message_id,
+            state,
+            emoji.clone(),
+        ))
+        .await?;
+        let mut messages = self.conversations.lock();
+
+        let index = messages
+            .iter()
+            .position(|conv| conv.conversation_id() == conversation_id && conv.id() == message_id)
+            .ok_or(Error::ArrayPositionNotFound)?;
+
+        let message = messages
+            .get_mut(index)
+            .ok_or(Error::ArrayPositionNotFound)?;
+
+        let reactions = message.reactions_mut();
+
+        match state {
+            ReactionState::Add => {
+                let emoji = match emoji {
+                    Some(e) => e,
+                    None => return Err(Error::Any(anyhow!("Emoji is required"))),
+                };
+                let index = match reactions
+                    .iter()
+                    .position(|reaction| reaction.emoji().eq(&emoji))
+                {
+                    Some(index) => index,
+                    None => {
+                        let mut reaction = Reaction::default();
+                        reaction.set_emoji(&emoji);
+                        reaction.set_users(vec![sender]);
+                        reactions.push(reaction);
+                        return Ok(());
+                    }
+                };
+
+                let reaction = reactions
+                    .get_mut(index)
+                    .ok_or(Error::ArrayPositionNotFound)?;
+
+                reaction.users_mut().push(sender);
+            }
+            ReactionState::Remove => {
+                let emoji = match emoji {
+                    Some(e) => e,
+                    None => return Err(Error::Any(anyhow!("Emoji is required"))),
+                };
+                let index = reactions
+                    .iter()
+                    .position(|r| r.users().contains(&sender) && r.emoji().eq(&emoji))
+                    .ok_or(Error::ArrayPositionNotFound)?;
+
+                let reaction = reactions
+                    .get_mut(index)
+                    .ok_or(Error::ArrayPositionNotFound)?;
+
+                let user_index = reaction
+                    .users()
+                    .iter()
+                    .position(|reaction_sender| reaction_sender.eq(&sender))
+                    .ok_or(Error::ArrayPositionNotFound)?;
+
+                reaction.users_mut().remove(user_index);
+            }
+        }
+        Ok(())
     }
 
     async fn pin(
@@ -785,8 +933,10 @@ impl RayGun for Libp2pMessaging {
         message_id: Uuid,
         state: PinState,
     ) -> Result<()> {
+        let sender = self.sender_id()?;
         self.send_event(MessagingEvents::PinMessage(
             conversation_id,
+            sender,
             message_id,
             state,
         ))
@@ -824,11 +974,11 @@ impl RayGun for Libp2pMessaging {
         message_id: Uuid,
         value: Vec<String>,
     ) -> Result<()> {
-        let pubkey = self.sender_id()?;
+        let sender = self.sender_id()?;
         let mut message = Message::new();
         message.set_conversation_id(conversation_id);
         message.set_replied(Some(message_id));
-        message.set_sender(SenderId::from_public_key(pubkey));
+        message.set_sender(sender);
 
         message.set_value(value);
 
@@ -848,7 +998,8 @@ impl RayGun for Libp2pMessaging {
     }
 
     async fn ping(&mut self, id: Uuid) -> Result<()> {
-        self.send_event(MessagingEvents::Ping(id))
+        let sender = self.sender_id()?;
+        self.send_event(MessagingEvents::Ping(id, sender))
             .await
             .map_err(Error::Any)
     }
