@@ -178,10 +178,9 @@ fn process_message_event(conversation: Arc<Mutex<Vec<Message>>>, events: Messagi
             let index = match messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
-                .ok_or(Error::ArrayPositionNotFound)
             {
-                Ok(index) => index,
-                Err(_) => return,
+                Some(index) => index,
+                None => return,
             };
 
             let message = match messages.get_mut(index) {
@@ -803,22 +802,48 @@ impl RayGun for Libp2pMessaging {
     async fn send(
         &mut self,
         conversation_id: Uuid,
-        _message_id: Option<Uuid>,
+        message_id: Option<Uuid>,
         value: Vec<String>,
     ) -> Result<()> {
-        //TODO: Implement editing message
-        //TODO: Check to see if message was sent or if its still sending
         let sender = self.sender_id()?;
-        let mut message = Message::new();
-        message.set_conversation_id(conversation_id);
-        message.set_sender(sender);
+        let message = match message_id {
+            Some(id) => {
+                //TODO: Get message from cache if available.
+                self.send_event(MessagingEvents::EditMessage(
+                    conversation_id,
+                    id,
+                    value.clone(),
+                ))
+                .await?;
+                let mut messages = self.conversations.lock();
 
-        message.set_value(value);
+                let index = messages
+                    .iter()
+                    .position(|message| {
+                        message.conversation_id() == conversation_id && message.id() == id
+                    })
+                    .ok_or(Error::ArrayPositionNotFound)?;
 
-        self.send_event(MessagingEvents::NewMessage(message.clone()))
-            .await?;
+                let message = messages
+                    .get_mut(index)
+                    .ok_or(Error::ArrayPositionNotFound)?;
 
-        self.conversations.lock().push(message.clone());
+                message.set_value(value);
+                message.clone()
+            }
+            None => {
+                let mut message = Message::new();
+                message.set_conversation_id(conversation_id);
+                message.set_sender(sender);
+
+                message.set_value(value);
+
+                self.send_event(MessagingEvents::NewMessage(message.clone()))
+                    .await?;
+                self.conversations.lock().push(message.clone());
+                message
+            }
+        };
 
         if let Ok(mut cache) = self.get_cache() {
             let data = DataObject::new(DataType::Messaging, message)?;
