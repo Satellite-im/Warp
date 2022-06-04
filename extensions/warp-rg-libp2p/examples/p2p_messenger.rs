@@ -5,9 +5,10 @@ use std::io::Write;
 use std::str::FromStr;
 use uuid::Uuid;
 use warp::crypto::hash::sha256_hash;
+use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState};
+use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, SenderId};
 use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
 use warp_mp_solana::SolanaAccount;
@@ -19,12 +20,12 @@ fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
     Ok(Arc::new(Mutex::new(Box::new(storage))))
 }
 
-async fn create_account(
+fn create_account(
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
 ) -> anyhow::Result<Arc<Mutex<Box<dyn MultiPass>>>> {
     let env = std::env::var("TESSERACT_FILE").unwrap_or(format!("datastore"));
 
-    let mut tesseract = Tesseract::from_file("datastore").unwrap_or_default();
+    let mut tesseract = Tesseract::from_file(&env).unwrap_or_default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
@@ -36,15 +37,12 @@ async fn create_account(
     account.set_tesseract(tesseract);
     account.set_cache(cache);
 
-    tokio::task::spawn_blocking(move || -> anyhow::Result<Arc<Mutex<Box<dyn MultiPass>>>> {
-        match account.get_own_identity() {
-            Ok(_) => return Ok(Arc::new(Mutex::new(Box::new(account)))),
-            Err(_) => {}
-        };
-        account.create_identity(None, None)?;
-        Ok(Arc::new(Mutex::new(Box::new(account))))
-    })
-    .await?
+    match account.get_own_identity() {
+        Ok(_) => return Ok(Arc::new(Mutex::new(Box::new(account)))),
+        Err(_) => {}
+    };
+    account.create_identity(None, None)?;
+    Ok(Arc::new(Mutex::new(Box::new(account))))
 }
 
 async fn create_rg(
@@ -94,8 +92,9 @@ async fn main() -> anyhow::Result<()> {
 
     let topic = topic();
     println!("Creating account...");
-    let new_account = create_account(cache.clone()).await?;
+    let new_account = create_account(cache.clone())?;
     let user = new_account.lock().get_own_identity()?;
+
     println!("Registered user {}#{}", user.username(), user.short_id());
 
     println!("Connecting to {}", topic);
@@ -124,8 +123,9 @@ async fn main() -> anyhow::Result<()> {
                     }
                     convo_size = msg.len();
                     let msg = msg.last().unwrap();
-
-                    writeln!(stdout, "[{}] @> {}", msg.id(), msg.value().join("\n"))?;
+                    let username = get_username(new_account.clone(), msg.sender())?;
+                    //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
+                    writeln!(stdout, "[{}] @> {}", username, msg.value().join("\n"))?;
                 }
             }
             line = rl.readline().fuse() => match line {
@@ -166,6 +166,44 @@ async fn main() -> anyhow::Result<()> {
                                 //TODO: Print it out in a table
                                 writeln!(stdout, "{:?}", message)?;
                             }
+                        },
+                        Some("/edit") => {
+
+                            let conversation_id = match cmd_line.next() {
+                                Some(id) => match Uuid::from_str(id) {
+                                        Ok(uuid) => uuid,
+                                        Err(e) => {
+                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            continue
+                                        }
+                                },
+                                None => {
+                                    writeln!(stdout, "/edit <conversation-id> <message-id> <message>")?;
+                                    continue
+                                }
+                            };
+
+                            let message_id = match cmd_line.next() {
+                                Some(id) => match Uuid::from_str(id) {
+                                        Ok(uuid) => uuid,
+                                        Err(e) => {
+                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            continue
+                                        }
+                                },
+                                None => {
+                                    writeln!(stdout, "/edit <conversation-id> <message-id> <message>")?;
+                                    continue
+                                }
+                            };
+
+                            let mut message = vec![];
+
+                            while let Some(item) = cmd_line.next() {
+                                message.push(item.to_string());
+                            }
+
+                            chat.send(conversation_id, message_id, message).await?;
                         },
                         Some("/ping") => {
                             match chat.ping(topic).await {
@@ -291,4 +329,18 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn get_username(account: Arc<Mutex<Box<dyn MultiPass>>>, id: SenderId) -> anyhow::Result<String> {
+    if let Some(id) = id.get_id() {
+        //if for some reason uuid is used, we can just return that instead as a string
+        return Ok(id.to_string());
+    }
+
+    if let Some(pubkey) = id.get_public_key() {
+        let account = account.lock();
+        let identity = account.get_identity(Identifier::public_key(pubkey))?;
+        return Ok(format!("{}#{}", identity.username(), identity.short_id()));
+    }
+    anyhow::bail!("Invalid SenderId")
 }
