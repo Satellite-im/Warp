@@ -653,7 +653,7 @@ async fn swarm_floodsub_events(
                 MessagingEvents::NewMessage(message) => message.conversation_id(),
                 MessagingEvents::EditMessage(id, _, _) => *id,
                 MessagingEvents::DeleteMessage(id, _) => *id,
-                MessagingEvents::PinMessage(id, _, _) => *id,
+                MessagingEvents::PinMessage(id, _, _, _) => *id,
                 MessagingEvents::DeleteConversation(id) => *id,
                 MessagingEvents::ReactMessage(id, _, _, _, _) => *id,
                 MessagingEvents::Ping(id, _) => *id,
