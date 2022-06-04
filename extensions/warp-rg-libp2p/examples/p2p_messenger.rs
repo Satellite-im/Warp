@@ -203,7 +203,7 @@ async fn main() -> anyhow::Result<()> {
                                 message.push(item.to_string());
                             }
 
-                            chat.send(conversation_id, message_id, message).await?;
+                            chat.send(conversation_id, Some(message_id), message).await?;
                         },
                         Some("/ping") => {
                             match chat.ping(topic).await {
