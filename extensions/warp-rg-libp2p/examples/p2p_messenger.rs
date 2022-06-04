@@ -7,7 +7,7 @@ use uuid::Uuid;
 use warp::crypto::hash::sha256_hash;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::{MessageOptions, PinState, RayGun};
+use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState};
 use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
 use warp_mp_solana::SolanaAccount;
@@ -22,11 +22,13 @@ fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
 async fn create_account(
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
 ) -> anyhow::Result<Arc<Mutex<Box<dyn MultiPass>>>> {
+    let env = std::env::var("TESSERACT_FILE").unwrap_or(format!("datastore"));
+
     let mut tesseract = Tesseract::from_file("datastore").unwrap_or_default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    tesseract.set_file("datastore");
+    tesseract.set_file(env);
     tesseract.set_autosave();
 
     let tesseract = Arc::new(Mutex::new(tesseract));
@@ -172,6 +174,56 @@ async fn main() -> anyhow::Result<()> {
                                     writeln!(stdout, "Error: {}", e)?;
                                 }
                             }
+                        }
+                        Some("/react") => {
+                            let state = match cmd_line.next() {
+                                Some("add") => ReactionState::Add,
+                                Some("remove") => ReactionState::Remove,
+                                None | _ => {
+                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    continue
+                                }
+                            };
+
+                            let conversation_id = match cmd_line.next() {
+                                Some(id) => match Uuid::from_str(id) {
+                                        Ok(uuid) => uuid,
+                                        Err(e) => {
+                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            continue
+                                        }
+                                },
+                                None => {
+                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    continue
+                                }
+                            };
+
+                            let message_id = match cmd_line.next() {
+                                Some(id) => match Uuid::from_str(id) {
+                                        Ok(uuid) => uuid,
+                                        Err(e) => {
+                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            continue
+                                        }
+                                },
+                                None => {
+                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    continue
+                                }
+                            };
+
+                            let code = match cmd_line.next() {
+                                Some(code) => code.to_string(),
+                                None => {
+                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    continue
+                                }
+                            };
+
+                            chat.react(conversation_id, message_id, state, Some(code)).await?;
+                            writeln!(stdout, "Reacted")?
+
                         }
                         Some("/pin") => {
                             match cmd_line.next() {
