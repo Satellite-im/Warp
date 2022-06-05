@@ -34,6 +34,7 @@ borsh = { version = "0.9.3", optional = true }
 warp-pd-stretto = { path = "../warp-pd-stretto" }
 warp-mp-solana = { path = "../warp-mp-solana" }
 rustyline-async = "0.2"
+comfy-table = "6.0"
 
 [build-dependencies]
 cbindgen = "0.23"

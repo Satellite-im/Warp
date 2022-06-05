@@ -1,3 +1,4 @@
+use comfy_table::Table;
 use futures::prelude::*;
 use libp2p::Multiaddr;
 use rustyline_async::{Readline, ReadlineError};
@@ -161,14 +162,28 @@ async fn main() -> anyhow::Result<()> {
                         //     chat.send_command(command).await?
                         // },
                         Some("/list") => {
+                            let mut table = Table::new();
+                            table.set_header(vec!["ID", "CID", "Date", "Sender", "Message", "Pinned", "Reaction"]);
                             let messages = chat.get_messages(topic, MessageOptions::default(), None).await?;
                             for message in messages.iter() {
-                                //TODO: Print it out in a table
-                                writeln!(stdout, "{:?}", message)?;
+                                let username = get_username(new_account.clone(), message.sender())?;
+                                let mut emojis = vec![];
+                                for reaction in message.reactions() {
+                                    emojis.push(reaction.emoji());
+                                }
+                                table.add_row(vec![
+                                    &message.id().to_string(),
+                                    &message.conversation_id().to_string(),
+                                    &message.date().to_string(),
+                                    &username,
+                                    &message.value().join("\n"),
+                                    &format!("{}", message.pinned()),
+                                    &format!("{}", if emojis.is_empty() { "NONE".into() } else { emojis.join(" ") })
+                                ]);
                             }
+                            writeln!(stdout, "{}", table)?;
                         },
                         Some("/edit") => {
-
                             let conversation_id = match cmd_line.next() {
                                 Some(id) => match Uuid::from_str(id) {
                                         Ok(uuid) => uuid,
@@ -259,7 +274,10 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            chat.react(conversation_id, message_id, state, Some(code)).await?;
+                            if let Err(e) = chat.react(conversation_id, message_id, state, Some(code)).await {
+                                writeln!(stdout, "Error: {}", e)?;
+                                continue;
+                            }
                             writeln!(stdout, "Reacted")?
 
                         }
@@ -313,9 +331,13 @@ async fn main() -> anyhow::Result<()> {
                                 None => { writeln!(stdout, "/unpin <id | all>")? }
                             }
                         }
-                        _ => if let Err(e) = chat.send(topic, None, vec![line.to_string()]).await {
-                           writeln!(stdout, "Error sending message: {}", e)?;
-                           continue
+                        _ => {
+                            if !line.is_empty() {
+                                if let Err(e) = chat.send(topic, None, vec![line.to_string()]).await {
+                                    writeln!(stdout, "Error sending message: {}", e)?;
+                                    continue
+                                }
+                            }
                        }
                     }
                 },

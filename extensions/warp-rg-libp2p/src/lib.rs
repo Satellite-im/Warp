@@ -810,6 +810,9 @@ impl RayGun for Libp2pMessaging {
         message_id: Option<Uuid>,
         value: Vec<String>,
     ) -> Result<()> {
+        if value.is_empty() {
+            return Err(Error::Any(anyhow!("Message is empty")));
+        }
         let sender = self.sender_id()?;
         let message = match message_id {
             Some(id) => {
