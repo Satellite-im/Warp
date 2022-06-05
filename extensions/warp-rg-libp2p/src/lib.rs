@@ -444,18 +444,9 @@ impl Libp2pMessaging {
                         }
                     }
                     rg_event = into_rx.recv() => {
-                        cfg_if::cfg_if!{
-                            if #[cfg(feature = "gossipsub")] {
-                                if let Err(e) = swarm_gossipsub_events(&mut swarm, rg_event, outer_tx.clone()).await {
-                                    //TODO: Log
-                                    println!("{}", e);
-                                }
-                            } else if #[cfg(feature = "floodsub")] {
-                                if let Err(e) = swarm_floodsub_events(&mut swarm, rg_event, outer_tx.clone()).await {
-                                    //TODO: Log
-                                    println!("{}", e);
-                                }
-                            }
+                        if let Err(e) = swarm_events(&mut swarm, rg_event, outer_tx.clone()).await {
+                            //TODO: Log
+                            println!("{}", e);
                         }
                     },
                     event = swarm.select_next_some() => {
@@ -645,53 +636,8 @@ fn swarm_command(
     Ok(())
 }
 
-#[cfg(feature = "floodsub")]
-async fn swarm_floodsub_events(
-    swarm: &mut Swarm<RayGunBehavior>,
-    event: Option<MessagingEvents>,
-    tx: Sender<Result<()>>,
-) -> anyhow::Result<()> {
-    match event {
-        Some(event) => {
-            let topic = match &event {
-                MessagingEvents::NewMessage(message) => message.conversation_id(),
-                MessagingEvents::EditMessage(id, _, _) => *id,
-                MessagingEvents::DeleteMessage(id, _) => *id,
-                MessagingEvents::PinMessage(id, _, _, _) => *id,
-                MessagingEvents::DeleteConversation(id) => *id,
-                MessagingEvents::ReactMessage(id, _, _, _, _) => *id,
-                MessagingEvents::Ping(id, _) => *id,
-            };
-
-            let topic = Topic::new(topic.to_string());
-
-            match serde_json::to_vec(&event) {
-                Ok(bytes) => {
-                    //TODO: Resolve initial connection/subscribe
-                    swarm.behaviour_mut().sub.subscribe(topic.clone());
-
-                    swarm.behaviour_mut().sub.publish(topic, bytes);
-
-                    if let Err(e) = tx.send(Ok(())).await {
-                        //TODO: Log error
-                        println!("{}", e);
-                    }
-                }
-                Err(e) => {
-                    if let Err(e) = tx.send(Err(Error::from(e))).await {
-                        //TODO: Log error
-                        println!("{}", e);
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-#[cfg(feature = "gossipsub")]
-async fn swarm_gossipsub_events(
+#[cfg(any(feature = "gossipsub", feature = "floodsub"))]
+async fn swarm_events(
     swarm: &mut Swarm<RayGunBehavior>,
     event: Option<MessagingEvents>,
     tx: Sender<Result<()>>,
@@ -712,23 +658,29 @@ async fn swarm_gossipsub_events(
         match serde_json::to_vec(&event) {
             Ok(bytes) => {
                 //TODO: Resolve initial connection/subscribe
-                match swarm.behaviour_mut().sub.subscribe(&topic) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        if let Err(e) = tx.send(Err(Error::Any(anyhow!(e)))).await {
-                            println!("{}", e);
-                        }
+                cfg_if::cfg_if! {
+                    if #[cfg(feature = "gossipsub")] {
+                        match swarm.behaviour_mut().sub.subscribe(&topic) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                if let Err(e) = tx.send(Err(Error::Any(anyhow!(e)))).await {
+                                    println!("{}", e);
+                                }
+                            }
+                        };
+                        match swarm.behaviour_mut().sub.publish(topic, bytes) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                if let Err(e) = tx.send(Err(Error::Any(anyhow!(e)))).await {
+                                    println!("{}", e);
+                                }
+                            }
+                        };
+                    } else if #[cfg(feature = "floodsub")] {
+                        swarm.behaviour_mut().sub.subscribe(topic.clone());
+                        swarm.behaviour_mut().sub.publish(topic, bytes);
                     }
-                };
-
-                match swarm.behaviour_mut().sub.publish(topic, bytes) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        if let Err(e) = tx.send(Err(Error::Any(anyhow!(e)))).await {
-                            println!("{}", e);
-                        }
-                    }
-                };
+                }
 
                 if let Err(e) = tx.send(Ok(())).await {
                     //TODO: Log error
