@@ -689,7 +689,7 @@ pub enum SwarmCommands {
     UnsubscribeFromTopic(String),
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessagingEvents {
     NewMessage(Message),
     EditMessage(Uuid, Uuid, Vec<String>),
@@ -737,49 +737,27 @@ impl RayGun for Libp2pMessaging {
             return Err(Error::Any(anyhow!("Message is empty")));
         }
         let sender = self.sender_id()?;
-        let message = match message_id {
-            Some(id) => {
-                //TODO: Get message from cache if available.
-                self.send_event(MessagingEvents::EditMessage(
-                    conversation_id,
-                    id,
-                    value.clone(),
-                ))
-                .await?;
-                let mut messages = self.conversations.lock();
-
-                let index = messages
-                    .iter()
-                    .position(|message| {
-                        message.conversation_id() == conversation_id && message.id() == id
-                    })
-                    .ok_or(Error::ArrayPositionNotFound)?;
-
-                let message = messages
-                    .get_mut(index)
-                    .ok_or(Error::ArrayPositionNotFound)?;
-
-                message.set_value(value);
-                message.clone()
-            }
+        let event = match message_id {
+            Some(id) => MessagingEvents::EditMessage(conversation_id, id, value.clone()),
             None => {
                 let mut message = Message::new();
                 message.set_conversation_id(conversation_id);
                 message.set_sender(sender);
-
                 message.set_value(value);
-
-                self.send_event(MessagingEvents::NewMessage(message.clone()))
-                    .await?;
-                self.conversations.lock().push(message.clone());
-                message
+                MessagingEvents::NewMessage(message)
             }
         };
 
-        if let Ok(mut cache) = self.get_cache() {
-            let data = DataObject::new(DataType::Messaging, message)?;
-            if cache.add_data(DataType::Messaging, &data).is_err() {
-                //TODO: Log error
+        self.send_event(event.clone()).await?;
+        process_message_event(self.conversations.clone(), event.clone())?;
+
+        //TODO: cache support edited messages
+        if let MessagingEvents::NewMessage(message) = event {
+            if let Ok(mut cache) = self.get_cache() {
+                let data = DataObject::new(DataType::Messaging, message)?;
+                if cache.add_data(DataType::Messaging, &data).is_err() {
+                    //TODO: Log error
+                }
             }
         }
 
@@ -787,18 +765,9 @@ impl RayGun for Libp2pMessaging {
     }
 
     async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()> {
-        self.send_event(MessagingEvents::DeleteMessage(conversation_id, message_id))
-            .await?;
-
-        let mut messages = self.conversations.lock();
-
-        let index = messages
-            .iter()
-            .position(|conv| conv.conversation_id() == conversation_id && conv.id() == message_id)
-            .ok_or(Error::ArrayPositionNotFound)?;
-
-        messages.remove(index);
-
+        let event = MessagingEvents::DeleteMessage(conversation_id, message_id);
+        self.send_event(event.clone()).await?;
+        process_message_event(self.conversations.clone(), event)?;
         Ok(())
     }
 
@@ -810,73 +779,15 @@ impl RayGun for Libp2pMessaging {
         emoji: String,
     ) -> Result<()> {
         let sender = self.sender_id()?;
-        self.send_event(MessagingEvents::ReactMessage(
+        let event = MessagingEvents::ReactMessage(
             conversation_id,
             sender.clone(),
             message_id,
             state,
             emoji.clone(),
-        ))
-        .await?;
-        let mut messages = self.conversations.lock();
-
-        let index = messages
-            .iter()
-            .position(|conv| conv.conversation_id() == conversation_id && conv.id() == message_id)
-            .ok_or(Error::ArrayPositionNotFound)?;
-
-        let message = messages
-            .get_mut(index)
-            .ok_or(Error::ArrayPositionNotFound)?;
-
-        let reactions = message.reactions_mut();
-
-        match state {
-            ReactionState::Add => {
-                let index = match reactions
-                    .iter()
-                    .position(|reaction| reaction.emoji().eq(&emoji))
-                {
-                    Some(index) => index,
-                    None => {
-                        let mut reaction = Reaction::default();
-                        reaction.set_emoji(&emoji);
-                        reaction.set_users(vec![sender]);
-                        reactions.push(reaction);
-                        return Ok(());
-                    }
-                };
-
-                let reaction = reactions
-                    .get_mut(index)
-                    .ok_or(Error::ArrayPositionNotFound)?;
-
-                reaction.users_mut().push(sender);
-            }
-            ReactionState::Remove => {
-                let index = reactions
-                    .iter()
-                    .position(|r| r.users().contains(&sender) && r.emoji().eq(&emoji))
-                    .ok_or(Error::ArrayPositionNotFound)?;
-
-                let reaction = reactions
-                    .get_mut(index)
-                    .ok_or(Error::ArrayPositionNotFound)?;
-
-                let user_index = reaction
-                    .users()
-                    .iter()
-                    .position(|reaction_sender| reaction_sender.eq(&sender))
-                    .ok_or(Error::ArrayPositionNotFound)?;
-
-                reaction.users_mut().remove(user_index);
-
-                if reaction.users().len() == 0 {
-                    //Since there is no users listed under the emoji, the reaction should be removed from the message
-                    reactions.remove(index);
-                }
-            }
-        }
+        );
+        self.send_event(event.clone()).await?;
+        process_message_event(self.conversations.clone(), event)?;
         Ok(())
     }
 
@@ -887,37 +798,10 @@ impl RayGun for Libp2pMessaging {
         state: PinState,
     ) -> Result<()> {
         let sender = self.sender_id()?;
-        self.send_event(MessagingEvents::PinMessage(
-            conversation_id,
-            sender,
-            message_id,
-            state,
-        ))
-        .await?;
-
-        let mut messages = self.conversations.lock();
-
-        let index = messages
-            .iter()
-            .position(|conv| conv.conversation_id() == conversation_id && conv.id() == message_id)
-            .ok_or(Error::ArrayPositionNotFound)?;
-
-        let message = messages
-            .get_mut(index)
-            .ok_or(Error::ArrayPositionNotFound)?;
-
-        match state {
-            PinState::Pin => *message.pinned_mut() = true,
-            PinState::Unpin => *message.pinned_mut() = false,
-        }
-
-        if let Ok(mut cache) = self.get_cache() {
-            let data = DataObject::new(DataType::Messaging, message)?;
-            if cache.add_data(DataType::Messaging, &data).is_err() {
-                //TODO: Log error
-            }
-        }
-
+        let event = MessagingEvents::PinMessage(conversation_id, sender, message_id, state);
+        self.send_event(event.clone()).await?;
+        process_message_event(self.conversations.clone(), event)?;
+        //TODO: Cache
         Ok(())
     }
 
@@ -935,15 +819,17 @@ impl RayGun for Libp2pMessaging {
 
         message.set_value(value);
 
-        self.send_event(MessagingEvents::NewMessage(message.clone()))
-            .await?;
+        let event = MessagingEvents::NewMessage(message);
 
-        self.conversations.lock().push(message.clone());
+        self.send_event(event.clone()).await?;
+        process_message_event(self.conversations.clone(), event.clone())?;
 
-        if let Ok(mut cache) = self.get_cache() {
-            let data = DataObject::new(DataType::Messaging, message)?;
-            if cache.add_data(DataType::Messaging, &data).is_err() {
-                //TODO: Log error
+        if let MessagingEvents::NewMessage(message) = event {
+            if let Ok(mut cache) = self.get_cache() {
+                let data = DataObject::new(DataType::Messaging, message)?;
+                if cache.add_data(DataType::Messaging, &data).is_err() {
+                    //TODO: Log error
+                }
             }
         }
 
