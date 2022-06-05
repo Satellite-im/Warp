@@ -151,7 +151,7 @@ impl NetworkBehaviourEventProcess<GossipsubEvent> for RayGunBehavior {
         } = message
         {
             if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
-                process_message_event(self.inner.clone(), events);
+                if let Err(_e) = process_message_event(self.inner.clone(), events) {}
             }
         }
     }
@@ -163,63 +163,53 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
         //TODO: Check topic and compare that to the conv id
         if let FloodsubEvent::Message(message) = message {
             if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
-                process_message_event(self.inner.clone(), events);
+                if let Err(_e) = process_message_event(self.inner.clone(), events) {}
             }
         }
     }
 }
 
-fn process_message_event(conversation: Arc<Mutex<Vec<Message>>>, events: MessagingEvents) {
+fn process_message_event(
+    conversation: Arc<Mutex<Vec<Message>>>,
+    events: MessagingEvents,
+) -> anyhow::Result<()> {
     match events {
         MessagingEvents::NewMessage(message) => conversation.lock().push(message),
         MessagingEvents::EditMessage(convo_id, message_id, val) => {
             let mut messages = conversation.lock();
 
-            let index = match messages
+            let index = messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
-            {
-                Some(index) => index,
-                None => return,
-            };
+                .ok_or(Error::ArrayPositionNotFound)?;
 
-            let message = match messages.get_mut(index) {
-                Some(msg) => msg,
-                None => return,
-            };
+            let message = messages
+                .get_mut(index)
+                .ok_or(Error::ArrayPositionNotFound)?;
 
             *message.value_mut() = val;
         }
         MessagingEvents::DeleteMessage(convo_id, message_id) => {
             let mut messages = conversation.lock();
 
-            let index = match messages
+            let index = messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
-                .ok_or(Error::ArrayPositionNotFound)
-            {
-                Ok(index) => index,
-                Err(_) => return,
-            };
+                .ok_or(Error::ArrayPositionNotFound)?;
 
             let _ = messages.remove(index);
         }
         MessagingEvents::PinMessage(convo_id, _, message_id, state) => {
             let mut messages = conversation.lock();
 
-            let index = match messages
+            let index = messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
-                .ok_or(Error::ArrayPositionNotFound)
-            {
-                Ok(index) => index,
-                Err(_) => return,
-            };
+                .ok_or(Error::ArrayPositionNotFound)?;
 
-            let message = match messages.get_mut(index) {
-                Some(msg) => msg,
-                None => return,
-            };
+            let message = messages
+                .get_mut(index)
+                .ok_or(Error::ArrayPositionNotFound)?;
 
             match state {
                 PinState::Pin => *message.pinned_mut() = true,
@@ -229,19 +219,14 @@ fn process_message_event(conversation: Arc<Mutex<Vec<Message>>>, events: Messagi
         MessagingEvents::ReactMessage(convo_id, sender, message_id, state, emoji) => {
             let mut messages = conversation.lock();
 
-            let index = match messages
+            let index = messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
-                .ok_or(Error::ArrayPositionNotFound)
-            {
-                Ok(index) => index,
-                Err(_) => return,
-            };
+                .ok_or(Error::ArrayPositionNotFound)?;
 
-            let message = match messages.get_mut(index) {
-                Some(msg) => msg,
-                None => return,
-            };
+            let message = messages
+                .get_mut(index)
+                .ok_or(Error::ArrayPositionNotFound)?;
 
             let reactions = message.reactions_mut();
 
@@ -257,38 +242,33 @@ fn process_message_event(conversation: Arc<Mutex<Vec<Message>>>, events: Messagi
                             reaction.set_emoji(&emoji);
                             reaction.set_users(vec![sender]);
                             reactions.push(reaction);
-                            return;
+                            return Ok(());
                         }
                     };
 
-                    let reaction = match reactions.get_mut(index) {
-                        Some(r) => r,
-                        None => return,
-                    };
+                    let reaction = reactions
+                        .get_mut(index)
+                        .ok_or(Error::ArrayPositionNotFound)?;
 
                     reaction.users_mut().push(sender);
                 }
                 ReactionState::Remove => {
-                    let index = match reactions.iter().position(|reaction| {
-                        reaction.users().contains(&sender) && reaction.emoji().eq(&emoji)
-                    }) {
-                        Some(index) => index,
-                        None => return,
-                    };
+                    let index = reactions
+                        .iter()
+                        .position(|reaction| {
+                            reaction.users().contains(&sender) && reaction.emoji().eq(&emoji)
+                        })
+                        .ok_or(Error::ArrayPositionNotFound)?;
 
-                    let reaction = match reactions.get_mut(index) {
-                        Some(r) => r,
-                        None => return,
-                    };
+                    let reaction = reactions
+                        .get_mut(index)
+                        .ok_or(Error::ArrayPositionNotFound)?;
 
-                    let user_index = match reaction
+                    let user_index = reaction
                         .users()
                         .iter()
                         .position(|reaction_sender| reaction_sender.eq(&sender))
-                    {
-                        Some(index) => index,
-                        None => return,
-                    };
+                        .ok_or(Error::ArrayPositionNotFound)?;
 
                     reaction.users_mut().remove(user_index);
 
@@ -302,6 +282,7 @@ fn process_message_event(conversation: Arc<Mutex<Vec<Message>>>, events: Messagi
         MessagingEvents::DeleteConversation(_) => {}
         MessagingEvents::Ping(_, _) => {}
     }
+    Ok(())
 }
 
 impl NetworkBehaviourEventProcess<PingEvent> for RayGunBehavior {
