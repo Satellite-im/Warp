@@ -301,6 +301,11 @@ fn process_message_event(conversation: Arc<Mutex<Vec<Message>>>, events: Messagi
                     };
 
                     reaction.users_mut().remove(user_index);
+
+                    if reaction.users().len() == 0 {
+                        //Since there is no users listed under the emoji, the reaction should be removed from the message
+                        reactions.remove(index);
+                    }
                 }
             }
         }
@@ -947,6 +952,11 @@ impl RayGun for Libp2pMessaging {
                     .ok_or(Error::ArrayPositionNotFound)?;
 
                 reaction.users_mut().remove(user_index);
+
+                if reaction.users().len() == 0 {
+                    //Since there is no users listed under the emoji, the reaction should be removed from the message
+                    reactions.remove(index);
+                }
             }
         }
         Ok(())
