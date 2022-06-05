@@ -341,7 +341,7 @@ pub trait RayGun: Extension + GroupChat + Sync + Send {
         conversation_id: Uuid,
         message_id: Uuid,
         state: ReactionState,
-        emoji: Option<String>,
+        emoji: String,
     ) -> Result<()>;
 
     /// Pin a message within a conversation
@@ -545,6 +545,10 @@ pub mod ffi {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
+        if emoji.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
@@ -557,10 +561,7 @@ pub mod ffi {
             Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
         };
 
-        let emoji = match emoji.is_null() {
-            true => None,
-            false => Some(CStr::from_ptr(emoji).to_string_lossy().to_string()),
-        };
+        let emoji = CStr::from_ptr(emoji).to_string_lossy().to_string();
 
         let adapter = &mut *ctx;
         let rt = runtime_handle();

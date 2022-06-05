@@ -274,7 +274,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = chat.react(conversation_id, message_id, state, Some(code)).await {
+                            if let Err(e) = chat.react(conversation_id, message_id, state, code).await {
                                 writeln!(stdout, "Error: {}", e)?;
                                 continue;
                             }

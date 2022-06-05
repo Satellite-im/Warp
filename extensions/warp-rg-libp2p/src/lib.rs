@@ -247,11 +247,6 @@ fn process_message_event(conversation: Arc<Mutex<Vec<Message>>>, events: Messagi
 
             match state {
                 ReactionState::Add => {
-                    let emoji = match emoji {
-                        Some(e) => e,
-                        None => return,
-                    };
-
                     let index = match reactions
                         .iter()
                         .position(|reaction| reaction.emoji().eq(&emoji))
@@ -274,11 +269,6 @@ fn process_message_event(conversation: Arc<Mutex<Vec<Message>>>, events: Messagi
                     reaction.users_mut().push(sender);
                 }
                 ReactionState::Remove => {
-                    let emoji = match emoji {
-                        Some(e) => e,
-                        None => return,
-                    };
-
                     let index = match reactions.iter().position(|reaction| {
                         reaction.users().contains(&sender) && reaction.emoji().eq(&emoji)
                     }) {
@@ -725,7 +715,7 @@ pub enum MessagingEvents {
     DeleteMessage(Uuid, Uuid),
     DeleteConversation(Uuid),
     PinMessage(Uuid, SenderId, Uuid, PinState),
-    ReactMessage(Uuid, SenderId, Uuid, ReactionState, Option<String>),
+    ReactMessage(Uuid, SenderId, Uuid, ReactionState, String),
     Ping(Uuid, SenderId),
 }
 
@@ -836,7 +826,7 @@ impl RayGun for Libp2pMessaging {
         conversation_id: Uuid,
         message_id: Uuid,
         state: ReactionState,
-        emoji: Option<String>,
+        emoji: String,
     ) -> Result<()> {
         let sender = self.sender_id()?;
         self.send_event(MessagingEvents::ReactMessage(
@@ -862,10 +852,6 @@ impl RayGun for Libp2pMessaging {
 
         match state {
             ReactionState::Add => {
-                let emoji = match emoji {
-                    Some(e) => e,
-                    None => return Err(Error::Any(anyhow!("Emoji is required"))),
-                };
                 let index = match reactions
                     .iter()
                     .position(|reaction| reaction.emoji().eq(&emoji))
@@ -887,10 +873,6 @@ impl RayGun for Libp2pMessaging {
                 reaction.users_mut().push(sender);
             }
             ReactionState::Remove => {
-                let emoji = match emoji {
-                    Some(e) => e,
-                    None => return Err(Error::Any(anyhow!("Emoji is required"))),
-                };
                 let index = reactions
                     .iter()
                     .position(|r| r.users().contains(&sender) && r.emoji().eq(&emoji))
