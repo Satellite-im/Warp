@@ -151,7 +151,7 @@ impl NetworkBehaviourEventProcess<GossipsubEvent> for RayGunBehavior {
         } = message
         {
             if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
-                if let Err(_e) = process_message_event(self.inner.clone(), events) {}
+                if let Err(_e) = process_message_event(self.inner.clone(), &events) {}
             }
         }
     }
@@ -163,7 +163,7 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
         //TODO: Check topic and compare that to the conv id
         if let FloodsubEvent::Message(message) = message {
             if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
-                if let Err(_e) = process_message_event(self.inner.clone(), events) {}
+                if let Err(_e) = process_message_event(self.inner.clone(), &events) {}
             }
         }
     }
@@ -171,9 +171,9 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
 
 fn process_message_event(
     conversation: Arc<Mutex<Vec<Message>>>,
-    events: MessagingEvents,
-) -> anyhow::Result<()> {
-    match events {
+    events: &MessagingEvents,
+) -> Result<()> {
+    match events.clone() {
         MessagingEvents::NewMessage(message) => conversation.lock().push(message),
         MessagingEvents::EditMessage(convo_id, message_id, val) => {
             let mut messages = conversation.lock();
@@ -272,7 +272,7 @@ fn process_message_event(
 
                     reaction.users_mut().remove(user_index);
 
-                    if reaction.users().len() == 0 {
+                    if reaction.users().is_empty() {
                         //Since there is no users listed under the emoji, the reaction should be removed from the message
                         reactions.remove(index);
                     }
@@ -530,23 +530,29 @@ impl Libp2pMessaging {
     }
 
     pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
-        let cache = self.cache.as_ref().ok_or(Error::ToBeDetermined)?;
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or(Error::PocketDimensionExtensionUnavailable)?;
         Ok(cache.lock())
     }
 
-    pub async fn send_event(&mut self, event: MessagingEvents) -> anyhow::Result<()> {
+    pub async fn send_event(&mut self, event: &MessagingEvents) -> anyhow::Result<()> {
         let inner_tx = self
             .into_thread
             .as_ref()
-            .ok_or_else(|| anyhow!("Channel unavailable"))?;
+            .ok_or(Error::SenderChannelUnavailable)?;
 
         //TODO: Implement a timeout
-        inner_tx.send(event).await.map_err(|e| anyhow!("{}", e))?;
+        inner_tx
+            .send(event.clone())
+            .await
+            .map_err(|e| anyhow!("{}", e))?;
 
         let response = self
             .response_channel
             .as_mut()
-            .ok_or_else(|| anyhow!("Channel unavailable"))?;
+            .ok_or(Error::ReceiverChannelUnavailable)?;
 
         response
             .recv()
@@ -734,11 +740,11 @@ impl RayGun for Libp2pMessaging {
         value: Vec<String>,
     ) -> Result<()> {
         if value.is_empty() {
-            return Err(Error::Any(anyhow!("Message is empty")));
+            return Err(Error::EmptyMessage);
         }
         let sender = self.sender_id()?;
         let event = match message_id {
-            Some(id) => MessagingEvents::EditMessage(conversation_id, id, value.clone()),
+            Some(id) => MessagingEvents::EditMessage(conversation_id, id, value),
             None => {
                 let mut message = Message::new();
                 message.set_conversation_id(conversation_id);
@@ -748,8 +754,8 @@ impl RayGun for Libp2pMessaging {
             }
         };
 
-        self.send_event(event.clone()).await?;
-        process_message_event(self.conversations.clone(), event.clone())?;
+        self.send_event(&event).await?;
+        process_message_event(self.conversations.clone(), &event)?;
 
         //TODO: cache support edited messages
         if let MessagingEvents::NewMessage(message) = event {
@@ -766,8 +772,8 @@ impl RayGun for Libp2pMessaging {
 
     async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()> {
         let event = MessagingEvents::DeleteMessage(conversation_id, message_id);
-        self.send_event(event.clone()).await?;
-        process_message_event(self.conversations.clone(), event)?;
+        self.send_event(&event).await?;
+        process_message_event(self.conversations.clone(), &event)?;
         Ok(())
     }
 
@@ -786,8 +792,8 @@ impl RayGun for Libp2pMessaging {
             state,
             emoji.clone(),
         );
-        self.send_event(event.clone()).await?;
-        process_message_event(self.conversations.clone(), event)?;
+        self.send_event(&event).await?;
+        process_message_event(self.conversations.clone(), &event)?;
         Ok(())
     }
 
@@ -799,8 +805,8 @@ impl RayGun for Libp2pMessaging {
     ) -> Result<()> {
         let sender = self.sender_id()?;
         let event = MessagingEvents::PinMessage(conversation_id, sender, message_id, state);
-        self.send_event(event.clone()).await?;
-        process_message_event(self.conversations.clone(), event)?;
+        self.send_event(&event).await?;
+        process_message_event(self.conversations.clone(), &event)?;
         //TODO: Cache
         Ok(())
     }
@@ -811,6 +817,9 @@ impl RayGun for Libp2pMessaging {
         message_id: Uuid,
         value: Vec<String>,
     ) -> Result<()> {
+        if value.is_empty() {
+            return Err(Error::EmptyMessage);
+        }
         let sender = self.sender_id()?;
         let mut message = Message::new();
         message.set_conversation_id(conversation_id);
@@ -821,8 +830,8 @@ impl RayGun for Libp2pMessaging {
 
         let event = MessagingEvents::NewMessage(message);
 
-        self.send_event(event.clone()).await?;
-        process_message_event(self.conversations.clone(), event.clone())?;
+        self.send_event(&event).await?;
+        process_message_event(self.conversations.clone(), &event)?;
 
         if let MessagingEvents::NewMessage(message) = event {
             if let Ok(mut cache) = self.get_cache() {
@@ -838,7 +847,7 @@ impl RayGun for Libp2pMessaging {
 
     async fn ping(&mut self, id: Uuid) -> Result<()> {
         let sender = self.sender_id()?;
-        self.send_event(MessagingEvents::Ping(id, sender))
+        self.send_event(&MessagingEvents::Ping(id, sender))
             .await
             .map_err(Error::Any)
     }
