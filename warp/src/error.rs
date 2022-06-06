@@ -13,6 +13,8 @@ pub enum Error {
     AlreadySubscribed,
 
     //Constellation Errors
+    #[error("Constellation extension is unavailable")]
+    ConstellationExtensionUnavailable,
     #[error("Item with name already exists in current directory")]
     DuplicateName,
     #[error("Directory cannot contain itself")]
@@ -21,6 +23,8 @@ pub enum Error {
     DirParentParadox,
     #[error("Directory cannot be found or is invalid")]
     DirInvalid,
+    #[error("File cannot be found or is invalid")]
+    FileInvalid,
     #[error("Item cannot be found or is invalid")]
     ItemInvalid,
     #[error("Item is not a valid file")]
@@ -31,34 +35,100 @@ pub enum Error {
     InvalidConversion,
     #[error("Path supplied is invalid")]
     InvalidPath,
-    #[error("Cannot find position of array content.")]
-    ArrayPositionNotFound,
 
     //PocketDimension Errors
+    #[error("Pocket dimension extension is unavailable")]
+    PocketDimensionExtensionUnavailable,
     #[error("Data module supplied does not match dimension module")]
     DimensionMismatch,
     #[error("Data object provided already exist within the dimension")]
     DataObjectExist,
-    #[error("Data object does not exist within tje dimension")]
+    #[error("Data object does not exist within the dimension")]
     DataObjectNotFound,
+
+    //MultiPass Errors
+    #[error("MultiPass extension is unavailable")]
+    MultiPassExtensionUnavailable,
+    #[error("Username has to be atleast 3 characters long")]
+    UsernameTooShort,
+    #[error("Username cannot be more than 32 characters long")]
+    UsernameTooLong,
+    #[error("Identity exist with the same information")]
+    IdentityExist,
+    #[error("Identity does not exist")]
+    IdentityDoesntExist,
+    #[error("Username cannot be updated for identity")]
+    CannotUpdateIdentityUsername,
+    #[error("Picture cannot be updated for identity")]
+    CannotUpdateIdentityPicture,
+    #[error("Banner cannot be updated for identity")]
+    CannotUpdateIdentityBanner,
+    #[error("Status cannot be updated for identity")]
+    CannotUpdateIdentityStatus,
+    #[error("Identity could not be updated")]
+    CannotUpdateIdentity,
+    #[error("Unable to send a friend request")]
+    CannotSendFriendRequest,
+    #[error("You cannot send yourself a friend request")]
+    CannotSendSelfFriendRequest,
+    #[error("You cannot accept yourself as a friend")]
+    CannotAcceptSelfAsFriend,
+    #[error("You cannot deny yourself as a friend")]
+    CannotDenySelfAsFriend,
+    #[error("You cannot block yourself as a friend")]
+    CannotBlockSelfAsFriend,
+    #[error("You cannot remove yourself as a friend")]
+    CannotRemoveSelfAsFriend,
+    #[error("You cannot use yourself")]
+    CannotUseSelfAsFriend,
+    #[error("Unable to close friend request")]
+    CannotCloseFriendRequest,
+    #[error("User does not exist as a friend")]
+    FriendDoesntExist,
+    #[error("User already exist as a friend")]
+    FriendExist,
+    #[error("User has blocked you from being able to interact with them")]
+    BlockedByUser,
+    #[error("Invalid identifier condition provided. Must be either public key, username, or your own identity")]
+    InvalidIdentifierCondition,
+
+    //RayGun Errors
+    #[error("RayGun extension is unavailable")]
+    RayGunExtensionUnavailable,
+    #[error("Conversation was invalid")]
+    InvalidConversation,
+    #[error("Message is empty")]
+    EmptyMessage,
+    #[error("Message was invalid")]
+    InvalidMessage,
+    #[error("Sender of the message is invalid")]
+    SenderMismatch,
+    #[error("Cannot react to the message with the same reaction")]
+    ReactionExist,
+    #[error("Reaction to the message does not exist")]
+    ReactionDoesntExist,
+    #[error("Message is already pinned")]
+    MessagePinned,
+    #[error("Message is not pinned")]
+    MessageNotPinned,
+    #[error("Group could not be created at this time")]
+    CannotCreateGroup,
+    #[error("Unable to join group")]
+    CannotJoinGroup,
+    #[error("Unable to obtain the list of members from the group")]
+    CannotGetMembers,
+    #[error("Invalid Group Id")]
+    InvalidGroupId,
+    #[error("Invalid Group Member")]
+    InvalidGroupMemeber,
+    #[error("Invite is invalid")]
+    InvalidInvite,
+    #[error("Unable to change group status")]
+    CannotChangeGroupStatus,
 
     //Crypto Errors
     #[error("{0}")]
     Ed25519Error(#[from] ed25519_dalek::SignatureError),
-
-    //Misc
-    #[error("Invalid data type")]
-    InvalidDataType,
-    #[error("Object is not found")]
-    ObjectNotFound,
-    #[error("The length of the key is invalid")]
-    InvalidKeyLength,
-    #[error("File is not found")]
-    FileNotFound,
-    #[error("Directory is not found")]
-    DirectoryNotFound,
-    #[error("To be determined")]
-    ToBeDetermined,
     #[error("Unable to encrypt data")]
     EncryptionError,
     #[error("Unable to decrypt data")]
@@ -67,8 +137,48 @@ pub enum Error {
     EncryptionStreamError,
     #[error("Unable to decrypt stream")]
     DecryptionStreamError,
+    #[error("Public key is invalid")]
+    PublicKeyInvalid,
+    #[error("Private key is invalid")]
+    PrivateKeyInvalid,
+    #[error("Public key length is invalid")]
+    InvalidPublicKeyLength,
+    #[error("Private key length is invalid")]
+    InvalidPrivateKeyLength,
+
+    //Tesseract Errors
+    #[error("Tesseract is unavailable")]
+    TesseractUnavailable,
     #[error("Tesseract is locked")]
     TesseractLocked,
+    #[error("One or more items in the datastore are corrupted or invalid")]
+    CorruptedDataStore,
+    #[error("Unable to save tesseract")]
+    CannotSaveTesseract,
+
+    //Data Errors
+    #[error("Invalid data type")]
+    InvalidDataType,
+
+    //Misc
+    #[error("Async runtime is unavailable")]
+    AsyncRuntimeUnavailable,
+    #[error("Sender Channel Unavailable")]
+    SenderChannelUnavailable,
+    #[error("Receiver Channel Unavailable")]
+    ReceiverChannelUnavailable,
+    #[error("Cannot find position of array content.")]
+    ArrayPositionNotFound,
+    #[error("Object is not found")]
+    ObjectNotFound,
+    #[error("The length of the key is invalid")]
+    InvalidKeyLength,
+    #[error("File is not found")]
+    FileNotFound,
+    #[error("Directory is not found")]
+    DirectoryNotFound,
+    #[error("Error to be determined")]
+    ToBeDetermined,
     #[error("{0}")]
     SerdeJsonError(#[from] serde_json::Error),
     #[error("{0}")]
@@ -91,7 +201,7 @@ pub enum Error {
 
 impl Error {
     pub fn enum_to_string(&self) -> String {
-        match self.clone() {
+        match &self {
             Error::HookUnregistered => String::from("HookUnregistered"),
             Error::DuplicateHook => String::from("DuplicateHook"),
             Error::AlreadySubscribed => String::from("AlreadySubscribed"),
@@ -128,7 +238,7 @@ impl Error {
             Error::Any(_) => String::from("Any"),
             Error::IoError(_) => String::from("IoError"),
             Error::Unimplemented => String::from("Unimplemented"),
-            Error::Other => String::from("Other"),
+            Error::Other | _ => String::from("Other"),
         }
     }
 }
