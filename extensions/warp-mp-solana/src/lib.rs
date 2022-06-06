@@ -123,10 +123,7 @@ impl SolanaAccount {
     }
 
     pub fn get_tesseract(&self) -> anyhow::Result<MutexGuard<Tesseract>> {
-        let tesseract = self
-            .tesseract
-            .as_ref()
-            .ok_or_else(|| anyhow!("Tesseract is not available"))?;
+        let tesseract = self.tesseract.as_ref().ok_or(Error::TesseractUnavailable)?;
         Ok(tesseract.lock())
     }
 
@@ -134,7 +131,7 @@ impl SolanaAccount {
         let cache = self
             .cache
             .as_ref()
-            .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
+            .ok_or(Error::PocketDimensionExtensionUnavailable)?;
 
         Ok(cache.lock())
     }
@@ -143,7 +140,7 @@ impl SolanaAccount {
         let hook = self
             .hooks
             .as_ref()
-            .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
+            .ok_or_else(|| anyhow!("Hooks is not set"))?;
 
         Ok(hook.lock())
     }
@@ -182,7 +179,7 @@ impl MultiPass for SolanaAccount {
                 .get_current_user()
                 .is_ok()
             {
-                return Err(Error::Any(anyhow!("Account already exist")));
+                return Err(Error::IdentityExist);
             }
         }
 
@@ -201,7 +198,7 @@ impl MultiPass for SolanaAccount {
 
         if let Ok(identity) = user_to_identity(&helper, None) {
             if identity.username() == username {
-                return Err(Error::Any(anyhow!("Account already exist")));
+                return Err(Error::IdentityExist);
             }
         }
 
@@ -256,19 +253,24 @@ impl MultiPass for SolanaAccount {
                 let user = helper.get_user_by_name(&username)?;
                 // If this field is empty or cannot be decoded from base58 we should return an error
                 // Note: We may have to cross check the public key against the account that holds it
-                //       for security purpose 
+                //       for security purpose
                 if user.extra_1.is_empty() {
-                    return Err(Error::Any(anyhow!("Unable to obtain identity by username (Incompatible Account)")));
+                    return Err(Error::Any(anyhow!(
+                        "Unable to obtain identity by username (Incompatible Account)"
+                    )));
                 }
 
-                match bs58::decode(&user.extra_1).into_vec().map_err(|e| anyhow!(e)) {
+                match bs58::decode(&user.extra_1)
+                    .into_vec()
+                    .map_err(|e| anyhow!(e))
+                {
                     Ok(pkey) => {
                         if pkey.is_empty() || pkey.len() < 31 {
-                            return Err(Error::Any(anyhow!("Length of public key is invalid")));
+                            return Err(Error::InvalidPublicKeyLength);
                         }
                         user_to_identity(&helper, Some(&pkey))?
-                    },
-                    Err(e) => return Err(Error::Any(e))
+                    }
+                    Err(e) => return Err(Error::Any(e)),
                 }
             }
             (Some(pkey), None, false) => {
@@ -287,7 +289,7 @@ impl MultiPass for SolanaAccount {
                 user_to_identity(&helper, Some(pkey.as_ref()))?
             }
             (None, None, true) => user_to_identity(&helper, None)?,
-            _ => return Err(Error::Any(anyhow!("Invalid identifier condition provided. Must be either public key, username, or your own identity")))
+            _ => return Err(Error::InvalidIdentifierCondition),
         };
 
         if let Ok(mut cache) = self.get_cache() {
@@ -316,26 +318,34 @@ impl MultiPass for SolanaAccount {
             option.status_message(),
         ) {
             (Some(username), None, None, None) => {
-                helper.set_name(&format!("{username}#{}", identity.short_id()))?;
+                helper
+                    .set_name(&format!("{username}#{}", identity.short_id()))
+                    .map_err(|_| Error::CannotUpdateIdentityUsername)?;
                 identity.set_username(&username)
             }
             (None, Some(hash), None, None) => {
-                helper.set_photo(&hash)?;
+                helper
+                    .set_photo(&hash)
+                    .map_err(|_| Error::CannotUpdateIdentityPicture)?;
                 let mut graphics = identity.graphics();
                 graphics.set_profile_picture(&hash);
                 identity.set_graphics(graphics);
             }
             (None, None, Some(hash), None) => {
-                helper.set_banner_image(&hash)?;
+                helper
+                    .set_banner_image(&hash)
+                    .map_err(|_| Error::CannotUpdateIdentityBanner)?;
                 let mut graphics = identity.graphics();
                 graphics.set_profile_banner(&hash);
                 identity.set_graphics(graphics);
             }
             (None, None, None, Some(status)) => {
-                helper.set_status(&status.clone().unwrap_or_default())?;
+                helper
+                    .set_status(&status.clone().unwrap_or_default())
+                    .map_err(|_| Error::CannotUpdateIdentityStatus)?;
                 identity.set_status_message(status)
             }
-            _ => return Err(Error::Any(anyhow!("Invalid update option"))),
+            _ => return Err(Error::CannotUpdateIdentity),
         }
 
         if let Ok(mut cache) = self.get_cache() {
@@ -379,15 +389,15 @@ impl Friends for SolanaAccount {
         let ident = self.get_own_identity()?;
 
         if ident.public_key() == pubkey {
-            return Err(Error::Any(anyhow!("Unable to send a request to yourself")));
+            return Err(Error::CannotSendSelfFriendRequest);
         }
 
         if self.get_identity(Identifier::from(pubkey.clone())).is_err() {
-            return Err(Error::Any(anyhow!("Account does not exist")));
+            return Err(Error::IdentityDoesntExist);
         }
 
         if self.has_friend(pubkey.clone()).is_ok() {
-            return Err(Error::Any(anyhow!("You are already friends")));
+            return Err(Error::FriendExist);
         }
 
         let helper = self.friend_helper()?;
@@ -413,17 +423,15 @@ impl Friends for SolanaAccount {
         let ident = self.get_own_identity()?;
 
         if ident.public_key() == pubkey {
-            return Err(Error::Any(anyhow!(
-                "Unable to send/accept a request for yourself"
-            )));
+            return Err(Error::CannotAcceptSelfAsFriend);
         }
 
         if self.get_identity(Identifier::from(pubkey.clone())).is_err() {
-            return Err(Error::Any(anyhow!("Account does not exist")));
+            return Err(Error::IdentityDoesntExist);
         }
 
         if self.has_friend(pubkey.clone()).is_ok() {
-            return Err(Error::Any(anyhow!("You are already friends")));
+            return Err(Error::FriendExist);
         }
 
         let helper = self.friend_helper()?;
@@ -449,15 +457,15 @@ impl Friends for SolanaAccount {
         let ident = self.get_own_identity()?;
 
         if ident.public_key() == pubkey {
-            return Err(Error::Any(anyhow!("Unable to deny a request for yourself")));
+            return Err(Error::CannotDenySelfAsFriend);
         }
 
         if self.get_identity(Identifier::from(pubkey.clone())).is_err() {
-            return Err(Error::Any(anyhow!("Account does not exist")));
+            return Err(Error::IdentityDoesntExist);
         }
 
         if self.has_friend(pubkey.clone()).is_ok() {
-            return Err(Error::Any(anyhow!("You are already friends")));
+            return Err(Error::FriendExist);
         }
 
         let helper = self.friend_helper()?;
@@ -482,17 +490,15 @@ impl Friends for SolanaAccount {
         let ident = self.get_own_identity()?;
 
         if ident.public_key() == pubkey {
-            return Err(Error::Any(anyhow!(
-                "Unable to close a request for yourself"
-            )));
+            return Err(Error::CannotUseSelfAsFriend);
         }
 
         if self.get_identity(Identifier::from(pubkey.clone())).is_err() {
-            return Err(Error::Any(anyhow!("Account does not exist")));
+            return Err(Error::IdentityDoesntExist);
         }
 
         if self.has_friend(pubkey.clone()).is_ok() {
-            return Err(Error::Any(anyhow!("You are already friends")));
+            return Err(Error::FriendExist);
         }
 
         let helper = self.friend_helper()?;
@@ -555,11 +561,11 @@ impl Friends for SolanaAccount {
 
     fn remove_friend(&mut self, pubkey: PublicKey) -> Result<()> {
         if self.get_identity(Identifier::from(pubkey.clone())).is_err() {
-            return Err(Error::Any(anyhow!("You cannot remove yourself.")));
+            return Err(Error::CannotRemoveSelfAsFriend);
         }
 
         if self.has_friend(pubkey.clone()).is_err() {
-            return Err(Error::Any(anyhow!("You are not friends.")));
+            return Err(Error::FriendDoesntExist);
         }
 
         let helper = self.friend_helper()?;
@@ -742,7 +748,7 @@ pub mod ffi {
         match pocketdimension.is_null() {
             true => {}
             false => {
-                let pd = &*(pocketdimension as *mut PocketDimensionAdapter);
+                let pd = &*pocketdimension;
                 account.set_cache(pd.inner().clone());
             }
         }
