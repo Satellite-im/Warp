@@ -1079,3 +1079,77 @@ fn solana_group_to_warp_group(
 //     //TODO
 //     Ok(group)
 // }
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ffi {
+    use crate::Libp2pMessaging;
+    use anyhow::anyhow;
+    use libp2p::Multiaddr;
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
+    use std::str::{FromStr, Utf8Error};
+    use warp::error::Error;
+    use warp::ffi::FFIResult;
+    use warp::multipass::MultiPassAdapter;
+    use warp::pocket_dimension::PocketDimensionAdapter;
+    use warp::raygun::RayGunAdapter;
+    use warp::runtime_handle;
+    use warp::sync::{Arc, Mutex};
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_rg_libp2p_new(
+        account: *const MultiPassAdapter,
+        cache: *const PocketDimensionAdapter,
+        listen_addr: *const c_char,
+        bootstrap: *const *const c_char,
+        bootstral_len: usize,
+    ) -> FFIResult<RayGunAdapter> {
+        if account.is_null() {
+            return FFIResult::err(Error::MultiPassExtensionUnavailable);
+        }
+
+        let cache = match cache.is_null() {
+            true => None,
+            false => None,
+        };
+
+        let listen_addr = match listen_addr.is_null() {
+            true => None,
+            false => match Multiaddr::from_str(
+                &CStr::from_ptr(listen_addr).to_string_lossy().to_string(),
+            ) {
+                Ok(addr) => Some(addr),
+                Err(e) => return FFIResult::err(Error::Any(anyhow!(e))),
+            },
+        };
+
+        let bootstrap = match bootstrap.is_null() {
+            true => vec![],
+            false => vec![],
+        };
+        let account = &*account;
+
+        let rt = runtime_handle();
+
+        rt.block_on(async move {
+            match Libp2pMessaging::new(account.get_inner().clone(), cache, listen_addr, bootstrap)
+                .await
+            {
+                Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(Mutex::new(Box::new(a))))),
+                Err(e) => FFIResult::err(Error::Any(e)),
+            }
+        })
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    unsafe fn pointer_to_vec(
+        data: *const *const c_char,
+        len: usize,
+    ) -> Result<Vec<String>, Utf8Error> {
+        std::slice::from_raw_parts(data, len)
+            .iter()
+            .map(|arg| CStr::from_ptr(*arg).to_str().map(ToString::to_string))
+            .collect()
+    }
+}
