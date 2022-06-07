@@ -1,7 +1,6 @@
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::{Client, Cluster};
-use anyhow::ensure;
 use std::rc::Rc;
 
 use crate::solana::wallet::SolanaWallet;
@@ -51,30 +50,36 @@ impl SolanaManager {
     pub fn request_air_drop(&self) -> anyhow::Result<()> {
         let payer = self.wallet.get_pubkey()?.to_string();
         let fut = async {
-            reqwest::Client::new()
-                .post("https://faucet.satellite.one")
-                .json(&serde_json::json!({ "address": payer }))
+            let response = reqwest::Client::new()
+                .post("https://dev-faucet.satellite.one")
+                .json(&serde_json::json!({ "address": payer, "accessCode": "blah"}))
                 .send()
-                .await?
-                .json::<ResponseStatus>()
-                .await
+                .await?;
+
+            if response.status().is_success() {
+                let res = response.json::<ResponseStatus>().await?;
+                if let Some(status) = res.status.as_ref() {
+                    if status == "success" {
+                        return Ok(());
+                    }
+                } else {
+                    anyhow::bail!("{}", res.message);
+                }
+            } else {
+                let res = response.json::<ResponseStatus>().await?;
+                anyhow::bail!("{}", res.message);
+            }
+            Result::Ok::<(), anyhow::Error>(())
         };
-        let response = if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            tokio::task::block_in_place(|| handle.block_on(fut))?
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            tokio::task::block_in_place(|| handle.block_on(fut))
         } else {
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?
                 .handle()
-                .block_on(fut)?
-        };
-
-        ensure!(
-            response.status == "success",
-            "Error requesting airdrop: {}",
-            response.additional
-        );
-        Ok(())
+                .block_on(fut)
+        }
     }
 
     pub fn request_air_drop_direct(&self, amount: u64) -> anyhow::Result<()> {
@@ -90,7 +95,11 @@ impl SolanaManager {
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 struct ResponseStatus {
-    pub status: String,
-    #[serde(flatten)]
-    pub additional: serde_json::Value,
+    pub status: Option<String>,
+    pub message: String,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "transactionSignature"
+    )]
+    pub signature: Option<String>,
 }
