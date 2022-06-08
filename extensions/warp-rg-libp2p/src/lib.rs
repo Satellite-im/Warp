@@ -437,7 +437,7 @@ impl Libp2pMessaging {
         let inner_tx = self
             .command_channel
             .as_ref()
-            .ok_or_else(|| anyhow!("Channel unavailable"))?;
+            .ok_or(Error::SenderChannelUnavailable)?;
 
         //TODO: Implement a timeout
         inner_tx.send(command).await.map_err(|e| anyhow!("{}", e))?;
@@ -1087,7 +1087,7 @@ pub mod ffi {
     use libp2p::Multiaddr;
     use std::ffi::CStr;
     use std::os::raw::c_char;
-    use std::str::{FromStr, Utf8Error};
+    use std::str::FromStr;
     use warp::error::Error;
     use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
@@ -1096,14 +1096,31 @@ pub mod ffi {
     use warp::runtime_handle;
     use warp::sync::{Arc, Mutex};
 
+    //Because C doesnt support tuple variants, we would need to make our own little wrapper
+    /// Used to build a list of bootstrap nodes to supply to libp2p extension
+    /// This is broken into a peer id and multiaddr.
+    ///
+    /// Example
+    ///
+    /// peer = QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN
+    /// multiaddr = /dnsaddr/bootstrap.libp2p.io
+    ///
+    /// Note: rust-libp2p may not support every multiaddr entry so if its not supported
+    ///       there would be no error as bootstrap nodes are optional
+    #[repr(C)]
+    pub struct Bootstrap {
+        pub peer: *mut c_char,
+        pub multiaddr: *mut c_char,
+    }
+
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn raygun_rg_libp2p_new(
         account: *const MultiPassAdapter,
         cache: *const PocketDimensionAdapter,
         listen_addr: *const c_char,
-        bootstrap: *const *const c_char,
-        bootstral_len: usize,
+        bootstrap: *const Bootstrap,
+        bootstrap_len: usize,
     ) -> FFIResult<RayGunAdapter> {
         if account.is_null() {
             return FFIResult::err(Error::MultiPassExtensionUnavailable);
@@ -1111,7 +1128,7 @@ pub mod ffi {
 
         let cache = match cache.is_null() {
             true => None,
-            false => None,
+            false => Some(&*cache),
         };
 
         let listen_addr = match listen_addr.is_null() {
@@ -1126,30 +1143,33 @@ pub mod ffi {
 
         let bootstrap = match bootstrap.is_null() {
             true => vec![],
-            false => vec![],
+            false => {
+                let mut bootstrap_list = vec![];
+                for item in std::slice::from_raw_parts(bootstrap, bootstrap_len) {
+                    let peer = CStr::from_ptr(item.peer).to_string_lossy().to_string();
+                    let addr = CStr::from_ptr(item.multiaddr).to_string_lossy().to_string();
+                    bootstrap_list.push((peer, addr));
+                }
+                bootstrap_list
+            }
         };
+
         let account = &*account;
 
         let rt = runtime_handle();
 
         rt.block_on(async move {
-            match Libp2pMessaging::new(account.get_inner().clone(), cache, listen_addr, bootstrap)
-                .await
+            match Libp2pMessaging::new(
+                account.get_inner().clone(),
+                cache.map(|p| p.inner().clone()),
+                listen_addr,
+                bootstrap,
+            )
+            .await
             {
                 Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(Mutex::new(Box::new(a))))),
                 Err(e) => FFIResult::err(Error::Any(e)),
             }
         })
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    unsafe fn pointer_to_vec(
-        data: *const *const c_char,
-        len: usize,
-    ) -> Result<Vec<String>, Utf8Error> {
-        std::slice::from_raw_parts(data, len)
-            .iter()
-            .map(|arg| CStr::from_ptr(*arg).to_str().map(ToString::to_string))
-            .collect()
     }
 }

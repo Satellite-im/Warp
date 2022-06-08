@@ -80,7 +80,7 @@ impl MessageOptions {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, FFIArray)]
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, FFIArray, FFIFree)]
 pub struct Message {
     /// ID of the Message
     id: Uuid,
@@ -94,7 +94,7 @@ pub struct Message {
     /// Timestamp of the message
     date: DateTime<Utc>,
 
-    /// TBD
+    /// Pin a message over other messages
     pinned: bool,
 
     /// List of the reactions for the `Message`
@@ -107,7 +107,7 @@ pub struct Message {
     /// Message context for `Message`
     value: Vec<String>,
 
-    /// Metadata related to the message
+    /// Metadata related to the message. Can be used externally, but more internally focused
     #[serde(flatten)]
     metadata: HashMap<String, String>,
 }
@@ -258,7 +258,7 @@ impl Message {
     }
 }
 
-#[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq, FFIFree)]
 pub struct Reaction {
     /// Emoji unicode for `Reaction`
     emoji: String,
@@ -392,15 +392,19 @@ impl RayGunAdapter {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::error::Error;
-    use crate::ffi::{FFIArray, FFIResult};
+    use crate::ffi::{FFIArray, FFIResult, FFIVec};
+    use crate::multipass::identity::PublicKey;
     use crate::raygun::{
-        EmbedState, Message, MessageOptions, PinState, RayGunAdapter, ReactionState,
+        EmbedState, Message, MessageOptions, PinState, RayGunAdapter, Reaction, ReactionState,
     };
     use crate::runtime_handle;
-    use std::ffi::CStr;
+    use std::ffi::{CStr, CString};
     use std::os::raw::{c_char, c_void};
     use std::str::{FromStr, Utf8Error};
     use uuid::Uuid;
+    // use warp_derive::FFIArray;
+
+    use super::SenderId;
 
     #[allow(clippy::await_holding_lock)]
     #[allow(clippy::missing_safety_doc)]
@@ -730,6 +734,188 @@ pub mod ffi {
         FFIResult::from(
             rt.block_on(async { adapter.inner_guard().embeds(convo_id, msg_id, state).await }),
         )
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn message_id(ctx: *const Message) -> *mut c_char {
+        if ctx.is_null() {
+            return std::ptr::null_mut();
+        }
+        let adapter = &*ctx;
+        match CString::new(adapter.id().to_string()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn message_conversation_id(ctx: *const Message) -> *mut c_char {
+        if ctx.is_null() {
+            return std::ptr::null_mut();
+        }
+        let adapter = &*ctx;
+        match CString::new(adapter.conversation_id().to_string()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn message_sender_id(ctx: *const Message) -> *mut SenderId {
+        if ctx.is_null() {
+            return std::ptr::null_mut();
+        }
+        let adapter = &*ctx;
+        Box::into_raw(Box::new(adapter.sender()))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn message_date(ctx: *const Message) -> *mut c_char {
+        if ctx.is_null() {
+            return std::ptr::null_mut();
+        }
+        let adapter = &*ctx;
+        match CString::new(adapter.date().to_string()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn message_pinned(ctx: *const Message) -> bool {
+        if ctx.is_null() {
+            return false;
+        }
+        let adapter = &*ctx;
+        adapter.pinned()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn message_reactions(ctx: *const Message) -> *mut c_char {
+        if ctx.is_null() {
+            return std::ptr::null_mut();
+        }
+        let adapter = &*ctx;
+        match CString::new(adapter.date().to_string()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn message_lines(ctx: *const Message) -> *mut FFIVec<*mut c_char> {
+        if ctx.is_null() {
+            return std::ptr::null_mut();
+        }
+        let adapter = &*ctx;
+        let lines = adapter
+            .value()
+            .iter()
+            .map(|line| match CString::new(line.clone()) {
+                Ok(l) => l.into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            })
+            .collect::<Vec<_>>();
+
+        Box::into_raw(Box::new(FFIVec::from(lines)))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn reaction_emoji(ctx: *const Reaction) -> *mut c_char {
+        if ctx.is_null() {
+            return std::ptr::null_mut();
+        }
+        let adapter = &*ctx;
+        match CString::new(adapter.emoji()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn reaction_users(ctx: *const Reaction) -> *mut FFIArray<SenderId> {
+        if ctx.is_null() {
+            return std::ptr::null_mut();
+        }
+        let adapter = &*ctx;
+        Box::into_raw(Box::new(FFIArray::new(adapter.users())))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn sender_id_from_id(id: *const c_char) -> *mut SenderId {
+        if id.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let id = CStr::from_ptr(id).to_string_lossy().to_string();
+
+        let uuid = match Uuid::from_str(&id) {
+            Ok(uuid) => uuid,
+            Err(_) => return std::ptr::null_mut(),
+        };
+
+        Box::into_raw(Box::new(SenderId::from_id(uuid)))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn sender_id_from_public_key(
+        public_key: *const PublicKey,
+    ) -> *mut SenderId {
+        if public_key.is_null() {
+            return std::ptr::null_mut();
+        }
+        let pkey = &*public_key;
+        Box::into_raw(Box::new(SenderId::from_public_key(pkey.clone())))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn sender_id_get_id(sender_id: *const SenderId) -> *mut c_char {
+        if sender_id.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let sender_id = &*sender_id;
+
+        let id = match sender_id.get_id() {
+            Some(id) => id.to_string(),
+            None => return std::ptr::null_mut(),
+        };
+
+        match CString::new(id) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn sender_id_get_public_key(
+        sender_id: *const SenderId,
+    ) -> *mut PublicKey {
+        if sender_id.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let sender_id = &*sender_id;
+
+        let key = match sender_id.get_public_key() {
+            Some(key) => key,
+            None => return std::ptr::null_mut(),
+        };
+
+        Box::into_raw(Box::new(key))
     }
 
     #[allow(clippy::missing_safety_doc)]
