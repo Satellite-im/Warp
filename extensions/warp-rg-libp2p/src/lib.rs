@@ -578,7 +578,7 @@ impl Libp2pMessaging {
     pub fn group_helper(&self) -> anyhow::Result<crate::solana::groupchat::GroupChat> {
         let private_key = self.account.lock().decrypt_private_key(None)?;
         let kp = anchor_client::solana_sdk::signer::keypair::Keypair::from_bytes(&private_key)?;
-        //TODO: Have option to swithc between devnet and mainnet
+        //TODO: Have option to switch between devnet and mainnet
         Ok(crate::solana::groupchat::GroupChat::devnet_keypair(&kp))
     }
 }
@@ -590,6 +590,11 @@ fn swarm_command(
     match commands {
         Some(SwarmCommands::DialPeer(peer)) => swarm.dial(peer)?,
         Some(SwarmCommands::DialAddr(addr)) => swarm.dial(addr)?,
+        Some(SwarmCommands::BanPeer(peer)) => swarm.ban_peer_id(peer),
+        Some(SwarmCommands::UnbanPeer(peer)) => swarm.unban_peer_id(peer),
+        Some(SwarmCommands::DisconnectPeer(peer)) => {
+            swarm.disconnect_peer_id(peer).map_err(|_| Error::Other)?
+        }
         Some(SwarmCommands::SubscribeToTopic(topic)) => {
             cfg_if::cfg_if! {
                 if #[cfg(feature = "floodsub")] {
@@ -608,12 +613,20 @@ fn swarm_command(
                 }
             }
         }
+        Some(SwarmCommands::PublishToTopic(topic, data)) => {
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "gossipsub")] {
+                    swarm.behaviour_mut().sub.publish(Topic::new(topic), data)?;
+                } else if #[cfg(feature = "floodsub")] {
+                    swarm.behaviour_mut().sub.publish(Topic::new(topic), data);
+                }
+            }
+        }
         _ => {} //TODO: Invalid command?
     }
     Ok(())
 }
 
-#[cfg(any(feature = "gossipsub", feature = "floodsub"))]
 async fn swarm_events(
     swarm: &mut Swarm<RayGunBehavior>,
     event: Option<MessagingEvents>,
@@ -630,32 +643,23 @@ async fn swarm_events(
             MessagingEvents::Ping(id, _) => *id,
         };
 
-        let topic = Topic::new(topic.to_string());
-
+        //TODO: Encrypt the bytes of data with a shared key between two (or more?) peers
         match serde_json::to_vec(&event) {
             Ok(bytes) => {
-                //TODO: Resolve initial connection/subscribe
-                cfg_if::cfg_if! {
-                    if #[cfg(feature = "gossipsub")] {
-                        match swarm.behaviour_mut().sub.subscribe(&topic) {
-                            Ok(_) => {}
-                            Err(e) => {
-                                if let Err(e) = tx.send(Err(Error::Any(anyhow!(e)))).await {
-                                    println!("{}", e);
-                                }
-                            }
-                        };
-                        match swarm.behaviour_mut().sub.publish(topic, bytes) {
-                            Ok(_) => {}
-                            Err(e) => {
-                                if let Err(e) = tx.send(Err(Error::Any(anyhow!(e)))).await {
-                                    println!("{}", e);
-                                }
-                            }
-                        };
-                    } else if #[cfg(feature = "floodsub")] {
-                        swarm.behaviour_mut().sub.subscribe(topic.clone());
-                        swarm.behaviour_mut().sub.publish(topic, bytes);
+                if let Err(e) = swarm_command(
+                    swarm,
+                    Some(SwarmCommands::SubscribeToTopic(topic.to_string())),
+                ) {
+                    if let Err(e) = tx.send(Err(Error::Any(e))).await {
+                        println!("{}", e);
+                    }
+                }
+                if let Err(e) = swarm_command(
+                    swarm,
+                    Some(SwarmCommands::PublishToTopic(topic.to_string(), bytes)),
+                ) {
+                    if let Err(e) = tx.send(Err(Error::Any(e))).await {
+                        println!("{}", e);
                     }
                 }
 
@@ -691,8 +695,12 @@ impl Extension for Libp2pMessaging {
 pub enum SwarmCommands {
     DialPeer(PeerId),
     DialAddr(Multiaddr),
+    BanPeer(PeerId),
+    UnbanPeer(PeerId),
+    DisconnectPeer(PeerId),
     SubscribeToTopic(String),
     UnsubscribeFromTopic(String),
+    PublishToTopic(String, Vec<u8>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -868,14 +876,7 @@ impl GroupChat for Libp2pMessaging {
         todo!()
     }
 
-    fn leave_group(&mut self, id: GroupId) -> Result<()> {
-        let helper = self.group_helper()?;
-        let group = solana_group_to_warp_group(&helper, &id)?;
-        if group.status() == GroupStatus::Closed {
-            return Err(Error::Any(anyhow!("Group is closed")));
-        }
-        let gid_uuid = id.get_id().ok_or(Error::Other)?;
-        helper.modify_open_invites(&gid_uuid.to_string(), true)?;
+    fn leave_group(&mut self, _id: GroupId) -> Result<()> {
         Ok(())
     }
 
