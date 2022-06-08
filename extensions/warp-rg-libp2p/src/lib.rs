@@ -405,6 +405,8 @@ impl Libp2pMessaging {
 
         message.command_channel = Some(command_tx);
 
+        //TODO: Subscribe to specific topics for handling exchange of specific data outside of the scope of messaging
+
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -598,27 +600,27 @@ fn swarm_command(
         Some(SwarmCommands::SubscribeToTopic(topic)) => {
             cfg_if::cfg_if! {
                 if #[cfg(feature = "floodsub")] {
-                    swarm.behaviour_mut().sub.subscribe(Topic::new(topic));
+                    swarm.behaviour_mut().sub.subscribe(topic);
                 } else if #[cfg(feature = "gossipsub")] {
-                    swarm.behaviour_mut().sub.subscribe(&Topic::new(topic))?;
+                    swarm.behaviour_mut().sub.subscribe(&topic)?;
                 }
             }
         }
         Some(SwarmCommands::UnsubscribeFromTopic(topic)) => {
             cfg_if::cfg_if! {
                 if #[cfg(feature = "floodsub")] {
-                    swarm.behaviour_mut().sub.unsubscribe(Topic::new(topic));
+                    swarm.behaviour_mut().sub.unsubscribe(topic);
                 } else if #[cfg(feature = "gossipsub")] {
-                    swarm.behaviour_mut().sub.unsubscribe(&Topic::new(topic))?;
+                    swarm.behaviour_mut().sub.unsubscribe(&topic)?;
                 }
             }
         }
         Some(SwarmCommands::PublishToTopic(topic, data)) => {
             cfg_if::cfg_if! {
                 if #[cfg(feature = "gossipsub")] {
-                    swarm.behaviour_mut().sub.publish(Topic::new(topic), data)?;
+                    swarm.behaviour_mut().sub.publish(topic, data)?;
                 } else if #[cfg(feature = "floodsub")] {
-                    swarm.behaviour_mut().sub.publish(Topic::new(topic), data);
+                    swarm.behaviour_mut().sub.publish(topic, data);
                 }
             }
         }
@@ -648,7 +650,9 @@ async fn swarm_events(
             Ok(bytes) => {
                 if let Err(e) = swarm_command(
                     swarm,
-                    Some(SwarmCommands::SubscribeToTopic(topic.to_string())),
+                    Some(SwarmCommands::SubscribeToTopic(Topic::new(
+                        topic.to_string(),
+                    ))),
                 ) {
                     if let Err(e) = tx.send(Err(Error::Any(e))).await {
                         println!("{}", e);
@@ -656,7 +660,10 @@ async fn swarm_events(
                 }
                 if let Err(e) = swarm_command(
                     swarm,
-                    Some(SwarmCommands::PublishToTopic(topic.to_string(), bytes)),
+                    Some(SwarmCommands::PublishToTopic(
+                        Topic::new(topic.to_string()),
+                        bytes,
+                    )),
                 ) {
                     if let Err(e) = tx.send(Err(Error::Any(e))).await {
                         println!("{}", e);
@@ -698,9 +705,9 @@ pub enum SwarmCommands {
     BanPeer(PeerId),
     UnbanPeer(PeerId),
     DisconnectPeer(PeerId),
-    SubscribeToTopic(String),
-    UnsubscribeFromTopic(String),
-    PublishToTopic(String, Vec<u8>),
+    SubscribeToTopic(Topic),
+    UnsubscribeFromTopic(Topic),
+    PublishToTopic(Topic, Vec<u8>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -911,7 +918,9 @@ impl GroupChatManagement for Libp2pMessaging {
         let id = GroupId::new_uuid();
         let group_id = id.get_id().ok_or(Error::Other)?;
         helper.create_group(&group_id.to_string(), name)?;
-        self.send_swarm_command_sync(SwarmCommands::SubscribeToTopic(group_id.to_string()))?;
+        self.send_swarm_command_sync(SwarmCommands::SubscribeToTopic(Topic::new(
+            group_id.to_string(),
+        )))?;
         let new_group = solana_group_to_warp_group(&helper, &id)?;
         Ok(new_group)
     }
