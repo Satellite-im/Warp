@@ -1,6 +1,8 @@
+use anyhow::anyhow;
 use comfy_table::Table;
 use futures::prelude::*;
-use libp2p::Multiaddr;
+#[allow(unused_imports)]
+use libp2p::{Multiaddr, PeerId};
 use rustyline_async::{Readline, ReadlineError};
 use std::io::Write;
 use std::str::FromStr;
@@ -14,7 +16,8 @@ use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
 use warp_mp_solana::SolanaAccount;
 use warp_pd_stretto::StrettoClient;
-use warp_rg_libp2p::Libp2pMessaging;
+#[allow(unused_imports)]
+use warp_rg_libp2p::{Libp2pMessaging, SwarmCommands};
 
 fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
     let storage = StrettoClient::new()?;
@@ -24,7 +27,7 @@ fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
 fn create_account(
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
 ) -> anyhow::Result<Arc<Mutex<Box<dyn MultiPass>>>> {
-    let env = std::env::var("TESSERACT_FILE").unwrap_or(format!("datastore"));
+    let env = std::env::var("TESSERACT_FILE").unwrap_or("datastore".to_string());
 
     let mut tesseract = Tesseract::from_file(&env).unwrap_or_default();
     tesseract
@@ -38,10 +41,9 @@ fn create_account(
     account.set_tesseract(tesseract);
     account.set_cache(cache);
 
-    match account.get_own_identity() {
-        Ok(_) => return Ok(Arc::new(Mutex::new(Box::new(account)))),
-        Err(_) => {}
-    };
+    if account.get_own_identity().is_ok() {
+        return Ok(Arc::new(Mutex::new(Box::new(account))));
+    }
     account.create_identity(None, None)?;
     Ok(Arc::new(Mutex::new(Box::new(account))))
 }
@@ -51,8 +53,19 @@ async fn create_rg(
     addr: Option<Multiaddr>,
     bootstrap: Vec<(String, String)>,
 ) -> anyhow::Result<Box<dyn RayGun>> {
-    let p2p_chat = Libp2pMessaging::new(account, None, addr, bootstrap).await?;
+    let p2p_chat = create_rg_direct(account, addr, bootstrap).await?;
     Ok(Box::new(p2p_chat))
+}
+
+#[allow(dead_code)]
+async fn create_rg_direct(
+    account: Arc<Mutex<Box<dyn MultiPass>>>,
+    addr: Option<Multiaddr>,
+    bootstrap: Vec<(String, String)>,
+) -> anyhow::Result<Libp2pMessaging> {
+    Libp2pMessaging::new(account, None, addr, bootstrap)
+        .await
+        .map_err(|e| anyhow!(e))
 }
 
 pub fn topic() -> Uuid {
@@ -63,7 +76,7 @@ pub fn topic() -> Uuid {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let addr = {
-        let env = std::env::var("LIBP2P_ADDR").unwrap_or(format!("/ip4/0.0.0.0/tcp/0"));
+        let env = std::env::var("LIBP2P_ADDR").unwrap_or("/ip4/0.0.0.0/tcp/0".to_string());
         Multiaddr::from_str(&env).ok()
     };
 
@@ -117,6 +130,7 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         tokio::select! {
+            //TODO: Optimize by clearing terminal and displaying all messages instead of getting last line
             msg = chat.get_messages(topic, MessageOptions::default(), None) => {
                 if let Ok(msg) = msg {
                     if msg.len() == convo_size {
@@ -158,8 +172,12 @@ async fn main() -> anyhow::Result<()> {
                         //         },
                         //         None | _ => continue
                         //     };
-                        //
-                        //     chat.send_command(command).await?
+
+                        //     if let Err(e) = chat.send_command(command).await {
+                        //         writeln!(stdout, "Error: {}", e)?;
+                        //         continue
+                        //     }
+                        //     writeln!(stdout, "Command Sent")?;
                         // },
                         Some("/list") => {
                             let mut table = Table::new();
