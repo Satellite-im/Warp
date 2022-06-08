@@ -24,6 +24,8 @@ serde_json = { version = "1.0" }
 bs58 = "0.4"
 cfg-if = "1.0"
 
+log = "0.4"
+
 hex = "0.4"
 
 groupchats = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"], optional = true }
