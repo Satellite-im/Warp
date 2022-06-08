@@ -125,6 +125,14 @@ pub enum Error {
     InvalidInvite,
     #[error("Unable to change group status")]
     CannotChangeGroupStatus,
+    #[error("Group name exceed maximum limit")]
+    GroupNameTooLong,
+    #[error("Group name does not meet minimum limit")]
+    GroupNameTooShort,
+    #[error("Group is closed")]
+    GroupClosed,
+    #[error("Group is opened")]
+    GroupOpened,
 
     //Crypto Errors
     #[error("{0}")]
