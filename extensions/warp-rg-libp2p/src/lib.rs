@@ -1171,7 +1171,7 @@ pub mod ffi {
         rt.block_on(async move {
             match Libp2pMessaging::new(
                 account.get_inner().clone(),
-                cache.map(|p| p.inner().clone()),
+                cache.map(|p| p.inner()),
                 listen_addr,
                 bootstrap,
             )
