@@ -5,20 +5,29 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies]
-#warp-common 	= { path = "../../utils/warp-common", features = ["async"]}
-#warp-raygun 	= { path = "../../modules/warp-raygun" }
-#warp-multipass 	= { path = "../../modules/warp-multipass" }
-#warp-module 	= { path = "../../utils/warp-module" }
-#warp-crypto 	= { path = "../../utils/warp-crypto" }
+[lib]
+crate-type = ["cdylib", "rlib", "staticlib"]
 
-ipfs-api-backend-hyper    = { version = "0.4", features = ["with-send-sync", "with-hyper-tls"], optional = true}
-hyper-tls 				  = { version = "0.5", optional = true }
-hyper                     = { version = "0.14", features = ["http1", "http2", "client", "tcp"], optional = true }
-http 					  = { version = "0.2", optional = true }
-ipfs 					  = { git = "https://github.com/rs-ipfs/rust-ipfs", optional = true}
+[dependencies]
+warp = { path = "../../warp" }
+
+libp2p = { default-features = false, features = ["floodsub", "identify", "kad", "tcp-tokio", "mplex", "noise", "ping", "yamux", "dns-tokio"], version = "0.43.0" }
+ipfs 					  = { git = "https://github.com/rs-ipfs/rust-ipfs" }
+
+uuid = { version = "1.0", features = ["serde", "v4"] }
+tokio = { version = "1", features = ["full"] }
+futures = { version = "0.3" }
+async-trait = { version = "0.1" }
+anyhow = { version = "1" }
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+bs58 = "0.4"
+cfg-if = "1.0"
+
+log = "0.4"
+
+hex = "0.4"
 
 [features]
 default = []
-http_api = ["ipfs-api-backend-hyper", "hyper-tls", "hyper", "http"]
-native = ["ipfs"]
