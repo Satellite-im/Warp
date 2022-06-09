@@ -195,10 +195,11 @@ impl MultiPass for SolanaAccount {
 
         let mut helper =
             UserHelper::new_with_cluster(self.endpoint.clone(), &wallet.get_keypair()?);
-
-        if let Ok(identity) = user_to_identity(&helper, None) {
-            if identity.username() == username {
-                return Err(Error::IdentityExist);
+        if let Ok(user) = helper.get_current_user() {
+            if let Ok(identity) = user_to_identity(&user) {
+                if identity.username() == username {
+                    return Err(Error::IdentityExist);
+                }
             }
         }
 
@@ -220,8 +221,8 @@ impl MultiPass for SolanaAccount {
         if self.get_wallet().is_err() {
             self.insert_solana_wallet(wallet)?;
         }
-
-        let identity = user_to_identity(&helper, None)?;
+        let user = helper.get_current_user()?;
+        let identity = user_to_identity(&user)?;
 
         if let Ok(mut cache) = self.get_cache() {
             let object = DataObject::new(DataType::from(Module::Accounts), &identity)?;
@@ -256,12 +257,12 @@ impl MultiPass for SolanaAccount {
                     return Err(Error::Any(anyhow!("Unable to obtain identity by username")));
                 }
 
-                let user_key = match users.first() {
-                    Some(user) => user.signer,
+                let user = match users.first() {
+                    Some(user) => user,
                     None => return Err(Error::ArrayPositionNotFound),
                 };
 
-                user_to_identity(&helper, Some(user_key.as_ref()))?
+                user_to_identity(user)?
             }
             (Some(pkey), None, false) => {
                 if let Ok(cache) = self.get_cache() {
@@ -276,9 +277,18 @@ impl MultiPass for SolanaAccount {
                         }
                     }
                 }
-                user_to_identity(&helper, Some(pkey.as_ref()))?
+                if pkey.as_ref().len() > 32 {
+                    return Err(Error::InvalidPublicKeyLength);
+                }
+                let pubkey = Pubkey::new(pkey.as_ref());
+                let user = helper.get_user(pubkey)?;
+
+                user_to_identity(&user)?
             }
-            (None, None, true) => user_to_identity(&helper, None)?,
+            (None, None, true) => {
+                let user = helper.get_current_user()?;
+                user_to_identity(&user)?
+            }
             _ => return Err(Error::InvalidIdentifierCondition),
         };
 
@@ -298,8 +308,9 @@ impl MultiPass for SolanaAccount {
 
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<()> {
         let mut helper = self.user_helper()?;
+        let user = helper.get_current_user()?;
+        let mut identity = user_to_identity(&user)?;
 
-        let mut identity = user_to_identity(&helper, None)?;
         let old_identity = identity.clone();
         match (
             option.username(),
@@ -637,20 +648,7 @@ fn fr_to_fr(fr: helper::friends::DirectFriendRequest) -> FriendRequest {
     new_fr
 }
 
-fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Result<Identity> {
-    let (user, pubkey) = match pubkey {
-        Some(pubkey) => {
-            let pkey = Pubkey::new(pubkey);
-            let user = helper.get_user(pkey)?;
-            (user, pkey)
-        }
-        None => {
-            let user = helper.get_current_user()?;
-            let pkey = helper.program.payer();
-            (user, pkey)
-        }
-    };
-
+fn user_to_identity(user: &users::User) -> anyhow::Result<Identity> {
     let mut identity = Identity::default();
     //Note: This is temporary
     if user.name.contains('#') {
@@ -663,8 +661,14 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
             identity.set_username(&user.name);
         } else {
             match (
-                split_data.get(0).ok_or(Error::Other).map(|s| s.to_string()),
-                split_data.get(1).ok_or(Error::Other)?.parse(),
+                split_data
+                    .get(0)
+                    .ok_or(Error::ArrayPositionNotFound)
+                    .map(|s| s.to_string()),
+                split_data
+                    .get(1)
+                    .ok_or(Error::ArrayPositionNotFound)?
+                    .parse(),
             ) {
                 (Ok(name), Ok(code)) => {
                     identity.set_username(&name);
@@ -677,8 +681,8 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
         identity.set_username(&user.name);
     };
 
-    identity.set_public_key(PublicKey::from_bytes(&pubkey.to_bytes()));
-    identity.set_status_message(Some(user.status));
+    identity.set_public_key(PublicKey::from_bytes(user.signer.as_ref()));
+    identity.set_status_message(Some(user.status.clone()));
     let mut graphics = Graphics::default();
     graphics.set_profile_banner(&user.banner_image_hash);
     graphics.set_profile_picture(&user.photo_hash);
