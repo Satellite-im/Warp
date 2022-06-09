@@ -254,7 +254,7 @@ impl MultiPass for SolanaAccount {
                 let users = helper.get_user_by_name(&username)?;
 
                 if users.is_empty() {
-                    return Err(Error::Any(anyhow!("Unable to obtain identity by username")));
+                    return Err(Error::IdentityDoesntExist);
                 }
 
                 let user = match users.first() {
