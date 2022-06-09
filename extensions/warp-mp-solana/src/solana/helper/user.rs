@@ -13,7 +13,6 @@ use anchor_client::anchor_lang::prelude::ProgramError;
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anyhow::{anyhow, ensure};
 use std::rc::Rc;
-use std::str::FromStr;
 
 pub struct UserHelper {
     pub client: Client,
@@ -57,8 +56,7 @@ impl UserHelper {
         );
 
         //TODO: Change back to users::id() when the program is updated to use the correct key
-        let program = client
-            .program(Pubkey::from_str("8n2ct4HBadJdtr8T31JvYPTvmYeZyCuLUjkt3CwcSsh9").unwrap());
+        let program = client.program(users::id());
         Self {
             client,
             program,
@@ -301,7 +299,30 @@ impl UserHelper {
         Ok(())
     }
 
-    pub fn get_user_by_name(&self, name: &str) -> anyhow::Result<User> {
+    pub fn close(&mut self) -> anyhow::Result<()> {
+        let payer = self.program.payer();
+        let user = self.program_key(payer)?;
+        self.program
+            .request()
+            .accounts(users::accounts::Close {
+                user,
+                signer: payer,
+                payer,
+            })
+            .args(users::instruction::Close)
+            .signer(&self.kp)
+            .send()
+            .map_err(|e| match e {
+                ClientError::ProgramError(ProgramError::Custom(code)) => {
+                    anyhow!(UserError::from(code))
+                }
+                _ => anyhow!(e),
+            })?;
+
+        Ok(())
+    }
+
+    pub fn get_user_by_name(&self, name: &str) -> anyhow::Result<Vec<User>> {
         let name_length = name.chars().count();
         ensure!(
             name_length > 3 || name_length <= 32,
@@ -316,7 +337,8 @@ impl UserHelper {
             encoding: None,
         });
 
-        self.program
+        Ok(self
+            .program
             .accounts(vec![filter])
             .map_err(|e| match e {
                 ClientError::ProgramError(ProgramError::Custom(code)) => {
@@ -327,10 +349,7 @@ impl UserHelper {
             .iter()
             .cloned()
             .map(|(_, account)| account)
-            .collect::<Vec<_>>()
-            .first()
-            .cloned()
-            .ok_or_else(|| anyhow!("User not found"))
+            .collect::<Vec<_>>())
     }
 
     pub fn user_pubkey(&self) -> Pubkey {

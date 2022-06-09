@@ -250,28 +250,18 @@ impl MultiPass for SolanaAccount {
                         }
                     }
                 }
-                let user = helper.get_user_by_name(&username)?;
-                // If this field is empty or cannot be decoded from base58 we should return an error
-                // Note: We may have to cross check the public key against the account that holds it
-                //       for security purpose
-                if user.extra_1.is_empty() {
-                    return Err(Error::Any(anyhow!(
-                        "Unable to obtain identity by username (Incompatible Account)"
-                    )));
+                let users = helper.get_user_by_name(&username)?;
+
+                if users.is_empty() {
+                    return Err(Error::Any(anyhow!("Unable to obtain identity by username")));
                 }
 
-                match bs58::decode(&user.extra_1)
-                    .into_vec()
-                    .map_err(|e| anyhow!(e))
-                {
-                    Ok(pkey) => {
-                        if pkey.is_empty() || pkey.len() < 31 {
-                            return Err(Error::InvalidPublicKeyLength);
-                        }
-                        user_to_identity(&helper, Some(&pkey))?
-                    }
-                    Err(e) => return Err(Error::Any(e)),
-                }
+                let user_key = match users.first() {
+                    Some(user) => user.signer,
+                    None => return Err(Error::ArrayPositionNotFound),
+                };
+
+                user_to_identity(&helper, Some(user_key.as_ref()))?
             }
             (Some(pkey), None, false) => {
                 if let Ok(cache) = self.get_cache() {
