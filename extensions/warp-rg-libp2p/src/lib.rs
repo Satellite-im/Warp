@@ -40,6 +40,7 @@ use warp::{error::Error, pocket_dimension::PocketDimension};
 use warp::{module::Module, Extension};
 
 use libp2p::autonat;
+use log::{error, info, warn};
 
 use serde::{Deserialize, Serialize};
 use warp::data::{DataObject, DataType};
@@ -352,13 +353,14 @@ impl Libp2pMessaging {
             }
             Err(e) => {
                 //TODO: Log
-                println!("Error decrypting private key: {}", e);
-                println!("Generating keypair...");
+                warn!("Error decrypting private key: {}", e);
+                warn!("Generating keypair...");
+                //Note: leave for testing purpose?
                 identity::Keypair::generate_ed25519()
             }
         };
 
-        let _peer = PeerId::from(keypair.public());
+        info!("PeerID: {}", PeerId::from(keypair.public()));
 
         let mut swarm = message.create_swarm(keypair).await?;
 
@@ -374,7 +376,7 @@ impl Libp2pMessaging {
                 Ok(addr) => addr,
                 Err(e) => {
                     //TODO: Log
-                    println!("{}", e);
+                    error!("{}", e);
                     continue;
                 }
             };
@@ -382,7 +384,7 @@ impl Libp2pMessaging {
                 Ok(peer) => peer,
                 Err(e) => {
                     //TODO: Log
-                    println!("{}", e);
+                    error!("{}", e);
                     continue;
                 }
             };
@@ -413,19 +415,19 @@ impl Libp2pMessaging {
                     swm_event = command_rx.recv() => {
                         if let Err(e) = swarm_command(&mut swarm, swm_event) {
                             //TODO: Log Error,
-                            println!("{}", e);
+                            error!("{}", e);
                         }
                     }
                     rg_event = into_rx.recv() => {
                         if let Err(e) = swarm_events(&mut swarm, rg_event, outer_tx.clone()).await {
                             //TODO: Log
-                            println!("{}", e);
+                            error!("{}", e);
                         }
                     },
                     event = swarm.select_next_some() => {
                         if let SwarmEvent::NewListenAddr { address, .. } = event {
                             //TODO: Log
-                            println!("Listening on {:?}", address);
+                            info!("Listening on {:?}", address);
                         }
                     }
                 }
@@ -655,7 +657,7 @@ async fn swarm_events(
                     ))),
                 ) {
                     if let Err(e) = tx.send(Err(Error::Any(e))).await {
-                        println!("{}", e);
+                        error!("{}", e);
                     }
                 }
                 if let Err(e) = swarm_command(
@@ -666,19 +668,19 @@ async fn swarm_events(
                     )),
                 ) {
                     if let Err(e) = tx.send(Err(Error::Any(e))).await {
-                        println!("{}", e);
+                        error!("{}", e);
                     }
                 }
 
                 if let Err(e) = tx.send(Ok(())).await {
                     //TODO: Log error
-                    println!("{}", e);
+                    error!("{}", e);
                 }
             }
             Err(e) => {
                 if let Err(e) = tx.send(Err(Error::from(e))).await {
                     //TODO: Log error
-                    println!("{}", e);
+                    error!("{}", e);
                 }
             }
         }

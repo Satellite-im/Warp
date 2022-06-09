@@ -4,6 +4,7 @@ use ipfs::{Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, TestTypes, Uninitializ
 use libp2p::identity;
 use std::path::PathBuf;
 use std::sync::Arc;
+#[allow(unused_imports)]
 use tokio::sync::mpsc::{Receiver, Sender};
 use uuid::Uuid;
 use warp::error::Error;
