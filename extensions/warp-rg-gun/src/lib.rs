@@ -308,7 +308,7 @@ impl RayGun for GunMessaging {
         _conversation_id: Uuid,
         _message_id: Uuid,
         _state: ReactionState,
-        _emoji: Option<String>,
+        _emoji: String,
     ) -> Result<()> {
         Err(Error::Unimplemented)
     }

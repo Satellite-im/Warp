@@ -1,32 +1,39 @@
+use anyhow::anyhow;
+use comfy_table::Table;
 use futures::prelude::*;
-use libp2p::Multiaddr;
+#[allow(unused_imports)]
+use libp2p::{Multiaddr, PeerId};
 use rustyline_async::{Readline, ReadlineError};
 use std::io::Write;
 use std::str::FromStr;
 use uuid::Uuid;
 use warp::crypto::hash::sha256_hash;
+use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::{MessageOptions, PinState, RayGun};
+use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, SenderId};
 use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
 use warp_mp_solana::SolanaAccount;
 use warp_pd_stretto::StrettoClient;
-use warp_rg_libp2p::Libp2pMessaging;
+#[allow(unused_imports)]
+use warp_rg_libp2p::{Libp2pMessaging, SwarmCommands};
 
 fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
     let storage = StrettoClient::new()?;
     Ok(Arc::new(Mutex::new(Box::new(storage))))
 }
 
-async fn create_account(
+fn create_account(
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
 ) -> anyhow::Result<Arc<Mutex<Box<dyn MultiPass>>>> {
-    let mut tesseract = Tesseract::from_file("datastore").unwrap_or_default();
+    let env = std::env::var("TESSERACT_FILE").unwrap_or("datastore".to_string());
+
+    let mut tesseract = Tesseract::from_file(&env).unwrap_or_default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    tesseract.set_file("datastore");
+    tesseract.set_file(env);
     tesseract.set_autosave();
 
     let tesseract = Arc::new(Mutex::new(tesseract));
@@ -34,15 +41,11 @@ async fn create_account(
     account.set_tesseract(tesseract);
     account.set_cache(cache);
 
-    tokio::task::spawn_blocking(move || -> anyhow::Result<Arc<Mutex<Box<dyn MultiPass>>>> {
-        match account.get_own_identity() {
-            Ok(_) => return Ok(Arc::new(Mutex::new(Box::new(account)))),
-            Err(_) => {}
-        };
-        account.create_identity(None, None)?;
-        Ok(Arc::new(Mutex::new(Box::new(account))))
-    })
-    .await?
+    if account.get_own_identity().is_ok() {
+        return Ok(Arc::new(Mutex::new(Box::new(account))));
+    }
+    account.create_identity(None, None)?;
+    Ok(Arc::new(Mutex::new(Box::new(account))))
 }
 
 async fn create_rg(
@@ -50,8 +53,19 @@ async fn create_rg(
     addr: Option<Multiaddr>,
     bootstrap: Vec<(String, String)>,
 ) -> anyhow::Result<Box<dyn RayGun>> {
-    let p2p_chat = Libp2pMessaging::new(account, None, addr, bootstrap).await?;
+    let p2p_chat = create_rg_direct(account, addr, bootstrap).await?;
     Ok(Box::new(p2p_chat))
+}
+
+#[allow(dead_code)]
+async fn create_rg_direct(
+    account: Arc<Mutex<Box<dyn MultiPass>>>,
+    addr: Option<Multiaddr>,
+    bootstrap: Vec<(String, String)>,
+) -> anyhow::Result<Libp2pMessaging> {
+    Libp2pMessaging::new(account, None, addr, bootstrap)
+        .await
+        .map_err(|e| anyhow!(e))
 }
 
 pub fn topic() -> Uuid {
@@ -62,7 +76,7 @@ pub fn topic() -> Uuid {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let addr = {
-        let env = std::env::var("LIBP2P_ADDR").unwrap_or(format!("/ip4/0.0.0.0/tcp/0"));
+        let env = std::env::var("LIBP2P_ADDR").unwrap_or("/ip4/0.0.0.0/tcp/0".to_string());
         Multiaddr::from_str(&env).ok()
     };
 
@@ -92,8 +106,9 @@ async fn main() -> anyhow::Result<()> {
 
     let topic = topic();
     println!("Creating account...");
-    let new_account = create_account(cache.clone()).await?;
+    let new_account = create_account(cache.clone())?;
     let user = new_account.lock().get_own_identity()?;
+
     println!("Registered user {}#{}", user.username(), user.short_id());
 
     println!("Connecting to {}", topic);
@@ -115,6 +130,7 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         tokio::select! {
+            //TODO: Optimize by clearing terminal and displaying all messages instead of getting last line
             msg = chat.get_messages(topic, MessageOptions::default(), None) => {
                 if let Ok(msg) = msg {
                     if msg.len() == convo_size {
@@ -122,8 +138,9 @@ async fn main() -> anyhow::Result<()> {
                     }
                     convo_size = msg.len();
                     let msg = msg.last().unwrap();
-
-                    writeln!(stdout, "[{}] @> {}", msg.id(), msg.value().join("\n"))?;
+                    let username = get_username(new_account.clone(), msg.sender())?;
+                    //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
+                    writeln!(stdout, "[{}] @> {}", username, msg.value().join("\n"))?;
                 }
             }
             line = rl.readline().fuse() => match line {
@@ -155,15 +172,71 @@ async fn main() -> anyhow::Result<()> {
                         //         },
                         //         None | _ => continue
                         //     };
-                        //
-                        //     chat.send_command(command).await?
+
+                        //     if let Err(e) = chat.send_command(command).await {
+                        //         writeln!(stdout, "Error: {}", e)?;
+                        //         continue
+                        //     }
+                        //     writeln!(stdout, "Command Sent")?;
                         // },
                         Some("/list") => {
+                            let mut table = Table::new();
+                            table.set_header(vec!["ID", "CID", "Date", "Sender", "Message", "Pinned", "Reaction"]);
                             let messages = chat.get_messages(topic, MessageOptions::default(), None).await?;
                             for message in messages.iter() {
-                                //TODO: Print it out in a table
-                                writeln!(stdout, "{:?}", message)?;
+                                let username = get_username(new_account.clone(), message.sender())?;
+                                let mut emojis = vec![];
+                                for reaction in message.reactions() {
+                                    emojis.push(reaction.emoji());
+                                }
+                                table.add_row(vec![
+                                    &message.id().to_string(),
+                                    &message.conversation_id().to_string(),
+                                    &message.date().to_string(),
+                                    &username,
+                                    &message.value().join("\n"),
+                                    &format!("{}", message.pinned()),
+                                    &format!("{}", if emojis.is_empty() { "NONE".into() } else { emojis.join(" ") })
+                                ]);
                             }
+                            writeln!(stdout, "{}", table)?;
+                        },
+                        Some("/edit") => {
+                            let conversation_id = match cmd_line.next() {
+                                Some(id) => match Uuid::from_str(id) {
+                                        Ok(uuid) => uuid,
+                                        Err(e) => {
+                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            continue
+                                        }
+                                },
+                                None => {
+                                    writeln!(stdout, "/edit <conversation-id> <message-id> <message>")?;
+                                    continue
+                                }
+                            };
+
+                            let message_id = match cmd_line.next() {
+                                Some(id) => match Uuid::from_str(id) {
+                                        Ok(uuid) => uuid,
+                                        Err(e) => {
+                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            continue
+                                        }
+                                },
+                                None => {
+                                    writeln!(stdout, "/edit <conversation-id> <message-id> <message>")?;
+                                    continue
+                                }
+                            };
+
+                            let mut message = vec![];
+
+                            while let Some(item) = cmd_line.next() {
+                                message.push(item.to_string());
+                            }
+
+                            chat.send(conversation_id, Some(message_id), message).await?;
                         },
                         Some("/ping") => {
                             match chat.ping(topic).await {
@@ -172,6 +245,59 @@ async fn main() -> anyhow::Result<()> {
                                     writeln!(stdout, "Error: {}", e)?;
                                 }
                             }
+                        }
+                        Some("/react") => {
+                            let state = match cmd_line.next() {
+                                Some("add") => ReactionState::Add,
+                                Some("remove") => ReactionState::Remove,
+                                None | _ => {
+                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    continue
+                                }
+                            };
+
+                            let conversation_id = match cmd_line.next() {
+                                Some(id) => match Uuid::from_str(id) {
+                                        Ok(uuid) => uuid,
+                                        Err(e) => {
+                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            continue
+                                        }
+                                },
+                                None => {
+                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    continue
+                                }
+                            };
+
+                            let message_id = match cmd_line.next() {
+                                Some(id) => match Uuid::from_str(id) {
+                                        Ok(uuid) => uuid,
+                                        Err(e) => {
+                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            continue
+                                        }
+                                },
+                                None => {
+                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    continue
+                                }
+                            };
+
+                            let code = match cmd_line.next() {
+                                Some(code) => code.to_string(),
+                                None => {
+                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    continue
+                                }
+                            };
+
+                            if let Err(e) = chat.react(conversation_id, message_id, state, code).await {
+                                writeln!(stdout, "Error: {}", e)?;
+                                continue;
+                            }
+                            writeln!(stdout, "Reacted")?
+
                         }
                         Some("/pin") => {
                             match cmd_line.next() {
@@ -223,9 +349,13 @@ async fn main() -> anyhow::Result<()> {
                                 None => { writeln!(stdout, "/unpin <id | all>")? }
                             }
                         }
-                        _ => if let Err(e) = chat.send(topic, None, vec![line.to_string()]).await {
-                           writeln!(stdout, "Error sending message: {}", e)?;
-                           continue
+                        _ => {
+                            if !line.is_empty() {
+                                if let Err(e) = chat.send(topic, None, vec![line.to_string()]).await {
+                                    writeln!(stdout, "Error sending message: {}", e)?;
+                                    continue
+                                }
+                            }
                        }
                     }
                 },
@@ -239,4 +369,18 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn get_username(account: Arc<Mutex<Box<dyn MultiPass>>>, id: SenderId) -> anyhow::Result<String> {
+    if let Some(id) = id.get_id() {
+        //if for some reason uuid is used, we can just return that instead as a string
+        return Ok(id.to_string());
+    }
+
+    if let Some(pubkey) = id.get_public_key() {
+        let account = account.lock();
+        let identity = account.get_identity(Identifier::public_key(pubkey))?;
+        return Ok(format!("{}#{}", identity.username(), identity.short_id()));
+    }
+    anyhow::bail!("Invalid SenderId")
 }

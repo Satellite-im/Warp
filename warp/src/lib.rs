@@ -1,5 +1,5 @@
 pub mod sync {
-    pub use parking_lot::{Mutex, MutexGuard};
+    pub use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
     pub use std::sync::Arc;
 }
 

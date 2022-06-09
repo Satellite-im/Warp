@@ -14,7 +14,7 @@ use libp2p::mdns::{Mdns, MdnsConfig, MdnsEvent};
 use libp2p::swarm::{NetworkBehaviour, NetworkBehaviourEventProcess, SwarmEvent};
 use libp2p::{identity, tokio_development_transport, Multiaddr, PeerId, Swarm};
 use libp2p::{ping, NetworkBehaviour};
-use warp::raygun::group::*;
+use warp::raygun::{group::*, Reaction};
 
 use std::str::FromStr;
 use std::time::Duration;
@@ -40,6 +40,7 @@ use warp::{error::Error, pocket_dimension::PocketDimension};
 use warp::{module::Module, Extension};
 
 use libp2p::autonat;
+use log::{error, info, warn};
 
 use serde::{Deserialize, Serialize};
 use warp::data::{DataObject, DataType};
@@ -151,7 +152,7 @@ impl NetworkBehaviourEventProcess<GossipsubEvent> for RayGunBehavior {
         } = message
         {
             if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
-                process_message_event(self.inner.clone(), events);
+                if let Err(_e) = process_message_event(self.inner.clone(), &events) {}
             }
         }
     }
@@ -163,74 +164,126 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
         //TODO: Check topic and compare that to the conv id
         if let FloodsubEvent::Message(message) = message {
             if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
-                process_message_event(self.inner.clone(), events);
+                if let Err(_e) = process_message_event(self.inner.clone(), &events) {}
             }
         }
     }
 }
 
-fn process_message_event(conversation: Arc<Mutex<Vec<Message>>>, events: MessagingEvents) {
-    match events {
+fn process_message_event(
+    conversation: Arc<Mutex<Vec<Message>>>,
+    events: &MessagingEvents,
+) -> Result<()> {
+    match events.clone() {
         MessagingEvents::NewMessage(message) => conversation.lock().push(message),
         MessagingEvents::EditMessage(convo_id, message_id, val) => {
             let mut messages = conversation.lock();
 
-            let index = match messages
+            let index = messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
-                .ok_or(Error::ArrayPositionNotFound)
-            {
-                Ok(index) => index,
-                Err(_) => return,
-            };
+                .ok_or(Error::ArrayPositionNotFound)?;
 
-            let message = match messages.get_mut(index) {
-                Some(msg) => msg,
-                None => return,
-            };
+            let message = messages
+                .get_mut(index)
+                .ok_or(Error::ArrayPositionNotFound)?;
 
             *message.value_mut() = val;
         }
         MessagingEvents::DeleteMessage(convo_id, message_id) => {
             let mut messages = conversation.lock();
 
-            let index = match messages
+            let index = messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
-                .ok_or(Error::ArrayPositionNotFound)
-            {
-                Ok(index) => index,
-                Err(_) => return,
-            };
+                .ok_or(Error::ArrayPositionNotFound)?;
 
             let _ = messages.remove(index);
         }
-        MessagingEvents::PinMessage(convo_id, message_id, state) => {
+        MessagingEvents::PinMessage(convo_id, _, message_id, state) => {
             let mut messages = conversation.lock();
 
-            let index = match messages
+            let index = messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
-                .ok_or(Error::ArrayPositionNotFound)
-            {
-                Ok(index) => index,
-                Err(_) => return,
-            };
+                .ok_or(Error::ArrayPositionNotFound)?;
 
-            let message = match messages.get_mut(index) {
-                Some(msg) => msg,
-                None => return,
-            };
+            let message = messages
+                .get_mut(index)
+                .ok_or(Error::ArrayPositionNotFound)?;
 
             match state {
                 PinState::Pin => *message.pinned_mut() = true,
                 PinState::Unpin => *message.pinned_mut() = false,
             }
         }
-        MessagingEvents::ReactMessage(_, _, _) => {}
+        MessagingEvents::ReactMessage(convo_id, sender, message_id, state, emoji) => {
+            let mut messages = conversation.lock();
+
+            let index = messages
+                .iter()
+                .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
+                .ok_or(Error::ArrayPositionNotFound)?;
+
+            let message = messages
+                .get_mut(index)
+                .ok_or(Error::ArrayPositionNotFound)?;
+
+            let reactions = message.reactions_mut();
+
+            match state {
+                ReactionState::Add => {
+                    let index = match reactions
+                        .iter()
+                        .position(|reaction| reaction.emoji().eq(&emoji))
+                    {
+                        Some(index) => index,
+                        None => {
+                            let mut reaction = Reaction::default();
+                            reaction.set_emoji(&emoji);
+                            reaction.set_users(vec![sender]);
+                            reactions.push(reaction);
+                            return Ok(());
+                        }
+                    };
+
+                    let reaction = reactions
+                        .get_mut(index)
+                        .ok_or(Error::ArrayPositionNotFound)?;
+
+                    reaction.users_mut().push(sender);
+                }
+                ReactionState::Remove => {
+                    let index = reactions
+                        .iter()
+                        .position(|reaction| {
+                            reaction.users().contains(&sender) && reaction.emoji().eq(&emoji)
+                        })
+                        .ok_or(Error::ArrayPositionNotFound)?;
+
+                    let reaction = reactions
+                        .get_mut(index)
+                        .ok_or(Error::ArrayPositionNotFound)?;
+
+                    let user_index = reaction
+                        .users()
+                        .iter()
+                        .position(|reaction_sender| reaction_sender.eq(&sender))
+                        .ok_or(Error::ArrayPositionNotFound)?;
+
+                    reaction.users_mut().remove(user_index);
+
+                    if reaction.users().is_empty() {
+                        //Since there is no users listed under the emoji, the reaction should be removed from the message
+                        reactions.remove(index);
+                    }
+                }
+            }
+        }
         MessagingEvents::DeleteConversation(_) => {}
-        MessagingEvents::Ping(_) => {}
+        MessagingEvents::Ping(_, _) => {}
     }
+    Ok(())
 }
 
 impl NetworkBehaviourEventProcess<PingEvent> for RayGunBehavior {
@@ -300,13 +353,14 @@ impl Libp2pMessaging {
             }
             Err(e) => {
                 //TODO: Log
-                println!("Error decrypting private key: {}", e);
-                println!("Generating keypair...");
+                warn!("Error decrypting private key: {}", e);
+                warn!("Generating keypair...");
+                //Note: leave for testing purpose?
                 identity::Keypair::generate_ed25519()
             }
         };
 
-        let _peer = PeerId::from(keypair.public());
+        info!("PeerID: {}", PeerId::from(keypair.public()));
 
         let mut swarm = message.create_swarm(keypair).await?;
 
@@ -322,7 +376,7 @@ impl Libp2pMessaging {
                 Ok(addr) => addr,
                 Err(e) => {
                     //TODO: Log
-                    println!("{}", e);
+                    error!("{}", e);
                     continue;
                 }
             };
@@ -330,7 +384,7 @@ impl Libp2pMessaging {
                 Ok(peer) => peer,
                 Err(e) => {
                     //TODO: Log
-                    println!("{}", e);
+                    error!("{}", e);
                     continue;
                 }
             };
@@ -353,34 +407,27 @@ impl Libp2pMessaging {
 
         message.command_channel = Some(command_tx);
 
+        //TODO: Subscribe to specific topics for handling exchange of specific data outside of the scope of messaging
+
         tokio::spawn(async move {
             loop {
                 tokio::select! {
                     swm_event = command_rx.recv() => {
                         if let Err(e) = swarm_command(&mut swarm, swm_event) {
                             //TODO: Log Error,
-                            println!("{}", e);
+                            error!("{}", e);
                         }
                     }
                     rg_event = into_rx.recv() => {
-                        cfg_if::cfg_if!{
-                            if #[cfg(feature = "gossipsub")] {
-                                if let Err(e) = swarm_gossipsub_events(&mut swarm, rg_event, outer_tx.clone()).await {
-                                    //TODO: Log
-                                    println!("{}", e);
-                                }
-                            } else if #[cfg(feature = "floodsub")] {
-                                if let Err(e) = swarm_floodsub_events(&mut swarm, rg_event, outer_tx.clone()).await {
-                                    //TODO: Log
-                                    println!("{}", e);
-                                }
-                            }
+                        if let Err(e) = swarm_events(&mut swarm, rg_event, outer_tx.clone()).await {
+                            //TODO: Log
+                            error!("{}", e);
                         }
                     },
                     event = swarm.select_next_some() => {
                         if let SwarmEvent::NewListenAddr { address, .. } = event {
                             //TODO: Log
-                            println!("Listening on {:?}", address);
+                            info!("Listening on {:?}", address);
                         }
                     }
                 }
@@ -394,7 +441,7 @@ impl Libp2pMessaging {
         let inner_tx = self
             .command_channel
             .as_ref()
-            .ok_or_else(|| anyhow!("Channel unavailable"))?;
+            .ok_or(Error::SenderChannelUnavailable)?;
 
         //TODO: Implement a timeout
         inner_tx.send(command).await.map_err(|e| anyhow!("{}", e))?;
@@ -487,23 +534,29 @@ impl Libp2pMessaging {
     }
 
     pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
-        let cache = self.cache.as_ref().ok_or(Error::ToBeDetermined)?;
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or(Error::PocketDimensionExtensionUnavailable)?;
         Ok(cache.lock())
     }
 
-    pub async fn send_event(&mut self, event: MessagingEvents) -> anyhow::Result<()> {
+    pub async fn send_event(&mut self, event: &MessagingEvents) -> anyhow::Result<()> {
         let inner_tx = self
             .into_thread
             .as_ref()
-            .ok_or_else(|| anyhow!("Channel unavailable"))?;
+            .ok_or(Error::SenderChannelUnavailable)?;
 
         //TODO: Implement a timeout
-        inner_tx.send(event).await.map_err(|e| anyhow!("{}", e))?;
+        inner_tx
+            .send(event.clone())
+            .await
+            .map_err(|e| anyhow!("{}", e))?;
 
         let response = self
             .response_channel
             .as_mut()
-            .ok_or_else(|| anyhow!("Channel unavailable"))?;
+            .ok_or(Error::ReceiverChannelUnavailable)?;
 
         response
             .recv()
@@ -520,16 +573,16 @@ impl Libp2pMessaging {
         Ok(())
     }
 
-    pub fn sender_id(&self) -> anyhow::Result<warp::multipass::identity::PublicKey> {
+    pub fn sender_id(&self) -> anyhow::Result<SenderId> {
         let ident = self.account.lock().get_own_identity()?;
-        Ok(ident.public_key())
+        Ok(SenderId::from_public_key(ident.public_key()))
     }
 
     #[cfg(feature = "solana")]
     pub fn group_helper(&self) -> anyhow::Result<crate::solana::groupchat::GroupChat> {
         let private_key = self.account.lock().decrypt_private_key(None)?;
         let kp = anchor_client::solana_sdk::signer::keypair::Keypair::from_bytes(&private_key)?;
-        //TODO: Have option to swithc between devnet and mainnet
+        //TODO: Have option to switch between devnet and mainnet
         Ok(crate::solana::groupchat::GroupChat::devnet_keypair(&kp))
     }
 }
@@ -541,21 +594,35 @@ fn swarm_command(
     match commands {
         Some(SwarmCommands::DialPeer(peer)) => swarm.dial(peer)?,
         Some(SwarmCommands::DialAddr(addr)) => swarm.dial(addr)?,
+        Some(SwarmCommands::BanPeer(peer)) => swarm.ban_peer_id(peer),
+        Some(SwarmCommands::UnbanPeer(peer)) => swarm.unban_peer_id(peer),
+        Some(SwarmCommands::DisconnectPeer(peer)) => {
+            swarm.disconnect_peer_id(peer).map_err(|_| Error::Other)?
+        }
         Some(SwarmCommands::SubscribeToTopic(topic)) => {
             cfg_if::cfg_if! {
                 if #[cfg(feature = "floodsub")] {
-                    swarm.behaviour_mut().sub.subscribe(Topic::new(topic));
+                    swarm.behaviour_mut().sub.subscribe(topic);
                 } else if #[cfg(feature = "gossipsub")] {
-                    swarm.behaviour_mut().sub.subscribe(&Topic::new(topic))?;
+                    swarm.behaviour_mut().sub.subscribe(&topic)?;
                 }
             }
         }
         Some(SwarmCommands::UnsubscribeFromTopic(topic)) => {
             cfg_if::cfg_if! {
                 if #[cfg(feature = "floodsub")] {
-                    swarm.behaviour_mut().sub.unsubscribe(Topic::new(topic));
+                    swarm.behaviour_mut().sub.unsubscribe(topic);
                 } else if #[cfg(feature = "gossipsub")] {
-                    swarm.behaviour_mut().sub.unsubscribe(&Topic::new(topic))?;
+                    swarm.behaviour_mut().sub.unsubscribe(&topic)?;
+                }
+            }
+        }
+        Some(SwarmCommands::PublishToTopic(topic, data)) => {
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "gossipsub")] {
+                    swarm.behaviour_mut().sub.publish(topic, data)?;
+                } else if #[cfg(feature = "floodsub")] {
+                    swarm.behaviour_mut().sub.publish(topic, data);
                 }
             }
         }
@@ -564,53 +631,7 @@ fn swarm_command(
     Ok(())
 }
 
-#[cfg(feature = "floodsub")]
-async fn swarm_floodsub_events(
-    swarm: &mut Swarm<RayGunBehavior>,
-    event: Option<MessagingEvents>,
-    tx: Sender<Result<()>>,
-) -> anyhow::Result<()> {
-    match event {
-        Some(event) => {
-            let topic = match &event {
-                MessagingEvents::NewMessage(message) => message.conversation_id(),
-                MessagingEvents::EditMessage(id, _, _) => *id,
-                MessagingEvents::DeleteMessage(id, _) => *id,
-                MessagingEvents::PinMessage(id, _, _) => *id,
-                MessagingEvents::DeleteConversation(id) => *id,
-                MessagingEvents::ReactMessage(id, _, _) => *id,
-                MessagingEvents::Ping(id) => *id,
-            };
-
-            let topic = Topic::new(topic.to_string());
-
-            match serde_json::to_vec(&event) {
-                Ok(bytes) => {
-                    //TODO: Resolve initial connection/subscribe
-                    swarm.behaviour_mut().sub.subscribe(topic.clone());
-
-                    swarm.behaviour_mut().sub.publish(topic, bytes);
-
-                    if let Err(e) = tx.send(Ok(())).await {
-                        //TODO: Log error
-                        println!("{}", e);
-                    }
-                }
-                Err(e) => {
-                    if let Err(e) = tx.send(Err(Error::from(e))).await {
-                        //TODO: Log error
-                        println!("{}", e);
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-#[cfg(feature = "gossipsub")]
-async fn swarm_gossipsub_events(
+async fn swarm_events(
     swarm: &mut Swarm<RayGunBehavior>,
     event: Option<MessagingEvents>,
     tx: Sender<Result<()>>,
@@ -620,44 +641,46 @@ async fn swarm_gossipsub_events(
             MessagingEvents::NewMessage(message) => message.conversation_id(),
             MessagingEvents::EditMessage(id, _, _) => *id,
             MessagingEvents::DeleteMessage(id, _) => *id,
-            MessagingEvents::PinMessage(id, _, _) => *id,
+            MessagingEvents::PinMessage(id, _, _, _) => *id,
             MessagingEvents::DeleteConversation(id) => *id,
-            MessagingEvents::ReactMessage(id, _, _) => *id,
-            MessagingEvents::Ping(id) => *id,
+            MessagingEvents::ReactMessage(id, _, _, _, _) => *id,
+            MessagingEvents::Ping(id, _) => *id,
         };
 
-        let topic = Topic::new(topic.to_string());
-
+        //TODO: Encrypt the bytes of data with a shared key between two (or more?) peers
         match serde_json::to_vec(&event) {
             Ok(bytes) => {
-                //TODO: Resolve initial connection/subscribe
-                match swarm.behaviour_mut().sub.subscribe(&topic) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        if let Err(e) = tx.send(Err(Error::Any(anyhow!(e)))).await {
-                            println!("{}", e);
-                        }
+                if let Err(e) = swarm_command(
+                    swarm,
+                    Some(SwarmCommands::SubscribeToTopic(Topic::new(
+                        topic.to_string(),
+                    ))),
+                ) {
+                    if let Err(e) = tx.send(Err(Error::Any(e))).await {
+                        error!("{}", e);
                     }
-                };
-
-                match swarm.behaviour_mut().sub.publish(topic, bytes) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        if let Err(e) = tx.send(Err(Error::Any(anyhow!(e)))).await {
-                            println!("{}", e);
-                        }
+                }
+                if let Err(e) = swarm_command(
+                    swarm,
+                    Some(SwarmCommands::PublishToTopic(
+                        Topic::new(topic.to_string()),
+                        bytes,
+                    )),
+                ) {
+                    if let Err(e) = tx.send(Err(Error::Any(e))).await {
+                        error!("{}", e);
                     }
-                };
+                }
 
                 if let Err(e) = tx.send(Ok(())).await {
                     //TODO: Log error
-                    println!("{}", e);
+                    error!("{}", e);
                 }
             }
             Err(e) => {
                 if let Err(e) = tx.send(Err(Error::from(e))).await {
                     //TODO: Log error
-                    println!("{}", e);
+                    error!("{}", e);
                 }
             }
         }
@@ -681,19 +704,23 @@ impl Extension for Libp2pMessaging {
 pub enum SwarmCommands {
     DialPeer(PeerId),
     DialAddr(Multiaddr),
-    SubscribeToTopic(String),
-    UnsubscribeFromTopic(String),
+    BanPeer(PeerId),
+    UnbanPeer(PeerId),
+    DisconnectPeer(PeerId),
+    SubscribeToTopic(Topic),
+    UnsubscribeFromTopic(Topic),
+    PublishToTopic(Topic, Vec<u8>),
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessagingEvents {
     NewMessage(Message),
     EditMessage(Uuid, Uuid, Vec<String>),
     DeleteMessage(Uuid, Uuid),
     DeleteConversation(Uuid),
-    PinMessage(Uuid, Uuid, PinState),
-    ReactMessage(Uuid, Uuid, ReactionState),
-    Ping(Uuid),
+    PinMessage(Uuid, SenderId, Uuid, PinState),
+    ReactMessage(Uuid, SenderId, Uuid, ReactionState, String),
+    Ping(Uuid, SenderId),
 }
 
 #[async_trait::async_trait]
@@ -726,27 +753,34 @@ impl RayGun for Libp2pMessaging {
     async fn send(
         &mut self,
         conversation_id: Uuid,
-        _message_id: Option<Uuid>,
+        message_id: Option<Uuid>,
         value: Vec<String>,
     ) -> Result<()> {
-        //TODO: Implement editing message
-        //TODO: Check to see if message was sent or if its still sending
-        let pubkey = self.sender_id()?;
-        let mut message = Message::new();
-        message.set_conversation_id(conversation_id);
-        message.set_sender(SenderId::from_public_key(pubkey));
+        if value.is_empty() {
+            return Err(Error::EmptyMessage);
+        }
+        let sender = self.sender_id()?;
+        let event = match message_id {
+            Some(id) => MessagingEvents::EditMessage(conversation_id, id, value),
+            None => {
+                let mut message = Message::new();
+                message.set_conversation_id(conversation_id);
+                message.set_sender(sender);
+                message.set_value(value);
+                MessagingEvents::NewMessage(message)
+            }
+        };
 
-        message.set_value(value);
+        self.send_event(&event).await?;
+        process_message_event(self.conversations.clone(), &event)?;
 
-        self.send_event(MessagingEvents::NewMessage(message.clone()))
-            .await?;
-
-        self.conversations.lock().push(message.clone());
-
-        if let Ok(mut cache) = self.get_cache() {
-            let data = DataObject::new(DataType::Messaging, message)?;
-            if cache.add_data(DataType::Messaging, &data).is_err() {
-                //TODO: Log error
+        //TODO: cache support edited messages
+        if let MessagingEvents::NewMessage(message) = event {
+            if let Ok(mut cache) = self.get_cache() {
+                let data = DataObject::new(DataType::Messaging, message)?;
+                if cache.add_data(DataType::Messaging, &data).is_err() {
+                    //TODO: Log error
+                }
             }
         }
 
@@ -754,29 +788,30 @@ impl RayGun for Libp2pMessaging {
     }
 
     async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()> {
-        self.send_event(MessagingEvents::DeleteMessage(conversation_id, message_id))
-            .await?;
-
-        let mut messages = self.conversations.lock();
-
-        let index = messages
-            .iter()
-            .position(|conv| conv.conversation_id() == conversation_id && conv.id() == message_id)
-            .ok_or(Error::ArrayPositionNotFound)?;
-
-        messages.remove(index);
-
+        let event = MessagingEvents::DeleteMessage(conversation_id, message_id);
+        self.send_event(&event).await?;
+        process_message_event(self.conversations.clone(), &event)?;
         Ok(())
     }
 
     async fn react(
         &mut self,
-        _conversation_id: Uuid,
-        _message_id: Uuid,
-        _state: ReactionState,
-        _emoji: Option<String>,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: String,
     ) -> Result<()> {
-        Err(Error::Unimplemented)
+        let sender = self.sender_id()?;
+        let event = MessagingEvents::ReactMessage(
+            conversation_id,
+            sender.clone(),
+            message_id,
+            state,
+            emoji.clone(),
+        );
+        self.send_event(&event).await?;
+        process_message_event(self.conversations.clone(), &event)?;
+        Ok(())
     }
 
     async fn pin(
@@ -785,36 +820,11 @@ impl RayGun for Libp2pMessaging {
         message_id: Uuid,
         state: PinState,
     ) -> Result<()> {
-        self.send_event(MessagingEvents::PinMessage(
-            conversation_id,
-            message_id,
-            state,
-        ))
-        .await?;
-
-        let mut messages = self.conversations.lock();
-
-        let index = messages
-            .iter()
-            .position(|conv| conv.conversation_id() == conversation_id && conv.id() == message_id)
-            .ok_or(Error::ArrayPositionNotFound)?;
-
-        let message = messages
-            .get_mut(index)
-            .ok_or(Error::ArrayPositionNotFound)?;
-
-        match state {
-            PinState::Pin => *message.pinned_mut() = true,
-            PinState::Unpin => *message.pinned_mut() = false,
-        }
-
-        if let Ok(mut cache) = self.get_cache() {
-            let data = DataObject::new(DataType::Messaging, message)?;
-            if cache.add_data(DataType::Messaging, &data).is_err() {
-                //TODO: Log error
-            }
-        }
-
+        let sender = self.sender_id()?;
+        let event = MessagingEvents::PinMessage(conversation_id, sender, message_id, state);
+        self.send_event(&event).await?;
+        process_message_event(self.conversations.clone(), &event)?;
+        //TODO: Cache
         Ok(())
     }
 
@@ -824,23 +834,28 @@ impl RayGun for Libp2pMessaging {
         message_id: Uuid,
         value: Vec<String>,
     ) -> Result<()> {
-        let pubkey = self.sender_id()?;
+        if value.is_empty() {
+            return Err(Error::EmptyMessage);
+        }
+        let sender = self.sender_id()?;
         let mut message = Message::new();
         message.set_conversation_id(conversation_id);
         message.set_replied(Some(message_id));
-        message.set_sender(SenderId::from_public_key(pubkey));
+        message.set_sender(sender);
 
         message.set_value(value);
 
-        self.send_event(MessagingEvents::NewMessage(message.clone()))
-            .await?;
+        let event = MessagingEvents::NewMessage(message);
 
-        self.conversations.lock().push(message.clone());
+        self.send_event(&event).await?;
+        process_message_event(self.conversations.clone(), &event)?;
 
-        if let Ok(mut cache) = self.get_cache() {
-            let data = DataObject::new(DataType::Messaging, message)?;
-            if cache.add_data(DataType::Messaging, &data).is_err() {
-                //TODO: Log error
+        if let MessagingEvents::NewMessage(message) = event {
+            if let Ok(mut cache) = self.get_cache() {
+                let data = DataObject::new(DataType::Messaging, message)?;
+                if cache.add_data(DataType::Messaging, &data).is_err() {
+                    //TODO: Log error
+                }
             }
         }
 
@@ -848,7 +863,8 @@ impl RayGun for Libp2pMessaging {
     }
 
     async fn ping(&mut self, id: Uuid) -> Result<()> {
-        self.send_event(MessagingEvents::Ping(id))
+        let sender = self.sender_id()?;
+        self.send_event(&MessagingEvents::Ping(id, sender))
             .await
             .map_err(Error::Any)
     }
@@ -869,14 +885,7 @@ impl GroupChat for Libp2pMessaging {
         todo!()
     }
 
-    fn leave_group(&mut self, id: GroupId) -> Result<()> {
-        let helper = self.group_helper()?;
-        let group = solana_group_to_warp_group(&helper, &id)?;
-        if group.status() == GroupStatus::Closed {
-            return Err(Error::Any(anyhow!("Group is closed")));
-        }
-        let gid_uuid = id.get_id().ok_or(Error::Other)?;
-        helper.modify_open_invites(&gid_uuid.to_string(), true)?;
+    fn leave_group(&mut self, _id: GroupId) -> Result<()> {
         Ok(())
     }
 
@@ -911,7 +920,9 @@ impl GroupChatManagement for Libp2pMessaging {
         let id = GroupId::new_uuid();
         let group_id = id.get_id().ok_or(Error::Other)?;
         helper.create_group(&group_id.to_string(), name)?;
-        self.send_swarm_command_sync(SwarmCommands::SubscribeToTopic(group_id.to_string()))?;
+        self.send_swarm_command_sync(SwarmCommands::SubscribeToTopic(Topic::new(
+            group_id.to_string(),
+        )))?;
         let new_group = solana_group_to_warp_group(&helper, &id)?;
         Ok(new_group)
     }
@@ -1080,3 +1091,97 @@ fn solana_group_to_warp_group(
 //     //TODO
 //     Ok(group)
 // }
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ffi {
+    use crate::Libp2pMessaging;
+    use anyhow::anyhow;
+    use libp2p::Multiaddr;
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
+    use std::str::FromStr;
+    use warp::error::Error;
+    use warp::ffi::FFIResult;
+    use warp::multipass::MultiPassAdapter;
+    use warp::pocket_dimension::PocketDimensionAdapter;
+    use warp::raygun::RayGunAdapter;
+    use warp::runtime_handle;
+    use warp::sync::{Arc, Mutex};
+
+    //Because C doesnt support tuple variants, we would need to make our own little wrapper
+    /// Used to build a list of bootstrap nodes to supply to libp2p extension
+    /// This is broken into a peer id and multiaddr.
+    ///
+    /// Example
+    ///
+    /// peer = QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN
+    /// multiaddr = /dnsaddr/bootstrap.libp2p.io
+    ///
+    /// Note: rust-libp2p may not support every multiaddr entry so if its not supported
+    ///       there would be no error as bootstrap nodes are optional
+    #[repr(C)]
+    pub struct Bootstrap {
+        pub peer: *mut c_char,
+        pub multiaddr: *mut c_char,
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_rg_libp2p_new(
+        account: *const MultiPassAdapter,
+        cache: *const PocketDimensionAdapter,
+        listen_addr: *const c_char,
+        bootstrap: *const Bootstrap,
+        bootstrap_len: usize,
+    ) -> FFIResult<RayGunAdapter> {
+        if account.is_null() {
+            return FFIResult::err(Error::MultiPassExtensionUnavailable);
+        }
+
+        let cache = match cache.is_null() {
+            true => None,
+            false => Some(&*cache),
+        };
+
+        let listen_addr = match listen_addr.is_null() {
+            true => None,
+            false => match Multiaddr::from_str(
+                &CStr::from_ptr(listen_addr).to_string_lossy().to_string(),
+            ) {
+                Ok(addr) => Some(addr),
+                Err(e) => return FFIResult::err(Error::Any(anyhow!(e))),
+            },
+        };
+
+        let bootstrap = match bootstrap.is_null() {
+            true => vec![],
+            false => {
+                let mut bootstrap_list = vec![];
+                for item in std::slice::from_raw_parts(bootstrap, bootstrap_len) {
+                    let peer = CStr::from_ptr(item.peer).to_string_lossy().to_string();
+                    let addr = CStr::from_ptr(item.multiaddr).to_string_lossy().to_string();
+                    bootstrap_list.push((peer, addr));
+                }
+                bootstrap_list
+            }
+        };
+
+        let account = &*account;
+
+        let rt = runtime_handle();
+
+        rt.block_on(async move {
+            match Libp2pMessaging::new(
+                account.get_inner().clone(),
+                cache.map(|p| p.inner()),
+                listen_addr,
+                bootstrap,
+            )
+            .await
+            {
+                Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(Mutex::new(Box::new(a))))),
+                Err(e) => FFIResult::err(Error::Any(e)),
+            }
+        })
+    }
+}

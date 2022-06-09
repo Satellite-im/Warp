@@ -24,6 +24,8 @@ serde_json = { version = "1.0" }
 bs58 = "0.4"
 cfg-if = "1.0"
 
+log = "0.4"
+
 hex = "0.4"
 
 groupchats = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"], optional = true }
@@ -34,6 +36,7 @@ borsh = { version = "0.9.3", optional = true }
 warp-pd-stretto = { path = "../warp-pd-stretto" }
 warp-mp-solana = { path = "../warp-mp-solana" }
 rustyline-async = "0.2"
+comfy-table = "6.0"
 
 [build-dependencies]
 cbindgen = "0.23"

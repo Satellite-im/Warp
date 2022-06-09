@@ -8,6 +8,7 @@
 void print_error(FFIError* error) {
     printf("Error Type: %s\n", error->error_type);
     printf("Error Message: %s\n", error->error_message);
+    ffierror_free(error);
 }
 
 int main() {
@@ -62,9 +63,7 @@ int main() {
         return -1; 
     } 
     
-    QueryBuilder *query = result_query_t.data;
-
-    struct FFIResult_FFIArray_Data result_array_t = pocket_dimension_get_data(pd, data_t, query);
+    struct FFIResult_FFIArray_Data result_array_t = pocket_dimension_get_data(pd, data_t, result_query_t.data);
 
     //Note: skipping check for now
 
@@ -78,7 +77,7 @@ int main() {
             return -1;
         }
 
-        const char *id = data_id(dat);
+        char *id = data_id(dat);
  
         printf("%s\n", id);
 
@@ -90,11 +89,15 @@ int main() {
         }
 
         printf("%s\n", result_payload_t.data);
+        free(result_payload_t.data);
+        free(id);
     }
 
     //TODO: Free more pointers
+    free(result_data_set2.data);
+    free(result_data_set1.data);
     ffiarray_data_free(result_array_t.data);
-    querybuilder_free(query);
+    querybuilder_free(result_query_t.data);
     return 0;
 }
 
