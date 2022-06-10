@@ -31,7 +31,7 @@ pub struct IpfsFileSystem {
     #[serde(skip)]
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     #[serde(skip)]
-    pub hooks: Option<Arc<Mutex<Hooks>>>,
+    pub hooks: Option<Hooks>,
 }
 
 #[derive(Default, Clone)]
@@ -112,7 +112,7 @@ impl IpfsFileSystem {
         self.cache = Some(cache);
     }
 
-    pub fn set_hook(&mut self, hook: Arc<Mutex<Hooks>>) {
+    pub fn set_hook(&mut self, hook: Hooks) {
         self.hooks = Some(hook)
     }
 
@@ -249,7 +249,6 @@ impl Constellation for IpfsFileSystem {
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
-            let hook = hook.lock();
             hook.trigger("filesystem::new_file", &object)
         }
 
@@ -395,7 +394,6 @@ impl Constellation for IpfsFileSystem {
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
-            let hook = hook.lock();
             hook.trigger("filesystem::new_file", &object)
         }
 
@@ -475,7 +473,6 @@ impl Constellation for IpfsFileSystem {
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), ())?;
-            let hook = hook.lock();
             hook.trigger("filesystem::remove_file", &object)
         }
         Ok(())
@@ -512,7 +509,6 @@ impl Constellation for IpfsFileSystem {
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), directory)?;
-            let hook = hook.lock();
             hook.trigger("filesystem::create_directory", &object)
         }
 

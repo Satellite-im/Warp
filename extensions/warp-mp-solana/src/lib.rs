@@ -30,7 +30,7 @@ pub struct SolanaAccount {
     pub contacts: Option<Vec<PublicKey>>,
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     pub tesseract: Tesseract,
-    pub hooks: Option<Arc<Mutex<Hooks>>>,
+    pub hooks: Option<Hooks>,
 }
 
 impl Default for SolanaAccount {
@@ -79,8 +79,8 @@ impl SolanaAccount {
         self.cache = Some(cache);
     }
 
-    pub fn set_hook(&mut self, hooks: Arc<Mutex<Hooks>>) {
-        self.hooks = Some(hooks)
+    pub fn set_hook(&mut self, hooks: &Hooks) {
+        self.hooks = Some(hooks.clone())
     }
 
     pub fn insert_solana_wallet(&mut self, wallet: SolanaWallet) -> anyhow::Result<()> {
@@ -133,13 +133,10 @@ impl SolanaAccount {
         Ok(cache.lock())
     }
 
-    pub fn get_hooks(&self) -> anyhow::Result<MutexGuard<Hooks>> {
-        let hook = self
-            .hooks
+    pub fn get_hooks(&self) -> anyhow::Result<&Hooks> {
+        self.hooks
             .as_ref()
-            .ok_or_else(|| anyhow!("Hooks is not set"))?;
-
-        Ok(hook.lock())
+            .ok_or_else(|| anyhow!("Hooks is not set"))
     }
 
     pub fn user_helper(&self) -> anyhow::Result<UserHelper> {

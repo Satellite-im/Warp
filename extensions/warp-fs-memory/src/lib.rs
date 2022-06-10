@@ -54,7 +54,7 @@ pub struct MemorySystem {
     #[serde(skip)]
     cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     #[serde(skip)]
-    hooks: Option<Arc<Mutex<Hooks>>>,
+    hooks: Option<Hooks>,
 }
 
 impl Default for MemorySystem {
@@ -80,8 +80,8 @@ impl MemorySystem {
         self.cache = Some(cache);
     }
 
-    pub fn set_hook(&mut self, hook: Arc<Mutex<Hooks>>) {
-        self.hooks = Some(hook)
+    pub fn set_hook(&mut self, hook: &Hooks) {
+        self.hooks = Some(hook.clone())
     }
 
     pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {

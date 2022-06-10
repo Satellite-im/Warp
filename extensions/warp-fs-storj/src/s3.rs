@@ -120,7 +120,7 @@ pub struct StorjFilesystem {
     #[serde(skip)]
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     #[serde(skip)]
-    pub hooks: Option<Arc<Mutex<Hooks>>>,
+    pub hooks: Option<Hooks>,
 }
 
 impl Default for StorjFilesystem {
@@ -150,8 +150,8 @@ impl StorjFilesystem {
         self.cache = Some(cache);
     }
 
-    pub fn set_hook(&mut self, hook: Arc<Mutex<Hooks>>) {
-        self.hooks = Some(hook)
+    pub fn set_hook(&mut self, hook: &Hooks) {
+        self.hooks = Some(hook.clone())
     }
 
     pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
@@ -244,7 +244,6 @@ impl Constellation for StorjFilesystem {
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
-            let hook = hook.lock();
             hook.trigger("filesystem::new_file", &object)
         }
         Ok(())
@@ -357,7 +356,6 @@ impl Constellation for StorjFilesystem {
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
-            let hook = hook.lock();
             hook.trigger("filesystem::new_file", &object)
         }
         Ok(())
@@ -418,7 +416,6 @@ impl Constellation for StorjFilesystem {
         let item = self.current_directory_mut()?.remove_item(&name)?;
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), &item)?;
-            let hook = hook.lock();
             //TODO: Add a proper check
             let hook_name = if item.is_directory() {
                 "filesystem::remove_directory"
