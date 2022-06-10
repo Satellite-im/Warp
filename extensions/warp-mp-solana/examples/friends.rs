@@ -45,12 +45,9 @@ fn account() -> anyhow::Result<SolanaAccount> {
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    let tesseract = Arc::new(Mutex::new(tesseract));
-
     // let pd = cache_setup()?;
 
-    let mut account = SolanaAccount::with_devnet();
-    account.set_tesseract(tesseract);
+    let mut account = SolanaAccount::with_devnet(&tesseract);
     // account.set_cache(pd);
     account.create_identity(None, None)?;
     Ok(account)

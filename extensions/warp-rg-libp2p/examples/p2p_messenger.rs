@@ -36,9 +36,7 @@ fn create_account(
     tesseract.set_file(env);
     tesseract.set_autosave();
 
-    let tesseract = Arc::new(Mutex::new(tesseract));
-    let mut account = SolanaAccount::with_devnet();
-    account.set_tesseract(tesseract);
+    let mut account = SolanaAccount::with_devnet(&tesseract);
     account.set_cache(cache);
 
     if account.get_own_identity().is_ok() {

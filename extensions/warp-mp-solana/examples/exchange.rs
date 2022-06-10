@@ -1,6 +1,5 @@
 use warp::multipass::identity::{Identity, PublicKey};
 use warp::multipass::{Friends, MultiPass};
-use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
 use warp_mp_solana::solana::anchor_client::anchor_lang::prelude::Pubkey;
 use warp_mp_solana::SolanaAccount;
@@ -10,9 +9,7 @@ fn account() -> anyhow::Result<SolanaAccount> {
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    let tesseract = Arc::new(Mutex::new(tesseract));
-    let mut account = SolanaAccount::with_devnet();
-    account.set_tesseract(tesseract);
+    let mut account = SolanaAccount::with_devnet(&tesseract);
     account.create_identity(None, None)?;
     Ok(account)
 }

@@ -29,9 +29,7 @@ async fn create_account(
     tesseract.set_file("datastore");
     tesseract.set_autosave();
 
-    let tesseract = Arc::new(Mutex::new(tesseract));
-    let mut account = SolanaAccount::with_devnet();
-    account.set_tesseract(tesseract);
+    let mut account = SolanaAccount::with_devnet(&tesseract);
     account.set_cache(cache);
 
     match tokio::task::spawn_blocking(move || -> anyhow::Result<SolanaAccount> {

@@ -52,12 +52,9 @@ fn main() -> anyhow::Result<()> {
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    let tesseract = Arc::new(Mutex::new(tesseract));
-
     let pd = cache_setup()?;
 
-    let mut account = SolanaAccount::with_devnet();
-    account.set_tesseract(tesseract);
+    let mut account = SolanaAccount::with_devnet(&tesseract);
     account.set_cache(pd);
     // Uncomment this if you want to interact with an precreated account and comment out `account.create_identity`
     // account.insert_solana_wallet(generated_wallet()?)?;

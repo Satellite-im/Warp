@@ -182,12 +182,10 @@ async fn main() -> AnyResult<()> {
         tokio::fs::create_dir(&warp_directory).await?;
     }
 
-    let tesseract = Arc::new(Mutex::new(
-        Tesseract::from_file(warp_directory.join("datastore")).unwrap_or_default(),
-    ));
+    let mut tesseract = Tesseract::from_file(warp_directory.join("datastore")).unwrap_or_default();
 
     if cli.bypass_key_check {
-        tesseract.lock().disable_key_check();
+        tesseract.disable_key_check();
     }
 
     //TODO: Have keyfile encrypted
@@ -197,7 +195,7 @@ async fn main() -> AnyResult<()> {
     };
 
     //TODO: push this to TUI
-    tesseract.lock().unlock(&key)?;
+    tesseract.unlock(&key)?;
 
     key.zeroize();
 
@@ -225,7 +223,6 @@ async fn main() -> AnyResult<()> {
     }
 
     if config.modules.constellation {
-        let tesseract = tesseract.lock();
         register_fs_ext(&cli, &config, &mut manager, &tesseract)?;
         if let Some(fs_ext) = cli
             .constellation_module
@@ -239,8 +236,7 @@ async fn main() -> AnyResult<()> {
     }
 
     if config.modules.multipass {
-        let mut account = SolanaAccount::with_devnet();
-        account.set_tesseract(tesseract.clone());
+        let mut account = SolanaAccount::with_devnet(&tesseract);
         if let Ok(cache) = manager.get_cache() {
             account.set_cache(cache.clone())
         }
@@ -285,12 +281,10 @@ async fn main() -> AnyResult<()> {
         //TODO: Store keyfile and datastore in a specific path.
         (false, false, false, Some(command)) => match command {
             Command::Import { key, value } => {
-                let mut tesseract = tesseract.lock();
                 tesseract.set(&key, &value)?;
                 tesseract.to_file(warp_directory.join("datastore"))?;
             }
             Command::Export { key } => {
-                let tesseract = tesseract.lock();
                 let data = tesseract.retrieve(&key)?;
                 let mut table = Table::new();
                 table
@@ -300,7 +294,6 @@ async fn main() -> AnyResult<()> {
                 println!("{table}")
             }
             Command::Unset { key } => {
-                let mut tesseract = tesseract.lock();
                 tesseract.delete(&key)?;
                 tesseract.to_file(warp_directory.join("datastore"))?;
             }
@@ -322,7 +315,7 @@ async fn main() -> AnyResult<()> {
                             bs58::encode(identity.public_key().into_bytes()).into_string()
                         ); // Using bs58 due to account being solana related.
                         println!();
-                        tesseract.lock().to_file(warp_directory.join("datastore"))?;
+                        tesseract.to_file(warp_directory.join("datastore"))?;
                     }
                     Err(e) => {
                         println!("{}", e);
@@ -331,7 +324,6 @@ async fn main() -> AnyResult<()> {
                 };
             }
             Command::Dump => {
-                let tesseract = tesseract.lock();
                 let mut table = Table::new();
                 table.set_header(vec!["Key", "Value"]);
                 for (key, val) in tesseract.export()? {
@@ -360,7 +352,7 @@ async fn main() -> AnyResult<()> {
                             bs58::encode(ident.public_key().into_bytes()).into_string()
                         );
                         println!();
-                        tesseract.lock().to_file(warp_directory.join("datastore"))?;
+                        tesseract.to_file(warp_directory.join("datastore"))?;
                     }
                     Err(e) => {
                         println!("Error obtaining account: {}", e);
@@ -381,7 +373,7 @@ async fn main() -> AnyResult<()> {
                             bs58::encode(ident.public_key().into_bytes()).into_string()
                         );
                         println!();
-                        tesseract.lock().to_file(warp_directory.join("datastore"))?;
+                        tesseract.to_file(warp_directory.join("datastore"))?;
                     }
                     Err(e) => {
                         println!("Error obtaining account: {}", e);

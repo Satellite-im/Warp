@@ -24,11 +24,11 @@ mod tests {
         SolanaWallet::create_random(PhraseType::Standard, None)
     }
 
-    fn tesseract_with_random_key() -> anyhow::Result<Arc<Mutex<Tesseract>>> {
+    fn tesseract_with_random_key() -> anyhow::Result<Tesseract> {
         let mut tesseract = Tesseract::default();
         let key = warp::crypto::generate(32);
         tesseract.unlock(&key)?;
-        Ok(Arc::new(Mutex::new(tesseract)))
+        Ok(tesseract)
     }
 
     #[allow(unused)]
@@ -42,9 +42,9 @@ mod tests {
 
     #[test]
     fn use_mp_with_pregenerated_wallet() -> anyhow::Result<()> {
-        let mut account = SolanaAccount::with_devnet();
         let tesseract = tesseract_with_random_key()?;
-        account.set_tesseract(tesseract);
+        let mut account = SolanaAccount::with_devnet(&tesseract);
+
         account.insert_solana_wallet(pregenerated_wallet()?)?;
 
         let ident = account.get_own_identity()?;

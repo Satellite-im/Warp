@@ -29,7 +29,7 @@ pub struct SolanaAccount {
     pub endpoint: Cluster,
     pub contacts: Option<Vec<PublicKey>>,
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-    pub tesseract: Option<Arc<Mutex<Tesseract>>>,
+    pub tesseract: Tesseract,
     pub hooks: Option<Arc<Mutex<Hooks>>>,
 }
 
@@ -39,38 +39,40 @@ impl Default for SolanaAccount {
             endpoint: Cluster::Devnet,
             contacts: None,
             cache: None,
-            tesseract: None,
+            tesseract: Tesseract::default(),
             hooks: None,
         }
     }
 }
 
 impl SolanaAccount {
-    pub fn new(endpoint: Cluster) -> Self {
+    pub fn new(endpoint: Cluster, tesseract: &Tesseract) -> Self {
+        let tesseract = tesseract.clone();
         Self {
+            tesseract,
             endpoint,
             ..Default::default()
         }
     }
 
-    pub fn with_devnet() -> Self {
-        Self::new(Cluster::Devnet)
+    pub fn with_devnet(tesseract: &Tesseract) -> Self {
+        Self::new(Cluster::Devnet, tesseract)
     }
 
-    pub fn with_mainnet() -> Self {
-        Self::new(Cluster::Mainnet)
+    pub fn with_mainnet(tesseract: &Tesseract) -> Self {
+        Self::new(Cluster::Mainnet, tesseract)
     }
 
-    pub fn with_testnet() -> Self {
-        Self::new(Cluster::Testnet)
+    pub fn with_testnet(tesseract: &Tesseract) -> Self {
+        Self::new(Cluster::Testnet, tesseract)
     }
 
-    pub fn with_localnet() -> Self {
-        Self::new(Cluster::Localnet)
+    pub fn with_localnet(tesseract: &Tesseract) -> Self {
+        Self::new(Cluster::Localnet, tesseract)
     }
 
-    pub fn with_custom(url: &str, ws: &str) -> Self {
-        Self::new(Cluster::Custom(url.to_string(), ws.to_string()))
+    pub fn with_custom(url: &str, ws: &str, tesseract: &Tesseract) -> Self {
+        Self::new(Cluster::Custom(url.to_string(), ws.to_string()), tesseract)
     }
 
     pub fn set_cache(&mut self, cache: Arc<Mutex<Box<dyn PocketDimension>>>) {
@@ -79,10 +81,6 @@ impl SolanaAccount {
 
     pub fn set_hook(&mut self, hooks: Arc<Mutex<Hooks>>) {
         self.hooks = Some(hooks)
-    }
-
-    pub fn set_tesseract(&mut self, tesseract: Arc<Mutex<Tesseract>>) {
-        self.tesseract = Some(tesseract)
     }
 
     pub fn insert_solana_wallet(&mut self, wallet: SolanaWallet) -> anyhow::Result<()> {
@@ -122,9 +120,8 @@ impl SolanaAccount {
         SolanaWallet::restore_from_mnemonic(None, &mnemonic)
     }
 
-    pub fn get_tesseract(&self) -> anyhow::Result<MutexGuard<Tesseract>> {
-        let tesseract = self.tesseract.as_ref().ok_or(Error::TesseractUnavailable)?;
-        Ok(tesseract.lock())
+    pub fn get_tesseract(&self) -> anyhow::Result<Tesseract> {
+        Ok(self.tesseract.clone())
     }
 
     pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
@@ -708,16 +705,17 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_mp_solana_new_with_devnet(
         pocketdimension: *const PocketDimensionAdapter,
-        tesseract: *mut Tesseract,
+        tesseract: *const Tesseract,
     ) -> *mut MultiPassAdapter {
-        let mut account = SolanaAccount::with_devnet();
         let tesseract = match tesseract.is_null() {
             false => {
-                let tesseract = &*(tesseract as *mut Tesseract);
+                let tesseract = &*tesseract;
                 tesseract.clone()
             }
             true => Tesseract::default(),
         };
+
+        let mut account = SolanaAccount::with_devnet(&tesseract);
         match pocketdimension.is_null() {
             true => {}
             false => {
@@ -725,7 +723,6 @@ pub mod ffi {
                 account.set_cache(pd.inner().clone());
             }
         }
-        account.set_tesseract(Arc::new(Mutex::new(tesseract)));
 
         let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
         Box::into_raw(Box::new(mp)) as *mut MultiPassAdapter
@@ -735,16 +732,16 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_mp_solana_new_with_testnet(
         pocketdimension: *const PocketDimensionAdapter,
-        tesseract: *mut Tesseract,
+        tesseract: *const Tesseract,
     ) -> *mut MultiPassAdapter {
-        let mut account = SolanaAccount::with_testnet();
         let tesseract = match tesseract.is_null() {
             false => {
-                let tesseract = &*(tesseract as *mut Tesseract);
+                let tesseract = &*tesseract;
                 tesseract.clone()
             }
             true => Tesseract::default(),
         };
+        let mut account = SolanaAccount::with_testnet(&tesseract);
         match pocketdimension.is_null() {
             true => {}
             false => {
@@ -752,7 +749,6 @@ pub mod ffi {
                 account.set_cache(pd.inner().clone());
             }
         }
-        account.set_tesseract(Arc::new(Mutex::new(tesseract)));
 
         let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
         Box::into_raw(Box::new(mp)) as *mut MultiPassAdapter
@@ -762,16 +758,17 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_mp_solana_new_with_mainnet(
         pocketdimension: *const PocketDimensionAdapter,
-        tesseract: *mut Tesseract,
+        tesseract: *const Tesseract,
     ) -> *mut MultiPassAdapter {
-        let mut account = SolanaAccount::with_mainnet();
         let tesseract = match tesseract.is_null() {
             false => {
-                let tesseract = &*(tesseract as *mut Tesseract);
+                let tesseract = &*(tesseract);
                 tesseract.clone()
             }
             true => Tesseract::default(),
         };
+
+        let mut account = SolanaAccount::with_mainnet(&tesseract);
         match pocketdimension.is_null() {
             true => {}
             false => {
@@ -779,7 +776,6 @@ pub mod ffi {
                 account.set_cache(pd.inner().clone());
             }
         }
-        account.set_tesseract(Arc::new(Mutex::new(tesseract)));
 
         let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
         Box::into_raw(Box::new(mp)) as *mut MultiPassAdapter
