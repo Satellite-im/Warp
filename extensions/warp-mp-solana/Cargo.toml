@@ -21,9 +21,8 @@ tiny-bip39 = "0.8"
 zeroize = "1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-users = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"] }
-friends = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"] }
-groupchats = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"] }
+users = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"], rev = "c55c84f89bffac4011f717f2798868b559351ba0" }
+friends = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"], rev = "c55c84f89bffac4011f717f2798868b559351ba0" }
 anchor-client = "0.24.2"
 tokio = { version = "1", features = ["full"]}
 reqwest = { version = "0.11", features = ["json"] }
