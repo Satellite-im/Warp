@@ -15,10 +15,9 @@ mod test {
             assert_eq!(hook.name().as_str(), "new_file");
             assert_eq!(hook.data_type(), DataType::from(Module::FileSystem));
 
-            assert_eq!(data.data_type(), DataType::from(Module::FileSystem));
-
-            let file: File = data.payload().unwrap(); //TODO: Implement Result for `Fn`
-            assert_eq!(file.name(), String::from("test.txt"));
+            if let Ok(file) = data.payload::<File>() {
+                assert_eq!(file.name(), String::from("test.txt"));
+            }
         })?;
         let data = DataObject::new(DataType::from(Module::FileSystem), File::new("test.txt"))?;
 
@@ -30,7 +29,7 @@ mod test {
     async fn test_shared() -> anyhow::Result<()> {
         let mut system = Hooks::new();
 
-        let mut system_dup = system.clone();
+        let system_dup = system.clone();
 
         let hook = system.create(Module::FileSystem, "new_file")?;
 
@@ -38,10 +37,9 @@ mod test {
             assert_eq!(hook.name().as_str(), "new_file");
             assert_eq!(hook.data_type(), DataType::from(Module::FileSystem));
 
-            assert_eq!(data.data_type(), DataType::from(Module::FileSystem));
-
-            let file: File = data.payload().unwrap(); //TODO: Implement Result for `Fn`
-            assert_eq!(file.name(), String::from("test.txt"));
+            if let Ok(file) = data.payload::<File>() {
+                assert_eq!(file.name(), String::from("test.txt"));
+            }
         })?;
         let data = DataObject::new(DataType::from(Module::FileSystem), File::new("test.txt"))?;
 
