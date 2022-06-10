@@ -5,6 +5,8 @@ use crate::error::Error;
 use crate::data::{DataObject, DataType};
 use crate::module::Module;
 
+use crate::sync::*;
+
 type Result<T> = std::result::Result<T, Error>;
 
 pub trait HookType: std::fmt::Display {
@@ -74,13 +76,13 @@ impl ToString for Hook {
 pub type HookData = Box<dyn Fn(&Hook, &DataObject) + Sync + Send>;
 
 /// Lists all of the hooks registered
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Hooks {
     /// List of hooks.
-    hooks: Vec<Hook>,
+    hooks: Arc<Mutex<Vec<Hook>>>,
 
     /// A map of hooks with an array of executable functions
-    subscribers: HashMap<String, Vec<HookData>>,
+    subscribers: Arc<Mutex<HashMap<String, Vec<HookData>>>>,
 }
 
 /// Create a new `Hook` registered to the system.
@@ -95,11 +97,9 @@ pub struct Hooks {
 /// ```
 impl<A: AsRef<str>> From<Vec<A>> for Hooks {
     fn from(h: Vec<A>) -> Self {
-        let hooks = h.iter().map(Hook::from).collect();
-        Hooks {
-            hooks,
-            subscribers: HashMap::new(),
-        }
+        let hooks = Arc::new(Mutex::new(h.iter().map(Hook::from).collect()));
+        let subscribers = Arc::new(Mutex::new(HashMap::new()));
+        Hooks { hooks, subscribers }
     }
 }
 
@@ -137,12 +137,12 @@ impl Hooks {
     /// ```
     pub fn create(&mut self, module: Module, name: &str) -> Result<Hook> {
         let hook = Hook::new(module, name);
-
-        if self.hooks.contains(&hook) {
+        let mut hooks = self.hooks.lock();
+        if hooks.contains(&hook) {
             return Err(Error::DuplicateHook);
         }
 
-        self.hooks.push(hook.clone());
+        hooks.push(hook.clone());
 
         Ok(hook)
     }
@@ -161,7 +161,7 @@ impl Hooks {
     ///     assert_eq!(hooks.get(0).unwrap(), &hook);
     /// ```
     pub fn list(&self) -> Vec<Hook> {
-        self.hooks.clone()
+        self.hooks.lock().clone()
     }
 
     /// Subscribe to events on a given hook
@@ -195,10 +195,11 @@ impl Hooks {
         H: Into<Hook>,
     {
         let hook = hook.into();
-        if !self.hooks.contains(&hook) {
+        if !self.hooks.lock().contains(&hook) {
             return Err(Error::HookUnregistered);
         }
         self.subscribers
+            .lock()
             .entry(hook.to_string())
             .or_insert_with(Vec::new)
             .push(Box::new(f));
@@ -227,7 +228,7 @@ impl Hooks {
     /// ```
     pub fn trigger(&self, name: &str, data: &DataObject) {
         let hook = Hook::from(name);
-        if let Some(subscribers) = self.subscribers.get(name) {
+        if let Some(subscribers) = self.subscribers.lock().get(name) {
             for subscriber in subscribers {
                 subscriber(&hook, data);
             }
