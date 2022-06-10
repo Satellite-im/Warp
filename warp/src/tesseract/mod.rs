@@ -22,15 +22,48 @@ use wasm_bindgen::prelude::*;
 type Result<T> = std::result::Result<T, Error>;
 
 /// The key store that holds encrypted strings that can be used for later use.
-#[derive(Default, Clone, PartialEq, Eq, FFIFree)]
+#[derive(FFIFree)]
 #[wasm_bindgen]
 pub struct Tesseract {
-    internal: HashMap<String, Vec<u8>>,
-    enc_pass: Vec<u8>,
-    file: Option<PathBuf>,
-    autosave: bool,
-    check: bool,
-    unlock: bool,
+    internal: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    enc_pass: Arc<Mutex<Vec<u8>>>,
+    file: Arc<Mutex<Option<PathBuf>>>,
+    autosave: Arc<Mutex<bool>>,
+    check: Arc<Mutex<bool>>,
+    unlock: Arc<Mutex<bool>>,
+    internal_counter: Arc<Mutex<usize>>,
+}
+
+impl Default for Tesseract {
+    fn default() -> Self {
+        Tesseract {
+            internal: Arc::new(Default::default()),
+            enc_pass: Arc::new(Default::default()),
+            file: Arc::new(Default::default()),
+            autosave: Arc::new(Default::default()),
+            check: Arc::new(Default::default()),
+            unlock: Arc::new(Default::default()),
+            internal_counter: Arc::new(Mutex::new(1)),
+        }
+    }
+}
+
+impl Clone for Tesseract {
+    fn clone(&self) -> Self {
+        {
+            let mut counter = self.internal_counter.lock();
+            *counter += 1;
+        }
+        Tesseract {
+            internal: self.internal.clone(),
+            enc_pass: self.enc_pass.clone(),
+            file: self.file.clone(),
+            autosave: self.autosave.clone(),
+            check: self.check.clone(),
+            unlock: self.unlock.clone(),
+            internal_counter: self.internal_counter.clone(),
+        }
+    }
 }
 
 impl Debug for Tesseract {
@@ -46,7 +79,14 @@ impl Debug for Tesseract {
 
 impl Drop for Tesseract {
     fn drop(&mut self) {
-        if self.is_unlock() {
+        let counter = {
+            let mut counter = self.internal_counter.lock();
+            if *counter != 0 {
+                *counter -= 1;
+            }
+            *counter
+        };
+        if counter == 0 && self.is_unlock() {
             self.lock()
         }
     }
@@ -65,12 +105,12 @@ impl Tesseract {
     /// ```
     pub fn from_file<S: AsRef<Path>>(file: S) -> Result<Self> {
         let mut store = Tesseract::default();
-        store.check = true;
+        *store.check.lock() = true;
         let fs = std::fs::File::open(&file)?;
         let data = serde_json::from_reader(fs)?;
         let file = std::fs::canonicalize(&file).unwrap_or_else(|_| file.as_ref().to_path_buf());
         store.set_file(file);
-        store.internal = data;
+        store.internal = Arc::new(Mutex::new(data));
         Ok(store)
     }
 
@@ -87,9 +127,9 @@ impl Tesseract {
     /// ```
     pub fn from_reader<S: Read>(reader: &mut S) -> Result<Self> {
         let mut store = Tesseract::default();
-        store.check = true;
+        *store.check.lock() = true;
         let data = serde_json::from_reader(reader)?;
-        store.internal = data;
+        store.internal = Arc::new(Mutex::new(data));
         Ok(store)
     }
 
@@ -122,7 +162,7 @@ impl Tesseract {
     /// tesseract.to_writer(&mut file).unwrap();
     /// ```
     pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<()> {
-        serde_json::to_writer(writer, &self.internal)?;
+        serde_json::to_writer(writer, &*self.internal.lock())?;
         Ok(())
     }
 
@@ -137,7 +177,7 @@ impl Tesseract {
     /// assert!(tesseract.file().is_some());
     /// ```
     pub fn set_file<P: AsRef<Path>>(&mut self, file: P) {
-        self.file = Some(file.as_ref().to_path_buf())
+        *self.file.lock() = Some(file.as_ref().to_path_buf())
     }
 
     /// Internal file handle
@@ -152,18 +192,21 @@ impl Tesseract {
     /// assert!(tesseract.file().is_some());
     /// ```
     pub fn file(&self) -> Option<String> {
-        self.file.as_ref().map(|s| s.to_string_lossy().to_string())
+        self.file
+            .lock()
+            .as_ref()
+            .map(|s| s.to_string_lossy().to_string())
     }
 
     /// To save to file using internal file path.
     /// Note: Because we do not want to interrupt the functions due to it failing to
     ///       save for whatever reason, this function will return `Result::Ok`
-    ///       regardless of success or error.
+    ///       regardless of success or error but would eventually log the error.
     ///
     /// TODO: Handle error without subjecting function to `Result::Err`
     pub fn save(&mut self) -> Result<()> {
         if self.autosave_enabled() {
-            if let Some(path) = &self.file {
+            if let Some(path) = &self.file() {
                 if let Err(_e) = self.to_file(path) {
                     //TODO: Logging
                 }
@@ -210,9 +253,10 @@ impl Tesseract {
         if !self.is_unlock() {
             return Err(Error::TesseractLocked);
         }
+        let keys = self.internal_keys();
         let mut map = HashMap::new();
-        for key in self.internal.keys() {
-            let value = match self.retrieve(key) {
+        for key in keys {
+            let value = match self.retrieve(&key) {
                 Ok(v) => v,
                 Err(e) => match self.is_key_check_enabled() {
                     true => return Err(e),
@@ -222,13 +266,6 @@ impl Tesseract {
             map.insert(key.clone(), value);
         }
         Ok(map)
-    }
-
-    /// Creates a TesseractShared
-    ///
-    /// Note: Tesseract itself would be consumed by TesseractShared
-    pub fn shared(self) -> TesseractShared {
-        TesseractShared::new(self)
     }
 }
 
@@ -251,7 +288,8 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_autosave(&mut self) {
-        self.autosave = !self.autosave;
+        let autosave = self.autosave_enabled();
+        *self.autosave.lock() = !autosave
     }
 
     /// Check to determine if `Tesseract::autosave` is true or false
@@ -264,7 +302,7 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn autosave_enabled(&self) -> bool {
-        self.autosave
+        *self.autosave.lock()
     }
 
     /// Disable the key check to allow any passphrase to be used when unlocking the datastore
@@ -287,7 +325,7 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn disable_key_check(&mut self) {
-        self.check = false;
+        *self.check.lock() = false;
     }
 
     /// Enable the key check to allow any passphrase to be used when unlocking the datastore
@@ -306,7 +344,7 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn enable_key_check(&mut self) {
-        self.check = true;
+        *self.check.lock() = true;
     }
 
     /// Check to determine if the key check is enabled
@@ -321,7 +359,7 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn is_key_check_enabled(&self) -> bool {
-        self.check
+        *self.check.lock()
     }
 
     /// To store a value to be encrypted into the keystore. If the key already exist, it
@@ -340,9 +378,11 @@ impl Tesseract {
         if !self.is_unlock() {
             return Err(Error::TesseractLocked);
         }
-        let pkey = crate::crypto::cipher::aes256gcm_self_decrypt(&self.enc_pass)?;
+        let pkey = crate::crypto::cipher::aes256gcm_self_decrypt(&*self.enc_pass.lock())?;
         let data = crate::crypto::cipher::aes256gcm_encrypt(&pkey, value.as_bytes())?;
-        self.internal.insert(key.to_string(), data);
+        {
+            self.internal.lock().insert(key.to_string(), data);
+        }
         self.save()
     }
 
@@ -359,7 +399,7 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn exist(&self, key: &str) -> bool {
-        self.internal.contains_key(key)
+        self.internal.lock().contains_key(key)
     }
 
     /// Used to retrieve and decrypt the value stored for the key
@@ -384,9 +424,9 @@ impl Tesseract {
             return Err(Error::ObjectNotFound);
         }
 
-        let pkey = crate::crypto::cipher::aes256gcm_self_decrypt(&self.enc_pass)?;
-
-        let data = self.internal.get(key).ok_or(Error::ObjectNotFound)?;
+        let pkey = crate::crypto::cipher::aes256gcm_self_decrypt(&*self.enc_pass.lock())?;
+        let internal = self.internal.lock();
+        let data = internal.get(key).ok_or(Error::ObjectNotFound)?;
         let slice = crate::crypto::cipher::aes256gcm_decrypt(&pkey, data)?;
         let plain_text = String::from_utf8_lossy(&slice[..]).to_string();
         Ok(plain_text)
@@ -406,7 +446,12 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn delete(&mut self, key: &str) -> Result<()> {
-        self.internal.remove(key).ok_or(Error::ObjectNotFound)?;
+        {
+            self.internal
+                .lock()
+                .remove(key)
+                .ok_or(Error::ObjectNotFound)?;
+        }
         self.save()
     }
 
@@ -423,7 +468,9 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn clear(&mut self) {
-        self.internal.clear();
+        {
+            self.internal.lock().clear();
+        }
         if self.save().is_ok() {}
     }
 
@@ -442,7 +489,7 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn is_unlock(&self) -> bool {
-        !self.enc_pass.is_empty() && self.unlock
+        !self.enc_pass.lock().is_empty() && *self.unlock.lock()
     }
 
     /// Store password in memory to be used to decrypt contents.
@@ -456,11 +503,14 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn unlock(&mut self, passphrase: &[u8]) -> Result<()> {
-        self.enc_pass = crate::crypto::cipher::aes256gcm_self_encrypt(passphrase)?;
-        self.unlock = true;
+        {
+            *self.enc_pass.lock() = crate::crypto::cipher::aes256gcm_self_encrypt(passphrase)?;
+            *self.unlock.lock() = true;
+        }
         if self.is_key_check_enabled() {
-            for key in self.internal.keys() {
-                if let Err(e) = self.retrieve(key) {
+            let keys = self.internal_keys();
+            for key in keys {
+                if let Err(e) = self.retrieve(&key) {
                     self.lock();
                     return Err(e);
                 }
@@ -483,8 +533,16 @@ impl Tesseract {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn lock(&mut self) {
         if self.save().is_ok() {}
-        self.enc_pass.zeroize();
-        self.unlock = false;
+        self.enc_pass.lock().zeroize();
+        *self.unlock.lock() = false;
+    }
+}
+
+impl Tesseract {
+    fn internal_keys(&self) -> Vec<String> {
+        let internal = self.internal.lock();
+        let keys = internal.keys().clone();
+        keys.cloned().collect::<Vec<_>>()
     }
 }
 
@@ -511,8 +569,8 @@ impl Tesseract {
             return Err(Error::TesseractLocked);
         }
         let mut map = HashMap::new();
-        for key in self.internal.keys() {
-            let value = match self.retrieve(key) {
+        for key in self.internal_keys() {
+            let value = match self.retrieve(&key) {
                 Ok(v) => v,
                 Err(_) => continue,
             };
@@ -526,7 +584,7 @@ impl Tesseract {
         use gloo::storage::{LocalStorage, Storage};
 
         if self.autosave_enabled() {
-            for (k, v) in &self.internal {
+            for (k, v) in &*self.internal.lock() {
                 LocalStorage::set(k, v).unwrap();
             }
         }
@@ -544,27 +602,10 @@ impl Tesseract {
         for index in 0..length {
             let key = local_storage.key(index).unwrap().unwrap_throw();
             let value: Vec<u8> = LocalStorage::get(&key).unwrap();
-            self.internal.insert(key, value);
+            self.internal.lock().insert(key, value);
         }
 
         Ok(())
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug, Clone, FFIFree)]
-pub struct TesseractShared {
-    tesseract: Arc<Mutex<Tesseract>>,
-}
-
-impl TesseractShared {
-    pub fn new(tesseract: Tesseract) -> Self {
-        let tesseract = Arc::new(Mutex::new(tesseract));
-        TesseractShared { tesseract }
-    }
-
-    pub fn to_inner(&self) -> Arc<Mutex<Tesseract>> {
-        self.tesseract.clone()
     }
 }
 
@@ -628,6 +669,40 @@ mod test {
     pub fn test_with_lock_store_default() -> anyhow::Result<()> {
         let mut tesseract = Tesseract::default();
         assert_eq!(tesseract.set("API", "MYKEY").is_err(), true);
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_with_shared_store() -> anyhow::Result<()> {
+        let mut tesseract = Tesseract::default();
+        let mut tesseract_dup = tesseract.clone();
+        let tesseract_dup_2 = tesseract.clone();
+
+        tesseract.unlock(
+            &b"This is a secret key that will be used for encryption. Totally not 256bit key"[..],
+        )?;
+        assert!(tesseract.is_unlock());
+        assert!(tesseract_dup.is_unlock());
+        assert!(tesseract_dup_2.is_unlock());
+
+        tesseract_dup.lock();
+
+        assert!(!tesseract.is_unlock());
+        assert!(!tesseract_dup.is_unlock());
+        assert!(!tesseract_dup_2.is_unlock());
+
+        tesseract.unlock(
+            &b"This is a secret key that will be used for encryption. Totally not 256bit key"[..],
+        )?;
+
+        drop(tesseract_dup_2);
+
+        assert!(tesseract.is_unlock());
+        drop(tesseract_dup);
+        assert!(tesseract.is_unlock());
+
+        // While we can manually drop the initial tesseract, we wouldnt be able to check to see if it been locked
+
         Ok(())
     }
 }
