@@ -474,28 +474,28 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn constellation_root_directory(
         ctx: *const ConstellationAdapter,
-    ) -> *const Directory {
+    ) -> *mut Directory {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
         let constellation = &*(ctx);
         let constellation = constellation.inner_guard();
         let directory = constellation.root_directory();
-        Box::into_raw(Box::new(directory.clone())) as *const Directory
+        Box::into_raw(Box::new(directory.clone())) as *mut Directory
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_current_directory(
         ctx: *const ConstellationAdapter,
-    ) -> *const Directory {
+    ) -> *mut  Directory {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
         let constellation = &*(ctx);
         let constellation = constellation.inner_guard();
         let current_directory = constellation.current_directory();
-        Box::into_raw(Box::new(current_directory.clone())) as *const Directory
+        Box::into_raw(Box::new(current_directory.clone())) as *mut Directory
     }
 
     #[allow(clippy::missing_safety_doc)]

@@ -771,8 +771,8 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_identifier_own() -> *const Identifier {
-        Box::into_raw(Box::new(Identifier::own())) as *const Identifier
+    pub unsafe extern "C" fn multipass_identifier_own() -> *mut Identifier {
+        Box::into_raw(Box::new(Identifier::own())) as *mut Identifier
     }
 
     #[allow(clippy::missing_safety_doc)]
