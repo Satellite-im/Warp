@@ -143,7 +143,7 @@ async fn main() -> anyhow::Result<()> {
             }
             line = rl.readline().fuse() => match line {
                 Ok(line) => {
-                    let mut cmd_line = line.trim().split(" ");
+                    let mut cmd_line = line.trim().split(' ');
                     match cmd_line.next() {
                         //This is used directly with the struct and not apart of the trait
                         // Some("/connect") => {
@@ -194,7 +194,7 @@ async fn main() -> anyhow::Result<()> {
                                     &username,
                                     &message.value().join("\n"),
                                     &format!("{}", message.pinned()),
-                                    &format!("{}", if emojis.is_empty() { "NONE".into() } else { emojis.join(" ") })
+                                    &emojis.join(" ")
                                 ]);
                             }
                             writeln!(stdout, "{}", table)?;
@@ -228,13 +228,16 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            let mut message = vec![];
+                            let mut messages = vec![];
 
                             while let Some(item) = cmd_line.next() {
-                                message.push(item.to_string());
+                                messages.push(item.to_string());
                             }
-
-                            chat.send(conversation_id, Some(message_id), message).await?;
+                            let message = vec![messages.join(" ").to_string()];
+                            if let Err(e) = chat.send(conversation_id, Some(message_id), message).await {
+                                writeln!(stdout, "Error: {}", e)?;
+                                continue
+                            }
                         },
                         Some("/ping") => {
                             match chat.ping(topic).await {
