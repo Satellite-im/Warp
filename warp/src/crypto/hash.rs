@@ -74,8 +74,10 @@ pub fn blake2s_hash(data: &[u8], salt: Option<Vec<u8>>) -> Vec<u8> {
     hasher.finalize().to_vec()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::crypto::hash::*;
+    use crate::ffi::FFIVec;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -84,9 +86,9 @@ pub mod ffi {
         data_size: usize,
         salt: *const u8,
         salt_size: usize,
-    ) -> *const u8 {
+    ) -> FFIVec<u8> {
         if data.is_null() || data_size == 0 {
-            return std::ptr::null();
+            return FFIVec::from(vec![]);
         }
         let data_slice = std::slice::from_raw_parts(data, data_size);
 
@@ -101,10 +103,7 @@ pub mod ffi {
             }
         };
 
-        let hash = sha1_hash(data_slice, salt);
-        let data_ptr = hash.as_ptr();
-        std::mem::forget(hash);
-        data_ptr
+        FFIVec::from(sha1_hash(data_slice, salt))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -114,9 +113,9 @@ pub mod ffi {
         data_size: usize,
         salt: *const u8,
         salt_size: usize,
-    ) -> *const u8 {
+    ) -> FFIVec<u8> {
         if data.is_null() || data_size == 0 {
-            return std::ptr::null();
+            return FFIVec::from(vec![]);
         }
         let data_slice = std::slice::from_raw_parts(data, data_size);
 
@@ -131,10 +130,7 @@ pub mod ffi {
             }
         };
 
-        let hash = sha256_hash(data_slice, salt);
-        let data_ptr = hash.as_ptr();
-        std::mem::forget(hash);
-        data_ptr
+        FFIVec::from(sha256_hash(data_slice, salt))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -144,9 +140,9 @@ pub mod ffi {
         data_size: usize,
         salt: *const u8,
         salt_size: usize,
-    ) -> *const u8 {
+    ) -> FFIVec<u8> {
         if data.is_null() || data_size == 0 {
-            return std::ptr::null();
+            return FFIVec::from(vec![]);
         }
         let data_slice = std::slice::from_raw_parts(data, data_size);
 
@@ -161,10 +157,7 @@ pub mod ffi {
             }
         };
 
-        let hash = blake2s_hash(data_slice, salt);
-        let data_ptr = hash.as_ptr();
-        std::mem::forget(hash);
-        data_ptr
+        FFIVec::from(blake2s_hash(data_slice, salt))
     }
 }
 
