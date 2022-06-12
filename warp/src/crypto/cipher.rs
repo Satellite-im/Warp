@@ -347,6 +347,7 @@ fn extract_data_slice(data: &[u8], size: usize) -> (&[u8], &[u8]) {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::crypto::cipher::*;
+    use crate::ffi::{FFIResult, FFIVec};
     #[allow(unused)]
     use std::ffi::{c_void, CString};
     #[allow(unused)]
@@ -359,21 +360,20 @@ pub mod ffi {
         key_size: usize,
         data: *const u8,
         data_size: usize,
-    ) -> *const u8 {
-        if key.is_null() || key_size == 0 || data.is_null() || data_size == 0 {
-            return std::ptr::null();
+    ) -> FFIResult<FFIVec<u8>> {
+        if key.is_null() || key_size == 0 {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Key is null or invalid")));
+        }
+        if data.is_null() || data_size == 0 {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Data is null or invalid")));
         }
         let key_slice = std::slice::from_raw_parts(key, key_size);
         let data_slice = std::slice::from_raw_parts(data, data_size);
 
-        let e_data = match aes256gcm_encrypt(key_slice, data_slice) {
-            Ok(data) => data,
-            Err(_) => return std::ptr::null(),
-        };
-
-        let data_ptr = e_data.as_ptr();
-        std::mem::forget(e_data);
-        data_ptr
+        match aes256gcm_encrypt(key_slice, data_slice) {
+            Ok(data) => FFIResult::ok(FFIVec::from(data)),
+            Err(e) => FFIResult::err(e),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -383,21 +383,21 @@ pub mod ffi {
         key_size: usize,
         data: *const u8,
         data_size: usize,
-    ) -> *const u8 {
-        if key.is_null() || key_size == 0 || data.is_null() || data_size == 0 {
-            return std::ptr::null();
+    ) -> FFIResult<FFIVec<u8>> {
+        if key.is_null() || key_size == 0 {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Key is null or invalid")));
         }
+        if data.is_null() || data_size == 0 {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Data is null or invalid")));
+        }
+
         let key_slice = std::slice::from_raw_parts(key, key_size);
         let data_slice = std::slice::from_raw_parts(data, data_size);
 
-        let e_data = match aes256gcm_decrypt(key_slice, data_slice) {
-            Ok(data) => data,
-            Err(_) => return std::ptr::null(),
-        };
-
-        let data_ptr = e_data.as_ptr();
-        std::mem::forget(e_data);
-        data_ptr
+        match aes256gcm_decrypt(key_slice, data_slice) {
+            Ok(data) => FFIResult::ok(FFIVec::from(data)),
+            Err(e) => FFIResult::err(e),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -407,21 +407,21 @@ pub mod ffi {
         key_size: usize,
         data: *const u8,
         data_size: usize,
-    ) -> *const u8 {
-        if key.is_null() || key_size == 0 || data.is_null() || data_size == 0 {
-            return std::ptr::null();
+    ) -> FFIResult<FFIVec<u8>> {
+        if key.is_null() || key_size == 0 {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Key is null or invalid")));
         }
+        if data.is_null() || data_size == 0 {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Data is null or invalid")));
+        }
+
         let key_slice = std::slice::from_raw_parts(key, key_size);
         let data_slice = std::slice::from_raw_parts(data, data_size);
 
-        let e_data = match xchacha20poly1305_encrypt(key_slice, data_slice) {
-            Ok(data) => data,
-            Err(_) => return std::ptr::null(),
-        };
-
-        let data_ptr = e_data.as_ptr();
-        std::mem::forget(e_data);
-        data_ptr
+        match xchacha20poly1305_encrypt(key_slice, data_slice) {
+            Ok(data) => FFIResult::ok(FFIVec::from(data)),
+            Err(e) => FFIResult::err(e),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -431,21 +431,21 @@ pub mod ffi {
         key_size: usize,
         data: *const u8,
         data_size: usize,
-    ) -> *const u8 {
-        if key.is_null() || key_size == 0 || data.is_null() || data_size == 0 {
-            return std::ptr::null();
+    ) -> FFIResult<FFIVec<u8>> {
+        if key.is_null() || key_size == 0 {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Key is null or invalid")));
         }
+        if data.is_null() || data_size == 0 {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Data is null or invalid")));
+        }
+
         let key_slice = std::slice::from_raw_parts(key, key_size);
         let data_slice = std::slice::from_raw_parts(data, data_size);
 
-        let e_data = match xchacha20poly1305_decrypt(key_slice, data_slice) {
-            Ok(data) => data,
-            Err(_) => return std::ptr::null(),
-        };
-
-        let data_ptr = e_data.as_ptr();
-        std::mem::forget(e_data);
-        data_ptr
+        match xchacha20poly1305_decrypt(key_slice, data_slice) {
+            Ok(data) => FFIResult::ok(FFIVec::from(data)),
+            Err(e) => FFIResult::err(e),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -453,20 +453,17 @@ pub mod ffi {
     pub unsafe extern "C" fn crypto_aes256gcm_self_encrypt(
         data: *const u8,
         data_size: usize,
-    ) -> *const u8 {
+    ) -> FFIResult<FFIVec<u8>> {
         if data.is_null() || data_size == 0 {
-            return std::ptr::null();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Data is null or invalid")));
         }
+
         let data_slice = std::slice::from_raw_parts(data, data_size);
 
-        let e_data = match aes256gcm_self_encrypt(data_slice) {
-            Ok(data) => data,
-            Err(_) => return std::ptr::null(),
-        };
-
-        let data_ptr = e_data.as_ptr();
-        std::mem::forget(e_data);
-        data_ptr
+        match aes256gcm_self_encrypt(data_slice) {
+            Ok(data) => FFIResult::ok(FFIVec::from(data)),
+            Err(e) => FFIResult::err(e),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -474,20 +471,17 @@ pub mod ffi {
     pub unsafe extern "C" fn crypto_aes256gcm_self_decrypt(
         data: *const u8,
         data_size: usize,
-    ) -> *const u8 {
+    ) -> FFIResult<FFIVec<u8>> {
         if data.is_null() || data_size == 0 {
-            return std::ptr::null();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Data is null or invalid")));
         }
+
         let data_slice = std::slice::from_raw_parts(data, data_size);
 
-        let e_data = match aes256gcm_self_decrypt(data_slice) {
-            Ok(data) => data,
-            Err(_) => return std::ptr::null(),
-        };
-
-        let data_ptr = e_data.as_ptr();
-        std::mem::forget(e_data);
-        data_ptr
+        match aes256gcm_self_decrypt(data_slice) {
+            Ok(data) => FFIResult::ok(FFIVec::from(data)),
+            Err(e) => FFIResult::err(e),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -495,20 +489,17 @@ pub mod ffi {
     pub unsafe extern "C" fn crypto_xchacha20poly1305_self_encrypt(
         data: *const u8,
         data_size: usize,
-    ) -> *const u8 {
+    ) -> FFIResult<FFIVec<u8>> {
         if data.is_null() || data_size == 0 {
-            return std::ptr::null();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Data is null or invalid")));
         }
+
         let data_slice = std::slice::from_raw_parts(data, data_size);
 
-        let e_data = match xchacha20poly1305_self_encrypt(data_slice) {
-            Ok(data) => data,
-            Err(_) => return std::ptr::null(),
-        };
-
-        let data_ptr = e_data.as_ptr();
-        std::mem::forget(e_data);
-        data_ptr
+        match xchacha20poly1305_self_encrypt(data_slice) {
+            Ok(data) => FFIResult::ok(FFIVec::from(data)),
+            Err(e) => FFIResult::err(e),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -516,20 +507,16 @@ pub mod ffi {
     pub unsafe extern "C" fn crypto_xchacha20poly1305_self_decrypt(
         data: *const u8,
         data_size: usize,
-    ) -> *const u8 {
+    ) -> FFIResult<FFIVec<u8>> {
         if data.is_null() || data_size == 0 {
-            return std::ptr::null();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Data is null or invalid")));
         }
         let data_slice = std::slice::from_raw_parts(data, data_size);
 
-        let e_data = match xchacha20poly1305_self_decrypt(data_slice) {
-            Ok(data) => data,
-            Err(_) => return std::ptr::null(),
-        };
-
-        let data_ptr = e_data.as_ptr();
-        std::mem::forget(e_data);
-        data_ptr
+        match xchacha20poly1305_self_decrypt(data_slice) {
+            Ok(data) => FFIResult::ok(FFIVec::from(data)),
+            Err(e) => FFIResult::err(e),
+        }
     }
 }
 
