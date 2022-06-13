@@ -40,11 +40,16 @@ use warp::{error::Error, pocket_dimension::PocketDimension};
 use warp::{module::Module, Extension};
 
 use libp2p::autonat;
+use libp2p::relay::v2::relay;
+use libp2p::relay::v2::relay::Relay;
 use log::{error, info, warn};
 
 use serde::{Deserialize, Serialize};
 use warp::data::{DataObject, DataType};
 use warp::pocket_dimension::query::QueryBuilder;
+
+//These topics will be used for internal communication and not meant for direct use.
+const DEFAULT_TOPICS: [&str; 2] = ["exchange", "announcement"];
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -70,6 +75,7 @@ pub struct RayGunBehavior {
     pub sub: Floodsub,
     pub mdns: Mdns,
     pub ping: Ping,
+    pub relay: relay::Relay,
     pub kademlia: Kademlia<MemoryStore>,
     pub identity: Identify,
     pub autonat: autonat::Behaviour,
@@ -77,6 +83,72 @@ pub struct RayGunBehavior {
     pub inner: Arc<Mutex<Vec<Message>>>,
     #[behaviour(ignore)]
     pub account: Arc<Mutex<Box<dyn MultiPass>>>,
+}
+
+pub enum BehaviourEvent {
+    #[cfg(feature = "floodsub")]
+    Floodsub(FloodsubEvent),
+    #[cfg(feature = "gossipsub")]
+    Gossipsub(GossipsubEvent),
+    Mdns(MdnsEvent),
+    Ping(PingEvent),
+    Relay(relay::Event),
+    Kad(KademliaEvent),
+    Identify(IdentifyEvent),
+    Autonat(autonat::Event),
+}
+
+#[cfg(feature = "floodsub")]
+impl From<FloodsubEvent> for BehaviourEvent {
+    fn from(event: FloodsubEvent) -> Self {
+        BehaviourEvent::Floodsub(event)
+    }
+}
+#[cfg(feature = "gossipsub")]
+impl From<GossipsubEvent> for BehaviourEvent {
+    fn from(event: GossipsubEvent) -> Self {
+        BehaviourEvent::Gossipsub(event)
+    }
+}
+
+impl From<MdnsEvent> for BehaviourEvent {
+    fn from(event: MdnsEvent) -> Self {
+        BehaviourEvent::Mdns(event)
+    }
+}
+
+impl From<PingEvent> for BehaviourEvent {
+    fn from(event: PingEvent) -> Self {
+        BehaviourEvent::Ping(event)
+    }
+}
+
+impl From<relay::Event> for BehaviourEvent {
+    fn from(event: relay::Event) -> Self {
+        BehaviourEvent::Relay(event)
+    }
+}
+
+impl From<KademliaEvent> for BehaviourEvent {
+    fn from(event: KademliaEvent) -> Self {
+        BehaviourEvent::Kad(event)
+    }
+}
+
+impl From<IdentifyEvent> for BehaviourEvent {
+    fn from(event: IdentifyEvent) -> Self {
+        BehaviourEvent::Identify(event)
+    }
+}
+
+impl From<autonat::Event> for BehaviourEvent {
+    fn from(event: autonat::Event) -> Self {
+        BehaviourEvent::Autonat(event)
+    }
+}
+
+impl NetworkBehaviourEventProcess<relay::Event> for RayGunBehavior {
+    fn inject_event(&mut self, event: relay::Event) {}
 }
 
 impl NetworkBehaviourEventProcess<KademliaEvent> for RayGunBehavior {
@@ -412,25 +484,34 @@ impl Libp2pMessaging {
                 tokio::select! {
                     swm_event = command_rx.recv() => {
                         if let Err(e) = swarm_command(&mut swarm, swm_event) {
-                            //TODO: Log Error,
                             error!("{}", e);
                         }
                     }
                     rg_event = into_rx.recv() => {
                         if let Err(e) = swarm_events(&mut swarm, rg_event, outer_tx.clone()).await {
-                            //TODO: Log
                             error!("{}", e);
                         }
                     },
                     event = swarm.select_next_some() => {
-                        if let SwarmEvent::NewListenAddr { address, .. } = event {
-                            //TODO: Log
-                            info!("Listening on {:?}", address);
-                        }
+                        // swarm_loop(&mut swarm, event).await;
                     }
                 }
             }
         });
+
+        for topic in DEFAULT_TOPICS {
+            if let Err(e) = message
+                .send_command(SwarmCommands::SubscribeToTopic(Topic::new(topic)))
+                .await
+            {
+                error!("Error subscribing to internal topics: {}", e);
+                continue;
+            }
+
+            info!("Subscribed to {}", topic);
+        }
+
+        //TODO: Spawn task to deal with the default/internal topics manually
 
         Ok(message)
     }
@@ -504,6 +585,8 @@ impl Libp2pMessaging {
                 kademlia: Kademlia::with_config(peer, store, kad_config),
                 inner: self.conversations.clone(),
                 account: self.account.clone(),
+                relay: Relay::new(peer, Default::default()),
+                //TODO: Check to determine if protocol version is correct for ipfs. It would either be 1.0.0 or 0.1.0
                 identity: Identify::new(
                     IdentifyConfig::new("/ipfs/1.0.0".into(), pubkey)
                         .with_agent_version(agent_name()),
@@ -582,6 +665,114 @@ impl Libp2pMessaging {
         let kp = anchor_client::solana_sdk::signer::keypair::Keypair::from_bytes(&private_key)?;
         //TODO: Have option to switch between devnet and mainnet
         Ok(crate::solana::groupchat::GroupChat::devnet_keypair(&kp))
+    }
+}
+
+pub async fn swarm_loop<E>(
+    swarm: &mut Swarm<RayGunBehavior>,
+    event: SwarmEvent<BehaviourEvent, E>,
+) {
+    match event {
+        SwarmEvent::Behaviour(BehaviourEvent::Relay(event)) => {
+            info!("{:?}", event);
+        }
+        #[cfg(feature = "floodsub")]
+        SwarmEvent::Behaviour(BehaviourEvent::Floodsub(message)) => {
+            if let FloodsubEvent::Message(message) = message {
+                if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
+                    if let Err(_e) = process_message_event(swarm.behaviour().inner.clone(), &events)
+                    {
+                        error!("{}", _e);
+                    }
+                }
+            }
+        }
+        #[cfg(feature = "gossipsub")]
+        SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(message)) => {
+            if let GossipsubEvent::Message {
+                propagation_source: _,
+                message_id: _,
+                message,
+            } = message
+            {
+                if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
+                    if let Err(_e) = process_message_event(swarm.behaviour().inner.clone(), &events)
+                    {
+                        error!("{}", _e);
+                    }
+                }
+            }
+        }
+        SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
+            MdnsEvent::Discovered(list) => {
+                for (peer, _addr) in list {
+                    cfg_if::cfg_if! {
+                        if #[cfg(feature = "gossipsub")] {
+                            swarm.behaviour_mut().sub.add_explicit_peer(&peer);
+                        } else if #[cfg(feature = "floodsub")] {
+                            swarm.behaviour_mut().sub.add_node_to_partial_view(peer);
+                        }
+                    }
+                }
+            }
+            MdnsEvent::Expired(list) => {
+                for (peer, _addr) in list {
+                    if !swarm.behaviour().mdns.has_node(&peer) {
+                        cfg_if::cfg_if! {
+                            if #[cfg(feature = "gossipsub")] {
+                                swarm.behaviour_mut().sub.remove_explicit_peer(&peer);
+                            } else if #[cfg(feature = "floodsub")] {
+                                swarm.behaviour_mut().sub.remove_node_from_partial_view(&peer);
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        SwarmEvent::Behaviour(BehaviourEvent::Ping(_)) => {}
+        SwarmEvent::Behaviour(BehaviourEvent::Kad(_)) => {}
+        SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => {
+            if let IdentifyEvent::Received {
+                peer_id,
+                info:
+                    IdentifyInfo {
+                        listen_addrs,
+                        protocols,
+                        agent_version,
+                        ..
+                    },
+            } = event
+            {
+                if !agent_version.ne(&agent_name()) {
+                    return;
+                }
+                if protocols
+                    .iter()
+                    .any(|p| p.as_bytes() == libp2p::kad::protocol::DEFAULT_PROTO_NAME)
+                {
+                    for addr in listen_addrs {
+                        swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
+                    }
+                }
+            }
+        }
+        SwarmEvent::Behaviour(BehaviourEvent::Autonat(_)) => {}
+        SwarmEvent::ConnectionEstablished { .. } => {}
+        SwarmEvent::ConnectionClosed { .. } => {}
+        SwarmEvent::IncomingConnection { .. } => {}
+        SwarmEvent::IncomingConnectionError { .. } => {}
+        SwarmEvent::OutgoingConnectionError { .. } => {}
+        SwarmEvent::BannedPeer { .. } => {}
+        SwarmEvent::NewListenAddr { address, .. } => {
+            println!("Listening on {:?}", address);
+            info!("Listening on {:?}", address);
+        }
+        SwarmEvent::ExpiredListenAddr { .. } => {}
+        SwarmEvent::ListenerClosed { .. } => {}
+        SwarmEvent::ListenerError { .. } => {}
+        SwarmEvent::Dialing(peer) => {
+            info!("Dialing {}", peer);
+        }
     }
 }
 
