@@ -1,5 +1,6 @@
+use warp::crypto::exchange::X25519PublicKey;
 use warp::multipass::identity::{Identity, PublicKey};
-use warp::multipass::{Friends, MultiPass};
+use warp::multipass::MultiPass;
 use warp::tesseract::Tesseract;
 use warp_mp_solana::solana::anchor_client::anchor_lang::prelude::Pubkey;
 use warp_mp_solana::SolanaAccount;
@@ -39,8 +40,8 @@ fn main() -> anyhow::Result<()> {
     let alice_pubkey = ecdh_public_key(&account_a)?;
     let bob_pubkey = ecdh_public_key(&account_b)?;
 
-    let alice_key = account_a.key_exchange(bob_pubkey).map(hex::encode)?;
-    let bob_key = account_b.key_exchange(alice_pubkey).map(hex::encode)?;
+    let alice_key = ecdh_key_exchange(&account_a, bob_pubkey).map(hex::encode)?;
+    let bob_key = ecdh_key_exchange(&account_b, alice_pubkey).map(hex::encode)?;
 
     assert_eq!(&alice_key, &bob_key);
 
@@ -58,4 +59,13 @@ fn ecdh_public_key(account: &impl MultiPass) -> anyhow::Result<PublicKey> {
     let secret = warp::crypto::exchange::X25519Secret::from_ed25519_keypair(&keypair)?;
     let pubkey = PublicKey::from_bytes(secret.public_key().to_inner().as_bytes());
     Ok(pubkey)
+}
+
+fn ecdh_key_exchange(account: &impl MultiPass, public_key: PublicKey) -> anyhow::Result<Vec<u8>> {
+    let private_key = account.decrypt_private_key(None)?;
+    let kp = warp::crypto::signature::Ed25519Keypair::from_bytes(&private_key)?;
+    let secret = warp::crypto::exchange::X25519Secret::from_ed25519_keypair(&kp)?;
+    let pubkey = X25519PublicKey::from_bytes(public_key.as_ref());
+    let ecdh_key = secret.key_exchange(pubkey);
+    Ok(ecdh_key)
 }
