@@ -21,7 +21,6 @@ use crate::solana::wallet::{PhraseType, SolanaWallet};
 use crate::solana::{anchor_client::Cluster, helper};
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::solana_sdk::signature::Keypair;
-use warp::crypto::exchange::X25519PublicKey;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -614,15 +613,6 @@ impl Friends for SolanaAccount {
         }
 
         Err(Error::Any(anyhow!("Account is not friends")))
-    }
-
-    fn key_exchange(&self, public_key: PublicKey) -> Result<Vec<u8>> {
-        let private_key = self.decrypt_private_key(None)?;
-        let kp = warp::crypto::signature::Ed25519Keypair::from_bytes(&private_key)?;
-        let secret = warp::crypto::exchange::X25519Secret::from_ed25519_keypair(&kp)?;
-        let pubkey = X25519PublicKey::from_bytes(public_key.as_ref());
-        let ecdh_key = secret.key_exchange(pubkey);
-        Ok(ecdh_key)
     }
 }
 
