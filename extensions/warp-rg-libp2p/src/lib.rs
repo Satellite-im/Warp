@@ -7,13 +7,16 @@ compile_error!("\"gossipsub\" and \"floodsub\" feature cannot be used at the sam
 #[cfg(feature = "solana")]
 pub mod solana;
 
+pub mod registry;
+
 use anyhow::anyhow;
 #[cfg(feature = "floodsub")]
 use libp2p::floodsub::{Floodsub, FloodsubEvent, Topic};
 use libp2p::mdns::{Mdns, MdnsConfig, MdnsEvent};
-use libp2p::swarm::{NetworkBehaviour, NetworkBehaviourEventProcess, SwarmEvent};
+use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use libp2p::{identity, tokio_development_transport, Multiaddr, PeerId, Swarm};
 use libp2p::{ping, NetworkBehaviour};
+use registry::PeerRegistry;
 use warp::raygun::{group::*, Reaction};
 
 use std::str::FromStr;
@@ -29,7 +32,7 @@ use libp2p::gossipsub::{
 use libp2p::identify::{Identify, IdentifyConfig, IdentifyEvent, IdentifyInfo};
 use libp2p::kad::store::MemoryStore;
 use libp2p::kad::{Kademlia, KademliaBucketInserts, KademliaConfig, KademliaEvent, QueryResult};
-use libp2p::ping::{Event, Ping, PingEvent};
+use libp2p::ping::{Ping, PingEvent};
 use uuid::Uuid;
 use warp::multipass::MultiPass;
 use warp::raygun::{
@@ -64,10 +67,11 @@ pub struct Libp2pMessaging {
     pub current_conversation: Option<Uuid>,
     //TODO: Support multiple conversations
     pub conversations: Arc<Mutex<Vec<Message>>>,
+    pub peer_registry: Arc<Mutex<PeerRegistry>>,
 }
 
 #[derive(NetworkBehaviour)]
-#[behaviour(event_process = true)]
+#[behaviour(out_event = "BehaviourEvent", event_process = false)]
 pub struct RayGunBehavior {
     #[cfg(feature = "gossipsub")]
     pub sub: Gossipsub,
@@ -83,6 +87,8 @@ pub struct RayGunBehavior {
     pub inner: Arc<Mutex<Vec<Message>>>,
     #[behaviour(ignore)]
     pub account: Arc<Mutex<Box<dyn MultiPass>>>,
+    #[behaviour(ignore)]
+    pub peer_registry: Arc<Mutex<PeerRegistry>>,
 }
 
 pub enum BehaviourEvent {
@@ -147,99 +153,8 @@ impl From<autonat::Event> for BehaviourEvent {
     }
 }
 
-impl NetworkBehaviourEventProcess<relay::Event> for RayGunBehavior {
-    fn inject_event(&mut self, event: relay::Event) {}
-}
-
-impl NetworkBehaviourEventProcess<KademliaEvent> for RayGunBehavior {
-    // Called when `kademlia` produces an event.
-    fn inject_event(&mut self, message: KademliaEvent) {
-        match message {
-            KademliaEvent::OutboundQueryCompleted { result, .. } => match result {
-                QueryResult::Bootstrap(_) => {}
-                QueryResult::GetClosestPeers(Ok(ok)) => {
-                    for peer in ok.peers {
-                        let addrs = self.kademlia.addresses_of_peer(&peer);
-                        for addr in addrs {
-                            self.kademlia.add_address(&peer, addr);
-                        }
-                    }
-                }
-                _ => {}
-            },
-            KademliaEvent::RoutingUpdated {
-                peer: _,
-                addresses: _,
-                ..
-            } => {}
-            _ => {}
-        }
-    }
-}
-
-impl NetworkBehaviourEventProcess<IdentifyEvent> for RayGunBehavior {
-    fn inject_event(&mut self, event: IdentifyEvent) {
-        if let IdentifyEvent::Received {
-            peer_id,
-            info:
-                IdentifyInfo {
-                    listen_addrs,
-                    protocols,
-                    agent_version,
-                    ..
-                },
-        } = event
-        {
-            if !agent_version.ne(&agent_name()) {
-                return;
-            }
-            if protocols
-                .iter()
-                .any(|p| p.as_bytes() == libp2p::kad::protocol::DEFAULT_PROTO_NAME)
-            {
-                for addr in listen_addrs {
-                    self.kademlia.add_address(&peer_id, addr);
-                }
-            }
-        }
-    }
-}
-
 pub fn agent_name() -> String {
     format!("warp-rg-libp2p/{}", env!("CARGO_PKG_VERSION"))
-}
-
-impl NetworkBehaviourEventProcess<autonat::Event> for RayGunBehavior {
-    fn inject_event(&mut self, _: autonat::Event) {}
-}
-
-#[cfg(feature = "gossipsub")]
-impl NetworkBehaviourEventProcess<GossipsubEvent> for RayGunBehavior {
-    fn inject_event(&mut self, message: GossipsubEvent) {
-        //TODO: Check topic and compare that to the conv id
-        if let GossipsubEvent::Message {
-            propagation_source: _,
-            message_id: _,
-            message,
-        } = message
-        {
-            if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
-                if let Err(_e) = process_message_event(self.inner.clone(), &events) {}
-            }
-        }
-    }
-}
-
-#[cfg(feature = "floodsub")]
-impl NetworkBehaviourEventProcess<FloodsubEvent> for RayGunBehavior {
-    fn inject_event(&mut self, message: FloodsubEvent) {
-        //TODO: Check topic and compare that to the conv id
-        if let FloodsubEvent::Message(message) = message {
-            if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
-                if let Err(_e) = process_message_event(self.inner.clone(), &events) {}
-            }
-        }
-    }
 }
 
 fn process_message_event(
@@ -358,44 +273,6 @@ fn process_message_event(
     Ok(())
 }
 
-impl NetworkBehaviourEventProcess<PingEvent> for RayGunBehavior {
-    fn inject_event(&mut self, event: PingEvent) {
-        let Event { .. } = event;
-    }
-}
-
-impl NetworkBehaviourEventProcess<MdnsEvent> for RayGunBehavior {
-    // Called when `mdns` produces an event.
-    fn inject_event(&mut self, event: MdnsEvent) {
-        match event {
-            MdnsEvent::Discovered(list) => {
-                for (peer, _addr) in list {
-                    cfg_if::cfg_if! {
-                        if #[cfg(feature = "gossipsub")] {
-                            self.sub.add_explicit_peer(&peer);
-                        } else if #[cfg(feature = "floodsub")] {
-                            self.sub.add_node_to_partial_view(peer);
-                        }
-                    }
-                }
-            }
-            MdnsEvent::Expired(list) => {
-                for (peer, _addr) in list {
-                    if !self.mdns.has_node(&peer) {
-                        cfg_if::cfg_if! {
-                            if #[cfg(feature = "gossipsub")] {
-                                self.sub.remove_explicit_peer(&peer);
-                            } else if #[cfg(feature = "floodsub")] {
-                                self.sub.remove_node_from_partial_view(&peer);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 impl Libp2pMessaging {
     pub async fn new(
         account: Arc<Mutex<Box<dyn MultiPass>>>,
@@ -404,7 +281,7 @@ impl Libp2pMessaging {
         bootstrap: Vec<(String, String)>,
     ) -> anyhow::Result<Self> {
         let account = account.clone();
-
+        let peer_registry = Arc::new(Mutex::new(PeerRegistry::default()));
         let mut message = Libp2pMessaging {
             account,
             cache,
@@ -414,6 +291,7 @@ impl Libp2pMessaging {
             current_conversation: None,
             conversations: Arc::new(Mutex::new(Vec::new())),
             response_channel: None,
+            peer_registry: peer_registry.clone(),
         };
 
         let keypair = match message.account.lock().decrypt_private_key(None) {
@@ -432,9 +310,11 @@ impl Libp2pMessaging {
             }
         };
 
-        info!("PeerID: {}", PeerId::from(keypair.public()));
+        println!("PeerID: {}", PeerId::from(keypair.public()));
 
-        let mut swarm = message.create_swarm(keypair).await?;
+        peer_registry.lock().add_public_key(keypair.public());
+
+        let mut swarm = message.create_swarm(keypair, peer_registry).await?;
 
         let address = match &message.listen_addr {
             Some(addr) => addr.clone(),
@@ -467,6 +347,10 @@ impl Libp2pMessaging {
             .kademlia
             .get_closest_peers(random_peer);
 
+        if let Err(e) = swarm.behaviour_mut().kademlia.bootstrap() {
+            error!("Error bootstrapping: {}", e);
+        }
+
         let (into_tx, mut into_rx) = tokio::sync::mpsc::channel(32);
         let (outer_tx, outer_rx) = tokio::sync::mpsc::channel(32);
         let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(32);
@@ -493,7 +377,7 @@ impl Libp2pMessaging {
                         }
                     },
                     event = swarm.select_next_some() => {
-                        // swarm_loop(&mut swarm, event).await;
+                        swarm_loop(&mut swarm, event).await;
                     }
                 }
             }
@@ -531,6 +415,7 @@ impl Libp2pMessaging {
     async fn create_swarm(
         &mut self,
         keypair: identity::Keypair,
+        peer_registry: Arc<Mutex<PeerRegistry>>,
     ) -> anyhow::Result<Swarm<RayGunBehavior>> {
         let pubkey = keypair.public();
 
@@ -592,6 +477,7 @@ impl Libp2pMessaging {
                         .with_agent_version(agent_name()),
                 ),
                 autonat: autonat::Behaviour::new(peer, Default::default()),
+                peer_registry,
             };
 
             libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
@@ -730,7 +616,30 @@ pub async fn swarm_loop<E>(
             }
         },
         SwarmEvent::Behaviour(BehaviourEvent::Ping(_)) => {}
-        SwarmEvent::Behaviour(BehaviourEvent::Kad(_)) => {}
+        SwarmEvent::Behaviour(BehaviourEvent::Kad(event)) => match event {
+            KademliaEvent::OutboundQueryCompleted { result, .. } => match result {
+                QueryResult::Bootstrap(_) => {}
+                QueryResult::GetClosestPeers(Ok(ok)) => {
+                    for peer in ok.peers {
+                        let addrs = swarm.behaviour_mut().kademlia.addresses_of_peer(&peer);
+                        for addr in addrs {
+                            swarm.behaviour_mut().kademlia.add_address(&peer, addr);
+                        }
+                        //TODO: Implement a check for a specific peer and dial it
+                        if let Err(e) = swarm.dial(peer) {
+                            error!("Error connecting to {}: {:?}", peer, e);
+                        }
+                    }
+                }
+                _ => {}
+            },
+            KademliaEvent::RoutingUpdated {
+                peer: _,
+                addresses: _,
+                ..
+            } => {}
+            _ => {}
+        },
         SwarmEvent::Behaviour(BehaviourEvent::Identify(event)) => {
             if let IdentifyEvent::Received {
                 peer_id,
@@ -739,12 +648,17 @@ pub async fn swarm_loop<E>(
                         listen_addrs,
                         protocols,
                         agent_version,
+                        public_key,
                         ..
                     },
             } = event
             {
-                if !agent_version.ne(&agent_name()) {
-                    return;
+                if agent_version.eq(&agent_name()) {
+                    swarm
+                        .behaviour_mut()
+                        .peer_registry
+                        .lock()
+                        .add_public_key(public_key);
                 }
                 if protocols
                     .iter()
@@ -814,6 +728,9 @@ fn swarm_command(
                     swarm.behaviour_mut().sub.publish(topic, data);
                 }
             }
+        }
+        Some(SwarmCommands::FindPeer(peer)) => {
+            swarm.behaviour_mut().kademlia.get_closest_peers(peer);
         }
         _ => {} //TODO: Invalid command?
     }
@@ -897,6 +814,7 @@ pub enum SwarmCommands {
     SubscribeToTopic(Topic),
     UnsubscribeFromTopic(Topic),
     PublishToTopic(Topic, Vec<u8>),
+    FindPeer(PeerId),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
