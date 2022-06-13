@@ -93,9 +93,10 @@ impl PocketDimension for MemoryClient {
     }
 
     fn empty(&mut self, dimension: DataType) -> Result<()> {
-        self.client.remove(&dimension);
-
-        Ok(())
+        self.client
+            .remove(&dimension)
+            .ok_or(Error::DataObjectNotFound)
+            .map(|_| ())
     }
 }
 

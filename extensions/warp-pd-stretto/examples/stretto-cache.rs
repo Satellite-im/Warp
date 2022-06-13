@@ -1,11 +1,7 @@
-use std::path::PathBuf;
-
-use serde::Deserialize;
 use warp::data::{DataObject, DataType};
-use warp::error::Error;
 use warp::module::Module;
 use warp::pocket_dimension::query::{Comparator, QueryBuilder};
-use warp::pocket_dimension::{DimensionData, PocketDimension};
+use warp::pocket_dimension::PocketDimension;
 use warp_pd_stretto::StrettoClient;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -49,6 +45,10 @@ fn main() -> anyhow::Result<()> {
         println!("Item::data={}", item.data);
     }
 
-    cache.empty(DataType::from(Module::FileSystem))?;
+    cache.empty(DataType::from(Module::Unknown))?;
+
+    let count = cache.count(DataType::from(Module::Unknown), None)?;
+
+    assert!(count == 0);
     Ok(())
 }
