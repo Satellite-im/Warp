@@ -375,16 +375,14 @@ impl Libp2pMessaging {
             let addr = match Multiaddr::from_str(addr) {
                 Ok(addr) => addr,
                 Err(e) => {
-                    //TODO: Log
-                    error!("{}", e);
+                    error!("Error parsing multiaddr: {}", e);
                     continue;
                 }
             };
             let node_peer = match PeerId::from_str(peer) {
                 Ok(peer) => peer,
                 Err(e) => {
-                    //TODO: Log
-                    error!("{}", e);
+                    error!("Error parsing peer: {}", e);
                     continue;
                 }
             };
@@ -673,13 +671,11 @@ async fn swarm_events(
                 }
 
                 if let Err(e) = tx.send(Ok(())).await {
-                    //TODO: Log error
                     error!("{}", e);
                 }
             }
             Err(e) => {
                 if let Err(e) = tx.send(Err(Error::from(e))).await {
-                    //TODO: Log error
                     error!("{}", e);
                 }
             }
@@ -913,7 +909,7 @@ impl GroupChat for Libp2pMessaging {
 impl GroupChatManagement for Libp2pMessaging {
     fn create_group(&mut self, name: &str) -> Result<Group> {
         if name.chars().count() >= 64 {
-            return Err(Error::Any(anyhow!("Group name is too long")));
+            return Err(Error::GroupNameTooLong);
         }
         let helper = self.group_helper()?;
         //Note: Maybe refactor the trait funciton to supply its own id rather than generating one?
@@ -929,7 +925,7 @@ impl GroupChatManagement for Libp2pMessaging {
 
     fn change_group_name(&mut self, id: GroupId, name: &str) -> Result<()> {
         if name.chars().count() >= 64 {
-            return Err(Error::Any(anyhow!("Group name is too long")));
+            return Err(Error::GroupNameTooLong);
         }
         let helper = self.group_helper()?;
         let group = solana_group_to_warp_group(&helper, &id)?;
@@ -945,7 +941,7 @@ impl GroupChatManagement for Libp2pMessaging {
         let helper = self.group_helper()?;
         let group = solana_group_to_warp_group(&helper, &id)?;
         if group.status() == GroupStatus::Opened {
-            return Err(Error::Any(anyhow!("Group is opened")));
+            return Err(Error::GroupOpened);
         }
         let gid_uuid = id.get_id().ok_or(Error::Other)?;
         helper.modify_open_invites(&gid_uuid.to_string(), true)?;
@@ -956,7 +952,7 @@ impl GroupChatManagement for Libp2pMessaging {
         let helper = self.group_helper()?;
         let group = solana_group_to_warp_group(&helper, &id)?;
         if group.status() == GroupStatus::Closed {
-            return Err(Error::Any(anyhow!("Group is closed")));
+            return Err(Error::GroupClosed);
         }
         let gid_uuid = id.get_id().ok_or(Error::Other)?;
         helper.modify_open_invites(&gid_uuid.to_string(), false)?;
