@@ -5,6 +5,9 @@ clean:
 build_static_tesseract:
 				mkdir -p bin && clang -Wall -Wextra tesseract.c -o bin/tesseract ../target/debug/libwarp.a -lm
 
+build_static_crypto:
+				mkdir -p bin && clang -Wall -Wextra crypto.c -o bin/crypto ../target/debug/libwarp.a -lm
+
 build_static_fs_memory:
 				mkdir -p bin && clang -Wall -Wextra fs_memory.c -o bin/fs_memory ../target/debug/libwarp.a ../target/debug/libwarp_fs_memory.a -lm
 
