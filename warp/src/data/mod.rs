@@ -386,3 +386,52 @@ pub mod ffi {
         FFIResult::from(serde_json::to_string(&payload).map_err(Error::from))
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::{Data, DataType};
+
+    #[test]
+    fn data_default_test() -> Result<(), crate::error::Error> {
+        let payload = String::from("Hello, World");
+        let payload_size = payload.len();
+
+        let mut data = Data::new(DataType::Unknown, &payload)?;
+        data.set_size(payload_size as u64);
+
+        assert_eq!(data.version(), 0);
+        assert_eq!(data.size(), 12);
+        assert_eq!(data.data_type(), DataType::Unknown);
+        assert_eq!(data.payload::<String>().unwrap(), payload);
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_data_test() -> Result<(), crate::error::Error> {
+        let payload = String::from("Hello, World");
+        let payload_size = payload.len();
+
+        let mut data = Data::new(DataType::Unknown, payload)?;
+        data.set_size(payload_size as u64);
+
+        assert_ne!(data.version(), 1);
+        assert_ne!(data.size(), 0);
+        assert_ne!(data.data_type(), DataType::FileSystem);
+        assert_ne!(data.payload::<String>().unwrap(), String::from("Ello"));
+        Ok(())
+    }
+
+    #[test]
+    fn serialize_data_test() -> Result<(), crate::error::Error> {
+        let data_json = r#"{"id":"f54c0405-d3ac-4dec-8bd4-c426aae55382","version":0,"timestamp":"2022-06-13T04:24:25.832774077Z","size":12,"type":"unknown","payload":"Hello, World"}"#;
+        let data = serde_json::from_str::<Data>(data_json)?;
+        assert_eq!(data.version(), 0);
+        assert_eq!(data.size(), 12);
+        assert_eq!(data.data_type(), DataType::Unknown);
+        assert_eq!(
+            data.payload::<String>().unwrap(),
+            String::from("Hello, World")
+        );
+        Ok(())
+    }
+}
