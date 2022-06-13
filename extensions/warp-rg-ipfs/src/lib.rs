@@ -89,10 +89,10 @@ impl IpfsMessaging {
 
 impl Extension for IpfsMessaging {
     fn id(&self) -> String {
-        "warp-rg-libp2p".to_string()
+        "warp-rg-ipfs".to_string()
     }
     fn name(&self) -> String {
-        "Raygun Libp2p Messaging".into()
+        "Raygun Ipfs Messaging".into()
     }
 
     fn module(&self) -> Module {
