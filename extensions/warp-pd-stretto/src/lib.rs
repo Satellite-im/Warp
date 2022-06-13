@@ -1,5 +1,4 @@
-pub mod error;
-
+use anyhow::anyhow;
 use warp::{
     data::{DataObject, DataType},
     module::Module,
@@ -8,7 +7,7 @@ use warp::{
 
 use stretto::Cache;
 
-use error::Error;
+use warp::error::Error;
 
 use warp::pocket_dimension::query::{ComparatorFilter, QueryBuilder};
 use warp::pocket_dimension::PocketDimension;
@@ -39,7 +38,7 @@ impl Extension for StrettoClient {
 }
 
 impl StrettoClient {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> anyhow::Result<Self> {
         let client = Cache::new(12960, 1e6 as i64)?;
         Ok(Self { client })
     }
@@ -50,11 +49,7 @@ impl StrettoClient {
 }
 
 impl PocketDimension for StrettoClient {
-    fn add_data(
-        &mut self,
-        dimension: DataType,
-        data: &DataObject,
-    ) -> std::result::Result<(), warp::error::Error> {
+    fn add_data(&mut self, dimension: DataType, data: &DataObject) -> Result<()> {
         let mut data = data.clone();
         data.set_data_type(dimension);
 
@@ -78,11 +73,7 @@ impl PocketDimension for StrettoClient {
         Ok(())
     }
 
-    fn has_data(
-        &mut self,
-        dimension: DataType,
-        query: &QueryBuilder,
-    ) -> std::result::Result<(), warp::error::Error> {
+    fn has_data(&mut self, dimension: DataType, query: &QueryBuilder) -> Result<()> {
         self.client
             .get(&dimension)
             .ok_or(warp::error::Error::DataObjectNotFound)
@@ -93,7 +84,7 @@ impl PocketDimension for StrettoClient {
         &self,
         dimension: DataType,
         query: Option<&QueryBuilder>,
-    ) -> std::result::Result<Vec<DataObject>, warp::error::Error> {
+    ) -> Result<Vec<DataObject>> {
         let data = self
             .client
             .get(&dimension)
@@ -106,39 +97,29 @@ impl PocketDimension for StrettoClient {
         }
     }
 
-    fn size(
-        &self,
-        dimension: DataType,
-        query: Option<&QueryBuilder>,
-    ) -> std::result::Result<i64, warp::error::Error> {
+    fn size(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
         self.get_data(dimension, query)
             .map(|data| data.iter().map(|i| i.size() as i64).sum())
     }
 
-    fn count(
-        &self,
-        dimension: DataType,
-        query: Option<&QueryBuilder>,
-    ) -> std::result::Result<i64, warp::error::Error> {
+    fn count(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
         self.get_data(dimension, query)
             .map(|data| data.len() as i64)
     }
 
-    fn empty(&mut self, _: DataType) -> std::result::Result<(), warp::error::Error> {
-        // Note, since stretto doesnt clear base on key, we will clear everything when this is
-        // call for now.
-        // TODO: Implement a direct clear or mutation for the dimension
+    fn empty(&mut self, dimension: DataType) -> Result<()> {
+        if let Some(mut dim) = self.client.get_mut(&dimension) {
+            dim.value_mut().clear();
+        }
 
-        self.client.clear().map_err(|_| warp::error::Error::Other)?;
-
-        self.client.wait().map_err(|_| warp::error::Error::Other)
+        self.client
+            .wait()
+            .map_err(|e| anyhow!(e))
+            .map_err(Error::from)
     }
 }
 
-pub(crate) fn execute(
-    data: &[DataObject],
-    query: &QueryBuilder,
-) -> std::result::Result<Vec<DataObject>, warp::error::Error> {
+pub(crate) fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<DataObject>> {
     let mut list = Vec::new();
     for data in data.iter() {
         let object = data.payload::<serde_json::Value>()?;
