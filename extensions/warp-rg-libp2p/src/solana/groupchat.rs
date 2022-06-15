@@ -7,6 +7,7 @@ use anchor_client::{Client, ClientError, Cluster, Program};
 use anyhow::{anyhow, bail};
 pub use groupchats::{Group, Invitation};
 use std::rc::Rc;
+use warp::crypto::cipher::{Cipher, CipherType};
 use warp::crypto::exchange::X25519PublicKey;
 
 #[allow(unused)]
@@ -101,8 +102,9 @@ impl GroupChat {
         let secret = warp::crypto::exchange::X25519Secret::from_ed25519_keypair(&kp)?;
 
         let dh_key = secret.key_exchange(X25519PublicKey::from_bytes(&recipient.to_bytes()));
-
-        let group_id = warp::crypto::cipher::aes256gcm_encrypt(&dh_key, group_id.as_bytes())
+        let cipher = Cipher::from(&dh_key);
+        let group_id = cipher
+            .encrypt(CipherType::Aes256Gcm, group_id.as_bytes())
             .map(hex::encode)?;
 
         Ok(Invitation {
@@ -124,8 +126,8 @@ impl GroupChat {
         let secret = warp::crypto::exchange::X25519Secret::from_ed25519_keypair(&kp)?;
 
         let dh_key = secret.key_exchange(X25519PublicKey::from_bytes(&sender.to_bytes()));
-
-        let group_id = warp::crypto::cipher::aes256gcm_decrypt(&dh_key, &group_id)?;
+        let cipher = Cipher::from(&dh_key);
+        let group_id = cipher.decrypt(CipherType::Aes256Gcm, &group_id)?;
         let group_id = String::from_utf8_lossy(&group_id).to_string();
 
         Ok(Invitation {

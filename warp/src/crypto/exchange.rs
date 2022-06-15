@@ -149,15 +149,19 @@ mod test {
         assert_eq!(a_dh, b_dh);
 
         {
-            let for_bob = aes256gcm_encrypt(&a_dh, &b"Hello Bob"[..])?;
-            let plaintext = aes256gcm_decrypt(&b_dh, &for_bob)
+            let cipher = Cipher::from(&a_dh);
+            let for_bob = cipher.encrypt(CipherType::Aes256Gcm, b"Hello Bob")?;
+            let plaintext = cipher
+                .decrypt(CipherType::Aes256Gcm, &for_bob)
                 .map(|ptxt| String::from_utf8_lossy(&ptxt).to_string())?;
             assert_eq!(plaintext, String::from("Hello Bob"));
         }
 
         {
-            let for_alice = aes256gcm_encrypt(&b_dh, &b"Hello Alice"[..])?;
-            let plaintext = aes256gcm_decrypt(&a_dh, &for_alice)
+            let cipher = Cipher::from(&b_dh);
+            let for_alice = cipher.encrypt(CipherType::Aes256Gcm, b"Hello Alice")?;
+            let plaintext = cipher
+                .decrypt(CipherType::Aes256Gcm, &for_alice)
                 .map(|ptxt| String::from_utf8_lossy(&ptxt).to_string())?;
             assert_eq!(plaintext, String::from("Hello Alice"));
         }
@@ -179,15 +183,19 @@ mod test {
         assert_eq!(a_dh, b_dh);
 
         {
-            let for_bob = aes256gcm_encrypt(&a_dh, &b"Hello Bob"[..])?;
-            let plaintext = aes256gcm_decrypt(&b_dh, &for_bob)
+            let cipher = Cipher::from(&a_dh);
+            let for_bob = cipher.encrypt(CipherType::Aes256Gcm, b"Hello Bob")?;
+            let plaintext = cipher
+                .decrypt(CipherType::Aes256Gcm, &for_bob)
                 .map(|ptxt| String::from_utf8_lossy(&ptxt).to_string())?;
             assert_eq!(plaintext, String::from("Hello Bob"));
         }
 
         {
-            let for_alice = aes256gcm_encrypt(&b_dh, &b"Hello Alice"[..])?;
-            let plaintext = aes256gcm_decrypt(&a_dh, &for_alice)
+            let cipher = Cipher::from(&b_dh);
+            let for_alice = cipher.encrypt(CipherType::Aes256Gcm, b"Hello Alice")?;
+            let plaintext = cipher
+                .decrypt(CipherType::Aes256Gcm, &for_alice)
                 .map(|ptxt| String::from_utf8_lossy(&ptxt).to_string())?;
             assert_eq!(plaintext, String::from("Hello Alice"));
         }

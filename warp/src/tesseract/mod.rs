@@ -8,7 +8,10 @@ use zeroize::Zeroize;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
-use crate::error::Error;
+use crate::{
+    crypto::cipher::{Cipher, CipherType},
+    error::Error,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::prelude::*;
@@ -378,8 +381,9 @@ impl Tesseract {
         if !self.is_unlock() {
             return Err(Error::TesseractLocked);
         }
-        let pkey = crate::crypto::cipher::aes256gcm_self_decrypt(&*self.enc_pass.lock())?;
-        let data = crate::crypto::cipher::aes256gcm_encrypt(&pkey, value.as_bytes())?;
+        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &*self.enc_pass.lock())?;
+        let cipher = Cipher::from(pkey);
+        let data = cipher.encrypt(CipherType::Aes256Gcm, value.as_bytes())?;
         {
             self.internal.lock().insert(key.to_string(), data);
         }
@@ -424,10 +428,11 @@ impl Tesseract {
             return Err(Error::ObjectNotFound);
         }
 
-        let pkey = crate::crypto::cipher::aes256gcm_self_decrypt(&*self.enc_pass.lock())?;
+        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &*self.enc_pass.lock())?;
+        let cipher = Cipher::from(pkey);
         let internal = self.internal.lock();
         let data = internal.get(key).ok_or(Error::ObjectNotFound)?;
-        let slice = crate::crypto::cipher::aes256gcm_decrypt(&pkey, data)?;
+        let slice = cipher.decrypt(CipherType::Aes256Gcm, data)?;
         let plain_text = String::from_utf8_lossy(&slice[..]).to_string();
         Ok(plain_text)
     }
@@ -504,7 +509,7 @@ impl Tesseract {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn unlock(&mut self, passphrase: &[u8]) -> Result<()> {
         {
-            *self.enc_pass.lock() = crate::crypto::cipher::aes256gcm_self_encrypt(passphrase)?;
+            *self.enc_pass.lock() = Cipher::self_encrypt(CipherType::Aes256Gcm, passphrase)?;
             *self.unlock.lock() = true;
         }
         if self.is_key_check_enabled() {
