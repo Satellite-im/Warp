@@ -437,6 +437,7 @@ impl Libp2pMessaging {
                     let gossipsub_config = gossipsub::GossipsubConfigBuilder::default()
                         .heartbeat_interval(Duration::from_secs(10))
                         .validation_mode(ValidationMode::Strict)
+                        .flood_publish(true)
                         .message_id_fn(message_id_fn)
                         .build()
                         .map_err(|e| anyhow!(e))?;
