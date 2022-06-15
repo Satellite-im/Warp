@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 [dependencies]
 warp = { path = "../../warp" }
 
-libp2p = { git = "https://github.com/libp2p/rust-libp2p", features = ["tcp-tokio", "dns-tokio"] } # TODO: Lock to a specific commit until version is publish
+libp2p = { version = "0.45.1", features = ["tcp-tokio", "dns-tokio"] }
 
 uuid = { version = "1.0", features = ["serde", "v4"] }
 tokio = { version = "1", features = ["full"] }
@@ -43,8 +43,6 @@ cbindgen = "0.23"
 
 
 [features]
-default = ["gossipsub", "solana"]
-gossipsub = []
-floodsub = []
+default = ["solana"]
 solana = ["groupchats", "anchor-client", "borsh"]
 build-header = []

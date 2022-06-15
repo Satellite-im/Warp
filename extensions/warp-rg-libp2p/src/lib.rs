@@ -1,17 +1,9 @@
-#[cfg(not(any(feature = "gossipsub", feature = "floodsub")))]
-compile_error!("Requires \"gossipsub\" or \"floodsub\" feature not being selected");
-
-#[cfg(all(feature = "gossipsub", feature = "floodsub"))]
-compile_error!("\"gossipsub\" and \"floodsub\" feature cannot be used at the same time");
-
 #[cfg(feature = "solana")]
 pub mod solana;
 
 pub mod registry;
 
 use anyhow::anyhow;
-#[cfg(feature = "floodsub")]
-use libp2p::floodsub::{Floodsub, FloodsubEvent, Topic};
 use libp2p::mdns::{Mdns, MdnsConfig, MdnsEvent};
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use libp2p::{identity, tokio_development_transport, Multiaddr, PeerId, Swarm};
@@ -24,7 +16,6 @@ use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use futures::StreamExt;
-#[cfg(feature = "gossipsub")]
 use libp2p::gossipsub::{
     self, Gossipsub, GossipsubEvent, GossipsubMessage, IdentTopic as Topic, MessageAuthenticity,
     MessageId, ValidationMode,
@@ -73,10 +64,7 @@ pub struct Libp2pMessaging {
 #[derive(NetworkBehaviour)]
 #[behaviour(out_event = "BehaviourEvent", event_process = false)]
 pub struct RayGunBehavior {
-    #[cfg(feature = "gossipsub")]
     pub sub: Gossipsub,
-    #[cfg(feature = "floodsub")]
-    pub sub: Floodsub,
     pub mdns: Mdns,
     pub ping: Ping,
     pub relay: relay::Relay,
@@ -92,9 +80,6 @@ pub struct RayGunBehavior {
 }
 
 pub enum BehaviourEvent {
-    #[cfg(feature = "floodsub")]
-    Floodsub(FloodsubEvent),
-    #[cfg(feature = "gossipsub")]
     Gossipsub(GossipsubEvent),
     Mdns(MdnsEvent),
     Ping(PingEvent),
@@ -104,13 +89,6 @@ pub enum BehaviourEvent {
     Autonat(autonat::Event),
 }
 
-#[cfg(feature = "floodsub")]
-impl From<FloodsubEvent> for BehaviourEvent {
-    fn from(event: FloodsubEvent) -> Self {
-        BehaviourEvent::Floodsub(event)
-    }
-}
-#[cfg(feature = "gossipsub")]
 impl From<GossipsubEvent> for BehaviourEvent {
     fn from(event: GossipsubEvent) -> Self {
         BehaviourEvent::Gossipsub(event)
@@ -411,7 +389,6 @@ impl Libp2pMessaging {
         Ok(())
     }
 
-    #[cfg(any(feature = "gossipsub", feature = "floodsub"))]
     async fn create_swarm(
         &mut self,
         keypair: identity::Keypair,
@@ -424,30 +401,24 @@ impl Libp2pMessaging {
         let transport = tokio_development_transport(keypair.clone())?;
 
         let sub = {
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "gossipsub")] {
-                    use std::collections::hash_map::DefaultHasher;
-                    use std::hash::{Hash, Hasher};
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
 
-                    let message_id_fn = |message: &GossipsubMessage| {
-                        let mut s = DefaultHasher::new();
-                        message.data.hash(&mut s);
-                        MessageId::from(s.finish().to_string())
-                    };
-                    let gossipsub_config = gossipsub::GossipsubConfigBuilder::default()
-                        .heartbeat_interval(Duration::from_secs(10))
-                        .validation_mode(ValidationMode::Strict)
-                        .flood_publish(true)
-                        .message_id_fn(message_id_fn)
-                        .build()
-                        .map_err(|e| anyhow!(e))?;
+            let message_id_fn = |message: &GossipsubMessage| {
+                let mut s = DefaultHasher::new();
+                message.data.hash(&mut s);
+                MessageId::from(s.finish().to_string())
+            };
+            let gossipsub_config = gossipsub::GossipsubConfigBuilder::default()
+                .heartbeat_interval(Duration::from_secs(10))
+                .validation_mode(ValidationMode::Strict)
+                .flood_publish(true)
+                .message_id_fn(message_id_fn)
+                .build()
+                .map_err(|e| anyhow!(e))?;
 
-                     gossipsub::Gossipsub::new(MessageAuthenticity::Signed(keypair), gossipsub_config)
-                            .map_err(|e| anyhow!(e))?
-                } else if #[cfg(feature = "floodsub")] {
-                    Floodsub::new(peer)
-                }
-            }
+            gossipsub::Gossipsub::new(MessageAuthenticity::Signed(keypair), gossipsub_config)
+                .map_err(|e| anyhow!(e))?
         };
 
         #[allow(clippy::field_reassign_with_default)]
@@ -489,16 +460,6 @@ impl Libp2pMessaging {
         };
 
         Ok(swarm)
-    }
-
-    #[cfg(not(any(feature = "gossipsub", feature = "floodsub")))]
-    async fn create_swarm(
-        &mut self,
-        keypair: identity::Keypair,
-    ) -> anyhow::Result<Swarm<RayGunBehavior>> {
-        anyhow::bail!(
-            "Unable to create swarm due to \"gossipsub\" or \"floodsub\" feature not being selected"
-        )
     }
 
     pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
@@ -563,18 +524,6 @@ pub async fn swarm_loop<E>(
         SwarmEvent::Behaviour(BehaviourEvent::Relay(event)) => {
             info!("{:?}", event);
         }
-        #[cfg(feature = "floodsub")]
-        SwarmEvent::Behaviour(BehaviourEvent::Floodsub(message)) => {
-            if let FloodsubEvent::Message(message) = message {
-                if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
-                    if let Err(_e) = process_message_event(swarm.behaviour().inner.clone(), &events)
-                    {
-                        error!("{}", _e);
-                    }
-                }
-            }
-        }
-        #[cfg(feature = "gossipsub")]
         SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(message)) => {
             if let GossipsubEvent::Message {
                 propagation_source: _,
@@ -593,25 +542,13 @@ pub async fn swarm_loop<E>(
         SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
             MdnsEvent::Discovered(list) => {
                 for (peer, _addr) in list {
-                    cfg_if::cfg_if! {
-                        if #[cfg(feature = "gossipsub")] {
-                            swarm.behaviour_mut().sub.add_explicit_peer(&peer);
-                        } else if #[cfg(feature = "floodsub")] {
-                            swarm.behaviour_mut().sub.add_node_to_partial_view(peer);
-                        }
-                    }
+                    swarm.behaviour_mut().sub.add_explicit_peer(&peer);
                 }
             }
             MdnsEvent::Expired(list) => {
                 for (peer, _addr) in list {
                     if !swarm.behaviour().mdns.has_node(&peer) {
-                        cfg_if::cfg_if! {
-                            if #[cfg(feature = "gossipsub")] {
-                                swarm.behaviour_mut().sub.remove_explicit_peer(&peer);
-                            } else if #[cfg(feature = "floodsub")] {
-                                swarm.behaviour_mut().sub.remove_node_from_partial_view(&peer);
-                            }
-                        }
+                        swarm.behaviour_mut().sub.remove_explicit_peer(&peer);
                     }
                 }
             }
@@ -701,34 +638,16 @@ fn swarm_command(
         Some(SwarmCommands::BanPeer(peer)) => swarm.ban_peer_id(peer),
         Some(SwarmCommands::UnbanPeer(peer)) => swarm.unban_peer_id(peer),
         Some(SwarmCommands::DisconnectPeer(peer)) => {
-            swarm.disconnect_peer_id(peer).map_err(|_| Error::Other)?
+            swarm.disconnect_peer_id(peer).map_err(|_| Error::Other)?;
         }
         Some(SwarmCommands::SubscribeToTopic(topic)) => {
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "floodsub")] {
-                    swarm.behaviour_mut().sub.subscribe(topic);
-                } else if #[cfg(feature = "gossipsub")] {
-                    swarm.behaviour_mut().sub.subscribe(&topic)?;
-                }
-            }
+            swarm.behaviour_mut().sub.subscribe(&topic)?;
         }
         Some(SwarmCommands::UnsubscribeFromTopic(topic)) => {
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "floodsub")] {
-                    swarm.behaviour_mut().sub.unsubscribe(topic);
-                } else if #[cfg(feature = "gossipsub")] {
-                    swarm.behaviour_mut().sub.unsubscribe(&topic)?;
-                }
-            }
+            swarm.behaviour_mut().sub.unsubscribe(&topic)?;
         }
         Some(SwarmCommands::PublishToTopic(topic, data)) => {
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "gossipsub")] {
-                    swarm.behaviour_mut().sub.publish(topic, data)?;
-                } else if #[cfg(feature = "floodsub")] {
-                    swarm.behaviour_mut().sub.publish(topic, data);
-                }
-            }
+            swarm.behaviour_mut().sub.publish(topic, data)?;
         }
         Some(SwarmCommands::FindPeer(peer)) => {
             swarm.behaviour_mut().kademlia.get_closest_peers(peer);
