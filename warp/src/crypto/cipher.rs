@@ -20,6 +20,7 @@ use wasm_bindgen::prelude::*;
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Zeroize)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Cipher {
     private_key: Vec<u8>,
 }
@@ -46,25 +47,37 @@ impl<U: AsRef<[u8]>> From<U> for Cipher {
 
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum CipherType {
+    /// AES256-GCM
     Aes256Gcm,
+
+    /// Xchacha20poly1305
     Xchacha20poly1305,
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Cipher {
+    /// Create an instance of Cipher.
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new() -> Cipher {
         Cipher::default()
     }
 
+    /// Import key into Cipher
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn from_bytes(private_key: &[u8]) -> Cipher {
         let private_key = private_key.to_vec();
         Cipher { private_key }
     }
 
+    /// Returns the stored key
     pub fn private_key(&self) -> Vec<u8> {
         self.private_key.to_owned()
     }
 
+    /// Used to generate and encrypt data with a random key
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn self_encrypt(cipher_type: CipherType, data: &[u8]) -> Result<Vec<u8>> {
         let cipher = Cipher::new();
         let mut data = cipher.encrypt(cipher_type, data)?;
@@ -72,6 +85,8 @@ impl Cipher {
         Ok(data)
     }
 
+    /// Used to decrypt data with a key that was attached to the data
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn self_decrypt(cipher_type: CipherType, data: &[u8]) -> Result<Vec<u8>> {
         let (key, data) = extract_data_slice(data, 34);
         let cipher = Cipher::from_bytes(key);
@@ -79,6 +94,8 @@ impl Cipher {
         Ok(data)
     }
 
+    /// Used to encrypt data
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn encrypt(&self, cipher_type: CipherType, data: &[u8]) -> Result<Vec<u8>> {
         let nonce = match cipher_type {
             CipherType::Aes256Gcm => crate::crypto::generate(12),
@@ -91,13 +108,12 @@ impl Cipher {
         });
 
         let key = Key::from_slice(&key);
-        let nonce = Nonce::from_slice(&nonce);
 
         let mut cipher_data = match cipher_type {
             CipherType::Aes256Gcm => {
                 let cipher = Aes256Gcm::new(key);
                 cipher
-                    .encrypt(nonce, data)
+                    .encrypt(Nonce::from_slice(&nonce), data)
                     .map_err(|_| Error::EncryptionError)?
             }
             CipherType::Xchacha20poly1305 => {
@@ -107,12 +123,13 @@ impl Cipher {
                     .map_err(|_| Error::EncryptionError)?
             }
         };
-
         cipher_data.extend(nonce);
 
         Ok(cipher_data)
     }
 
+    /// Used to decrypt data
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn decrypt(&self, cipher_type: CipherType, data: &[u8]) -> Result<Vec<u8>> {
         let (nonce, payload) = match cipher_type {
             CipherType::Aes256Gcm => extract_data_slice(data, 12),
@@ -134,9 +151,9 @@ impl Cipher {
                     .map_err(|_| Error::DecryptionError)?
             }
             CipherType::Xchacha20poly1305 => {
-                let cipher = XChaCha20Poly1305::new(key.as_slice().into());
+                let cipher = XChaCha20Poly1305::new(key);
                 cipher
-                    .decrypt(nonce.into(), payload.as_ref())
+                    .decrypt(Nonce::from_slice(nonce), payload)
                     .map_err(|_| Error::DecryptionError)?
             }
         };
@@ -594,7 +611,7 @@ mod test {
             &mut cipher_data,
         )?;
 
-        cipher.encrypt_stream(
+        cipher.decrypt_stream(
             CipherType::Xchacha20poly1305,
             &mut cipher_data.as_slice(),
             &mut plaintext,
