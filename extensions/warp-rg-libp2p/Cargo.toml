@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 [dependencies]
 warp = { path = "../../warp" }
 
-libp2p = { version = "0.45.1", features = ["tcp-tokio", "dns-tokio"] }
+libp2p = { version = "0.45", features = ["tcp-tokio", "dns-tokio"] }
 
 uuid = { version = "1.0", features = ["serde", "v4"] }
 tokio = { version = "1", features = ["full"] }
