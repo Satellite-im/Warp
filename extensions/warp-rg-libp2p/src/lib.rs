@@ -429,7 +429,6 @@ impl Libp2pMessaging {
             let mut kad_config = KademliaConfig::default();
             kad_config
                 .set_query_timeout(Duration::from_secs(5 * 60))
-                .set_kbucket_inserts(KademliaBucketInserts::OnConnected)
                 .set_connection_idle_timeout(Duration::from_secs(5 * 60))
                 .set_provider_publication_interval(Some(Duration::from_secs(60)));
 
