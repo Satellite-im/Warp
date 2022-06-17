@@ -1,0 +1,19 @@
+name: Run Warp Test
+on: [push]
+jobs:
+  cargo_test_warp:
+    name: Warp Crate Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      # - name: Install dependencies (linux)
+      #   run: sudo apt-get install llvm-dev libssl-dev pkg-config cmake
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: -p warp
