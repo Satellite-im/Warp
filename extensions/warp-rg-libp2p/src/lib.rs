@@ -22,7 +22,7 @@ use libp2p::gossipsub::{
 };
 use libp2p::identify::{Identify, IdentifyConfig, IdentifyEvent, IdentifyInfo};
 use libp2p::kad::store::MemoryStore;
-use libp2p::kad::{Kademlia, KademliaBucketInserts, KademliaConfig, KademliaEvent, QueryResult};
+use libp2p::kad::{Kademlia, KademliaConfig, KademliaEvent, QueryResult};
 use libp2p::ping::{Ping, PingEvent};
 use uuid::Uuid;
 use warp::multipass::MultiPass;
