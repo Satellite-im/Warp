@@ -1,14 +1,16 @@
 name: Run Warp Test
 on: [push]
 jobs:
-  cargo_test_warp:
-    name: Warp Crate Test
+  cargo_test:
+    name: Warp Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
 
-      # - name: Install dependencies (linux)
-      #   run: sudo apt-get install llvm-dev libssl-dev pkg-config cmake
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-dev cmake libudev-dev
 
       - uses: actions-rs/toolchain@v1
         with:
@@ -16,4 +18,3 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
-          args: -p warp
