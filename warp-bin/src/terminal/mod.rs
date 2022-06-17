@@ -1,6 +1,5 @@
 pub mod ui;
 
-use clap::lazy_static;
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
 use crossterm::{
     execute,
@@ -24,9 +23,8 @@ use warp_extensions::fs_memory::MemorySystem;
 use warp_extensions::pd_stretto::StrettoClient;
 
 //Using lazy static to handle global hooks for the time being
-lazy_static::lazy_static! {
-    pub static ref HOOKS: Arc<Mutex<Hooks>> = Arc::new(Mutex::new(Hooks::default()));
-}
+pub static HOOKS: once_cell::sync::Lazy<Mutex<Hooks>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(Hooks::default()));
 
 #[derive(Default)]
 pub struct WarpApp<'a> {
