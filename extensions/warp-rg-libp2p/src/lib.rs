@@ -64,7 +64,7 @@ pub struct Libp2pMessaging {
 #[derive(NetworkBehaviour)]
 #[behaviour(out_event = "BehaviourEvent", event_process = false)]
 pub struct RayGunBehavior {
-    pub sub: Gossipsub,
+    pub gossipsub: Gossipsub,
     pub mdns: Mdns,
     pub ping: Ping,
     pub relay: relay::Relay,
@@ -400,20 +400,18 @@ impl Libp2pMessaging {
 
         let transport = tokio_development_transport(keypair.clone())?;
 
-        let sub = {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-
-            let message_id_fn = |message: &GossipsubMessage| {
-                let mut s = DefaultHasher::new();
-                message.data.hash(&mut s);
-                MessageId::from(s.finish().to_string())
-            };
+        let gossipsub = {
             let gossipsub_config = gossipsub::GossipsubConfigBuilder::default()
                 .heartbeat_interval(Duration::from_secs(10))
                 .validation_mode(ValidationMode::Strict)
                 .flood_publish(true)
-                .message_id_fn(message_id_fn)
+                .message_id_fn(|message: &GossipsubMessage| {
+                    use std::collections::hash_map::DefaultHasher;
+                    use std::hash::{Hash, Hasher};
+                    let mut s = DefaultHasher::new();
+                    message.data.hash(&mut s);
+                    MessageId::from(s.finish().to_string())
+                })
                 .build()
                 .map_err(|e| anyhow!(e))?;
 
@@ -435,7 +433,7 @@ impl Libp2pMessaging {
             let store = MemoryStore::new(peer);
 
             let behaviour = RayGunBehavior {
-                sub,
+                gossipsub,
                 mdns: Mdns::new(mdns_config).await?,
                 ping: Ping::new(ping::Config::new().with_keep_alive(true)),
                 kademlia: Kademlia::with_config(peer, store, kad_config),
@@ -444,7 +442,7 @@ impl Libp2pMessaging {
                 relay: Relay::new(peer, Default::default()),
                 //TODO: Check to determine if protocol version is correct for ipfs. It would either be 1.0.0 or 0.1.0
                 identity: Identify::new(
-                    IdentifyConfig::new("/ipfs/1.0.0".into(), pubkey)
+                    IdentifyConfig::new("/ipfs/0.1.0".into(), pubkey)
                         .with_agent_version(agent_name()),
                 ),
                 autonat: autonat::Behaviour::new(peer, Default::default()),
@@ -541,13 +539,13 @@ pub async fn swarm_loop<E>(
         SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
             MdnsEvent::Discovered(list) => {
                 for (peer, _addr) in list {
-                    swarm.behaviour_mut().sub.add_explicit_peer(&peer);
+                    swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
                 }
             }
             MdnsEvent::Expired(list) => {
                 for (peer, _addr) in list {
                     if !swarm.behaviour().mdns.has_node(&peer) {
-                        swarm.behaviour_mut().sub.remove_explicit_peer(&peer);
+                        swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
                     }
                 }
             }
@@ -640,13 +638,13 @@ fn swarm_command(
             swarm.disconnect_peer_id(peer).map_err(|_| Error::Other)?;
         }
         Some(SwarmCommands::SubscribeToTopic(topic)) => {
-            swarm.behaviour_mut().sub.subscribe(&topic)?;
+            swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
         }
         Some(SwarmCommands::UnsubscribeFromTopic(topic)) => {
-            swarm.behaviour_mut().sub.unsubscribe(&topic)?;
+            swarm.behaviour_mut().gossipsub.unsubscribe(&topic)?;
         }
         Some(SwarmCommands::PublishToTopic(topic, data)) => {
-            swarm.behaviour_mut().sub.publish(topic, data)?;
+            swarm.behaviour_mut().gossipsub.publish(topic, data)?;
         }
         Some(SwarmCommands::FindPeer(peer)) => {
             swarm.behaviour_mut().kademlia.get_closest_peers(peer);
