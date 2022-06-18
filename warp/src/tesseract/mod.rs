@@ -1,7 +1,11 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi;
 
-use std::{collections::HashMap, fmt::Debug};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 use warp_derive::FFIFree;
 use zeroize::Zeroize;
 
@@ -18,6 +22,8 @@ use std::io::prelude::*;
 
 use std::path::PathBuf;
 
+use std::sync::atomic::AtomicBool;
+
 use crate::sync::{Arc, Mutex};
 
 use wasm_bindgen::prelude::*;
@@ -31,10 +37,10 @@ pub struct Tesseract {
     internal: Arc<Mutex<HashMap<String, Vec<u8>>>>,
     enc_pass: Arc<Mutex<Vec<u8>>>,
     file: Arc<Mutex<Option<PathBuf>>>,
-    autosave: Arc<Mutex<bool>>,
-    check: Arc<Mutex<bool>>,
-    unlock: Arc<Mutex<bool>>,
-    internal_counter: Arc<Mutex<usize>>,
+    autosave: Arc<AtomicBool>,
+    check: Arc<AtomicBool>,
+    unlock: Arc<AtomicBool>,
+    internal_counter: Arc<AtomicUsize>,
 }
 
 impl Default for Tesseract {
@@ -46,7 +52,7 @@ impl Default for Tesseract {
             autosave: Arc::new(Default::default()),
             check: Arc::new(Default::default()),
             unlock: Arc::new(Default::default()),
-            internal_counter: Arc::new(Mutex::new(1)),
+            internal_counter: Arc::new(AtomicUsize::new(1)),
         }
     }
 }
@@ -54,8 +60,9 @@ impl Default for Tesseract {
 impl Clone for Tesseract {
     fn clone(&self) -> Self {
         {
-            let mut counter = self.internal_counter.lock();
-            *counter += 1;
+            let mut counter = self.internal_counter.load(Ordering::SeqCst);
+            counter += 1;
+            self.internal_counter.store(counter, Ordering::SeqCst);
         }
         Tesseract {
             internal: self.internal.clone(),
@@ -83,11 +90,12 @@ impl Debug for Tesseract {
 impl Drop for Tesseract {
     fn drop(&mut self) {
         let counter = {
-            let mut counter = self.internal_counter.lock();
-            if *counter != 0 {
-                *counter -= 1;
+            let mut counter = self.internal_counter.load(Ordering::SeqCst);
+            if counter != 0 {
+                counter -= 1;
+                self.internal_counter.store(counter, Ordering::SeqCst)
             }
-            *counter
+            counter
         };
         if counter == 0 && self.is_unlock() {
             self.lock()
@@ -108,7 +116,7 @@ impl Tesseract {
     /// ```
     pub fn from_file<S: AsRef<Path>>(file: S) -> Result<Self> {
         let mut store = Tesseract::default();
-        *store.check.lock() = true;
+        store.check.store(true, Ordering::Relaxed);
         let fs = std::fs::File::open(&file)?;
         let data = serde_json::from_reader(fs)?;
         let file = std::fs::canonicalize(&file).unwrap_or_else(|_| file.as_ref().to_path_buf());
@@ -130,7 +138,7 @@ impl Tesseract {
     /// ```
     pub fn from_reader<S: Read>(reader: &mut S) -> Result<Self> {
         let mut store = Tesseract::default();
-        *store.check.lock() = true;
+        store.check.store(true, Ordering::Relaxed);
         let data = serde_json::from_reader(reader)?;
         store.internal = Arc::new(Mutex::new(data));
         Ok(store)
@@ -292,7 +300,7 @@ impl Tesseract {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_autosave(&mut self) {
         let autosave = self.autosave_enabled();
-        *self.autosave.lock() = !autosave
+        self.autosave.store(!autosave, Ordering::Relaxed);
     }
 
     /// Check to determine if `Tesseract::autosave` is true or false
@@ -305,7 +313,7 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn autosave_enabled(&self) -> bool {
-        *self.autosave.lock()
+        self.autosave.load(Ordering::Relaxed)
     }
 
     /// Disable the key check to allow any passphrase to be used when unlocking the datastore
@@ -328,7 +336,7 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn disable_key_check(&mut self) {
-        *self.check.lock() = false;
+        self.check.store(false, Ordering::Relaxed);
     }
 
     /// Enable the key check to allow any passphrase to be used when unlocking the datastore
@@ -347,7 +355,7 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn enable_key_check(&mut self) {
-        *self.check.lock() = true;
+        self.check.store(true, Ordering::Relaxed);
     }
 
     /// Check to determine if the key check is enabled
@@ -362,7 +370,7 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn is_key_check_enabled(&self) -> bool {
-        *self.check.lock()
+        self.check.load(Ordering::Relaxed)
     }
 
     /// To store a value to be encrypted into the keystore. If the key already exist, it
@@ -494,7 +502,7 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn is_unlock(&self) -> bool {
-        !self.enc_pass.lock().is_empty() && *self.unlock.lock()
+        !self.enc_pass.lock().is_empty() && self.unlock.load(Ordering::Relaxed)
     }
 
     /// Store password in memory to be used to decrypt contents.
@@ -510,7 +518,7 @@ impl Tesseract {
     pub fn unlock(&mut self, passphrase: &[u8]) -> Result<()> {
         {
             *self.enc_pass.lock() = Cipher::self_encrypt(CipherType::Aes256Gcm, passphrase)?;
-            *self.unlock.lock() = true;
+            self.unlock.store(true, Ordering::Relaxed);
         }
         if self.is_key_check_enabled() {
             let keys = self.internal_keys();
@@ -539,7 +547,7 @@ impl Tesseract {
     pub fn lock(&mut self) {
         if self.save().is_ok() {}
         self.enc_pass.lock().zeroize();
-        *self.unlock.lock() = false;
+        self.unlock.store(false, Ordering::Relaxed);
     }
 }
 
