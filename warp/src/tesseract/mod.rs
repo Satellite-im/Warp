@@ -674,14 +674,14 @@ mod test {
         assert_eq!(data, String::from("MYKEY"));
         tesseract.lock();
         tesseract.unlock(b"this is a dif key")?;
-        assert_eq!(tesseract.retrieve("API").is_err(), true);
+        assert!(tesseract.retrieve("API").is_err());
         Ok(())
     }
 
     #[test]
     pub fn test_with_lock_store_default() -> anyhow::Result<()> {
         let mut tesseract = Tesseract::default();
-        assert_eq!(tesseract.set("API", "MYKEY").is_err(), true);
+        assert!(tesseract.set("API", "MYKEY").is_err());
         Ok(())
     }
 
