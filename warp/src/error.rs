@@ -111,6 +111,10 @@ pub enum Error {
     MessagePinned,
     #[error("Message is not pinned")]
     MessageNotPinned,
+    #[error("Message exist within conversation")]
+    MessageFound,
+    #[error("Message not found within conversation")]
+    MessageNotFound,
     #[error("Group could not be created at this time")]
     CannotCreateGroup,
     #[error("Unable to join group")]
