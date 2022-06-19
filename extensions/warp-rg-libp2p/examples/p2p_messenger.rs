@@ -17,7 +17,7 @@ use warp::tesseract::Tesseract;
 use warp_mp_solana::SolanaAccount;
 use warp_pd_stretto::StrettoClient;
 #[allow(unused_imports)]
-use warp_rg_libp2p::{Libp2pMessaging, SwarmCommands};
+use warp_rg_libp2p::{Libp2pMessaging, behaviour::SwarmCommands};
 
 fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
     let storage = StrettoClient::new()?;
