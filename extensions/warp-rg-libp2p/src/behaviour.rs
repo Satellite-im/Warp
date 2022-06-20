@@ -332,16 +332,7 @@ pub async fn create_behaviour(
 
     let gossipsub = {
         let gossipsub_config = GossipsubConfigBuilder::default()
-            .heartbeat_interval(Duration::from_secs(10))
             .validation_mode(ValidationMode::Strict)
-            .flood_publish(true)
-            .message_id_fn(|message: &GossipsubMessage| {
-                use std::collections::hash_map::DefaultHasher;
-                use std::hash::{Hash, Hasher};
-                let mut s = DefaultHasher::new();
-                message.data.hash(&mut s);
-                MessageId::from(s.finish().to_string())
-            })
             .build()
             .map_err(|e| anyhow!(e))?;
 
