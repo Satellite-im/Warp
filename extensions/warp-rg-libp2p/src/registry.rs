@@ -1,4 +1,7 @@
+use anyhow::bail;
 use libp2p::{core::PublicKey, PeerId};
+use std::collections::HashMap;
+use warp::error::Error;
 
 /// This registry will account for compatible peers utilizing libp2p through this crate.
 #[derive(Debug, Default)]
@@ -105,5 +108,64 @@ impl RegisteredPeer {
 
     pub fn set_public_key(&mut self, public_key: PublicKey) {
         self.public_key = public_key;
+    }
+}
+
+/// Local registry for peers connected to a registered group
+#[derive(Debug, Default)]
+pub struct GroupRegistry {
+    groups: HashMap<String, Vec<PeerId>>,
+}
+
+impl GroupRegistry {
+    pub fn register_group(&mut self, id: String) -> anyhow::Result<()> {
+        if self.groups.contains_key(&id) {
+            bail!("Group exist in registry")
+        }
+        self.groups.insert(id, vec![]);
+        Ok(())
+    }
+
+    pub fn remove_group(&mut self, id: String) -> anyhow::Result<()> {
+        if !self.groups.contains_key(&id) {
+            bail!("Group doesnt in registry")
+        }
+        self.groups.remove(&id);
+        Ok(())
+    }
+
+    pub fn insert_peer(&mut self, id: String, peer: PeerId) -> anyhow::Result<()> {
+        if let Some(group) = self.groups.get_mut(&id) {
+            if group.contains(&peer) {
+                bail!(Error::IdentityExist)
+            }
+            group.push(peer);
+            return Ok(());
+        }
+        bail!("Group doesnt exist in registry")
+    }
+
+    pub fn remove_peer(&mut self, id: String, peer: PeerId) -> anyhow::Result<()> {
+        if let Some(group) = self.groups.get_mut(&id) {
+            if !group.contains(&peer) {
+                bail!(Error::IdentityDoesntExist)
+            }
+            let index = group
+                .iter()
+                .position(|id| *id == peer)
+                .ok_or(Error::ArrayPositionNotFound)?;
+
+            group.remove(index);
+            return Ok(());
+        }
+        bail!("Group doesnt exist in registry")
+    }
+
+    pub fn list(&self, id: String) -> anyhow::Result<Vec<PeerId>> {
+        self.groups
+            .get(&id)
+            .cloned()
+            .ok_or(Error::InvalidGroupId)
+            .map_err(anyhow::Error::from)
     }
 }

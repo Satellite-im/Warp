@@ -17,7 +17,7 @@ use warp::tesseract::Tesseract;
 use warp_mp_solana::SolanaAccount;
 use warp_pd_stretto::StrettoClient;
 #[allow(unused_imports)]
-use warp_rg_libp2p::{Libp2pMessaging, behaviour::SwarmCommands};
+use warp_rg_libp2p::{behaviour::SwarmCommands, Libp2pMessaging};
 
 fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
     let storage = StrettoClient::new()?;
@@ -80,20 +80,20 @@ async fn main() -> anyhow::Result<()> {
 
     let bootstrap = vec![
         (
+            "/dnsaddr/bootstrap.libp2p.io",
             "QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-            "/dnsaddr/bootstrap.libp2p.io",
         ),
         (
+            "/dnsaddr/bootstrap.libp2p.io",
             "QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-            "/dnsaddr/bootstrap.libp2p.io",
         ),
         (
+            "/dnsaddr/bootstrap.libp2p.io",
             "QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
-            "/dnsaddr/bootstrap.libp2p.io",
         ),
         (
-            "QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
             "/dnsaddr/bootstrap.libp2p.io",
+            "QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
         ),
     ]
     .iter()

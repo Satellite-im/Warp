@@ -1,5 +1,6 @@
 use crate::events::{process_message_event, MessagingEvents};
-use crate::{agent_name, PeerRegistry};
+use crate::registry::PeerOption;
+use crate::{agent_name, GroupRegistry, PeerRegistry};
 use anyhow::anyhow;
 use libp2p::{
     self, autonat,
@@ -42,6 +43,8 @@ pub struct RayGunBehavior {
     pub account: Arc<Mutex<Box<dyn MultiPass>>>,
     #[behaviour(ignore)]
     pub peer_registry: Arc<Mutex<PeerRegistry>>,
+    #[behaviour(ignore)]
+    pub group_registry: Arc<Mutex<GroupRegistry>>,
 }
 
 pub enum BehaviourEvent {
@@ -104,21 +107,35 @@ pub async fn swarm_loop<E>(
         SwarmEvent::Behaviour(BehaviourEvent::Relay(event)) => {
             info!("{:?}", event);
         }
-        SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(message)) => {
-            if let GossipsubEvent::Message {
+        SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(event)) => match event {
+            GossipsubEvent::Message {
                 propagation_source: _,
                 message_id: _,
                 message,
-            } = message
-            {
+            } => {
                 if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
-                    if let Err(_e) = process_message_event(swarm.behaviour().inner.clone(), &events)
+                    if let Err(e) = process_message_event(swarm.behaviour().inner.clone(), &events)
                     {
-                        error!("{}", _e);
+                        error!("{}", e);
                     }
                 }
             }
-        }
+
+            //TODO: Perform a check to see if topic is a registered group before insertion of peer
+            GossipsubEvent::Subscribed { peer_id, topic } => {
+                let mut group_registry = swarm.behaviour_mut().group_registry.lock();
+                if let Err(e) = group_registry.insert_peer(topic.to_string(), peer_id) {
+                    error!("{}", e);
+                }
+            }
+            GossipsubEvent::Unsubscribed { peer_id, topic } => {
+                let mut group_registry = swarm.behaviour_mut().group_registry.lock();
+                if let Err(e) = group_registry.remove_peer(topic.to_string(), peer_id) {
+                    error!("{}", e);
+                }
+            }
+            GossipsubEvent::GossipsubNotSupported { .. } => {}
+        },
         SwarmEvent::Behaviour(BehaviourEvent::Mdns(event)) => match event {
             MdnsEvent::Discovered(list) => {
                 for (peer, _addr) in list {
@@ -168,11 +185,11 @@ pub async fn swarm_loop<E>(
             } = event
             {
                 if agent_version.eq(&agent_name()) {
-                    swarm
-                        .behaviour_mut()
-                        .peer_registry
-                        .lock()
-                        .add_public_key(public_key);
+                    let mut registry = swarm.behaviour_mut().peer_registry.lock();
+
+                    if !registry.exist(PeerOption::PublicKey(public_key.clone())) {
+                        registry.add_public_key(public_key);
+                    }
                 }
                 if protocols
                     .iter()
@@ -305,6 +322,7 @@ pub async fn create_behaviour(
     conversation: Arc<Mutex<Vec<Message>>>,
     account: Arc<Mutex<Box<dyn MultiPass>>>,
     peer_registry: Arc<Mutex<PeerRegistry>>,
+    group_registry: Arc<Mutex<GroupRegistry>>,
 ) -> anyhow::Result<Swarm<RayGunBehavior>> {
     let pubkey = keypair.public();
 
@@ -357,6 +375,7 @@ pub async fn create_behaviour(
             ),
             autonat: autonat::Behaviour::new(peer, Default::default()),
             peer_registry,
+            group_registry,
         };
 
         libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
