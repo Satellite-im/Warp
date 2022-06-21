@@ -1,4 +1,5 @@
-const CONFIG: &'static str = r#"
+#[allow(dead_code)]
+const CONFIG: &str = r#"
 language = "C"
 
 cpp_compat = true

@@ -16,6 +16,8 @@ use tokio::sync::mpsc::{Receiver, Sender};
 
 use futures::StreamExt;
 use libp2p::gossipsub::IdentTopic as Topic;
+#[allow(unused_imports)]
+use log::{error, info, warn};
 use uuid::Uuid;
 use warp::multipass::MultiPass;
 use warp::raygun::{
@@ -24,8 +26,6 @@ use warp::raygun::{
 use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::{error::Error, pocket_dimension::PocketDimension};
 use warp::{module::Module, Extension};
-
-use log::{error, info, warn};
 
 use crate::behaviour::SwarmCommands;
 use crate::events::MessagingEvents;
