@@ -622,10 +622,10 @@ fn solana_group_to_warp_group(
     group.set_id(id.clone());
     group.set_name(&raw.name);
     group.set_creator(GroupMember::from_public_key(
-        warp::multipass::identity::PublicKey::from_bytes(raw.creator.as_ref()),
+        warp::crypto::PublicKey::from_bytes(raw.creator.as_ref()),
     ));
     group.set_admin(GroupMember::from_public_key(
-        warp::multipass::identity::PublicKey::from_bytes(raw.admin.as_ref()),
+        warp::crypto::PublicKey::from_bytes(raw.admin.as_ref()),
     ));
     group.set_members(raw.members as u32);
     group.set_status(match raw.open_invites {

@@ -19,7 +19,65 @@ pub mod hash;
 pub mod multihash;
 pub mod signature;
 
+use serde::{Deserialize, Serialize};
+use warp_derive::{FFIArray, FFIFree};
 use wasm_bindgen::prelude::*;
+use zeroize::Zeroize;
+
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIArray, FFIFree)]
+#[wasm_bindgen]
+pub struct PublicKey(Vec<u8>);
+
+impl AsRef<[u8]> for PublicKey {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
+#[wasm_bindgen]
+impl PublicKey {
+    #[wasm_bindgen]
+    pub fn from_vec(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+    #[wasm_bindgen]
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        Self(bytes.to_vec())
+    }
+
+    #[wasm_bindgen]
+    pub fn into_bytes(&self) -> Vec<u8> {
+        self.0.clone()
+    }
+}
+
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIArray, FFIFree)]
+#[wasm_bindgen]
+pub struct PrivateKey(Vec<u8>);
+
+impl Drop for PrivateKey {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+impl AsRef<[u8]> for PrivateKey {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
+#[wasm_bindgen]
+impl PrivateKey {
+    #[wasm_bindgen]
+    pub fn from_vec(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+    #[wasm_bindgen]
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        Self(bytes.to_vec())
+    }
+}
 
 #[wasm_bindgen]
 pub fn generate(limit: usize) -> Vec<u8> {

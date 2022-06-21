@@ -6,8 +6,10 @@ use warp::sync::{Arc, Mutex, MutexGuard};
 
 use uuid::Uuid;
 use warp::crypto::hash::sha256_hash;
+use warp::crypto::PublicKey;
 use warp::error::Error;
 use warp::module::Module;
+
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{
@@ -213,7 +215,7 @@ impl GunMessaging {
             .map_err(|e| anyhow!(e))
     }
 
-    pub fn sender_id(&self) -> anyhow::Result<warp::multipass::identity::PublicKey> {
+    pub fn sender_id(&self) -> anyhow::Result<PublicKey> {
         let ident = self.account.lock().get_own_identity()?;
         Ok(ident.public_key())
     }

@@ -195,14 +195,17 @@ impl Hooks {
         H: Into<Hook>,
     {
         let hook = hook.into();
+
         if !self.hooks.lock().contains(&hook) {
             return Err(Error::HookUnregistered);
         }
+
         self.subscribers
             .lock()
             .entry(hook.to_string())
             .or_insert_with(Vec::new)
             .push(Box::new(f));
+
         Ok(())
     }
 

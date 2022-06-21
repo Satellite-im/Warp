@@ -1,5 +1,5 @@
+use crate::crypto::PublicKey;
 use crate::error::Error;
-use crate::multipass::identity::PublicKey;
 use crate::raygun::Uid;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

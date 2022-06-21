@@ -1,7 +1,7 @@
 pub mod group;
 
+use crate::crypto::PublicKey;
 use crate::error::Error;
-use crate::multipass::identity::PublicKey;
 use crate::sync::{Arc, Mutex, MutexGuard};
 use crate::Extension;
 
@@ -391,9 +391,9 @@ impl RayGunAdapter {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
+    use crate::crypto::PublicKey;
     use crate::error::Error;
     use crate::ffi::{FFIArray, FFIResult, FFIVec};
-    use crate::multipass::identity::PublicKey;
     use crate::raygun::{
         EmbedState, Message, MessageOptions, PinState, RayGunAdapter, Reaction, ReactionState,
     };

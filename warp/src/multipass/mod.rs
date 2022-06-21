@@ -10,8 +10,8 @@ use crate::Extension;
 use identity::Identity;
 
 type Result<T> = std::result::Result<T, crate::error::Error>;
-
-use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate, PublicKey};
+use crate::crypto::PublicKey;
+use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate};
 
 pub trait MultiPass: Extension + Friends + Sync + Send {
     fn create_identity(
@@ -234,10 +234,11 @@ cfg_if::cfg_if! {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
+    use crate::crypto::PublicKey;
     use crate::error::Error;
     use crate::ffi::{FFIArray, FFIResult};
     use crate::multipass::{
-        identity::{FriendRequest, Identifier, Identity, IdentityUpdate, PublicKey},
+        identity::{FriendRequest, Identifier, Identity, IdentityUpdate},
         MultiPassAdapter,
     };
     use std::ffi::CStr;

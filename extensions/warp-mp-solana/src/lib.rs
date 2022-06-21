@@ -1,7 +1,7 @@
 pub mod solana;
 
 use anyhow::anyhow;
-use warp::crypto::rand::Rng;
+use warp::crypto::{rand::Rng, PublicKey};
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::hooks::Hooks;

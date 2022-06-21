@@ -1,5 +1,6 @@
 use wasm_bindgen::prelude::*;
 
+use crate::crypto::PublicKey;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -286,33 +287,6 @@ impl Default for FriendRequestStatus {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIArray, FFIFree)]
-#[wasm_bindgen]
-pub struct PublicKey(Vec<u8>);
-
-impl AsRef<[u8]> for PublicKey {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_slice()
-    }
-}
-
-#[wasm_bindgen]
-impl PublicKey {
-    #[wasm_bindgen]
-    pub fn from_vec(bytes: Vec<u8>) -> Self {
-        Self(bytes)
-    }
-    #[wasm_bindgen]
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        Self(bytes.to_vec())
-    }
-
-    #[wasm_bindgen]
-    pub fn into_bytes(&self) -> Vec<u8> {
-        self.0.clone()
-    }
-}
-
 #[derive(Default, Debug, Clone, FFIFree)]
 #[wasm_bindgen]
 pub struct Identifier {
@@ -471,10 +445,11 @@ impl IdentityUpdate {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
+    use crate::crypto::PublicKey;
     use crate::ffi::FFIArray;
     use crate::multipass::identity::{
         Badge, FriendRequest, FriendRequestStatus, Graphics, Identifier, Identity, IdentityUpdate,
-        PublicKey, Role,
+        Role,
     };
     use std::ffi::{CStr, CString};
     use std::os::raw::{c_char, c_void};
