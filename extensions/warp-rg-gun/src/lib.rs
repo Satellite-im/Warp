@@ -392,7 +392,7 @@ impl GroupChat for GunMessaging {
         todo!()
     }
 
-    fn list_members(&self) -> Result<Vec<GroupMember>> {
+    fn list_members(&self, _id: GroupId) -> Result<Vec<GroupMember>> {
         todo!()
     }
 }

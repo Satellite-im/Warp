@@ -212,7 +212,7 @@ pub trait GroupChat: GroupInvite + GroupChatManagement {
     fn leave_group(&mut self, id: GroupId) -> Result<(), Error>;
 
     /// List members of group
-    fn list_members(&self) -> Result<Vec<GroupMember>, Error>;
+    fn list_members(&self, id: GroupId) -> Result<Vec<GroupMember>, Error>;
 }
 
 // Group Invite Management Trait

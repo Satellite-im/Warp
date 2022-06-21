@@ -2,6 +2,7 @@
 pub mod solana;
 
 pub mod behaviour;
+pub mod config;
 pub mod events;
 pub mod registry;
 
@@ -28,6 +29,7 @@ use log::{error, info, warn};
 
 use crate::behaviour::SwarmCommands;
 use crate::events::MessagingEvents;
+use crate::registry::GroupRegistry;
 use warp::data::{DataObject, DataType};
 use warp::pocket_dimension::query::QueryBuilder;
 
@@ -46,6 +48,7 @@ pub struct Libp2pMessaging {
     //TODO: Support multiple conversations
     pub conversations: Arc<Mutex<Vec<Message>>>,
     pub peer_registry: Arc<Mutex<PeerRegistry>>,
+    pub group_registry: Arc<Mutex<GroupRegistry>>,
 }
 
 pub fn agent_name() -> String {
@@ -61,6 +64,7 @@ impl Libp2pMessaging {
     ) -> anyhow::Result<Self> {
         let account = account.clone();
         let peer_registry = Arc::new(Mutex::new(PeerRegistry::default()));
+        let group_registry = Arc::new(Mutex::new(GroupRegistry::default()));
         let mut message = Libp2pMessaging {
             account,
             cache,
@@ -70,6 +74,7 @@ impl Libp2pMessaging {
             conversations: Arc::new(Mutex::new(Vec::new())),
             response_channel: None,
             peer_registry: peer_registry.clone(),
+            group_registry: group_registry.clone(),
         };
 
         let keypair = match message.account.lock().decrypt_private_key(None) {
@@ -97,6 +102,7 @@ impl Libp2pMessaging {
             message.conversations.clone(),
             message.account.clone(),
             peer_registry,
+            group_registry,
         )
         .await?;
 
@@ -107,7 +113,7 @@ impl Libp2pMessaging {
 
         swarm.listen_on(address)?;
 
-        for (peer, addr) in bootstrap.iter() {
+        for (addr, peer) in bootstrap.iter() {
             let addr = match Multiaddr::from_str(addr) {
                 Ok(addr) => addr,
                 Err(e) => {
@@ -420,16 +426,33 @@ impl RayGun for Libp2pMessaging {
 
 #[cfg(feature = "solana")]
 impl GroupChat for Libp2pMessaging {
-    fn join_group(&mut self, _id: GroupId) -> Result<()> {
-        todo!()
-    }
+    fn join_group(&mut self, id: GroupId) -> Result<()> {
+        //Note: For now subscribe to the group with assumption that the member is apart of it until
+        //      the contract offers the ability to join without needing an invite.
+        let group_id = group_id_to_string(id)?;
+        self.send_swarm_command_sync(SwarmCommands::SubscribeToTopic(Topic::new(group_id)))?;
 
-    fn leave_group(&mut self, _id: GroupId) -> Result<()> {
         Ok(())
     }
 
-    fn list_members(&self) -> Result<Vec<GroupMember>> {
-        todo!()
+    fn leave_group(&mut self, id: GroupId) -> Result<()> {
+        let helper = self.group_helper()?;
+        let gid_uuid = group_id_to_string(id)?;
+        helper.leave(&gid_uuid)?;
+        self.send_swarm_command_sync(SwarmCommands::UnsubscribeFromTopic(Topic::new(gid_uuid)))?;
+        Ok(())
+    }
+
+    fn list_members(&self, id: GroupId) -> Result<Vec<GroupMember>> {
+        // Note: Due to groupchat program/contract not containing functionality to list the members of the group
+        //       this implementation will reply on connected peers to the topic thats apart of the registry
+        let mut _members = vec![];
+        let id = group_id_to_string(id)?;
+        let _peers = self.group_registry.lock().list(id)?;
+        let peer_registry = self.peer_registry.lock();
+        let _registered_peers = peer_registry.list();
+
+        Ok(_members)
     }
 }
 
@@ -616,6 +639,17 @@ fn solana_group_to_warp_group(
         false => GroupStatus::Closed,
     });
     Ok(group)
+}
+
+fn group_id_to_string(id: GroupId) -> anyhow::Result<String> {
+    match (id.get_id(), id.get_public_key()) {
+        (Some(id), None) => Ok(id.to_string()),
+        (None, Some(pkey)) => {
+            let pk_str = bs58::encode(pkey.as_ref());
+            Ok(pk_str.into_string())
+        }
+        _ => anyhow::bail!(Error::InvalidGroupId),
+    }
 }
 
 // #[cfg(feature = "solana")]
