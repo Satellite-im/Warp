@@ -142,7 +142,10 @@ pub fn process_message_event(
                 }
             }
         }
-        MessagingEvents::DeleteConversation(_) => {}
+        MessagingEvents::DeleteConversation(convo_id) => conversation
+            .lock()
+            .retain(|item| item.conversation_id() != convo_id),
+
         MessagingEvents::Ping(_, _) => {}
     }
     Ok(())
