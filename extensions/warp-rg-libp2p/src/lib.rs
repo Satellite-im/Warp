@@ -77,20 +77,12 @@ impl Libp2pMessaging {
             group_registry: group_registry.clone(),
         };
 
-        let keypair = match message.account.lock().decrypt_private_key(None) {
-            Ok(prikey) => {
-                let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&prikey)?;
-                let mut sec_key = id_kp.secret.to_bytes();
-                let id_secret = identity::ed25519::SecretKey::from_bytes(&mut sec_key)?;
-                identity::Keypair::Ed25519(id_secret.into())
-            }
-            Err(e) => {
-                //TODO: Log
-                warn!("Error decrypting private key: {}", e);
-                warn!("Generating keypair...");
-                //Note: leave for testing purpose?
-                identity::Keypair::generate_ed25519()
-            }
+        let keypair = {
+            let prikey = message.account.lock().decrypt_private_key(None)?;
+            let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&prikey)?;
+            let mut sec_key = id_kp.secret.to_bytes();
+            let id_secret = identity::ed25519::SecretKey::from_bytes(&mut sec_key)?;
+            identity::Keypair::Ed25519(id_secret.into())
         };
 
         println!("PeerID: {}", PeerId::from(keypair.public()));
@@ -106,29 +98,31 @@ impl Libp2pMessaging {
         )
         .await?;
 
-        let address = match &message.listen_addr {
-            Some(addr) => addr.clone(),
-            None => "/ip4/0.0.0.0/tcp/0".parse()?,
-        };
+        let address = message
+            .listen_addr
+            .clone()
+            .unwrap_or_else(|| "/ip4/0.0.0.0/tcp/0".parse().unwrap());
 
         swarm.listen_on(address)?;
 
-        for (addr, peer) in bootstrap.iter() {
-            let addr = match Multiaddr::from_str(addr) {
-                Ok(addr) => addr,
-                Err(e) => {
+        for (b_addr, b_peer) in bootstrap.iter() {
+            let (addr, peer) = match (Multiaddr::from_str(b_addr), PeerId::from_str(b_peer)) {
+                (Ok(addr), Ok(peer)) => (addr, peer),
+                (Err(e), _) => {
                     error!("Error parsing multiaddr: {}", e);
                     continue;
                 }
-            };
-            let node_peer = match PeerId::from_str(peer) {
-                Ok(peer) => peer,
-                Err(e) => {
+                (_, Err(e)) => {
                     error!("Error parsing peer: {}", e);
                     continue;
                 }
             };
-            swarm.behaviour_mut().kademlia.add_address(&node_peer, addr);
+
+            swarm.behaviour_mut().kademlia.add_address(&peer, addr);
+
+            if let Err(e) = swarm.dial(peer) {
+                println!("Unable to dial: {}", e);
+            }
         }
 
         let random_peer: PeerId = identity::Keypair::generate_ed25519().public().into();

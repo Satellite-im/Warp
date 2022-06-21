@@ -5,8 +5,8 @@ use anyhow::anyhow;
 use libp2p::{
     self, autonat,
     gossipsub::{
-        Gossipsub, GossipsubConfigBuilder, GossipsubEvent, GossipsubMessage, IdentTopic as Topic,
-        MessageAuthenticity, MessageId, ValidationMode,
+        Gossipsub, GossipsubConfigBuilder, GossipsubEvent, IdentTopic as Topic,
+        MessageAuthenticity, ValidationMode,
     },
     identify::{Identify, IdentifyConfig, IdentifyEvent, IdentifyInfo},
     identity::Keypair,
@@ -108,11 +108,7 @@ pub async fn swarm_loop<E>(
             info!("{:?}", event);
         }
         SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(event)) => match event {
-            GossipsubEvent::Message {
-                propagation_source: _,
-                message_id: _,
-                message,
-            } => {
+            GossipsubEvent::Message { message, .. } => {
                 if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
                     if let Err(e) = process_message_event(swarm.behaviour().inner.clone(), &events)
                     {
