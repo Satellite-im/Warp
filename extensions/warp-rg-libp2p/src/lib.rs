@@ -49,8 +49,8 @@ pub struct Libp2pMessaging {
     pub listen_addr: Option<Multiaddr>,
     //TODO: Support multiple conversations
     pub conversations: Arc<Mutex<Vec<Message>>>,
-    pub peer_registry: Arc<Mutex<PeerRegistry>>,
-    pub group_registry: Arc<Mutex<GroupRegistry>>,
+    pub peer_registry: PeerRegistry,
+    pub group_registry: GroupRegistry,
 }
 
 pub fn agent_name() -> String {
@@ -72,8 +72,8 @@ impl Libp2pMessaging {
         bootstrap: Vec<(String, String)>,
     ) -> anyhow::Result<Self> {
         let account = account.clone();
-        let peer_registry = Arc::new(Mutex::new(PeerRegistry::default()));
-        let group_registry = Arc::new(Mutex::new(GroupRegistry::default()));
+        let mut peer_registry = PeerRegistry::default();
+        let group_registry = GroupRegistry::default();
         let mut message = Libp2pMessaging {
             account,
             cache,
@@ -96,7 +96,7 @@ impl Libp2pMessaging {
 
         println!("PeerID: {}", PeerId::from(keypair.public()));
 
-        peer_registry.lock().add_public_key(keypair.public());
+        peer_registry.add_public_key(keypair.public());
 
         let mut swarm = behaviour::create_behaviour(
             keypair,
@@ -450,14 +450,14 @@ impl GroupChat for Libp2pMessaging {
         Ok(())
     }
 
-    fn list_members(&self, id: GroupId) -> Result<Vec<GroupMember>> {
+    fn list_members(&self, _id: GroupId) -> Result<Vec<GroupMember>> {
         // Note: Due to groupchat program/contract not containing functionality to list the members of the group
         //       this implementation will reply on connected peers to the topic thats apart of the registry
         let mut _members = vec![];
-        let id = group_id_to_string(id)?;
-        let _peers = self.group_registry.lock().list(id)?;
-        let peer_registry = self.peer_registry.lock();
-        let _registered_peers = peer_registry.list();
+        // let id = group_id_to_string(id)?;
+        // let _peers = self.group_registry.list(id)?;
+        // let peer_registry = self.peer_registry;
+        // let _registered_peers = peer_registry.list();
 
         Ok(_members)
     }
@@ -613,7 +613,7 @@ impl GroupInvite for Libp2pMessaging {
 
         self.send_swarm_command_sync(SwarmCommands::FindPeer(peer_id))?;
         self.execute_async_func(tokio::time::sleep(Duration::from_millis(500)));
-        if self.peer_registry.lock().exist(PeerOption::PeerId(peer_id)) {
+        if self.peer_registry.exist(PeerOption::PeerId(peer_id)) {
             // Peer is not found in registry after executing command
             // TODO: Maybe provide another stated term besides invalid group member?
             return Err(Error::InvalidGroupMemeber);

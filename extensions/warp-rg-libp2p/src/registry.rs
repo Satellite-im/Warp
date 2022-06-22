@@ -2,30 +2,20 @@ use anyhow::bail;
 use libp2p::{core::PublicKey, PeerId};
 use std::collections::HashMap;
 use warp::error::Error;
+use warp::sync::{Arc, Mutex};
 
 /// This registry will account for compatible peers utilizing libp2p through this crate.
-#[derive(Debug, Default)]
-pub struct PeerRegistry(Vec<RegisteredPeer>);
-
-impl AsMut<Vec<RegisteredPeer>> for PeerRegistry {
-    fn as_mut(&mut self) -> &mut Vec<RegisteredPeer> {
-        &mut self.0
-    }
-}
-
-impl AsRef<Vec<RegisteredPeer>> for PeerRegistry {
-    fn as_ref(&self) -> &Vec<RegisteredPeer> {
-        &self.0
-    }
-}
+#[derive(Debug, Default, Clone)]
+pub struct PeerRegistry(Arc<Mutex<Vec<RegisteredPeer>>>);
 
 impl PeerRegistry {
     pub fn list(&self) -> Vec<RegisteredPeer> {
-        self.0.clone()
+        self.0.lock().clone()
     }
 
     pub fn exist(&self, option: PeerOption) -> bool {
-        for item in self.as_ref() {
+        let list = self.0.lock();
+        for item in list.iter() {
             match option {
                 PeerOption::PeerId(id) if item.peer() == id => return true,
                 PeerOption::PublicKey(pkey) if item.public_key() == pkey => return true,
@@ -40,7 +30,7 @@ impl PeerRegistry {
             return false;
         }
         let registered_peer = RegisteredPeer::new(public_key);
-        self.as_mut().push(registered_peer);
+        self.0.lock().push(registered_peer);
         true
     }
 
@@ -49,7 +39,7 @@ impl PeerRegistry {
             return false;
         }
         let registered_peer = RegisteredPeer::new_with_peer(peer, pkey);
-        self.as_mut().push(registered_peer);
+        self.0.lock().push(registered_peer);
         true
     }
 
@@ -59,7 +49,8 @@ impl PeerRegistry {
         }
 
         let index = match self
-            .as_ref()
+            .0
+            .lock()
             .iter()
             .position(|registered_peer| registered_peer.peer() == peer)
         {
@@ -67,7 +58,7 @@ impl PeerRegistry {
             None => return false,
         };
 
-        self.as_mut().remove(index);
+        self.0.lock().remove(index);
 
         true
     }
@@ -112,30 +103,30 @@ impl RegisteredPeer {
 }
 
 /// Local registry for peers connected to a registered group
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct GroupRegistry {
-    groups: HashMap<String, Vec<PeerId>>,
+    groups: Arc<Mutex<HashMap<String, Vec<PeerId>>>>,
 }
 
 impl GroupRegistry {
     pub fn register_group(&mut self, id: String) -> anyhow::Result<()> {
-        if self.groups.contains_key(&id) {
+        if self.groups.lock().contains_key(&id) {
             bail!("Group exist in registry")
         }
-        self.groups.insert(id, vec![]);
+        self.groups.lock().insert(id, vec![]);
         Ok(())
     }
 
     pub fn remove_group(&mut self, id: String) -> anyhow::Result<()> {
-        if !self.groups.contains_key(&id) {
+        if !self.groups.lock().contains_key(&id) {
             bail!("Group doesnt in registry")
         }
-        self.groups.remove(&id);
+        self.groups.lock().remove(&id);
         Ok(())
     }
 
     pub fn insert_peer(&mut self, id: String, peer: PeerId) -> anyhow::Result<()> {
-        if let Some(group) = self.groups.get_mut(&id) {
+        if let Some(group) = self.groups.lock().get_mut(&id) {
             if group.contains(&peer) {
                 bail!(Error::IdentityExist)
             }
@@ -146,7 +137,7 @@ impl GroupRegistry {
     }
 
     pub fn remove_peer(&mut self, id: String, peer: PeerId) -> anyhow::Result<()> {
-        if let Some(group) = self.groups.get_mut(&id) {
+        if let Some(group) = self.groups.lock().get_mut(&id) {
             if !group.contains(&peer) {
                 bail!(Error::IdentityDoesntExist)
             }
@@ -163,6 +154,7 @@ impl GroupRegistry {
 
     pub fn list(&self, id: String) -> anyhow::Result<Vec<PeerId>> {
         self.groups
+            .lock()
             .get(&id)
             .cloned()
             .ok_or(Error::InvalidGroupId)

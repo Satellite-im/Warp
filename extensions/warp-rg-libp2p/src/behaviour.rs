@@ -42,9 +42,9 @@ pub struct RayGunBehavior {
     #[behaviour(ignore)]
     pub account: Arc<Mutex<Box<dyn MultiPass>>>,
     #[behaviour(ignore)]
-    pub peer_registry: Arc<Mutex<PeerRegistry>>,
+    pub peer_registry: PeerRegistry,
     #[behaviour(ignore)]
-    pub group_registry: Arc<Mutex<GroupRegistry>>,
+    pub group_registry: GroupRegistry,
 }
 
 pub enum BehaviourEvent {
@@ -119,13 +119,13 @@ pub async fn swarm_loop<E>(
 
             //TODO: Perform a check to see if topic is a registered group before insertion of peer
             GossipsubEvent::Subscribed { peer_id, topic } => {
-                let mut group_registry = swarm.behaviour_mut().group_registry.lock();
+                let mut group_registry = swarm.behaviour_mut().group_registry.clone();
                 if let Err(e) = group_registry.insert_peer(topic.to_string(), peer_id) {
                     error!("{}", e);
                 }
             }
             GossipsubEvent::Unsubscribed { peer_id, topic } => {
-                let mut group_registry = swarm.behaviour_mut().group_registry.lock();
+                let mut group_registry = swarm.behaviour_mut().group_registry.clone();
                 if let Err(e) = group_registry.remove_peer(topic.to_string(), peer_id) {
                     error!("{}", e);
                 }
@@ -181,9 +181,13 @@ pub async fn swarm_loop<E>(
             } = event
             {
                 if agent_version.eq(&agent_name()) {
-                    let mut registry = swarm.behaviour_mut().peer_registry.lock();
-
+                    let mut registry = swarm.behaviour_mut().peer_registry.clone();
+                    //TODO: Test to make sure a deadlock doesnt occur due to internal mutex
+                    let mut exist = false;
                     if !registry.exist(PeerOption::PublicKey(public_key.clone())) {
+                        exist = true;
+                    }
+                    if exist {
                         registry.add_public_key(public_key);
                     }
                 }
@@ -317,14 +321,12 @@ pub async fn create_behaviour(
     keypair: Keypair,
     conversation: Arc<Mutex<Vec<Message>>>,
     account: Arc<Mutex<Box<dyn MultiPass>>>,
-    peer_registry: Arc<Mutex<PeerRegistry>>,
-    group_registry: Arc<Mutex<GroupRegistry>>,
+    peer_registry: PeerRegistry,
+    group_registry: GroupRegistry,
 ) -> anyhow::Result<Swarm<RayGunBehavior>> {
     let pubkey = keypair.public();
 
     let peer = PeerId::from(keypair.public());
-
-    let transport = tokio_development_transport(keypair.clone())?;
 
     let gossipsub = {
         let gossipsub_config = GossipsubConfigBuilder::default()
@@ -332,8 +334,11 @@ pub async fn create_behaviour(
             .build()
             .map_err(|e| anyhow!(e))?;
 
-        Gossipsub::new(MessageAuthenticity::Signed(keypair), gossipsub_config)
-            .map_err(|e| anyhow!(e))?
+        Gossipsub::new(
+            MessageAuthenticity::Signed(keypair.clone()),
+            gossipsub_config,
+        )
+        .map_err(|e| anyhow!(e))?
     };
 
     #[allow(clippy::field_reassign_with_default)]
@@ -348,7 +353,6 @@ pub async fn create_behaviour(
             .set_provider_publication_interval(Some(Duration::from_secs(60)));
 
         let store = MemoryStore::new(peer);
-
         let behaviour = RayGunBehavior {
             gossipsub,
             mdns: Mdns::new(mdns_config).await?,
@@ -364,7 +368,7 @@ pub async fn create_behaviour(
             peer_registry,
             group_registry,
         };
-
+        let transport = tokio_development_transport(keypair.clone())?;
         libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
             .executor(Box::new(|fut| {
                 tokio::spawn(fut);
