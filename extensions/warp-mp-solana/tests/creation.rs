@@ -3,7 +3,7 @@ mod tests {
     #[allow(unused)]
     use std::str::FromStr;
     #[allow(unused)]
-    use warp::multipass::identity::{Identifier, IdentityUpdate, PublicKey};
+    use warp::multipass::identity::{Identifier, IdentityUpdate};
     use warp::multipass::MultiPass;
     use warp::sync::{Arc, Mutex};
     use warp::tesseract::Tesseract;

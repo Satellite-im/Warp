@@ -1,5 +1,6 @@
 use warp::crypto::exchange::X25519PublicKey;
-use warp::multipass::identity::{Identity, PublicKey};
+use warp::crypto::PublicKey;
+use warp::multipass::identity::Identity;
 use warp::multipass::MultiPass;
 use warp::tesseract::Tesseract;
 use warp_mp_solana::solana::anchor_client::anchor_lang::prelude::Pubkey;
