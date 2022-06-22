@@ -12,6 +12,7 @@ use registry::PeerRegistry;
 use warp::raygun::group::*;
 
 use std::str::FromStr;
+use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use futures::StreamExt;
@@ -28,8 +29,9 @@ use warp::{error::Error, pocket_dimension::PocketDimension};
 use warp::{module::Module, Extension};
 
 use crate::behaviour::SwarmCommands;
+use crate::config::Config;
 use crate::events::MessagingEvents;
-use crate::registry::GroupRegistry;
+use crate::registry::{GroupRegistry, PeerOption};
 use warp::data::{DataObject, DataType};
 use warp::pocket_dimension::query::QueryBuilder;
 
@@ -56,6 +58,13 @@ pub fn agent_name() -> String {
 }
 
 impl Libp2pMessaging {
+    pub async fn from_config(
+        _account: Arc<Mutex<Box<dyn MultiPass>>>,
+        _cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+        _configuration: Config,
+    ) -> anyhow::Result<Self> {
+        unimplemented!()
+    }
     pub async fn new(
         account: Arc<Mutex<Box<dyn MultiPass>>>,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
@@ -233,6 +242,10 @@ impl Libp2pMessaging {
         let handle = tokio::runtime::Handle::try_current()?;
         tokio::task::block_in_place(|| handle.block_on(self.send_command(event)))?;
         Ok(())
+    }
+
+    pub fn execute_async_func<F: core::future::Future>(&self, future: F) -> F::Output {
+        tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(future))
     }
 
     pub fn sender_id(&self) -> anyhow::Result<SenderId> {
@@ -460,7 +473,7 @@ impl GroupChat for Libp2pMessaging {
         todo!()
     }
 
-    fn list_members(&self) -> Result<Vec<GroupMember>> {
+    fn list_members(&self, id: GroupId) -> Result<Vec<GroupMember>> {
         todo!()
     }
 }
@@ -520,19 +533,19 @@ impl GroupChatManagement for Libp2pMessaging {
     }
 
     fn change_admin(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 
     fn assign_admin(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 
     fn kick_member(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 
     fn ban_member(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 }
 
@@ -573,20 +586,61 @@ impl GroupChatManagement for Libp2pMessaging {
 
 #[cfg(feature = "solana")]
 impl GroupInvite for Libp2pMessaging {
-    fn send_invite(&mut self, _id: GroupId, _recipient: GroupMember) -> Result<()> {
-        todo!()
+    fn send_invite(&mut self, id: GroupId, recipient: GroupMember) -> Result<()> {
+        let helper = self.group_helper()?;
+        let _group = solana_group_to_warp_group(&helper, &id)?;
+        let gid_uuid = group_id_to_string(id)?;
+        let gm_public_key = recipient.get_public_key().ok_or(Error::PublicKeyInvalid)?;
+        //Before we send the invite, lets check to see if the user is online
+        //convert our public key into a peer_id
+        let ec25519_pk = identity::ed25519::PublicKey::decode(gm_public_key.as_ref())
+            .map_err(anyhow::Error::from)?;
+        let peer_id = PeerId::from(identity::PublicKey::Ed25519(ec25519_pk));
+
+        // find the user in registry
+        // let peer_registry = self.peer_registry.lock();
+        //
+        // if !peer_registry.exist(PeerOption::PeerId(peer_id)) {
+        //     // If peer is not found in registry, find peer in DHT
+        //     self.send_swarm_command_sync(SwarmCommands::FindPeer(peer_id))?;
+        //
+        //     if self.peer_registry.lock().exist(PeerOption::PeerId(peer_id)) {
+        //         // Peer is not found in registry after executing command
+        //         // TODO: Maybe provide another stated term besides invalid group member?
+        //         return Err(Error::InvalidGroupMemeber);
+        //     }
+        // }
+
+        self.send_swarm_command_sync(SwarmCommands::FindPeer(peer_id))?;
+        self.execute_async_func(tokio::time::sleep(Duration::from_millis(500)));
+        if self.peer_registry.lock().exist(PeerOption::PeerId(peer_id)) {
+            // Peer is not found in registry after executing command
+            // TODO: Maybe provide another stated term besides invalid group member?
+            return Err(Error::InvalidGroupMemeber);
+        }
+        // Connect to user if found
+        // Note: this is a optional since connection may already be establish
+        if let Err(e) = self.send_swarm_command_sync(SwarmCommands::DialPeer(peer_id)) {
+            warn!("Unable to dial peer. Not located in registry or DHT? Error: {e} Skipping.....");
+        }
+
+        let pubkey = anchor_client::solana_sdk::pubkey::Pubkey::new(gm_public_key.as_ref());
+        //TODO: Maybe announce to the peer of the request via pubsub? This will be in a non-solana variant
+        helper
+            .invite_to_group(&gid_uuid.to_string(), pubkey)
+            .map_err(Error::from)
     }
 
     fn accept_invite(&mut self, _id: GroupId) -> Result<()> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 
     fn deny_invite(&mut self, _id: GroupId) -> Result<()> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 
     fn block_group(&mut self, _id: GroupId) -> Result<()> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 }
 
