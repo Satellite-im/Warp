@@ -4,6 +4,7 @@ use futures::prelude::*;
 #[allow(unused_imports)]
 use libp2p::{Multiaddr, PeerId};
 use rustyline_async::{Readline, ReadlineError};
+use std::collections::HashMap;
 use std::io::Write;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -11,6 +12,7 @@ use warp::crypto::hash::sha256_hash;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
+use warp::raygun::group::GroupId;
 use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, SenderId};
 use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
@@ -71,6 +73,16 @@ pub fn topic() -> Uuid {
     Uuid::from_slice(&topic_hash[..topic_hash.len() / 2]).unwrap_or_default()
 }
 
+pub fn generate_group_id(generate: &str) -> GroupId {
+    let uuid = generate_uuid(generate);
+    GroupId::from_id(uuid)
+}
+
+pub fn generate_uuid(generate: &str) -> Uuid {
+    let topic_hash = sha256_hash(generate.as_bytes(), None);
+    Uuid::from_slice(&topic_hash[..topic_hash.len() / 2]).unwrap_or_default()
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let addr = {
@@ -102,39 +114,41 @@ async fn main() -> anyhow::Result<()> {
 
     let cache = cache_setup()?;
 
-    let topic = topic();
-    println!("Creating account...");
+    println!("Creating or obtaining account...");
     let new_account = create_account(cache.clone())?;
-    let user = new_account.lock().get_own_identity()?;
 
-    println!("Registered user {}#{}", user.username(), user.short_id());
-
-    println!("Connecting to {}", topic);
     let mut chat = create_rg(new_account.clone(), addr, bootstrap).await?;
 
-    println!("Type anything and press enter to send...");
-
-    if let Err(_) = chat.ping(topic).await {}
-
+    println!("Obtaining identity....");
     let identity = new_account.lock().get_own_identity()?;
-
+    println!(
+        "Registered user {}#{}",
+        identity.username(),
+        identity.short_id()
+    );
     let (mut rl, mut stdout) = Readline::new(format!(
         "{}#{} >>> ",
         identity.username(),
         identity.short_id()
-    ))
-    .unwrap();
-    let mut convo_size = 0;
+    ))?;
+    let mut topic = generate_uuid("warp-rg-libp2p");
+
+    writeln!(stdout, "Connecting to {}", topic)?;
+    chat.join_group(GroupId::from_id(topic))?;
+
+    writeln!(stdout, "Type anything and press enter to send...")?;
+
+    let mut convo_size: std::collections::HashMap<Uuid, usize> = HashMap::new();
 
     loop {
         tokio::select! {
             //TODO: Optimize by clearing terminal and displaying all messages instead of getting last line
             msg = chat.get_messages(topic, MessageOptions::default(), None) => {
                 if let Ok(msg) = msg {
-                    if msg.len() == convo_size {
+                    if msg.len() == *convo_size.entry(topic).or_insert(0) {
                         continue;
                     }
-                    convo_size = msg.len();
+                    convo_size.entry(topic).and_modify(|e| *e = msg.len() ).or_insert(msg.len());
                     let msg = msg.last().unwrap();
                     let username = get_username(new_account.clone(), msg.sender())?;
                     //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
@@ -180,7 +194,11 @@ async fn main() -> anyhow::Result<()> {
                         Some("/list") => {
                             let mut table = Table::new();
                             table.set_header(vec!["ID", "CID", "Date", "Sender", "Message", "Pinned", "Reaction"]);
-                            let messages = chat.get_messages(topic, MessageOptions::default(), None).await?;
+                            let local_topic = match cmd_line.next() {
+                                Some(id) => generate_uuid(id),
+                                None => topic
+                            };
+                            let messages = chat.get_messages(local_topic, MessageOptions::default(), None).await?;
                             for message in messages.iter() {
                                 let username = get_username(new_account.clone(), message.sender())?;
                                 let mut emojis = vec![];
@@ -201,13 +219,7 @@ async fn main() -> anyhow::Result<()> {
                         },
                         Some("/edit") => {
                             let conversation_id = match cmd_line.next() {
-                                Some(id) => match Uuid::from_str(id) {
-                                        Ok(uuid) => uuid,
-                                        Err(e) => {
-                                            writeln!(stdout, "Error parsing ID: {}", e)?;
-                                            continue
-                                        }
-                                },
+                                Some(id) => generate_uuid(id),
                                 None => {
                                     writeln!(stdout, "/edit <conversation-id> <message-id> <message>")?;
                                     continue
@@ -258,13 +270,7 @@ async fn main() -> anyhow::Result<()> {
                             };
 
                             let conversation_id = match cmd_line.next() {
-                                Some(id) => match Uuid::from_str(id) {
-                                        Ok(uuid) => uuid,
-                                        Err(e) => {
-                                            writeln!(stdout, "Error parsing ID: {}", e)?;
-                                            continue
-                                        }
-                                },
+                                Some(id) => generate_uuid(id),
                                 None => {
                                     writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
                                     continue
@@ -348,6 +354,23 @@ async fn main() -> anyhow::Result<()> {
                                     writeln!(stdout, "Unpinned {}", id)?;
                                 },
                                 None => { writeln!(stdout, "/unpin <id | all>")? }
+                            }
+                        }
+                        Some("/switch") => {
+                            match cmd_line.next() {
+                                Some(id) => {
+                                    let group = generate_uuid(id);
+                                    if let Err(e) = chat.join_group(GroupId::from_id(group)) {
+                                        writeln!(stdout, "Error joining {}: {}", id, e)?;
+                                        continue
+                                    }
+                                    topic = group;
+                                    writeln!(stdout, "Joined {}", id)?;
+                                },
+                                None => {
+                                    writeln!(stdout, "/switch <topic>")?;
+                                    continue
+                                }
                             }
                         }
                         _ => {
