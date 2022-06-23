@@ -4,6 +4,7 @@ use crate::{agent_name, Config, GroupRegistry, PeerRegistry};
 use anyhow::anyhow;
 use libp2p::{
     self, autonat,
+    dcutr::behaviour::{Behaviour as DcutrBehaviour, Event as DcutrEvent},
     gossipsub::{
         Gossipsub, GossipsubConfigBuilder, GossipsubEvent, IdentTopic as Topic,
         MessageAuthenticity, ValidationMode,
@@ -13,9 +14,12 @@ use libp2p::{
     kad::{store::MemoryStore, Kademlia, KademliaConfig, KademliaEvent, QueryResult},
     mdns::{Mdns, MdnsConfig, MdnsEvent},
     ping::{self, Ping, PingEvent},
-    relay::v2::relay::{self, Relay},
+    relay::v2::{
+        client::{self, Client as RelayClient, Event as RelayClientEvent},
+        relay::{Event as RelayServerEvent, Relay as RelayServer},
+    },
     swarm::{behaviour::toggle::Toggle, NetworkBehaviour, Swarm, SwarmEvent},
-    tokio_development_transport, Multiaddr, NetworkBehaviour, PeerId,
+    tokio_development_transport, Multiaddr, NetworkBehaviour, PeerId, Transport,
 };
 use log::{error, info};
 use std::time::Duration;
@@ -33,7 +37,9 @@ pub struct RayGunBehavior {
     pub gossipsub: Gossipsub,
     pub mdns: Toggle<Mdns>,
     pub ping: Ping,
-    pub relay: relay::Relay,
+    pub dcutr: Toggle<DcutrBehaviour>,
+    pub relay_server: Toggle<RelayServer>,
+    pub relay_client: Toggle<RelayClient>,
     pub kademlia: Kademlia<MemoryStore>,
     pub identity: Identify,
     pub autonat: autonat::Behaviour,
@@ -51,7 +57,9 @@ pub enum BehaviourEvent {
     Gossipsub(GossipsubEvent),
     Mdns(MdnsEvent),
     Ping(PingEvent),
-    Relay(relay::Event),
+    Dcutr(DcutrEvent),
+    RelayServer(RelayServerEvent),
+    RelayClient(RelayClientEvent),
     Kad(KademliaEvent),
     Identify(IdentifyEvent),
     Autonat(autonat::Event),
@@ -75,9 +83,21 @@ impl From<PingEvent> for BehaviourEvent {
     }
 }
 
-impl From<relay::Event> for BehaviourEvent {
-    fn from(event: relay::Event) -> Self {
-        BehaviourEvent::Relay(event)
+impl From<DcutrEvent> for BehaviourEvent {
+    fn from(event: DcutrEvent) -> Self {
+        BehaviourEvent::Dcutr(event)
+    }
+}
+
+impl From<RelayServerEvent> for BehaviourEvent {
+    fn from(event: RelayServerEvent) -> Self {
+        BehaviourEvent::RelayServer(event)
+    }
+}
+
+impl From<RelayClientEvent> for BehaviourEvent {
+    fn from(event: RelayClientEvent) -> Self {
+        BehaviourEvent::RelayClient(event)
     }
 }
 
@@ -104,7 +124,16 @@ pub async fn swarm_loop<E>(
     event: SwarmEvent<BehaviourEvent, E>,
 ) {
     match event {
-        SwarmEvent::Behaviour(BehaviourEvent::Relay(event)) => {
+        SwarmEvent::Behaviour(BehaviourEvent::RelayServer(event)) => {
+            info!("{:?}", event);
+        }
+        SwarmEvent::Behaviour(BehaviourEvent::RelayClient(
+            RelayClientEvent::ReservationReqAccepted { .. },
+        )) => {
+            //TODO: Store and esstablish information regarding reservation
+            info!("Relay accepted our reservation request.");
+        }
+        SwarmEvent::Behaviour(BehaviourEvent::RelayClient(event)) => {
             info!("{:?}", event);
         }
         SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(event)) => match event {
@@ -211,6 +240,7 @@ pub async fn swarm_loop<E>(
             }
         }
         SwarmEvent::Behaviour(BehaviourEvent::Autonat(_)) => {}
+        SwarmEvent::Behaviour(BehaviourEvent::Dcutr(_)) => {}
         SwarmEvent::ConnectionEstablished { .. } => {}
         SwarmEvent::ConnectionClosed { .. } => {}
         SwarmEvent::IncomingConnection { .. } => {}
@@ -367,23 +397,56 @@ pub async fn create_behaviour(
         .set_connection_idle_timeout(Duration::from_secs(5 * 60))
         .set_provider_publication_interval(Some(Duration::from_secs(60)));
 
-    let store = MemoryStore::new(peer);
+    let relay_server = match config.behaviour.relay_server.enable {
+        true => Some(RelayServer::new(peer, Default::default())),
+        false => None,
+    }
+    .into();
+
+    let (relay_transport, relay_client): (
+        Option<client::transport::ClientTransport>,
+        Toggle<RelayClient>,
+    ) = match config.behaviour.relay_client.enable {
+        true => {
+            let (transport, client) = RelayClient::new_transport_and_behaviour(peer);
+            (Some(transport), Some(client).into())
+        }
+        false => (None, None.into()),
+    };
+
+    let dcutr = match config.behaviour.dcutr.enable {
+        true => Some(DcutrBehaviour::new()),
+        false => None,
+    }
+    .into();
+
+    let ping = Ping::new(ping::Config::new().with_keep_alive(true));
+    let kademlia = Kademlia::with_config(peer, MemoryStore::new(peer), kad_config);
+    let identity = Identify::new(
+        IdentifyConfig::new("/ipfs/0.1.0".into(), pubkey).with_agent_version(agent_name()),
+    );
+    let autonat = autonat::Behaviour::new(peer, Default::default());
+    let inner = conversation;
+
+    let relay_client_enabled = relay_client.is_enabled();
+
     let behaviour = RayGunBehavior {
         gossipsub,
         mdns,
-        ping: Ping::new(ping::Config::new().with_keep_alive(true)),
-        kademlia: Kademlia::with_config(peer, store, kad_config),
-        inner: conversation,
+        ping,
+        kademlia,
+        inner,
+        dcutr,
         account,
-        relay: Relay::new(peer, Default::default()),
-        identity: Identify::new(
-            IdentifyConfig::new("/ipfs/0.1.0".into(), pubkey).with_agent_version(agent_name()),
-        ),
-        autonat: autonat::Behaviour::new(peer, Default::default()),
+        relay_server,
+        relay_client,
+        identity,
+        autonat,
         peer_registry,
         group_registry,
     };
-    let transport = tokio_development_transport(keypair.clone())?;
+
+    let transport = transport(keypair, relay_transport)?;
 
     let swarm = libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
         .executor(Box::new(|fut| {
@@ -391,5 +454,41 @@ pub async fn create_behaviour(
         }))
         .build();
 
+    if relay_client_enabled {}
+
     Ok(swarm)
+}
+
+pub fn transport(
+    keypair: Keypair,
+    relay_transport: Option<client::transport::ClientTransport>,
+) -> std::io::Result<libp2p::core::transport::Boxed<(PeerId, libp2p::core::muxing::StreamMuxerBox)>>
+{
+    match relay_transport {
+        None => tokio_development_transport(keypair),
+        Some(relay_transport) => {
+            let dns_tcp = libp2p::dns::TokioDnsConfig::system(
+                libp2p::tcp::TokioTcpConfig::new().nodelay(true),
+            )?;
+            let ws_dns_tcp = libp2p::websocket::WsConfig::new(libp2p::dns::TokioDnsConfig::system(
+                libp2p::tcp::TokioTcpConfig::new().nodelay(true),
+            )?);
+
+            let transport = relay_transport.or_transport(dns_tcp.or_transport(ws_dns_tcp));
+
+            let noise_keys = libp2p::noise::Keypair::<libp2p::noise::X25519Spec>::new()
+                .into_authentic(&keypair)
+                .expect("Signing libp2p-noise static DH keypair failed.");
+
+            Ok(transport
+                .upgrade(libp2p::core::upgrade::Version::V1)
+                .authenticate(libp2p::noise::NoiseConfig::xx(noise_keys).into_authenticated())
+                .multiplex(libp2p::core::upgrade::SelectUpgrade::new(
+                    libp2p::yamux::YamuxConfig::default(),
+                    libp2p::mplex::MplexConfig::default(),
+                ))
+                .timeout(std::time::Duration::from_secs(20))
+                .boxed())
+        }
+    }
 }

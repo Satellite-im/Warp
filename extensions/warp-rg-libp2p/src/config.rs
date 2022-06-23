@@ -27,7 +27,6 @@ pub struct RelayClient {
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct RelayServer {
     pub enable: bool,
-    pub relay_address: Option<Multiaddr>,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
@@ -70,10 +69,7 @@ impl Default for Config {
                     enable: false,
                     relay_address: None,
                 },
-                relay_server: RelayServer {
-                    enable: false,
-                    relay_address: None,
-                },
+                relay_server: RelayServer { enable: false },
                 dcutr: Dcutr { enable: true },
             },
         }

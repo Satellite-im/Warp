@@ -445,16 +445,11 @@ impl GroupChat for Libp2pMessaging {
             .into_iter()
             .filter(|peer| group_registry.contains(&peer.peer()))
             .map(|peer| peer.public_key())
-            .map(|key| match key {
+            .filter_map(|key| match key {
                 libp2p::core::PublicKey::Ed25519(pkey) => {
-                    warp::crypto::PublicKey::from_bytes(&pkey.encode())
+                    Some(warp::crypto::PublicKey::from_bytes(&pkey.encode()))
                 }
-                libp2p::core::PublicKey::Rsa(pkey) => {
-                    warp::crypto::PublicKey::from_bytes(&pkey.encode_x509())
-                }
-                libp2p::core::PublicKey::Secp256k1(pkey) => {
-                    warp::crypto::PublicKey::from_bytes(&pkey.encode())
-                }
+                _ => None,
             })
             .map(GroupMember::from_public_key)
             .collect::<Vec<_>>();
