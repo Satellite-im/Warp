@@ -1,17 +1,17 @@
 #[cfg(feature = "solana")]
 pub mod solana;
 
+pub mod addr;
 pub mod behaviour;
 pub mod config;
 pub mod events;
 pub mod registry;
 
 use anyhow::anyhow;
-use libp2p::{identity, Multiaddr, PeerId};
+use libp2p::{identity, PeerId};
 use registry::PeerRegistry;
 use warp::raygun::group::*;
 
-use std::str::FromStr;
 use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 
@@ -28,6 +28,7 @@ use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::{error::Error, pocket_dimension::PocketDimension};
 use warp::{module::Module, Extension};
 
+use crate::addr::MultiaddrWithPeerId;
 use crate::behaviour::SwarmCommands;
 use crate::config::Config;
 use crate::events::MessagingEvents;
@@ -46,11 +47,11 @@ pub struct Libp2pMessaging {
     pub into_thread: Option<Sender<MessagingEvents>>,
     pub response_channel: Option<Receiver<Result<()>>>,
     pub command_channel: Option<Sender<SwarmCommands>>,
-    pub listen_addr: Option<Multiaddr>,
-    //TODO: Support multiple conversations
+    //TODO: Implement a storage system
     pub conversations: Arc<Mutex<Vec<Message>>>,
     pub peer_registry: PeerRegistry,
     pub group_registry: GroupRegistry,
+    pub peer_id: PeerId,
 }
 
 pub fn agent_name() -> String {
@@ -58,18 +59,10 @@ pub fn agent_name() -> String {
 }
 
 impl Libp2pMessaging {
-    pub async fn from_config(
-        _account: Arc<Mutex<Box<dyn MultiPass>>>,
-        _cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-        _configuration: Config,
-    ) -> anyhow::Result<Self> {
-        unimplemented!()
-    }
     pub async fn new(
         account: Arc<Mutex<Box<dyn MultiPass>>>,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-        listen_addr: Option<Multiaddr>,
-        bootstrap: Vec<(String, String)>,
+        configuration: Config,
     ) -> anyhow::Result<Self> {
         let account = account.clone();
         let mut peer_registry = PeerRegistry::default();
@@ -79,11 +72,11 @@ impl Libp2pMessaging {
             cache,
             into_thread: None,
             command_channel: None,
-            listen_addr,
             conversations: Arc::new(Mutex::new(Vec::new())),
             response_channel: None,
             peer_registry: peer_registry.clone(),
             group_registry: group_registry.clone(),
+            peer_id: PeerId::random(),
         };
 
         let keypair = {
@@ -94,7 +87,7 @@ impl Libp2pMessaging {
             identity::Keypair::Ed25519(id_secret.into())
         };
 
-        println!("PeerID: {}", PeerId::from(keypair.public()));
+        message.peer_id = keypair.public().into();
 
         peer_registry.add_public_key(keypair.public());
 
@@ -104,41 +97,28 @@ impl Libp2pMessaging {
             message.account.clone(),
             peer_registry,
             group_registry,
+            &configuration,
         )
         .await?;
 
-        let address = message
-            .listen_addr
-            .clone()
-            .unwrap_or_else(|| "/ip4/0.0.0.0/tcp/0".parse().unwrap());
+        for address in &configuration.listen_on {
+            swarm.listen_on(address.clone())?;
+        }
 
-        swarm.listen_on(address)?;
-
-        for (b_addr, b_peer) in bootstrap.iter() {
-            let (addr, peer) = match (Multiaddr::from_str(b_addr), PeerId::from_str(b_peer)) {
-                (Ok(addr), Ok(peer)) => (addr, peer),
-                (Err(e), _) => {
-                    error!("Error parsing multiaddr: {}", e);
-                    continue;
-                }
-                (_, Err(e)) => {
-                    error!("Error parsing peer: {}", e);
+        for bootstrap in &configuration.bootstrap {
+            let bootstrap = match MultiaddrWithPeerId::try_from(bootstrap.clone()) {
+                Ok(addr) => addr,
+                Err(e) => {
+                    error!("Error parsing bootstrap: {}", e);
                     continue;
                 }
             };
 
-            swarm.behaviour_mut().kademlia.add_address(&peer, addr);
-
-            if let Err(e) = swarm.dial(peer) {
-                println!("Unable to dial: {}", e);
-            }
+            swarm
+                .behaviour_mut()
+                .kademlia
+                .add_address(&bootstrap.peer_id, bootstrap.multiaddr.as_ref().clone());
         }
-
-        let random_peer: PeerId = identity::Keypair::generate_ed25519().public().into();
-        swarm
-            .behaviour_mut()
-            .kademlia
-            .get_closest_peers(random_peer);
 
         if let Err(e) = swarm.behaviour_mut().kademlia.bootstrap() {
             error!("Error bootstrapping: {}", e);
@@ -437,6 +417,11 @@ impl GroupChat for Libp2pMessaging {
         //Note: For now subscribe to the group with assumption that the member is apart of it until
         //      the contract offers the ability to join without needing an invite.
         let group_id = group_id_to_string(id)?;
+        if !self.group_registry.exist(group_id.clone()) {
+            self.group_registry.register_group(group_id.clone())?;
+        }
+        self.group_registry
+            .insert_peer(group_id.clone(), self.peer_id)?;
         self.send_swarm_command_sync(SwarmCommands::SubscribeToTopic(Topic::new(group_id)))?;
 
         Ok(())
@@ -450,16 +435,31 @@ impl GroupChat for Libp2pMessaging {
         Ok(())
     }
 
-    fn list_members(&self, _id: GroupId) -> Result<Vec<GroupMember>> {
+    fn list_members(&self, id: GroupId) -> Result<Vec<GroupMember>> {
         // Note: Due to groupchat program/contract not containing functionality to list the members of the group
         //       this implementation will reply on connected peers to the topic thats apart of the registry
-        let mut _members = vec![];
-        // let id = group_id_to_string(id)?;
-        // let _peers = self.group_registry.list(id)?;
-        // let peer_registry = self.peer_registry;
-        // let _registered_peers = peer_registry.list();
+        let group_registry = self.group_registry.list_peers(group_id_to_string(id)?)?;
+        let members = self
+            .peer_registry
+            .list()
+            .into_iter()
+            .filter(|peer| group_registry.contains(&peer.peer()))
+            .map(|peer| peer.public_key())
+            .map(|key| match key {
+                libp2p::core::PublicKey::Ed25519(pkey) => {
+                    warp::crypto::PublicKey::from_bytes(&pkey.encode())
+                }
+                libp2p::core::PublicKey::Rsa(pkey) => {
+                    warp::crypto::PublicKey::from_bytes(&pkey.encode_x509())
+                }
+                libp2p::core::PublicKey::Secp256k1(pkey) => {
+                    warp::crypto::PublicKey::from_bytes(&pkey.encode())
+                }
+            })
+            .map(GroupMember::from_public_key)
+            .collect::<Vec<_>>();
 
-        Ok(_members)
+        Ok(members)
     }
 }
 
@@ -627,7 +627,7 @@ impl GroupInvite for Libp2pMessaging {
         let pubkey = anchor_client::solana_sdk::pubkey::Pubkey::new(gm_public_key.as_ref());
         //TODO: Maybe announce to the peer of the request via pubsub? This will be in a non-solana variant
         helper
-            .invite_to_group(&gid_uuid.to_string(), pubkey)
+            .invite_to_group(&gid_uuid, pubkey)
             .map_err(Error::from)
     }
 
@@ -715,12 +715,9 @@ fn group_id_to_string(id: GroupId) -> anyhow::Result<String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use crate::Libp2pMessaging;
-    use anyhow::anyhow;
-    use libp2p::Multiaddr;
+    use crate::{Config, Libp2pMessaging};
     use std::ffi::CStr;
     use std::os::raw::c_char;
-    use std::str::FromStr;
     use warp::error::Error;
     use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
@@ -729,31 +726,12 @@ pub mod ffi {
     use warp::runtime_handle;
     use warp::sync::{Arc, Mutex};
 
-    //Because C doesnt support tuple variants, we would need to make our own little wrapper
-    /// Used to build a list of bootstrap nodes to supply to libp2p extension
-    /// This is broken into a peer id and multiaddr.
-    ///
-    /// Example
-    ///
-    /// peer = QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN
-    /// multiaddr = /dnsaddr/bootstrap.libp2p.io
-    ///
-    /// Note: rust-libp2p may not support every multiaddr entry so if its not supported
-    ///       there would be no error as bootstrap nodes are optional
-    #[repr(C)]
-    pub struct Bootstrap {
-        pub peer: *mut c_char,
-        pub multiaddr: *mut c_char,
-    }
-
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn raygun_rg_libp2p_new(
         account: *const MultiPassAdapter,
         cache: *const PocketDimensionAdapter,
-        listen_addr: *const c_char,
-        bootstrap: *const Bootstrap,
-        bootstrap_len: usize,
+        config: *const c_char,
     ) -> FFIResult<RayGunAdapter> {
         if account.is_null() {
             return FFIResult::err(Error::MultiPassExtensionUnavailable);
@@ -764,26 +742,14 @@ pub mod ffi {
             false => Some(&*cache),
         };
 
-        let listen_addr = match listen_addr.is_null() {
-            true => None,
-            false => match Multiaddr::from_str(
-                &CStr::from_ptr(listen_addr).to_string_lossy().to_string(),
-            ) {
-                Ok(addr) => Some(addr),
-                Err(e) => return FFIResult::err(Error::Any(anyhow!(e))),
-            },
-        };
-
-        let bootstrap = match bootstrap.is_null() {
-            true => vec![],
+        let config = match config.is_null() {
+            true => Config::default(),
             false => {
-                let mut bootstrap_list = vec![];
-                for item in std::slice::from_raw_parts(bootstrap, bootstrap_len) {
-                    let peer = CStr::from_ptr(item.peer).to_string_lossy().to_string();
-                    let addr = CStr::from_ptr(item.multiaddr).to_string_lossy().to_string();
-                    bootstrap_list.push((peer, addr));
+                let config = CStr::from_ptr(config).to_string_lossy().to_string();
+                match serde_json::from_str(&config) {
+                    Ok(c) => c,
+                    Err(e) => return FFIResult::err(Error::from(e)),
                 }
-                bootstrap_list
             }
         };
 
@@ -795,8 +761,7 @@ pub mod ffi {
             match Libp2pMessaging::new(
                 account.get_inner().clone(),
                 cache.map(|p| p.inner()),
-                listen_addr,
-                bootstrap,
+                config,
             )
             .await
             {

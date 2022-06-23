@@ -74,7 +74,7 @@ MultiPassAdapter *new_account(const char* file) {
 }
 
 RayGunAdapter *new_chat(const MultiPassAdapter* mp) {
-    FFIResult_RayGunAdapter result_rg_t = raygun_rg_libp2p_new(mp, NULL, NULL, NULL, 0);
+    FFIResult_RayGunAdapter result_rg_t = raygun_rg_libp2p_new(mp, NULL, NULL);
     if (result_rg_t.error) {
         print_error(result_rg_t.error);
         return NULL;

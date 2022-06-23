@@ -18,6 +18,7 @@ use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
 use warp_mp_solana::SolanaAccount;
 use warp_pd_stretto::StrettoClient;
+use warp_rg_libp2p::config::Config;
 #[allow(unused_imports)]
 use warp_rg_libp2p::{behaviour::SwarmCommands, Libp2pMessaging};
 
@@ -50,20 +51,18 @@ fn create_account(
 
 async fn create_rg(
     account: Arc<Mutex<Box<dyn MultiPass>>>,
-    addr: Option<Multiaddr>,
-    bootstrap: Vec<(String, String)>,
+    config: Config,
 ) -> anyhow::Result<Box<dyn RayGun>> {
-    let p2p_chat = create_rg_direct(account, addr, bootstrap).await?;
+    let p2p_chat = create_rg_direct(account, config).await?;
     Ok(Box::new(p2p_chat))
 }
 
 #[allow(dead_code)]
 async fn create_rg_direct(
     account: Arc<Mutex<Box<dyn MultiPass>>>,
-    addr: Option<Multiaddr>,
-    bootstrap: Vec<(String, String)>,
+    config: Config,
 ) -> anyhow::Result<Libp2pMessaging> {
-    Libp2pMessaging::new(account, None, addr, bootstrap)
+    Libp2pMessaging::new(account, None, config)
         .await
         .map_err(|e| anyhow!(e))
 }
@@ -85,39 +84,19 @@ pub fn generate_uuid(generate: &str) -> Uuid {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let addr = {
-        let env = std::env::var("LIBP2P_ADDR").unwrap_or("/ip4/0.0.0.0/tcp/0".to_string());
-        Multiaddr::from_str(&env).ok()
+    let config = Config {
+        listen_on: vec![std::env::var("LIBP2P_ADDR")
+            .unwrap_or_else(|_| "/ip4/0.0.0.0/tcp/0".to_string())
+            .parse()?],
+        ..Default::default()
     };
-
-    let bootstrap = vec![
-        (
-            "/dnsaddr/bootstrap.libp2p.io",
-            "QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-        ),
-        (
-            "/dnsaddr/bootstrap.libp2p.io",
-            "QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-        ),
-        (
-            "/dnsaddr/bootstrap.libp2p.io",
-            "QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
-        ),
-        (
-            "/dnsaddr/bootstrap.libp2p.io",
-            "QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-        ),
-    ]
-    .iter()
-    .map(|(p, a)| (p.to_string(), a.to_string()))
-    .collect::<Vec<(String, String)>>();
 
     let cache = cache_setup()?;
 
     println!("Creating or obtaining account...");
     let new_account = create_account(cache.clone())?;
 
-    let mut chat = create_rg(new_account.clone(), addr, bootstrap).await?;
+    let mut chat = create_rg(new_account.clone(), config).await?;
 
     println!("Obtaining identity....");
     let identity = new_account.lock().get_own_identity()?;
@@ -214,6 +193,30 @@ async fn main() -> anyhow::Result<()> {
                                     &format!("{}", message.pinned()),
                                     &emojis.join(" ")
                                 ]);
+                            }
+                            writeln!(stdout, "{}", table)?;
+                        },
+                        Some("/list-members") => {
+                            let mut table = Table::new();
+                            table.set_header(vec!["Username"]);
+                            let members = match chat.list_members(GroupId::from_id(topic)) {
+                                Ok(members) => members,
+                                Err(e) => {
+                                    writeln!(stdout, "Error: {e}")?;
+                                    continue
+                                }
+                            };
+
+                            for member in members.iter() {
+                                let username = match get_username(new_account.clone(), SenderId::from_public_key(member.get_public_key().unwrap())) {
+                                    Ok(user) => user,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error: {e}")?;
+                                        continue
+                                    }
+                                };
+
+                                table.add_row(vec![username]);
                             }
                             writeln!(stdout, "{}", table)?;
                         },

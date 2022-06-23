@@ -1,6 +1,6 @@
 use crate::events::{process_message_event, MessagingEvents};
 use crate::registry::PeerOption;
-use crate::{agent_name, GroupRegistry, PeerRegistry};
+use crate::{agent_name, Config, GroupRegistry, PeerRegistry};
 use anyhow::anyhow;
 use libp2p::{
     self, autonat,
@@ -14,7 +14,7 @@ use libp2p::{
     mdns::{Mdns, MdnsConfig, MdnsEvent},
     ping::{self, Ping, PingEvent},
     relay::v2::relay::{self, Relay},
-    swarm::{NetworkBehaviour, Swarm, SwarmEvent},
+    swarm::{behaviour::toggle::Toggle, NetworkBehaviour, Swarm, SwarmEvent},
     tokio_development_transport, Multiaddr, NetworkBehaviour, PeerId,
 };
 use log::{error, info};
@@ -31,7 +31,7 @@ use warp::{
 #[behaviour(out_event = "BehaviourEvent", event_process = false)]
 pub struct RayGunBehavior {
     pub gossipsub: Gossipsub,
-    pub mdns: Mdns,
+    pub mdns: Toggle<Mdns>,
     pub ping: Ping,
     pub relay: relay::Relay,
     pub kademlia: Kademlia<MemoryStore>,
@@ -112,7 +112,7 @@ pub async fn swarm_loop<E>(
                 if let Ok(events) = serde_json::from_slice::<MessagingEvents>(&message.data) {
                     if let Err(e) = process_message_event(swarm.behaviour().inner.clone(), &events)
                     {
-                        error!("{}", e);
+                        error!("Error processing message event: {}", e);
                     }
                 }
             }
@@ -120,14 +120,21 @@ pub async fn swarm_loop<E>(
             //TODO: Perform a check to see if topic is a registered group before insertion of peer
             GossipsubEvent::Subscribed { peer_id, topic } => {
                 let mut group_registry = swarm.behaviour_mut().group_registry.clone();
-                if let Err(e) = group_registry.insert_peer(topic.to_string(), peer_id) {
-                    error!("{}", e);
+                if !group_registry.exist(topic.to_string()) {
+                    if let Err(e) = group_registry.register_group(topic.to_string()) {
+                        error!("Error registering group: {}", e);
+                    }
+                }
+                if !group_registry.exist(topic.to_string()) {
+                    if let Err(e) = group_registry.insert_peer(topic.to_string(), peer_id) {
+                        error!("Error inserting peer to group: {}", e);
+                    }
                 }
             }
             GossipsubEvent::Unsubscribed { peer_id, topic } => {
                 let mut group_registry = swarm.behaviour_mut().group_registry.clone();
                 if let Err(e) = group_registry.remove_peer(topic.to_string(), peer_id) {
-                    error!("{}", e);
+                    error!("Error moving peer from group: {}", e);
                 }
             }
             GossipsubEvent::GossipsubNotSupported { .. } => {}
@@ -140,8 +147,10 @@ pub async fn swarm_loop<E>(
             }
             MdnsEvent::Expired(list) => {
                 for (peer, _addr) in list {
-                    if !swarm.behaviour().mdns.has_node(&peer) {
-                        swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
+                    if let Some(mdns) = swarm.behaviour().mdns.as_ref() {
+                        if !mdns.has_node(&peer) {
+                            swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
+                        }
                     }
                 }
             }
@@ -209,8 +218,7 @@ pub async fn swarm_loop<E>(
         SwarmEvent::OutgoingConnectionError { .. } => {}
         SwarmEvent::BannedPeer { .. } => {}
         SwarmEvent::NewListenAddr { address, .. } => {
-            println!("Listening on {:?}", address);
-            info!("Listening on {:?}", address);
+            info!("Listening on {}", address);
         }
         SwarmEvent::ExpiredListenAddr { .. } => {}
         SwarmEvent::ListenerClosed { .. } => {}
@@ -323,7 +331,9 @@ pub async fn create_behaviour(
     account: Arc<Mutex<Box<dyn MultiPass>>>,
     peer_registry: PeerRegistry,
     group_registry: GroupRegistry,
+    config: &Config,
 ) -> anyhow::Result<Swarm<RayGunBehavior>> {
+    let config = config.clone();
     let pubkey = keypair.public();
 
     let peer = PeerId::from(keypair.public());
@@ -341,11 +351,17 @@ pub async fn create_behaviour(
         .map_err(|e| anyhow!(e))?
     };
 
-    #[allow(clippy::field_reassign_with_default)]
-    let swarm = {
-        let mut mdns_config = MdnsConfig::default();
-        mdns_config.enable_ipv6 = true;
+    let mdns = match config.behaviour.mdns.enable {
+        true => {
+            let mut mdns_config = MdnsConfig::default();
+            mdns_config.enable_ipv6 = config.behaviour.mdns.enable_ipv6;
+            Mdns::new(mdns_config).await.ok()
+        }
+        false => None,
+    }
+    .into();
 
+    let swarm = {
         let mut kad_config = KademliaConfig::default();
         kad_config
             .set_query_timeout(Duration::from_secs(5 * 60))
@@ -355,7 +371,7 @@ pub async fn create_behaviour(
         let store = MemoryStore::new(peer);
         let behaviour = RayGunBehavior {
             gossipsub,
-            mdns: Mdns::new(mdns_config).await?,
+            mdns,
             ping: Ping::new(ping::Config::new().with_keep_alive(true)),
             kademlia: Kademlia::with_config(peer, store, kad_config),
             inner: conversation,
@@ -369,6 +385,7 @@ pub async fn create_behaviour(
             group_registry,
         };
         let transport = tokio_development_transport(keypair.clone())?;
+
         libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
             .executor(Box::new(|fut| {
                 tokio::spawn(fut);
