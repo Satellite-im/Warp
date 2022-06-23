@@ -250,7 +250,7 @@ impl Error {
             Error::Any(_) => String::from("Any"),
             Error::IoError(_) => String::from("IoError"),
             Error::Unimplemented => String::from("Unimplemented"),
-            Error::Other | _ => String::from("Other"),
+            _ => String::from("Other"),
         }
     }
 }
