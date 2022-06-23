@@ -152,7 +152,22 @@ impl GroupRegistry {
         bail!("Group doesnt exist in registry")
     }
 
-    pub fn list(&self, id: String) -> anyhow::Result<Vec<PeerId>> {
+    pub fn exist(&self, id: String) -> bool {
+        self.groups.lock().contains_key(&id)
+    }
+
+    pub fn exist_in_group(&self, id: String, peer: PeerId) -> bool {
+        match self.groups.lock().get(&id) {
+            Some(list) => list.contains(&peer),
+            None => false,
+        }
+    }
+
+    pub fn list_groups(&self) -> Vec<String> {
+        self.groups.lock().keys().cloned().collect::<Vec<_>>()
+    }
+
+    pub fn list_peers(&self, id: String) -> anyhow::Result<Vec<PeerId>> {
         self.groups
             .lock()
             .get(&id)
