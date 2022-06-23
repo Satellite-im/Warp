@@ -361,37 +361,35 @@ pub async fn create_behaviour(
     }
     .into();
 
-    let swarm = {
-        let mut kad_config = KademliaConfig::default();
-        kad_config
-            .set_query_timeout(Duration::from_secs(5 * 60))
-            .set_connection_idle_timeout(Duration::from_secs(5 * 60))
-            .set_provider_publication_interval(Some(Duration::from_secs(60)));
+    let mut kad_config = KademliaConfig::default();
+    kad_config
+        .set_query_timeout(Duration::from_secs(5 * 60))
+        .set_connection_idle_timeout(Duration::from_secs(5 * 60))
+        .set_provider_publication_interval(Some(Duration::from_secs(60)));
 
-        let store = MemoryStore::new(peer);
-        let behaviour = RayGunBehavior {
-            gossipsub,
-            mdns,
-            ping: Ping::new(ping::Config::new().with_keep_alive(true)),
-            kademlia: Kademlia::with_config(peer, store, kad_config),
-            inner: conversation,
-            account,
-            relay: Relay::new(peer, Default::default()),
-            identity: Identify::new(
-                IdentifyConfig::new("/ipfs/0.1.0".into(), pubkey).with_agent_version(agent_name()),
-            ),
-            autonat: autonat::Behaviour::new(peer, Default::default()),
-            peer_registry,
-            group_registry,
-        };
-        let transport = tokio_development_transport(keypair.clone())?;
-
-        libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
-            .executor(Box::new(|fut| {
-                tokio::spawn(fut);
-            }))
-            .build()
+    let store = MemoryStore::new(peer);
+    let behaviour = RayGunBehavior {
+        gossipsub,
+        mdns,
+        ping: Ping::new(ping::Config::new().with_keep_alive(true)),
+        kademlia: Kademlia::with_config(peer, store, kad_config),
+        inner: conversation,
+        account,
+        relay: Relay::new(peer, Default::default()),
+        identity: Identify::new(
+            IdentifyConfig::new("/ipfs/0.1.0".into(), pubkey).with_agent_version(agent_name()),
+        ),
+        autonat: autonat::Behaviour::new(peer, Default::default()),
+        peer_registry,
+        group_registry,
     };
+    let transport = tokio_development_transport(keypair.clone())?;
+
+    let swarm = libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
+        .executor(Box::new(|fut| {
+            tokio::spawn(fut);
+        }))
+        .build();
 
     Ok(swarm)
 }
