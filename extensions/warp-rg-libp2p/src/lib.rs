@@ -593,13 +593,11 @@ impl GroupInvite for Libp2pMessaging {
         let peer_id = PeerId::from(identity::PublicKey::Ed25519(ec25519_pk));
 
         // find the user in registry
-        // let peer_registry = self.peer_registry.lock();
-        //
-        // if !peer_registry.exist(PeerOption::PeerId(peer_id)) {
+        // if !self.peer_registry.exist(PeerOption::PeerId(peer_id)) {
         //     // If peer is not found in registry, find peer in DHT
         //     self.send_swarm_command_sync(SwarmCommands::FindPeer(peer_id))?;
         //
-        //     if self.peer_registry.lock().exist(PeerOption::PeerId(peer_id)) {
+        //     if self.peer_registry.exist(PeerOption::PeerId(peer_id)) {
         //         // Peer is not found in registry after executing command
         //         // TODO: Maybe provide another stated term besides invalid group member?
         //         return Err(Error::InvalidGroupMemeber);

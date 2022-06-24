@@ -2,6 +2,7 @@ use crate::events::{process_message_event, MessagingEvents};
 use crate::registry::PeerOption;
 use crate::{agent_name, Config, GroupRegistry, PeerRegistry};
 use anyhow::anyhow;
+use libp2p::multiaddr::Protocol;
 use libp2p::{
     self,
     autonat::{Behaviour as Autonat, Event as AutonatEvent},
@@ -128,12 +129,6 @@ pub async fn swarm_loop<E>(
         SwarmEvent::Behaviour(BehaviourEvent::RelayServer(event)) => {
             info!("{:?}", event);
         }
-        SwarmEvent::Behaviour(BehaviourEvent::RelayClient(
-            RelayClientEvent::ReservationReqAccepted { .. },
-        )) => {
-            //TODO: Store and esstablish information regarding reservation
-            info!("Relay accepted our reservation request.");
-        }
         SwarmEvent::Behaviour(BehaviourEvent::RelayClient(event)) => {
             info!("{:?}", event);
         }
@@ -241,12 +236,20 @@ pub async fn swarm_loop<E>(
             }
         }
         SwarmEvent::Behaviour(BehaviourEvent::Autonat(_)) => {}
-        SwarmEvent::Behaviour(BehaviourEvent::Dcutr(_)) => {}
-        SwarmEvent::ConnectionEstablished { .. } => {}
+        SwarmEvent::Behaviour(BehaviourEvent::Dcutr(event)) => {
+            info!("Dctur Event: {:?}", event);
+        }
+        SwarmEvent::ConnectionEstablished {
+            peer_id, endpoint, ..
+        } => {
+            info!("Established connection to {:?} via {:?}", peer_id, endpoint);
+        }
         SwarmEvent::ConnectionClosed { .. } => {}
         SwarmEvent::IncomingConnection { .. } => {}
         SwarmEvent::IncomingConnectionError { .. } => {}
-        SwarmEvent::OutgoingConnectionError { .. } => {}
+        SwarmEvent::OutgoingConnectionError { peer_id, error } => {
+            info!("Outgoing connection error to {:?}: {:?}", peer_id, error);
+        }
         SwarmEvent::BannedPeer { .. } => {}
         SwarmEvent::NewListenAddr { address, .. } => {
             info!("Listening on {}", address);
@@ -263,6 +266,7 @@ pub async fn swarm_loop<E>(
 pub enum SwarmCommands {
     DialPeer(PeerId),
     DialAddr(Multiaddr),
+    DialPeerThroughRelay(Multiaddr, PeerId),
     BanPeer(PeerId),
     UnbanPeer(PeerId),
     DisconnectPeer(PeerId),
@@ -279,6 +283,12 @@ pub fn swarm_command(
     match commands {
         Some(SwarmCommands::DialPeer(peer)) => swarm.dial(peer)?,
         Some(SwarmCommands::DialAddr(addr)) => swarm.dial(addr)?,
+        Some(SwarmCommands::DialPeerThroughRelay(relay, peer)) => {
+            let addr = relay
+                .with(Protocol::P2pCircuit)
+                .with(Protocol::P2p(peer.into()));
+            swarm.dial(addr)?
+        }
         Some(SwarmCommands::BanPeer(peer)) => swarm.ban_peer_id(peer),
         Some(SwarmCommands::UnbanPeer(peer)) => swarm.unban_peer_id(peer),
         Some(SwarmCommands::DisconnectPeer(peer)) => {
@@ -435,8 +445,6 @@ pub async fn create_behaviour(
     );
     let inner = conversation;
 
-    let relay_client_enabled = relay_client.is_enabled();
-
     let behaviour = RayGunBehavior {
         gossipsub,
         mdns,
@@ -460,9 +468,6 @@ pub async fn create_behaviour(
             tokio::spawn(fut);
         }))
         .build();
-
-    if relay_client_enabled {}
-
     Ok(swarm)
 }
 
