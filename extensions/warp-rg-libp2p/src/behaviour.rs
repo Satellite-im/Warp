@@ -3,7 +3,8 @@ use crate::registry::PeerOption;
 use crate::{agent_name, Config, GroupRegistry, PeerRegistry};
 use anyhow::anyhow;
 use libp2p::{
-    self, autonat,
+    self,
+    autonat::{Behaviour as Autonat, Event as AutonatEvent},
     dcutr::behaviour::{Behaviour as DcutrBehaviour, Event as DcutrEvent},
     gossipsub::{
         Gossipsub, GossipsubConfigBuilder, GossipsubEvent, IdentTopic as Topic,
@@ -42,7 +43,7 @@ pub struct RayGunBehavior {
     pub relay_client: Toggle<RelayClient>,
     pub kademlia: Kademlia<MemoryStore>,
     pub identity: Identify,
-    pub autonat: autonat::Behaviour,
+    pub autonat: Toggle<Autonat>,
     #[behaviour(ignore)]
     pub inner: Arc<Mutex<Vec<Message>>>,
     #[behaviour(ignore)]
@@ -62,7 +63,7 @@ pub enum BehaviourEvent {
     RelayClient(RelayClientEvent),
     Kad(KademliaEvent),
     Identify(IdentifyEvent),
-    Autonat(autonat::Event),
+    Autonat(AutonatEvent),
 }
 
 impl From<GossipsubEvent> for BehaviourEvent {
@@ -113,8 +114,8 @@ impl From<IdentifyEvent> for BehaviourEvent {
     }
 }
 
-impl From<autonat::Event> for BehaviourEvent {
-    fn from(event: autonat::Event) -> Self {
+impl From<AutonatEvent> for BehaviourEvent {
+    fn from(event: AutonatEvent) -> Self {
         BehaviourEvent::Autonat(event)
     }
 }
@@ -425,7 +426,13 @@ pub async fn create_behaviour(
     let identity = Identify::new(
         IdentifyConfig::new("/ipfs/0.1.0".into(), pubkey).with_agent_version(agent_name()),
     );
-    let autonat = autonat::Behaviour::new(peer, Default::default());
+    let autonat = Toggle::from(
+        config
+            .behaviour
+            .autonat
+            .enable
+            .then(|| Autonat::new(peer, Default::default())),
+    );
     let inner = conversation;
 
     let relay_client_enabled = relay_client.is_enabled();
