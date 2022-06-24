@@ -1,3 +1,5 @@
+pub mod config;
+
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -96,6 +98,15 @@ impl Default for IpfsFileSystem {
 impl IpfsFileSystem {
     pub fn new() -> Self {
         IpfsFileSystem::default()
+    }
+
+    pub fn from_config(config: config::Config) -> anyhow::Result<Self> {
+        let config::Config { api_server } = config;
+        if let Some(api_server) = api_server {
+            Self::new_with_uri(api_server)
+        } else {
+            Ok(Self::new())
+        }
     }
 
     pub fn new_with_uri<S: AsRef<str>>(uri: S) -> anyhow::Result<Self> {

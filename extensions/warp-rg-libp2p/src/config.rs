@@ -75,3 +75,9 @@ impl Default for Config {
         }
     }
 }
+
+impl Config {
+    pub fn development() -> Config {
+        Self::default()
+    }
+}

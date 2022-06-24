@@ -1,12 +1,13 @@
+pub mod config;
+
+use anyhow::anyhow;
+use serde_json::Value;
 #[allow(unused_imports)]
 use std::{
     fs::OpenOptions,
     io::{ErrorKind, Read, Write},
     path::{Path, PathBuf},
 };
-
-use anyhow::anyhow;
-use serde_json::Value;
 use uuid::Uuid;
 use warp::error::Error;
 use warp::Extension;
@@ -36,6 +37,25 @@ pub struct FlatfileStorage {
 
     /// Handle for index
     index: FlatfileIndex,
+}
+
+impl From<config::Config> for FlatfileStorage {
+    fn from(config: config::Config) -> Self {
+        let config::Config {
+            directory,
+            prefix,
+            use_index_file,
+            index_file,
+        } = config;
+
+        FlatfileStorage {
+            directory,
+            prefix,
+            use_index_file,
+            index_file,
+            ..Default::default()
+        }
+    }
 }
 
 impl Extension for FlatfileStorage {
@@ -144,6 +164,12 @@ impl<P: AsRef<Path>> From<P> for FlatfileStorage {
 }
 
 impl FlatfileStorage {
+    pub fn from_config(config: config::Config) -> Result<Self> {
+        let mut storage = Self::from(config);
+        storage.initialize_internal()?;
+        Ok(storage)
+    }
+
     pub fn new<P: AsRef<Path>>(path: P) -> Self {
         Self::from(path)
     }
@@ -172,6 +198,35 @@ impl FlatfileStorage {
         storage.index = index;
 
         Ok(storage)
+    }
+
+    pub fn initialize_internal(&mut self) -> Result<()> {
+        let index_file = self.index_file.clone().ok_or(Error::FileInvalid)?;
+        self.initialize_index_file(index_file)
+    }
+
+    pub fn initialize_index_file<P: AsRef<Path>>(&mut self, file: P) -> Result<()> {
+        if !self.is_valid() {
+            self.create_directory(true)?;
+        }
+
+        let file = file.as_ref();
+
+        self.index_file = Some(file.to_string_lossy().to_string());
+        self.use_index_file = true;
+
+        let mut cache_file_index = self.directory.clone();
+        cache_file_index.push(&file);
+
+        let mut index = FlatfileIndex::default();
+        if !cache_file_index.is_file() {
+            index.export_index_to_file(&cache_file_index)?;
+        }
+        index.build_index_from_file(&cache_file_index)?;
+
+        self.index = index;
+
+        Ok(())
     }
 
     pub fn create_directory(&self, all: bool) -> Result<()> {
