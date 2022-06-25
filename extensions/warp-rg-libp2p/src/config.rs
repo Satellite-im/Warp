@@ -90,7 +90,10 @@ impl Default for Config {
             .iter()
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),
-            listen_on: vec!["/ip4/0.0.0.0/tcp/0".parse().unwrap()],
+            listen_on: vec!["/ip4/0.0.0.0/tcp/0"]
+                .iter()
+                .filter_map(|s| Multiaddr::from_str(s).ok())
+                .collect::<Vec<_>>(),
             behaviour: BehaviourConfig {
                 mdns: Mdns {
                     enable: true,
@@ -102,7 +105,7 @@ impl Default for Config {
                     relay_address: None,
                 },
                 relay_server: RelayServer { enable: false },
-                dcutr: Dcutr { enable: true },
+                dcutr: Dcutr { enable: false },
                 kad: Kad {
                     enable: true,
                     ..Default::default()

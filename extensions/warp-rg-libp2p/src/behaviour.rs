@@ -2,6 +2,7 @@ use crate::events::{process_message_event, MessagingEvents};
 use crate::registry::PeerOption;
 use crate::{agent_name, Config, GroupRegistry, PeerRegistry};
 use anyhow::anyhow;
+use futures::StreamExt;
 use libp2p::multiaddr::Protocol;
 use libp2p::{
     self,
@@ -484,11 +485,70 @@ pub async fn create_behaviour(
 
     let transport = transport(keypair, relay_transport)?;
 
-    let swarm = libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
+    let mut swarm = libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
         .executor(Box::new(|fut| {
             tokio::spawn(fut);
         }))
         .build();
+
+    for address in &config.listen_on {
+        swarm.listen_on(address.clone())?;
+    }
+
+    //Listen on [all] selected interfaces
+    let mut tick = tokio::time::interval(Duration::from_secs(2));
+    loop {
+        tokio::select! {
+            event = swarm.select_next_some() => {
+                if let SwarmEvent::NewListenAddr { address, .. } = event {
+                     info!("Listening on {:?}", address);
+                }
+            },
+            _ = tick.tick() => {
+                break
+            }
+        }
+    }
+
+    if config.behaviour.relay_client.enable {
+        let relay_addr = config
+            .behaviour
+            .relay_client
+            .relay_address
+            .ok_or_else(|| Error::Any(anyhow!("No relay address available")))?;
+
+        //Connect to relay
+        swarm.dial(relay_addr.clone())?;
+        let mut learned_addr = false;
+        let mut sent_addr = false;
+        loop {
+            match swarm.select_next_some().await {
+                SwarmEvent::NewListenAddr { .. } => {}
+                SwarmEvent::Dialing { .. } => {}
+                SwarmEvent::ConnectionEstablished { .. } => {}
+                SwarmEvent::Behaviour(BehaviourEvent::Ping(_)) => {}
+                SwarmEvent::Behaviour(BehaviourEvent::Identify(IdentifyEvent::Sent { .. })) => {
+                    info!("Told relay its public address.");
+                    sent_addr = true;
+                }
+                SwarmEvent::Behaviour(BehaviourEvent::Identify(IdentifyEvent::Received {
+                    info: IdentifyInfo { observed_addr, .. },
+                    ..
+                })) => {
+                    info!("Relay told us our public address: {:?}", observed_addr);
+                    learned_addr = true;
+                }
+                _ => {}
+            }
+            if learned_addr && sent_addr {
+                break;
+            }
+        }
+
+        //listen on relay
+        swarm.listen_on(relay_addr.with(Protocol::P2pCircuit))?;
+    }
+
     Ok(swarm)
 }
 

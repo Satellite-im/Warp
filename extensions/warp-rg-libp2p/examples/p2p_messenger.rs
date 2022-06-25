@@ -19,6 +19,7 @@ use warp::tesseract::Tesseract;
 use warp_mp_solana::SolanaAccount;
 use warp_pd_stretto::StrettoClient;
 use warp_rg_libp2p::config::Config;
+
 #[allow(unused_imports)]
 use warp_rg_libp2p::{behaviour::SwarmCommands, Libp2pMessaging};
 
@@ -30,7 +31,7 @@ fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
 fn create_account(
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
 ) -> anyhow::Result<Arc<Mutex<Box<dyn MultiPass>>>> {
-    let env = std::env::var("TESSERACT_FILE").unwrap_or("datastore".to_string());
+    let env = std::env::var("TESSERACT_FILE").unwrap_or_else(|_| "datastore".to_string());
 
     let mut tesseract = Tesseract::from_file(&env).unwrap_or_default();
     tesseract
@@ -245,10 +246,12 @@ async fn main() -> anyhow::Result<()> {
 
                             let mut messages = vec![];
 
-                            while let Some(item) = cmd_line.next() {
+                            for item in cmd_line.by_ref() {
                                 messages.push(item.to_string());
                             }
+
                             let message = vec![messages.join(" ").to_string()];
+
                             if let Err(e) = chat.send(conversation_id, Some(message_id), message).await {
                                 writeln!(stdout, "Error: {}", e)?;
                                 continue
@@ -266,7 +269,7 @@ async fn main() -> anyhow::Result<()> {
                             let state = match cmd_line.next() {
                                 Some("add") => ReactionState::Add,
                                 Some("remove") => ReactionState::Remove,
-                                None | _ => {
+                                _ => {
                                     writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
                                     continue
                                 }

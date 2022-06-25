@@ -89,6 +89,8 @@ impl Libp2pMessaging {
 
         message.peer_id = keypair.public().into();
 
+        println!("{}", message.peer_id);
+
         peer_registry.add_public_key(keypair.public());
 
         let mut swarm = behaviour::create_behaviour(
@@ -100,10 +102,6 @@ impl Libp2pMessaging {
             &configuration,
         )
         .await?;
-
-        for address in &configuration.listen_on {
-            swarm.listen_on(address.clone())?;
-        }
 
         for bootstrap in &configuration.bootstrap {
             let bootstrap = match MultiaddrWithPeerId::try_from(bootstrap.clone()) {
