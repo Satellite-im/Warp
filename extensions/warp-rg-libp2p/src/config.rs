@@ -30,12 +30,45 @@ pub struct RelayServer {
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
+pub struct Kad {
+    pub enable: bool,
+    pub query_timeout: Option<u64>,
+    pub idle_timeout: Option<u64>,
+    pub protocol_name: Option<String>,
+}
+
+#[derive(Default, Clone, Serialize, Deserialize)]
+pub struct Identity {
+    pub agent: Option<String>,
+    pub protocol: Option<String>,
+    pub listen_addr_update: Option<bool>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Rendezvous {
+    pub enable: bool,
+    pub address: Multiaddr,
+}
+
+impl Default for Rendezvous {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            address: Multiaddr::empty(),
+        }
+    }
+}
+
+#[derive(Default, Clone, Serialize, Deserialize)]
 pub struct BehaviourConfig {
     pub mdns: Mdns,
     pub autonat: Autonat,
     pub relay_client: RelayClient,
     pub relay_server: RelayServer,
     pub dcutr: Dcutr,
+    pub kad: Kad,
+    pub rendezvous: Rendezvous,
+    pub identity: Option<Identity>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -57,7 +90,6 @@ impl Default for Config {
             .iter()
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),
-
             listen_on: vec!["/ip4/0.0.0.0/tcp/0".parse().unwrap()],
             behaviour: BehaviourConfig {
                 mdns: Mdns {
@@ -71,6 +103,15 @@ impl Default for Config {
                 },
                 relay_server: RelayServer { enable: false },
                 dcutr: Dcutr { enable: true },
+                kad: Kad {
+                    enable: true,
+                    ..Default::default()
+                },
+                rendezvous: Rendezvous {
+                    enable: false,
+                    ..Default::default()
+                },
+                identity: None,
             },
         }
     }

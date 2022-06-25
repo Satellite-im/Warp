@@ -113,15 +113,15 @@ impl Libp2pMessaging {
                     continue;
                 }
             };
-
-            swarm
-                .behaviour_mut()
-                .kademlia
-                .add_address(&bootstrap.peer_id, bootstrap.multiaddr.as_ref().clone());
+            if let Some(kad) = swarm.behaviour_mut().kademlia.as_mut() {
+                kad.add_address(&bootstrap.peer_id, bootstrap.multiaddr.as_ref().clone());
+            }
         }
 
-        if let Err(e) = swarm.behaviour_mut().kademlia.bootstrap() {
-            error!("Error bootstrapping: {}", e);
+        if let Some(kad) = swarm.behaviour_mut().kademlia.as_mut() {
+            if let Err(e) = kad.bootstrap() {
+                error!("Error bootstrapping: {}", e);
+            }
         }
 
         let (into_tx, mut into_rx) = tokio::sync::mpsc::channel(32);

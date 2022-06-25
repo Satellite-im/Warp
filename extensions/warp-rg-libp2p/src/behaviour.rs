@@ -42,7 +42,7 @@ pub struct RayGunBehavior {
     pub dcutr: Toggle<DcutrBehaviour>,
     pub relay_server: Toggle<RelayServer>,
     pub relay_client: Toggle<RelayClient>,
-    pub kademlia: Kademlia<MemoryStore>,
+    pub kademlia: Toggle<Kademlia<MemoryStore>>,
     pub identity: Identify,
     pub autonat: Toggle<Autonat>,
     #[behaviour(ignore)]
@@ -185,10 +185,12 @@ pub async fn swarm_loop<E>(
             KademliaEvent::OutboundQueryCompleted { result, .. } => match result {
                 QueryResult::Bootstrap(_) => {}
                 QueryResult::GetClosestPeers(Ok(ok)) => {
-                    for peer in ok.peers {
-                        let addrs = swarm.behaviour_mut().kademlia.addresses_of_peer(&peer);
-                        for addr in addrs {
-                            swarm.behaviour_mut().kademlia.add_address(&peer, addr);
+                    if let Some(kad) = swarm.behaviour_mut().kademlia.as_mut() {
+                        for peer in ok.peers {
+                            let addrs = kad.addresses_of_peer(&peer);
+                            for addr in addrs {
+                                kad.add_address(&peer, addr);
+                            }
                         }
                     }
                 }
@@ -230,7 +232,9 @@ pub async fn swarm_loop<E>(
                     .any(|p| p.as_bytes() == libp2p::kad::protocol::DEFAULT_PROTO_NAME)
                 {
                     for addr in listen_addrs {
-                        swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
+                        if let Some(kad) = swarm.behaviour_mut().kademlia.as_mut() {
+                            kad.add_address(&peer_id, addr);
+                        }
                     }
                 }
             }
@@ -304,7 +308,9 @@ pub fn swarm_command(
             swarm.behaviour_mut().gossipsub.publish(topic, data)?;
         }
         Some(SwarmCommands::FindPeer(peer)) => {
-            swarm.behaviour_mut().kademlia.get_closest_peers(peer);
+            if let Some(kad) = swarm.behaviour_mut().kademlia.as_mut() {
+                kad.get_closest_peers(peer);
+            }
         }
         _ => {} //TODO: Invalid command?
     }
@@ -394,19 +400,15 @@ pub async fn create_behaviour(
 
     let mdns = match config.behaviour.mdns.enable {
         true => {
-            let mut mdns_config = MdnsConfig::default();
-            mdns_config.enable_ipv6 = config.behaviour.mdns.enable_ipv6;
+            let mdns_config = MdnsConfig {
+                enable_ipv6: config.behaviour.mdns.enable_ipv6,
+                ..Default::default()
+            };
             Mdns::new(mdns_config).await.ok()
         }
         false => None,
     }
     .into();
-
-    let mut kad_config = KademliaConfig::default();
-    kad_config
-        .set_query_timeout(Duration::from_secs(5 * 60))
-        .set_connection_idle_timeout(Duration::from_secs(5 * 60))
-        .set_provider_publication_interval(Some(Duration::from_secs(60)));
 
     let relay_server = match config.behaviour.relay_server.enable {
         true => Some(RelayServer::new(peer, Default::default())),
@@ -432,10 +434,28 @@ pub async fn create_behaviour(
     .into();
 
     let ping = Ping::new(ping::Config::new().with_keep_alive(true));
-    let kademlia = Kademlia::with_config(peer, MemoryStore::new(peer), kad_config);
+    let kademlia = Toggle::from(config.behaviour.kad.enable.then(|| {
+        let mut kad_config = KademliaConfig::default();
+
+        // if let Some(protocol) = config.behaviour.kad.protocol_name {
+        //     kad_config.set_protocol_name(protocol.as_bytes().into());
+        // }
+
+        if let Some(timeout) = config.behaviour.kad.query_timeout {
+            kad_config.set_query_timeout(Duration::from_secs(timeout));
+        }
+
+        if let Some(timeout) = config.behaviour.kad.idle_timeout {
+            kad_config.set_connection_idle_timeout(Duration::from_secs(timeout));
+        }
+
+        Kademlia::with_config(peer, MemoryStore::new(peer), kad_config)
+    }));
+
     let identity = Identify::new(
         IdentifyConfig::new("/ipfs/0.1.0".into(), pubkey).with_agent_version(agent_name()),
     );
+
     let autonat = Toggle::from(
         config
             .behaviour
@@ -443,6 +463,7 @@ pub async fn create_behaviour(
             .enable
             .then(|| Autonat::new(peer, Default::default())),
     );
+
     let inner = conversation;
 
     let behaviour = RayGunBehavior {
