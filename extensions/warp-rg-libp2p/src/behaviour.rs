@@ -1,4 +1,3 @@
-use crate::addr::MultiaddrWithPeerId;
 use crate::events::{process_message_event, MessagingEvents};
 use crate::registry::PeerOption;
 use crate::{agent_name, Config, GroupRegistry, PeerRegistry};
@@ -27,7 +26,7 @@ use libp2p::{
 };
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use warp::{
     error::Error,
     multipass::MultiPass,
@@ -529,12 +528,22 @@ pub async fn create_behaviour(
     if let Some(autonat) = swarm.behaviour_mut().autonat.as_mut() {
         info!("Autonat enabled.");
         for server in config.behaviour.autonat.servers {
+            let mut addr = server.to_owned();
+            let peer_id = match addr.pop() {
+                Some(Protocol::P2p(hash)) => match PeerId::from_multihash(hash) {
+                    Ok(id) => id,
+                    Err(_) => {
+                        warn!("PeerId could not be formed from multihash");
+                        continue;
+                    }
+                },
+                _ => {
+                    warn!("Invalid peer id");
+                    continue;
+                }
+            };
             info!("Adding {}", server);
-            let addr_with_peer = MultiaddrWithPeerId::try_from(server)?;
-            autonat.add_server(
-                addr_with_peer.peer_id,
-                Some(addr_with_peer.multiaddr.as_ref().clone()),
-            );
+            autonat.add_server(peer_id, Some(addr));
         }
     }
 

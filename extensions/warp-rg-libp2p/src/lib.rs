@@ -1,7 +1,6 @@
 #[cfg(feature = "solana")]
 pub mod solana;
 
-pub mod addr;
 pub mod behaviour;
 pub mod config;
 pub mod events;
