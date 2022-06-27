@@ -159,6 +159,13 @@ pub fn construct_ffi(_: TokenStream) -> TokenStream {
         }
 
         impl<T> FFIResult<T> {
+            pub fn import(result: std::result::Result<T, crate::error::Error>) -> Self {
+                match result {
+                    Ok(t) => FFIResult::ok(t)
+                    Err(err) => FFIResult::err(err),
+                }
+            }
+
             pub fn ok(data: T) -> Self {
                 Self {
                     data: Box::into_raw(Box::new(data)),
