@@ -414,11 +414,11 @@ pub mod ffi {
         convo_id: *const c_char,
     ) -> FFIResult<FFIArray<Message>> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("context cannot be null")));
         }
 
         if convo_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("convo id cannot be null")));
         }
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
