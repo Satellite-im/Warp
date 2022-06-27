@@ -402,7 +402,6 @@ pub mod ffi {
     use std::os::raw::{c_char, c_void};
     use std::str::{FromStr, Utf8Error};
     use uuid::Uuid;
-    // use warp_derive::FFIArray;
 
     use super::SenderId;
 
@@ -414,11 +413,13 @@ pub mod ffi {
         convo_id: *const c_char,
     ) -> FFIResult<FFIArray<Message>> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("context cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("convo id cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Conversation id cannot be null"
+            )));
         }
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
@@ -451,28 +452,36 @@ pub mod ffi {
         lines: usize,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Conversation ID cannot be null"
+            )));
         }
 
         if messages.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Message array cannot be null")));
+        }
+
+        if lines == 0 {
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Lines has to be more than zero"
+            )));
         }
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+            Err(e) => return FFIResult::err(Error::UuidError(e)),
         };
 
         let msg_id = match message_id.is_null() {
             false => {
                 match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string()) {
                     Ok(uuid) => Some(uuid),
-                    Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+                    Err(e) => return FFIResult::err(Error::UuidError(e)),
                 }
             }
             true => None,
@@ -499,27 +508,29 @@ pub mod ffi {
         message_id: *const c_char,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Conversation ID cannot be null"
+            )));
         }
 
         if message_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
         }
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+            Err(e) => return FFIResult::err(Error::UuidError(e)),
         };
 
         let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+            Err(e) => return FFIResult::err(Error::UuidError(e)),
         };
 
         let adapter = &mut *ctx;
@@ -538,31 +549,33 @@ pub mod ffi {
         emoji: *const c_char,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Conversation ID cannot be null"
+            )));
         }
 
         if message_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
         }
 
         if emoji.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Emoji cannot be null")));
         }
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+            Err(e) => return FFIResult::err(Error::UuidError(e)),
         };
 
         let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+            Err(e) => return FFIResult::err(Error::UuidError(e)),
         };
 
         let emoji = CStr::from_ptr(emoji).to_string_lossy().to_string();
@@ -587,27 +600,29 @@ pub mod ffi {
         state: PinState,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Conversation ID cannot be null"
+            )));
         }
 
         if message_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
         }
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+            Err(e) => return FFIResult::err(Error::UuidError(e)),
         };
 
         let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+            Err(e) => return FFIResult::err(Error::UuidError(e)),
         };
 
         let adapter = &mut *ctx;
@@ -628,31 +643,33 @@ pub mod ffi {
         lines: usize,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Conversation ID cannot be null"
+            )));
         }
 
         if message_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
         }
 
         if messages.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Messages cannot be null")));
         }
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+            Err(e) => return FFIResult::err(Error::UuidError(e)),
         };
 
         let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+            Err(e) => return FFIResult::err(Error::UuidError(e)),
         };
 
         let messages = match pointer_to_vec(messages, lines) {
@@ -678,17 +695,19 @@ pub mod ffi {
         convo_id: *const c_char,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Conversation ID cannot be null"
+            )));
         }
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+            Err(e) => return FFIResult::err(Error::UuidError(e)),
         };
 
         let adapter = &mut *ctx;
@@ -706,27 +725,29 @@ pub mod ffi {
         state: EmbedState,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Conversation ID cannot be null"
+            )));
         }
 
         if message_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
         }
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+            Err(e) => return FFIResult::err(Error::UuidError(e)),
         };
 
         let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+            Err(e) => return FFIResult::err(Error::UuidError(e)),
         };
 
         let adapter = &mut *ctx;

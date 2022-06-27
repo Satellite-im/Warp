@@ -15,7 +15,7 @@ pub unsafe extern "C" fn tesseract_new() -> *mut Tesseract {
 #[no_mangle]
 pub unsafe extern "C" fn tesseract_from_file(file: *const c_char) -> FFIResult<Tesseract> {
     if file.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract is null")));
+        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
     }
 
     let cname = CStr::from_ptr(file).to_string_lossy().to_string();
@@ -32,11 +32,11 @@ pub unsafe extern "C" fn tesseract_to_file(
     file: *const c_char,
 ) -> FFIResult<c_void> {
     if tesseract.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract is null")));
+        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
     }
 
     if file.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Key is null")));
+        return FFIResult::err(Error::Any(anyhow::anyhow!("Key cannot be null")));
     }
     let tesseract = &mut *tesseract;
     let cname = CStr::from_ptr(file).to_string_lossy().to_string();
@@ -125,7 +125,7 @@ pub unsafe extern "C" fn tesseract_is_key_check_enabled(tesseract: *const Tesser
 #[no_mangle]
 pub unsafe extern "C" fn tesseract_save(tesseract: *mut Tesseract) -> FFIResult<c_void> {
     if tesseract.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract is null")));
+        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
     }
 
     let tesseract = &mut *tesseract;
@@ -140,13 +140,13 @@ pub unsafe extern "C" fn tesseract_set(
     val: *const c_char,
 ) -> FFIResult<c_void> {
     if tesseract.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract is null")));
+        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
     }
     if key.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Key is null")));
+        return FFIResult::err(Error::Any(anyhow::anyhow!("Key cannot be null")));
     }
     if val.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Val is null")));
+        return FFIResult::err(Error::Any(anyhow::anyhow!("Value cannot be null")));
     }
 
     let tesseract = &mut *tesseract;
@@ -163,11 +163,11 @@ pub unsafe extern "C" fn tesseract_retrieve(
     key: *const c_char,
 ) -> FFIResult<c_char> {
     if tesseract.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract is null")));
+        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
     }
 
     if key.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Key is null")));
+        return FFIResult::err(Error::Any(anyhow::anyhow!("Key cannot be null")));
     }
 
     let tesseract = &mut *tesseract;
@@ -197,11 +197,11 @@ pub unsafe extern "C" fn tesseract_delete(
     key: *const c_char,
 ) -> FFIResult<c_void> {
     if tesseract.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract is null")));
+        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
     }
 
     if key.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Key is null")));
+        return FFIResult::err(Error::Any(anyhow::anyhow!("Key cannot be null")));
     }
 
     let tesseract = &mut *tesseract;
@@ -239,11 +239,11 @@ pub unsafe extern "C" fn tesseract_unlock(
     key: *const c_char,
 ) -> FFIResult<c_void> {
     if tesseract.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract is null")));
+        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
     }
 
     if key.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Key is null")));
+        return FFIResult::err(Error::Any(anyhow::anyhow!("Key cannot be null")));
     }
 
     let tesseract = &mut *tesseract;

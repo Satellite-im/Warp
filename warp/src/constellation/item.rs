@@ -318,34 +318,22 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_into_directory(item: *const Item) -> *mut Directory {
+    pub unsafe extern "C" fn item_into_directory(item: *const Item) -> FFIResult<Directory> {
         if item.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
         let item = &*(item);
-        match item.get_directory() {
-            Ok(directory) => {
-                let dir = Box::new(directory.clone());
-                Box::into_raw(dir) as *mut Directory
-            }
-            Err(_) => std::ptr::null_mut(),
-        }
+        FFIResult::import(item.get_directory().map(|d| d.clone()))
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_into_file(item: *const Item) -> *mut File {
+    pub unsafe extern "C" fn item_into_file(item: *const Item) -> FFIResult<File> {
         if item.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
         let item = &*(item);
-        match item.get_file() {
-            Ok(file) => {
-                let file = Box::new(file.clone());
-                Box::into_raw(file) as *mut File
-            }
-            Err(_) => std::ptr::null_mut(),
-        }
+        FFIResult::import(item.get_file().map(|f| f.clone()))
     }
 
     #[allow(clippy::missing_safety_doc)]

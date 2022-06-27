@@ -249,11 +249,11 @@ pub mod ffi {
         data: *const Data,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Adapter is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if data.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Data is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Data cannot be null")));
         }
 
         let pd = &mut *ctx;
@@ -270,11 +270,11 @@ pub mod ffi {
         query: *const QueryBuilder,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Adapter is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
-        if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Query is is required")));
+        if query.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Query cannot be required")));
         }
 
         let pd = &mut *ctx;
@@ -291,7 +291,7 @@ pub mod ffi {
         query: *const QueryBuilder,
     ) -> FFIResult<FFIArray<Data>> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Adapter is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let query = match query.is_null() {
@@ -315,7 +315,7 @@ pub mod ffi {
         query: *const QueryBuilder,
     ) -> FFIResult<i64> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Adapter is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let query = match query.is_null() {
@@ -339,7 +339,7 @@ pub mod ffi {
         query: *const QueryBuilder,
     ) -> FFIResult<i64> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Adapter is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let query = match query.is_null() {
@@ -362,7 +362,7 @@ pub mod ffi {
         dimension: DataType,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Adapter is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let pd = &mut *ctx;

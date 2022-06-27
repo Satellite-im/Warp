@@ -194,6 +194,8 @@ pub enum Error {
     #[error("{0}")]
     SerdeJsonError(#[from] serde_json::Error),
     #[error("{0}")]
+    UuidError(#[from] uuid::Error),
+    #[error("{0}")]
     SerdeYamlError(#[from] serde_yaml::Error),
     #[error("Cannot deserialize: {0}")]
     TomlDeserializeError(#[from] toml::de::Error),
@@ -247,6 +249,7 @@ impl Error {
             Error::TomlDeserializeError(_) => String::from("TomlDeserializeError"),
             Error::TomlSerializeError(_) => String::from("TomlSerializeError"),
             Error::RegexError(_) => String::from("RegexError"),
+            Error::UuidError(_) => String::from("UuidError"),
             Error::Any(_) => String::from("Any"),
             Error::IoError(_) => String::from("IoError"),
             Error::Unimplemented => String::from("Unimplemented"),

@@ -421,11 +421,11 @@ pub mod ffi {
         name: *const c_char,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if name.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Name cannot be null")));
         }
 
         let cname = CStr::from_ptr(name).to_string_lossy().to_string();
@@ -440,7 +440,7 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let constellation = &mut *(ctx);
@@ -454,11 +454,11 @@ pub mod ffi {
         name: *const c_char,
     ) -> FFIResult<Directory> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if name.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Name cannot be null")));
         }
 
         let cname = CStr::from_ptr(name).to_string_lossy().to_string();
@@ -488,7 +488,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn constellation_current_directory(
         ctx: *const ConstellationAdapter,
-    ) -> *mut  Directory {
+    ) -> *mut Directory {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
@@ -526,15 +526,15 @@ pub mod ffi {
         local: *const c_char,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if remote.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
         }
 
         if local.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Local path cannot be null")));
         }
 
         let constellation = &mut *(ctx);
@@ -553,21 +553,21 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         buffer: *const u8,
-        buffer_size: u32,
+        buffer_size: usize,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if remote.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
         }
 
         if buffer.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Buffer cannot be null")));
         }
 
-        let slice = std::slice::from_raw_parts(buffer, buffer_size as usize);
+        let slice = std::slice::from_raw_parts(buffer, buffer_size);
 
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote);
@@ -592,15 +592,15 @@ pub mod ffi {
         local: *const c_char,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if remote.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
         }
 
         if local.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Local path cannot be null")));
         }
 
         let constellation = &*(ctx);
@@ -621,11 +621,11 @@ pub mod ffi {
         remote: *const c_char,
     ) -> FFIResult<FFIVec<u8>> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if remote.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Remote cannot be null")));
         }
 
         let constellation = &*ctx;
@@ -648,11 +648,11 @@ pub mod ffi {
         recursive: bool,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if remote.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Remote cannot be null")));
         }
 
         let constellation = &mut *(ctx);
@@ -672,11 +672,11 @@ pub mod ffi {
         recursive: bool,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if remote.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
         }
 
         let constellation = &mut *(ctx);
@@ -701,15 +701,15 @@ pub mod ffi {
         dst: *const c_char,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if src.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Source cannot be null")));
         }
 
         if dst.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Dest cannot be null")));
         }
 
         let constellation = &mut *(ctx);
@@ -729,11 +729,11 @@ pub mod ffi {
         src: *const c_char,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if src.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Source cannot be null")));
         }
 
         let constellation = &mut *(ctx);
@@ -751,7 +751,7 @@ pub mod ffi {
         datatype: ConstellationDataType,
     ) -> FFIResult<c_char> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let constellation = &*(ctx);
@@ -767,58 +767,15 @@ pub mod ffi {
         data: *const c_char,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if data.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Data cannot be null")));
         }
 
         let constellation = &mut *(ctx);
         let data = CStr::from_ptr(data).to_string_lossy().to_string();
         FFIResult::from(constellation.inner_guard().import(datatype, data))
     }
-
-    // #[allow(clippy::missing_safety_doc)]
-    // #[no_mangle]
-    // pub unsafe extern "C" fn constellation_export_json(
-    //     ctx: *const ConstellationAdapter,
-    // ) -> *mut c_char {
-    //     if ctx.is_null() {
-    //         return std::ptr::null_mut();
-    //     }
-    //     let constellation = &*(ctx);
-    //     match constellation
-    //         .inner_guard()
-    //         .export(ConstellationDataType::Json)
-    //     {
-    //         Ok(export) => match CString::new(export) {
-    //             Ok(export) => export.into_raw(),
-    //             Err(_) => std::ptr::null_mut(),
-    //         },
-    //         Err(_) => std::ptr::null_mut(),
-    //     }
-    // }
-    //
-    // #[allow(clippy::missing_safety_doc)]
-    // #[no_mangle]
-    // pub unsafe extern "C" fn constellation_import_json(
-    //     ctx: *mut ConstellationAdapter,
-    //     data: *const c_char,
-    // ) -> bool {
-    //     if ctx.is_null() {
-    //         return false;
-    //     }
-    //
-    //     if data.is_null() {
-    //         return false;
-    //     }
-    //
-    //     let constellation = &mut *(ctx);
-    //     let data = CStr::from_ptr(data).to_string_lossy().to_string();
-    //     constellation
-    //         .inner_guard()
-    //         .import(ConstellationDataType::Json, data)
-    //         .is_ok()
-    // }
 }

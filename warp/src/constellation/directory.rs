@@ -645,7 +645,6 @@ pub mod ffi {
     use std::ffi::CString;
     use std::os::raw::{c_char, c_void};
 
-    // Prep for FFI
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn directory_new(name: *const c_char) -> *mut Directory {
@@ -860,15 +859,15 @@ pub mod ffi {
         item: *const c_char,
     ) -> FFIResult<Item> {
         if ptr.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Directory cannot be null")));
         }
 
         if directory.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Directory path cannot be null")));
         }
 
         if item.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Item cannot be null")));
         }
 
         let dir = &mut *ptr;
@@ -876,10 +875,7 @@ pub mod ffi {
         let directory = CStr::from_ptr(directory).to_string_lossy().to_string();
         let item = CStr::from_ptr(item).to_string_lossy().to_string();
 
-        match dir.remove_item_from_path(&directory, &item) {
-            Ok(item) => FFIResult::ok(item),
-            Err(e) => FFIResult::err(e),
-        }
+        FFIResult::import(dir.remove_item_from_path(&directory, &item))
     }
 
     #[allow(clippy::missing_safety_doc)]

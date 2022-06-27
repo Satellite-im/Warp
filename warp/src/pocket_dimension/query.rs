@@ -120,7 +120,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn querybuilder_import(data: *const c_char) -> FFIResult<QueryBuilder> {
         if data.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Query is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Query cannot be null")));
         }
         let data = CStr::from_ptr(data).to_string_lossy().to_string();
 

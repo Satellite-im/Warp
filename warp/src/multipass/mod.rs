@@ -252,7 +252,7 @@ pub mod ffi {
         passphrase: *const c_char,
     ) -> FFIResult<PublicKey> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let username = match username.is_null() {
@@ -288,7 +288,7 @@ pub mod ffi {
         identifier: *const Identifier,
     ) -> FFIResult<Identity> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if identifier.is_null() {
@@ -309,7 +309,7 @@ pub mod ffi {
         ctx: *const MultiPassAdapter,
     ) -> FFIResult<Identity> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let mp = &*(ctx);
@@ -326,7 +326,7 @@ pub mod ffi {
         option: *const IdentityUpdate,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let mp = &mut *(ctx);
@@ -363,7 +363,7 @@ pub mod ffi {
         ctx: *mut MultiPassAdapter,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let mp = &mut *(ctx);
@@ -377,7 +377,7 @@ pub mod ffi {
         pubkey: *const PublicKey,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if pubkey.is_null() {
@@ -395,7 +395,7 @@ pub mod ffi {
         pubkey: *const PublicKey,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if pubkey.is_null() {
@@ -414,7 +414,7 @@ pub mod ffi {
         pubkey: *const PublicKey,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if pubkey.is_null() {
@@ -433,7 +433,7 @@ pub mod ffi {
         pubkey: *const PublicKey,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if pubkey.is_null() {
@@ -451,7 +451,7 @@ pub mod ffi {
         ctx: *const MultiPassAdapter,
     ) -> FFIResult<FFIArray<FriendRequest>> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let mp = &*(ctx);
@@ -467,7 +467,7 @@ pub mod ffi {
         ctx: *const MultiPassAdapter,
     ) -> FFIResult<FFIArray<FriendRequest>> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let mp = &*(ctx);
@@ -483,7 +483,7 @@ pub mod ffi {
         ctx: *const MultiPassAdapter,
     ) -> FFIResult<FFIArray<FriendRequest>> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let mp = &*(ctx);
@@ -500,7 +500,7 @@ pub mod ffi {
         pubkey: *const PublicKey,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if pubkey.is_null() {
@@ -519,7 +519,7 @@ pub mod ffi {
         pubkey: *const PublicKey,
     ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if pubkey.is_null() {
@@ -535,15 +535,15 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_friends(
         ctx: *const MultiPassAdapter,
-    ) -> *mut FFIArray<Identity> {
+    ) -> FFIResult<FFIArray<Identity>> {
         if ctx.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let mp = &*(ctx);
         match mp.inner_guard().list_friends() {
-            Ok(list) => Box::into_raw(Box::new(FFIArray::new(list))) as *mut _,
-            Err(_) => std::ptr::null_mut(),
+            Ok(list) => FFIResult::ok(FFIArray::new(list)),
+            Err(e) => FFIResult::err(e),
         }
     }
 
@@ -552,17 +552,18 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_has_friend(
         ctx: *const MultiPassAdapter,
         pubkey: *const PublicKey,
-    ) -> bool {
+    ) -> FFIResult<c_void> {
         if ctx.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if pubkey.is_null() {
-            return false;
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Public key cannot be null")));
         }
 
         let mp = &*(ctx);
         let pk = &*pubkey;
-        mp.inner_guard().has_friend(pk.clone()).is_ok()
+
+        FFIResult::from(mp.inner_guard().has_friend(pk.clone()))
     }
 }
