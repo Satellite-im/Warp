@@ -16,6 +16,7 @@ pub struct Mdns {
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Autonat {
     pub enable: bool,
+    pub servers: Vec<Multiaddr>,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
@@ -86,11 +87,12 @@ impl Default for Config {
                 "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
                 "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
                 "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+                "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
             ]
             .iter()
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),
-            listen_on: vec!["/ip4/0.0.0.0/tcp/0"]
+            listen_on: vec!["/ip4/0.0.0.0/tcp/0", "/ip6/::/tcp/0"]
                 .iter()
                 .filter_map(|s| Multiaddr::from_str(s).ok())
                 .collect::<Vec<_>>(),
@@ -99,7 +101,10 @@ impl Default for Config {
                     enable: true,
                     enable_ipv6: true,
                 },
-                autonat: Autonat { enable: true },
+                autonat: Autonat {
+                    enable: true,
+                    servers: vec![],
+                },
                 relay_client: RelayClient {
                     enable: false,
                     relay_address: None,
@@ -108,6 +113,8 @@ impl Default for Config {
                 dcutr: Dcutr { enable: false },
                 kad: Kad {
                     enable: true,
+                    query_timeout: Some(300),
+                    idle_timeout: Some(300),
                     ..Default::default()
                 },
                 rendezvous: Rendezvous {

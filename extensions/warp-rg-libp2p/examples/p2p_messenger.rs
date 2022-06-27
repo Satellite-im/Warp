@@ -118,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
 
     writeln!(stdout, "Type anything and press enter to send...")?;
 
-    let mut convo_size: std::collections::HashMap<Uuid, usize> = HashMap::new();
+    let mut convo_size: HashMap<Uuid, usize> = HashMap::new();
 
     loop {
         tokio::select! {
@@ -232,11 +232,11 @@ async fn main() -> anyhow::Result<()> {
 
                             let message_id = match cmd_line.next() {
                                 Some(id) => match Uuid::from_str(id) {
-                                        Ok(uuid) => uuid,
-                                        Err(e) => {
-                                            writeln!(stdout, "Error parsing ID: {}", e)?;
-                                            continue
-                                        }
+                                    Ok(uuid) => uuid,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing ID: {}", e)?;
+                                        continue
+                                    }
                                 },
                                 None => {
                                     writeln!(stdout, "/edit <conversation-id> <message-id> <message>")?;
@@ -285,11 +285,11 @@ async fn main() -> anyhow::Result<()> {
 
                             let message_id = match cmd_line.next() {
                                 Some(id) => match Uuid::from_str(id) {
-                                        Ok(uuid) => uuid,
-                                        Err(e) => {
-                                            writeln!(stdout, "Error parsing ID: {}", e)?;
-                                            continue
-                                        }
+                                    Ok(uuid) => uuid,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing ID: {}", e)?;
+                                        continue
+                                    }
                                 },
                                 None => {
                                     writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;

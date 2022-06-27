@@ -8,6 +8,7 @@ pub mod events;
 pub mod registry;
 
 use anyhow::anyhow;
+use libp2p::multiaddr::Protocol;
 use libp2p::{identity, PeerId};
 use registry::PeerRegistry;
 use warp::raygun::group::*;
@@ -18,7 +19,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use futures::StreamExt;
 use libp2p::gossipsub::IdentTopic as Topic;
 #[allow(unused_imports)]
-use log::{error, info, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 use warp::multipass::MultiPass;
 use warp::raygun::{
@@ -28,7 +29,6 @@ use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::{error::Error, pocket_dimension::PocketDimension};
 use warp::{module::Module, Extension};
 
-use crate::addr::MultiaddrWithPeerId;
 use crate::behaviour::SwarmCommands;
 use crate::config::Config;
 use crate::events::MessagingEvents;
@@ -89,7 +89,7 @@ impl Libp2pMessaging {
 
         message.peer_id = keypair.public().into();
 
-        println!("{}", message.peer_id);
+        info!("{}", message.peer_id);
 
         peer_registry.add_public_key(keypair.public());
 
@@ -103,20 +103,26 @@ impl Libp2pMessaging {
         )
         .await?;
 
-        for bootstrap in &configuration.bootstrap {
-            let bootstrap = match MultiaddrWithPeerId::try_from(bootstrap.clone()) {
-                Ok(addr) => addr,
-                Err(e) => {
-                    error!("Error parsing bootstrap: {}", e);
-                    continue;
-                }
-            };
-            if let Some(kad) = swarm.behaviour_mut().kademlia.as_mut() {
-                kad.add_address(&bootstrap.peer_id, bootstrap.multiaddr.as_ref().clone());
-            }
-        }
-
         if let Some(kad) = swarm.behaviour_mut().kademlia.as_mut() {
+            for bootstrap in &configuration.bootstrap {
+                info!("Adding {} as bootstrap", bootstrap);
+                let mut addr = bootstrap.to_owned();
+                let peer_id = match addr.pop() {
+                    Some(Protocol::P2p(hash)) => match PeerId::from_multihash(hash) {
+                        Ok(id) => id,
+                        Err(_) => {
+                            warn!("PeerId could not be formed from multihash");
+                            continue;
+                        }
+                    },
+                    _ => {
+                        warn!("Invalid peer id");
+                        continue;
+                    }
+                };
+                kad.add_address(&peer_id, addr);
+            }
+
             if let Err(e) = kad.bootstrap() {
                 error!("Error bootstrapping: {}", e);
             }

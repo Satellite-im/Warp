@@ -1,3 +1,4 @@
+use crate::addr::MultiaddrWithPeerId;
 use crate::events::{process_message_event, MessagingEvents};
 use crate::registry::PeerOption;
 use crate::{agent_name, Config, GroupRegistry, PeerRegistry};
@@ -22,11 +23,11 @@ use libp2p::{
         relay::{Event as RelayServerEvent, Relay as RelayServer},
     },
     swarm::{behaviour::toggle::Toggle, NetworkBehaviour, Swarm, SwarmEvent},
-    tokio_development_transport, Multiaddr, NetworkBehaviour, PeerId, Transport,
+    Multiaddr, NetworkBehaviour, PeerId, Transport,
 };
-use log::{error, info};
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
+use tracing::{error, info};
 use warp::{
     error::Error,
     multipass::MultiPass,
@@ -145,6 +146,7 @@ pub async fn swarm_loop<E>(
 
             //TODO: Perform a check to see if topic is a registered group before insertion of peer
             GossipsubEvent::Subscribed { peer_id, topic } => {
+                info!(target:"gossipsub_subscribe", "{} subscribed to {}", peer_id, topic);
                 let mut group_registry = swarm.behaviour_mut().group_registry.clone();
                 if !group_registry.exist(topic.to_string()) {
                     if let Err(e) = group_registry.register_group(topic.to_string()) {
@@ -158,6 +160,7 @@ pub async fn swarm_loop<E>(
                 }
             }
             GossipsubEvent::Unsubscribed { peer_id, topic } => {
+                info!(target:"gossipsub_unsubscribe", "{} unsubscribed from {}", peer_id, topic);
                 let mut group_registry = swarm.behaviour_mut().group_registry.clone();
                 if let Err(e) = group_registry.remove_peer(topic.to_string(), peer_id) {
                     error!("Error moving peer from group: {}", e);
@@ -217,6 +220,28 @@ pub async fn swarm_loop<E>(
                     },
             } = event
             {
+                if protocols
+                    .iter()
+                    .any(|p| p.as_bytes() == libp2p::kad::protocol::DEFAULT_PROTO_NAME)
+                {
+                    for addr in &listen_addrs {
+                        if let Some(kad) = swarm.behaviour_mut().kademlia.as_mut() {
+                            kad.add_address(&peer_id, addr.clone());
+                        }
+                    }
+                }
+
+                //Used due to name not const in autonat protocol crate
+                let autonat_proto_name = b"/libp2p/autonat/1.0.0";
+
+                if protocols.iter().any(|p| p.as_bytes() == autonat_proto_name) {
+                    for addr in listen_addrs {
+                        if let Some(autonat) = swarm.behaviour_mut().autonat.as_mut() {
+                            autonat.add_server(peer_id, Some(addr));
+                        }
+                    }
+                }
+
                 if agent_version.eq(&agent_name()) {
                     let mut registry = swarm.behaviour_mut().peer_registry.clone();
                     //TODO: Test to make sure a deadlock doesnt occur due to internal mutex
@@ -226,16 +251,6 @@ pub async fn swarm_loop<E>(
                     }
                     if exist {
                         registry.add_public_key(public_key);
-                    }
-                }
-                if protocols
-                    .iter()
-                    .any(|p| p.as_bytes() == libp2p::kad::protocol::DEFAULT_PROTO_NAME)
-                {
-                    for addr in listen_addrs {
-                        if let Some(kad) = swarm.behaviour_mut().kademlia.as_mut() {
-                            kad.add_address(&peer_id, addr);
-                        }
                     }
                 }
             }
@@ -486,6 +501,7 @@ pub async fn create_behaviour(
     let transport = transport(keypair, relay_transport)?;
 
     let mut swarm = libp2p::swarm::SwarmBuilder::new(transport, behaviour, peer)
+        .dial_concurrency_factor(10_u8.try_into().unwrap())
         .executor(Box::new(|fut| {
             tokio::spawn(fut);
         }))
@@ -501,7 +517,7 @@ pub async fn create_behaviour(
         tokio::select! {
             event = swarm.select_next_some() => {
                 if let SwarmEvent::NewListenAddr { address, .. } = event {
-                     info!("Listening on {:?}", address);
+                     info!("Listening on {}", address);
                 }
             },
             _ = tick.tick() => {
@@ -510,7 +526,20 @@ pub async fn create_behaviour(
         }
     }
 
+    if let Some(autonat) = swarm.behaviour_mut().autonat.as_mut() {
+        info!("Autonat enabled.");
+        for server in config.behaviour.autonat.servers {
+            info!("Adding {}", server);
+            let addr_with_peer = MultiaddrWithPeerId::try_from(server)?;
+            autonat.add_server(
+                addr_with_peer.peer_id,
+                Some(addr_with_peer.multiaddr.as_ref().clone()),
+            );
+        }
+    }
+
     if config.behaviour.relay_client.enable {
+        info!("Relay client enabled.");
         let relay_addr = config
             .behaviour
             .relay_client
@@ -558,7 +587,7 @@ pub fn transport(
 ) -> std::io::Result<libp2p::core::transport::Boxed<(PeerId, libp2p::core::muxing::StreamMuxerBox)>>
 {
     match relay_transport {
-        None => tokio_development_transport(keypair),
+        None => libp2p::tokio_development_transport(keypair),
         Some(relay_transport) => {
             let dns_tcp = libp2p::dns::TokioDnsConfig::system(
                 libp2p::tcp::TokioTcpConfig::new().nodelay(true),
