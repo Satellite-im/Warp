@@ -81,12 +81,16 @@ pub fn construct_ffi(_: TokenStream) -> TokenStream {
         }
 
         impl<T> FFIVec<T> {
-            pub fn from(mut vec: Vec<T>) -> Self {
+            pub fn from(vec: Vec<T>) -> Self {
+                let mut vec = std::mem::ManuallyDrop::new(vec);
                 let len = vec.len();
                 let cap = vec.capacity();
                 let ptr = vec.as_mut_ptr();
-                std::mem::forget(vec);
                 Self { ptr, len, cap }
+            }
+
+            pub fn into_vec(mut self) -> Vec<T> {
+                unsafe { Vec::from_raw_parts(self.ptr, self.len, self.cap) }
             }
         }
 
