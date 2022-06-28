@@ -65,7 +65,7 @@ impl SolanaWallet {
     pub fn create_random(
         phrase: PhraseType,
         password: Option<&str>,
-    ) -> anyhow::Result<SolanaWallet> {
+    ) -> Result<SolanaWallet, warp::error::Error> {
         let m_type = match phrase {
             PhraseType::Standard => MnemonicType::Words12,
             PhraseType::Secure => MnemonicType::Words24,
@@ -90,7 +90,7 @@ impl SolanaWallet {
     pub fn restore_from_mnemonic(
         password: Option<&str>,
         mnemonic: &str,
-    ) -> anyhow::Result<SolanaWallet> {
+    ) -> Result<SolanaWallet, warp::error::Error> {
         let mnemonic = Mnemonic::from_phrase(mnemonic, Language::English)?;
         let seed = Seed::new(&mnemonic, password.unwrap_or_default());
 
@@ -103,12 +103,12 @@ impl SolanaWallet {
         Ok(SolanaWallet { mnemonic, keypair })
     }
 
-    pub fn get_keypair(&self) -> anyhow::Result<Keypair> {
+    pub fn get_keypair(&self) -> Result<Keypair, warp::error::Error> {
         let kp = Keypair::from_bytes(&self.keypair)?;
         Ok(kp)
     }
 
-    pub fn get_pubkey(&self) -> anyhow::Result<Pubkey> {
+    pub fn get_pubkey(&self) -> Result<Pubkey, warp::error::Error> {
         let kp = self.get_keypair()?;
         Ok(kp.pubkey())
     }
@@ -126,7 +126,7 @@ impl SolanaWallet {
     ///
     /// assert_eq!(wallet.get_mnemonic_phrase().unwrap(), String::from("morning caution dose lab six actress pond humble pause enact virtual train"))
     /// ```
-    pub fn get_mnemonic_phrase(&self) -> anyhow::Result<String> {
+    pub fn get_mnemonic_phrase(&self) -> Result<String, warp::error::Error> {
         let phrase = Mnemonic::from_entropy(&self.mnemonic, Language::English)?;
         Ok(phrase.phrase().to_string())
     }
@@ -213,7 +213,7 @@ pub mod ffi {
 
         match SolanaWallet::create_random(phrase, password.as_deref()) {
             Ok(wallet) => FFIResult::ok(wallet),
-            Err(e) => FFIResult::err(Error::Any(e)),
+            Err(e) => FFIResult::err(e),
         }
     }
 
@@ -239,7 +239,7 @@ pub mod ffi {
 
         match SolanaWallet::restore_from_mnemonic(passphrase.as_deref(), &mnemonic) {
             Ok(wallet) => FFIResult::ok(wallet),
-            Err(e) => FFIResult::err(Error::Any(e)),
+            Err(e) => FFIResult::err(e),
         }
     }
 
@@ -254,12 +254,7 @@ pub mod ffi {
 
         let wallet = &*wallet;
 
-        FFIResult::from(
-            wallet
-                .get_keypair()
-                .map(|s| s.to_base58_string())
-                .map_err(Error::from),
-        )
+        FFIResult::from(wallet.get_keypair().map(|s| s.to_base58_string()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -273,12 +268,7 @@ pub mod ffi {
 
         let wallet = &*wallet;
 
-        FFIResult::from(
-            wallet
-                .get_pubkey()
-                .map(|s| s.to_string())
-                .map_err(Error::from),
-        )
+        FFIResult::from(wallet.get_pubkey().map(|s| s.to_string()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -292,7 +282,7 @@ pub mod ffi {
 
         let wallet = &*wallet;
 
-        FFIResult::from(wallet.get_mnemonic_phrase().map_err(Error::from))
+        FFIResult::from(wallet.get_mnemonic_phrase())
     }
 
     #[allow(clippy::missing_safety_doc)]

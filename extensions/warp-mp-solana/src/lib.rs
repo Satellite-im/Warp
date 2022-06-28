@@ -113,7 +113,7 @@ impl SolanaAccount {
         Ok(keypair)
     }
 
-    pub fn get_wallet(&self) -> anyhow::Result<SolanaWallet> {
+    pub fn get_wallet(&self) -> Result<SolanaWallet> {
         let tesseract = self.get_tesseract()?;
         let mnemonic = tesseract.retrieve("mnemonic")?;
         SolanaWallet::restore_from_mnemonic(None, &mnemonic)
