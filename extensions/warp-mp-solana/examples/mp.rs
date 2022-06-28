@@ -29,6 +29,7 @@ fn generated_wallet() -> anyhow::Result<SolanaWallet> {
         None,
         "morning caution dose lab six actress pond humble pause enact virtual train",
     )
+    .map_err(anyhow::Error::from)
 }
 
 fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {

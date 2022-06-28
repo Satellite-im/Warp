@@ -17,11 +17,12 @@ mod tests {
             None,
             "morning caution dose lab six actress pond humble pause enact virtual train",
         )
+        .map_err(anyhow::Error::from)
     }
 
     #[allow(unused)]
     fn generated_wallet() -> anyhow::Result<SolanaWallet> {
-        SolanaWallet::create_random(PhraseType::Standard, None)
+        SolanaWallet::create_random(PhraseType::Standard, None).map_err(anyhow::Error::from)
     }
 
     fn tesseract_with_random_key() -> anyhow::Result<Tesseract> {
