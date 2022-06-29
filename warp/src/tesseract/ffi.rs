@@ -45,34 +45,29 @@ pub unsafe extern "C" fn tesseract_to_file(
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "C" fn tesseract_set_file(
-    tesseract: *mut Tesseract,
-    file: *const c_char,
-) -> bool {
+pub unsafe extern "C" fn tesseract_set_file(tesseract: *mut Tesseract, file: *const c_char) {
     if tesseract.is_null() {
-        return false;
+        return;
     }
 
     if file.is_null() {
-        return false;
+        return;
     }
 
     let tesseract = &mut *tesseract;
     let cname = CStr::from_ptr(file).to_string_lossy().to_string();
     tesseract.set_file(cname);
-    true
 }
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "C" fn tesseract_set_autosave(tesseract: *mut Tesseract) -> bool {
+pub unsafe extern "C" fn tesseract_set_autosave(tesseract: *mut Tesseract) {
     if tesseract.is_null() {
-        return false;
+        return;
     }
 
     let tesseract = &mut *tesseract;
     tesseract.set_autosave();
-    true
 }
 
 #[allow(clippy::missing_safety_doc)]
@@ -88,26 +83,24 @@ pub unsafe extern "C" fn tesseract_autosave_enabled(tesseract: *mut Tesseract) -
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "C" fn tesseract_disable_key_check(tesseract: *mut Tesseract) -> bool {
+pub unsafe extern "C" fn tesseract_disable_key_check(tesseract: *mut Tesseract) {
     if tesseract.is_null() {
-        return false;
+        return;
     }
 
     let tesseract = &mut *tesseract;
     tesseract.disable_key_check();
-    true
 }
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "C" fn tesseract_enable_key_check(tesseract: *mut Tesseract) -> bool {
+pub unsafe extern "C" fn tesseract_enable_key_check(tesseract: *mut Tesseract) {
     if tesseract.is_null() {
-        return false;
+        return;
     }
 
     let tesseract = &mut *tesseract;
     tesseract.enable_key_check();
-    true
 }
 
 #[allow(clippy::missing_safety_doc)]
@@ -222,12 +215,12 @@ pub unsafe extern "C" fn tesseract_clear(tesseract: *mut Tesseract) {
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "C" fn tesseract_is_unlock(tesseract: *mut Tesseract) -> bool {
+pub unsafe extern "C" fn tesseract_is_unlock(tesseract: *const Tesseract) -> bool {
     if tesseract.is_null() {
         return false;
     }
 
-    let tesseract = &mut *tesseract;
+    let tesseract = &*tesseract;
     tesseract.is_unlock()
 }
 
@@ -253,12 +246,11 @@ pub unsafe extern "C" fn tesseract_unlock(
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "C" fn tesseract_lock(tesseract: *mut Tesseract) -> bool {
+pub unsafe extern "C" fn tesseract_lock(tesseract: *mut Tesseract) {
     if tesseract.is_null() {
-        return false;
+        return;
     }
 
     let tesseract = &mut *tesseract;
     tesseract.lock();
-    true
 }
