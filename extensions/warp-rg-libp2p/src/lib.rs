@@ -41,16 +41,16 @@ const DEFAULT_TOPICS: [&str; 2] = ["exchange", "announcement"];
 type Result<T> = std::result::Result<T, Error>;
 
 pub struct Libp2pMessaging {
-    pub account: Arc<Mutex<Box<dyn MultiPass>>>,
-    pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-    pub into_thread: Option<Sender<MessagingEvents>>,
-    pub response_channel: Option<Receiver<Result<()>>>,
-    pub command_channel: Option<Sender<SwarmCommands>>,
+    account: Arc<Mutex<Box<dyn MultiPass>>>,
+    cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    into_thread: Option<Sender<MessagingEvents>>,
+    response_channel: Option<Receiver<Result<()>>>,
+    command_channel: Option<Sender<SwarmCommands>>,
     //TODO: Implement a storage system
-    pub conversations: Arc<Mutex<Vec<Message>>>,
-    pub peer_registry: PeerRegistry,
-    pub group_registry: GroupRegistry,
-    pub peer_id: PeerId,
+    conversations: Arc<Mutex<Vec<Message>>>,
+    peer_registry: PeerRegistry,
+    group_registry: GroupRegistry,
+    peer_id: PeerId,
 }
 
 pub fn agent_name() -> String {
