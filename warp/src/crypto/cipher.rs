@@ -94,6 +94,20 @@ impl Cipher {
         Ok(data)
     }
 
+    /// Used to encrypt data directly with key
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn direct_encrypt(cipher_type: CipherType, data: &[u8], key: &[u8]) -> Result<Vec<u8>> {
+        let cipher = Cipher::from(key);
+        cipher.encrypt(cipher_type, data)
+    }
+
+    /// Used to decrypt data directly with key
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn direct_decrypt(cipher_type: CipherType, data: &[u8], key: &[u8]) -> Result<Vec<u8>> {
+        let cipher = Cipher::from(key);
+        cipher.decrypt(cipher_type, data)
+    }
+
     /// Used to encrypt data
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn encrypt(&self, cipher_type: CipherType, data: &[u8]) -> Result<Vec<u8>> {
