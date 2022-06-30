@@ -390,8 +390,7 @@ impl Tesseract {
             return Err(Error::TesseractLocked);
         }
         let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &*self.enc_pass.lock())?;
-        let cipher = Cipher::from(pkey);
-        let data = cipher.encrypt(CipherType::Aes256Gcm, value.as_bytes())?;
+        let data = Cipher::direct_encrypt(CipherType::Aes256Gcm, value.as_bytes(), &pkey)?;
         {
             self.internal.lock().insert(key.to_string(), data);
         }
@@ -437,10 +436,9 @@ impl Tesseract {
         }
 
         let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &*self.enc_pass.lock())?;
-        let cipher = Cipher::from(pkey);
         let internal = self.internal.lock();
         let data = internal.get(key).ok_or(Error::ObjectNotFound)?;
-        let slice = cipher.decrypt(CipherType::Aes256Gcm, data)?;
+        let slice = Cipher::direct_decrypt(CipherType::Aes256Gcm, data, &pkey)?;
         let plain_text = String::from_utf8_lossy(&slice[..]).to_string();
         Ok(plain_text)
     }
