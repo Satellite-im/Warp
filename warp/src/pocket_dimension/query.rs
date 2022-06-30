@@ -1,7 +1,6 @@
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-use super::Result;
 use crate::error::Error;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
@@ -55,7 +54,7 @@ pub struct QueryBuilder {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl QueryBuilder {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn import(data: &str) -> Result<QueryBuilder> {
+    pub fn import(data: &str) -> Result<QueryBuilder, Error> {
         serde_json::from_str(data).map_err(Error::SerdeJsonError)
     }
 }
@@ -75,7 +74,7 @@ impl QueryBuilder {
 }
 
 impl QueryBuilder {
-    pub fn r#where<I>(&mut self, key: &str, value: I) -> Result<&mut Self>
+    pub fn r#where<I>(&mut self, key: &str, value: I) -> Result<&mut Self, Error>
     where
         I: Serialize,
     {
@@ -84,7 +83,12 @@ impl QueryBuilder {
         Ok(self)
     }
 
-    pub fn filter<I>(&mut self, comparator: Comparator, key: &str, value: I) -> Result<&mut Self>
+    pub fn filter<I>(
+        &mut self,
+        comparator: Comparator,
+        key: &str,
+        value: I,
+    ) -> Result<&mut Self, Error>
     where
         I: Serialize,
     {

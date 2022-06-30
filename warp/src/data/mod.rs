@@ -10,8 +10,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-type Result<T> = std::result::Result<T, Error>;
-
 #[allow(unused_imports)]
 use crate::module::Module;
 
@@ -165,7 +163,7 @@ impl Data {
 #[cfg(not(target_arch = "wasm32"))]
 impl Data {
     /// Creates a instance of `Data` with `Module` and `Payload`
-    pub fn new<T>(data_type: DataType, payload: T) -> Result<Self>
+    pub fn new<T>(data_type: DataType, payload: T) -> Result<Self, Error>
     where
         T: Serialize,
     {
@@ -183,7 +181,7 @@ impl Data {
     }
 
     /// Set the payload for `Data`
-    pub fn set_payload<T>(&mut self, payload: T) -> Result<()>
+    pub fn set_payload<T>(&mut self, payload: T) -> Result<(), Error>
     where
         T: Serialize,
     {
@@ -192,7 +190,7 @@ impl Data {
     }
 
     /// Returns the type from `Payload` for `Data`
-    pub fn payload<T>(&self) -> Result<T>
+    pub fn payload<T>(&self) -> Result<T, Error>
     where
         T: DeserializeOwned,
     {
@@ -205,7 +203,7 @@ impl Data {
 impl Data {
     /// Creates a instance of `Data` with `Module` and `Payload`
     #[wasm_bindgen(constructor)]
-    pub fn new(data_type: DataType, payload: JsValue) -> Result<Data> {
+    pub fn new(data_type: DataType, payload: JsValue) -> Result<Data, Error> {
         let payload = serde_wasm_bindgen::from_value(payload).map_err(|_| Error::Other)?;
         Ok(Data {
             data_type,
@@ -222,13 +220,13 @@ impl Data {
 
     /// Set the payload for `Data`
     #[wasm_bindgen(setter)]
-    pub fn set_payload(&mut self, payload: JsValue) -> Result<()> {
+    pub fn set_payload(&mut self, payload: JsValue) -> Result<(), Error> {
         self.payload = serde_wasm_bindgen::from_value(payload).map_err(|_| Error::Other)?;
         Ok(())
     }
 
     #[wasm_bindgen(getter)]
-    pub fn payload(&self) -> Result<JsValue> {
+    pub fn payload(&self) -> Result<JsValue, Error> {
         serde_wasm_bindgen::to_value(&self.payload).map_err(|_| Error::Other)
     }
 }

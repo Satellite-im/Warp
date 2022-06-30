@@ -15,8 +15,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-pub(super) type Result<T> = std::result::Result<T, Error>;
-
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[wasm_bindgen]
@@ -70,7 +68,7 @@ impl DimensionData {
 }
 
 impl DimensionData {
-    pub fn name(&self) -> Result<String> {
+    pub fn name(&self) -> Result<String, Error> {
         match self.get_inner() {
             DimensionDataInner::Buffer { name, .. } => Ok(name.clone()),
             DimensionDataInner::BufferNoFile { name, .. } => Ok(name.clone()),
@@ -80,14 +78,14 @@ impl DimensionData {
 }
 
 impl DimensionData {
-    pub fn path(&self) -> Result<PathBuf> {
+    pub fn path(&self) -> Result<PathBuf, Error> {
         match self.get_inner() {
             DimensionDataInner::Path { path, .. } => Ok(path.clone()),
             _ => Err(Error::Other),
         }
     }
 
-    pub fn write_to_buffer(&self, buffer: &mut [u8]) -> Result<()> {
+    pub fn write_to_buffer(&self, buffer: &mut [u8]) -> Result<(), Error> {
         if let DimensionDataInner::BufferNoFile { internal, .. } = self.get_inner() {
             buffer.copy_from_slice(internal);
             return Ok(());
@@ -98,7 +96,7 @@ impl DimensionData {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl DimensionData {
-    pub fn write_from_path<W: Write>(&self, writer: &mut W) -> Result<()> {
+    pub fn write_from_path<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         match self.get_inner() {
             DimensionDataInner::Path { name, path } if name.is_some() => {
                 let mut file = std::fs::File::open(path)?;
@@ -122,26 +120,26 @@ impl DimensionData {
 /// results.
 pub trait PocketDimension: Extension + Send + Sync {
     /// Used to add data to `PocketDimension` for `Module`
-    fn add_data(&mut self, dimension: DataType, data: &DataObject) -> Result<()>;
+    fn add_data(&mut self, dimension: DataType, data: &DataObject) -> Result<(), Error>;
 
     /// Used to check to see if data exist within `PocketDimension`
-    fn has_data(&mut self, dimension: DataType, query: &QueryBuilder) -> Result<()>;
+    fn has_data(&mut self, dimension: DataType, query: &QueryBuilder) -> Result<(), Error>;
 
     /// Used to obtain a list of `DataObject` for `Module`
     fn get_data(
         &self,
         dimension: DataType,
         query: Option<&QueryBuilder>,
-    ) -> Result<Vec<DataObject>>;
+    ) -> Result<Vec<DataObject>, Error>;
 
     /// Returns the total size within the `Module`
-    fn size(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64>;
+    fn size(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64, Error>;
 
     /// Returns an total amount of `DataObject` for `Module`
-    fn count(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64>;
+    fn count(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64, Error>;
 
     /// Will flush out the data related to `Module`.
-    fn empty(&mut self, dimension: DataType) -> Result<()>;
+    fn empty(&mut self, dimension: DataType) -> Result<(), Error>;
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -167,27 +165,27 @@ impl PocketDimensionAdapter {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl PocketDimensionAdapter {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn add_data(&mut self, dim: DataType, data: &DataObject) -> Result<()> {
+    pub fn add_data(&mut self, dim: DataType, data: &DataObject) -> Result<(), Error> {
         self.inner_guard().add_data(dim, data)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn has_data(&mut self, dim: DataType, query: &QueryBuilder) -> Result<()> {
+    pub fn has_data(&mut self, dim: DataType, query: &QueryBuilder) -> Result<(), Error> {
         self.inner_guard().has_data(dim, query)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn size(&self, dim: DataType, query: Option<QueryBuilder>) -> Result<i64> {
+    pub fn size(&self, dim: DataType, query: Option<QueryBuilder>) -> Result<i64, Error> {
         self.inner_guard().size(dim, query.as_ref())
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn count(&self, dim: DataType, query: Option<QueryBuilder>) -> Result<i64> {
+    pub fn count(&self, dim: DataType, query: Option<QueryBuilder>) -> Result<i64, Error> {
         self.inner_guard().count(dim, query.as_ref())
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn empty(&mut self, dimension: DataType) -> Result<()> {
+    pub fn empty(&mut self, dimension: DataType) -> Result<(), Error> {
         self.inner_guard().empty(dimension)
     }
 
@@ -214,7 +212,11 @@ impl PocketDimensionAdapter {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl PocketDimensionAdapter {
-    pub fn get_data(&self, dim: DataType, query: Option<QueryBuilder>) -> Result<Vec<DataObject>> {
+    pub fn get_data(
+        &self,
+        dim: DataType,
+        query: Option<QueryBuilder>,
+    ) -> Result<Vec<DataObject>, Error> {
         self.inner_guard().get_data(dim, query.as_ref())
     }
 }
@@ -223,7 +225,11 @@ impl PocketDimensionAdapter {
 #[wasm_bindgen]
 impl PocketDimensionAdapter {
     #[wasm_bindgen]
-    pub fn get_data(&self, dim: DataType, query: Option<QueryBuilder>) -> Result<Vec<JsValue>> {
+    pub fn get_data(
+        &self,
+        dim: DataType,
+        query: Option<QueryBuilder>,
+    ) -> Result<Vec<JsValue>, Error> {
         self.inner_guard().get_data(dim, query.as_ref()).map(|s| {
             s.iter()
                 .map(|i| serde_wasm_bindgen::to_value(&i).unwrap())

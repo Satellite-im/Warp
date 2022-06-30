@@ -24,8 +24,6 @@ use js_sys::Promise;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::future_to_promise;
 
-pub(super) type Result<T> = std::result::Result<T, Error>;
-
 /// Interface that would provide functionality around the filesystem.
 #[async_trait::async_trait]
 pub trait Constellation: Extension + Sync + Send {
@@ -53,7 +51,7 @@ pub trait Constellation: Extension + Sync + Send {
     }
 
     /// Select a directory within the filesystem
-    fn select(&mut self, path: &str) -> Result<()> {
+    fn select(&mut self, path: &str) -> Result<(), Error> {
         let path = Path::new(path).to_path_buf();
         let current_pathbuf = self.get_path();
 
@@ -79,7 +77,7 @@ pub trait Constellation: Extension + Sync + Send {
     fn get_path(&self) -> &PathBuf;
 
     /// Go back to the previous directory
-    fn go_back(&mut self) -> Result<()> {
+    fn go_back(&mut self) -> Result<(), Error> {
         if !self.get_path_mut().pop() {
             return Err(Error::DirectoryNotFound);
         }
@@ -90,12 +88,12 @@ pub trait Constellation: Extension + Sync + Send {
     fn get_path_mut(&mut self) -> &mut PathBuf;
 
     /// Get the current directory that is mutable.
-    fn current_directory_mut(&mut self) -> Result<&mut Directory> {
+    fn current_directory_mut(&mut self) -> Result<&mut Directory, Error> {
         self.open_directory(&self.get_path().clone().to_string_lossy())
     }
 
     /// Returns a mutable directory from the filesystem
-    fn open_directory(&mut self, path: &str) -> Result<&mut Directory> {
+    fn open_directory(&mut self, path: &str) -> Result<&mut Directory, Error> {
         match path.trim().is_empty() {
             true => Ok(self.root_directory_mut()),
             false => self
@@ -106,47 +104,47 @@ pub trait Constellation: Extension + Sync + Send {
     }
 
     /// Used to upload file to the filesystem
-    async fn put(&mut self, _: &str, _: &str) -> Result<()> {
+    async fn put(&mut self, _: &str, _: &str) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Used to download a file from the filesystem
-    async fn get(&self, _: &str, _: &str) -> Result<()> {
+    async fn get(&self, _: &str, _: &str) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Used to upload file to the filesystem with data from buffer
-    async fn put_buffer(&mut self, _: &str, _: &Vec<u8>) -> Result<()> {
+    async fn put_buffer(&mut self, _: &str, _: &Vec<u8>) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Used to download data from the filesystem into a buffer
-    async fn get_buffer(&self, _: &str) -> Result<Vec<u8>> {
+    async fn get_buffer(&self, _: &str) -> Result<Vec<u8>, Error> {
         Err(Error::Unimplemented)
     }
 
     /// Used to remove data from the filesystem
-    async fn remove(&mut self, _: &str, _: bool) -> Result<()> {
+    async fn remove(&mut self, _: &str, _: bool) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Used to move data within the filesystem
-    async fn move_item(&mut self, _: &str, _: &str) -> Result<()> {
+    async fn move_item(&mut self, _: &str, _: &str) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Used to create a directory within the filesystem.
-    async fn create_directory(&mut self, _: &str, _: bool) -> Result<()> {
+    async fn create_directory(&mut self, _: &str, _: bool) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Used to sync references within the filesystem for a file
-    async fn sync_ref(&mut self, _: &str) -> Result<()> {
+    async fn sync_ref(&mut self, _: &str) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Used to export the filesystem to a specific structure. Currently supports `Json`, `Toml`, and `Yaml`
-    fn export(&self, r#type: ConstellationDataType) -> Result<String> {
+    fn export(&self, r#type: ConstellationDataType) -> Result<String, Error> {
         match r#type {
             ConstellationDataType::Json => {
                 serde_json::to_string(self.root_directory()).map_err(Error::from)
@@ -162,7 +160,7 @@ pub trait Constellation: Extension + Sync + Send {
 
     /// Used to import data into the filesystem. This would override current contents.
     /// TODO: Have the data argument accept either bytes or an reader field
-    fn import(&mut self, r#type: ConstellationDataType, data: String) -> Result<()> {
+    fn import(&mut self, r#type: ConstellationDataType, data: String) -> Result<(), Error> {
         let directory: Directory = match r#type {
             ConstellationDataType::Json => serde_json::from_str(data.as_str())?,
             ConstellationDataType::Yaml => serde_yaml::from_str(data.as_str())?,
@@ -244,22 +242,22 @@ impl ConstellationAdapter {
     }
 
     #[wasm_bindgen]
-    pub fn select(&mut self, path: &str) -> Result<()> {
+    pub fn select(&mut self, path: &str) -> Result<(), Error> {
         self.inner_guard().select(path)
     }
 
     #[wasm_bindgen]
-    pub fn go_back(&mut self) -> Result<()> {
+    pub fn go_back(&mut self) -> Result<(), Error> {
         self.inner_guard().go_back()
     }
 
     #[wasm_bindgen]
-    pub fn export(&self, data_type: ConstellationDataType) -> Result<String> {
+    pub fn export(&self, data_type: ConstellationDataType) -> Result<String, Error> {
         self.inner_guard().export(data_type)
     }
 
     #[wasm_bindgen]
-    pub fn import(&mut self, data_type: ConstellationDataType, data: String) -> Result<()> {
+    pub fn import(&mut self, data_type: ConstellationDataType, data: String) -> Result<(), Error> {
         self.inner_guard().import(data_type, data)
     }
 

@@ -7,7 +7,6 @@ use uuid::Uuid;
 
 use super::directory::Directory;
 use super::file::File;
-use super::Result;
 use crate::error::Error;
 use warp_derive::{FFIArray, FFIFree};
 
@@ -208,7 +207,7 @@ impl Item {
 
     /// Rename the name of `Item`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn rename(&mut self, name: &str) -> Result<()> {
+    pub fn rename(&mut self, name: &str) -> Result<(), Error> {
         let name = name.trim();
         if self.name() == name {
             return Err(Error::DuplicateName);
@@ -252,7 +251,7 @@ impl Item {
 
     /// Set size of `Item` if its a `File`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_size(&mut self, size: i64) -> Result<()> {
+    pub fn set_size(&mut self, size: i64) -> Result<(), Error> {
         if let Some(file) = self.file_mut() {
             file.set_size(size);
             return Ok(());
@@ -263,22 +262,22 @@ impl Item {
 
 impl Item {
     /// Convert `Item` to `Directory`
-    pub fn get_directory(&self) -> Result<&Directory> {
+    pub fn get_directory(&self) -> Result<&Directory, Error> {
         self.directory().ok_or(Error::InvalidConversion)
     }
 
     /// Convert `Item` to `File`
-    pub fn get_file(&self) -> Result<&File> {
+    pub fn get_file(&self) -> Result<&File, Error> {
         self.file().ok_or(Error::InvalidConversion)
     }
 
     /// Convert `Item` to `Directory`
-    pub fn get_directory_mut(&mut self) -> Result<&mut Directory> {
+    pub fn get_directory_mut(&mut self) -> Result<&mut Directory, Error> {
         self.directory_mut().ok_or(Error::InvalidConversion)
     }
 
     /// Convert `Item` to `File`
-    pub fn get_file_mut(&mut self) -> Result<&mut File> {
+    pub fn get_file_mut(&mut self) -> Result<&mut File, Error> {
         self.file_mut().ok_or(Error::InvalidConversion)
     }
 }

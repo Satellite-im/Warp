@@ -16,8 +16,6 @@ use uuid::Uuid;
 
 use self::group::GroupChat;
 
-pub(super) type Result<T> = std::result::Result<T, crate::error::Error>;
-
 pub type Callback = Box<dyn Fn() + Sync + Send>;
 
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
@@ -322,7 +320,7 @@ pub trait RayGun: Extension + GroupChat + Sync + Send {
         conversation_id: Uuid,
         options: MessageOptions,
         callback: Option<Callback>,
-    ) -> Result<Vec<Message>>;
+    ) -> Result<Vec<Message>, Error>;
 
     /// Sends a message to a conversation. If `message_id` is provided, it will override the selected message
     async fn send(
@@ -330,10 +328,10 @@ pub trait RayGun: Extension + GroupChat + Sync + Send {
         conversation_id: Uuid,
         message_id: Option<Uuid>,
         message: Vec<String>,
-    ) -> Result<()>;
+    ) -> Result<(), Error>;
 
     /// Delete message from a conversation
-    async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()>;
+    async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<(), Error>;
 
     /// React to a message
     async fn react(
@@ -342,11 +340,15 @@ pub trait RayGun: Extension + GroupChat + Sync + Send {
         message_id: Uuid,
         state: ReactionState,
         emoji: String,
-    ) -> Result<()>;
+    ) -> Result<(), Error>;
 
     /// Pin a message within a conversation
-    async fn pin(&mut self, conversation_id: Uuid, message_id: Uuid, state: PinState)
-        -> Result<()>;
+    async fn pin(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: PinState,
+    ) -> Result<(), Error>;
 
     /// Reply to a message within a conversation
     async fn reply(
@@ -354,10 +356,10 @@ pub trait RayGun: Extension + GroupChat + Sync + Send {
         conversation_id: Uuid,
         message_id: Uuid,
         message: Vec<String>,
-    ) -> Result<()>;
+    ) -> Result<(), Error>;
 
     /// Ping conversation for a response
-    async fn ping(&mut self, _: Uuid) -> Result<()> {
+    async fn ping(&mut self, _: Uuid) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
@@ -366,7 +368,7 @@ pub trait RayGun: Extension + GroupChat + Sync + Send {
         conversation_id: Uuid,
         message_id: Uuid,
         state: EmbedState,
-    ) -> Result<()>;
+    ) -> Result<(), Error>;
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]

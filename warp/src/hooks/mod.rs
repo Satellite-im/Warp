@@ -7,8 +7,6 @@ use crate::module::Module;
 
 use crate::sync::*;
 
-type Result<T> = std::result::Result<T, Error>;
-
 pub trait HookType: std::fmt::Display {
     fn module_type(&self) -> DataType {
         DataType::Unknown
@@ -135,7 +133,7 @@ impl Hooks {
     ///     let hook = system.create(Module::FileSystem, "new_file").unwrap();
     ///     assert_eq!(hook, Hook::new(Module::FileSystem, "new_file"));
     /// ```
-    pub fn create(&mut self, module: Module, name: &str) -> Result<Hook> {
+    pub fn create(&mut self, module: Module, name: &str) -> Result<Hook, Error> {
         let hook = Hook::new(module, name);
         let mut hooks = self.hooks.lock();
         if hooks.contains(&hook) {
@@ -189,7 +187,7 @@ impl Hooks {
     ///     let data = DataObject::new(DataType::from(Module::FileSystem), File::new("test.txt")).unwrap();
     ///     system.trigger("filesystem::new_file", &data);
     /// ```
-    pub fn subscribe<C, H>(&mut self, hook: H, f: C) -> Result<()>
+    pub fn subscribe<C, H>(&mut self, hook: H, f: C) -> Result<(), Error>
     where
         C: 'static + Fn(&Hook, &DataObject) + Sync + Send,
         H: Into<Hook>,

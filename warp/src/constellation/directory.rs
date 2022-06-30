@@ -1,6 +1,5 @@
 use super::file::File;
 use super::item::Item;
-use super::Result;
 use crate::error::Error;
 use chrono::{DateTime, Utc};
 use derive_more::Display;
@@ -151,7 +150,7 @@ impl Directory {
 
     /// Add a file to the `Directory`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn add_file(&mut self, file: File) -> Result<()> {
+    pub fn add_file(&mut self, file: File) -> Result<(), Error> {
         if self.has_item(&file.name()) {
             return Err(Error::DuplicateName);
         }
@@ -162,7 +161,7 @@ impl Directory {
 
     /// Add a directory to the `Directory`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn add_directory(&mut self, directory: Directory) -> Result<()> {
+    pub fn add_directory(&mut self, directory: Directory) -> Result<(), Error> {
         if self.has_item(&directory.name()) {
             return Err(Error::DuplicateName);
         }
@@ -194,7 +193,7 @@ impl Directory {
     ///
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn get_item_index(&self, item_name: &str) -> Result<usize> {
+    pub fn get_item_index(&self, item_name: &str) -> Result<usize, Error> {
         self.items
             .iter()
             .position(|item| item.name() == item_name)
@@ -220,7 +219,7 @@ impl Directory {
     ///
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn rename_item(&mut self, current_name: &str, new_name: &str) -> Result<()> {
+    pub fn rename_item(&mut self, current_name: &str, new_name: &str) -> Result<(), Error> {
         self.get_item_mut_by_path(current_name)?.rename(new_name)
     }
 
@@ -240,7 +239,7 @@ impl Directory {
     ///     assert_eq!(root.has_item("Sub Directory"), false);
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn remove_item(&mut self, item_name: &str) -> Result<Item> {
+    pub fn remove_item(&mut self, item_name: &str) -> Result<Item, Error> {
         if !self.has_item(item_name) {
             return Err(Error::ItemInvalid);
         }
@@ -282,7 +281,7 @@ impl Directory {
     ///         assert_eq!(root.get_item_by_path("Sub Directory 1/Sub Directory 2/Sub Directory 3").is_err(), true);
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn remove_item_from_path(&mut self, directory: &str, item: &str) -> Result<Item> {
+    pub fn remove_item_from_path(&mut self, directory: &str, item: &str) -> Result<Item, Error> {
         self.get_item_mut_by_path(directory)?
             .get_directory_mut()?
             .remove_item(item)
@@ -309,7 +308,7 @@ impl Directory {
     ///     assert_ne!(root.has_item("Sub Directory 2"), true);
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn move_item_to(&mut self, child: &str, dst: &str) -> Result<()> {
+    pub fn move_item_to(&mut self, child: &str, dst: &str) -> Result<(), Error> {
         let (child, dst) = (child.trim(), dst.trim());
 
         if self.get_item_by_path(dst)?.is_file() {
@@ -364,7 +363,7 @@ impl Directory {
     ///     let sub = Directory::new("Sub Directory");
     ///     root.add_item(sub).unwrap();
     /// ```
-    pub fn add_item<I: Into<Item>>(&mut self, item: I) -> Result<()> {
+    pub fn add_item<I: Into<Item>>(&mut self, item: I) -> Result<(), Error> {
         let item = item.into();
         if self.has_item(&item.name()) {
             return Err(Error::DuplicateName);
@@ -387,7 +386,7 @@ impl Directory {
     ///     let item = root.get_item("Sub Directory").unwrap();
     ///     assert_eq!(item.name(), "Sub Directory");
     /// ```
-    pub fn get_item(&self, item_name: &str) -> Result<&Item> {
+    pub fn get_item(&self, item_name: &str) -> Result<&Item, Error> {
         if !self.has_item(item_name) {
             return Err(Error::ItemInvalid);
         }
@@ -419,7 +418,7 @@ impl Directory {
     ///     assert_eq!(dir.has_item("testFile.png"), false);
     ///
     /// ```
-    pub fn get_item_mut(&mut self, item_name: &str) -> Result<&mut Item> {
+    pub fn get_item_mut(&mut self, item_name: &str) -> Result<&mut Item, Error> {
         if !self.has_item(item_name) {
             return Err(Error::ItemInvalid);
         }
@@ -445,7 +444,7 @@ impl Directory {
     ///     let item = root.find_item("Sub Directory 2").unwrap();
     ///     assert_eq!(item.name(), "Sub Directory 2");
     /// ```
-    pub fn find_item(&self, item_name: &str) -> Result<&Item> {
+    pub fn find_item(&self, item_name: &str) -> Result<&Item, Error> {
         for item in self.items.iter() {
             if item.name().eq(item_name) {
                 return Ok(item);
@@ -501,7 +500,7 @@ impl Directory {
     ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory 3").is_ok(), true);
     ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory3/Another Dir").is_ok(), false);
     /// ```
-    pub fn get_item_by_path(&self, path: &str) -> Result<&Item> {
+    pub fn get_item_by_path(&self, path: &str) -> Result<&Item, Error> {
         let mut path = path
             .split('/')
             .filter(|&s| !s.is_empty())
@@ -544,7 +543,7 @@ impl Directory {
     ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory 3").is_ok(), true);
     ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/Sub Directory 2/Another Directory").is_ok(), true);
     /// ```
-    pub fn get_item_mut_by_path(&mut self, path: &str) -> Result<&mut Item> {
+    pub fn get_item_mut_by_path(&mut self, path: &str) -> Result<&mut Item, Error> {
         let mut path = path
             .split('/')
             .filter(|&s| !s.is_empty())

@@ -1,4 +1,4 @@
-use super::Result;
+use crate::error::Error;
 use chrono::{DateTime, Utc};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -298,7 +298,7 @@ impl Hash {
 #[cfg(not(target_arch = "wasm32"))]
 impl Hash {
     /// Use to generate a hash from file
-    pub fn hash_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<()> {
+    pub fn hash_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<(), Error> {
         self.sha1hash_from_file(&path)?;
         self.sha256hash_from_file(&path)?;
         Ok(())
@@ -318,14 +318,14 @@ impl Hash {
     /// assert_eq!(hash.sha1(), Some(String::from("0A0A9F2A6772942557AB5355D76AF442F8F65E01")))    ;///
     /// assert_eq!(hash.sha256(), Some(String::from("DFFD6021BB2BD5B0AF676290809EC3A53191DD81C7F70A4B28688A362182986F")));
     /// ```
-    pub fn hash_from_reader<R: Read + Seek>(&mut self, reader: &mut R) -> Result<()> {
+    pub fn hash_from_reader<R: Read + Seek>(&mut self, reader: &mut R) -> Result<(), Error> {
         self.sha1hash_from_reader(reader)?;
         self.sha256hash_from_reader(reader)?;
         Ok(())
     }
 
     /// Use to generate a sha1 hash of a file
-    pub fn sha1hash_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<()> {
+    pub fn sha1hash_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<(), Error> {
         let res = crate::crypto::multihash::sha1_multihash_file(path)?;
         self.sha1 = Some(bs58::encode(res).into_string());
         Ok(())
@@ -344,7 +344,7 @@ impl Hash {
     ///
     /// assert_eq!(hash.sha1(), Some(String::from("0A0A9F2A6772942557AB5355D76AF442F8F65E01")))
     /// ```
-    pub fn sha1hash_from_reader<R: Read + Seek>(&mut self, reader: &mut R) -> Result<()> {
+    pub fn sha1hash_from_reader<R: Read + Seek>(&mut self, reader: &mut R) -> Result<(), Error> {
         let res = crate::crypto::hash::sha1_hash_stream(reader, None)?;
         reader.seek(SeekFrom::Start(0))?;
         self.sha1 = Some(hex::encode(res).to_uppercase());
@@ -352,7 +352,10 @@ impl Hash {
     }
 
     /// Use to generate a sha256 hash of a file
-    pub fn sha256hash_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<()> {
+    pub fn sha256hash_from_file<P: AsRef<std::path::Path>>(
+        &mut self,
+        path: P,
+    ) -> Result<(), Error> {
         let res = crate::crypto::multihash::sha2_256_multihash_file(path)?;
         self.sha256 = Some(bs58::encode(res).into_string());
         Ok(())
@@ -371,7 +374,7 @@ impl Hash {
     ///
     /// assert_eq!(hash.sha256(), Some(String::from("DFFD6021BB2BD5B0AF676290809EC3A53191DD81C7F70A4B28688A362182986F")))
     /// ```
-    pub fn sha256hash_from_reader<R: Read + Seek>(&mut self, reader: &mut R) -> Result<()> {
+    pub fn sha256hash_from_reader<R: Read + Seek>(&mut self, reader: &mut R) -> Result<(), Error> {
         let res = crate::crypto::hash::sha256_hash_stream(reader, None)?;
         reader.seek(SeekFrom::Start(0))?;
         self.sha256 = Some(hex::encode(res).to_uppercase());
@@ -395,7 +398,7 @@ impl Hash {
     /// assert_eq!(hash.sha256(), Some(String::from("QmdR1iHsUocy7pmRHBhNa9znM8eh8Mwqq5g5vcw8MDMXTt")));
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn hash_from_slice(&mut self, data: &[u8]) -> Result<()> {
+    pub fn hash_from_slice(&mut self, data: &[u8]) -> Result<(), Error> {
         self.sha1hash_from_slice(data)?;
         self.sha256hash_from_slice(data)
     }
@@ -412,7 +415,7 @@ impl Hash {
     /// assert_eq!(hash.sha1(), Some(String::from("5dqvXR93VnV1Grn96DBGdqEQAbJe1e")))
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn sha1hash_from_slice(&mut self, slice: &[u8]) -> Result<()> {
+    pub fn sha1hash_from_slice(&mut self, slice: &[u8]) -> Result<(), Error> {
         let res = crate::crypto::multihash::sha1_multihash_slice(slice)?;
         self.sha1 = Some(bs58::encode(res).into_string());
         Ok(())
@@ -430,7 +433,7 @@ impl Hash {
     /// assert_eq!(hash.sha256(), Some(String::from("QmdR1iHsUocy7pmRHBhNa9znM8eh8Mwqq5g5vcw8MDMXTt")))
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn sha256hash_from_slice(&mut self, slice: &[u8]) -> Result<()> {
+    pub fn sha256hash_from_slice(&mut self, slice: &[u8]) -> Result<(), Error> {
         let res = crate::crypto::multihash::sha2_256_multihash_slice(slice)?;
         self.sha256 = Some(bs58::encode(res).into_string());
         Ok(())

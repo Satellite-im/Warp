@@ -1,15 +1,16 @@
-use crate::sync::{Arc, Mutex, MutexGuard};
+pub mod generator;
+pub mod identity;
+
 use warp_derive::FFIFree;
 #[allow(unused_imports)]
 use wasm_bindgen::prelude::*;
 
-pub mod generator;
-pub mod identity;
+use crate::error::Error;
+use crate::sync::{Arc, Mutex, MutexGuard};
 
 use crate::Extension;
 use identity::Identity;
 
-type Result<T> = std::result::Result<T, crate::error::Error>;
 use crate::crypto::PublicKey;
 use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate};
 
@@ -18,19 +19,19 @@ pub trait MultiPass: Extension + Friends + Sync + Send {
         &mut self,
         username: Option<&str>,
         passphrase: Option<&str>,
-    ) -> Result<PublicKey>;
+    ) -> Result<PublicKey, Error>;
 
-    fn get_identity(&self, id: Identifier) -> Result<Identity>;
+    fn get_identity(&self, id: Identifier) -> Result<Identity, Error>;
 
-    fn get_own_identity(&self) -> Result<Identity> {
+    fn get_own_identity(&self) -> Result<Identity, Error> {
         self.get_identity(Identifier::own())
     }
 
-    fn update_identity(&mut self, option: IdentityUpdate) -> Result<()>;
+    fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error>;
 
-    fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<Vec<u8>>;
+    fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<Vec<u8>, Error>;
 
-    fn refresh_cache(&mut self) -> Result<()>;
+    fn refresh_cache(&mut self) -> Result<(), Error>;
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -41,37 +42,37 @@ pub struct MultiPassAdapter {
 
 pub trait Friends: Sync + Send {
     /// Send friend request to corresponding public key
-    fn send_request(&mut self, pubkey: PublicKey) -> Result<()>;
+    fn send_request(&mut self, pubkey: PublicKey) -> Result<(), Error>;
 
     /// Accept friend request from public key
-    fn accept_request(&mut self, pubkey: PublicKey) -> Result<()>;
+    fn accept_request(&mut self, pubkey: PublicKey) -> Result<(), Error>;
 
     /// Deny friend request from public key
-    fn deny_request(&mut self, pubkey: PublicKey) -> Result<()>;
+    fn deny_request(&mut self, pubkey: PublicKey) -> Result<(), Error>;
 
     /// Closing or retracting friend request
-    fn close_request(&mut self, pubkey: PublicKey) -> Result<()>;
+    fn close_request(&mut self, pubkey: PublicKey) -> Result<(), Error>;
 
     /// List the incoming friend request
-    fn list_incoming_request(&self) -> Result<Vec<FriendRequest>>;
+    fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error>;
 
     /// List the outgoing friend request
-    fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>>;
+    fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error>;
 
     /// List all the friend request that been sent or received
-    fn list_all_request(&self) -> Result<Vec<FriendRequest>>;
+    fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error>;
 
     /// Remove friend from contacts
-    fn remove_friend(&mut self, pubkey: PublicKey) -> Result<()>;
+    fn remove_friend(&mut self, pubkey: PublicKey) -> Result<(), Error>;
 
     /// Block public key, rather it be a friend or not, from being able to send request to account public address
-    fn block_key(&mut self, pubkey: PublicKey) -> Result<()>;
+    fn block_key(&mut self, pubkey: PublicKey) -> Result<(), Error>;
 
     /// List all friends and return a corresponding identity for each public key
-    fn list_friends(&self) -> Result<Vec<Identity>>;
+    fn list_friends(&self) -> Result<Vec<Identity>, Error>;
 
     /// Check to see if public key is friend of the account
-    fn has_friend(&self, pubkey: PublicKey) -> Result<()>;
+    fn has_friend(&self, pubkey: PublicKey) -> Result<(), Error>;
 }
 
 impl MultiPassAdapter {
@@ -99,69 +100,69 @@ impl MultiPassAdapter {
         &mut self,
         username: Option<String>,
         passphrase: Option<String>,
-    ) -> Result<PublicKey> {
+    ) -> Result<PublicKey, Error> {
         self.inner_guard()
             .create_identity(username.as_deref(), passphrase.as_deref())
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn get_identity(&self, id: Identifier) -> Result<Identity> {
+    pub fn get_identity(&self, id: Identifier) -> Result<Identity, Error> {
         self.inner_guard().get_identity(id)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn get_own_identity(&self) -> Result<Identity> {
+    pub fn get_own_identity(&self) -> Result<Identity, Error> {
         self.inner_guard().get_own_identity()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn update_identity(&mut self, option: IdentityUpdate) -> Result<()> {
+    pub fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
         self.inner_guard().update_identity(option)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn decrypt_private_key(&self, passphrase: Option<String>) -> Result<Vec<u8>> {
+    pub fn decrypt_private_key(&self, passphrase: Option<String>) -> Result<Vec<u8>, Error> {
         self.inner_guard()
             .decrypt_private_key(passphrase.as_deref())
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn refresh_cache(&mut self) -> Result<()> {
+    pub fn refresh_cache(&mut self) -> Result<(), Error> {
         self.inner_guard().refresh_cache()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn send_request(&mut self, pubkey: PublicKey) -> Result<()> {
+    pub fn send_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
         self.inner_guard().send_request(pubkey)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn accept_request(&mut self, pubkey: PublicKey) -> Result<()> {
+    pub fn accept_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
         self.inner_guard().accept_request(pubkey)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn deny_request(&mut self, pubkey: PublicKey) -> Result<()> {
+    pub fn deny_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
         self.inner_guard().deny_request(pubkey)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn close_request(&mut self, pubkey: PublicKey) -> Result<()> {
+    pub fn close_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
         self.inner_guard().close_request(pubkey)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn remove_friend(&mut self, pubkey: PublicKey) -> Result<()> {
+    pub fn remove_friend(&mut self, pubkey: PublicKey) -> Result<(), Error> {
         self.inner_guard().remove_friend(pubkey)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn block_key(&mut self, pubkey: PublicKey) -> Result<()> {
+    pub fn block_key(&mut self, pubkey: PublicKey) -> Result<(), Error> {
         self.inner_guard().block_key(pubkey)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn has_friend(&self, pubkey: PublicKey) -> Result<()> {
+    pub fn has_friend(&self, pubkey: PublicKey) -> Result<(), Error> {
         self.inner_guard().has_friend(pubkey)
     }
 
@@ -188,19 +189,19 @@ impl MultiPassAdapter {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl MultiPassAdapter {
-    pub fn list_incoming_request(&self) -> Result<Vec<FriendRequest>> {
+    pub fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
         self.inner_guard().list_incoming_request()
     }
 
-    pub fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>> {
+    pub fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
         self.inner_guard().list_outgoing_request()
     }
 
-    pub fn list_friends(&self) -> Result<Vec<Identity>> {
+    pub fn list_friends(&self) -> Result<Vec<Identity>, Error> {
         self.inner_guard().list_friends()
     }
 
-    pub fn list_all_request(&self) -> Result<Vec<FriendRequest>> {
+    pub fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
         self.inner_guard().list_all_request()
     }
 }
@@ -210,22 +211,22 @@ cfg_if::cfg_if! {
         #[wasm_bindgen]
         impl MultiPassAdapter {
             #[wasm_bindgen]
-            pub fn list_incoming_request(&self) -> Result<JsValue> {
+            pub fn list_incoming_request(&self) -> Result<JsValue, Error> {
                 self.inner_guard().list_incoming_request().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
             }
 
             #[wasm_bindgen]
-            pub fn list_outgoing_request(&self) -> Result<JsValue> {
+            pub fn list_outgoing_request(&self) -> Result<JsValue, Error> {
                 self.inner_guard().list_outgoing_request().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
             }
 
             #[wasm_bindgen]
-            pub fn list_friends(&self) -> Result<JsValue> {
+            pub fn list_friends(&self) -> Result<JsValue, Error> {
                 self.inner_guard().list_friends().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
             }
 
             #[wasm_bindgen]
-            pub fn list_all_request(&self) -> Result<JsValue> {
+            pub fn list_all_request(&self) -> Result<JsValue, Error> {
                 self.inner_guard().list_all_request().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
             }
         }
