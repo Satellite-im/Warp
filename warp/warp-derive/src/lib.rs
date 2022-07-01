@@ -120,6 +120,12 @@ pub fn construct_ffi(_: TokenStream) -> TokenStream {
             pub error: *mut FFIError,
         }
 
+        #[repr(C)]
+        pub struct FFIResult_String {
+            pub data: *mut std::os::raw::c_char,
+            pub error: *mut FFIError,
+        }
+
         impl<T> From<Result<Vec<T>, crate::error::Error>> for FFIResult<FFIVec<T>> {
             fn from(res: Result<Vec<T>, crate::error::Error>) -> Self {
                 match res {
