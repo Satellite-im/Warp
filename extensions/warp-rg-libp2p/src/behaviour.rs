@@ -1,7 +1,7 @@
 use crate::events::{process_message_event, MessagingEvents};
 use crate::registry::PeerOption;
 use crate::{agent_name, Config, GroupRegistry, PeerRegistry};
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use futures::StreamExt;
 use libp2p::multiaddr::Protocol;
 use libp2p::{
@@ -24,7 +24,7 @@ use libp2p::{
     swarm::{behaviour::toggle::Toggle, NetworkBehaviour, Swarm, SwarmEvent},
     Multiaddr, NetworkBehaviour, PeerId, Transport,
 };
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 use tracing::{error, info, warn};
@@ -189,7 +189,14 @@ pub async fn swarm_loop<E>(
         SwarmEvent::Behaviour(BehaviourEvent::Ping(_)) => {}
         SwarmEvent::Behaviour(BehaviourEvent::Kad(event)) => match event {
             KademliaEvent::OutboundQueryCompleted { result, .. } => match result {
-                QueryResult::Bootstrap(_) => {}
+                QueryResult::Bootstrap(Ok(ok)) => {
+                    if ok.num_remaining == 0 {
+                        swarm
+                            .behaviour_mut()
+                            .bootstrap_complete
+                            .store(true, Ordering::SeqCst);
+                    }
+                }
                 QueryResult::GetClosestPeers(Ok(ok)) => {
                     if let Some(kad) = swarm.behaviour_mut().kademlia.as_mut() {
                         for peer in ok.peers {
@@ -325,9 +332,18 @@ pub fn swarm_command(
         Some(SwarmCommands::PublishToTopic(topic, data)) => {
             swarm.behaviour_mut().gossipsub.publish(topic, data)?;
         }
+        //TODO: Expand on FindPeer to look locally for the completion
         Some(SwarmCommands::FindPeer(peer)) => {
-            if let Some(kad) = swarm.behaviour_mut().kademlia.as_mut() {
-                kad.get_closest_peers(peer);
+            if swarm
+                .behaviour_mut()
+                .bootstrap_complete
+                .load(Ordering::SeqCst)
+            {
+                if let Some(kad) = swarm.behaviour_mut().kademlia.as_mut() {
+                    kad.get_closest_peers(peer);
+                }
+            } else {
+                bail!("Error: Bootstrap is still running");
             }
         }
         _ => {} //TODO: Invalid command?
