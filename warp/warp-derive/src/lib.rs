@@ -114,6 +114,22 @@ pub fn construct_ffi(_: TokenStream) -> TokenStream {
             pub error_message: *mut std::os::raw::c_char,
         }
 
+        impl FFIError {
+            pub fn new(err: crate::error::Error) -> Self {
+                let error_message = std::ffi::CString::new(err.to_string()).unwrap().into_raw();
+                let error_type = std::ffi::CString::new(err.enum_to_string()).unwrap().into_raw();
+
+                FFIError {
+                    error_type,
+                    error_message,
+                }
+            }
+
+            pub fn to_ptr(self) -> *mut FFIError {
+                Box::into_raw(Box::new(self))
+            }
+        }
+
         #[repr(C)]
         pub struct FFIResult<T> {
             pub data: *mut T,
@@ -124,6 +140,27 @@ pub fn construct_ffi(_: TokenStream) -> TokenStream {
         pub struct FFIResult_String {
             pub data: *mut std::os::raw::c_char,
             pub error: *mut FFIError,
+        }
+
+        impl From<Result<String, crate::error::Error>> for FFIResult_String {
+            fn from(res: Result<String, crate::error::Error>) -> Self {
+                match res {
+                    Ok(t) => {
+                        let data = std::ffi::CString::new(t).unwrap().into_raw();
+                        Self {
+                            data,
+                            error: std::ptr::null_mut(),
+                        }
+                    }
+                    Err(err) => {
+                        let error = FFIError::new(err).to_ptr();
+                        Self {
+                            data: std::ptr::null_mut(),
+                            error,
+                        }
+                    },
+                }
+            }
         }
 
         impl<T> From<Result<Vec<T>, crate::error::Error>> for FFIResult<FFIVec<T>> {
@@ -184,17 +221,10 @@ pub fn construct_ffi(_: TokenStream) -> TokenStream {
             }
 
             pub fn err(err: crate::error::Error) -> Self {
-                let error_message = std::ffi::CString::new(err.to_string()).unwrap().into_raw();
-                let error_type = std::ffi::CString::new(err.enum_to_string())
-                    .unwrap()
-                    .into_raw();
-                let error_obj = FFIError {
-                    error_type,
-                    error_message,
-                };
+                let error = FFIError::new(err).to_ptr();
                 Self {
                     data: std::ptr::null_mut(),
-                    error: Box::into_raw(Box::new(error_obj)),
+                    error,
                 }
             }
         }
@@ -205,7 +235,9 @@ pub fn construct_ffi(_: TokenStream) -> TokenStream {
                 return;
             }
 
-            drop(Box::from_raw(ptr))
+            let ffierror = Box::from_raw(ptr);
+            //TODO: Convert the c_char to string
+
         }
     };
 
