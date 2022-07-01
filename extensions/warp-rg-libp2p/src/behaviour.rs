@@ -24,6 +24,7 @@ use libp2p::{
     swarm::{behaviour::toggle::Toggle, NetworkBehaviour, Swarm, SwarmEvent},
     Multiaddr, NetworkBehaviour, PeerId, Transport,
 };
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 use tracing::{error, info, warn};
@@ -54,6 +55,8 @@ pub struct RayGunBehavior {
     pub peer_registry: PeerRegistry,
     #[behaviour(ignore)]
     pub group_registry: GroupRegistry,
+    #[behaviour(ignore)]
+    pub bootstrap_complete: Arc<AtomicBool>,
 }
 
 pub enum BehaviourEvent {
@@ -481,6 +484,8 @@ pub async fn create_behaviour(
 
     let inner = conversation;
 
+    let bootstrap_complete = Arc::new(AtomicBool::default());
+
     let behaviour = RayGunBehavior {
         gossipsub,
         mdns,
@@ -495,6 +500,7 @@ pub async fn create_behaviour(
         autonat,
         peer_registry,
         group_registry,
+        bootstrap_complete,
     };
 
     let transport = transport(keypair, relay_transport)?;
