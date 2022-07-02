@@ -7,7 +7,7 @@ mod test {
     use warp::module::Module;
     use warp::pocket_dimension::query::{Comparator, ComparatorFilter, QueryBuilder};
     use warp::pocket_dimension::PocketDimension;
-    use warp::Extension;
+    use warp::{Extension, SingleHandle};
 
     type Result<T> = std::result::Result<T, Error>;
 
@@ -17,7 +17,7 @@ mod test {
     //      Such code here should not really be used in production
     #[derive(Default)]
     pub struct MemoryCache(HashMap<DataType, Vec<DataObject>>);
-
+    impl SingleHandle for MemoryCache {}
     impl Extension for MemoryCache {
         fn description(&self) -> String {
             format!(
