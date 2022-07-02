@@ -11,6 +11,7 @@ use libp2p::multiaddr::Protocol;
 use libp2p::{identity, PeerId};
 use registry::PeerRegistry;
 use warp::raygun::group::*;
+use warp::SingleHandle;
 
 use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -257,6 +258,8 @@ impl Extension for Libp2pMessaging {
         Module::Messaging
     }
 }
+
+impl SingleHandle for Libp2pMessaging {}
 
 #[async_trait::async_trait]
 impl RayGun for Libp2pMessaging {

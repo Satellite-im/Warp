@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::sync::{Arc, Mutex, MutexGuard};
 
 use crate::error::Error;
-use crate::Extension;
+use crate::{Extension, SingleHandle};
 use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 
@@ -26,7 +26,7 @@ use wasm_bindgen_futures::future_to_promise;
 
 /// Interface that would provide functionality around the filesystem.
 #[async_trait::async_trait]
-pub trait Constellation: Extension + Sync + Send {
+pub trait Constellation: Extension + Sync + Send + SingleHandle {
     /// Returns the version for `Constellation`
     fn version(&self) -> &str {
         "0.1.0"

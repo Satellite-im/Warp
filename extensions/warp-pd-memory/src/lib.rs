@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use warp::{
     data::{DataObject, DataType},
     module::Module,
-    Extension,
+    Extension, SingleHandle,
 };
 
 use warp::error::Error;
@@ -43,6 +43,8 @@ impl MemoryClient {
         Self { client }
     }
 }
+
+impl SingleHandle for MemoryClient {}
 
 impl PocketDimension for MemoryClient {
     fn add_data(&mut self, dimension: DataType, data: &DataObject) -> Result<()> {

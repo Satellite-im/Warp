@@ -8,13 +8,13 @@ use wasm_bindgen::prelude::*;
 use crate::error::Error;
 use crate::sync::{Arc, Mutex, MutexGuard};
 
-use crate::Extension;
+use crate::{Extension, SingleHandle};
 use identity::Identity;
 
 use crate::crypto::PublicKey;
 use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate};
 
-pub trait MultiPass: Extension + Friends + Sync + Send {
+pub trait MultiPass: Extension + Friends + Sync + Send + SingleHandle {
     fn create_identity(
         &mut self,
         username: Option<&str>,

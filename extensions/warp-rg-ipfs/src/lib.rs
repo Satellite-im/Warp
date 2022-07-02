@@ -19,6 +19,7 @@ use warp::raygun::{
 };
 use warp::sync::Mutex;
 use warp::Extension;
+use warp::SingleHandle;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -109,6 +110,12 @@ pub enum MessagingEvents {
     PinMessage(Uuid, SenderId, Uuid, PinState),
     ReactMessage(Uuid, SenderId, Uuid, ReactionState, String),
     Ping(Uuid, SenderId),
+}
+
+impl SingleHandle for IpfsMessaging {
+    fn handle(&self) -> std::result::Result<Box<dyn core::any::Any>, warp::error::Error> {
+        Ok(Box::new(self.ipfs.clone()))
+    }
 }
 
 #[async_trait::async_trait]

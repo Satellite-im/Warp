@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use warp::constellation::item::Item;
 use warp::data::{DataObject, DataType};
 use warp::hooks::Hooks;
-use warp::Extension;
+use warp::{Extension, SingleHandle};
 
 use chrono::{DateTime, Utc};
 use warp::error::Error;
@@ -165,6 +165,8 @@ impl StorjFilesystem {
         Ok(inner)
     }
 }
+
+impl SingleHandle for StorjFilesystem {}
 
 #[async_trait::async_trait]
 impl Constellation for StorjFilesystem {

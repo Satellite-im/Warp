@@ -2,7 +2,7 @@ use anyhow::anyhow;
 use warp::{
     data::{DataObject, DataType},
     module::Module,
-    Extension,
+    Extension, SingleHandle,
 };
 
 use stretto::Cache;
@@ -47,6 +47,8 @@ impl StrettoClient {
         &self.client
     }
 }
+
+impl SingleHandle for StrettoClient {}
 
 impl PocketDimension for StrettoClient {
     fn add_data(&mut self, dimension: DataType, data: &DataObject) -> Result<()> {

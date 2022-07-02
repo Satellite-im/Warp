@@ -22,6 +22,13 @@ static RUNTIME: once_cell::sync::Lazy<tokio::runtime::Runtime> = once_cell::sync
         .unwrap()
 });
 
+/// Used to downcast a specific type from an extension to share to another
+pub trait SingleHandle {
+    fn handle(&self) -> Result<Box<dyn core::any::Any>, error::Error> {
+        Err(error::Error::Unimplemented)
+    }
+}
+
 pub trait Extension {
     /// Returns an id of the extension. Should be the crate name (eg in a `warp-module-ext` format)
     fn id(&self) -> String;
