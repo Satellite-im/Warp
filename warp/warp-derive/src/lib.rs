@@ -128,6 +128,20 @@ pub fn construct_ffi(_: TokenStream) -> TokenStream {
             pub fn to_ptr(self) -> *mut FFIError {
                 Box::into_raw(Box::new(self))
             }
+
+            pub fn from_ptr(ptr: *mut FFIError) -> (String, String) {
+                let mut error = unsafe { Box::from_raw(ptr) };
+                let error_type = match error.error_type.is_null() {
+                    false => unsafe { std::ffi::CString::from_raw(error.error_type).into_string().unwrap() },
+                    true => String::new()
+                };
+                let error_message = match error.error_message.is_null() {
+                    false => unsafe { std::ffi::CString::from_raw(error.error_message).into_string().unwrap() },
+                    true => String::new()
+                };
+
+                (error_type, error_message)
+            }
         }
 
         #[repr(C)]
@@ -206,6 +220,7 @@ pub fn construct_ffi(_: TokenStream) -> TokenStream {
         }
 
         impl<T> FFIResult<T> {
+            /// Convert a Result<T, warp::error::Error> into FFIResult
             pub fn import(result: std::result::Result<T, crate::error::Error>) -> Self {
                 match result {
                     Ok(t) => FFIResult::ok(t),
@@ -213,6 +228,7 @@ pub fn construct_ffi(_: TokenStream) -> TokenStream {
                 }
             }
 
+            /// Produce a successful FFIResult
             pub fn ok(data: T) -> Self {
                 Self {
                     data: Box::into_raw(Box::new(data)),
@@ -220,6 +236,7 @@ pub fn construct_ffi(_: TokenStream) -> TokenStream {
                 }
             }
 
+            /// Produce a error of FFIResult
             pub fn err(err: crate::error::Error) -> Self {
                 let error = FFIError::new(err).to_ptr();
                 Self {
@@ -235,9 +252,7 @@ pub fn construct_ffi(_: TokenStream) -> TokenStream {
                 return;
             }
 
-            let ffierror = Box::from_raw(ptr);
-            //TODO: Convert the c_char to string
-
+            let _ = FFIError::from_ptr(ptr);
         }
     };
 
