@@ -19,7 +19,7 @@ use warp::error::Error;
 use warp::hooks::Hooks;
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::pocket_dimension::{DimensionData, PocketDimension};
-use warp::Extension;
+use warp::{Extension, SingleHandle};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -150,6 +150,8 @@ impl Extension for IpfsFileSystem {
         Module::FileSystem
     }
 }
+
+impl SingleHandle for IpfsFileSystem {}
 
 #[async_trait::async_trait]
 impl Constellation for IpfsFileSystem {

@@ -19,7 +19,7 @@ use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::constellation::directory::Directory;
 use warp::hooks::Hooks;
 use warp::module::Module;
-use warp::Extension;
+use warp::{Extension, SingleHandle};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -56,6 +56,8 @@ pub struct MemorySystem {
     #[serde(skip)]
     hooks: Option<Hooks>,
 }
+
+impl SingleHandle for MemorySystem {}
 
 impl Default for MemorySystem {
     fn default() -> Self {

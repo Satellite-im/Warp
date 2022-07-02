@@ -16,7 +16,7 @@ use warp::raygun::{
     group::*, Callback, EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState,
     SenderId,
 };
-use warp::Extension;
+use warp::{Extension, SingleHandle};
 
 use serde::{Deserialize, Serialize};
 
@@ -234,6 +234,8 @@ impl Extension for GunMessaging {
         Module::Messaging
     }
 }
+
+impl SingleHandle for GunMessaging {}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessagingEvents {

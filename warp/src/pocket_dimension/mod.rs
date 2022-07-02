@@ -3,7 +3,7 @@ pub mod query;
 use crate::data::{DataObject, DataType};
 use crate::error::Error;
 use crate::sync::{Arc, Mutex, MutexGuard};
-use crate::Extension;
+use crate::{Extension, SingleHandle};
 use query::QueryBuilder;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
@@ -118,7 +118,7 @@ impl DimensionData {
 /// for caching frequently used data so that request can be made faster. This makes it easy by sorting the data per module, as well
 /// as allowing querying by specific information stored inside the payload of the `DataObject` for a quick turnaround for search
 /// results.
-pub trait PocketDimension: Extension + Send + Sync {
+pub trait PocketDimension: Extension + Send + Sync + SingleHandle {
     /// Used to add data to `PocketDimension` for `Module`
     fn add_data(&mut self, dimension: DataType, data: &DataObject) -> Result<(), Error>;
 

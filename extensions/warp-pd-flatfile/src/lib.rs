@@ -9,8 +9,8 @@ use std::{
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
-use warp::error::Error;
 use warp::Extension;
+use warp::{error::Error, SingleHandle};
 
 use warp::data::{DataObject, DataType};
 use warp::module::Module;
@@ -279,6 +279,8 @@ impl FlatfileStorage {
         Ok(())
     }
 }
+
+impl SingleHandle for FlatfileStorage {}
 
 impl PocketDimension for FlatfileStorage {
     fn add_data(&mut self, dimension: DataType, data: &warp::data::DataObject) -> Result<()> {

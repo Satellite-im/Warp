@@ -12,7 +12,7 @@ use warp::pocket_dimension::query::QueryBuilder;
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::tesseract::Tesseract;
-use warp::Extension;
+use warp::{Extension, SingleHandle};
 
 use crate::solana::helper::friends::{DirectFriendRequest, DirectStatus};
 use crate::solana::helper::user::UserHelper;
@@ -164,6 +164,8 @@ impl Extension for SolanaAccount {
         Module::Accounts
     }
 }
+
+impl SingleHandle for SolanaAccount {}
 
 impl MultiPass for SolanaAccount {
     fn create_identity(&mut self, username: Option<&str>, _: Option<&str>) -> Result<PublicKey> {

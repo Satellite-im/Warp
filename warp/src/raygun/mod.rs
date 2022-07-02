@@ -3,7 +3,7 @@ pub mod group;
 use crate::crypto::PublicKey;
 use crate::error::Error;
 use crate::sync::{Arc, Mutex, MutexGuard};
-use crate::Extension;
+use crate::{Extension, SingleHandle};
 
 use warp_derive::{FFIArray, FFIFree};
 #[cfg(target_arch = "wasm32")]
@@ -313,7 +313,7 @@ pub enum EmbedState {
 }
 
 #[async_trait::async_trait]
-pub trait RayGun: Extension + GroupChat + Sync + Send {
+pub trait RayGun: Extension + GroupChat + Sync + Send + SingleHandle {
     /// Retreive all messages from a conversation
     async fn get_messages(
         &self,
