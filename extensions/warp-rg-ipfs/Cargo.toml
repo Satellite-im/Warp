@@ -11,8 +11,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 [dependencies]
 warp = { path = "../../warp" }
 
-libp2p = { default-features = false, features = ["floodsub", "identify", "kad", "tcp-tokio", "mplex", "noise", "ping", "yamux", "dns-tokio"], version = "0.43.0" }
-ipfs 					  = { git = "https://github.com/rs-ipfs/rust-ipfs" }
+ipfs  = { git = "https://github.com/rs-ipfs/rust-ipfs" }
 
 uuid = { version = "1.0", features = ["serde", "v4"] }
 tokio = { version = "1", features = ["full"] }
@@ -25,9 +24,11 @@ serde_json = { version = "1.0" }
 bs58 = "0.4"
 cfg-if = "1.0"
 
-log = "0.4"
-
 hex = "0.4"
+
+[dev-dependencies]
+warp-mp-ipfs = { path = "../warp-mp-ipfs" }
+
 
 [features]
 default = []

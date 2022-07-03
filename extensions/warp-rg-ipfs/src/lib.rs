@@ -106,19 +106,18 @@ impl IpfsMessaging {
     ) -> anyhow::Result<Self> {
         let ipfs = match account.lock().handle() {
             Ok(handle) => {
-                if !handle.is::<Ipfs<TestTypes>>() || !handle.is::<Ipfs<Types>>() {
+                if !handle.is::<Ipfs<TestTypes>>() && !handle.is::<Ipfs<Types>>() {
                     anyhow::bail!("Invalid ipfs type provided")
                 }
 
-                fn mem_check<A: Any>(item: &A) -> Option<IpfsMode> {
-                    let item = item as &dyn Any;
+                fn mem_check(item: &Box<dyn Any>) -> Option<IpfsMode> {
                     match item.downcast_ref::<Ipfs<TestTypes>>() {
                         Some(ipfs) => Some(IpfsMode::from(ipfs.clone())),
                         None => None,
                     }
                 }
-                fn persist_check<A: Any>(item: &A) -> Option<IpfsMode> {
-                    let item = item as &dyn Any;
+
+                fn persist_check(item: &Box<dyn Any>) -> Option<IpfsMode> {
                     match item.downcast_ref::<Ipfs<Types>>() {
                         Some(ipfs) => Some(IpfsMode::from(ipfs.clone())),
                         None => None,
@@ -128,7 +127,7 @@ impl IpfsMessaging {
                 match (mem_check(&handle), persist_check(&handle)) {
                     (Some(mem), None) => mem,
                     (None, Some(persist)) => persist,
-                    _ => anyhow::bail!("Invalid ipfs type provided"),
+                    _ => anyhow::bail!("None of the types are valid"),
                 }
             }
             //TODO: Have a fallback to setup rust-ipfs
