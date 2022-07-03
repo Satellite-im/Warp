@@ -1,0 +1,29 @@
+[package]
+name = "warp-mp-ipfs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+warp = { path = "../../warp" }
+# TODO: Point to different repo once additional changes and testing are done
+ipfs = { git = "https://github.com/rs-ipfs/rust-ipfs" }
+
+uuid = { version = "1.0", features = ["serde", "v4"] }
+tokio = { version = "1", features = ["full"] }
+futures = { version = "0.3" }
+async-trait = { version = "0.1" }
+anyhow = { version = "1" }
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+bs58 = "0.4"
+cfg-if = "1.0"
+
+log = "0.4"
+
+hex = "0.4"
+
+[features]
+default = []
