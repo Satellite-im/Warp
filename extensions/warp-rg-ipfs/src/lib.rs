@@ -2,7 +2,6 @@
 use futures::pin_mut;
 use futures::StreamExt;
 use ipfs::{Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, TestTypes, Types, UninitializedIpfs};
-use libp2p::identity;
 use std::any::Any;
 use std::ops::Deref;
 use std::path::PathBuf;
