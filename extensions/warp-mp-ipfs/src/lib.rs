@@ -78,7 +78,10 @@ impl IpfsIdentity {
         };
 
         let opts = IpfsOptions {
-            ipfs_path: path.unwrap_or_else(|| std::env::temp_dir()),
+            ipfs_path: path.unwrap_or_else(|| {
+                let temp = warp::crypto::rand::thread_rng().gen_range(0, 1000);
+                std::env::temp_dir().join(&format!("ipfs-temp-{temp}"))
+            }),
             keypair: keypair.clone(),
             bootstrap: vec![],
             mdns: false,
@@ -86,6 +89,11 @@ impl IpfsIdentity {
             listening_addrs: vec!["/ip4/0.0.0.0/tcp/0".parse().unwrap()],
             span: None,
         };
+
+        // Create directory if it doesnt exist
+        if !opts.ipfs_path.exists() {
+            tokio::fs::create_dir(opts.ipfs_path.clone()).await?;
+        }
 
         let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
         tokio::task::spawn(fut);
