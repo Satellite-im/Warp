@@ -1,6 +1,6 @@
 use crate::error::Error;
 use ed25519_dalek::{
-    Keypair, PublicKey, SecretKey, Signature, Signer, KEYPAIR_LENGTH, SECRET_KEY_LENGTH,
+    Keypair, PublicKey, SecretKey, Signature, Signer, Verifier, KEYPAIR_LENGTH, SECRET_KEY_LENGTH,
 };
 use getrandom::getrandom;
 use warp_derive::{FFIArray, FFIFree};
@@ -29,6 +29,31 @@ impl Ed25519PublicKey {
     pub fn from_bytes(bytes: &[u8]) -> Result<Ed25519PublicKey, Error> {
         let public_key = PublicKey::from_bytes(bytes)?;
         Ok(Ed25519PublicKey(public_key))
+    }
+
+    #[wasm_bindgen]
+    pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<(), Error> {
+        let signature = Signature::from_bytes(signature)?;
+        self.0.verify(data, &signature).map_err(Error::from)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Ed25519PublicKey {
+    pub fn verify_reader(
+        &self,
+        reader: &mut impl std::io::Read,
+        signature: &[u8],
+    ) -> Result<(), Error> {
+        use curve25519_dalek::digest::Digest;
+        use ed25519_dalek::Sha512;
+
+        let signature = Signature::from_bytes(signature)?;
+        let mut digest: Sha512 = Sha512::new();
+        std::io::copy(reader, &mut digest)?;
+        self.0
+            .verify_prehashed(digest, None, &signature)
+            .map_err(Error::from)
     }
 }
 
