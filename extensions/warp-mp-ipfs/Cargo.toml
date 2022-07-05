@@ -9,7 +9,8 @@ edition = "2021"
 warp = { path = "../../warp" }
 # TODO: Point to different repo once additional changes and testing are done
 ipfs = { git = "https://github.com/rs-ipfs/rust-ipfs" }
-
+cid = { default-features = false, version = "0.5" }
+libp2p = { default-features = false, features = ["floodsub", "identify", "kad", "tcp-tokio", "mplex", "noise", "ping", "yamux", "dns-tokio"], version = "0.43.0" }
 uuid = { version = "1.0", features = ["serde", "v4"] }
 tokio = { version = "1", features = ["full"] }
 futures = { version = "0.3" }
