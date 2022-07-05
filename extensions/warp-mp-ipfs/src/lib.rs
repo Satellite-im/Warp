@@ -13,60 +13,16 @@ use warp::tesseract::Tesseract;
 use warp::{Extension, SingleHandle};
 
 use ipfs::{Ipfs, IpfsOptions, Keypair, TestTypes, Types, UninitializedIpfs};
+use tokio::sync::mpsc::Sender;
 use warp::crypto::PublicKey;
 use warp::error::Error;
 use warp::multipass::identity::{FriendRequest, Identifier, Identity, IdentityUpdate};
-use warp::multipass::{Friends, MultiPass};
-
-#[derive(Default, Debug, Clone, Copy)]
-pub enum IpfsModeType {
-    #[default]
-    Memory,
-    Persistent,
-}
-
-#[derive(Debug, Clone)]
-pub enum IpfsMode {
-    Memory(Ipfs<TestTypes>),
-    Persistent(Ipfs<Types>),
-}
-
-impl IpfsMode {
-    pub async fn memory(opts: IpfsOptions) -> anyhow::Result<IpfsMode> {
-        let (ipfs, fut): (_, _) = UninitializedIpfs::new(opts).start().await?;
-        tokio::task::spawn(fut);
-        Ok(IpfsMode::Memory(ipfs))
-    }
-
-    pub async fn persistent(opts: IpfsOptions) -> anyhow::Result<IpfsMode> {
-        let (ipfs, fut): (_, _) = UninitializedIpfs::new(opts).start().await?;
-        tokio::task::spawn(fut);
-        Ok(IpfsMode::Persistent(ipfs))
-    }
-}
-
-impl AsRef<Ipfs<TestTypes>> for IpfsMode {
-    fn as_ref(&self) -> &Ipfs<TestTypes> {
-        match self {
-            IpfsMode::Memory(ipfs) => ipfs,
-            IpfsMode::Persistent(_) => unreachable!(),
-        }
-    }
-}
-
-impl AsRef<Ipfs<Types>> for IpfsMode {
-    fn as_ref(&self) -> &Ipfs<Types> {
-        match self {
-            IpfsMode::Memory(_) => unreachable!(),
-            IpfsMode::Persistent(ipfs) => ipfs,
-        }
-    }
-}
+use warp::multipass::{identity, Friends, MultiPass};
 
 pub struct IpfsIdentity {
-    pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-    pub tesseract: Tesseract,
-    pub mode: IpfsMode,
+    cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    tesseract: Tesseract,
+    ipfs: Ipfs<Types>,
     //TODO: FriendStore
     //      * Add/Remove/Block friends
     //      * Show incoming/outgoing request
@@ -77,11 +33,11 @@ pub struct IpfsIdentity {
 }
 
 impl IpfsIdentity {
-    pub async fn memory(
+    pub async fn temporary(
         tesseract: Tesseract,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity> {
-        IpfsIdentity::new(IpfsModeType::Memory, None, tesseract, cache).await
+        IpfsIdentity::new(None, tesseract, cache).await
     }
 
     pub async fn persistent<P: AsRef<std::path::Path>>(
@@ -90,24 +46,26 @@ impl IpfsIdentity {
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity> {
         let path = path.as_ref();
-        IpfsIdentity::new(
-            IpfsModeType::Persistent,
-            Some(path.to_path_buf()),
-            tesseract,
-            cache,
-        )
-        .await
+        IpfsIdentity::new(Some(path.to_path_buf()), tesseract, cache).await
     }
 
     pub async fn new(
-        ipfs: IpfsModeType,
         path: Option<PathBuf>,
         tesseract: Tesseract,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity> {
-        let opts = IpfsOptions {
-            ipfs_path: path.unwrap_or_default(),
-            keypair: Keypair::generate_ed25519(),
+        let keypair = match tesseract.retrieve("secret") {
+            Ok(keypair) => {
+                let secret_bytes = bs58::decode(keypair).into_vec()?;
+                let secret = identity::ed25519::SecretKey::from_bytes(&mut sec_key)?;
+                identity::Keypair::Ed25519(secret.into())
+            }
+            Err(_) => Keypair::generate_ed25519(),
+        };
+
+        let mut opts = IpfsOptions {
+            ipfs_path: path.unwrap_or_else(|| std::env::temp_dir()),
+            keypair: keypair.clone(),
             bootstrap: vec![],
             mdns: false,
             kad_protocol: None,
@@ -115,21 +73,16 @@ impl IpfsIdentity {
             span: None,
         };
 
-        let mode = match ipfs {
-            IpfsModeType::Memory => IpfsMode::memory(opts).await?,
-            IpfsModeType::Persistent => IpfsMode::persistent(opts).await?,
-        };
+        let (ipfs, fut): (_, _) = UninitializedIpfs::new(opts).start().await?;
+        tokio::task::spawn(fut);
 
-        //TODO: Manually load bootstrap
-        match &mode {
-            IpfsMode::Memory(ipfs) => ipfs.restore_bootstrappers().await?,
-            IpfsMode::Persistent(ipfs) => ipfs.restore_bootstrappers().await?,
-        };
+        //TODO: Manually load bootstrap or use IpfsOptions
+        ipfs.restore_bootstrappers().await?;
 
         Ok(IpfsIdentity {
             tesseract,
             cache,
-            mode,
+            ipfs,
         })
     }
 
@@ -158,10 +111,7 @@ impl Extension for IpfsIdentity {
 
 impl SingleHandle for IpfsIdentity {
     fn handle(&self) -> Result<Box<dyn Any>, Error> {
-        match self.mode.clone() {
-            IpfsMode::Memory(ipfs) => Ok(Box::new(ipfs)),
-            IpfsMode::Persistent(ipfs) => Ok(Box::new(ipfs)),
-        }
+        Ok(Box::new(self.ipfs.clone()))
     }
 }
 
