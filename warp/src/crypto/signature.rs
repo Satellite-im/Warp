@@ -16,6 +16,28 @@ pub struct Ed25519Keypair(Keypair);
 #[wasm_bindgen]
 pub struct Ed25519PublicKey(PublicKey);
 
+impl TryFrom<Vec<u8>> for Ed25519PublicKey {
+    type Error = Error;
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        Ed25519PublicKey::from_bytes(&value)
+    }
+}
+
+#[wasm_bindgen]
+impl Ed25519PublicKey {
+    #[wasm_bindgen]
+    pub fn from_bytes(bytes: &[u8]) -> Result<Ed25519PublicKey, Error> {
+        let public_key = PublicKey::from_bytes(bytes)?;
+        Ok(Ed25519PublicKey(public_key))
+    }
+}
+
+impl Ed25519PublicKey {
+    pub fn to_inner(&self) -> PublicKey {
+        self.0
+    }
+}
+
 impl Zeroize for Ed25519Keypair {
     fn zeroize(&mut self) {
         self.0.secret.zeroize()

@@ -1,15 +1,18 @@
-use crate::crypto::signature::Ed25519Keypair;
+use crate::crypto::signature::{Ed25519Keypair, Ed25519PublicKey};
 use crate::error::Error;
+use curve25519_dalek::edwards::CompressedEdwardsY;
+use ed25519_dalek::{Digest, Sha512};
 use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 use x25519_dalek::{PublicKey, StaticSecret};
+use zeroize::Zeroize;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(FFIFree)]
 pub struct X25519Secret(StaticSecret);
 
-#[derive(Copy, Clone, Eq, PartialEq, FFIFree)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct X25519PublicKey(PublicKey);
 
@@ -20,6 +23,23 @@ impl X25519PublicKey {
         let mut public_bytes = [0u8; 32];
         public_bytes.copy_from_slice(bytes);
         X25519PublicKey(PublicKey::from(public_bytes))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn from_ed25519_public_key(public_key: Ed25519PublicKey) -> Result<X25519PublicKey, Error> {
+        let public_key = public_key.to_inner();
+        let decompressed_point = CompressedEdwardsY(public_key.to_bytes())
+            .decompress()
+            .ok_or(Error::Other)?;
+        let mon = decompressed_point.to_montgomery();
+        Ok(X25519PublicKey(PublicKey::from(mon.0)))
+    }
+}
+
+impl TryFrom<Ed25519PublicKey> for X25519PublicKey {
+    type Error = Error;
+    fn try_from(value: Ed25519PublicKey) -> Result<Self, Self::Error> {
+        X25519PublicKey::from_ed25519_public_key(value)
     }
 }
 
@@ -55,9 +75,14 @@ impl X25519Secret {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn from_ed25519_keypair(keypair: &Ed25519Keypair) -> Result<X25519Secret, Error> {
         let ed25519_keypair = keypair.to_inner()?;
-        Ok(X25519Secret(StaticSecret::from(
-            ed25519_keypair.secret.to_bytes(),
-        )))
+        let mut hasher: Sha512 = Sha512::new();
+        hasher.update(ed25519_keypair.secret.as_ref());
+        let hash = hasher.finalize().to_vec();
+        let mut new_sk: [u8; 32] = [0; 32];
+        new_sk.copy_from_slice(&hash[..32]);
+        let sk = x25519_dalek::StaticSecret::from(new_sk);
+        new_sk.zeroize();
+        Ok(X25519Secret(sk))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -71,6 +96,13 @@ impl X25519Secret {
             .diffie_hellman(&public_key.to_inner())
             .as_bytes()
             .to_vec()
+    }
+}
+
+impl TryFrom<Ed25519Keypair> for X25519Secret {
+    type Error = Error;
+    fn try_from(value: Ed25519Keypair) -> Result<Self, Self::Error> {
+        X25519Secret::from_ed25519_keypair(&value)
     }
 }
 
