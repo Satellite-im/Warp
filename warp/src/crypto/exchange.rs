@@ -165,6 +165,19 @@ mod test {
     }
 
     #[test]
+    fn ed25519_pk_to_x25519_pk() -> anyhow::Result<()> {
+        let keypair = Ed25519Keypair::new()?;
+        let ed25519_pk = keypair.public_key();
+
+        let x25519_kp = X25519Secret::from_ed25519_keypair(&keypair)?;
+        let x25519_pk = X25519PublicKey::from_ed25519_public_key(ed25519_pk)?;
+
+        assert_eq!(x25519_kp.public_key(), x25519_pk);
+
+        Ok(())
+    }
+
+    #[test]
     fn ed25519_key_exchange_encryption() -> anyhow::Result<()> {
         let alice_keypair = Ed25519Keypair::new()?;
         let bob_keypair = Ed25519Keypair::new()?;
