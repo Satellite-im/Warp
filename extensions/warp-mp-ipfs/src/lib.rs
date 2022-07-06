@@ -3,6 +3,9 @@
 //TODO: Use rust-ipfs branch with major changes for pubsub, ipld, etc
 #![allow(unused_variables)]
 #![allow(unused_imports)]
+
+pub mod store;
+
 use anyhow::bail;
 use futures::{Future, TryFutureExt};
 use ipfs::ipld::ipld_macro;
@@ -173,7 +176,10 @@ impl MultiPass for IpfsIdentity {
                 let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
                 let path = IpfsPath::from(cid);
                 let identity_path = path.sub_path("identity").map_err(anyhow::Error::from)?;
-                let identity_ipld = async_block_unchecked(self.ipfs.get_dag(identity_path))?;
+                let identity_ipld = match async_block_unchecked(self.ipfs.get_dag(identity_path)) {
+                    Ok(Ipld::Bytes(bytes)) => serde_json::from_slice::<Identity>(&bytes)?,
+                    _ => return Err(Error::Other), //Note: It should not hit here unless the repo is corrupted
+                };
                 //TODO: Perform basic checks against ipld
                 return Err(Error::IdentityExist);
             }
@@ -193,10 +199,10 @@ impl MultiPass for IpfsIdentity {
         identity.set_short_id(warp::crypto::rand::thread_rng().gen_range(0, 9999));
         identity.set_public_key(public_key);
         // Convert our identity to ipld. This step would convert it to serde_json::Value then match accordingly
-        let ipld_val = to_ipld(identity.clone())?;
-
+        // let ipld_val = to_ipld(identity.clone())?;
+        let bytes = serde_json::to_vec(&identity)?;
         // Store the identity as a dag
-        let ident_cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!(ipld_val)))?;
+        let ident_cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!(bytes)))?;
         let root_handle =
             async_block_unchecked(self.ipfs.put_dag(make_ipld!({ "identity": ident_cid })))?;
 
@@ -219,14 +225,59 @@ impl MultiPass for IpfsIdentity {
         Ok(identity.public_key())
     }
 
+    //TODO: Use DHT to perform lookups
     fn get_identity(&self, id: Identifier) -> Result<Identity, Error> {
         match id.get_inner() {
-            (Some(_), None, false) => {}
-            (None, Some(_), false) => {}
-            (None, None, true) => {}
+            (Some(pk), None, false) => {
+                if let Ok(cache) = self.get_cache() {
+                    let mut query = QueryBuilder::default();
+                    query.r#where("public_key", &pk)?;
+                    if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
+                    {
+                        //get last
+                        if !list.is_empty() {
+                            let obj = list.last().unwrap();
+                            return obj.payload::<Identity>();
+                        }
+                    }
+                }
+                return Err(Error::IdentityDoesntExist);
+            }
+            (None, Some(username), false) => {
+                if let Ok(cache) = self.get_cache() {
+                    let mut query = QueryBuilder::default();
+                    query.r#where("username", &username)?;
+                    if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
+                    {
+                        //get last
+                        if !list.is_empty() {
+                            let obj = list.last().unwrap();
+                            return obj.payload::<Identity>();
+                        }
+                    }
+                }
+                //TODO: Lookup by username
+                return Err(Error::IdentityDoesntExist);
+            }
+            (None, None, true) => {
+                match self.tesseract.retrieve("root_cid") {
+                    Ok(cid) => {
+                        let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
+                        let path = IpfsPath::from(cid);
+                        let identity_path =
+                            path.sub_path("identity").map_err(anyhow::Error::from)?;
+                        let identity = match async_block_unchecked(self.ipfs.get_dag(identity_path))
+                        {
+                            Ok(Ipld::Bytes(bytes)) => serde_json::from_slice::<Identity>(&bytes)?,
+                            _ => return Err(Error::Other), //Note: It should not hit here unless the repo is corrupted
+                        };
+                        Ok(identity)
+                    }
+                    Err(_) => Err(Error::IdentityDoesntExist),
+                }
+            }
             _ => return Err(Error::InvalidIdentifierCondition),
         }
-        return Err(Error::Unimplemented);
     }
 
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
@@ -255,6 +306,7 @@ impl MultiPass for IpfsIdentity {
 
         if let Ok(mut cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
+            //TODO: Query by public key to tie/assiociate the username to identity in the event of dup
             query.r#where("username", &old_identity.username())?;
             if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query)) {
                 //get last
@@ -338,11 +390,14 @@ impl Friends for IpfsIdentity {
     }
 }
 
+#[allow(dead_code)]
 fn to_ipld<S: serde::Serialize>(ser: S) -> anyhow::Result<Ipld> {
     let value = serde_json::to_value(ser)?;
     let item = match value {
         serde_json::Value::Null => Ipld::Null,
         serde_json::Value::Bool(bool) => Ipld::Bool(bool),
+        //TODO: Maybe perform explicit check since all numbers are returned as Option::is_some
+        //      otherwise this would continue to be null for a array of numbers
         serde_json::Value::Number(n) => match (n.as_i64(), n.as_u64(), n.as_f64()) {
             (Some(n), None, None) => Ipld::Integer(n as i128),
             (None, Some(n), None) => Ipld::Integer(n as i128),
@@ -370,6 +425,7 @@ fn to_ipld<S: serde::Serialize>(ser: S) -> anyhow::Result<Ipld> {
     Ok(item)
 }
 
+#[allow(dead_code)]
 fn from_ipld<D: DeserializeOwned>(ipld: &Ipld) -> anyhow::Result<D> {
     let value = match ipld {
         Ipld::Null => serde_json::Value::Null,
