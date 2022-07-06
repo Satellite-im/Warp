@@ -9,6 +9,7 @@ use std::sync::Arc;
 #[allow(unused_imports)]
 use tokio::sync::mpsc::{Receiver, Sender};
 use uuid::Uuid;
+use warp::crypto::rand::Rng;
 use warp::error::Error;
 use warp::module::Module;
 use warp::multipass::MultiPass;
@@ -20,29 +21,17 @@ use warp::raygun::{
     Callback, EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState, SenderId,
 };
 use warp::sync::Mutex;
+use warp::tesseract::Tesseract;
 use warp::Extension;
 use warp::SingleHandle;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Default, Debug, Clone, Copy)]
-pub enum IpfsModeType {
-    #[default]
-    Memory,
-    Persistent,
-}
-
-#[derive(Debug, Clone)]
-pub enum IpfsMode {
-    Memory(Ipfs<TestTypes>),
-    Persistent(Ipfs<Types>),
-}
-
 pub struct IpfsMessaging {
     pub account: Arc<Mutex<Box<dyn MultiPass>>>,
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     pub conversations: Arc<Mutex<Vec<Message>>>,
-    pub ipfs: IpfsMode,
+    pub ipfs: Ipfs<Types>,
     //TODO: DirectMessageStore
     //      * Subscribes to topic and store messages sent or received from peers
     //      * Lookup up conversation
@@ -54,83 +43,71 @@ pub struct IpfsMessaging {
     //      * TBD
 }
 
-impl IpfsMode {
-    pub async fn memory(opts: IpfsOptions) -> anyhow::Result<IpfsMode> {
-        let (ipfs, fut): (_, _) = UninitializedIpfs::new(opts).start().await?;
-        tokio::task::spawn(fut);
-        Ok(IpfsMode::Memory(ipfs))
-    }
-
-    pub async fn persistent(opts: IpfsOptions) -> anyhow::Result<IpfsMode> {
-        let (ipfs, fut): (_, _) = UninitializedIpfs::new(opts).start().await?;
-        tokio::task::spawn(fut);
-        Ok(IpfsMode::Persistent(ipfs))
-    }
-}
-
-impl AsRef<Ipfs<TestTypes>> for IpfsMode {
-    fn as_ref(&self) -> &Ipfs<TestTypes> {
-        match self {
-            IpfsMode::Memory(ipfs) => ipfs,
-            IpfsMode::Persistent(_) => unreachable!(),
-        }
-    }
-}
-
-impl AsRef<Ipfs<Types>> for IpfsMode {
-    fn as_ref(&self) -> &Ipfs<Types> {
-        match self {
-            IpfsMode::Memory(_) => unreachable!(),
-            IpfsMode::Persistent(ipfs) => ipfs,
-        }
-    }
-}
-
-impl From<Ipfs<TestTypes>> for IpfsMode {
-    fn from(ipfs: Ipfs<TestTypes>) -> Self {
-        IpfsMode::Memory(ipfs)
-    }
-}
-
-impl From<Ipfs<Types>> for IpfsMode {
-    fn from(ipfs: Ipfs<Types>) -> Self {
-        IpfsMode::Persistent(ipfs)
-    }
-}
-
 impl IpfsMessaging {
+    pub async fn temporary(
+        account: Arc<Mutex<Box<dyn MultiPass>>>,
+        cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    ) -> anyhow::Result<IpfsMessaging> {
+        IpfsMessaging::new(None, account, cache).await
+    }
+
+    pub async fn persistent<P: AsRef<std::path::Path>>(
+        path: P,
+        account: Arc<Mutex<Box<dyn MultiPass>>>,
+        cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    ) -> anyhow::Result<IpfsMessaging> {
+        let path = path.as_ref();
+        IpfsMessaging::new(Some(path.to_path_buf()), account, cache).await
+    }
+
     pub async fn new(
+        path: Option<PathBuf>,
         account: Arc<Mutex<Box<dyn MultiPass>>>,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
-        let ipfs = match account.lock().handle() {
-            Ok(handle) => {
-                if !handle.is::<Ipfs<TestTypes>>() && !handle.is::<Ipfs<Types>>() {
-                    anyhow::bail!("Invalid ipfs type provided")
-                }
-
-                fn mem_check(item: &Box<dyn Any>) -> Option<IpfsMode> {
-                    match item.downcast_ref::<Ipfs<TestTypes>>() {
-                        Some(ipfs) => Some(IpfsMode::from(ipfs.clone())),
-                        None => None,
-                    }
-                }
-
-                fn persist_check(item: &Box<dyn Any>) -> Option<IpfsMode> {
-                    match item.downcast_ref::<Ipfs<Types>>() {
-                        Some(ipfs) => Some(IpfsMode::from(ipfs.clone())),
-                        None => None,
-                    }
-                }
-
-                match (mem_check(&handle), persist_check(&handle)) {
-                    (Some(mem), None) => mem,
-                    (None, Some(persist)) => persist,
-                    _ => anyhow::bail!("None of the types are valid"),
+        let ipfs_handle = match account.lock().handle() {
+            Ok(handle) if handle.is::<Ipfs<Types>>() => {
+                match handle.downcast_ref::<Ipfs<Types>>() {
+                    Some(ipfs) => Some(ipfs.clone()),
+                    None => None,
                 }
             }
-            //TODO: Have a fallback to setup rust-ipfs
-            Err(e) => anyhow::bail!(e),
+            _ => None,
+        };
+
+        let ipfs = match ipfs_handle {
+            Some(ipfs) => ipfs,
+            None => {
+                let keypair = {
+                    let prikey = account.lock().decrypt_private_key(None)?;
+                    let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&prikey)?;
+                    let mut sec_key = id_kp.secret.to_bytes();
+                    let id_secret = libp2p::identity::ed25519::SecretKey::from_bytes(&mut sec_key)?;
+                    Keypair::Ed25519(id_secret.into())
+                };
+
+                let opts = IpfsOptions {
+                    ipfs_path: path.unwrap_or_else(|| {
+                        let temp = warp::crypto::rand::thread_rng().gen_range(0, 1000);
+                        std::env::temp_dir().join(&format!("ipfs-rg-temp-{temp}"))
+                    }),
+                    keypair: keypair.clone(),
+                    bootstrap: vec![],
+                    mdns: false,
+                    kad_protocol: None,
+                    listening_addrs: vec!["/ip4/0.0.0.0/tcp/0".parse().unwrap()],
+                    span: None,
+                };
+
+                if !opts.ipfs_path.exists() {
+                    tokio::fs::create_dir(opts.ipfs_path.clone()).await?;
+                }
+
+                let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
+                tokio::task::spawn(fut);
+
+                ipfs
+            }
         };
 
         let conversations = Arc::new(Mutex::new(Vec::new()));

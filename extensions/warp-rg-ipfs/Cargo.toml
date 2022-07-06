@@ -12,6 +12,8 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 warp = { path = "../../warp" }
 
 ipfs  = { git = "https://github.com/rs-ipfs/rust-ipfs" }
+libp2p = { default-features = false, features = ["floodsub", "identify", "kad", "tcp-tokio", "mplex", "noise", "ping", "yamux", "dns-tokio"], version = "0.43.0" }
+
 cid = { default-features = false, version = "0.5" }
 
 uuid = { version = "1.0", features = ["serde", "v4"] }
