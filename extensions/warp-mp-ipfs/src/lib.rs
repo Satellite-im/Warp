@@ -176,6 +176,7 @@ impl MultiPass for IpfsIdentity {
                 let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
                 let path = IpfsPath::from(cid);
                 let identity_path = path.sub_path("identity").map_err(anyhow::Error::from)?;
+                //TODO: Fix deadlock if cid doesnt exist. May be related to the ipld link
                 let identity_ipld = match async_block_unchecked(self.ipfs.get_dag(identity_path)) {
                     Ok(Ipld::Bytes(bytes)) => serde_json::from_slice::<Identity>(&bytes)?,
                     _ => return Err(Error::Other), //Note: It should not hit here unless the repo is corrupted
