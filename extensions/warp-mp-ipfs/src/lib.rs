@@ -73,8 +73,10 @@ impl IpfsIdentity {
     ) -> anyhow::Result<IpfsIdentity> {
         let keypair = match tesseract.retrieve("ipfs_keypair") {
             Ok(keypair) => {
-                let secret_bytes = bs58::decode(keypair).into_vec()?;
-                let secret = libp2p::identity::ed25519::SecretKey::from_bytes(secret_bytes)?;
+                let kp = bs58::decode(keypair).into_vec()?;
+                let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
+                let secret =
+                    libp2p::identity::ed25519::SecretKey::from_bytes(id_kp.secret.to_bytes())?;
                 Keypair::Ed25519(secret.into())
             }
             Err(_) => Keypair::generate_ed25519(),
