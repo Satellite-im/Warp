@@ -4,6 +4,7 @@ use crate::{agent_name, Config, GroupRegistry, PeerRegistry};
 use anyhow::{anyhow, bail};
 use futures::StreamExt;
 use libp2p::multiaddr::Protocol;
+use libp2p::tcp::GenTcpConfig;
 use libp2p::{
     self,
     autonat::{Behaviour as Autonat, Event as AutonatEvent},
@@ -621,10 +622,10 @@ pub fn transport(
         None => libp2p::tokio_development_transport(keypair),
         Some(relay_transport) => {
             let dns_tcp = libp2p::dns::TokioDnsConfig::system(
-                libp2p::tcp::TokioTcpConfig::new().nodelay(true),
+                libp2p::tcp::TokioTcpTransport::new(GenTcpConfig::default().nodelay(true)),
             )?;
             let ws_dns_tcp = libp2p::websocket::WsConfig::new(libp2p::dns::TokioDnsConfig::system(
-                libp2p::tcp::TokioTcpConfig::new().nodelay(true),
+                libp2p::tcp::TokioTcpTransport::new(GenTcpConfig::default().nodelay(true)),
             )?);
 
             let transport = relay_transport.or_transport(dns_tcp.or_transport(ws_dns_tcp));
