@@ -225,6 +225,10 @@ pub struct FriendRequest {
 
     /// Status of the request
     status: FriendRequestStatus,
+
+    /// Signature of request
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signature: Option<Vec<u8>>
 }
 
 #[wasm_bindgen]
@@ -242,6 +246,11 @@ impl FriendRequest {
     #[wasm_bindgen(setter)]
     pub fn set_status(&mut self, status: FriendRequestStatus) {
         self.status = status
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_signature(&mut self, signature: Vec<u8>) {
+        self.signature = Some(signature);
     }
 }
 
