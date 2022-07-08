@@ -53,7 +53,11 @@ pub struct IpfsIdentity {
 
 impl Drop for IpfsIdentity {
     fn drop(&mut self) {
+        // We want to gracefully close the ipfs repo to allow for any cleanup
         async_block_unchecked(self.ipfs.clone().exit_daemon());
+
+        // If IpfsIdentity::temporary was used, `temp` would be true and it would
+        // let is to delete the repo
         if self.temp {
             if let Ok(_) = std::fs::remove_dir_all(&self.path) {}
         }
@@ -225,6 +229,7 @@ impl MultiPass for IpfsIdentity {
         identity.set_short_id(warp::crypto::rand::thread_rng().gen_range(0, 9999));
         identity.set_public_key(public_key);
         // Convert our identity to ipld. This step would convert it to serde_json::Value then match accordingly
+        // Update `to_ipld`
         // let ipld_val = to_ipld(identity.clone())?;
         let bytes = serde_json::to_vec(&identity)?;
         // Store the identity as a dag
