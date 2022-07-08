@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
     let mut tesseract = Tesseract::default();
     tesseract.unlock(b"super duper pass")?;
     
-    let mut identity = IpfsIdentity::temporary(tesseract, None).await?;
+    let mut identity = IpfsIdentity::temporary(None, tesseract, None).await?;
     identity.create_identity(None, None)?;
 
     let ident = identity.get_own_identity()?;

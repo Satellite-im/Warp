@@ -5,8 +5,10 @@
 #![allow(unused_imports)]
 
 pub mod store;
+pub mod config;
 
 use anyhow::bail;
+use config::Config;
 use futures::{Future, TryFutureExt};
 use ipfs::ipld::ipld_macro;
 use serde::de::DeserializeOwned;
@@ -24,7 +26,7 @@ use warp::{Extension, SingleHandle};
 
 use ipfs::ipld::dag_json::DagJsonCodec;
 use ipfs::{
-    make_ipld, Block, Cid, Ipfs, IpfsOptions, IpfsPath, Ipld, Keypair, Types, UninitializedIpfs,
+    make_ipld, Block, Cid, Ipfs, IpfsOptions, IpfsPath, Ipld, Keypair, Types, UninitializedIpfs, Protocol, PeerId,
 };
 use libp2p::multihash::Sha2_256;
 use tokio::sync::mpsc::Sender;
@@ -66,26 +68,31 @@ impl Drop for IpfsIdentity {
 
 impl IpfsIdentity {
     pub async fn temporary(
+        config: Option<Config>,
         tesseract: Tesseract,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity> {
-        IpfsIdentity::new(None, tesseract, cache).await
+        if let Some(config) = &config {
+            if config.path.is_some() { anyhow::bail!("Path cannot be set") }
+        }
+        IpfsIdentity::new( config.unwrap_or_default(), tesseract, cache).await
     }
 
     pub async fn persistent<P: AsRef<std::path::Path>>(
-        path: P,
+        config: Config,
         tesseract: Tesseract,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity> {
-        let path = path.as_ref();
-        IpfsIdentity::new(Some(path.to_path_buf()), tesseract, cache).await
+        if config.path.is_none() { anyhow::bail!("Path is required for identity to be persistent") }
+        IpfsIdentity::new(config, tesseract, cache).await
     }
 
     pub async fn new(
-        path: Option<PathBuf>,
+        config: Config,
         tesseract: Tesseract,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity> {
+
         let keypair = match tesseract.retrieve("ipfs_keypair") {
             Ok(keypair) => {
                 let kp = bs58::decode(keypair).into_vec()?;
@@ -96,18 +103,38 @@ impl IpfsIdentity {
             }
             Err(_) => Keypair::generate_ed25519(),
         };
-        let temp = path.is_none();
-        let path = path.unwrap_or_else(|| {
+
+        let temp = config.path.is_none();
+        let path = config.path.unwrap_or_else(|| {
             let temp = warp::crypto::rand::thread_rng().gen_range(0, 1000);
             std::env::temp_dir().join(&format!("ipfs-temp-{temp}"))
         });
+
+        let mut bootstrap = vec![];
+        
+        for addr in config.bootstrap {
+            let mut addr = addr.clone();
+            let peer_id = match addr.pop() {
+                Some(Protocol::P2p(hash)) => match PeerId::from_multihash(hash) {
+                    Ok(id) => id,
+                    Err(_) => {
+                        continue;
+                    }
+                },
+                _ => {
+                    continue; 
+                }
+            };
+            bootstrap.push((addr, peer_id));
+        }
+
         let opts = IpfsOptions {
             ipfs_path: path.clone(),
             keypair: keypair.clone(),
-            bootstrap: vec![],
+            bootstrap,
             mdns: false,
             kad_protocol: None,
-            listening_addrs: vec!["/ip4/0.0.0.0/tcp/0".parse().unwrap()],
+            listening_addrs: config.listen_on,
             span: None,
         };
 
