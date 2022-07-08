@@ -49,6 +49,12 @@ pub struct IpfsIdentity {
     //      * Profile information
 }
 
+impl Drop for IpfsIdentity {
+    fn drop(&mut self) {
+        async_block_unchecked(self.ipfs.clone().exit_daemon())
+    }
+}
+
 impl IpfsIdentity {
     pub async fn temporary(
         tesseract: Tesseract,
