@@ -19,3 +19,5 @@ Cargo.lock
 .idea
 .vscode
 extensions/**/cbindgen.toml
+
+/data
