@@ -313,6 +313,23 @@ impl MultiPass for IpfsIdentity {
             _ => return Err(Error::CannotUpdateIdentity),
         }
 
+        match self.tesseract.retrieve("root_cid") {
+            Ok(cid) => {
+                let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
+                async_block_unchecked(self.ipfs.remove_pin(&cid, false))?;
+            }
+            Err(_) => {},
+        };
+
+        let bytes = serde_json::to_vec(&identity)?;
+        let ident_cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!(bytes)))?;
+        let root_handle =
+            async_block_unchecked(self.ipfs.put_dag(make_ipld!({ "identity": ident_cid })))?;
+
+        async_block_unchecked(self.ipfs.insert_pin(&root_handle, false))?;
+
+        self.tesseract.set("root_cid", &root_handle.to_string())?;
+
         if let Ok(mut cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
             //TODO: Query by public key to tie/assiociate the username to identity in the event of dup
