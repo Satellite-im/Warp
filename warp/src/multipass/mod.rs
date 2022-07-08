@@ -15,22 +15,28 @@ use crate::crypto::PublicKey;
 use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate};
 
 pub trait MultiPass: Extension + Friends + Sync + Send + SingleHandle {
+    /// Create an [`Identity`]
     fn create_identity(
         &mut self,
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<PublicKey, Error>;
 
+    /// Obtain an [`Identity`] using [`Identifier`]
     fn get_identity(&self, id: Identifier) -> Result<Identity, Error>;
 
+    /// Obtain your own [`Identity`]
     fn get_own_identity(&self) -> Result<Identity, Error> {
         self.get_identity(Identifier::own())
     }
 
+    /// Update your own [`Identity`] using [`IdentityUpdate`]
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error>;
 
+    /// Decrypt and provide private key for [`Identity`]
     fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<Vec<u8>, Error>;
 
+    /// Clear out cache related to [`Module::Accounts`]
     fn refresh_cache(&mut self) -> Result<(), Error>;
 }
 

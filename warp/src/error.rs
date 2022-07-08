@@ -205,6 +205,8 @@ pub enum Error {
     RegexError(#[from] regex::Error),
     #[error(transparent)]
     Any(#[from] anyhow::Error),
+    #[error(transparent)]
+    Bs58Error( #[from] bs58::decode::Error),
     #[error("{0}")]
     IoError(#[from] std::io::Error),
     #[error("Functionality is not yet implemented")]

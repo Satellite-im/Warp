@@ -18,6 +18,7 @@ pub struct X25519PublicKey(PublicKey);
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl X25519PublicKey {
+    /// Import X25519 Public Key from bytes
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn from_bytes(bytes: &[u8]) -> X25519PublicKey {
         let mut public_bytes = [0u8; 32];
@@ -25,6 +26,7 @@ impl X25519PublicKey {
         X25519PublicKey(PublicKey::from(public_bytes))
     }
 
+    /// Convert a ED25519 Public Key to X25519 Public Key
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn from_ed25519_public_key(public_key: Ed25519PublicKey) -> Result<X25519PublicKey, Error> {
         let public_key = public_key.to_inner();
@@ -44,6 +46,7 @@ impl TryFrom<Ed25519PublicKey> for X25519PublicKey {
 }
 
 impl X25519PublicKey {
+    /// To access X25519 Public Key
     pub fn to_inner(&self) -> PublicKey {
         self.0
     }
@@ -57,6 +60,7 @@ impl Default for X25519Secret {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl X25519Secret {
+    /// Create an X25519 Secret Key
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new() -> X25519Secret {
         let mut key = [0u8; 32];
@@ -65,6 +69,7 @@ impl X25519Secret {
         X25519Secret::from_bytes(&key)
     }
 
+    /// Import X25519 Secret Key from bytes
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn from_bytes(bytes: &[u8]) -> X25519Secret {
         let mut secret_bytes = [0u8; 32];
@@ -72,6 +77,7 @@ impl X25519Secret {
         X25519Secret(x25519_dalek::StaticSecret::from(secret_bytes))
     }
 
+    /// Convert ED25519 to X25519
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn from_ed25519_keypair(keypair: &Ed25519Keypair) -> Result<X25519Secret, Error> {
         let ed25519_keypair = keypair.to_inner()?;
@@ -85,11 +91,13 @@ impl X25519Secret {
         Ok(X25519Secret(sk))
     }
 
+    /// Public Key of X25519
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn public_key(&self) -> X25519PublicKey {
         X25519PublicKey(PublicKey::from(&self.0))
     }
 
+    /// Key exchange 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn key_exchange(&self, public_key: X25519PublicKey) -> Vec<u8> {
         self.0
@@ -123,24 +131,6 @@ mod test {
         let b_dh = bob_private_key.key_exchange(alice_public_key);
 
         assert_eq!(a_dh, b_dh);
-
-        Ok(())
-    }
-
-    #[test]
-    fn loop_key_exchange() -> anyhow::Result<()> {
-        for _ in 0..50 {
-            let alice_private_key = X25519Secret::new();
-            let alice_public_key = alice_private_key.public_key();
-
-            let bob_private_key = X25519Secret::new();
-            let bob_public_key = bob_private_key.public_key();
-
-            let a_dh = alice_private_key.key_exchange(bob_public_key);
-            let b_dh = bob_private_key.key_exchange(alice_public_key);
-
-            assert_eq!(a_dh, b_dh);
-        }
 
         Ok(())
     }
@@ -187,6 +177,44 @@ mod test {
 
         let bob_secret = X25519Secret::from_ed25519_keypair(&bob_keypair)?;
         let bob_pubkey = bob_secret.public_key();
+
+        let a_dh = alice_secret.key_exchange(bob_pubkey);
+        let b_dh = bob_secret.key_exchange(alice_pubkey);
+
+        assert_eq!(a_dh, b_dh);
+
+        {
+            let cipher = Cipher::from(&a_dh);
+            let for_bob = cipher.encrypt(CipherType::Aes256Gcm, b"Hello Bob")?;
+            let plaintext = cipher
+                .decrypt(CipherType::Aes256Gcm, &for_bob)
+                .map(|ptxt| String::from_utf8_lossy(&ptxt).to_string())?;
+            assert_eq!(plaintext, String::from("Hello Bob"));
+        }
+
+        {
+            let cipher = Cipher::from(&b_dh);
+            let for_alice = cipher.encrypt(CipherType::Aes256Gcm, b"Hello Alice")?;
+            let plaintext = cipher
+                .decrypt(CipherType::Aes256Gcm, &for_alice)
+                .map(|ptxt| String::from_utf8_lossy(&ptxt).to_string())?;
+            assert_eq!(plaintext, String::from("Hello Alice"));
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn ed25519_key_exchange_encryption_using_ed25519_pk() -> anyhow::Result<()> {
+        // Used to test the public key conversion. 
+        let alice_keypair = Ed25519Keypair::new()?;
+        let bob_keypair = Ed25519Keypair::new()?;
+
+        let alice_secret = X25519Secret::from_ed25519_keypair(&alice_keypair)?;
+        let alice_pubkey = X25519PublicKey::from_ed25519_public_key(alice_keypair.public_key())?;
+
+        let bob_secret = X25519Secret::from_ed25519_keypair(&bob_keypair)?;
+        let bob_pubkey = X25519PublicKey::from_ed25519_public_key(bob_keypair.public_key())?;
 
         let a_dh = alice_secret.key_exchange(bob_pubkey);
         let b_dh = bob_secret.key_exchange(alice_pubkey);
