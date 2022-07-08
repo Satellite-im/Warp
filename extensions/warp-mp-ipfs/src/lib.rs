@@ -36,9 +36,11 @@ use warp::multipass::identity::{FriendRequest, Identifier, Identity, IdentityUpd
 use warp::multipass::{identity, Friends, MultiPass};
 
 pub struct IpfsIdentity {
+    path: PathBuf,
     cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     tesseract: Tesseract,
     ipfs: Ipfs<Types>,
+    temp: bool,
     keypair: Keypair,
     //TODO: FriendStore
     //      * Add/Remove/Block friends
@@ -51,7 +53,10 @@ pub struct IpfsIdentity {
 
 impl Drop for IpfsIdentity {
     fn drop(&mut self) {
-        async_block_unchecked(self.ipfs.clone().exit_daemon())
+        async_block_unchecked(self.ipfs.clone().exit_daemon());
+        if self.temp {
+            if let Ok(_) = std::fs::remove_dir_all(&self.path) {}
+        }
     }
 }
 
@@ -77,6 +82,7 @@ impl IpfsIdentity {
         tesseract: Tesseract,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity> {
+        
         let keypair = match tesseract.retrieve("ipfs_keypair") {
             Ok(keypair) => {
                 let kp = bs58::decode(keypair).into_vec()?;
@@ -87,12 +93,13 @@ impl IpfsIdentity {
             }
             Err(_) => Keypair::generate_ed25519(),
         };
-
+        let temp = path.is_none();
+        let path = path.unwrap_or_else(|| {
+            let temp = warp::crypto::rand::thread_rng().gen_range(0, 1000);
+            std::env::temp_dir().join(&format!("ipfs-temp-{temp}"))
+        });
         let opts = IpfsOptions {
-            ipfs_path: path.unwrap_or_else(|| {
-                let temp = warp::crypto::rand::thread_rng().gen_range(0, 1000);
-                std::env::temp_dir().join(&format!("ipfs-temp-{temp}"))
-            }),
+            ipfs_path: path.clone(),
             keypair: keypair.clone(),
             bootstrap: vec![],
             mdns: false,
@@ -113,10 +120,12 @@ impl IpfsIdentity {
         ipfs.restore_bootstrappers().await?;
 
         Ok(IpfsIdentity {
+            path,
             tesseract,
             cache,
             ipfs,
             keypair,
+            temp
         })
     }
 
