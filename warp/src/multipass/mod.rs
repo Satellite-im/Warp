@@ -42,37 +42,74 @@ pub struct MultiPassAdapter {
 
 pub trait Friends: Sync + Send {
     /// Send friend request to corresponding public key
-    fn send_request(&mut self, pubkey: PublicKey) -> Result<(), Error>;
+    fn send_request(&mut self, _: PublicKey) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
 
     /// Accept friend request from public key
-    fn accept_request(&mut self, pubkey: PublicKey) -> Result<(), Error>;
+    fn accept_request(&mut self, _: PublicKey) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
 
     /// Deny friend request from public key
-    fn deny_request(&mut self, pubkey: PublicKey) -> Result<(), Error>;
+    fn deny_request(&mut self, _: PublicKey) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
 
     /// Closing or retracting friend request
-    fn close_request(&mut self, pubkey: PublicKey) -> Result<(), Error>;
+    fn close_request(&mut self, _: PublicKey) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
 
     /// List the incoming friend request
-    fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error>;
+    fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
+        Err(Error::Unimplemented)
+    }
 
     /// List the outgoing friend request
-    fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error>;
+    fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
+        Err(Error::Unimplemented)
+    }
 
     /// List all the friend request that been sent or received
-    fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error>;
+    fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
+        Err(Error::Unimplemented)
+    }
 
     /// Remove friend from contacts
-    fn remove_friend(&mut self, pubkey: PublicKey) -> Result<(), Error>;
+    fn remove_friend(&mut self, _: PublicKey) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
 
     /// Block public key, rather it be a friend or not, from being able to send request to account public address
-    fn block_key(&mut self, pubkey: PublicKey) -> Result<(), Error>;
+    fn block(&mut self, _: PublicKey) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Unblock public key
+    fn unblock(&mut self, _: PublicKey) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    // TODO: Remove
+    fn block_key(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+        self.block(pubkey)
+    }
+
+    /// List block list
+    fn list_block_list(&self) -> Result<Vec<PublicKey>, Error> {
+        Err(Error::Unimplemented)
+    }
 
     /// List all friends and return a corresponding identity for each public key
-    fn list_friends(&self) -> Result<Vec<Identity>, Error>;
+    fn list_friends(&self) -> Result<Vec<Identity>, Error> {
+        Err(Error::Unimplemented)
+    }
 
     /// Check to see if public key is friend of the account
-    fn has_friend(&self, pubkey: PublicKey) -> Result<(), Error>;
+    fn has_friend(&self, _: PublicKey) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
 }
 
 impl MultiPassAdapter {
