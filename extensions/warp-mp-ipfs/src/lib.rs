@@ -82,7 +82,6 @@ impl IpfsIdentity {
         tesseract: Tesseract,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity> {
-        
         let keypair = match tesseract.retrieve("ipfs_keypair") {
             Ok(keypair) => {
                 let kp = bs58::decode(keypair).into_vec()?;
@@ -125,7 +124,7 @@ impl IpfsIdentity {
             cache,
             ipfs,
             keypair,
-            temp
+            temp,
         })
     }
 
@@ -187,19 +186,28 @@ impl MultiPass for IpfsIdentity {
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<PublicKey, Error> {
-        if self.tesseract.exist("ipfs_keypair") {
+        if let Ok(encoded_kp) = self.tesseract.retrieve("ipfs_keypair") {
+            let kp = bs58::decode(encoded_kp)
+                .into_vec()
+                .map_err(anyhow::Error::from)?;
+            let keypair = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
+
             //TODO: Check records to determine if profile exist properly
             if let Ok(cid) = self.tesseract.retrieve("root_cid") {
                 let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
                 let path = IpfsPath::from(cid);
                 let identity_path = path.sub_path("identity").map_err(anyhow::Error::from)?;
                 //TODO: Fix deadlock if cid doesnt exist. May be related to the ipld link
-                let identity_ipld = match async_block_unchecked(self.ipfs.get_dag(identity_path)) {
+                let identity = match async_block_unchecked(self.ipfs.get_dag(identity_path)) {
                     Ok(Ipld::Bytes(bytes)) => serde_json::from_slice::<Identity>(&bytes)?,
                     _ => return Err(Error::Other), //Note: It should not hit here unless the repo is corrupted
                 };
-                //TODO: Perform basic checks against ipld
-                return Err(Error::IdentityExist);
+                let public_key = identity.public_key();
+                let inner_pk = PublicKey::from_bytes(keypair.public.as_ref());
+
+                if public_key == inner_pk {
+                    return Err(Error::IdentityExist);
+                }
             }
         }
 
@@ -327,7 +335,7 @@ impl MultiPass for IpfsIdentity {
                 let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
                 async_block_unchecked(self.ipfs.remove_pin(&cid, false))?;
             }
-            Err(_) => {},
+            Err(_) => {}
         };
 
         let bytes = serde_json::to_vec(&identity)?;
