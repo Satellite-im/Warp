@@ -241,10 +241,7 @@ pub async fn swarm_loop<E>(
                     }
                 }
 
-                //Used due to name not const in autonat protocol crate
-                let autonat_proto_name = b"/libp2p/autonat/1.0.0";
-
-                if protocols.iter().any(|p| p.as_bytes() == autonat_proto_name) {
+                if protocols.iter().any(|p| p.as_bytes() == libp2p::autonat::DEFAULT_PROTOCOL_NAME) {
                     for addr in listen_addrs {
                         if let Some(autonat) = swarm.behaviour_mut().autonat.as_mut() {
                             autonat.add_server(peer_id, Some(addr));
