@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use wasm_bindgen::prelude::*;
 
 use crate::crypto::PublicKey;
@@ -214,7 +215,7 @@ impl Identity {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray, FFIFree)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray, FFIFree)]
 #[wasm_bindgen]
 pub struct FriendRequest {
     /// The account where the request came from
@@ -226,9 +227,24 @@ pub struct FriendRequest {
     /// Status of the request
     status: FriendRequestStatus,
 
+    /// Date of the request
+    date: DateTime<Utc>,
+
     /// Signature of request
     #[serde(skip_serializing_if = "Option::is_none")]
     signature: Option<Vec<u8>>
+}
+
+impl Default for FriendRequest {
+    fn default() -> Self {
+        Self {
+            from: Default::default(),
+            to: Default::default(),
+            status: Default::default(),
+            date: Utc::now(),
+            signature: None
+        }
+    }
 }
 
 #[wasm_bindgen]
@@ -246,6 +262,11 @@ impl FriendRequest {
     #[wasm_bindgen(setter)]
     pub fn set_status(&mut self, status: FriendRequestStatus) {
         self.status = status
+    }
+
+    #[wasm_bindgen]
+    pub fn set_date(&mut self) {
+        self.date = Utc::now()
     }
 
     #[wasm_bindgen(setter)]
@@ -269,6 +290,27 @@ impl FriendRequest {
     #[wasm_bindgen(getter)]
     pub fn status(&self) -> FriendRequestStatus {
         self.status
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn signature(&self) -> Option<Vec<u8>> {
+        self.signature.clone()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl FriendRequest {
+    pub fn date(&self) -> DateTime<Utc> {
+        self.date
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl FriendRequest {
+    #[wasm_bindgen(getter)]
+    pub fn date(&self) -> i64 {
+        self.date.timestamp()
     }
 }
 
