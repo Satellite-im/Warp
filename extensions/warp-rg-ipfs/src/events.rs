@@ -8,12 +8,6 @@ use warp::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum RayGunEvents {
-    MessagingEvents(Vec<u8>),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessagingEvents {
     NewMessage(Message),
     EditMessage(Uuid, Uuid, Vec<String>),
@@ -24,12 +18,12 @@ pub enum MessagingEvents {
     Ping(Uuid, SenderId),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Payload {
-    event: RayGunEvents,
-    signature: Vec<u8>,
-    pk: Vec<u8>,
-}
+// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+// pub struct Payload {
+//     event: RayGunEvents,
+//     signature: Vec<u8>,
+//     pk: Vec<u8>,
+// }
 
 pub fn process_message_event(
     conversation: Arc<Mutex<Vec<Message>>>,
