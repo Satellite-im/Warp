@@ -1,14 +1,14 @@
 #![allow(dead_code)]
 use std::sync::atomic::AtomicBool;
 
-use futures::StreamExt;
+use futures::{StreamExt, SinkExt, TryFutureExt};
 use ipfs::{Ipfs, PeerId, Types};
 
 use serde::{Deserialize, Serialize};
 use warp::crypto::curve25519_dalek::traits::Identity;
 use warp::crypto::PublicKey;
 use warp::error::Error;
-use warp::multipass::identity::FriendRequest;
+use warp::multipass::identity::{FriendRequest, FriendRequestStatus};
 use warp::multipass::MultiPass;
 use warp::sync::{Arc, Mutex};
 
@@ -59,22 +59,27 @@ impl FriendsStore {
         let outgoing_request = Arc::new(Mutex::new(Vec::new()));
         let rejected_request = Arc::new(Mutex::new(Vec::new()));
 
-        let rebroadcast_request_clone = rebroadcast_request.clone();
-        let incoming_request_clone = incoming_request.clone();
-        let outging_request_clone = outgoing_request.clone();
-        let rejected_request_clone = rejected_request.clone();
-        let account_clone = account.clone();
-        let ipfs_clone = ipfs.clone();
-
-        let stream = ipfs.pubsub_subscribe("friends".into()).await?;
+        //TODO: Broadcast topic over DHT to find other peers that would be subscribed and connect to them 
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+
+        let store = Self {
+            ipfs,
+            rebroadcast_request,
+            incoming_request,
+            outgoing_request,
+            rejected_request,
+            account,
+            task: tx,
+        };
+
+        //TODO: 
+
+        // for tokio task
+        let store_inner = store.clone();
+
+        let stream = store.ipfs.pubsub_subscribe("friends".into()).await?;
         tokio::spawn(async move {
-            let incoming = incoming_request_clone.clone();
-            let outgoing = outging_request_clone.clone();
-            let rejected = rejected_request_clone.clone();
-            let rebroadcast = rebroadcast_request_clone.clone();
-            let account = account_clone.clone();
-            let ipfs = ipfs_clone.clone();
+            let store = store_inner;
             futures::pin_mut!(stream);
             loop {
                 tokio::select! {
@@ -86,7 +91,9 @@ impl FriendsStore {
                         if let Some(events) = events {
                             match events {
                                 Request::SendRequest(peer, ret) => {}
-                                Request::AcceptRequest(peer, ret) => {}
+                                Request::AcceptRequest(peer, ret) => {
+                                    
+                                }
                                 Request::RejectRequest(peer, ret) => {}
                             }
                         }
@@ -108,24 +115,30 @@ impl FriendsStore {
                 }
             }
         });
-        Ok(Self {
-            ipfs,
-            rebroadcast_request,
-            incoming_request,
-            outgoing_request,
-            rejected_request,
-            account,
-            task: tx,
-        })
+        Ok(store)
     }
 }
 
 impl FriendsStore {
 
-    pub fn send_request(&mut self) {}
-    pub fn accept_request(&mut self) {}
-    pub fn reject_request(&mut self) {}
-    pub fn block_request(&mut self) {}
+    pub async fn send_request(&mut self, pubkey: PublicKey) -> anyhow::Result<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.task.send(Request::SendRequest(pubkey, tx)).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        rx.await?.map_err(anyhow::Error::from)
+    }
+
+    pub async fn accept_request(&mut self, pubkey: PublicKey) -> anyhow::Result<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.task.send(Request::AcceptRequest(pubkey, tx)).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        rx.await?.map_err(anyhow::Error::from)
+    }
+
+    pub async fn reject_request(&mut self, pubkey: PublicKey) -> anyhow::Result<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.task.send(Request::RejectRequest(pubkey, tx)).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        rx.await?.map_err(anyhow::Error::from)
+    }
+
 
 }
 
@@ -146,21 +159,10 @@ impl FriendsStore {
     }
 
     pub fn list_incoming_request(&self) -> Vec<FriendRequest> {
-        self.incoming_request.lock().to_owned()
+        self.incoming_request.lock().iter().filter(|request| request.status() == FriendRequestStatus::Pending).cloned().collect::<Vec<_>>()
     }
 
     pub fn list_outgoing_request(&self) -> Vec<FriendRequest> {
-        self.outgoing_request.lock().to_owned()
+        self.outgoing_request.lock().iter().filter(|request| request.status() == FriendRequestStatus::Pending).cloned().collect::<Vec<_>>()
     }
-}
-
-pub struct FriendPayload {
-    pub from: PublicKey,
-    pub to: PublicKey,
-    pub payload: Vec<u8>,
-    pub signature: Vec<u8>
-}
-
-impl FriendPayload {
-    pub fn new() {}
 }
