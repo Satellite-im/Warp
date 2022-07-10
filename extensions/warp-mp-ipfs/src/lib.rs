@@ -4,8 +4,8 @@
 #![allow(unused_variables)]
 #![allow(unused_imports)]
 
-pub mod store;
 pub mod config;
+pub mod store;
 
 use anyhow::bail;
 use config::Config;
@@ -15,6 +15,7 @@ use serde::de::DeserializeOwned;
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use store::friends::FriendsStore;
 use warp::data::{DataObject, DataType};
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::sync::{Arc, Mutex, MutexGuard};
@@ -26,7 +27,8 @@ use warp::{Extension, SingleHandle};
 
 use ipfs::ipld::dag_json::DagJsonCodec;
 use ipfs::{
-    make_ipld, Block, Cid, Ipfs, IpfsOptions, IpfsPath, Ipld, Keypair, Types, UninitializedIpfs, Protocol, PeerId,
+    make_ipld, Block, Cid, Ipfs, IpfsOptions, IpfsPath, Ipld, Keypair, PeerId, Protocol, Types,
+    UninitializedIpfs,
 };
 use libp2p::multihash::Sha2_256;
 use tokio::sync::mpsc::Sender;
@@ -37,6 +39,7 @@ use warp::multipass::generator::generate_name;
 use warp::multipass::identity::{FriendRequest, Identifier, Identity, IdentityUpdate};
 use warp::multipass::{identity, Friends, MultiPass};
 
+#[derive(Clone)]
 pub struct IpfsIdentity {
     path: PathBuf,
     cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
@@ -44,9 +47,7 @@ pub struct IpfsIdentity {
     ipfs: Ipfs<Types>,
     temp: bool,
     keypair: Keypair,
-    //TODO: FriendStore
-    //      * Add/Remove/Block friends
-    //      * Show incoming/outgoing request
+    friend_store: FriendsStore,
     //TODO: AccountManager
     //      * Account registry (for self)
     //      * Account lookup
@@ -61,7 +62,7 @@ impl Drop for IpfsIdentity {
         // If IpfsIdentity::temporary was used, `temp` would be true and it would
         // let is to delete the repo
         if self.temp {
-            if let Ok(_) = std::fs::remove_dir_all(&self.path) {}
+            if let Err(_) = std::fs::remove_dir_all(&self.path) {}
         }
     }
 }
@@ -73,9 +74,11 @@ impl IpfsIdentity {
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity> {
         if let Some(config) = &config {
-            if config.path.is_some() { anyhow::bail!("Path cannot be set") }
+            if config.path.is_some() {
+                anyhow::bail!("Path cannot be set")
+            }
         }
-        IpfsIdentity::new( config.unwrap_or_default(), tesseract, cache).await
+        IpfsIdentity::new(config.unwrap_or_default(), tesseract, cache).await
     }
 
     pub async fn persistent<P: AsRef<std::path::Path>>(
@@ -83,7 +86,9 @@ impl IpfsIdentity {
         tesseract: Tesseract,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity> {
-        if config.path.is_none() { anyhow::bail!("Path is required for identity to be persistent") }
+        if config.path.is_none() {
+            anyhow::bail!("Path is required for identity to be persistent")
+        }
         IpfsIdentity::new(config, tesseract, cache).await
     }
 
@@ -92,7 +97,6 @@ impl IpfsIdentity {
         tesseract: Tesseract,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity> {
-
         let keypair = match tesseract.retrieve("ipfs_keypair") {
             Ok(keypair) => {
                 let kp = bs58::decode(keypair).into_vec()?;
@@ -111,7 +115,7 @@ impl IpfsIdentity {
         });
 
         let mut bootstrap = vec![];
-        
+
         for addr in config.bootstrap {
             let mut addr = addr.clone();
             let peer_id = match addr.pop() {
@@ -122,7 +126,7 @@ impl IpfsIdentity {
                     }
                 },
                 _ => {
-                    continue; 
+                    continue;
                 }
             };
             bootstrap.push((addr, peer_id));
@@ -146,17 +150,19 @@ impl IpfsIdentity {
         let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
         tokio::task::spawn(fut);
 
-        //TODO: Manually load bootstrap or use IpfsOptions
-        ipfs.restore_bootstrappers().await?;
+        let friend_store = FriendsStore::new(ipfs.clone(), tesseract.clone()).await?;
 
-        Ok(IpfsIdentity {
+        let identity = IpfsIdentity {
             path,
             tesseract,
             cache,
             ipfs,
             keypair,
             temp,
-        })
+            friend_store,
+        };
+
+        Ok(identity)
     }
 
     pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
@@ -176,6 +182,7 @@ impl IpfsIdentity {
     }
 }
 
+// used for executing async functions in the current thread
 pub fn async_block<F: Future>(fut: F) -> anyhow::Result<F::Output> {
     let handle = match tokio::runtime::Handle::try_current() {
         Ok(handle) => handle,
@@ -188,6 +195,7 @@ pub fn async_block<F: Future>(fut: F) -> anyhow::Result<F::Output> {
     Ok(tokio::task::block_in_place(|| handle.block_on(fut)))
 }
 
+// used for executing async functions in the current thread
 pub fn async_block_unchecked<F: Future>(fut: F) -> F::Output {
     async_block(fut).expect("Unable to run future on runtime")
 }
@@ -224,12 +232,11 @@ impl MultiPass for IpfsIdentity {
             let keypair = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
 
             //TODO: Check records to determine if profile exist properly
-            if let Ok(cid) = self.tesseract.retrieve("root_cid") {
+            if let Ok(cid) = self.tesseract.retrieve("ident_cid") {
                 let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
                 let path = IpfsPath::from(cid);
-                let identity_path = path.sub_path("identity").map_err(anyhow::Error::from)?;
                 //TODO: Fix deadlock if cid doesnt exist. May be related to the ipld link
-                let identity = match async_block_unchecked(self.ipfs.get_dag(identity_path)) {
+                let identity = match async_block_unchecked(self.ipfs.get_dag(path)) {
                     Ok(Ipld::Bytes(bytes)) => serde_json::from_slice::<Identity>(&bytes)?,
                     _ => return Err(Error::Other), //Note: It should not hit here unless the repo is corrupted
                 };
@@ -261,21 +268,32 @@ impl MultiPass for IpfsIdentity {
         let bytes = serde_json::to_vec(&identity)?;
         // Store the identity as a dag
         let ident_cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!(bytes)))?;
-        let root_handle =
-            async_block_unchecked(self.ipfs.put_dag(make_ipld!({ "identity": ident_cid })))?;
+        // Blank list of friends as a dag (as public keys)
+        let friends_cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!([])))?;
+        // blank list of a block list as a dag (ditto)
+        let block_cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!([])))?;
 
         // Pin the dag
-        async_block_unchecked(self.ipfs.insert_pin(&root_handle, false))?;
+        async_block_unchecked(self.ipfs.insert_pin(&ident_cid, true))?;
+        async_block_unchecked(self.ipfs.insert_pin(&friends_cid, true))?;
+        async_block_unchecked(self.ipfs.insert_pin(&block_cid, true))?;
+
+        //TODO: Maybe keep a root cid?
 
         // Note that for the time being we will be storing the Cid to tesseract,
-        // however this would need to be handled a different way, especially since the cid is stored in the pinstore
+        // however this may be handled a different way, especially since the cid is stored in the pinstore
         // in rust-ipfs.
         // TODO: Store the Cid of the root handle properly
         // TODO: Provide the Cid to DHT. Either through the PutProvider or (soon to be implemented) ipns
-        self.tesseract.set("root_cid", &root_handle.to_string())?;
+        self.tesseract.set("ident_cid", &ident_cid.to_string())?;
+        self.tesseract
+            .set("friends_cid", &friends_cid.to_string())?;
+        self.tesseract.set("block_cid", &block_cid.to_string())?;
+
         let encoded_kp = bs58::encode(&raw_kp.encode()).into_string();
 
         self.tesseract.set("ipfs_keypair", &encoded_kp)?;
+
         if let Ok(mut cache) = self.get_cache() {
             let object = DataObject::new(DataType::from(Module::Accounts), &identity)?;
             cache.add_data(DataType::from(Module::Accounts), &object)?;
@@ -299,6 +317,7 @@ impl MultiPass for IpfsIdentity {
                         }
                     }
                 }
+                //TODO: Lookup by public key
                 return Err(Error::IdentityDoesntExist);
             }
             (None, Some(username), false) => {
@@ -318,14 +337,11 @@ impl MultiPass for IpfsIdentity {
                 return Err(Error::IdentityDoesntExist);
             }
             (None, None, true) => {
-                match self.tesseract.retrieve("root_cid") {
+                match self.tesseract.retrieve("ident_cid") {
                     Ok(cid) => {
                         let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
                         let path = IpfsPath::from(cid);
-                        let identity_path =
-                            path.sub_path("identity").map_err(anyhow::Error::from)?;
-                        let identity = match async_block_unchecked(self.ipfs.get_dag(identity_path))
-                        {
+                        let identity = match async_block_unchecked(self.ipfs.get_dag(path)) {
                             Ok(Ipld::Bytes(bytes)) => serde_json::from_slice::<Identity>(&bytes)?,
                             _ => return Err(Error::Other), //Note: It should not hit here unless the repo is corrupted
                         };
@@ -362,7 +378,7 @@ impl MultiPass for IpfsIdentity {
             _ => return Err(Error::CannotUpdateIdentity),
         }
 
-        match self.tesseract.retrieve("root_cid") {
+        match self.tesseract.retrieve("ident_cid") {
             Ok(cid) => {
                 let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
                 async_block_unchecked(self.ipfs.remove_pin(&cid, false))?;
@@ -372,12 +388,10 @@ impl MultiPass for IpfsIdentity {
 
         let bytes = serde_json::to_vec(&identity)?;
         let ident_cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!(bytes)))?;
-        let root_handle =
-            async_block_unchecked(self.ipfs.put_dag(make_ipld!({ "identity": ident_cid })))?;
 
-        async_block_unchecked(self.ipfs.insert_pin(&root_handle, false))?;
+        async_block_unchecked(self.ipfs.insert_pin(&ident_cid, true))?;
 
-        self.tesseract.set("root_cid", &root_handle.to_string())?;
+        self.tesseract.set("ident_cid", &ident_cid.to_string())?;
 
         if let Ok(mut cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
@@ -398,7 +412,7 @@ impl MultiPass for IpfsIdentity {
             }
         }
 
-        //TODO: store and broadcast identity
+        //TODO: broadcast identity
 
         // if let Ok(hooks) = self.get_hooks() {
         //     let object = DataObject::new(DataType::Accounts, identity.clone())?;
@@ -421,51 +435,124 @@ impl MultiPass for IpfsIdentity {
 
 impl Friends for IpfsIdentity {
     fn send_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        todo!()
+        async_block_unchecked(self.friend_store.send_request(pubkey))
     }
 
     fn accept_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        todo!()
+        async_block_unchecked(self.friend_store.accept_request(pubkey))
     }
 
     fn deny_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        todo!()
-    }
-
-    fn close_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        todo!()
+        async_block_unchecked(self.friend_store.reject_request(pubkey))
     }
 
     fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        todo!()
+        Ok(self.friend_store.list_incoming_request())
     }
 
     fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        todo!()
+        Ok(self.friend_store.list_outgoing_request())
     }
 
     fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        todo!()
+        Ok(self.friend_store.list_all_request())
     }
 
     fn remove_friend(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        todo!()
+        let (friend_cid, mut friend_list) = match self.tesseract.retrieve("friends_cid") {
+            Ok(cid) => {
+                let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
+                let path = IpfsPath::from(cid.clone());
+                match async_block_unchecked(self.ipfs.get_dag(path)) {
+                    Ok(Ipld::Bytes(bytes)) => {
+                        (cid, serde_json::from_slice::<Vec<PublicKey>>(&bytes)?)
+                    }
+                    _ => return Err(Error::Other), //Note: It should not hit here unless the repo is corrupted
+                }
+            }
+            Err(e) => return Err(e),
+        };
+
+        if !friend_list.contains(&pubkey) {
+            return Err(Error::FriendDoesntExist);
+        }
+
+        let friend_index = friend_list
+            .iter()
+            .position(|pk| *pk == pubkey)
+            .ok_or(Error::ArrayPositionNotFound)?;
+
+        friend_list.remove(friend_index);
+
+        async_block_unchecked(self.ipfs.remove_pin(&friend_cid, true))?;
+
+        let friend_list_bytes = serde_json::to_vec(&friend_list)?;
+
+        let cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!(friend_list_bytes)))?;
+
+        async_block_unchecked(self.ipfs.insert_pin(&cid, true))?;
+
+        self.tesseract.set("friends_cid", &cid.to_string())?;
+
+        //TODO: Broadcast change to peer
+
+        Ok(())
     }
 
-    fn block_key(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        todo!()
+    fn block(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+        let (block_cid, mut block_list) = match self.tesseract.retrieve("block_cid") {
+            Ok(cid) => {
+                let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
+                let path = IpfsPath::from(cid.clone());
+                match async_block_unchecked(self.ipfs.get_dag(path)) {
+                    Ok(Ipld::Bytes(bytes)) => {
+                        (cid, serde_json::from_slice::<Vec<PublicKey>>(&bytes)?)
+                    }
+                    _ => return Err(Error::Other), //Note: It should not hit here unless the repo is corrupted
+                }
+            }
+            Err(e) => return Err(e),
+        };
+
+        if block_list.contains(&pubkey) {
+            //TODO: Proper error related to blocking
+            return Err(Error::FriendExist);
+        }
+
+        if let Err(_) = self.remove_friend(pubkey.clone()) {
+            //TODO: Log about friend not existing
+        }
+
+        block_list.push(pubkey);
+
+        async_block_unchecked(self.ipfs.remove_pin(&block_cid, true))?;
+
+        let block_list_bytes = serde_json::to_vec(&block_list)?;
+
+        let cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!(block_list_bytes)))?;
+
+        async_block_unchecked(self.ipfs.insert_pin(&cid, true))?;
+
+        self.tesseract.set("block_cid", &cid.to_string())?;
+
+        Ok(())
     }
 
     fn list_friends(&self) -> Result<Vec<Identity>, Error> {
-        todo!()
+        Err(Error::Unimplemented)
     }
 
     fn has_friend(&self, pubkey: PublicKey) -> Result<(), Error> {
-        todo!()
+        let list = self.list_friends()?;
+        for identity in list {
+            if identity.public_key() == pubkey {
+                return Ok(());
+            }
+        }
+        Err(Error::FriendDoesntExist)
     }
 }
 
-#[allow(dead_code)]
 fn to_ipld<S: serde::Serialize>(ser: S) -> anyhow::Result<Ipld> {
     let value = serde_json::to_value(ser)?;
     let item = match value {

@@ -54,6 +54,9 @@ pub struct IpfsSetting {
     pub rendezvous: Rendezvous,
 }
 
+//TODO: section for friends and identity discovery
+//      - In the case these are not set or unable to make a connection to fall back to using ipfs DHT
+//        and performing a lookup of provided cid to make a connection. 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
     pub path: Option<PathBuf>,
