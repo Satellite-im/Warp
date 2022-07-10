@@ -591,6 +591,7 @@ impl Tesseract {
     }
 
     /// Used to save contents to local storage
+    #[wasm_bindgen]
     pub fn save(&mut self) -> Result<()> {
         use gloo::storage::{LocalStorage, Storage};
 
@@ -604,6 +605,7 @@ impl Tesseract {
     }
 
     /// Used to load contents from local storage
+    #[wasm_bindgen]
     pub fn load_from_storage(&mut self) -> Result<()> {
         use gloo::storage::{LocalStorage, Storage};
 
