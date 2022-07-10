@@ -642,7 +642,7 @@ mod test {
     #[test]
     pub fn test_with_256bit_passphase() -> anyhow::Result<()> {
         let mut tesseract = Tesseract::default();
-        tesseract.unlock(&b"an example very very secret key."[..])?;
+        tesseract.unlock(b"an example very very secret key.")?;
         tesseract.set("API", "MYKEY")?;
         let data = tesseract.retrieve("API")?;
         assert_eq!(data, String::from("MYKEY"));
@@ -653,7 +653,7 @@ mod test {
     pub fn test_with_non_256bit_passphase() -> anyhow::Result<()> {
         let mut tesseract = Tesseract::default();
         tesseract.unlock(
-            &b"This is a secret key that will be used for encryption. Totally not 256bit key"[..],
+            b"This is a secret key that will be used for encryption. Totally not 256bit key",
         )?;
         tesseract.set("API", "MYKEY")?;
         let data = tesseract.retrieve("API")?;
@@ -665,7 +665,7 @@ mod test {
     pub fn test_with_invalid_passphrase() -> anyhow::Result<()> {
         let mut tesseract = Tesseract::default();
         tesseract.unlock(
-            &b"This is a secret key that will be used for encryption. Totally not 256bit key"[..],
+            b"This is a secret key that will be used for encryption. Totally not 256bit key",
         )?;
         tesseract.set("API", "MYKEY")?;
         let data = tesseract.retrieve("API")?;
@@ -690,7 +690,7 @@ mod test {
         let tesseract_dup_2 = tesseract.clone();
 
         tesseract.unlock(
-            &b"This is a secret key that will be used for encryption. Totally not 256bit key"[..],
+            b"This is a secret key that will be used for encryption. Totally not 256bit key",
         )?;
         assert!(tesseract.is_unlock());
         assert!(tesseract_dup.is_unlock());
@@ -703,7 +703,7 @@ mod test {
         assert!(!tesseract_dup_2.is_unlock());
 
         tesseract.unlock(
-            &b"This is a secret key that will be used for encryption. Totally not 256bit key"[..],
+            b"This is a secret key that will be used for encryption. Totally not 256bit key",
         )?;
 
         drop(tesseract_dup_2);
