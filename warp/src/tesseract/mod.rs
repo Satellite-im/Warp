@@ -457,12 +457,11 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn delete(&mut self, key: &str) -> Result<()> {
-        {
-            self.internal
-                .write()
-                .remove(key)
-                .ok_or(Error::ObjectNotFound)?;
-        }
+        self.internal
+            .write()
+            .remove(key)
+            .ok_or(Error::ObjectNotFound)?;
+
         self.save()
     }
 
@@ -479,9 +478,8 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn clear(&mut self) {
-        {
-            self.internal.write().clear();
-        }
+        self.internal.write().clear();
+
         if self.save().is_ok() {}
     }
 
@@ -514,10 +512,9 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn unlock(&mut self, passphrase: &[u8]) -> Result<()> {
-        {
-            *self.enc_pass.write() = Cipher::self_encrypt(CipherType::Aes256Gcm, passphrase)?;
-            self.unlock.store(true, Ordering::Relaxed);
-        }
+        *self.enc_pass.write() = Cipher::self_encrypt(CipherType::Aes256Gcm, passphrase)?;
+        self.unlock.store(true, Ordering::Relaxed);
+
         if self.is_key_check_enabled() {
             let keys = self.internal_keys();
             for key in keys {
