@@ -390,6 +390,8 @@ impl MultiPass for IpfsIdentity {
             }
         }
 
+        async_block_unchecked(self.identity_store.update_identity())?;
+        async_block_unchecked(tokio::time::sleep(Duration::from_millis(500)));
         //TODO: broadcast identity
 
         // if let Ok(hooks) = self.get_hooks() {
@@ -462,7 +464,7 @@ impl Friends for IpfsIdentity {
 
         friend_list.remove(friend_index);
 
-        async_block_unchecked(self.ipfs.remove_pin(&friend_cid, true))?;
+        async_block_unchecked(self.ipfs.remove_pin(&friend_cid, false))?;
 
         let friend_list_bytes = serde_json::to_vec(&friend_list)?;
 
@@ -478,42 +480,7 @@ impl Friends for IpfsIdentity {
     }
 
     fn block(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        let (block_cid, mut block_list) = match self.tesseract.retrieve("block_cid") {
-            Ok(cid) => {
-                let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
-                let path = IpfsPath::from(cid.clone());
-                match async_block_unchecked(self.ipfs.get_dag(path)) {
-                    Ok(Ipld::Bytes(bytes)) => {
-                        (cid, serde_json::from_slice::<Vec<PublicKey>>(&bytes)?)
-                    }
-                    _ => return Err(Error::Other), //Note: It should not hit here unless the repo is corrupted
-                }
-            }
-            Err(e) => return Err(e),
-        };
-
-        if block_list.contains(&pubkey) {
-            //TODO: Proper error related to blocking
-            return Err(Error::FriendExist);
-        }
-
-        if let Err(_) = self.remove_friend(pubkey.clone()) {
-            //TODO: Log about friend not existing
-        }
-
-        block_list.push(pubkey);
-
-        async_block_unchecked(self.ipfs.remove_pin(&block_cid, true))?;
-
-        let block_list_bytes = serde_json::to_vec(&block_list)?;
-
-        let cid = async_block_unchecked(self.ipfs.put_dag(ipld!(block_list_bytes)))?;
-
-        async_block_unchecked(self.ipfs.insert_pin(&cid, false))?;
-
-        self.tesseract.set("block_cid", &cid.to_string())?;
-
-        Ok(())
+        async_block_unchecked(self.friend_store.block(pubkey))
     }
 
     fn list_friends(&self) -> Result<Vec<Identity>, Error> {
@@ -531,6 +498,7 @@ impl Friends for IpfsIdentity {
     }
 }
 
+#[allow(dead_code)]
 fn to_ipld<S: serde::Serialize>(ser: S) -> anyhow::Result<Ipld> {
     let value = serde_json::to_value(ser)?;
     let item = match value {

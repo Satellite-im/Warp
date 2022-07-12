@@ -14,7 +14,7 @@ use warp::{
 
 use crate::async_block_unchecked;
 
-pub const IDENTITY_BROADCAST: &'static str = "identity/broadcast";
+use super::IDENTITY_BROADCAST;
 
 #[derive(Clone)]
 pub struct IdentityStore {
@@ -66,7 +66,7 @@ impl IdentityStore {
                     message = id_broadcast_stream.next() => {
                         if let Some(message) = message {
                             if let Ok(identity) = serde_json::from_slice::<Identity>(&message.data) {
-                                if let Ok(own_id) = store.own_identity().await {
+                                if let Some(own_id) = store.get_identity_lock() {
                                     if own_id == identity {
                                         continue
                                     }
@@ -91,7 +91,7 @@ impl IdentityStore {
                     }
                     _ = tick.tick() => {
                         //TODO: Add check to determine if peers are subscribed to topic before publishing
-                        //TODO: Provide a signed payload
+                        //TODO: Provide a signed and/or encrypted payload
                         let ident = store.get_identity_lock();
                         if let Some(ident) = ident.as_ref() {
                             if let Ok(bytes) = serde_json::to_vec(&ident) {
@@ -109,14 +109,14 @@ impl IdentityStore {
 
     pub fn lookup(&self, lookup: LookupBy) -> Result<Identity, Error> {
         let identity_list = &*self.cache.read();
-        for identity in identity_list.into_iter() {
-            match lookup {
-                LookupBy::PublicKey(pubkey) if identity.public_key() == pubkey => return Ok(identity.clone()),
-                LookupBy::Username(username) if identity.username() == username => return Ok(identity.clone()),
-                _ => {}
+
+        identity_list.into_iter().filter(|id| {
+            match &lookup {
+                LookupBy::PublicKey(pubkey) => &id.public_key() == pubkey,
+                LookupBy::Username(username) => &id.username() == username
             }
-        }
-        Err(Error::IdentityDoesntExist)
+        }).cloned().collect::<Vec<_>>().get(0).cloned().ok_or(Error::IdentityDoesntExist)
+
     }
 
     fn get_identity_lock(&self) -> Option<Identity> {
