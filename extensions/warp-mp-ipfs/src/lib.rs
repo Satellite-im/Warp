@@ -12,6 +12,7 @@ use config::Config;
 use futures::{Future, TryFutureExt};
 use ipfs::ipld::ipld_macro;
 use serde::de::DeserializeOwned;
+use store::identity::{IdentityStore, LookupBy};
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -48,10 +49,7 @@ pub struct IpfsIdentity {
     temp: bool,
     keypair: Keypair,
     friend_store: FriendsStore,
-    //TODO: AccountManager
-    //      * Account registry (for self)
-    //      * Account lookup
-    //      * Profile information
+    identity_store: IdentityStore,
 }
 
 impl Drop for IpfsIdentity {
@@ -151,6 +149,7 @@ impl IpfsIdentity {
         tokio::task::spawn(fut);
 
         let friend_store = FriendsStore::new(ipfs.clone(), tesseract.clone()).await?;
+        let identity_store = IdentityStore::new(ipfs.clone(), tesseract.clone()).await?;
 
         let identity = IpfsIdentity {
             path,
@@ -160,6 +159,7 @@ impl IpfsIdentity {
             keypair,
             temp,
             friend_store,
+            identity_store
         };
 
         Ok(identity)
@@ -274,9 +274,9 @@ impl MultiPass for IpfsIdentity {
         let block_cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!([])))?;
 
         // Pin the dag
-        async_block_unchecked(self.ipfs.insert_pin(&ident_cid, true))?;
-        async_block_unchecked(self.ipfs.insert_pin(&friends_cid, true))?;
-        async_block_unchecked(self.ipfs.insert_pin(&block_cid, true))?;
+        async_block_unchecked(self.ipfs.insert_pin(&ident_cid, false))?;
+        async_block_unchecked(self.ipfs.insert_pin(&friends_cid, false))?;
+        async_block_unchecked(self.ipfs.insert_pin(&block_cid, false))?;
 
         //TODO: Maybe keep a root cid?
 
@@ -318,7 +318,7 @@ impl MultiPass for IpfsIdentity {
                     }
                 }
                 //TODO: Lookup by public key
-                return Err(Error::IdentityDoesntExist);
+                return self.identity_store.lookup(LookupBy::PublicKey(pk))
             }
             (None, Some(username), false) => {
                 if let Ok(cache) = self.get_cache() {
@@ -334,22 +334,9 @@ impl MultiPass for IpfsIdentity {
                     }
                 }
                 //TODO: Lookup by username
-                return Err(Error::IdentityDoesntExist);
+                return self.identity_store.lookup(LookupBy::Username(username))
             }
-            (None, None, true) => {
-                match self.tesseract.retrieve("ident_cid") {
-                    Ok(cid) => {
-                        let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
-                        let path = IpfsPath::from(cid);
-                        let identity = match async_block_unchecked(self.ipfs.get_dag(path)) {
-                            Ok(Ipld::Bytes(bytes)) => serde_json::from_slice::<Identity>(&bytes)?,
-                            _ => return Err(Error::Other), //Note: It should not hit here unless the repo is corrupted
-                        };
-                        Ok(identity)
-                    }
-                    Err(_) => Err(Error::IdentityDoesntExist),
-                }
-            }
+            (None, None, true) => return async_block_unchecked(self.identity_store.own_identity()),
             _ => return Err(Error::InvalidIdentifierCondition),
         }
     }
@@ -389,7 +376,7 @@ impl MultiPass for IpfsIdentity {
         let bytes = serde_json::to_vec(&identity)?;
         let ident_cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!(bytes)))?;
 
-        async_block_unchecked(self.ipfs.insert_pin(&ident_cid, true))?;
+        async_block_unchecked(self.ipfs.insert_pin(&ident_cid, false))?;
 
         self.tesseract.set("ident_cid", &ident_cid.to_string())?;
 
@@ -490,7 +477,7 @@ impl Friends for IpfsIdentity {
 
         let cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!(friend_list_bytes)))?;
 
-        async_block_unchecked(self.ipfs.insert_pin(&cid, true))?;
+        async_block_unchecked(self.ipfs.insert_pin(&cid, false))?;
 
         self.tesseract.set("friends_cid", &cid.to_string())?;
 
@@ -531,7 +518,7 @@ impl Friends for IpfsIdentity {
 
         let cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!(block_list_bytes)))?;
 
-        async_block_unchecked(self.ipfs.insert_pin(&cid, true))?;
+        async_block_unchecked(self.ipfs.insert_pin(&cid, false))?;
 
         self.tesseract.set("block_cid", &cid.to_string())?;
 
