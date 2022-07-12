@@ -114,7 +114,7 @@ impl IpfsIdentity {
             ipfs_path: path.clone(),
             keypair: keypair.clone(),
             bootstrap: config.bootstrap,
-            mdns: false,
+            mdns: config.ipfs_setting.mdns.enable,
             kad_protocol: None,
             listening_addrs: config.listen_on,
             span: None,
