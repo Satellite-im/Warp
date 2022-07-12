@@ -18,9 +18,15 @@ use warp::tesseract::Tesseract;
 
 use crate::async_block_unchecked;
 
+use super::FRIENDS_BROADCAST;
+use super::identity::{IdentityStore, LookupBy};
+
 #[derive(Clone)]
 pub struct FriendsStore {
     ipfs: Ipfs<Types>,
+
+    // Copy of the identity store
+    identity_store: IdentityStore,
 
     // In the event we are not connected to a node, this would become helpful in reboadcasting request
     rebroadcast_request: Arc<AtomicBool>,
@@ -56,7 +62,7 @@ pub enum InternalRequest {
 }
 
 impl FriendsStore {
-    pub async fn new(ipfs: Ipfs<Types>, tesseract: Tesseract) -> anyhow::Result<Self> {
+    pub async fn new(ipfs: Ipfs<Types>, tesseract: Tesseract, identity_store: IdentityStore) -> anyhow::Result<Self> {
         let rebroadcast_request = Arc::new(AtomicBool::new(false));
         let rebroadcast_interval = Arc::new(AtomicUsize::new(0));
         let incoming_request = Arc::new(RwLock::new(Vec::new()));
@@ -68,6 +74,7 @@ impl FriendsStore {
 
         let store = Self {
             ipfs,
+            identity_store,
             rebroadcast_request,
             rebroadcast_interval,
             incoming_request,
@@ -84,13 +91,13 @@ impl FriendsStore {
 
         let stream = store
             .ipfs
-            .pubsub_subscribe("friends/discovery".into())
+            .pubsub_subscribe(FRIENDS_BROADCAST.into())
             .await?;
 
-        let topic_cid = store
-            .ipfs
-            .put_dag(ipld!("gossipsub:friends/discovery"))
-            .await?;
+        // let topic_cid = store
+        //     .ipfs
+        //     .put_dag(ipld!(format!("gossipsub:{}", FRIENDS_BROADCAST)))
+        //     .await?;
 
         let ipfs_clone = store.ipfs.clone();
 
@@ -108,12 +115,14 @@ impl FriendsStore {
                     events = rx.recv() => {
                         //Here we receive events to send off to either a peer or to a node to relay the request
                         //TODO:
-                        //* Use (custom) DHT to provide the request to peer over libp2p-kad.
+                        //* Use (custom?) DHT to provide the request to peer over libp2p-kad.
                         //* Sign and encrypt request using private key and the peer public key to ensure they only get the request
                         if let Some(events) = events {
                             match events {
-                                Request::SendRequest(peer, ret) => {
-                                    if let Ok(list) = store.ipfs.pubsub_peers(Some("friends/discovery".into())).await {
+                                Request::SendRequest(pkey, ret) => {
+                                    
+                                    //This check is used to determine if the
+                                    if let Ok(list) = store.ipfs.pubsub_peers(Some(FRIENDS_BROADCAST.into())).await {
                                         if list.contains(&peer_id) {
                                             let _ = ret.send(Err(Error::CannotSendSelfFriendRequest));
                                             continue
@@ -121,10 +130,10 @@ impl FriendsStore {
                                         let _ = ret.send(Err(Error::Unimplemented));
                                     }
                                 }
-                                Request::AcceptRequest(peer, ret) => {
+                                Request::AcceptRequest(pkey, ret) => {
                                     let _ = ret.send(Err(Error::Unimplemented));
                                 }
-                                Request::RejectRequest(peer, ret) => {
+                                Request::RejectRequest(pkey, ret) => {
                                     let _ = ret.send(Err(Error::Unimplemented));
                                 }
                             }
@@ -253,6 +262,77 @@ impl FriendsStore {
 
         self.tesseract.set("block_cid", &cid.to_string())?;
         Ok(())
+    }
+}
+
+impl FriendsStore {
+    pub async fn raw_friends_list(&self) -> Result<(Cid, Vec<PublicKey>), Error> {
+        match self.tesseract.retrieve("friends_cid") {
+            Ok(cid) => {
+                let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
+                let path = IpfsPath::from(cid.clone());
+                match async_block_unchecked(self.ipfs.get_dag(path)) {
+                    Ok(Ipld::Bytes(bytes)) => {
+                        Ok((cid, serde_json::from_slice::<Vec<PublicKey>>(&bytes)?))
+                    }
+                    _ => return Err(Error::Other),
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    pub async fn friends_list(&self) -> Result<Vec<PublicKey>, Error> {
+        self.raw_friends_list().await.map(|(_, list)| list)
+    }
+
+    pub async fn friends_cid(&self) -> Result<Cid, Error> {
+        self.raw_friends_list().await.map(|(cid, _)| cid)
+    }
+
+    pub async fn remove_friend(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+        let (friend_cid, mut friend_list) = self.raw_block_list().await?;
+
+        if !friend_list.contains(&pubkey) {
+            return Err(Error::FriendDoesntExist);
+        }
+
+        let friend_index = friend_list
+            .iter()
+            .position(|pk| *pk == pubkey)
+            .ok_or(Error::ArrayPositionNotFound)?;
+
+        let pk = friend_list.remove(friend_index);
+
+        self.ipfs.remove_pin(&friend_cid, false).await?;
+
+        let friend_list_bytes = serde_json::to_vec(&friend_list)?;
+
+        let cid = self.ipfs.put_dag(ipld!(friend_list_bytes)).await?;
+
+        self.ipfs.insert_pin(&cid, false).await?;
+
+        self.tesseract.set("friends_cid", &cid.to_string())?;
+
+        Ok(())
+    }
+
+    pub async fn friends_list_with_identity(&self) -> Result<Vec<Identity>, Error> {
+        let mut identity_list = vec![];
+
+        let list = self.friends_list().await?;
+
+        for pk in list {
+            let mut identity = Identity::default();
+            if let Ok(id) = self.identity_store.lookup(LookupBy::PublicKey(pk.clone())) {
+                identity = id;
+            } else {
+                //Since we are not able to resolve this lookup, we would just have the public key apart of the identity for the time being
+                identity.set_public_key(pk);
+            }
+            identity_list.push(identity);
+        }
+        Ok(identity_list)
     }
 }
 

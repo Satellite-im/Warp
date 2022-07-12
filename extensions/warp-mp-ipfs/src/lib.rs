@@ -133,8 +133,9 @@ impl IpfsIdentity {
         let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
         tokio::task::spawn(fut);
 
-        let friend_store = FriendsStore::new(ipfs.clone(), tesseract.clone()).await?;
+
         let identity_store = IdentityStore::new(ipfs.clone(), tesseract.clone()).await?;
+        let friend_store = FriendsStore::new(ipfs.clone(), tesseract.clone(), identity_store.clone()).await?;
 
         let identity = IpfsIdentity {
             path,
@@ -439,48 +440,15 @@ impl Friends for IpfsIdentity {
     }
 
     fn remove_friend(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        let (friend_cid, mut friend_list) = match self.tesseract.retrieve("friends_cid") {
-            Ok(cid) => {
-                let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
-                let path = IpfsPath::from(cid.clone());
-                match async_block_unchecked(self.ipfs.get_dag(path)) {
-                    Ok(Ipld::Bytes(bytes)) => {
-                        (cid, serde_json::from_slice::<Vec<PublicKey>>(&bytes)?)
-                    }
-                    _ => return Err(Error::Other), //Note: It should not hit here unless the repo is corrupted
-                }
-            }
-            Err(e) => return Err(e),
-        };
-
-        if !friend_list.contains(&pubkey) {
-            return Err(Error::FriendDoesntExist);
-        }
-
-        let friend_index = friend_list
-            .iter()
-            .position(|pk| *pk == pubkey)
-            .ok_or(Error::ArrayPositionNotFound)?;
-
-        friend_list.remove(friend_index);
-
-        async_block_unchecked(self.ipfs.remove_pin(&friend_cid, false))?;
-
-        let friend_list_bytes = serde_json::to_vec(&friend_list)?;
-
-        let cid = async_block_unchecked(self.ipfs.put_dag(ipld!(friend_list_bytes)))?;
-
-        async_block_unchecked(self.ipfs.insert_pin(&cid, false))?;
-
-        self.tesseract.set("friends_cid", &cid.to_string())?;
-
-        //TODO: Broadcast change to peer
-
-        Ok(())
+        async_block_unchecked(self.friend_store.remove_friend(pubkey))
     }
 
     fn block(&mut self, pubkey: PublicKey) -> Result<(), Error> {
         async_block_unchecked(self.friend_store.block(pubkey))
+    }
+
+    fn block_list(&self) -> Result<Vec<PublicKey>, Error> {
+        async_block_unchecked(self.friend_store.block_list())
     }
 
     fn list_friends(&self) -> Result<Vec<Identity>, Error> {
