@@ -402,7 +402,7 @@ async fn main() -> AnyResult<()> {
             Command::ListFriends => {
                 let account = manager.get_account()?;
                 let account = account.lock();
-                let friends = account.list_friends()?;
+                let friends = account.list_friends()?.iter().filter_map(|pk| account.get_identity(Identifier::from(pk.clone())).ok()).collect::<Vec<_>>();
                 let mut table = Table::new();
                 table.set_header(vec!["Username", "Address"]);
                 for friend in friends {

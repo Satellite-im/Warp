@@ -107,8 +107,8 @@ pub trait Friends: Sync + Send {
         Err(Error::Unimplemented)
     }
 
-    /// List all friends and return a corresponding identity for each public key
-    fn list_friends(&self) -> Result<Vec<Identity>, Error> {
+    /// List all friends public key
+    fn list_friends(&self) -> Result<Vec<PublicKey>, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -240,7 +240,7 @@ impl MultiPassAdapter {
         self.inner_guard().list_outgoing_request()
     }
 
-    pub fn list_friends(&self) -> Result<Vec<Identity>, Error> {
+    pub fn list_friends(&self) -> Result<Vec<PublicKey>, Error> {
         self.inner_guard().list_friends()
     }
 
@@ -579,7 +579,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_friends(
         ctx: *const MultiPassAdapter,
-    ) -> FFIResult<FFIArray<Identity>> {
+    ) -> FFIResult<FFIArray<PublicKey>> {
         if ctx.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }

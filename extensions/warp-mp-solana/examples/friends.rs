@@ -116,6 +116,7 @@ fn main() -> anyhow::Result<()> {
             println!("{} Friends:", username(&ident_a));
 
             for friend in account_a.list_friends()? {
+                let friend = account_a.get_identity(Identifier::public_key(friend))?;
                 println!("Username: {}", username(&friend));
                 println!("Public Key: {}", Pubkey::new(friend.public_key().as_ref()));
                 println!();
@@ -124,6 +125,7 @@ fn main() -> anyhow::Result<()> {
             println!("{} Friends:", username(&ident_b));
 
             for friend in account_b.list_friends()? {
+                let friend = account_b.get_identity(Identifier::public_key(friend))?;
                 println!("Username: {}", username(&friend));
                 println!("Public Key: {}", Pubkey::new(friend.public_key().as_ref()));
                 println!();

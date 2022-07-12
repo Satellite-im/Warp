@@ -451,14 +451,14 @@ impl Friends for IpfsIdentity {
         async_block_unchecked(self.friend_store.block_list())
     }
 
-    fn list_friends(&self) -> Result<Vec<Identity>, Error> {
+    fn list_friends(&self) -> Result<Vec<PublicKey>, Error> {
         Err(Error::Unimplemented)
     }
 
     fn has_friend(&self, pubkey: PublicKey) -> Result<(), Error> {
         let list = self.list_friends()?;
-        for identity in list {
-            if identity.public_key() == pubkey {
+        for pk in list {
+            if pk == pubkey {
                 return Ok(());
             }
         }

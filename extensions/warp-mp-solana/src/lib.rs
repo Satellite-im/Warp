@@ -437,7 +437,7 @@ impl Friends for SolanaAccount {
             if let Some(request) = self
                 .list_friends()?
                 .iter()
-                .filter(|identity| identity.public_key() == pubkey)
+                .filter(|pk| **pk == pubkey)
                 .collect::<Vec<_>>()
                 .first()
             {
@@ -585,7 +585,7 @@ impl Friends for SolanaAccount {
         Err(Error::Unimplemented)
     }
 
-    fn list_friends(&self) -> Result<Vec<Identity>> {
+    fn list_friends(&self) -> Result<Vec<PublicKey>> {
         let mut identities = vec![];
         let list = self.list_all_request()?;
         let ident = self.get_own_identity()?;
@@ -594,9 +594,9 @@ impl Friends for SolanaAccount {
             .filter(|r| r.status() == FriendRequestStatus::Accepted)
         {
             let identity = if request.to() != ident.public_key() {
-                self.get_identity(Identifier::from(request.to()))?
+                request.to()
             } else {
-                self.get_identity(Identifier::from(request.from()))?
+                request.from()
             };
 
             identities.push(identity)
