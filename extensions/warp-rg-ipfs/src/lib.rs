@@ -105,6 +105,10 @@ impl IpfsMessaging {
                     kad_protocol: None,
                     listening_addrs: vec!["/ip4/0.0.0.0/tcp/0".parse().unwrap()],
                     span: None,
+                    dcutr: false,
+                    relay: false,
+                    relay_server: false,
+                    relay_addr: None,
                 };
 
                 if !opts.ipfs_path.exists() {

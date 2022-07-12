@@ -2,8 +2,9 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 
 use futures::{SinkExt, StreamExt, TryFutureExt};
-use ipfs::{make_ipld, Cid, Ipfs, Keypair, PeerId, Protocol, Types};
+use ipfs::{Ipfs, Keypair, PeerId, Protocol, Types, IpfsPath};
 
+use libipld::{ipld, Cid, Ipld};
 use serde::{Deserialize, Serialize};
 use warp::crypto::PublicKey;
 use warp::error::Error;
@@ -14,6 +15,8 @@ use warp::sync::{Arc, RwLock};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender};
 use warp::tesseract::Tesseract;
+
+use crate::async_block_unchecked;
 
 #[derive(Clone)]
 pub struct FriendsStore {
@@ -86,7 +89,7 @@ impl FriendsStore {
 
         let topic_cid = store
             .ipfs
-            .put_dag(make_ipld!("gossipsub:friends/discovery"))
+            .put_dag(ipld!("gossipsub:friends/discovery"))
             .await?;
 
         let ipfs_clone = store.ipfs.clone();
@@ -174,6 +177,82 @@ impl FriendsStore {
             .await
             .map_err(|e| anyhow::anyhow!("{}", e))?;
         rx.await.map_err(anyhow::Error::from)?
+    }
+}
+
+impl FriendsStore {
+
+    pub async fn raw_block_list(&self) -> Result<(Cid, Vec<PublicKey>), Error> {
+        match self.tesseract.retrieve("block_cid") {
+            Ok(cid) => {
+                let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
+                let path = IpfsPath::from(cid.clone());
+                match self.ipfs.get_dag(path).await {
+                    Ok(Ipld::Bytes(bytes)) => {
+                        Ok((cid, serde_json::from_slice::<Vec<PublicKey>>(&bytes)?))
+                    }
+                    _ => return Err(Error::Other), //Note: It should not hit here unless the repo is corrupted
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    pub async fn block_list(&self) -> Result<Vec<PublicKey>, Error> {
+        self.raw_block_list().await.map(|(_, list)| list)
+    }
+
+    pub async fn block_cid(&self) -> Result<Cid, Error> {
+        self.raw_block_list().await.map(|(cid, _)| cid)
+    }
+
+    pub async fn block(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+        let (block_cid, mut block_list) = self.raw_block_list().await?;
+        
+        if block_list.contains(&pubkey) {
+            //TODO: Proper error related to blocking
+            return Err(Error::FriendExist);
+        }
+
+        block_list.push(pubkey);
+
+        self.ipfs.remove_pin(&block_cid, false).await?;
+
+        let block_list_bytes = serde_json::to_vec(&block_list)?;
+
+        let cid = self.ipfs.put_dag(ipld!(block_list_bytes)).await?;
+
+        self.ipfs.insert_pin(&cid, false).await?;
+
+        self.tesseract.set("block_cid", &cid.to_string())?;
+        Ok(())
+    }
+
+    pub async fn unblock(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+        let (block_cid, mut block_list) = self.raw_block_list().await?;
+        
+        if !block_list.contains(&pubkey) {
+            //TODO: Proper error related to blocking
+            return Err(Error::FriendDoesntExist);
+        }
+
+        let index = block_list
+            .iter()
+            .position(|pk| *pk == pubkey)
+            .ok_or(Error::ArrayPositionNotFound)?;
+
+        block_list.remove(index);
+
+        self.ipfs.remove_pin(&block_cid, false).await?;
+
+        let block_list_bytes = serde_json::to_vec(&block_list)?;
+
+        let cid = self.ipfs.put_dag(ipld!(block_list_bytes)).await?;
+
+        self.ipfs.insert_pin(&cid, false).await?;
+
+        self.tesseract.set("block_cid", &cid.to_string())?;
+        Ok(())
     }
 }
 

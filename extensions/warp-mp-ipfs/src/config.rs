@@ -1,4 +1,4 @@
-use libp2p::Multiaddr;
+use ipfs::Multiaddr;
 use serde::{Deserialize, Serialize};
 use std::{str::FromStr, path::PathBuf};
 
