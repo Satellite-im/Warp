@@ -264,11 +264,6 @@ impl FriendRequest {
         self.status = status
     }
 
-    #[wasm_bindgen]
-    pub fn set_date(&mut self) {
-        self.date = Utc::now()
-    }
-
     #[wasm_bindgen(setter)]
     pub fn set_signature(&mut self, signature: Vec<u8>) {
         self.signature = Some(signature);
@@ -300,6 +295,12 @@ impl FriendRequest {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl FriendRequest {
+
+    pub fn set_date(&mut self, date: DateTime<Utc>) {
+        self.date = date
+    }
+
+
     pub fn date(&self) -> DateTime<Utc> {
         self.date
     }
@@ -308,6 +309,14 @@ impl FriendRequest {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 impl FriendRequest {
+
+    #[wasm_bindgen]
+    pub fn set_date(&mut self) {
+        //TODO: Use timestamp and convert it to Datetime
+        self.date = Utc::now()
+    }
+
+
     #[wasm_bindgen(getter)]
     pub fn date(&self) -> i64 {
         self.date.timestamp()
