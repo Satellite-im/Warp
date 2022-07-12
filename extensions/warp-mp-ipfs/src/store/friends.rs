@@ -2,8 +2,9 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 
 use futures::{SinkExt, StreamExt, TryFutureExt};
-use ipfs::{make_ipld, Cid, Ipfs, Keypair, PeerId, Protocol, Types};
+use ipfs::{Ipfs, Keypair, PeerId, Protocol, Types};
 
+use libipld::ipld;
 use serde::{Deserialize, Serialize};
 use warp::crypto::PublicKey;
 use warp::error::Error;
@@ -86,7 +87,7 @@ impl FriendsStore {
 
         let topic_cid = store
             .ipfs
-            .put_dag(make_ipld!("gossipsub:friends/discovery"))
+            .put_dag(ipld!("gossipsub:friends/discovery"))
             .await?;
 
         let ipfs_clone = store.ipfs.clone();

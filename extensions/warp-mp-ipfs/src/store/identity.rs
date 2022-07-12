@@ -2,9 +2,9 @@
 #![allow(dead_code)]
 use std::time::Duration;
 
-use cid::Cid;
-use ipfs::{Ipfs, Types, IpfsPath, Ipld};
+use ipfs::{Ipfs, Types, IpfsPath};
 use futures::{SinkExt, StreamExt, TryFutureExt};
+use libipld::{Cid, Ipld};
 use warp::{
     error::Error,
     multipass::identity::Identity,
@@ -44,7 +44,7 @@ impl IdentityStore {
         }
         let id_broadcast_stream = store.ipfs.pubsub_subscribe(IDENTITY_BROADCAST.into()).await?;
         let store_inner = store.clone();
-        
+
         tokio::spawn(async move {
             let store = store_inner;
 

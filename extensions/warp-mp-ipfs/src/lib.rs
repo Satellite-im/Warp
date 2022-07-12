@@ -10,7 +10,7 @@ pub mod store;
 use anyhow::bail;
 use config::Config;
 use futures::{Future, TryFutureExt};
-use ipfs::ipld::ipld_macro;
+use libipld::{Cid, Ipld, ipld};
 use serde::de::DeserializeOwned;
 use store::identity::{IdentityStore, LookupBy};
 use std::any::Any;
@@ -26,12 +26,10 @@ use warp::pocket_dimension::PocketDimension;
 use warp::tesseract::Tesseract;
 use warp::{Extension, SingleHandle};
 
-use ipfs::ipld::dag_json::DagJsonCodec;
 use ipfs::{
-    make_ipld, Block, Cid, Ipfs, IpfsOptions, IpfsPath, Ipld, Keypair, PeerId, Protocol, Types,
+    Block, Ipfs, IpfsOptions, IpfsPath, Keypair, PeerId, Protocol, Types,
     UninitializedIpfs,
 };
-use libp2p::multihash::Sha2_256;
 use tokio::sync::mpsc::Sender;
 use warp::crypto::rand::Rng;
 use warp::crypto::PublicKey;
@@ -112,32 +110,18 @@ impl IpfsIdentity {
             std::env::temp_dir().join(&format!("ipfs-temp-{temp}"))
         });
 
-        let mut bootstrap = vec![];
-
-        for addr in config.bootstrap {
-            let mut addr = addr.clone();
-            let peer_id = match addr.pop() {
-                Some(Protocol::P2p(hash)) => match PeerId::from_multihash(hash) {
-                    Ok(id) => id,
-                    Err(_) => {
-                        continue;
-                    }
-                },
-                _ => {
-                    continue;
-                }
-            };
-            bootstrap.push((addr, peer_id));
-        }
-
         let opts = IpfsOptions {
             ipfs_path: path.clone(),
             keypair: keypair.clone(),
-            bootstrap,
+            bootstrap: config.bootstrap,
             mdns: false,
             kad_protocol: None,
             listening_addrs: config.listen_on,
             span: None,
+            dcutr: false,
+            relay: false,
+            relay_server: false,
+            relay_addr: None,
         };
 
         // Create directory if it doesnt exist
@@ -267,11 +251,11 @@ impl MultiPass for IpfsIdentity {
         // let ipld_val = to_ipld(identity.clone())?;
         let bytes = serde_json::to_vec(&identity)?;
         // Store the identity as a dag
-        let ident_cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!(bytes)))?;
+        let ident_cid = async_block_unchecked(self.ipfs.put_dag(ipld!(bytes)))?;
         // Blank list of friends as a dag (as public keys)
-        let friends_cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!([])))?;
+        let friends_cid = async_block_unchecked(self.ipfs.put_dag(ipld!([])))?;
         // blank list of a block list as a dag (ditto)
-        let block_cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!([])))?;
+        let block_cid = async_block_unchecked(self.ipfs.put_dag(ipld!([])))?;
 
         // Pin the dag
         async_block_unchecked(self.ipfs.insert_pin(&ident_cid, false))?;
@@ -374,7 +358,7 @@ impl MultiPass for IpfsIdentity {
         };
 
         let bytes = serde_json::to_vec(&identity)?;
-        let ident_cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!(bytes)))?;
+        let ident_cid = async_block_unchecked(self.ipfs.put_dag(ipld!(bytes)))?;
 
         async_block_unchecked(self.ipfs.insert_pin(&ident_cid, false))?;
 
@@ -475,7 +459,7 @@ impl Friends for IpfsIdentity {
 
         let friend_list_bytes = serde_json::to_vec(&friend_list)?;
 
-        let cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!(friend_list_bytes)))?;
+        let cid = async_block_unchecked(self.ipfs.put_dag(ipld!(friend_list_bytes)))?;
 
         async_block_unchecked(self.ipfs.insert_pin(&cid, false))?;
 
@@ -516,7 +500,7 @@ impl Friends for IpfsIdentity {
 
         let block_list_bytes = serde_json::to_vec(&block_list)?;
 
-        let cid = async_block_unchecked(self.ipfs.put_dag(make_ipld!(block_list_bytes)))?;
+        let cid = async_block_unchecked(self.ipfs.put_dag(ipld!(block_list_bytes)))?;
 
         async_block_unchecked(self.ipfs.insert_pin(&cid, false))?;
 
