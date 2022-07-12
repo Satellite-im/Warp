@@ -78,7 +78,7 @@ impl IpfsIdentity {
         IpfsIdentity::new(config.unwrap_or_default(), tesseract, cache).await
     }
 
-    pub async fn persistent<P: AsRef<std::path::Path>>(
+    pub async fn persistent(
         config: Config,
         tesseract: Tesseract,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
