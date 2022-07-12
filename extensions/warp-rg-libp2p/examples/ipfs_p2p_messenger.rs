@@ -32,21 +32,14 @@ fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
 async fn create_account(
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
 ) -> anyhow::Result<Arc<Mutex<Box<dyn MultiPass>>>> {
-    let env = std::env::var("TESSERACT_FILE").unwrap_or_else(|_| "datastore".to_string());
 
-    let mut tesseract = Tesseract::from_file(&env).unwrap_or_default();
+    let mut tesseract = Tesseract::default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    tesseract.set_file(env);
-    tesseract.set_autosave();
-
-    let config = warp_mp_ipfs::config::Config { ipfs_setting: IpfsSetting { mdns: warp_mp_ipfs::config::Mdns { enable: true }, ..Default::default() }, ..Default::default() };
+    let config = warp_mp_ipfs::config::Config {ipfs_setting: IpfsSetting { mdns: warp_mp_ipfs::config::Mdns { enable: true }, ..Default::default() }, ..Default::default() };
     let mut account = IpfsIdentity::temporary(Some(config), tesseract, Some(cache)).await?;
 
-    if account.get_own_identity().is_ok() {
-        return Ok(Arc::new(Mutex::new(Box::new(account))));
-    }
     account.create_identity(None, None)?;
     Ok(Arc::new(Mutex::new(Box::new(account))))
 }
