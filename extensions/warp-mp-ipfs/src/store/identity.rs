@@ -1,6 +1,6 @@
 
 #![allow(dead_code)]
-use std::time::Duration;
+use std::{time::Duration, sync::atomic::{AtomicBool, Ordering}};
 
 use ipfs::{Ipfs, Types, IpfsPath};
 use futures::{SinkExt, StreamExt, TryFutureExt};
@@ -20,10 +20,12 @@ pub const IDENTITY_BROADCAST: &'static str = "identity/broadcast";
 pub struct IdentityStore {
     ipfs: Ipfs<Types>,
 
-    identity: Arc<Mutex<Option<Identity>>>,
+    identity: Arc<RwLock<Option<Identity>>>,
 
     cache: Arc<RwLock<Vec<Identity>>>,
     
+    start_event: Arc<AtomicBool>,
+
     tesseract: Tesseract
 }
 
@@ -36,24 +38,30 @@ impl IdentityStore {
     pub async fn new(ipfs: Ipfs<Types>, tesseract: Tesseract) -> Result<Self, Error> {
         let cache = Arc::new(Default::default());
         let identity = Arc::new(Default::default());
+        let start_event = Arc::new(Default::default());
 
-        let store = Self { ipfs, cache, identity, tesseract };
+        let store = Self { ipfs, cache, identity, start_event, tesseract };
 
         if let Ok(ident) = store.own_identity().await {
-            *store.identity.lock() = Some(ident);
+            *store.identity.write() = Some(ident);
+            store.start_event.store(true, Ordering::SeqCst);
         }
         let id_broadcast_stream = store.ipfs.pubsub_subscribe(IDENTITY_BROADCAST.into()).await?;
         let store_inner = store.clone();
 
         tokio::spawn(async move {
             let store = store_inner;
-
+            
             //TODO: Perform "peer discovery" by providing the topic over DHT
 
             futures::pin_mut!(id_broadcast_stream);
             // Used to send identity out in intervals
+            // TODO: Determine if we can decrease the interval and make it configurable 
             let mut tick = tokio::time::interval(Duration::from_secs(1));
             loop {
+                if !store.start_event.load(Ordering::SeqCst) {
+                    continue
+                }
                 tokio::select! {
                     message = id_broadcast_stream.next() => {
                         if let Some(message) = message {
@@ -63,6 +71,7 @@ impl IdentityStore {
                                         continue
                                     }
                                 }
+
                                 if store.cache.read().contains(&identity) {
                                     continue;
                                 }
@@ -83,7 +92,8 @@ impl IdentityStore {
                     _ = tick.tick() => {
                         //TODO: Add check to determine if peers are subscribed to topic before publishing
                         //TODO: Provide a signed payload
-                        if let Ok(ident) = store.own_identity().await {
+                        let ident = store.get_identity_lock();
+                        if let Some(ident) = ident.as_ref() {
                             if let Ok(bytes) = serde_json::to_vec(&ident) {
                                 if let Err(_) = store.ipfs.pubsub_publish(IDENTITY_BROADCAST.into(), bytes).await {
                                     continue
@@ -109,6 +119,10 @@ impl IdentityStore {
         Err(Error::IdentityDoesntExist)
     }
 
+    fn get_identity_lock(&self) -> Option<Identity> {
+        self.identity.read().clone()
+    }
+
     pub async fn own_identity(&self) -> Result<Identity, Error> {
         match self.tesseract.retrieve("ident_cid") {
             Ok(cid) => {
@@ -126,7 +140,15 @@ impl IdentityStore {
 
     pub async fn update_identity(&self) -> Result<(), Error> {
         let ident = self.own_identity().await?;
-        *self.identity.lock() = Some(ident);
+        *self.identity.write() = Some(ident);
         Ok(())
+    }
+
+    pub fn enable_event(&self) {
+        self.start_event.store(true, Ordering::SeqCst);
+    }
+
+    pub fn disable_event(&self) {
+        self.start_event.store(true, Ordering::SeqCst);
     }
 }

@@ -16,6 +16,7 @@ use store::identity::{IdentityStore, LookupBy};
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::time::Duration;
 use store::friends::FriendsStore;
 use warp::data::{DataObject, DataType};
 use warp::pocket_dimension::query::QueryBuilder;
@@ -278,6 +279,11 @@ impl MultiPass for IpfsIdentity {
 
         self.tesseract.set("ipfs_keypair", &encoded_kp)?;
 
+        async_block_unchecked(self.identity_store.update_identity())?;
+        self.identity_store.enable_event();
+
+        // Add a delay to give the loop time to start to broadcast and accept events
+        async_block_unchecked(tokio::time::sleep(Duration::from_millis(500)));
         if let Ok(mut cache) = self.get_cache() {
             let object = DataObject::new(DataType::from(Module::Accounts), &identity)?;
             cache.add_data(DataType::from(Module::Accounts), &object)?;
@@ -287,6 +293,7 @@ impl MultiPass for IpfsIdentity {
 
     //TODO: Use DHT to perform lookups
     fn get_identity(&self, id: Identifier) -> Result<Identity, Error> {
+
         match id.get_inner() {
             (Some(pk), None, false) => {
                 if let Ok(cache) = self.get_cache() {
