@@ -103,7 +103,7 @@ pub trait Friends: Sync + Send {
     }
 
     /// List block list
-    fn list_block_list(&self) -> Result<Vec<PublicKey>, Error> {
+    fn block_list(&self) -> Result<Vec<PublicKey>, Error> {
         Err(Error::Unimplemented)
     }
 
