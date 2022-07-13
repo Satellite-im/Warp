@@ -1,21 +1,21 @@
 #![allow(dead_code)]
 use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::time::Duration;
 
 use futures::{SinkExt, StreamExt, TryFutureExt};
 use ipfs::{Ipfs, Keypair, PeerId, Protocol, Types, IpfsPath};
 
 use libipld::{ipld, Cid, Ipld};
-use serde::{Deserialize, Serialize};
-use warp::crypto::PublicKey;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use warp::crypto::{PublicKey, signature::Ed25519Keypair};
 use warp::error::Error;
 use warp::multipass::identity::{FriendRequest, FriendRequestStatus, Identity};
 use warp::multipass::MultiPass;
-use warp::sync::{Arc, RwLock};
+use warp::sync::{Arc, RwLock, Mutex};
 
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender};
 use warp::tesseract::Tesseract;
-
 use crate::async_block_unchecked;
 
 use super::FRIENDS_BROADCAST;
@@ -24,9 +24,6 @@ use super::identity::{IdentityStore, LookupBy};
 #[derive(Clone)]
 pub struct FriendsStore {
     ipfs: Ipfs<Types>,
-
-    // Copy of the identity store
-    identity_store: IdentityStore,
 
     // In the event we are not connected to a node, this would become helpful in reboadcasting request
     rebroadcast_request: Arc<AtomicBool>,
@@ -62,19 +59,19 @@ pub enum InternalRequest {
 }
 
 impl FriendsStore {
-    pub async fn new(ipfs: Ipfs<Types>, tesseract: Tesseract, identity_store: IdentityStore) -> anyhow::Result<Self> {
+    pub async fn new(ipfs: Ipfs<Types>, tesseract: Tesseract) -> anyhow::Result<Self> {
         let rebroadcast_request = Arc::new(AtomicBool::new(false));
-        let rebroadcast_interval = Arc::new(AtomicUsize::new(0));
-        let incoming_request = Arc::new(RwLock::new(Vec::new()));
-        let outgoing_request = Arc::new(RwLock::new(Vec::new()));
-        let rejected_request = Arc::new(RwLock::new(Vec::new()));
+        let rebroadcast_interval = Arc::new(AtomicUsize::new(1));
+        let incoming_request = Arc::new(Default::default());
+        let outgoing_request = Arc::new(Default::default());
+        let rejected_request = Arc::new(Default::default());
+
 
         //TODO: Broadcast topic over DHT to find other peers that would be subscribed and connect to them
         let (task, mut rx) = tokio::sync::mpsc::channel(1);
 
         let store = Self {
             ipfs,
-            identity_store,
             rebroadcast_request,
             rebroadcast_interval,
             incoming_request,
@@ -103,13 +100,14 @@ impl FriendsStore {
 
         //TODO: Maybe move this into the main task when there are no events being received?
 
-        let peer_id = store.ipfs.identity().await.map(|(p, _)| p.to_peer_id())?;
+        let (local_ipfs_public_key, local_peer_id) = store.ipfs.identity().await.map(|(p, _)| (p.clone(), p.to_peer_id()))?;
 
         tokio::spawn(async move {
             let store = store_inner;
             //Using this for "peer discovery" when providing the cid over DHT
-
+            
             futures::pin_mut!(stream);
+            let mut broadcast_interval = tokio::time::interval(Duration::from_secs(1));
             loop {
                 tokio::select! {
                     events = rx.recv() => {
@@ -120,17 +118,114 @@ impl FriendsStore {
                         if let Some(events) = events {
                             match events {
                                 Request::SendRequest(pkey, ret) => {
-                                    
-                                    //This check is used to determine if the
-                                    if let Ok(list) = store.ipfs.pubsub_peers(Some(FRIENDS_BROADCAST.into())).await {
-                                        if list.contains(&peer_id) {
-                                            let _ = ret.send(Err(Error::CannotSendSelfFriendRequest));
+
+                                    let local_public_key = match libp2p_pub_to_pub(&local_ipfs_public_key) {
+                                        Ok(pk) => pk,
+                                        Err(e) => {
+                                            let _ = ret.send(Err(Error::Any(e)));
                                             continue
                                         }
-                                        let _ = ret.send(Err(Error::Unimplemented));
+                                    };
+
+                                    if local_public_key == pkey {
+                                        let _ = ret.send(Err(Error::CannotSendSelfFriendRequest));
+                                        continue
                                     }
+
+                                    if store.is_friend(pkey.clone()).await.is_ok() {
+                                        let _ = ret.send(Err(Error::FriendExist));
+                                        continue
+                                    }
+
+                                    let peer: PeerId = match pub_to_libp2p_pub(&pkey) {
+                                        Ok(pk) => pk.into(),
+                                        Err(e) => {
+                                            let _ = ret.send(Err(Error::Any(e)));
+                                            continue
+                                        }
+                                    };
+
+                                    let outgoing_list = store.outgoing_request.read();
+                                    let mut found = false;
+                                    for request in outgoing_list.iter() {
+                                        // checking the from and status is just a precaution and not required
+                                        if request.from() == local_public_key && request.to() == pkey && request.status() == FriendRequestStatus::Pending {
+                                            // since the request has already been sent, we should not be sending it again
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+
+                                    if found {
+                                        let _ = ret.send(Err(Error::CannotSendFriendRequest));
+                                        continue;
+                                    }
+                                    let mut request = FriendRequest::default();
+                                    request.set_from(local_public_key);
+                                    request.set_to(pkey);
+                                    request.set_status(FriendRequestStatus::Pending);
+                                    let signature = match sign_serde(&store.tesseract, &request) {
+                                        Ok(sig) => sig,
+                                        Err(e) => {
+                                            let _ = ret.send(Err(Error::Any(e)));
+                                            continue
+                                        }
+                                    };
+                                    request.set_signature(signature);
+
+                                    //TODO: Resolve deadlock 
+                                    store.outgoing_request.write().push(request);
+                                    println!("Request");
+                                    //TODO: create dag of request
+                                    
+                                    let _ = ret.send(Ok(()));
                                 }
                                 Request::AcceptRequest(pkey, ret) => {
+                                    let local_public_key = match libp2p_pub_to_pub(&local_ipfs_public_key) {
+                                        Ok(pk) => pk,
+                                        Err(e) => {
+                                            let _ = ret.send(Err(Error::Any(e)));
+                                            continue
+                                        }
+                                    };
+
+                                    if local_public_key == pkey {
+                                        let _ = ret.send(Err(Error::CannotAcceptSelfAsFriend));
+                                        continue
+                                    }
+                                    
+                                    let incoming_request = store.incoming_request.read();
+                                    let mut found = false;
+                                    for request in incoming_request.iter() {
+                                        // checking the from is just a precaution and not required
+                                        if request.from() == pkey && request.to() == local_public_key  {
+                                            // since the request has already been sent, we should not be sending it again
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+
+                                    if !found {
+                                        let _ = ret.send(Err(Error::CannotFindFriendRequest));
+                                        continue;
+                                    }
+
+                                    let mut request = FriendRequest::default();
+                                    request.set_from(local_public_key);
+                                    request.set_to(pkey);
+                                    request.set_status(FriendRequestStatus::Accepted);
+
+                                    let signature = match sign_serde(&store.tesseract, &request) {
+                                        Ok(sig) => sig,
+                                        Err(e) => {
+                                            let _ = ret.send(Err(Error::Any(e)));
+                                            continue
+                                        }
+                                    };
+                                    request.set_signature(signature);
+
+                                    store.outgoing_request.write().push(request);
+
                                     let _ = ret.send(Err(Error::Unimplemented));
                                 }
                                 Request::RejectRequest(pkey, ret) => {
@@ -139,17 +234,20 @@ impl FriendsStore {
                             }
                         }
                     },
-                    message = stream.next() => {
-                        if let Some(message) = message {
-                            if let Ok(data) = serde_json::from_slice::<InternalRequest>(&message.data) {
-                                //TODO:
-                                //* Check peer and compare it to the request. If the peer is from the a node used for offline, process and submit
-                                //	request back to the node. If peer sent this directly, remit the request back to the peer unless peer is no
-                                //	longer connected and in such case to send the request to a node for handling of offline storage.
-                                //	If rebroadcast is true, we can repeat such request over iteration in a set interval until we receive a response
-                                //	and have the request removed from the outgoing_request
-                                //* Decrypt request designed only for us and not for another
-
+                    message = stream.select_next_some() => {
+                        if let Ok(data) = serde_json::from_slice::<FriendRequest>(&message.data) {
+                            println!("{:?}", data);
+                        }
+                    }
+                    _ = broadcast_interval.tick() => {
+                        //TODO: Add check to determine if peers are subscribed to topic before publishing
+                        //TODO: Provide a signed and/or encrypted payload
+                        let outgoing_request = store.outgoing_request.read().clone();
+                        for request in outgoing_request.iter() {
+                            if let Ok(bytes) = serde_json::to_vec(&request) {
+                                if let Err(_) = store.ipfs.pubsub_publish(FRIENDS_BROADCAST.into(), bytes).await {
+                                    continue
+                                }
                             }
                         }
                     }
@@ -159,6 +257,37 @@ impl FriendsStore {
         Ok(store)
     }
 }
+
+fn pub_to_libp2p_pub(public_key: &PublicKey) -> anyhow::Result<libp2p::identity::PublicKey> {
+    let pk = libp2p::identity::PublicKey::Ed25519(libp2p::identity::ed25519::PublicKey::decode(&public_key.into_bytes())?);
+    Ok(pk)
+}
+
+fn libp2p_pub_to_pub(public_key: &libp2p::identity::PublicKey) -> anyhow::Result<PublicKey> {
+    let pk = match public_key {
+        libp2p::identity::PublicKey::Ed25519(pk) => PublicKey::from_bytes(&pk.encode()),
+        _ => anyhow::bail!(Error::PublicKeyInvalid)
+    };
+    Ok(pk)
+}
+
+fn sign_serde<D: Serialize>(tesseract: &Tesseract, data: &D) -> anyhow::Result<Vec<u8>> {
+    let kp = tesseract.retrieve("ipfs_keypair")?;
+    let kp = bs58::decode(kp).into_vec()?;
+    let keypair = Ed25519Keypair::from_bytes(&kp)?;
+    let bytes = serde_json::to_vec(data)?;
+    Ok(keypair.sign(&bytes))
+}
+
+fn verify_serde_sig<D: Serialize>(tesseract: &Tesseract, data: &D, signature: &[u8]) -> anyhow::Result<()> {
+    let kp = tesseract.retrieve("ipfs_keypair")?;
+    let kp = bs58::decode(kp).into_vec()?;
+    let keypair = Ed25519Keypair::from_bytes(&kp)?;
+    let bytes = serde_json::to_vec(data)?;
+    keypair.verify(&bytes, signature)?;
+    Ok(())
+}
+
 
 impl FriendsStore {
     pub async fn send_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
@@ -290,6 +419,29 @@ impl FriendsStore {
         self.raw_friends_list().await.map(|(cid, _)| cid)
     }
 
+    // Should not be called directly but only after a request is accepted
+    pub async fn add_friend(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+        let (friend_cid, mut friend_list) = self.raw_friends_list().await?;
+            
+        if friend_list.contains(&pubkey) {
+            return Err(Error::FriendExist);
+        }
+    
+        friend_list.push(pubkey);
+    
+        self.ipfs.remove_pin(&friend_cid, false).await?;
+    
+        let friend_list_bytes = serde_json::to_vec(&friend_list)?;
+    
+        let cid = self.ipfs.put_dag(ipld!(friend_list_bytes)).await?;
+    
+        self.ipfs.insert_pin(&cid, false).await?;
+    
+        self.tesseract.set("friends_cid", &cid.to_string())?;
+        Ok(())
+        
+    }
+
     pub async fn remove_friend(&mut self, pubkey: PublicKey) -> Result<(), Error> {
         let (friend_cid, mut friend_list) = self.raw_block_list().await?;
 
@@ -317,22 +469,32 @@ impl FriendsStore {
         Ok(())
     }
 
-    pub async fn friends_list_with_identity(&self) -> Result<Vec<Identity>, Error> {
-        let mut identity_list = vec![];
+    // pub async fn friends_list_with_identity(&self) -> Result<Vec<Identity>, Error> {
+    //     let mut identity_list = vec![];
 
+    //     let list = self.friends_list().await?;
+
+    //     for pk in list {
+    //         let mut identity = Identity::default();
+    //         if let Ok(id) = self.identity_store.lookup(LookupBy::PublicKey(pk.clone())) {
+    //             identity = id;
+    //         } else {
+    //             //Since we are not able to resolve this lookup, we would just have the public key apart of the identity for the time being
+    //             identity.set_public_key(pk);
+    //         }
+    //         identity_list.push(identity);
+    //     }
+    //     Ok(identity_list)
+    // }
+
+    pub async fn is_friend(&self, pubkey: PublicKey) -> Result<(), Error> {
         let list = self.friends_list().await?;
-
         for pk in list {
-            let mut identity = Identity::default();
-            if let Ok(id) = self.identity_store.lookup(LookupBy::PublicKey(pk.clone())) {
-                identity = id;
-            } else {
-                //Since we are not able to resolve this lookup, we would just have the public key apart of the identity for the time being
-                identity.set_public_key(pk);
+            if pk == pubkey {
+                return Ok(());
             }
-            identity_list.push(identity);
         }
-        Ok(identity_list)
+        Err(Error::FriendDoesntExist)
     }
 }
 

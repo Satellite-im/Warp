@@ -51,8 +51,7 @@ impl IdentityStore {
 
         tokio::spawn(async move {
             let store = store_inner;
-            
-            //TODO: Perform "peer discovery" by providing the topic over DHT
+        
 
             futures::pin_mut!(id_broadcast_stream);
             // Used to send identity out in intervals
@@ -63,31 +62,30 @@ impl IdentityStore {
                     continue
                 }
                 tokio::select! {
-                    message = id_broadcast_stream.next() => {
-                        if let Some(message) = message {
-                            if let Ok(identity) = serde_json::from_slice::<Identity>(&message.data) {
-                                if let Some(own_id) = store.get_identity_lock() {
-                                    if own_id == identity {
-                                        continue
-                                    }
+                    message = id_broadcast_stream.select_next_some() => {
+                        if let Ok(identity) = serde_json::from_slice::<Identity>(&message.data) {
+                            if let Some(own_id) = store.get_identity_lock() {
+                                if own_id == identity {
+                                    continue
                                 }
-
-                                if store.cache.read().contains(&identity) {
-                                    continue;
-                                }
-
-                                let index = store.cache.read()
-                                    .iter()
-                                    .position(|ident| ident.public_key() == identity.public_key());
-
-                                if let Some(index) = index {
-                                    store.cache.write().remove(index);
-                                }
-
-                                store.cache.write().push(identity);
-                                //TODO: Maybe cache the identity in PD
                             }
+
+                            if store.cache.read().contains(&identity) {
+                                continue;
+                            }
+
+                            let index = store.cache.read()
+                                .iter()
+                                .position(|ident| ident.public_key() == identity.public_key());
+
+                            if let Some(index) = index {
+                                store.cache.write().remove(index);
+                            }
+
+                            store.cache.write().push(identity);
+                            //TODO: Maybe cache the identity in PD
                         }
+                        
                     }
                     _ = tick.tick() => {
                         //TODO: Add check to determine if peers are subscribed to topic before publishing

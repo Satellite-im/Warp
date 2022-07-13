@@ -135,7 +135,7 @@ impl IpfsIdentity {
 
 
         let identity_store = IdentityStore::new(ipfs.clone(), tesseract.clone()).await?;
-        let friend_store = FriendsStore::new(ipfs.clone(), tesseract.clone(), identity_store.clone()).await?;
+        let friend_store = FriendsStore::new(ipfs.clone(), tesseract.clone()).await?;
 
         let identity = IpfsIdentity {
             path,
@@ -258,6 +258,8 @@ impl MultiPass for IpfsIdentity {
         let friends_cid = async_block_unchecked(self.ipfs.put_dag(ipld!([])))?;
         // blank list of a block list as a dag (ditto)
         let block_cid = async_block_unchecked(self.ipfs.put_dag(ipld!([])))?;
+
+        //TODO: Blank list of incoming and outgoing request
 
         // Pin the dag
         async_block_unchecked(self.ipfs.insert_pin(&ident_cid, false))?;
