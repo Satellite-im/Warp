@@ -285,8 +285,6 @@ impl MultiPass for IpfsIdentity {
         async_block_unchecked(self.identity_store.update_identity())?;
         self.identity_store.enable_event();
 
-        // Add a delay to give the loop time to start to broadcast and accept events
-        async_block_unchecked(tokio::time::sleep(Duration::from_millis(500)));
         if let Ok(mut cache) = self.get_cache() {
             let object = DataObject::new(DataType::from(Module::Accounts), &identity)?;
             cache.add_data(DataType::from(Module::Accounts), &object)?;
@@ -393,7 +391,7 @@ impl MultiPass for IpfsIdentity {
         }
 
         async_block_unchecked(self.identity_store.update_identity())?;
-        async_block_unchecked(tokio::time::sleep(Duration::from_millis(500)));
+
         //TODO: broadcast identity
 
         // if let Ok(hooks) = self.get_hooks() {
