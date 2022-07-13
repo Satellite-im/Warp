@@ -581,10 +581,6 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn block_key(&mut self, _: PublicKey) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
     fn list_friends(&self) -> Result<Vec<PublicKey>> {
         let mut identities = vec![];
         let list = self.list_all_request()?;
