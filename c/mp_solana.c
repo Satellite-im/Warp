@@ -29,13 +29,9 @@ MultiPassAdapter *new_account(const char* file) {
         return NULL;
     }
 
-    if (!tesseract_set_file(tesseract, file)) {
-        printf("Unable to set file for tesseract with \"%s\". Skipped...\n", file);
-    }
+    tesseract_set_file(tesseract, file);
 
-    if (!tesseract_set_autosave(tesseract)) {
-        printf("Unable to enable autosave for tesseract. Skipped...\n");
-    }
+    tesseract_set_autosave(tesseract);
 
     if (!tesseract_autosave_enabled(tesseract)) {
         printf("Autosave is disabled\n");
@@ -127,7 +123,9 @@ int main() {
     struct PublicKey *acct_a_key = multipass_identity_public_key(ident_a);
     struct PublicKey *acct_b_key = multipass_identity_public_key(ident_b);
 
-    if(!multipass_has_friend(account_a, acct_b_key)) {
+    FFIResult_c_void result_void = multipass_has_friend(account_a, acct_b_key);
+
+    if(!result_void.error) {
         FFIResult_c_void result_ignore0_t = multipass_send_request(account_a, acct_b_key);
         if(result_ignore0_t.error) {
             printf("Unable to send friend request\n");
@@ -143,19 +141,29 @@ int main() {
         }
     }
 
-    struct FFIArray_Identity *friends = multipass_list_friends(account_a);
+    struct FFIResult_FFIArray_PublicKey result_friends = multipass_list_friends(account_a);
 
-    int len = ffiarray_identity_length(friends);
+    if(result_friends.error) {
+        print_error(result_friends.error);
+        goto drop;
+    }
+
+    FFIArray_PublicKey *friends = result_friends.data;
+
+    int len = ffiarray_publickey_length(friends);
 
     for(int i = 0; i<len; i++) {
-        const struct Identity *friend = ffiarray_identity_get(friends, i);
-        char *friend_name = multipass_identity_username((struct Identity *)friend);
+        PublicKey *friend = ffiarray_publickey_get(friends, i);
+        
+        FFIResult_Identity result_identity = multipass_get_identity(account_a, multipass_identifier_public_key(friend));
+
+        char *friend_name = multipass_identity_username(result_identity.data);
         if (!friend_name) {
             printf("Unable to get username in iter %d\n", i);
             continue;
         }
 
-        uint16_t sc = multipass_identity_short_id((struct Identity *)friend);
+        uint16_t sc = multipass_identity_short_id(result_identity.data);
 
         printf("Friend Identity Username: %s#%d\n", friend_name, sc);
         free(friend_name);

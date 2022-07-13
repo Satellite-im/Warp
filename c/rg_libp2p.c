@@ -35,13 +35,9 @@ MultiPassAdapter *new_account(const char* file) {
         return NULL;
     }
 
-    if (!tesseract_set_file(tesseract, file)) {
-        printf("Unable to set file for tesseract with \"%s\". Skipped...\n", file);
-    }
+    tesseract_set_file(tesseract, file);
 
-    if (!tesseract_set_autosave(tesseract)) {
-        printf("Unable to enable autosave for tesseract. Skipped...\n");
-    }
+    tesseract_set_autosave(tesseract);
 
     if (!tesseract_autosave_enabled(tesseract)) {
         printf("Autosave is disabled\n");
