@@ -12,8 +12,6 @@ use warp::{
     tesseract::Tesseract, crypto::PublicKey,
 };
 
-use crate::async_block_unchecked;
-
 use super::IDENTITY_BROADCAST;
 
 #[derive(Clone)]
@@ -29,6 +27,7 @@ pub struct IdentityStore {
     tesseract: Tesseract
 }
 
+#[derive(Debug, Clone)]
 pub enum LookupBy {
     PublicKey(PublicKey),
     Username(String)
@@ -62,35 +61,37 @@ impl IdentityStore {
                     continue
                 }
                 tokio::select! {
-                    message = id_broadcast_stream.select_next_some() => {
-                        if let Ok(identity) = serde_json::from_slice::<Identity>(&message.data) {
-                            if let Some(own_id) = store.get_identity_lock() {
-                                if own_id == identity {
-                                    continue
+                    message = id_broadcast_stream.next() => {
+                        if let Some(message) = message {
+                            if let Ok(identity) = serde_json::from_slice::<Identity>(&message.data) {
+                                if let Some(own_id) = store.identity.read().clone() {
+                                    if own_id == identity {
+                                        continue
+                                    }
                                 }
+
+                                if store.cache.read().contains(&identity) {
+                                    continue;
+                                }
+
+                                let index = store.cache.read()
+                                    .iter()
+                                    .position(|ident| ident.public_key() == identity.public_key());
+
+                                if let Some(index) = index {
+                                    store.cache.write().remove(index);
+                                }
+
+                                store.cache.write().push(identity);
+                                //TODO: Maybe cache the identity in PD
                             }
-
-                            if store.cache.read().contains(&identity) {
-                                continue;
-                            }
-
-                            let index = store.cache.read()
-                                .iter()
-                                .position(|ident| ident.public_key() == identity.public_key());
-
-                            if let Some(index) = index {
-                                store.cache.write().remove(index);
-                            }
-
-                            store.cache.write().push(identity);
-                            //TODO: Maybe cache the identity in PD
                         }
                         
                     }
                     _ = tick.tick() => {
                         //TODO: Add check to determine if peers are subscribed to topic before publishing
                         //TODO: Provide a signed and/or encrypted payload
-                        let ident = store.get_identity_lock();
+                        let ident = store.identity.read().clone();
                         if let Some(ident) = ident.as_ref() {
                             if let Ok(bytes) = serde_json::to_vec(&ident) {
                                 if let Err(_) = store.ipfs.pubsub_publish(IDENTITY_BROADCAST.into(), bytes).await {
@@ -106,19 +107,14 @@ impl IdentityStore {
     }
 
     pub fn lookup(&self, lookup: LookupBy) -> Result<Identity, Error> {
-        let identity_list = &*self.cache.read();
-
-        identity_list.into_iter().filter(|id| {
+        for ident in self.cache.read().iter() {
             match &lookup {
-                LookupBy::PublicKey(pubkey) => &id.public_key() == pubkey,
-                LookupBy::Username(username) => &id.username() == username
+                LookupBy::PublicKey(pubkey) if &ident.public_key() == pubkey => return Ok(ident.clone()),
+                LookupBy::Username(username) if &ident.username() == username => return Ok(ident.clone()),
+                _ => continue
             }
-        }).cloned().collect::<Vec<_>>().get(0).cloned().ok_or(Error::IdentityDoesntExist)
-
-    }
-
-    fn get_identity_lock(&self) -> Option<Identity> {
-        self.identity.read().clone()
+        }
+        Err(Error::IdentityDoesntExist)
     }
 
     pub async fn own_identity(&self) -> Result<Identity, Error> {

@@ -252,12 +252,13 @@ impl MultiPass for IpfsIdentity {
         // Update `to_ipld`
         // let ipld_val = to_ipld(identity.clone())?;
         let bytes = serde_json::to_vec(&identity)?;
+        let blank: Vec<u8> = Vec::new();
         // Store the identity as a dag
         let ident_cid = async_block_unchecked(self.ipfs.put_dag(ipld!(bytes)))?;
         // Blank list of friends as a dag (as public keys)
-        let friends_cid = async_block_unchecked(self.ipfs.put_dag(ipld!([])))?;
+        let friends_cid = async_block_unchecked(self.ipfs.put_dag(ipld!(blank.clone())))?;
         // blank list of a block list as a dag (ditto)
-        let block_cid = async_block_unchecked(self.ipfs.put_dag(ipld!([])))?;
+        let block_cid = async_block_unchecked(self.ipfs.put_dag(ipld!(blank)))?;
 
         //TODO: Blank list of incoming and outgoing request
 
@@ -274,8 +275,7 @@ impl MultiPass for IpfsIdentity {
         // TODO: Store the Cid of the root handle properly
         // TODO: Provide the Cid to DHT. Either through the PutProvider or (soon to be implemented) ipns
         self.tesseract.set("ident_cid", &ident_cid.to_string())?;
-        self.tesseract
-            .set("friends_cid", &friends_cid.to_string())?;
+        self.tesseract.set("friends_cid", &friends_cid.to_string())?;
         self.tesseract.set("block_cid", &block_cid.to_string())?;
 
         let encoded_kp = bs58::encode(&raw_kp.encode()).into_string();
@@ -454,7 +454,7 @@ impl Friends for IpfsIdentity {
     }
 
     fn list_friends(&self) -> Result<Vec<PublicKey>, Error> {
-        Err(Error::Unimplemented)
+        async_block_unchecked(self.friend_store.friends_list())
     }
 
     fn has_friend(&self, pubkey: PublicKey) -> Result<(), Error> {
