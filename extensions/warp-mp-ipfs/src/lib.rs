@@ -311,7 +311,6 @@ impl MultiPass for IpfsIdentity {
                         }
                     }
                 }
-                //TODO: Lookup by public key
                 return self.identity_store.lookup(LookupBy::PublicKey(pk))
             }
             (None, Some(username), false) => {

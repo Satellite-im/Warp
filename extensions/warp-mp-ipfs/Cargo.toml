@@ -26,5 +26,8 @@ log = "0.4"
 
 hex = "0.4"
 
+[dev-dependencies]
+bs58 = "0.4"
+
 [features]
 default = []
