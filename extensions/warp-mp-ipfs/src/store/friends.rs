@@ -461,8 +461,7 @@ impl FriendsStore {
     }
 
     pub async fn remove_friend(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        let (friend_cid, mut friend_list) = self.raw_block_list().await?;
-
+        let (friend_cid, mut friend_list) = self.raw_friends_list().await?;
         if !friend_list.contains(&pubkey) {
             return Err(Error::FriendDoesntExist);
         }
@@ -472,7 +471,7 @@ impl FriendsStore {
             .position(|pk| *pk == pubkey)
             .ok_or(Error::ArrayPositionNotFound)?;
 
-        let pk = friend_list.remove(friend_index);
+        friend_list.remove(friend_index);
 
         self.ipfs.remove_pin(&friend_cid, false).await?;
 
