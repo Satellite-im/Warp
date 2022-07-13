@@ -81,6 +81,10 @@ pub enum Error {
     CannotRemoveSelfAsFriend,
     #[error("You cannot use yourself")]
     CannotUseSelfAsFriend,
+    #[error("You cannot accept friend request")]
+    CannotAcceptFriendRequest,
+    #[error("Cannot find friend request")]
+    CannotFindFriendRequest,
     #[error("Unable to close friend request")]
     CannotCloseFriendRequest,
     #[error("User does not exist as a friend")]
