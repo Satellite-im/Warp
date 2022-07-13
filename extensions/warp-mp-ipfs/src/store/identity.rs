@@ -124,6 +124,15 @@ impl IdentityStore {
     }
 
     pub fn lookup(&self, lookup: LookupBy) -> Result<Identity, Error> {
+        // Check own identity just in case since we dont store this in the cache
+        if let Some(ident) = self.identity.read().clone() {
+            match lookup {
+                LookupBy::PublicKey(pubkey) if ident.public_key() == pubkey => return Ok(ident),
+                LookupBy::Username(username) if ident.username() == username => return Ok(ident),
+                _ => {}
+            };
+        }
+
         for ident in self.cache() {
             match &lookup {
                 LookupBy::PublicKey(pubkey) if &ident.public_key() == pubkey => return Ok(ident.clone()),
