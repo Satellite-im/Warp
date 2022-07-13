@@ -211,85 +211,87 @@ impl MultiPass for IpfsIdentity {
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<PublicKey, Error> {
-        if let Ok(encoded_kp) = self.tesseract.retrieve("ipfs_keypair") {
-            let kp = bs58::decode(encoded_kp)
-                .into_vec()
-                .map_err(anyhow::Error::from)?;
-            let keypair = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
+        async_block_unchecked(async {
+            if let Ok(encoded_kp) = self.tesseract.retrieve("ipfs_keypair") {
+                let kp = bs58::decode(encoded_kp)
+                    .into_vec()
+                    .map_err(anyhow::Error::from)?;
+                let keypair = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
 
-            //TODO: Check records to determine if profile exist properly
-            if let Ok(cid) = self.tesseract.retrieve("ident_cid") {
-                let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
-                let path = IpfsPath::from(cid);
-                //TODO: Fix deadlock if cid doesnt exist. May be related to the ipld link
-                let identity = match async_block_unchecked(self.ipfs.get_dag(path)) {
-                    Ok(Ipld::Bytes(bytes)) => serde_json::from_slice::<Identity>(&bytes)?,
-                    _ => return Err(Error::Other), //Note: It should not hit here unless the repo is corrupted
-                };
-                let public_key = identity.public_key();
-                let inner_pk = PublicKey::from_bytes(keypair.public.as_ref());
+                //TODO: Check records to determine if profile exist properly
+                if let Ok(cid) = self.tesseract.retrieve("ident_cid") {
+                    let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
+                    let path = IpfsPath::from(cid);
+                    //TODO: Fix deadlock if cid doesnt exist. May be related to the ipld link
+                    let identity = match self.ipfs.get_dag(path).await {
+                        Ok(Ipld::Bytes(bytes)) => serde_json::from_slice::<Identity>(&bytes)?,
+                        _ => return Err(Error::Other), //Note: It should not hit here unless the repo is corrupted
+                    };
+                    let public_key = identity.public_key();
+                    let inner_pk = PublicKey::from_bytes(keypair.public.as_ref());
 
-                if public_key == inner_pk {
-                    return Err(Error::IdentityExist);
+                    if public_key == inner_pk {
+                        return Err(Error::IdentityExist);
+                    }
                 }
             }
-        }
 
-        let raw_kp = self.raw_keypair()?;
+            let raw_kp = self.raw_keypair()?;
 
-        let mut identity = Identity::default();
-        let public_key = PublicKey::from_bytes(&raw_kp.public().encode());
+            let mut identity = Identity::default();
+            let public_key = PublicKey::from_bytes(&raw_kp.public().encode());
 
-        let username = match username {
-            Some(u) => u.to_string(),
-            None => generate_name(),
-        };
+            let username = match username {
+                Some(u) => u.to_string(),
+                None => generate_name(),
+            };
 
-        identity.set_username(&username);
-        identity.set_short_id(warp::crypto::rand::thread_rng().gen_range(0, 9999));
-        identity.set_public_key(public_key);
-        // Convert our identity to ipld. This step would convert it to serde_json::Value then match accordingly
-        // Update `to_ipld`
-        // let ipld_val = to_ipld(identity.clone())?;
-        let bytes = serde_json::to_vec(&identity)?;
-        let blank: Vec<u8> = Vec::new();
-        // Store the identity as a dag
-        let ident_cid = async_block_unchecked(self.ipfs.put_dag(ipld!(bytes)))?;
-        // Blank list of friends as a dag (as public keys)
-        let friends_cid = async_block_unchecked(self.ipfs.put_dag(ipld!(blank.clone())))?;
-        // blank list of a block list as a dag (ditto)
-        let block_cid = async_block_unchecked(self.ipfs.put_dag(ipld!(blank)))?;
+            identity.set_username(&username);
+            identity.set_short_id(warp::crypto::rand::thread_rng().gen_range(0, 9999));
+            identity.set_public_key(public_key);
+            // Convert our identity to ipld. This step would convert it to serde_json::Value then match accordingly
+            // Update `to_ipld`
+            // let ipld_val = to_ipld(identity.clone())?;
+            let bytes = serde_json::to_vec(&identity)?;
+            let blank: Vec<u8> = Vec::new();
+            // Store the identity as a dag
+            let ident_cid = self.ipfs.put_dag(ipld!(bytes)).await?;
+            // Blank list of friends as a dag (as public keys)
+            let friends_cid = self.ipfs.put_dag(ipld!(blank.clone())).await?;
+            // blank list of a block list as a dag (ditto)
+            let block_cid = self.ipfs.put_dag(ipld!(blank)).await?;
 
-        //TODO: Blank list of incoming and outgoing request
+            //TODO: Blank list of incoming and outgoing request
 
-        // Pin the dag
-        async_block_unchecked(self.ipfs.insert_pin(&ident_cid, false))?;
-        async_block_unchecked(self.ipfs.insert_pin(&friends_cid, false))?;
-        async_block_unchecked(self.ipfs.insert_pin(&block_cid, false))?;
+            // Pin the dag
+            self.ipfs.insert_pin(&ident_cid, false).await?;
+            self.ipfs.insert_pin(&friends_cid, false).await?;
+            self.ipfs.insert_pin(&block_cid, false).await?;
 
-        //TODO: Maybe keep a root cid?
+            //TODO: Maybe keep a root cid?
 
-        // Note that for the time being we will be storing the Cid to tesseract,
-        // however this may be handled a different way, especially since the cid is stored in the pinstore
-        // in rust-ipfs.
-        // TODO: Store the Cid of the root handle properly
-        // TODO: Provide the Cid to DHT. Either through the PutProvider or (soon to be implemented) ipns
-        self.tesseract.set("ident_cid", &ident_cid.to_string())?;
-        self.tesseract.set("friends_cid", &friends_cid.to_string())?;
-        self.tesseract.set("block_cid", &block_cid.to_string())?;
+            // Note that for the time being we will be storing the Cid to tesseract,
+            // however this may be handled a different way, especially since the cid is stored in the pinstore
+            // in rust-ipfs.
+            // TODO: Store the Cid of the root handle properly
+            // TODO: Provide the Cid to DHT. Either through the PutProvider or (soon to be implemented) ipns
+            self.tesseract.set("ident_cid", &ident_cid.to_string())?;
+            self.tesseract.set("friends_cid", &friends_cid.to_string())?;
+            self.tesseract.set("block_cid", &block_cid.to_string())?;
 
-        let encoded_kp = bs58::encode(&raw_kp.encode()).into_string();
+            let encoded_kp = bs58::encode(&raw_kp.encode()).into_string();
 
-        self.tesseract.set("ipfs_keypair", &encoded_kp)?;
+            self.tesseract.set("ipfs_keypair", &encoded_kp)?;
 
-        async_block_unchecked(self.identity_store.update_identity())?;
-        self.identity_store.enable_event();
+            self.identity_store.update_identity().await?;
+            self.identity_store.enable_event();
 
-        if let Ok(mut cache) = self.get_cache() {
-            let object = DataObject::new(DataType::from(Module::Accounts), &identity)?;
-            cache.add_data(DataType::from(Module::Accounts), &object)?;
-        }
-        Ok(identity.public_key())
+            if let Ok(mut cache) = self.get_cache() {
+                let object = DataObject::new(DataType::from(Module::Accounts), &identity)?;
+                cache.add_data(DataType::from(Module::Accounts), &object)?;
+            }
+            Ok(identity.public_key())
+        })
     }
 
     //TODO: Use DHT to perform lookups
