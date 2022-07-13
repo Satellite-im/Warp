@@ -24,7 +24,16 @@ pub struct IdentityStore {
     
     start_event: Arc<AtomicBool>,
 
+    end_event: Arc<AtomicBool>,
+
     tesseract: Tesseract
+}
+
+impl Drop for IdentityStore {
+    fn drop(&mut self) {
+        self.disable_event();
+        self.end_event();
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -38,8 +47,9 @@ impl IdentityStore {
         let cache = Arc::new(Default::default());
         let identity = Arc::new(Default::default());
         let start_event = Arc::new(Default::default());
+        let end_event = Arc::new(Default::default());
 
-        let store = Self { ipfs, cache, identity, start_event, tesseract };
+        let store = Self { ipfs, cache, identity, start_event, end_event, tesseract };
 
         if let Ok(ident) = store.own_identity().await {
             *store.identity.write() = Some(ident);
@@ -57,6 +67,9 @@ impl IdentityStore {
             // TODO: Determine if we can decrease the interval and make it configurable 
             let mut tick = tokio::time::interval(Duration::from_secs(1));
             loop {
+                if store.end_event.load(Ordering::SeqCst) {
+                    break
+                }
                 if !store.start_event.load(Ordering::SeqCst) {
                     continue
                 }
@@ -106,8 +119,12 @@ impl IdentityStore {
         Ok(store)
     }
 
+    fn cache(&self) -> Vec<Identity> {
+        self.cache.read().clone()
+    }
+
     pub fn lookup(&self, lookup: LookupBy) -> Result<Identity, Error> {
-        for ident in self.cache.read().iter() {
+        for ident in self.cache() {
             match &lookup {
                 LookupBy::PublicKey(pubkey) if &ident.public_key() == pubkey => return Ok(ident.clone()),
                 LookupBy::Username(username) if &ident.username() == username => return Ok(ident.clone()),
@@ -138,11 +155,15 @@ impl IdentityStore {
         Ok(())
     }
 
-    pub fn enable_event(&self) {
+    pub fn enable_event(&mut self) {
         self.start_event.store(true, Ordering::SeqCst);
     }
 
-    pub fn disable_event(&self) {
-        self.start_event.store(true, Ordering::SeqCst);
+    pub fn disable_event(&mut self) {
+        self.start_event.store(false, Ordering::SeqCst);
+    }
+
+    pub fn end_event(&mut self) {
+        self.end_event.store(true, Ordering::SeqCst);
     }
 }

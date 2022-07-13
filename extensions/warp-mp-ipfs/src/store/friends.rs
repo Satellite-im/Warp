@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt, TryFutureExt};
@@ -31,6 +31,9 @@ pub struct FriendsStore {
     // Interval to rebroadcast requests
     rebroadcast_interval: Arc<AtomicUsize>,
 
+    // Would be used to stop the look in the tokio task
+    end_event: Arc<AtomicBool>,
+
     // Request meant for the user
     incoming_request: Arc<RwLock<Vec<FriendRequest>>>,
 
@@ -47,6 +50,12 @@ pub struct FriendsStore {
     task: Sender<Request>,
 }
 
+impl Drop for FriendsStore {
+    fn drop(&mut self) {
+        self.end_event.store(true, Ordering::SeqCst);
+    }
+}
+
 pub enum Request {
     SendRequest(PublicKey, OneshotSender<Result<(), Error>>),
     AcceptRequest(PublicKey, OneshotSender<Result<(), Error>>),
@@ -61,6 +70,7 @@ pub enum InternalRequest {
 impl FriendsStore {
     pub async fn new(ipfs: Ipfs<Types>, tesseract: Tesseract) -> anyhow::Result<Self> {
         let rebroadcast_request = Arc::new(AtomicBool::new(false));
+        let end_event = Arc::new(AtomicBool::new(false));
         let rebroadcast_interval = Arc::new(AtomicUsize::new(1));
         let incoming_request = Arc::new(Default::default());
         let outgoing_request = Arc::new(Default::default());
@@ -74,6 +84,7 @@ impl FriendsStore {
             ipfs,
             rebroadcast_request,
             rebroadcast_interval,
+            end_event,
             incoming_request,
             outgoing_request,
             rejected_request,
@@ -109,6 +120,9 @@ impl FriendsStore {
             futures::pin_mut!(stream);
             let mut broadcast_interval = tokio::time::interval(Duration::from_secs(1));
             loop {
+                if store.end_event.load(Ordering::SeqCst) {
+                    break
+                }
                 tokio::select! {
                     events = rx.recv() => {
                         //Here we receive events to send off to either a peer or to a node to relay the request
