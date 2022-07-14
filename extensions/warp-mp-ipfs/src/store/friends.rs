@@ -356,6 +356,10 @@ impl FriendsStore {
         self.raw_block_list().await.map(|(_, list)| list)
     }
 
+    pub async fn is_blocked(&self, public_key: PublicKey) -> Result<bool, Error> {
+        self.block_list().await.map(|list| list.contains(&public_key))
+    }
+
     pub async fn block_cid(&self) -> Result<Cid, Error> {
         self.raw_block_list().await.map(|(cid, _)| cid)
     }
