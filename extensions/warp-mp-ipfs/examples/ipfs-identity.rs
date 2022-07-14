@@ -33,9 +33,8 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Current Identity: {}", serde_json::to_string(&ident)?);
 
-    update_name(&mut identity, "NotSoNewAccount")?;
+    update_name(&mut identity, &warp::multipass::generator::generate_name())?;
     update_status(&mut identity, "New status message")?;
    
-
     Ok(())
 }
