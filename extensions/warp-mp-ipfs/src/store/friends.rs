@@ -40,9 +40,6 @@ pub struct FriendsStore {
     // Request meant for others
     outgoing_request: Arc<RwLock<Vec<FriendRequest>>>,
 
-    // Reject that been rejected by other users
-    rejected_request: Arc<RwLock<Vec<FriendRequest>>>,
-
     // Tesseract
     tesseract: Tesseract,
 
@@ -54,17 +51,6 @@ impl Drop for FriendsStore {
     }
 }
 
-pub enum Request {
-    SendRequest(PublicKey, OneshotSender<Result<(), Error>>),
-    AcceptRequest(PublicKey, OneshotSender<Result<(), Error>>),
-    RejectRequest(PublicKey, OneshotSender<Result<(), Error>>),
-}
-
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub enum InternalRequest {
-    SendRequest(PublicKey, PublicKey),
-}
-
 impl FriendsStore {
     pub async fn new(ipfs: Ipfs<Types>, tesseract: Tesseract) -> anyhow::Result<Self> {
         let rebroadcast_request = Arc::new(AtomicBool::new(false));
@@ -72,7 +58,6 @@ impl FriendsStore {
         let rebroadcast_interval = Arc::new(AtomicUsize::new(1));
         let incoming_request = Arc::new(Default::default());
         let outgoing_request = Arc::new(Default::default());
-        let rejected_request = Arc::new(Default::default());
 
 
         //TODO: Broadcast topic over DHT to find other peers that would be subscribed and connect to them
@@ -84,10 +69,8 @@ impl FriendsStore {
             end_event,
             incoming_request,
             outgoing_request,
-            rejected_request,
             tesseract,
         };
-
 
         // for tokio task
         let store_inner = store.clone();
@@ -121,17 +104,23 @@ impl FriendsStore {
                     message = stream.next() => {
                         if let Some(message) = message {
                             if let Ok(data) = serde_json::from_slice::<FriendRequest>(&message.data) {
-                                if store.outgoing_request.read().contains(&data) {
+
+                                if store.outgoing_request.read().contains(&data) ||
+                                   store.incoming_request.read().contains(&data) {
                                     continue;
                                 }
 
-                                if store.incoming_request.read().contains(&data) {
-                                    continue;
-                                }
-
-                                if store.rejected_request.read().contains(&data) {
-                                    continue;
-                                }
+                                // Before we validate the request, we should check to see if the key is blocked
+                                // If it is, skip the request so we dont wait resources storing it.
+                                // TODO: Block peer connection directly so messages cannot come directly from peer
+                                match store.is_blocked(data.from()).await {
+                                    Ok(true) => continue,
+                                    Ok(false) => {},
+                                    Err(_e) => {
+                                        //TODO: Log error
+                                        continue
+                                    }
+                                };
 
                                 //first verify the request before processing it
                                 let pk = match Ed25519PublicKey::try_from(data.from().into_bytes()) {
@@ -142,16 +131,18 @@ impl FriendsStore {
                                     }
                                 };
 
+                                let signature = match data.signature() {
+                                    Some(s) => s,
+                                    None => continue
+                                };
+
                                 let mut request = FriendRequest::default();
                                 request.set_from(data.from());
                                 request.set_to(data.to());
                                 request.set_status(data.status());
                                 request.set_date(data.date());
 
-                                let signature = match data.signature() {
-                                    Some(s) => s,
-                                    None => continue
-                                };
+
 
                                 if let Err(_) = verify_serde_sig(pk, &request, &signature) {
                                     //Signature is not valid
@@ -173,12 +164,16 @@ impl FriendsStore {
                                         }
                                     }
                                     FriendRequestStatus::Pending => store.incoming_request.write().push(data),
-                                    FriendRequestStatus::Denied => store.rejected_request.write().push(data),
+                                    FriendRequestStatus::Denied => {
+                                        let index = match store.outgoing_request.read().iter().position(|request| request.from() == data.to() && request.status() == FriendRequestStatus::Pending) {
+                                            Some(index) => index,
+                                            None => continue,
+                                        };
+
+                                        let _ = store.outgoing_request.write().remove(index);
+                                    },
                                     _ => {}
                                 };
-
-                                
-                            
                             }
                         }
                     }
@@ -288,31 +283,31 @@ impl FriendsStore {
         }
 
         // Although the request been validated before storing, we should validate again just to be safe
-        {
-            let index = self.incoming_request.read().iter().position(|request| request.from() == pubkey && request.to() == local_public_key);
+        
+        let index = self.incoming_request.read().iter().position(|request| request.from() == pubkey && request.to() == local_public_key);
 
-            let incoming_request = match index {
-                Some(index) => match self.incoming_request.read().get(index).cloned() {
-                    Some(r) => r,
-                    None => return Err(Error::CannotFindFriendRequest)
-                },
+        let incoming_request = match index {
+            Some(index) => match self.incoming_request.read().get(index).cloned() {
+                Some(r) => r,
                 None => return Err(Error::CannotFindFriendRequest)
-            };
-            let pk = Ed25519PublicKey::try_from(incoming_request.from().into_bytes())?;
+            },
+            None => return Err(Error::CannotFindFriendRequest)
+        };
+        let pk = Ed25519PublicKey::try_from(incoming_request.from().into_bytes())?;
 
-            let mut request = FriendRequest::default();
-            request.set_from(incoming_request.from());
-            request.set_to(incoming_request.to());
-            request.set_status(incoming_request.status());
-            request.set_date(incoming_request.date());
+        let mut request = FriendRequest::default();
+        request.set_from(incoming_request.from());
+        request.set_to(incoming_request.to());
+        request.set_status(incoming_request.status());
+        request.set_date(incoming_request.date());
 
-            let signature = match incoming_request.signature() {
-                Some(s) => s,
-                None => return Err(Error::Other) //TODO: Signature Missing
-            };
+        let signature = match incoming_request.signature() {
+            Some(s) => s,
+            None => return Err(Error::Other) //TODO: Signature Missing
+        };
 
-            verify_serde_sig(pk, &request, &signature)?;
-        }
+        verify_serde_sig(pk, &request, &signature)?;
+        
 
         let mut request = FriendRequest::default();
         request.set_from(local_public_key);
@@ -326,11 +321,66 @@ impl FriendsStore {
 
         self.outgoing_request.write().push(request);
 
+        if let Some(index) = index {
+            self.incoming_request.write().remove(index);
+        }
+
         Ok(())
     }
 
     pub async fn reject_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        return Err(Error::Unimplemented)
+        let (local_ipfs_public_key, _) = self.local().await?;
+
+        let local_public_key = libp2p_pub_to_pub(&local_ipfs_public_key)?;
+
+        if local_public_key == pubkey {
+            return Err(Error::CannotAcceptSelfAsFriend);
+        }
+
+        // Although the request been validated before storing, we should validate again just to be safe
+        
+        let index = self.incoming_request.read().iter().position(|request| request.from() == pubkey && request.to() == local_public_key);
+
+        let incoming_request = match index {
+            Some(index) => match self.incoming_request.read().get(index).cloned() {
+                Some(r) => r,
+                None => return Err(Error::CannotFindFriendRequest)
+            },
+            None => return Err(Error::CannotFindFriendRequest)
+        };
+        let pk = Ed25519PublicKey::try_from(incoming_request.from().into_bytes())?;
+
+        let mut request = FriendRequest::default();
+        request.set_from(incoming_request.from());
+        request.set_to(incoming_request.to());
+        request.set_status(incoming_request.status());
+        request.set_date(incoming_request.date());
+
+        let signature = match incoming_request.signature() {
+            Some(s) => s,
+            None => return Err(Error::Other) //TODO: Signature Missing
+        };
+
+        verify_serde_sig(pk, &request, &signature)?;
+        
+
+        let mut request = FriendRequest::default();
+        request.set_from(local_public_key);
+        request.set_to(pubkey.clone());
+        request.set_status(FriendRequestStatus::Denied);
+
+        let signature = sign_serde(&self.tesseract, &request)?;
+        request.set_signature(signature);
+
+        self.add_friend(pubkey).await?;
+
+        self.outgoing_request.write().push(request);
+
+        if let Some(index) = index {
+            self.incoming_request.write().remove(index);
+        }
+
+        Ok(())
     }
 }
 
@@ -343,12 +393,14 @@ impl FriendsStore {
                 let path = IpfsPath::from(cid.clone());
                 match self.ipfs.get_dag(path).await {
                     Ok(Ipld::Bytes(bytes)) => {
-                        Ok((cid, serde_json::from_slice::<Vec<PublicKey>>(&bytes)?))
+                        let list = serde_json::from_slice::<Vec<PublicKey>>(&bytes).unwrap_or_default();
+                        Ok((cid, list))
                     }
-                    _ => return Err(Error::Other), //Note: It should not hit here unless the repo is corrupted
+                    Err(e) => Err(Error::Any(anyhow::anyhow!("Unable to get dag: {}", e))),
+                    _ => Err(Error::Other),
                 }
             }
-            Err(e) => Err(e),
+            Err(e) => return Err(e),
         }
     }
 

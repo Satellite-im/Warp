@@ -63,7 +63,6 @@ impl IdentityStore {
         
 
             futures::pin_mut!(id_broadcast_stream);
-            // Used to send identity out in intervals
             // TODO: Determine if we can decrease the interval and make it configurable 
             let mut tick = tokio::time::interval(Duration::from_secs(1));
             loop {

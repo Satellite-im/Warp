@@ -123,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     println!();
-
+    delay().await;
     println!("Request List for {}", username(&ident_a));
     for list in account_a.list_all_request()? {
         let ident_from = account_a.get_identity(Identifier::from(list.from()))?;
