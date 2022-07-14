@@ -119,10 +119,10 @@ impl IpfsIdentity {
             kad_protocol: None,
             listening_addrs: config.listen_on,
             span: None,
-            dcutr: false,
-            relay: false,
-            relay_server: false,
-            relay_addr: None,
+            dcutr: config.ipfs_setting.dcutr.enable,
+            relay: config.ipfs_setting.relay_client.enable,
+            relay_server: config.ipfs_setting.relay_server.enable,
+            relay_addr: config.ipfs_setting.relay_client.relay_address,
         };
 
         // Create directory if it doesnt exist
