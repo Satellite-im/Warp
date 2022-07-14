@@ -1,6 +1,6 @@
 
 #![allow(dead_code)]
-use std::{time::Duration, sync::atomic::{AtomicBool, Ordering}};
+use std::{time::Duration, sync::atomic::{AtomicBool, Ordering, AtomicU64}};
 
 use ipfs::{Ipfs, Types, IpfsPath};
 use futures::{SinkExt, StreamExt, TryFutureExt};
@@ -12,7 +12,7 @@ use warp::{
     tesseract::Tesseract, crypto::PublicKey,
 };
 
-use super::IDENTITY_BROADCAST;
+use super::{IDENTITY_BROADCAST, topic_discovery};
 
 #[derive(Clone)]
 pub struct IdentityStore {
@@ -43,7 +43,7 @@ pub enum LookupBy {
 }
 
 impl IdentityStore {
-    pub async fn new(ipfs: Ipfs<Types>, tesseract: Tesseract) -> Result<Self, Error> {
+    pub async fn new(ipfs: Ipfs<Types>, tesseract: Tesseract, discovery: bool, interval: u64) -> Result<Self, Error> {
         let cache = Arc::new(Default::default());
         let identity = Arc::new(Default::default());
         let start_event = Arc::new(Default::default());
@@ -60,11 +60,16 @@ impl IdentityStore {
 
         tokio::spawn(async move {
             let store = store_inner;
-        
+            
+            if discovery {
+                if let Ok(fut) = topic_discovery(store.ipfs.clone(), IDENTITY_BROADCAST).await {
+                    tokio::task::spawn(fut);
+                }
+            }
 
             futures::pin_mut!(id_broadcast_stream);
             // TODO: Determine if we can decrease the interval and make it configurable 
-            let mut tick = tokio::time::interval(Duration::from_secs(1));
+            let mut tick = tokio::time::interval(Duration::from_millis(interval));
             loop {
                 if store.end_event.load(Ordering::SeqCst) {
                     break

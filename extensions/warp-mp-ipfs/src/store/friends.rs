@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering, AtomicU64};
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt, TryFutureExt};
@@ -18,18 +18,12 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender};
 use warp::tesseract::Tesseract;
 
-use super::FRIENDS_BROADCAST;
+use super::{FRIENDS_BROADCAST, topic_discovery};
 use super::identity::{IdentityStore, LookupBy};
 
 #[derive(Clone)]
 pub struct FriendsStore {
     ipfs: Ipfs<Types>,
-
-    // In the event we are not connected to a node, this would become helpful in reboadcasting request
-    rebroadcast_request: Arc<AtomicBool>,
-
-    // Interval to rebroadcast requests
-    rebroadcast_interval: Arc<AtomicUsize>,
 
     // Would be used to stop the look in the tokio task
     end_event: Arc<AtomicBool>,
@@ -52,10 +46,8 @@ impl Drop for FriendsStore {
 }
 
 impl FriendsStore {
-    pub async fn new(ipfs: Ipfs<Types>, tesseract: Tesseract) -> anyhow::Result<Self> {
-        let rebroadcast_request = Arc::new(AtomicBool::new(false));
+    pub async fn new(ipfs: Ipfs<Types>, tesseract: Tesseract, discovery: bool, interval: u64) -> anyhow::Result<Self> {
         let end_event = Arc::new(AtomicBool::new(false));
-        let rebroadcast_interval = Arc::new(AtomicUsize::new(1));
         let incoming_request = Arc::new(Default::default());
         let outgoing_request = Arc::new(Default::default());
 
@@ -64,8 +56,6 @@ impl FriendsStore {
 
         let store = Self {
             ipfs,
-            rebroadcast_request,
-            rebroadcast_interval,
             end_event,
             incoming_request,
             outgoing_request,
@@ -80,22 +70,16 @@ impl FriendsStore {
             .pubsub_subscribe(FRIENDS_BROADCAST.into())
             .await?;
 
-        // let topic_cid = store
-        //     .ipfs
-        //     .put_dag(ipld!(format!("gossipsub:{}", FRIENDS_BROADCAST)))
-        //     .await?;
-
-
-        //TODO: Maybe move this into the main task when there are no events being received?
-
-        
-
         tokio::spawn(async move {
             let mut store = store_inner;
-            //Using this for "peer discovery" when providing the cid over DHT
+            if discovery {
+                if let Ok(fut) = topic_discovery(store.ipfs.clone(), FRIENDS_BROADCAST).await {
+                    tokio::task::spawn(fut);
+                }
+            }
             
             futures::pin_mut!(stream);
-            let mut broadcast_interval = tokio::time::interval(Duration::from_secs(1));
+            let mut broadcast_interval = tokio::time::interval(Duration::from_millis(interval));
             loop {
                 if store.end_event.load(Ordering::SeqCst) {
                     break

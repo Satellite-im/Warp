@@ -133,9 +133,8 @@ impl IpfsIdentity {
         let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
         tokio::task::spawn(fut);
 
-
-        let identity_store = IdentityStore::new(ipfs.clone(), tesseract.clone()).await?;
-        let friend_store = FriendsStore::new(ipfs.clone(), tesseract.clone()).await?;
+        let identity_store = IdentityStore::new(ipfs.clone(), tesseract.clone(), config.store_setting.discovery, config.store_setting.broadcast_interval).await?;
+        let friend_store = FriendsStore::new(ipfs.clone(), tesseract.clone(), config.store_setting.discovery, config.store_setting.broadcast_interval).await?;
 
         let identity = IpfsIdentity {
             path,

@@ -54,15 +54,19 @@ pub struct IpfsSetting {
     pub rendezvous: Rendezvous,
 }
 
-//TODO: section for friends and identity discovery
-//      - In the case these are not set or unable to make a connection to fall back to using ipfs DHT
-//        and performing a lookup of provided cid to make a connection. 
+#[derive(Default, Clone, Serialize, Deserialize)]
+pub struct StoreSetting {
+    pub broadcast_interval: u64,
+    pub discovery: bool
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
     pub path: Option<PathBuf>,
     pub bootstrap: Vec<Multiaddr>,
     pub listen_on: Vec<Multiaddr>,
     pub ipfs_setting: IpfsSetting,
+    pub store_setting: StoreSetting,
 }
 
 impl Default for Config {
@@ -102,6 +106,10 @@ impl Default for Config {
                     ..Default::default()
                 },
             },
+            store_setting: StoreSetting {
+                broadcast_interval: 100,
+                discovery: false,
+            }
         }
     }
 }
