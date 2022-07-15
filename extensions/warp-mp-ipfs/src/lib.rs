@@ -25,7 +25,7 @@ use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::module::Module;
 use warp::pocket_dimension::PocketDimension;
 use warp::tesseract::Tesseract;
-use warp::{Extension, SingleHandle};
+use warp::{Extension, SingleHandle, async_block_in_place_uncheck};
 
 use ipfs::{
     Block, Ipfs, IpfsOptions, IpfsPath, Keypair, PeerId, Protocol, Types,
@@ -54,7 +54,7 @@ pub struct IpfsIdentity {
 impl Drop for IpfsIdentity {
     fn drop(&mut self) {
         // We want to gracefully close the ipfs repo to allow for any cleanup
-        async_block_unchecked(self.ipfs.clone().exit_daemon());
+        async_block_in_place_uncheck(self.ipfs.clone().exit_daemon());
 
         // If IpfsIdentity::temporary was used, `temp` would be true and it would
         // let is to delete the repo
@@ -167,24 +167,6 @@ impl IpfsIdentity {
     }
 }
 
-// used for executing async functions in the current thread
-pub fn async_block<F: Future>(fut: F) -> anyhow::Result<F::Output> {
-    let handle = match tokio::runtime::Handle::try_current() {
-        Ok(handle) => handle,
-        Err(_) => tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()?
-            .handle()
-            .clone(),
-    };
-    Ok(tokio::task::block_in_place(|| handle.block_on(fut)))
-}
-
-// used for executing async functions in the current thread
-pub fn async_block_unchecked<F: Future>(fut: F) -> F::Output {
-    async_block(fut).expect("Unable to run future on runtime")
-}
-
 impl Extension for IpfsIdentity {
     fn id(&self) -> String {
         "warp-mp-ipfs".to_string()
@@ -210,7 +192,7 @@ impl MultiPass for IpfsIdentity {
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<PublicKey, Error> {
-        async_block_unchecked(async {
+        async_block_in_place_uncheck(async {
             if let Ok(encoded_kp) = self.tesseract.retrieve("ipfs_keypair") {
                 let kp = bs58::decode(encoded_kp)
                     .into_vec()
@@ -328,7 +310,7 @@ impl MultiPass for IpfsIdentity {
                 //TODO: Lookup by username
                 return self.identity_store.lookup(LookupBy::Username(username))
             }
-            (None, None, true) => return async_block_unchecked(self.identity_store.own_identity()),
+            (None, None, true) => return async_block_in_place_uncheck(self.identity_store.own_identity()),
             _ => return Err(Error::InvalidIdentifierCondition),
         }
     }
@@ -360,15 +342,15 @@ impl MultiPass for IpfsIdentity {
         match self.tesseract.retrieve("ident_cid") {
             Ok(cid) => {
                 let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
-                async_block_unchecked(self.ipfs.remove_pin(&cid, false))?;
+                async_block_in_place_uncheck(self.ipfs.remove_pin(&cid, false))?;
             }
             Err(_) => {}
         };
 
         let bytes = serde_json::to_vec(&identity)?;
-        let ident_cid = async_block_unchecked(self.ipfs.put_dag(ipld!(bytes)))?;
+        let ident_cid = async_block_in_place_uncheck(self.ipfs.put_dag(ipld!(bytes)))?;
 
-        async_block_unchecked(self.ipfs.insert_pin(&ident_cid, false))?;
+        async_block_in_place_uncheck(self.ipfs.insert_pin(&ident_cid, false))?;
 
         self.tesseract.set("ident_cid", &ident_cid.to_string())?;
 
@@ -391,7 +373,7 @@ impl MultiPass for IpfsIdentity {
             }
         }
 
-        async_block_unchecked(self.identity_store.update_identity())?;
+        async_block_in_place_uncheck(self.identity_store.update_identity())?;
 
         //TODO: broadcast identity
 
@@ -416,15 +398,15 @@ impl MultiPass for IpfsIdentity {
 
 impl Friends for IpfsIdentity {
     fn send_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_unchecked(self.friend_store.send_request(pubkey))
+        async_block_in_place_uncheck(self.friend_store.send_request(pubkey))
     }
 
     fn accept_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_unchecked(self.friend_store.accept_request(pubkey))
+        async_block_in_place_uncheck(self.friend_store.accept_request(pubkey))
     }
 
     fn deny_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_unchecked(self.friend_store.reject_request(pubkey))
+        async_block_in_place_uncheck(self.friend_store.reject_request(pubkey))
     }
 
     fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
@@ -440,19 +422,19 @@ impl Friends for IpfsIdentity {
     }
 
     fn remove_friend(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_unchecked(self.friend_store.remove_friend(pubkey))
+        async_block_in_place_uncheck(self.friend_store.remove_friend(pubkey))
     }
 
     fn block(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_unchecked(self.friend_store.block(pubkey))
+        async_block_in_place_uncheck(self.friend_store.block(pubkey))
     }
 
     fn block_list(&self) -> Result<Vec<PublicKey>, Error> {
-        async_block_unchecked(self.friend_store.block_list())
+        async_block_in_place_uncheck(self.friend_store.block_list())
     }
 
     fn list_friends(&self) -> Result<Vec<PublicKey>, Error> {
-        async_block_unchecked(self.friend_store.friends_list())
+        async_block_in_place_uncheck(self.friend_store.friends_list())
     }
 
     fn has_friend(&self, pubkey: PublicKey) -> Result<(), Error> {
@@ -538,4 +520,97 @@ fn from_ipld<D: DeserializeOwned>(ipld: &Ipld) -> anyhow::Result<D> {
     };
     let item = serde_json::from_value(value)?;
     Ok(item)
+}
+
+pub mod ffi {
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
+    use warp::error::Error;
+    use warp::multipass::MultiPassAdapter;
+    use warp::pocket_dimension::PocketDimensionAdapter;
+    use warp::{runtime_handle, async_block_in_place_uncheck};
+    use warp::sync::{Arc, Mutex};
+    use warp::tesseract::Tesseract;
+    use warp::ffi::FFIResult;
+    use crate::{IpfsIdentity};
+    use crate::config::Config;
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_mp_ipfs_temporary(
+        pocketdimension: *const PocketDimensionAdapter,
+        tesseract: *const Tesseract,
+        config: *const c_char,
+    ) -> FFIResult<MultiPassAdapter> {
+        let tesseract = match tesseract.is_null() {
+            false => {
+                let tesseract = &*tesseract;
+                tesseract.clone()
+            }
+            true => Tesseract::default(),
+        };
+
+        let config = match config.is_null() {
+            true => None,
+            false => {
+                let config = CStr::from_ptr(config).to_string_lossy().to_string();
+                match serde_json::from_str(&config) {
+                    Ok(c) => Some(c),
+                    Err(e) => return FFIResult::err(Error::from(e)),
+                }
+            }
+        };
+
+        let cache = match pocketdimension.is_null() {
+            true => None,
+            false => Some(&*pocketdimension)
+        };
+
+        let account = match async_block_in_place_uncheck(IpfsIdentity::temporary(config, tesseract, cache.map(|c| c.inner()))) {
+            Ok(identity) => identity,
+            Err(e) => return FFIResult::err(Error::from(e))
+        };
+        
+        FFIResult::ok(MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account)))))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_mp_ipfs_persistent(
+        pocketdimension: *const PocketDimensionAdapter,
+        tesseract: *const Tesseract,
+        config: *const c_char,
+    ) -> FFIResult<MultiPassAdapter> {
+        let tesseract = match tesseract.is_null() {
+            false => {
+                let tesseract = &*tesseract;
+                tesseract.clone()
+            }
+            true => Tesseract::default(),
+        };
+
+        let config = match config.is_null() {
+            true => return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is invalid"))),
+            false => {
+                let config = CStr::from_ptr(config).to_string_lossy().to_string();
+                match serde_json::from_str(&config) {
+                    Ok(c) => c,
+                    Err(e) => return FFIResult::err(Error::from(e)),
+                }
+            }
+        };
+
+        let cache = match pocketdimension.is_null() {
+            true => None,
+            false => Some(&*pocketdimension)
+        };
+
+        let account = match async_block_in_place_uncheck(IpfsIdentity::persistent(config, tesseract, cache.map(|c| c.inner()))) {
+            Ok(identity) => identity,
+            Err(e) => return FFIResult::err(Error::from(e))
+        };
+        
+        FFIResult::ok(MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account)))))
+    }
+
 }

@@ -31,3 +31,4 @@ bs58 = "0.4"
 
 [features]
 default = []
+build-header = []
