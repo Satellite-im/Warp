@@ -131,7 +131,7 @@ impl IpfsIdentity {
         }
 
         let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
-        tokio::task::spawn(fut);
+        tokio::spawn(fut);
 
         let identity_store = IdentityStore::new(ipfs.clone(), tesseract.clone(), config.store_setting.discovery, config.store_setting.broadcast_interval).await?;
         let friend_store = FriendsStore::new(ipfs.clone(), tesseract.clone(), config.store_setting.discovery, config.store_setting.broadcast_interval).await?;
@@ -528,7 +528,7 @@ pub mod ffi {
     use warp::error::Error;
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::{runtime_handle, async_block_in_place_uncheck};
+    use warp::{runtime_handle, async_on_block};
     use warp::sync::{Arc, Mutex};
     use warp::tesseract::Tesseract;
     use warp::ffi::FFIResult;
@@ -566,7 +566,7 @@ pub mod ffi {
             false => Some(&*pocketdimension)
         };
 
-        let account = match async_block_in_place_uncheck(IpfsIdentity::temporary(config, tesseract, cache.map(|c| c.inner()))) {
+        let account = match async_on_block(IpfsIdentity::temporary(config, tesseract, cache.map(|c| c.inner()))) {
             Ok(identity) => identity,
             Err(e) => return FFIResult::err(Error::from(e))
         };
@@ -604,8 +604,8 @@ pub mod ffi {
             true => None,
             false => Some(&*pocketdimension)
         };
-
-        let account = match async_block_in_place_uncheck(IpfsIdentity::persistent(config, tesseract, cache.map(|c| c.inner()))) {
+        
+        let account = match async_on_block(IpfsIdentity::persistent(config, tesseract, cache.map(|c| c.inner()))) {
             Ok(identity) => identity,
             Err(e) => return FFIResult::err(Error::from(e))
         };

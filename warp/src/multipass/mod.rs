@@ -278,6 +278,7 @@ cfg_if::cfg_if! {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
+    use crate::async_on_block;
     use crate::crypto::PublicKey;
     use crate::error::Error;
     use crate::ffi::{FFIArray, FFIResult};
@@ -316,9 +317,10 @@ pub mod ffi {
         };
 
         let mp = &mut *(ctx);
-        match mp
+       
+        match async_on_block(async { mp
             .inner_guard()
-            .create_identity(username.as_deref(), passphrase.as_deref())
+            .create_identity(username.as_deref(), passphrase.as_deref()) })
         {
             Ok(pkey) => FFIResult::ok(pkey),
             Err(e) => FFIResult::err(e),
@@ -341,7 +343,7 @@ pub mod ffi {
 
         let mp = &*(ctx);
         let id = &*(identifier as *mut Identifier);
-        match mp.inner_guard().get_identity(id.clone()) {
+        match async_on_block(async { mp.inner_guard().get_identity(id.clone()) }) {
             Ok(identity) => FFIResult::ok(identity),
             Err(e) => FFIResult::err(e),
         }
@@ -357,7 +359,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match mp.inner_guard().get_own_identity() {
+        match async_on_block(async { mp.inner_guard().get_own_identity() }) {
             Ok(identity) => FFIResult::ok(identity),
             Err(e) => FFIResult::err(e),
         }
@@ -375,7 +377,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let option = &*option;
-        FFIResult::from(mp.inner_guard().update_identity(option.clone()))
+        FFIResult::from(async_on_block(async { mp.inner_guard().update_identity(option.clone()) } ))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -395,7 +397,7 @@ pub mod ffi {
             true => None,
         };
         let mp = &*(ctx);
-        match mp.inner_guard().decrypt_private_key(passphrase.as_deref()) {
+        match async_on_block(async { mp.inner_guard().decrypt_private_key(passphrase.as_deref()) }) {
             Ok(key) => FFIResult::ok(FFIArray::new(key)),
             Err(e) => FFIResult::err(e),
         }
@@ -411,7 +413,7 @@ pub mod ffi {
         }
 
         let mp = &mut *(ctx);
-        FFIResult::from(mp.inner_guard().refresh_cache())
+        FFIResult::from( async_on_block(async { mp.inner_guard().refresh_cache() }))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -429,7 +431,7 @@ pub mod ffi {
         }
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        FFIResult::from(mp.inner_guard().send_request(pk.clone()))
+        FFIResult::from(async_on_block(async { mp.inner_guard().send_request(pk.clone()) }))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -448,7 +450,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        FFIResult::from(mp.inner_guard().accept_request(pk.clone()))
+        FFIResult::from(async_on_block(async { mp.inner_guard().accept_request(pk.clone()) }))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -467,7 +469,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        FFIResult::from(mp.inner_guard().deny_request(pk.clone()))
+        FFIResult::from(async_on_block(async {mp.inner_guard().deny_request(pk.clone()) }))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -486,7 +488,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        FFIResult::from(mp.inner_guard().close_request(pk.clone()))
+        FFIResult::from(async_on_block(async {mp.inner_guard().close_request(pk.clone()) }))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -499,7 +501,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match mp.inner_guard().list_incoming_request() {
+        match async_on_block(async { mp.inner_guard().list_incoming_request() }){
             Ok(list) => FFIResult::ok(FFIArray::new(list)),
             Err(e) => FFIResult::err(e),
         }
@@ -515,7 +517,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match mp.inner_guard().list_outgoing_request() {
+        match async_on_block(async { mp.inner_guard().list_outgoing_request() }) {
             Ok(list) => FFIResult::ok(FFIArray::new(list)),
             Err(e) => FFIResult::err(e),
         }
@@ -531,7 +533,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match mp.inner_guard().list_all_request() {
+        match async_on_block(async { mp.inner_guard().list_all_request() }) {
             Ok(list) => FFIResult::ok(FFIArray::new(list)),
             Err(e) => FFIResult::err(e),
         }
@@ -553,12 +555,12 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        FFIResult::from(mp.inner_guard().remove_friend(pk.clone()))
+        FFIResult::from(async_on_block(async { mp.inner_guard().remove_friend(pk.clone()) }))
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_block_key(
+    pub unsafe extern "C" fn multipass_block(
         ctx: *mut MultiPassAdapter,
         pubkey: *const PublicKey,
     ) -> FFIResult<c_void> {
@@ -572,7 +574,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        FFIResult::from(mp.inner_guard().block_key(pk.clone()))
+        FFIResult::from(async_on_block(async { mp.inner_guard().block(pk.clone()) }))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -585,7 +587,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match mp.inner_guard().list_friends() {
+        match async_on_block(async { mp.inner_guard().list_friends() }) {
             Ok(list) => FFIResult::ok(FFIArray::new(list)),
             Err(e) => FFIResult::err(e),
         }
@@ -608,6 +610,6 @@ pub mod ffi {
         let mp = &*(ctx);
         let pk = &*pubkey;
 
-        FFIResult::from(mp.inner_guard().has_friend(pk.clone()))
+        FFIResult::from(async_on_block(async { mp.inner_guard().has_friend(pk.clone()) }))
     }
 }
