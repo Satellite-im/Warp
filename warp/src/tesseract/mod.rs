@@ -548,7 +548,7 @@ impl Tesseract {
 
 impl Tesseract {
     fn internal_keys(&self) -> Vec<String> {
-        let internal = self.internal.write();
+        let internal = self.internal.read();
         let keys = internal.keys().clone();
         keys.cloned().collect::<Vec<_>>()
     }
