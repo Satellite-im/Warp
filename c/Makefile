@@ -20,6 +20,9 @@ build_shared_tesseract:
 build_static_mp_solana:
 				mkdir -p bin && clang -Wall -Wextra mp_solana.c -o bin/mp_solana ../target/debug/libwarp.a ../target/debug/libwarp_mp_solana.a -lz -lssl -lcrypto -lbz2 -lm -ludev
 
+build_static_mp_ipfs:
+				mkdir -p bin && clang -Wall -Wextra mp_ipfs.c -o bin/mp_ipfs ../target/debug/libwarp.a ../target/debug/libwarp_mp_ipfs.a -lz -lm
+
 build_static_pd_flatfile:
 				mkdir -p bin && clang -Wall -Wextra pd_flatfile.c -o bin/pd_flatfile ../target/debug/libwarp.a ../target/debug/libwarp_pd_flatfile.a -lm
 
