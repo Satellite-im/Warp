@@ -68,6 +68,34 @@ pub fn runtime_handle() -> tokio::runtime::Handle {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+pub fn async_on_block<F: futures::Future>(fut: F) -> std::io::Result<F::Output> {
+    let handle = match tokio::runtime::Handle::try_current() {
+        Ok(handle) => handle,
+        Err(_) => tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?
+            .handle()
+            .clone(),
+    };
+    Ok(handle.block_on(fut))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn async_on_block_uncheck<F: futures::Future>(fut: F) -> F::Output {
+    async_on_block(fut).expect("Unexpected error")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn async_block_in_place<F: futures::Future>(fut: F) -> std::io::Result<F::Output> {
+    tokio::task::block_in_place(|| async_on_block(fut))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn async_block_in_place_uncheck<F: futures::Future>(fut: F) -> F::Output {
+    async_block_in_place(fut).expect("Unexpected error")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     pub struct FFIArray<T> {
         value: Vec<T>,
