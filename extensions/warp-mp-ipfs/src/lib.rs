@@ -10,14 +10,14 @@ pub mod store;
 use anyhow::bail;
 use config::Config;
 use futures::{Future, TryFutureExt};
-use libipld::{Cid, Ipld, ipld};
+use libipld::{ipld, Cid, Ipld};
 use serde::de::DeserializeOwned;
-use store::identity::{IdentityStore, LookupBy};
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 use store::friends::FriendsStore;
+use store::identity::{IdentityStore, LookupBy};
 use warp::data::{DataObject, DataType};
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::sync::{Arc, Mutex, MutexGuard};
@@ -25,11 +25,10 @@ use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::module::Module;
 use warp::pocket_dimension::PocketDimension;
 use warp::tesseract::Tesseract;
-use warp::{Extension, SingleHandle, async_block_in_place_uncheck};
+use warp::{async_block_in_place_uncheck, Extension, SingleHandle};
 
 use ipfs::{
-    Block, Ipfs, IpfsOptions, IpfsPath, Keypair, PeerId, Protocol, Types,
-    UninitializedIpfs,
+    Block, Ipfs, IpfsOptions, IpfsPath, Keypair, PeerId, Protocol, Types, UninitializedIpfs,
 };
 use tokio::sync::mpsc::Sender;
 use warp::crypto::rand::Rng;
@@ -46,7 +45,6 @@ pub struct IpfsIdentity {
     tesseract: Tesseract,
     ipfs: Ipfs<Types>,
     temp: bool,
-    keypair: Keypair,
     friend_store: FriendsStore,
     identity_store: IdentityStore,
 }
@@ -102,7 +100,16 @@ impl IpfsIdentity {
                     libp2p::identity::ed25519::SecretKey::from_bytes(id_kp.secret.to_bytes())?;
                 Keypair::Ed25519(secret.into())
             }
-            Err(_) => Keypair::generate_ed25519(),
+            Err(_) => {
+                let mut tesseract = tesseract.clone();
+                if let Keypair::Ed25519(kp) = Keypair::generate_ed25519() {
+                    let encoded_kp = bs58::encode(&kp.encode()).into_string();
+                    tesseract.set("ipfs_keypair", &encoded_kp)?;
+                    Keypair::Ed25519(kp)
+                } else {
+                    anyhow::bail!("Unreachable")
+                }
+            }
         };
 
         let temp = config.path.is_none();
@@ -133,18 +140,30 @@ impl IpfsIdentity {
         let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
         tokio::spawn(fut);
 
-        let identity_store = IdentityStore::new(ipfs.clone(), tesseract.clone(), config.store_setting.discovery, config.store_setting.broadcast_interval).await?;
-        let friend_store = FriendsStore::new(ipfs.clone(), tesseract.clone(), config.store_setting.discovery, config.store_setting.broadcast_interval).await?;
+        let identity_store = IdentityStore::new(
+            ipfs.clone(),
+            tesseract.clone(),
+            config.store_setting.discovery,
+            config.store_setting.broadcast_interval,
+        )
+        .await?;
+
+        let friend_store = FriendsStore::new(
+            ipfs.clone(),
+            tesseract.clone(),
+            config.store_setting.discovery,
+            config.store_setting.broadcast_interval,
+        )
+        .await?;
 
         let identity = IpfsIdentity {
             path,
             tesseract,
             cache,
             ipfs,
-            keypair,
             temp,
             friend_store,
-            identity_store
+            identity_store,
         };
 
         Ok(identity)
@@ -157,13 +176,6 @@ impl IpfsIdentity {
             .ok_or(Error::PocketDimensionExtensionUnavailable)?;
 
         Ok(cache.lock())
-    }
-
-    pub fn raw_keypair(&self) -> anyhow::Result<libp2p::identity::ed25519::Keypair> {
-        match self.keypair.clone() {
-            Keypair::Ed25519(kp) => Ok(kp),
-            _ => bail!("Unsupported keypair"),
-        }
     }
 }
 
@@ -192,92 +204,17 @@ impl MultiPass for IpfsIdentity {
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<PublicKey, Error> {
-        async_block_in_place_uncheck(async {
-            if let Ok(encoded_kp) = self.tesseract.retrieve("ipfs_keypair") {
-                let kp = bs58::decode(encoded_kp)
-                    .into_vec()
-                    .map_err(anyhow::Error::from)?;
-                let keypair = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
+        let identity = async_block_in_place_uncheck(self.identity_store.create_identity(username))?;
 
-                //TODO: Check records to determine if profile exist properly
-                if let Ok(cid) = self.tesseract.retrieve("ident_cid") {
-                    let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
-                    let path = IpfsPath::from(cid);
-                    //TODO: Fix deadlock if cid doesnt exist. May be related to the ipld link
-                    let identity = match self.ipfs.get_dag(path).await {
-                        Ok(Ipld::Bytes(bytes)) => serde_json::from_slice::<Identity>(&bytes)?,
-                        _ => return Err(Error::Other), //Note: It should not hit here unless the repo is corrupted
-                    };
-                    let public_key = identity.public_key();
-                    let inner_pk = PublicKey::from_bytes(keypair.public.as_ref());
-
-                    if public_key == inner_pk {
-                        return Err(Error::IdentityExist);
-                    }
-                }
-            }
-
-            let raw_kp = self.raw_keypair()?;
-
-            let mut identity = Identity::default();
-            let public_key = PublicKey::from_bytes(&raw_kp.public().encode());
-
-            let username = match username {
-                Some(u) => u.to_string(),
-                None => generate_name(),
-            };
-
-            identity.set_username(&username);
-            identity.set_short_id(warp::crypto::rand::thread_rng().gen_range(0, 9999));
-            identity.set_public_key(public_key);
-            // Convert our identity to ipld. This step would convert it to serde_json::Value then match accordingly
-            // Update `to_ipld`
-            // let ipld_val = to_ipld(identity.clone())?;
-            let bytes = serde_json::to_vec(&identity)?;
-            let blank: Vec<u8> = Vec::new();
-            // Store the identity as a dag
-            let ident_cid = self.ipfs.put_dag(ipld!(bytes)).await?;
-            // Blank list of friends as a dag (as public keys)
-            let friends_cid = self.ipfs.put_dag(ipld!(blank.clone())).await?;
-            // blank list of a block list as a dag (ditto)
-            let block_cid = self.ipfs.put_dag(ipld!(blank)).await?;
-
-            //TODO: Blank list of incoming and outgoing request
-
-            // Pin the dag
-            self.ipfs.insert_pin(&ident_cid, false).await?;
-            self.ipfs.insert_pin(&friends_cid, false).await?;
-            self.ipfs.insert_pin(&block_cid, false).await?;
-
-            //TODO: Maybe keep a root cid?
-
-            // Note that for the time being we will be storing the Cid to tesseract,
-            // however this may be handled a different way, especially since the cid is stored in the pinstore
-            // in rust-ipfs.
-            // TODO: Store the Cid of the root handle properly
-            // TODO: Provide the Cid to DHT. Either through the PutProvider or (soon to be implemented) ipns
-            self.tesseract.set("ident_cid", &ident_cid.to_string())?;
-            self.tesseract.set("friends_cid", &friends_cid.to_string())?;
-            self.tesseract.set("block_cid", &block_cid.to_string())?;
-
-            let encoded_kp = bs58::encode(&raw_kp.encode()).into_string();
-
-            self.tesseract.set("ipfs_keypair", &encoded_kp)?;
-
-            self.identity_store.update_identity().await?;
-            self.identity_store.enable_event();
-
-            if let Ok(mut cache) = self.get_cache() {
-                let object = DataObject::new(DataType::from(Module::Accounts), &identity)?;
-                cache.add_data(DataType::from(Module::Accounts), &object)?;
-            }
-            Ok(identity.public_key())
-        })
+        if let Ok(mut cache) = self.get_cache() {
+            let object = DataObject::new(DataType::from(Module::Accounts), &identity)?;
+            cache.add_data(DataType::from(Module::Accounts), &object)?;
+        }
+        Ok(identity.public_key())
     }
 
     //TODO: Use DHT to perform lookups
     fn get_identity(&self, id: Identifier) -> Result<Identity, Error> {
-
         match id.get_inner() {
             (Some(pk), None, false) => {
                 if let Ok(cache) = self.get_cache() {
@@ -292,7 +229,7 @@ impl MultiPass for IpfsIdentity {
                         }
                     }
                 }
-                return self.identity_store.lookup(LookupBy::PublicKey(pk))
+                return self.identity_store.lookup(LookupBy::PublicKey(pk));
             }
             (None, Some(username), false) => {
                 if let Ok(cache) = self.get_cache() {
@@ -307,10 +244,11 @@ impl MultiPass for IpfsIdentity {
                         }
                     }
                 }
-                //TODO: Lookup by username
-                return self.identity_store.lookup(LookupBy::Username(username))
+                return self.identity_store.lookup(LookupBy::Username(username));
             }
-            (None, None, true) => return async_block_in_place_uncheck(self.identity_store.own_identity()),
+            (None, None, true) => {
+                return async_block_in_place_uncheck(self.identity_store.own_identity())
+            }
             _ => return Err(Error::InvalidIdentifierCondition),
         }
     }
@@ -375,8 +313,6 @@ impl MultiPass for IpfsIdentity {
 
         async_block_in_place_uncheck(self.identity_store.update_identity())?;
 
-        //TODO: broadcast identity
-
         // if let Ok(hooks) = self.get_hooks() {
         //     let object = DataObject::new(DataType::Accounts, identity.clone())?;
         //     hooks.trigger("accounts::update_identity", &object);
@@ -386,7 +322,8 @@ impl MultiPass for IpfsIdentity {
     }
 
     fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<Vec<u8>, Error> {
-        self.raw_keypair()
+        self.identity_store
+            .get_raw_keypair()
             .map(|kp| kp.encode().to_vec())
             .map_err(Error::from)
     }
@@ -523,17 +460,17 @@ fn from_ipld<D: DeserializeOwned>(ipld: &Ipld) -> anyhow::Result<D> {
 }
 
 pub mod ffi {
+    use crate::config::Config;
+    use crate::IpfsIdentity;
     use std::ffi::CStr;
     use std::os::raw::c_char;
     use warp::error::Error;
+    use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::{runtime_handle, async_on_block};
     use warp::sync::{Arc, Mutex};
     use warp::tesseract::Tesseract;
-    use warp::ffi::FFIResult;
-    use crate::{IpfsIdentity};
-    use crate::config::Config;
+    use warp::{async_on_block, runtime_handle};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -563,15 +500,21 @@ pub mod ffi {
 
         let cache = match pocketdimension.is_null() {
             true => None,
-            false => Some(&*pocketdimension)
+            false => Some(&*pocketdimension),
         };
 
-        let account = match async_on_block(IpfsIdentity::temporary(config, tesseract, cache.map(|c| c.inner()))) {
+        let account = match async_on_block(IpfsIdentity::temporary(
+            config,
+            tesseract,
+            cache.map(|c| c.inner()),
+        )) {
             Ok(identity) => identity,
-            Err(e) => return FFIResult::err(Error::from(e))
+            Err(e) => return FFIResult::err(Error::from(e)),
         };
-        
-        FFIResult::ok(MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account)))))
+
+        FFIResult::ok(MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(
+            account,
+        )))))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -590,7 +533,9 @@ pub mod ffi {
         };
 
         let config = match config.is_null() {
-            true => return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is invalid"))),
+            true => {
+                return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is invalid")))
+            }
             false => {
                 let config = CStr::from_ptr(config).to_string_lossy().to_string();
                 match serde_json::from_str(&config) {
@@ -602,15 +547,20 @@ pub mod ffi {
 
         let cache = match pocketdimension.is_null() {
             true => None,
-            false => Some(&*pocketdimension)
+            false => Some(&*pocketdimension),
         };
-        
-        let account = match async_on_block(IpfsIdentity::persistent(config, tesseract, cache.map(|c| c.inner()))) {
-            Ok(identity) => identity,
-            Err(e) => return FFIResult::err(Error::from(e))
-        };
-        
-        FFIResult::ok(MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account)))))
-    }
 
+        let account = match async_on_block(IpfsIdentity::persistent(
+            config,
+            tesseract,
+            cache.map(|c| c.inner()),
+        )) {
+            Ok(identity) => identity,
+            Err(e) => return FFIResult::err(Error::from(e)),
+        };
+
+        FFIResult::ok(MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(
+            account,
+        )))))
+    }
 }

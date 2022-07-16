@@ -1,18 +1,21 @@
-
 #![allow(dead_code)]
-use std::{time::Duration, sync::atomic::{AtomicBool, Ordering, AtomicU64}};
-
-use ipfs::{Ipfs, Types, IpfsPath};
-use futures::{SinkExt, StreamExt, TryFutureExt};
-use libipld::{Cid, Ipld};
-use warp::{
-    error::Error,
-    multipass::identity::Identity,
-    sync::{Arc, RwLock, Mutex},
-    tesseract::Tesseract, crypto::PublicKey,
+use std::{
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    time::Duration,
 };
 
-use super::{IDENTITY_BROADCAST, topic_discovery};
+use futures::{SinkExt, StreamExt, TryFutureExt};
+use ipfs::{Ipfs, IpfsPath, Keypair, Types};
+use libipld::{ipld, Cid, Ipld};
+use warp::{
+    crypto::{rand::Rng, PublicKey},
+    error::Error,
+    multipass::identity::Identity,
+    sync::{Arc, Mutex, RwLock},
+    tesseract::Tesseract,
+};
+
+use super::{libp2p_pub_to_pub, topic_discovery, IDENTITY_BROADCAST};
 
 #[derive(Clone)]
 pub struct IdentityStore {
@@ -21,12 +24,12 @@ pub struct IdentityStore {
     identity: Arc<RwLock<Option<Identity>>>,
 
     cache: Arc<RwLock<Vec<Identity>>>,
-    
+
     start_event: Arc<AtomicBool>,
 
     end_event: Arc<AtomicBool>,
 
-    tesseract: Tesseract
+    tesseract: Tesseract,
 }
 
 impl Drop for IdentityStore {
@@ -39,43 +42,61 @@ impl Drop for IdentityStore {
 #[derive(Debug, Clone)]
 pub enum LookupBy {
     PublicKey(PublicKey),
-    Username(String)
+    Username(String),
 }
 
 impl IdentityStore {
-    pub async fn new(ipfs: Ipfs<Types>, tesseract: Tesseract, discovery: bool, interval: u64) -> Result<Self, Error> {
+    pub async fn new(
+        ipfs: Ipfs<Types>,
+        tesseract: Tesseract,
+        discovery: bool,
+        interval: u64,
+    ) -> Result<Self, Error> {
         let cache = Arc::new(Default::default());
         let identity = Arc::new(Default::default());
         let start_event = Arc::new(Default::default());
         let end_event = Arc::new(Default::default());
 
-        let store = Self { ipfs, cache, identity, start_event, end_event, tesseract };
+        let store = Self {
+            ipfs,
+            cache,
+            identity,
+            start_event,
+            end_event,
+            tesseract,
+        };
 
         if let Ok(ident) = store.own_identity().await {
             *store.identity.write() = Some(ident);
             store.start_event.store(true, Ordering::SeqCst);
         }
-        let id_broadcast_stream = store.ipfs.pubsub_subscribe(IDENTITY_BROADCAST.into()).await?;
+        let id_broadcast_stream = store
+            .ipfs
+            .pubsub_subscribe(IDENTITY_BROADCAST.into())
+            .await?;
         let store_inner = store.clone();
+
+        if discovery {
+            let ipfs = store.ipfs.clone();
+            tokio::spawn(async {
+                if let Err(_) = topic_discovery(ipfs, IDENTITY_BROADCAST).await {
+                    //TODO: Log
+                }
+            });
+        }
 
         tokio::spawn(async move {
             let store = store_inner;
-            
-            if discovery {
-                if let Ok(fut) = topic_discovery(store.ipfs.clone(), IDENTITY_BROADCAST).await {
-                    tokio::task::spawn(fut);
-                }
-            }
 
             futures::pin_mut!(id_broadcast_stream);
-            // TODO: Determine if we can decrease the interval and make it configurable 
+
             let mut tick = tokio::time::interval(Duration::from_millis(interval));
             loop {
                 if store.end_event.load(Ordering::SeqCst) {
-                    break
+                    break;
                 }
                 if !store.start_event.load(Ordering::SeqCst) {
-                    continue
+                    continue;
                 }
                 tokio::select! {
                     message = id_broadcast_stream.next() => {
@@ -100,10 +121,9 @@ impl IdentityStore {
                                 }
 
                                 store.cache.write().push(identity);
-                                //TODO: Maybe cache the identity in PD
                             }
                         }
-                        
+
                     }
                     _ = tick.tick() => {
                         //TODO: Add check to determine if peers are subscribed to topic before publishing
@@ -127,6 +147,55 @@ impl IdentityStore {
         self.cache.read().clone()
     }
 
+    pub async fn create_identity(&mut self, username: Option<&str>) -> Result<Identity, Error> {
+        let raw_kp = self.get_raw_keypair()?;
+
+        if self.own_identity().await.is_ok() {
+            return Err(Error::IdentityExist);
+        }
+
+        let raw_kp = self.get_raw_keypair()?;
+
+        let mut identity = Identity::default();
+        let public_key = PublicKey::from_bytes(&raw_kp.public().encode());
+
+        let username = match username {
+            Some(u) => u.to_string(),
+            None => warp::multipass::generator::generate_name(),
+        };
+
+        identity.set_username(&username);
+        identity.set_short_id(warp::crypto::rand::thread_rng().gen_range(0, 9999));
+        identity.set_public_key(public_key);
+
+        // TODO: Convert our identity to ipld(?)
+        let bytes = serde_json::to_vec(&identity)?;
+
+        // Store the identity as a dag
+        // TODO: Create a single root dag for the Cid
+        let ident_cid = self.ipfs.put_dag(ipld!(bytes)).await?;
+        let friends_cid = self.ipfs.put_dag(ipld!(Vec::<u8>::new())).await?;
+        let block_cid = self.ipfs.put_dag(ipld!(Vec::<u8>::new())).await?;
+
+        // Pin the dag
+        self.ipfs.insert_pin(&ident_cid, false).await?;
+        self.ipfs.insert_pin(&friends_cid, false).await?;
+        self.ipfs.insert_pin(&block_cid, false).await?;
+
+        // Note that for the time being we will be storing the Cid to tesseract,
+        // however this may be handled a different way.
+        // TODO: Provide the Cid to DHT
+        self.tesseract.set("ident_cid", &ident_cid.to_string())?;
+        self.tesseract
+            .set("friends_cid", &friends_cid.to_string())?;
+        self.tesseract.set("block_cid", &block_cid.to_string())?;
+
+        self.update_identity().await?;
+        self.enable_event();
+
+        Ok(identity)
+    }
+
     pub fn lookup(&self, lookup: LookupBy) -> Result<Identity, Error> {
         // Check own identity just in case since we dont store this in the cache
         if let Some(ident) = self.identity.read().clone() {
@@ -139,27 +208,59 @@ impl IdentityStore {
 
         for ident in self.cache() {
             match &lookup {
-                LookupBy::PublicKey(pubkey) if &ident.public_key() == pubkey => return Ok(ident.clone()),
-                LookupBy::Username(username) if &ident.username() == username => return Ok(ident.clone()),
-                _ => continue
+                LookupBy::PublicKey(pubkey) if &ident.public_key() == pubkey => {
+                    return Ok(ident.clone())
+                }
+                LookupBy::Username(username) if &ident.username() == username => {
+                    return Ok(ident.clone())
+                }
+                _ => continue,
             }
         }
         Err(Error::IdentityDoesntExist)
     }
 
+    pub fn get_keypair(&self) -> anyhow::Result<Keypair> {
+        match self.tesseract.retrieve("ipfs_keypair") {
+            Ok(keypair) => {
+                let kp = bs58::decode(keypair).into_vec()?;
+                let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
+                let secret =
+                    libp2p::identity::ed25519::SecretKey::from_bytes(id_kp.secret.to_bytes())?;
+                Ok(Keypair::Ed25519(secret.into()))
+            }
+            Err(_) => anyhow::bail!(Error::PrivateKeyInvalid),
+        }
+    }
+
+    pub fn get_raw_keypair(&self) -> anyhow::Result<libp2p::identity::ed25519::Keypair> {
+        match self.get_keypair()? {
+            Keypair::Ed25519(kp) => Ok(kp),
+            _ => anyhow::bail!("Unsupported keypair"),
+        }
+    }
+
     pub async fn own_identity(&self) -> Result<Identity, Error> {
-        match self.tesseract.retrieve("ident_cid") {
+        let identity = match self.tesseract.retrieve("ident_cid") {
             Ok(cid) => {
                 let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
                 let path = IpfsPath::from(cid);
-                let identity = match self.ipfs.get_dag(path).await {
+                match self.ipfs.get_dag(path).await {
                     Ok(Ipld::Bytes(bytes)) => serde_json::from_slice::<Identity>(&bytes)?,
                     _ => return Err(Error::IdentityDoesntExist), //Note: It should not hit here unless the repo is corrupted
-                };
-                Ok(identity)
+                }
             }
-            Err(_) => Err(Error::IdentityDoesntExist),
+            Err(_) => return Err(Error::IdentityDoesntExist),
+        };
+
+        let public_key = identity.public_key();
+        let kp_public_key = libp2p_pub_to_pub(&self.get_keypair()?.public())?;
+
+        if public_key != kp_public_key {
+            return Err(Error::IdentityDoesntExist);
         }
+
+        Ok(identity)
     }
 
     pub async fn update_identity(&self) -> Result<(), Error> {

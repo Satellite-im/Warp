@@ -1,6 +1,6 @@
 use ipfs::Multiaddr;
 use serde::{Deserialize, Serialize};
-use std::{str::FromStr, path::PathBuf};
+use std::{path::PathBuf, str::FromStr};
 
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Dcutr {
@@ -57,7 +57,7 @@ pub struct IpfsSetting {
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
     pub broadcast_interval: u64,
-    pub discovery: bool
+    pub discovery: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -88,9 +88,7 @@ impl Default for Config {
                 .filter_map(|s| Multiaddr::from_str(s).ok())
                 .collect::<Vec<_>>(),
             ipfs_setting: IpfsSetting {
-                mdns: Mdns {
-                    enable: false,
-                },
+                mdns: Mdns { enable: true },
                 autonat: Autonat {
                     enable: false,
                     servers: vec![],
@@ -109,7 +107,7 @@ impl Default for Config {
             store_setting: StoreSetting {
                 broadcast_interval: 100,
                 discovery: false,
-            }
+            },
         }
     }
 }

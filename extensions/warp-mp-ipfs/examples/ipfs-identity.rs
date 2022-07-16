@@ -3,7 +3,6 @@ use warp::multipass::MultiPass;
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::IpfsIdentity;
 
-
 fn update_name(account: &mut impl MultiPass, name: &str) -> anyhow::Result<()> {
     account.update_identity(IdentityUpdate::set_username(name.to_string()))?;
     let ident = account.get_own_identity()?;
@@ -20,12 +19,11 @@ fn update_status(account: &mut impl MultiPass, status: &str) -> anyhow::Result<(
     Ok(())
 }
 
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut tesseract = Tesseract::default();
     tesseract.unlock(b"super duper pass")?;
-    
+
     let mut identity = IpfsIdentity::temporary(None, tesseract, None).await?;
     identity.create_identity(None, None)?;
 
@@ -35,6 +33,6 @@ async fn main() -> anyhow::Result<()> {
 
     update_name(&mut identity, &warp::multipass::generator::generate_name())?;
     update_status(&mut identity, "New status message")?;
-   
+
     Ok(())
 }

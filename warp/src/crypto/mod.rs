@@ -24,6 +24,7 @@ use warp_derive::{FFIArray, FFIFree};
 use wasm_bindgen::prelude::*;
 use zeroize::Zeroize;
 
+//TODO: Have internals match with various of crypto public keys
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIArray, FFIFree)]
 #[wasm_bindgen]
 pub struct PublicKey(Vec<u8>);
@@ -67,6 +68,7 @@ impl AsRef<[u8]> for PrivateKey {
     }
 }
 
+//TODO: Have internals match with various of crypto private keys
 #[wasm_bindgen]
 impl PrivateKey {
     #[wasm_bindgen]
