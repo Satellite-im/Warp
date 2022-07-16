@@ -23,7 +23,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    Callback, EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState, SenderId,
+    EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState, SenderId,
 };
 use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::{error::Error, pocket_dimension::PocketDimension};
@@ -267,7 +267,6 @@ impl RayGun for Libp2pMessaging {
         &self,
         conversation_id: Uuid,
         _: MessageOptions,
-        _: Option<Callback>,
     ) -> Result<Vec<Message>> {
         if let Ok(cache) = self.get_cache() {
             let mut query = QueryBuilder::default();

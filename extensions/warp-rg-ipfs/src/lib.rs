@@ -174,7 +174,6 @@ impl RayGun for IpfsMessaging {
         &self,
         _conversation_id: Uuid,
         _: MessageOptions,
-        _: Option<Callback>,
     ) -> Result<Vec<Message>> {
         let list = vec![];
         Ok(list)

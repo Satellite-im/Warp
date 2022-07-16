@@ -319,7 +319,6 @@ pub trait RayGun: Extension + GroupChat + Sync + Send + SingleHandle {
         &self,
         conversation_id: Uuid,
         options: MessageOptions,
-        callback: Option<Callback>,
     ) -> Result<Vec<Message>, Error>;
 
     /// Sends a message to a conversation. If `message_id` is provided, it will override the selected message
@@ -435,7 +434,7 @@ pub mod ffi {
         match rt.block_on(async {
             adapter
                 .inner_guard()
-                .get_messages(convo_id, MessageOptions::default(), None)
+                .get_messages(convo_id, MessageOptions::default())
                 .await
         }) {
             Ok(messages) => FFIResult::ok(FFIArray::new(messages)),

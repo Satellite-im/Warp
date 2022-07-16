@@ -117,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
     loop {
         tokio::select! {
             //TODO: Optimize by clearing terminal and displaying all messages instead of getting last line
-            msg = chat.get_messages(topic, MessageOptions::default(), None) => {
+            msg = chat.get_messages(topic, MessageOptions::default()) => {
                 if let Ok(msg) = msg {
                     if msg.len() == *convo_size.entry(topic).or_insert(0) {
                         continue;
@@ -172,7 +172,7 @@ async fn main() -> anyhow::Result<()> {
                                 Some(id) => generate_uuid(id),
                                 None => topic
                             };
-                            let messages = chat.get_messages(local_topic, MessageOptions::default(), None).await?;
+                            let messages = chat.get_messages(local_topic, MessageOptions::default()).await?;
                             for message in messages.iter() {
                                 let username = get_username(new_account.clone(), message.sender())?;
                                 let mut emojis = vec![];
@@ -310,7 +310,7 @@ async fn main() -> anyhow::Result<()> {
                             match cmd_line.next() {
                                 Some("all") => {
                                    let messages = chat
-                                       .get_messages(topic, MessageOptions::default(), None)
+                                       .get_messages(topic, MessageOptions::default())
                                        .await?;
                                    for message in messages.iter() {
                                        chat.pin(topic, message.id(), PinState::Pin).await?;
@@ -335,7 +335,7 @@ async fn main() -> anyhow::Result<()> {
                             match cmd_line.next() {
                                 Some("all") => {
                                    let messages = chat
-                                       .get_messages(topic, MessageOptions::default(), None)
+                                       .get_messages(topic, MessageOptions::default())
                                        .await?;
                                    for message in messages.iter() {
                                        chat.pin(topic, message.id(), PinState::Unpin).await?;
