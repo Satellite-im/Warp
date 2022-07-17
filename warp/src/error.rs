@@ -67,8 +67,14 @@ pub enum Error {
     CannotUpdateIdentityStatus,
     #[error("Identity could not be updated")]
     CannotUpdateIdentity,
+    #[error("Public Key isnt Blocked")]
+    PublicKeyIsBlocked,
+    #[error("Public Key isnt Blocked")]
+    PublicKeyIsntBlocked,
     #[error("Unable to send a friend request")]
     CannotSendFriendRequest,
+    #[error("friend request")]
+    FriendRequestExist,
     #[error("You cannot send yourself a friend request")]
     CannotSendSelfFriendRequest,
     #[error("You cannot accept yourself as a friend")]
@@ -161,6 +167,8 @@ pub enum Error {
     InvalidPublicKeyLength,
     #[error("Private key length is invalid")]
     InvalidPrivateKeyLength,
+    #[error("Signature is invalid")]
+    InvalidSignature,
 
     //Tesseract Errors
     #[error("Tesseract is unavailable")]
@@ -210,7 +218,7 @@ pub enum Error {
     #[error(transparent)]
     Any(#[from] anyhow::Error),
     #[error(transparent)]
-    Bs58Error( #[from] bs58::decode::Error),
+    Bs58Error(#[from] bs58::decode::Error),
     #[error("{0}")]
     IoError(#[from] std::io::Error),
     #[error("Functionality is not yet implemented")]
