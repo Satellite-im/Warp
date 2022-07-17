@@ -17,10 +17,10 @@ async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
     let config = Config {
         store_setting: StoreSetting {
             broadcast_interval: 5,
-            discovery: true,
+            discovery: false,
         },
         ipfs_setting: IpfsSetting {
-            mdns: warp_mp_ipfs::config::Mdns { enable: false },
+            mdns: warp_mp_ipfs::config::Mdns { enable: true },
             ..Default::default()
         },
         ..Default::default()
@@ -55,8 +55,6 @@ async fn main() -> anyhow::Result<()> {
         username(&ident_b),
         bs58::encode(ident_b.public_key().as_ref()).into_string()
     );
-
-    fixed_delay(30000).await;
 
     account_a.send_request(ident_b.public_key())?;
 
