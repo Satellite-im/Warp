@@ -3,7 +3,7 @@ use ed25519_dalek::{
     Keypair, PublicKey, SecretKey, Signature, Signer, Verifier, KEYPAIR_LENGTH, SECRET_KEY_LENGTH,
 };
 use getrandom::getrandom;
-use warp_derive::{FFIArray, FFIFree};
+use warp_derive::{FFIVec, FFIFree};
 use wasm_bindgen::prelude::wasm_bindgen;
 use zeroize::Zeroize;
 
@@ -12,7 +12,7 @@ use zeroize::Zeroize;
 #[wasm_bindgen]
 pub struct Ed25519Keypair(Keypair);
 
-#[derive(Copy, Clone, Eq, PartialEq, FFIArray, FFIFree)]
+#[derive(Copy, Clone, Eq, PartialEq, FFIVec, FFIFree)]
 #[wasm_bindgen]
 pub struct Ed25519PublicKey(PublicKey);
 

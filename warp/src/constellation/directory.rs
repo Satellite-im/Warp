@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use warp_derive::{FFIArray, FFIFree};
+use warp_derive::{FFIFree};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -38,7 +38,7 @@ pub enum DirectoryHookType {
 }
 
 /// `Directory` handles folders and its contents.
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, FFIArray, FFIFree)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Directory {
     /// ID of the `Directory`
@@ -635,11 +635,12 @@ impl Directory {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use crate::constellation::file::File;
-    use crate::constellation::item::Item;
-    use crate::constellation::Directory;
+    use crate::constellation::file::{File};
+    use crate::constellation::item::{Item};
+    use crate::constellation::{directory::{Directory}};
+    use crate::constellation::item::FFIVec_Item; //file::FFIVec_File,  directory::FFIVec_Directory};
     use crate::error::Error;
-    use crate::ffi::{FFIArray, FFIResult};
+    use crate::ffi::{FFIResult};
     use std::ffi::CStr;
     use std::ffi::CString;
     use std::os::raw::{c_char, c_void};
@@ -816,14 +817,14 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_get_items(ptr: *const Directory) -> *mut FFIArray<Item> {
+    pub unsafe extern "C" fn directory_get_items(ptr: *const Directory) -> *mut FFIVec_Item {
         if ptr.is_null() {
             return std::ptr::null_mut();
         }
 
         let directory = &*ptr;
 
-        Box::into_raw(Box::new(FFIArray::new(directory.get_items().clone()))) as *mut _
+        Box::into_raw(Box::new(directory.get_items().into())) as *mut _
     }
 
     #[allow(clippy::missing_safety_doc)]

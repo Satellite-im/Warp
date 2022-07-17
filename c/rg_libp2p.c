@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../warp/warp.h"
-#include "../extensions/warp-mp-solana/warp-mp-solana.h"
+#include "../extensions/warp-mp-ipfs/warp-mp-ipfs.h"
 #include "../extensions/warp-rg-libp2p/warp-rg-libp2p.h"
 
 //Predefined topic for this example
@@ -19,15 +19,7 @@ void print_error(FFIError* error) {
 
 MultiPassAdapter *new_account(const char* file) {
     
-    struct Tesseract *tesseract = NULL;
-    FFIResult_Tesseract result_tesseract_t = tesseract_from_file(file);
-
-    if (result_tesseract_t.error) {
-        print_error(result_tesseract_t.error);
-        tesseract = tesseract_new();
-    } else if (result_tesseract_t.data) {
-        tesseract = result_tesseract_t.data;
-    }
+    Tesseract *tesseract = tesseract_new();;
 
     FFIResult_c_void result_unlock_t = tesseract_unlock(tesseract, "this is my super key");
     if (result_unlock_t.error) {
@@ -35,38 +27,25 @@ MultiPassAdapter *new_account(const char* file) {
         return NULL;
     }
 
-    tesseract_set_file(tesseract, file);
+    const char *config = "{\"path\":null,\"bootstrap\":[\"/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN\"], \"listen_on\":[\"/ip4/0.0.0.0/tcp/0\"],\"ipfs_setting\":{\"mdns\":{\"enable\":true},\"autonat\":{\"enable\":false,\"servers\":[]},\"relay_client\":{\"enable\":false,\"relay_address\":null},\"relay_server\":{\"enable\":false},\"dcutr\":{\"enable\":false},\"rendezvous\":{\"enable\":false,\"address\":\"\"}},\"store_setting\":{\"broadcast_interval\":10,\"discovery\":false}}";
 
-    tesseract_set_autosave(tesseract);
 
-    if (!tesseract_autosave_enabled(tesseract)) {
-        printf("Autosave is disabled\n");
-    }
+    FFIResult_MultiPassAdapter result_mp = multipass_mp_ipfs_temporary(NULL, tesseract, config);
 
-    struct MultiPassAdapter *mp = multipass_mp_solana_new_with_devnet(NULL, tesseract);
-
-    if (!mp) {
-        printf("Adapter is null\n");
+    if (result_mp.error) {
+        print_error(result_mp.error);
         return NULL;
     }
 
     tesseract_free(tesseract);
-    FFIResult_PublicKey result_ignore_t = multipass_create_identity(mp, NULL, NULL);
+    FFIResult_PublicKey result_ignore_t = multipass_create_identity(result_mp.data, NULL, NULL);
     if (result_ignore_t.error) {
-        if(strcmp(result_ignore_t.error->error_type, "Any") && strcmp(result_ignore_t.error->error_message, "Account already exist")) {
-            FFIResult_Identity result_identity_t = multipass_get_own_identity(mp);
-            if (result_identity_t.error) {
-                print_error(result_identity_t.error);
-                return NULL;
-            }
-        } else {
-            printf("Error?\n");
-            print_error(result_ignore_t.error);
-            return NULL;
-        }
+        printf("Error creating identity\n");
+        print_error(result_ignore_t.error);
+        return NULL;
     }
 
-    return mp;
+    return result_mp.data;
 }
 
 RayGunAdapter *new_chat(const MultiPassAdapter* mp) {
@@ -100,12 +79,10 @@ char *get_username(const MultiPassAdapter *account, const SenderId* id) {
     return multipass_identity_username(result_identity_t.data);
 }
 
-void print_messages(const MultiPassAdapter *account, FFIArray_Message *messages) {
+void print_messages(const MultiPassAdapter *account, const FFIVec_Message *messages) {
 
-    int messages_length = ffiarray_message_length(messages);
-
-    for (int i = 0; i<messages_length; i++) {
-        Message *message = ffiarray_message_get(messages, i);
+    for (int i = 0; i<messages->len; i++) {
+        Message *message = messages->ptr[i];
         if (!message) {
             printf("Message is null\n");
             return;
@@ -114,7 +91,7 @@ void print_messages(const MultiPassAdapter *account, FFIArray_Message *messages)
         SenderId* sender = message_sender_id(message);
         char *username = get_username(account, sender);
 
-        FFIVec_____c_char *messages_vec = message_lines(message);
+        FFIVec_String *messages_vec = message_lines(message);
         
         if (messages_vec->len >= 1) {
             for (uintptr_t x = 0; x < messages_vec->len; ++x) {
@@ -173,7 +150,7 @@ int main() {
     // Because its async internally, we want to make sure that chatter_b to receive it before attempting to . 
     sleep(1);
 
-    FFIResult_FFIArray_Message result_messages_b_t = raygun_get_messages(chatter_b, conversation_id);
+    FFIResult_FFIVec_Message result_messages_b_t = raygun_get_messages(chatter_b, conversation_id);
 
     if (result_messages_b_t.error) {
         print_error(result_messages_b_t.error);
@@ -205,7 +182,7 @@ int main() {
     sleep(1);
 
     //Note: Because chatter a already had messages stored that was previously sent
-    FFIResult_FFIArray_Message result_messages_t = raygun_get_messages(chatter_a, conversation_id);
+    FFIResult_FFIVec_Message result_messages_t = raygun_get_messages(chatter_a, conversation_id);
 
     if (result_messages_t.error) {
         print_error(result_messages_t.error);

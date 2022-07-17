@@ -10,26 +10,24 @@
 bool import_from_cache(struct PocketDimensionAdapter* pd, struct ConstellationAdapter* constellation) {
     DataType data_t = DataExport;
 
-    FFIResult_FFIArray_Data result_object_t = pocket_dimension_get_data(pd, data_t, NULL);
+    FFIResult_FFIVec_Data result_object_t = pocket_dimension_get_data(pd, data_t, NULL);
     if (result_object_t.error) {
         return false;
     }
 
-    FFIArray_Data *object = result_object_t.data;
+    FFIVec_Data *object = result_object_t.data;
 
-    int data_length = ffiarray_data_length(object);
-
-    if (data_length==0) {
+    if (object->len==0) {
         return false;
     } 
 
-    const struct Data *data = ffiarray_data_get(object, data_length - 1);
+    struct Data *data = object->ptr[object->len - 1];
 
     if (!data) {
         return false;
     }
 
-    FFIResult_c_char result_payload_t = data_payload(data);
+    FFIResult_String result_payload_t = data_payload(data);
 
     if (result_payload_t.error) {
         return false;
@@ -55,7 +53,7 @@ bool import_from_cache(struct PocketDimensionAdapter* pd, struct ConstellationAd
 bool export_to_cache(struct PocketDimensionAdapter* pd, struct ConstellationAdapter* constellation) {
     DataType data_t = DataExport;
     ConstellationDataType constellation_data_t = Json;
-    FFIResult_c_char result_char_t = constellation_export(constellation, constellation_data_t);
+    FFIResult_String result_char_t = constellation_export(constellation, constellation_data_t);
 
     if (result_char_t.error) {
         return false;

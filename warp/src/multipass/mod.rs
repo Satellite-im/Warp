@@ -279,11 +279,11 @@ cfg_if::cfg_if! {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::async_on_block;
-    use crate::crypto::PublicKey;
+    use crate::crypto::{PublicKey, FFIVec_PublicKey};
     use crate::error::Error;
-    use crate::ffi::{FFIArray, FFIResult};
+    use crate::ffi::{FFIResult, FFIVec};
     use crate::multipass::{
-        identity::{FriendRequest, Identifier, Identity, IdentityUpdate},
+        identity::{FFIVec_FriendRequest, Identifier, Identity, IdentityUpdate},
         MultiPassAdapter,
     };
     use std::ffi::CStr;
@@ -385,7 +385,7 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_decrypt_private_key(
         ctx: *mut MultiPassAdapter,
         passphrase: *const c_char,
-    ) -> FFIResult<FFIArray<u8>> {
+    ) -> FFIResult<FFIVec<u8>> {
         if ctx.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
@@ -398,7 +398,7 @@ pub mod ffi {
         };
         let mp = &*(ctx);
         match async_on_block(async { mp.inner_guard().decrypt_private_key(passphrase.as_deref()) }) {
-            Ok(key) => FFIResult::ok(FFIArray::new(key)),
+            Ok(key) => FFIResult::ok(key.into()),
             Err(e) => FFIResult::err(e),
         }
     }
@@ -495,14 +495,14 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_incoming_request(
         ctx: *const MultiPassAdapter,
-    ) -> FFIResult<FFIArray<FriendRequest>> {
+    ) -> FFIResult<FFIVec_FriendRequest> {
         if ctx.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let mp = &*(ctx);
         match async_on_block(async { mp.inner_guard().list_incoming_request() }){
-            Ok(list) => FFIResult::ok(FFIArray::new(list)),
+            Ok(list) => FFIResult::ok(list.into()),
             Err(e) => FFIResult::err(e),
         }
     }
@@ -511,14 +511,14 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_outgoing_request(
         ctx: *const MultiPassAdapter,
-    ) -> FFIResult<FFIArray<FriendRequest>> {
+    ) -> FFIResult<FFIVec_FriendRequest> {
         if ctx.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let mp = &*(ctx);
         match async_on_block(async { mp.inner_guard().list_outgoing_request() }) {
-            Ok(list) => FFIResult::ok(FFIArray::new(list)),
+            Ok(list) => FFIResult::ok(list.into()),
             Err(e) => FFIResult::err(e),
         }
     }
@@ -527,14 +527,14 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_all_request(
         ctx: *const MultiPassAdapter,
-    ) -> FFIResult<FFIArray<FriendRequest>> {
+    ) -> FFIResult<FFIVec_FriendRequest> {
         if ctx.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let mp = &*(ctx);
         match async_on_block(async { mp.inner_guard().list_all_request() }) {
-            Ok(list) => FFIResult::ok(FFIArray::new(list)),
+            Ok(list) => FFIResult::ok(list.into()),
             Err(e) => FFIResult::err(e),
         }
     }
@@ -581,14 +581,14 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_friends(
         ctx: *const MultiPassAdapter,
-    ) -> FFIResult<FFIArray<PublicKey>> {
+    ) -> FFIResult<FFIVec_PublicKey> {
         if ctx.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let mp = &*(ctx);
         match async_on_block(async { mp.inner_guard().list_friends() }) {
-            Ok(list) => FFIResult::ok(FFIArray::new(list)),
+            Ok(list) => FFIResult::ok(list.into()),
             Err(e) => FFIResult::err(e),
         }
     }

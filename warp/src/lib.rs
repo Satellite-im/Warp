@@ -87,30 +87,18 @@ pub fn async_block_in_place_uncheck<F: futures::Future>(fut: F) -> F::Output {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub mod ffi {
-    pub struct FFIArray<T> {
-        value: Vec<T>,
-    }
-
-    impl<T> FFIArray<T> {
-        pub fn new(value: Vec<T>) -> FFIArray<T> {
-            FFIArray { value }
-        }
-
-        pub fn get(&self, index: usize) -> Option<&T> {
-            self.value.get(index)
-        }
-
-        pub fn length(&self) -> usize {
-            self.value.len()
-        }
-    }
-
+pub mod ffi {    
     #[repr(C)]
     pub struct FFIVec<T> {
         pub ptr: *mut T,
         pub len: usize,
         pub cap: usize,
+    }
+
+    impl<T> Into<FFIVec<T>> for Vec<T> {
+        fn into(self) -> FFIVec<T> {
+            FFIVec::from(self)
+        }
     }
 
     impl<T> FFIVec<T> {
@@ -124,6 +112,49 @@ pub mod ffi {
 
         pub fn into_vec(self) -> Vec<T> {
             unsafe { Vec::from_raw_parts(self.ptr, self.len, self.cap) }
+        }
+    }
+
+    #[repr(C)]
+    #[allow(non_camel_case_types)]
+    pub struct FFIVec_String {
+        pub ptr: *mut *mut std::os::raw::c_char,
+        pub len: usize,
+        pub cap: usize,
+    }
+
+    impl Into<FFIVec_String> for Vec<String> {
+        fn into(self) -> FFIVec_String {
+            let list = self.iter().filter_map(|s| {
+                match std::ffi::CString::new(s.to_string()) {
+                    Ok(s) => Some(s.as_ptr() as *mut _),
+                    Err(_) => None
+                }
+            }).collect::<Vec<_>>();
+
+            let mut vec = std::mem::ManuallyDrop::new(list);
+            let len = vec.len();
+            let cap = vec.capacity();
+            let ptr = vec.as_mut_ptr();
+            FFIVec_String { len, cap, ptr}
+        }
+    }
+
+    impl From<FFIVec_String> for Vec<String> {
+        fn from(c_vec: FFIVec_String) -> Self {
+            unsafe { 
+                let raw_list = Vec::from_raw_parts(c_vec.ptr, c_vec.len, c_vec.cap);
+                raw_list.iter().filter_map(|ptr| std::ffi::CString::from_raw(*ptr).into_string().ok()).collect::<Vec<_>>()
+            }
+        }
+    }
+
+    impl From<Box<FFIVec_String>> for Vec<String> {
+        fn from(c_vec: Box<FFIVec_String>) -> Self {
+            unsafe { 
+                let raw_list = Vec::from_raw_parts(c_vec.ptr, c_vec.len, c_vec.cap);
+                raw_list.iter().filter_map(|ptr| std::ffi::CString::from_raw(*ptr).into_string().ok()).collect::<Vec<_>>()
+            }
         }
     }
 
@@ -180,6 +211,16 @@ pub mod ffi {
     pub struct FFIResult_String {
         pub data: *mut std::os::raw::c_char,
         pub error: *mut FFIError,
+    }
+
+    impl FFIResult_String {
+        pub fn err(err: crate::error::Error) -> Self {
+            let error = FFIError::new(err).to_ptr();
+            Self {
+                data: std::ptr::null_mut(),
+                error,
+            }
+        }
     }
 
     #[repr(C)]

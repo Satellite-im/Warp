@@ -195,7 +195,7 @@ pub mod ffi {
     use std::ffi::CStr;
     use std::os::raw::c_char;
     use warp::error::Error;
-    use warp::ffi::FFIResult;
+    use warp::ffi::{FFIResult, FFIResult_String};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -247,14 +247,14 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn solana_wallet_get_keypair(
         wallet: *const SolanaWallet,
-    ) -> FFIResult<c_char> {
+    ) -> FFIResult_String {
         if wallet.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Wallet is null")));
+            return FFIResult_String::err(Error::Any(anyhow::anyhow!("Wallet is null")));
         }
 
         let wallet = &*wallet;
 
-        FFIResult::from(wallet.get_keypair().map(|s| s.to_base58_string()))
+        FFIResult_String::from(wallet.get_keypair().map(|s| s.to_base58_string()))
     }
 
     #[allow(clippy::missing_safety_doc)]

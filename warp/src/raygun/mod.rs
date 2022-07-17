@@ -5,7 +5,7 @@ use crate::error::Error;
 use crate::sync::{Arc, Mutex, MutexGuard};
 use crate::{Extension, SingleHandle};
 
-use warp_derive::{FFIArray, FFIFree};
+use warp_derive::{FFIFree};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -78,7 +78,7 @@ impl MessageOptions {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, FFIArray, FFIFree)]
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 pub struct Message {
     /// ID of the Message
     id: Uuid,
@@ -111,7 +111,7 @@ pub struct Message {
 }
 
 /// Use to identify the sender
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec)]
 pub struct SenderId(Uid);
 
 impl SenderId {
@@ -394,9 +394,9 @@ impl RayGunAdapter {
 pub mod ffi {
     use crate::crypto::PublicKey;
     use crate::error::Error;
-    use crate::ffi::{FFIArray, FFIResult, FFIVec};
+    use crate::ffi::{FFIResult, FFIVec_String};
     use crate::raygun::{
-        EmbedState, Message, MessageOptions, PinState, RayGunAdapter, Reaction, ReactionState,
+        EmbedState, Message, MessageOptions, PinState, RayGunAdapter, Reaction, ReactionState, FFIVec_Message, FFIVec_SenderId
     };
     use crate::runtime_handle;
     use std::ffi::{CStr, CString};
@@ -412,7 +412,7 @@ pub mod ffi {
     pub unsafe extern "C" fn raygun_get_messages(
         ctx: *const RayGunAdapter,
         convo_id: *const c_char,
-    ) -> FFIResult<FFIArray<Message>> {
+    ) -> FFIResult<FFIVec_Message>{
         if ctx.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
@@ -437,7 +437,9 @@ pub mod ffi {
                 .get_messages(convo_id, MessageOptions::default())
                 .await
         }) {
-            Ok(messages) => FFIResult::ok(FFIArray::new(messages)),
+            Ok(messages) => FFIResult::ok(
+                messages.into(),
+            ),
             Err(e) => FFIResult::err(e),
         }
     }
@@ -832,21 +834,14 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn message_lines(ctx: *const Message) -> *mut FFIVec<*mut c_char> {
+    pub unsafe extern "C" fn message_lines(ctx: *const Message) -> *mut FFIVec_String {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
         let adapter = &*ctx;
-        let lines = adapter
-            .value()
-            .iter()
-            .map(|line| match CString::new(line.clone()) {
-                Ok(l) => l.into_raw(),
-                Err(_) => std::ptr::null_mut(),
-            })
-            .collect::<Vec<_>>();
+        let lines = adapter.value();
 
-        Box::into_raw(Box::new(FFIVec::from(lines)))
+        Box::into_raw(Box::new(lines.into()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -864,12 +859,12 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn reaction_users(ctx: *const Reaction) -> *mut FFIArray<SenderId> {
+    pub unsafe extern "C" fn reaction_users(ctx: *const Reaction) -> *mut FFIVec_SenderId {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
         let adapter = &*ctx;
-        Box::into_raw(Box::new(FFIArray::new(adapter.users())))
+        Box::into_raw(Box::new(adapter.users().into()))
     }
 
     #[allow(clippy::missing_safety_doc)]

@@ -8,13 +8,13 @@ use uuid::Uuid;
 use super::directory::Directory;
 use super::file::File;
 use crate::error::Error;
-use warp_derive::{FFIArray, FFIFree};
+use warp_derive::{FFIFree};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 /// `Item` is a type that handles both `File` and `Directory`
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, FFIArray, FFIFree)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Item(ItemInner);
 

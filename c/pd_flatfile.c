@@ -63,14 +63,14 @@ int main() {
         return -1; 
     } 
     
-    struct FFIResult_FFIArray_Data result_array_t = pocket_dimension_get_data(pd, data_t, result_query_t.data);
+    struct FFIResult_FFIVec_Data result_array_t = pocket_dimension_get_data(pd, data_t, result_query_t.data);
 
     //Note: skipping check for now
 
     int length = ffiarray_data_length(result_array_t.data);
 
-    for(int i = 0; i<length; i++) {
-        const struct Data *dat = ffiarray_data_get(result_array_t.data, i);
+    for(int i = 0; i<result_array_t.data->len; i++) {
+        Data *dat = result_array_t.data->ptr[i];
 
         if (!dat) {
             printf("Error: data is null\n");
@@ -81,7 +81,7 @@ int main() {
  
         printf("%s\n", id);
 
-        FFIResult_c_char result_payload_t = data_payload(dat);
+        FFIResult_String result_payload_t = data_payload(dat);
 
         if (result_payload_t.error) {
             print_error(result_payload_t.error); 
@@ -96,7 +96,7 @@ int main() {
     //TODO: Free more pointers
     free(result_data_set2.data);
     free(result_data_set1.data);
-    ffiarray_data_free(result_array_t.data);
+    ffivec_data_free(result_array_t.data);
     querybuilder_free(result_query_t.data);
     return 0;
 }

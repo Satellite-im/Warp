@@ -5,9 +5,9 @@ use crate::crypto::PublicKey;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use warp_derive::{FFIArray, FFIFree};
+use warp_derive::{FFIFree};
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray, FFIFree)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree)]
 #[wasm_bindgen]
 pub struct Role {
     /// Name of the role
@@ -30,7 +30,7 @@ impl Role {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray, FFIFree)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree)]
 #[wasm_bindgen]
 pub struct Badge {
     /// TBD
@@ -89,7 +89,7 @@ impl Graphics {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray, FFIFree)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree)]
 #[wasm_bindgen]
 pub struct Identity {
     /// Username of the identity
@@ -215,7 +215,7 @@ impl Identity {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, FFIArray, FFIFree)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree)]
 #[wasm_bindgen]
 pub struct FriendRequest {
     /// The account where the request came from
@@ -506,10 +506,9 @@ impl IdentityUpdate {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::crypto::PublicKey;
-    use crate::ffi::FFIArray;
     use crate::multipass::identity::{
         Badge, FriendRequest, FriendRequestStatus, Graphics, Identifier, Identity, IdentityUpdate,
-        Role,
+        Role, FFIVec_Badge, FFIVec_Role
     };
     use std::ffi::{CStr, CString};
     use std::os::raw::{c_char, c_void};
@@ -684,7 +683,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_identity_roles(
         identity: *mut Identity,
-    ) -> *mut FFIArray<Role> {
+    ) -> *mut FFIVec_Role {
         if identity.is_null() {
             return std::ptr::null_mut();
         }
@@ -692,14 +691,14 @@ pub mod ffi {
         let identity = &*identity;
 
         let contents = identity.roles();
-        Box::into_raw(Box::new(FFIArray::new(contents))) as *mut _
+        Box::into_raw(Box::new(contents.into())) as *mut _
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_identity_available_badge(
         identity: *mut Identity,
-    ) -> *mut FFIArray<Badge> {
+    ) -> *mut FFIVec_Badge {
         if identity.is_null() {
             return std::ptr::null_mut();
         }
@@ -707,7 +706,7 @@ pub mod ffi {
         let identity = &*identity;
 
         let contents = identity.available_badges();
-        Box::into_raw(Box::new(FFIArray::new(contents))) as *mut _
+        Box::into_raw(Box::new(contents.into())) as *mut _
     }
 
     #[allow(clippy::missing_safety_doc)]

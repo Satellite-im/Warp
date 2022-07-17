@@ -13,14 +13,14 @@ use uuid::Uuid;
 #[allow(unused_imports)]
 use crate::module::Module;
 
-use warp_derive::{FFIArray, FFIFree};
+use warp_derive::{FFIFree};
 use wasm_bindgen::prelude::*;
 
 pub type DataObject = Data;
 
 /// Standard DataObject used throughout warp.
 /// Unifies output from all modules
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIArray, FFIFree)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 #[wasm_bindgen]
 pub struct Data {
     /// ID of the Data Object
@@ -235,7 +235,7 @@ impl Data {
 pub mod ffi {
     use crate::data::{Data, DataType};
     use crate::error::Error;
-    use crate::ffi::FFIResult;
+    use crate::ffi::{FFIResult, FFIResult_String};
     use std::ffi::{CStr, CString};
     use std::os::raw::c_char;
 
@@ -367,9 +367,9 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn data_payload(data: *const Data) -> FFIResult<c_char> {
+    pub unsafe extern "C" fn data_payload(data: *const Data) -> FFIResult_String {
         if data.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Data is null")));
+            return FFIResult_String::err(Error::Any(anyhow::anyhow!("Data is null")));
         }
 
         let data = &*data;
@@ -378,10 +378,10 @@ pub mod ffi {
         //return the string
         let payload = match data.payload::<serde_json::Value>() {
             Ok(payload) => payload,
-            Err(e) => return FFIResult::err(e),
+            Err(e) => return FFIResult_String::err(e),
         };
 
-        FFIResult::from(serde_json::to_string(&payload).map_err(Error::from))
+        FFIResult_String::from(serde_json::to_string(&payload).map_err(Error::from))
     }
 }
 

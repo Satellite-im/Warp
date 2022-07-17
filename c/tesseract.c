@@ -13,7 +13,7 @@ void print_error(FFIError* error) {
 
 int main() {
     FFIResult_c_void result_ignored_t;
-    FFIResult_c_char result_char_t;
+    FFIResult_String result_char_t;
     
     struct Tesseract *tesseract = tesseract_new();
 

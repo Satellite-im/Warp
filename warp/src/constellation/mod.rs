@@ -409,7 +409,7 @@ pub mod ffi {
     use crate::constellation::directory::Directory;
     use crate::constellation::{ConstellationAdapter, ConstellationDataType};
     use crate::error::Error;
-    use crate::ffi::{FFIResult, FFIVec};
+    use crate::ffi::{FFIResult, FFIVec, FFIResult_String};
     use crate::runtime_handle;
     use std::ffi::CStr;
     use std::os::raw::{c_char, c_void};
@@ -749,14 +749,14 @@ pub mod ffi {
     pub unsafe extern "C" fn constellation_export(
         ctx: *mut ConstellationAdapter,
         datatype: ConstellationDataType,
-    ) -> FFIResult<c_char> {
+    ) -> FFIResult_String {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_String::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let constellation = &*(ctx);
 
-        FFIResult::from(constellation.inner_guard().export(datatype))
+        FFIResult_String::from(constellation.inner_guard().export(datatype))
     }
 
     #[allow(clippy::missing_safety_doc)]

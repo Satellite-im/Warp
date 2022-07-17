@@ -1,4 +1,4 @@
-use crate::error::Error;
+use crate::{error::Error, ffi::FFIResult_String};
 use crate::ffi::FFIResult;
 use libc::c_void;
 use std::{ffi::CStr, os::raw::c_char};
@@ -154,19 +154,19 @@ pub unsafe extern "C" fn tesseract_set(
 pub unsafe extern "C" fn tesseract_retrieve(
     tesseract: *mut Tesseract,
     key: *const c_char,
-) -> FFIResult<c_char> {
+) -> FFIResult_String {
     if tesseract.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
+        return FFIResult_String::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
     }
 
     if key.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Key cannot be null")));
+        return FFIResult_String::err(Error::Any(anyhow::anyhow!("Key cannot be null")));
     }
 
     let tesseract = &mut *tesseract;
     let c_key = CStr::from_ptr(key).to_string_lossy().to_string();
 
-    FFIResult::from(tesseract.retrieve(&c_key))
+    FFIResult_String::from(tesseract.retrieve(&c_key))
 }
 
 #[allow(clippy::missing_safety_doc)]

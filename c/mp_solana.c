@@ -141,19 +141,17 @@ int main() {
         }
     }
 
-    struct FFIResult_FFIArray_PublicKey result_friends = multipass_list_friends(account_a);
+    struct FFIResult_FFIVec_PublicKey result_friends = multipass_list_friends(account_a);
 
     if(result_friends.error) {
         print_error(result_friends.error);
         goto drop;
     }
 
-    FFIArray_PublicKey *friends = result_friends.data;
+    FFIVec_PublicKey *friends = result_friends.data;
 
-    int len = ffiarray_publickey_length(friends);
-
-    for(int i = 0; i<len; i++) {
-        PublicKey *friend = ffiarray_publickey_get(friends, i);
+    for(int i = 0; i<friends->len; i++) {
+        PublicKey *friend = friends->ptr[i];
         
         FFIResult_Identity result_identity = multipass_get_identity(account_a, multipass_identifier_public_key(friend));
 

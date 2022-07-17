@@ -240,9 +240,9 @@ impl PocketDimensionAdapter {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use crate::data::{Data, DataType};
+    use crate::data::{Data, FFIVec_Data, DataType};
     use crate::error::Error;
-    use crate::ffi::{FFIArray, FFIResult};
+    use crate::ffi::{FFIResult};
     use crate::pocket_dimension::query::QueryBuilder;
     use crate::pocket_dimension::PocketDimensionAdapter;
     use std::os::raw::c_void;
@@ -295,7 +295,7 @@ pub mod ffi {
         ctx: *const PocketDimensionAdapter,
         dimension: DataType,
         query: *const QueryBuilder,
-    ) -> FFIResult<FFIArray<Data>> {
+    ) -> FFIResult<FFIVec_Data> {
         if ctx.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
@@ -308,7 +308,7 @@ pub mod ffi {
         let pd = &*ctx;
 
         match pd.inner_guard().get_data(dimension, query) {
-            Ok(list) => FFIResult::ok(FFIArray::new(list)),
+            Ok(list) => FFIResult::ok(list.into()),
             Err(e) => FFIResult::err(e),
         }
     }

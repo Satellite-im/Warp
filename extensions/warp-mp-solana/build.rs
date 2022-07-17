@@ -8,7 +8,7 @@ include_guard = "_WARP_MP_SOLANA_H_"
 
 [export]
 
-exclude = ["FFIError", "FFIResult_c_char"]
+exclude = ["FFIError", "FFIResult_String"]
 
 [parse]
 parse_deps = true

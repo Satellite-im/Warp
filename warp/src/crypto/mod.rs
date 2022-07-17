@@ -20,12 +20,12 @@ pub mod multihash;
 pub mod signature;
 
 use serde::{Deserialize, Serialize};
-use warp_derive::{FFIArray, FFIFree};
+use warp_derive::{FFIVec, FFIFree};
 use wasm_bindgen::prelude::*;
 use zeroize::Zeroize;
 
 //TODO: Have internals match with various of crypto public keys
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIArray, FFIFree)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIVec, FFIFree)]
 #[wasm_bindgen]
 pub struct PublicKey(Vec<u8>);
 
@@ -52,7 +52,7 @@ impl PublicKey {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIArray, FFIFree)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIVec, FFIFree)]
 #[wasm_bindgen]
 pub struct PrivateKey(Vec<u8>);
 
