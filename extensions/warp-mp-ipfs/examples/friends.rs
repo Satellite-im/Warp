@@ -1,12 +1,11 @@
-
 use std::time::Duration;
 
 use warp::crypto::rand::{self, prelude::*};
 use warp::multipass::identity::{Identifier, Identity};
 use warp::multipass::MultiPass;
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::IpfsIdentity;
 use warp_mp_ipfs::config::{Config, IpfsSetting, StoreSetting};
+use warp_mp_ipfs::IpfsIdentity;
 
 async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
     let mut tesseract = Tesseract::default();
@@ -15,7 +14,17 @@ async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
 
     //Note: This uses mdns for this example. This example will not work if the system does not support mdns. This will change in the future
     //      The internal store will broadcast at 5ms but ideally it would want to be set to 100ms
-    let config = Config { store_setting: StoreSetting { broadcast_interval: 5, ..Default::default() }, ipfs_setting: IpfsSetting { mdns: warp_mp_ipfs::config::Mdns { enable: true }, ..Default::default() }, ..Default::default() };
+    let config = Config {
+        store_setting: StoreSetting {
+            broadcast_interval: 5,
+            discovery: true,
+        },
+        ipfs_setting: IpfsSetting {
+            mdns: warp_mp_ipfs::config::Mdns { enable: false },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     let mut account = IpfsIdentity::temporary(Some(config), tesseract, None).await?;
     account.create_identity(username, None)?;
     Ok(Box::new(account))
@@ -47,6 +56,8 @@ async fn main() -> anyhow::Result<()> {
         bs58::encode(ident_b.public_key().as_ref()).into_string()
     );
 
+    fixed_delay(30000).await;
+
     account_a.send_request(ident_b.public_key())?;
 
     delay().await;
@@ -77,7 +88,11 @@ async fn main() -> anyhow::Result<()> {
         0 => {
             account_b.accept_request(ident_a.public_key())?;
 
-            println!("{} accepted {} request", ident_b.username(), ident_a.username());
+            println!(
+                "{} accepted {} request",
+                ident_b.username(),
+                ident_a.username()
+            );
 
             delay().await;
 
@@ -85,7 +100,10 @@ async fn main() -> anyhow::Result<()> {
             for friend in account_a.list_friends()? {
                 let friend = account_a.get_identity(Identifier::public_key(friend))?;
                 println!("Username: {}", username(&friend));
-                println!("Public Key: {}", bs58::encode(friend.public_key().as_ref()).into_string());
+                println!(
+                    "Public Key: {}",
+                    bs58::encode(friend.public_key().as_ref()).into_string()
+                );
                 println!();
             }
 
@@ -93,7 +111,10 @@ async fn main() -> anyhow::Result<()> {
             for friend in account_b.list_friends()? {
                 let friend = account_b.get_identity(Identifier::public_key(friend))?;
                 println!("Username: {}", username(&friend));
-                println!("Public Key: {}", bs58::encode(friend.public_key().as_ref()).into_string());
+                println!(
+                    "Public Key: {}",
+                    bs58::encode(friend.public_key().as_ref()).into_string()
+                );
                 println!();
             }
 
@@ -150,7 +171,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 //Note: Because of the internal nature of this extension and not reliant on a central confirmation, this will be used to add delays to allow the separate
-//      task to 
+//      task to
 async fn delay() {
     fixed_delay(90).await;
 }

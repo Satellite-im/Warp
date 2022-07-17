@@ -261,28 +261,28 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn solana_wallet_get_pubkey(
         wallet: *const SolanaWallet,
-    ) -> FFIResult<c_char> {
+    ) -> FFIResult_String {
         if wallet.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Wallet is null")));
+            return FFIResult_String::err(Error::Any(anyhow::anyhow!("Wallet is null")));
         }
 
         let wallet = &*wallet;
 
-        FFIResult::from(wallet.get_pubkey().map(|s| s.to_string()))
+        FFIResult_String::from(wallet.get_pubkey().map(|s| s.to_string()))
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn solana_wallet_get_mnemonic_phrase(
         wallet: *const SolanaWallet,
-    ) -> FFIResult<c_char> {
+    ) -> FFIResult_String {
         if wallet.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Wallet is null")));
+            return FFIResult_String::err(Error::Any(anyhow::anyhow!("Wallet is null")));
         }
 
         let wallet = &*wallet;
 
-        FFIResult::from(wallet.get_mnemonic_phrase())
+        FFIResult_String::from(wallet.get_mnemonic_phrase())
     }
 
     #[allow(clippy::missing_safety_doc)]

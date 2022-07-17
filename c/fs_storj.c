@@ -38,7 +38,7 @@ bool import_from_cache(struct PocketDimensionAdapter* pd, struct ConstellationAd
     ConstellationDataType constellation_data_t = Json;
 
 
-    FFIResult_c_void result_ignore = constellation_import(constellation, constellation_data_t, data_j);
+    FFIResult_Null result_ignore = constellation_import(constellation, constellation_data_t, data_j);
     if (result_ignore.error) {
         return false;
     }
@@ -64,7 +64,7 @@ bool export_to_cache(struct PocketDimensionAdapter* pd, struct ConstellationAdap
     if (result_data.error) {
         return false;
     }
-    FFIResult_c_void result_ignored = pocket_dimension_add_data(pd, data_t, result_data.data);
+    FFIResult_Null result_ignored = pocket_dimension_add_data(pd, data_t, result_data.data);
     if(result_ignored.error) {
         return false;
     }
@@ -102,7 +102,7 @@ int main() {
     const char *data = "Hello, World!";
     uint32_t data_size = strlen(data);
 
-    FFIResult_c_void result_ignore_t = constellation_put_buffer(fs_storj, "readme.txt", (const uint8_t*)data, data_size);
+    FFIResult_Null result_ignore_t = constellation_put_buffer(fs_storj, "readme.txt", (const uint8_t*)data, data_size);
 
     if(result_ignore_t.error) {
         printf("Error uploading file\n");

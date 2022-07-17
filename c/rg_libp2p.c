@@ -21,7 +21,7 @@ MultiPassAdapter *new_account(const char* file) {
     
     Tesseract *tesseract = tesseract_new();;
 
-    FFIResult_c_void result_unlock_t = tesseract_unlock(tesseract, "this is my super key");
+    FFIResult_Null result_unlock_t = tesseract_unlock(tesseract, "this is my super key");
     if (result_unlock_t.error) {
         print_error(result_unlock_t.error);
         return NULL;
@@ -120,12 +120,12 @@ int main() {
     //To assure that we are subscribed to the chat prior to sending messages
     //this will change in the future. 
     //however any errors from pinging can technically be ignored for the time being
-    FFIResult_c_void result_ping_0_t = raygun_ping(chatter_a, conversation_id);
+    FFIResult_Null result_ping_0_t = raygun_ping(chatter_a, conversation_id);
     if (result_ping_0_t.error) {
         print_error(result_ping_0_t.error);
     }
 
-    FFIResult_c_void result_ping_1_t = raygun_ping(chatter_b, conversation_id);
+    FFIResult_Null result_ping_1_t = raygun_ping(chatter_b, conversation_id);
     if (result_ping_1_t.error) {
         print_error(result_ping_1_t.error);
     }
@@ -141,7 +141,7 @@ int main() {
     };
 
     int message_lines_length = sizeof(chat_a_message) / sizeof(chat_a_message[0]);
-    FFIResult_c_void result_chat_t = raygun_send(chatter_a, conversation_id, NULL, chat_a_message, message_lines_length);
+    FFIResult_Null result_chat_t = raygun_send(chatter_a, conversation_id, NULL, chat_a_message, message_lines_length);
 
     if (result_chat_t.error) {
         print_error(result_chat_t.error);
@@ -171,7 +171,7 @@ int main() {
     };
 
     int message_b_lines_length = sizeof(chat_b_message) / sizeof(chat_b_message[0]);
-    FFIResult_c_void result_chat_b_t = raygun_send(chatter_b, conversation_id, NULL, chat_b_message, message_b_lines_length);
+    FFIResult_Null result_chat_b_t = raygun_send(chatter_b, conversation_id, NULL, chat_b_message, message_b_lines_length);
 
     if (result_chat_b_t.error) {
         print_error(result_chat_b_t.error);

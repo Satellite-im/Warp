@@ -16,7 +16,7 @@ int main() {
 
     const char *data = "Hello, World!";
     uint32_t data_size = strlen(data);
-    FFIResult_c_void result_ignored_t = constellation_put_buffer(memory, "readme.txt", (const uint8_t*)data, data_size);
+    FFIResult_Null result_ignored_t = constellation_put_buffer(memory, "readme.txt", (const uint8_t*)data, data_size);
     if(result_ignored_t.error) {
         printf("Error uploading file\n");
         return -1;

@@ -229,6 +229,35 @@ pub mod ffi {
         pub error: *mut FFIError,
     }
 
+    /// Used when a function does not return anything when successful 
+    #[repr(C)]
+    pub struct FFIResult_Null {
+        pub data: *mut std::os::raw::c_void,
+        pub error: *mut FFIError,
+    }
+
+    impl FFIResult_Null {
+        pub fn err(err: crate::error::Error) -> Self {
+            let error = FFIError::new(err).to_ptr();
+            Self {
+                data: std::ptr::null_mut(),
+                error,
+            }
+        }
+    }
+
+    impl Into<FFIResult_Null> for Result<(), crate::error::Error> {
+        fn into(self) -> FFIResult_Null {
+            match self {
+                Ok(_) => FFIResult_Null {
+                    data: std::ptr::null_mut(),
+                    error: std::ptr::null_mut(),
+                },
+                Err(err) => FFIResult_Null::err(err),
+            }
+        }
+    }
+
     impl From<Result<String, crate::error::Error>> for FFIResult_String {
         fn from(res: Result<String, crate::error::Error>) -> Self {
             match res {
@@ -286,32 +315,17 @@ pub mod ffi {
         }
     }
 
-    impl From<Result<String, crate::error::Error>> for FFIResult<std::os::raw::c_char> {
-        fn from(res: Result<String, crate::error::Error>) -> Self {
-            match res {
-                Ok(t) => {
-                    let data = std::ffi::CString::new(t).unwrap().into_raw();
-                    Self {
-                        data,
-                        error: std::ptr::null_mut(),
-                    }
-                }
-                Err(err) => Self::err(err),
-            }
-        }
-    }
-
-    impl From<Result<(), crate::error::Error>> for FFIResult<std::os::raw::c_void> {
-        fn from(res: Result<(), crate::error::Error>) -> Self {
-            match res {
-                Ok(_) => Self {
-                    data: std::ptr::null_mut(),
-                    error: std::ptr::null_mut(),
-                },
-                Err(err) => Self::err(err),
-            }
-        }
-    }
+    // impl From<Result<(), crate::error::Error>> for FFIResult<std::os::raw::c_void> {
+    //     fn from(res: Result<(), crate::error::Error>) -> Self {
+    //         match res {
+    //             Ok(_) => Self {
+    //                 data: std::ptr::null_mut(),
+    //                 error: std::ptr::null_mut(),
+    //             },
+    //             Err(err) => Self::err(err),
+    //         }
+    //     }
+    // }
 
     impl<T> FFIResult<T> {
         /// Convert a Result<T, warp::error::Error> into FFIResult

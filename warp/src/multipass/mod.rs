@@ -281,13 +281,13 @@ pub mod ffi {
     use crate::async_on_block;
     use crate::crypto::{PublicKey, FFIVec_PublicKey};
     use crate::error::Error;
-    use crate::ffi::{FFIResult, FFIVec};
+    use crate::ffi::{FFIResult, FFIVec, FFIResult_Null};
     use crate::multipass::{
         identity::{FFIVec_FriendRequest, Identifier, Identity, IdentityUpdate},
         MultiPassAdapter,
     };
     use std::ffi::CStr;
-    use std::os::raw::{c_char, c_void};
+    use std::os::raw::{c_char};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -370,14 +370,14 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_update_identity(
         ctx: *mut MultiPassAdapter,
         option: *const IdentityUpdate,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let mp = &mut *(ctx);
         let option = &*option;
-        FFIResult::from(async_on_block(async { mp.inner_guard().update_identity(option.clone()) } ))
+        async_on_block(async { mp.inner_guard().update_identity(option.clone()) } ).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -407,13 +407,13 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_refresh_cache(
         ctx: *mut MultiPassAdapter,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let mp = &mut *(ctx);
-        FFIResult::from( async_on_block(async { mp.inner_guard().refresh_cache() }))
+        async_on_block(async { mp.inner_guard().refresh_cache() }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -421,17 +421,17 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_send_request(
         ctx: *mut MultiPassAdapter,
         pubkey: *const PublicKey,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if pubkey.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        FFIResult::from(async_on_block(async { mp.inner_guard().send_request(pk.clone()) }))
+        async_on_block(async { mp.inner_guard().send_request(pk.clone()) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -439,18 +439,18 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_accept_request(
         ctx: *mut MultiPassAdapter,
         pubkey: *const PublicKey,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if pubkey.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        FFIResult::from(async_on_block(async { mp.inner_guard().accept_request(pk.clone()) }))
+        async_on_block(async { mp.inner_guard().accept_request(pk.clone()) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -458,18 +458,18 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_deny_request(
         ctx: *mut MultiPassAdapter,
         pubkey: *const PublicKey,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if pubkey.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        FFIResult::from(async_on_block(async {mp.inner_guard().deny_request(pk.clone()) }))
+        async_on_block(async {mp.inner_guard().deny_request(pk.clone()) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -477,18 +477,18 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_close_request(
         ctx: *mut MultiPassAdapter,
         pubkey: *const PublicKey,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if pubkey.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        FFIResult::from(async_on_block(async {mp.inner_guard().close_request(pk.clone()) }))
+        async_on_block(async {mp.inner_guard().close_request(pk.clone()) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -544,18 +544,18 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_remove_friend(
         ctx: *mut MultiPassAdapter,
         pubkey: *const PublicKey,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if pubkey.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        FFIResult::from(async_on_block(async { mp.inner_guard().remove_friend(pk.clone()) }))
+        async_on_block(async { mp.inner_guard().remove_friend(pk.clone()) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -563,19 +563,21 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_block(
         ctx: *mut MultiPassAdapter,
         pubkey: *const PublicKey,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if pubkey.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        FFIResult::from(async_on_block(async { mp.inner_guard().block(pk.clone()) }))
+        async_on_block(async { mp.inner_guard().block(pk.clone()) }).into()
     }
+
+    //TODO: unblock and blocklist
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -598,18 +600,18 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_has_friend(
         ctx: *const MultiPassAdapter,
         pubkey: *const PublicKey,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if pubkey.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Public key cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Public key cannot be null")));
         }
 
         let mp = &*(ctx);
         let pk = &*pubkey;
 
-        FFIResult::from(async_on_block(async { mp.inner_guard().has_friend(pk.clone()) }))
+        async_on_block(async { mp.inner_guard().has_friend(pk.clone()) }).into()
     }
 }

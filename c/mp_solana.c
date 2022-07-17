@@ -23,7 +23,7 @@ MultiPassAdapter *new_account(const char* file) {
         tesseract = result_tesseract_t.data;
     }
 
-    FFIResult_c_void result_unlock_t = tesseract_unlock(tesseract, "this is my super key");
+    FFIResult_Null result_unlock_t = tesseract_unlock(tesseract, "this is my super key");
     if (result_unlock_t.error) {
         print_error(result_unlock_t.error);
         return NULL;
@@ -123,17 +123,17 @@ int main() {
     struct PublicKey *acct_a_key = multipass_identity_public_key(ident_a);
     struct PublicKey *acct_b_key = multipass_identity_public_key(ident_b);
 
-    FFIResult_c_void result_void = multipass_has_friend(account_a, acct_b_key);
+    FFIResult_Null result_void = multipass_has_friend(account_a, acct_b_key);
 
     if(!result_void.error) {
-        FFIResult_c_void result_ignore0_t = multipass_send_request(account_a, acct_b_key);
+        FFIResult_Null result_ignore0_t = multipass_send_request(account_a, acct_b_key);
         if(result_ignore0_t.error) {
             printf("Unable to send friend request\n");
             print_error(result_ignore0_t.error);
             goto drop;
         }
 
-        FFIResult_c_void result_ignore1_t = multipass_accept_request(account_b, acct_a_key);
+        FFIResult_Null result_ignore1_t = multipass_accept_request(account_b, acct_a_key);
         if(result_ignore1_t.error) {
             printf("Unable to accept friend request\n");
             print_error(result_ignore1_t.error);

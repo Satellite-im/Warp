@@ -394,13 +394,13 @@ impl RayGunAdapter {
 pub mod ffi {
     use crate::crypto::PublicKey;
     use crate::error::Error;
-    use crate::ffi::{FFIResult, FFIVec_String};
+    use crate::ffi::{FFIResult, FFIVec_String, FFIResult_Null};
     use crate::raygun::{
         EmbedState, Message, MessageOptions, PinState, RayGunAdapter, Reaction, ReactionState, FFIVec_Message, FFIVec_SenderId
     };
     use crate::runtime_handle;
     use std::ffi::{CStr, CString};
-    use std::os::raw::{c_char, c_void};
+    use std::os::raw::{c_char};
     use std::str::{FromStr, Utf8Error};
     use uuid::Uuid;
 
@@ -453,23 +453,23 @@ pub mod ffi {
         message_id: *const c_char,
         messages: *const *const c_char,
         lines: usize,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!(
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
                 "Conversation ID cannot be null"
             )));
         }
 
         if messages.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Message array cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Message array cannot be null")));
         }
 
         if lines == 0 {
-            return FFIResult::err(Error::Any(anyhow::anyhow!(
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
                 "Lines has to be more than zero"
             )));
         }
@@ -477,14 +477,14 @@ pub mod ffi {
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::UuidError(e)),
+            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
         let msg_id = match message_id.is_null() {
             false => {
                 match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string()) {
                     Ok(uuid) => Some(uuid),
-                    Err(e) => return FFIResult::err(Error::UuidError(e)),
+                    Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
                 }
             }
             true => None,
@@ -492,14 +492,14 @@ pub mod ffi {
 
         let messages = match pointer_to_vec(messages, lines) {
             Ok(messages) => messages,
-            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+            Err(e) => return FFIResult_Null::err(Error::Any(anyhow::anyhow!(e))),
         };
 
         let adapter = &mut *ctx;
         let rt = runtime_handle();
-        FFIResult::from(
-            rt.block_on(async { adapter.inner_guard().send(convo_id, msg_id, messages).await }),
-        )
+        
+        rt.block_on(async { adapter.inner_guard().send(convo_id, msg_id, messages).await }).into()
+        
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -509,36 +509,36 @@ pub mod ffi {
         ctx: *mut RayGunAdapter,
         convo_id: *const c_char,
         message_id: *const c_char,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!(
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
                 "Conversation ID cannot be null"
             )));
         }
 
         if message_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
         }
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::UuidError(e)),
+            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
         let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::UuidError(e)),
+            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
         let adapter = &mut *ctx;
         let rt = runtime_handle();
-        FFIResult::from(rt.block_on(async { adapter.inner_guard().delete(convo_id, msg_id).await }))
+        rt.block_on(async { adapter.inner_guard().delete(convo_id, msg_id).await }).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -550,47 +550,47 @@ pub mod ffi {
         message_id: *const c_char,
         state: ReactionState,
         emoji: *const c_char,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!(
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
                 "Conversation ID cannot be null"
             )));
         }
 
         if message_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
         }
 
         if emoji.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Emoji cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Emoji cannot be null")));
         }
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::UuidError(e)),
+            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
         let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::UuidError(e)),
+            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
         let emoji = CStr::from_ptr(emoji).to_string_lossy().to_string();
 
         let adapter = &mut *ctx;
         let rt = runtime_handle();
-        FFIResult::from(rt.block_on(async {
+        rt.block_on(async {
             adapter
                 .inner_guard()
                 .react(convo_id, msg_id, state, emoji)
                 .await
-        }))
+        }).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -601,38 +601,37 @@ pub mod ffi {
         convo_id: *const c_char,
         message_id: *const c_char,
         state: PinState,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!(
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
                 "Conversation ID cannot be null"
             )));
         }
 
         if message_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
         }
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::UuidError(e)),
+            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
         let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::UuidError(e)),
+            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
         let adapter = &mut *ctx;
         let rt = runtime_handle();
-        FFIResult::from(
-            rt.block_on(async { adapter.inner_guard().pin(convo_id, msg_id, state).await }),
-        )
+        rt.block_on(async { adapter.inner_guard().pin(convo_id, msg_id, state).await }).into()
+        
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -644,50 +643,50 @@ pub mod ffi {
         message_id: *const c_char,
         messages: *const *const c_char,
         lines: usize,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!(
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
                 "Conversation ID cannot be null"
             )));
         }
 
         if message_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
         }
 
         if messages.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Messages cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Messages cannot be null")));
         }
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::UuidError(e)),
+            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
         let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::UuidError(e)),
+            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
         let messages = match pointer_to_vec(messages, lines) {
             Ok(messages) => messages,
-            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+            Err(e) => return FFIResult_Null::err(Error::Any(anyhow::anyhow!(e))),
         };
 
         let adapter = &mut *ctx;
         let rt = runtime_handle();
-        FFIResult::from(rt.block_on(async {
+        rt.block_on(async {
             adapter
                 .inner_guard()
                 .reply(convo_id, msg_id, messages)
                 .await
-        }))
+        }).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -696,13 +695,13 @@ pub mod ffi {
     pub unsafe extern "C" fn raygun_ping(
         ctx: *mut RayGunAdapter,
         convo_id: *const c_char,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!(
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
                 "Conversation ID cannot be null"
             )));
         }
@@ -710,12 +709,12 @@ pub mod ffi {
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::UuidError(e)),
+            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
         let adapter = &mut *ctx;
         let rt = runtime_handle();
-        FFIResult::from(rt.block_on(async { adapter.inner_guard().ping(convo_id).await }))
+        rt.block_on(async { adapter.inner_guard().ping(convo_id).await }).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -726,38 +725,38 @@ pub mod ffi {
         convo_id: *const c_char,
         message_id: *const c_char,
         state: EmbedState,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!(
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
                 "Conversation ID cannot be null"
             )));
         }
 
         if message_id.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
         }
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::UuidError(e)),
+            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
         let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
-            Err(e) => return FFIResult::err(Error::UuidError(e)),
+            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
         let adapter = &mut *ctx;
         let rt = runtime_handle();
-        FFIResult::from(
-            rt.block_on(async { adapter.inner_guard().embeds(convo_id, msg_id, state).await }),
-        )
+
+        rt.block_on(async { adapter.inner_guard().embeds(convo_id, msg_id, state).await }).into()
+        
     }
 
     #[allow(clippy::missing_safety_doc)]

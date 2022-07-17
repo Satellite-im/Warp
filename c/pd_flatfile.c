@@ -39,7 +39,7 @@ int main() {
         return -1;
     }
 
-    FFIResult_c_void result_ignored_t = pocket_dimension_add_data(pd, data_t, result_data_set1.data);
+    FFIResult_Null result_ignored_t = pocket_dimension_add_data(pd, data_t, result_data_set1.data);
 
     if (result_ignored_t.error) {
         printf("Unable to add object to pd\n");

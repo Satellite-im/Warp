@@ -409,42 +409,42 @@ pub mod ffi {
     use crate::constellation::directory::Directory;
     use crate::constellation::{ConstellationAdapter, ConstellationDataType};
     use crate::error::Error;
-    use crate::ffi::{FFIResult, FFIVec, FFIResult_String};
+    use crate::ffi::{FFIResult, FFIVec, FFIResult_String, FFIResult_Null};
     use crate::runtime_handle;
     use std::ffi::CStr;
-    use std::os::raw::{c_char, c_void};
+    use std::os::raw::{c_char};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_select(
         ctx: *mut ConstellationAdapter,
         name: *const c_char,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if name.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Name cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Name cannot be null")));
         }
 
         let cname = CStr::from_ptr(name).to_string_lossy().to_string();
 
         let constellation = &mut *(ctx);
-        FFIResult::from(constellation.inner_guard().select(&cname))
+        constellation.inner_guard().select(&cname).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_go_back(
         ctx: *mut ConstellationAdapter,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let constellation = &mut *(ctx);
-        FFIResult::from(constellation.inner_guard().go_back())
+        constellation.inner_guard().go_back().into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -524,17 +524,17 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         local: *const c_char,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if remote.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
         }
 
         if local.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Local path cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Local path cannot be null")));
         }
 
         let constellation = &mut *(ctx);
@@ -542,8 +542,8 @@ pub mod ffi {
         let local = CStr::from_ptr(local).to_string_lossy().to_string();
         let rt = runtime_handle();
         rt.block_on(async {
-            FFIResult::from(constellation.inner_guard().put(&remote, &local).await)
-        })
+            constellation.inner_guard().put(&remote, &local).await
+        }).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -554,17 +554,17 @@ pub mod ffi {
         remote: *const c_char,
         buffer: *const u8,
         buffer_size: usize,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if remote.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
         }
 
         if buffer.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Buffer cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Buffer cannot be null")));
         }
 
         let slice = std::slice::from_raw_parts(buffer, buffer_size);
@@ -574,13 +574,13 @@ pub mod ffi {
         let rt = runtime_handle();
 
         rt.block_on(async move {
-            FFIResult::from(
+
                 constellation
                     .inner_guard()
                     .put_buffer(&remote.to_string_lossy().to_string(), &slice.to_vec())
-                    .await,
-            )
-        })
+                    .await
+            
+        }).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -590,17 +590,17 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         local: *const c_char,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if remote.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
         }
 
         if local.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Local path cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Local path cannot be null")));
         }
 
         let constellation = &*(ctx);
@@ -609,8 +609,8 @@ pub mod ffi {
         let local = CStr::from_ptr(local).to_string_lossy().to_string();
         let rt = runtime_handle();
         rt.block_on(async move {
-            FFIResult::from(constellation.inner_guard().get(&remote, &local).await)
-        })
+            constellation.inner_guard().get(&remote, &local).await
+        }).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -646,21 +646,21 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         recursive: bool,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if remote.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Remote cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Remote cannot be null")));
         }
 
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let rt = runtime_handle();
         rt.block_on(async move {
-            FFIResult::from(constellation.inner_guard().remove(&remote, recursive).await)
-        })
+            constellation.inner_guard().remove(&remote, recursive).await
+        }).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -670,26 +670,24 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         recursive: bool,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if remote.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
         }
 
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let rt = runtime_handle();
         rt.block_on(async move {
-            FFIResult::from(
                 constellation
                     .inner_guard()
                     .create_directory(&remote, recursive)
-                    .await,
-            )
-        })
+                    .await
+        }).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -699,17 +697,17 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
         src: *const c_char,
         dst: *const c_char,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if src.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Source cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Source cannot be null")));
         }
 
         if dst.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Dest cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Dest cannot be null")));
         }
 
         let constellation = &mut *(ctx);
@@ -717,8 +715,8 @@ pub mod ffi {
         let dst = CStr::from_ptr(dst).to_string_lossy().to_string();
         let rt = runtime_handle();
         rt.block_on(async move {
-            FFIResult::from(constellation.inner_guard().move_item(&src, &dst).await)
-        })
+            constellation.inner_guard().move_item(&src, &dst).await
+        }).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -727,21 +725,21 @@ pub mod ffi {
     pub unsafe extern "C" fn constellation_sync_ref(
         ctx: *mut ConstellationAdapter,
         src: *const c_char,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if src.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Source cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Source cannot be null")));
         }
 
         let constellation = &mut *(ctx);
         let src = CStr::from_ptr(src).to_string_lossy().to_string();
         let rt = runtime_handle();
         rt.block_on(
-            async move { FFIResult::from(constellation.inner_guard().sync_ref(&src).await) },
-        )
+            async move { constellation.inner_guard().sync_ref(&src).await },
+        ).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -765,17 +763,17 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
         datatype: ConstellationDataType,
         data: *const c_char,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if data.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Data cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Data cannot be null")));
         }
 
         let constellation = &mut *(ctx);
         let data = CStr::from_ptr(data).to_string_lossy().to_string();
-        FFIResult::from(constellation.inner_guard().import(datatype, data))
+        constellation.inner_guard().import(datatype, data).into()
     }
 }

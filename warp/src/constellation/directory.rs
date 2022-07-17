@@ -640,10 +640,10 @@ pub mod ffi {
     use crate::constellation::{directory::{Directory}};
     use crate::constellation::item::FFIVec_Item; //file::FFIVec_File,  directory::FFIVec_Directory};
     use crate::error::Error;
-    use crate::ffi::{FFIResult};
+    use crate::ffi::{FFIResult, FFIResult_Null};
     use std::ffi::CStr;
     use std::ffi::CString;
-    use std::os::raw::{c_char, c_void};
+    use std::os::raw::{c_char};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -661,20 +661,20 @@ pub mod ffi {
     pub unsafe extern "C" fn directory_add_item(
         dir_ptr: *mut Directory,
         item: *const Item,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if dir_ptr.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Directory is null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Directory is null")));
         }
 
         if item.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Item is null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Item is null")));
         }
 
         let dir_ptr = &mut *(dir_ptr);
 
         let item = &*(item);
 
-        FFIResult::from(dir_ptr.add_item(item.clone()))
+        dir_ptr.add_item(item.clone()).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -682,20 +682,20 @@ pub mod ffi {
     pub unsafe extern "C" fn directory_add_directory(
         dir_ptr: *mut Directory,
         directory: *const Directory,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if dir_ptr.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Directory pointer is null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Directory pointer is null")));
         }
 
         if directory.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Directory is null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Directory is null")));
         }
 
         let dir_ptr = &mut *(dir_ptr);
 
         let new_directory = &*(directory);
 
-        FFIResult::from(dir_ptr.add_directory(new_directory.clone()))
+        dir_ptr.add_directory(new_directory.clone()).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -703,20 +703,20 @@ pub mod ffi {
     pub unsafe extern "C" fn directory_add_file(
         dir_ptr: *mut Directory,
         file: *const File,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if dir_ptr.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Directory is null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Directory is null")));
         }
 
         if file.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("File is null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("File is null")));
         }
 
         let dir_ptr = &mut *dir_ptr;
 
         let new_file = &*file;
 
-        FFIResult::from(dir_ptr.add_file(new_file.clone()))
+        dir_ptr.add_file(new_file.clone()).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -749,17 +749,17 @@ pub mod ffi {
         dir_ptr: *mut Directory,
         current_name: *const c_char,
         new_name: *const c_char,
-    ) -> FFIResult<c_void> {
+    ) -> FFIResult_Null {
         if dir_ptr.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Directory is null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Directory is null")));
         }
 
         if current_name.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Current name is null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Current name is null")));
         }
 
         if new_name.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("New name is null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("New name is null")));
         }
 
         let dir_ptr = &mut *dir_ptr;
@@ -767,7 +767,7 @@ pub mod ffi {
         let current_name = CStr::from_ptr(current_name).to_string_lossy().to_string();
         let new_name = CStr::from_ptr(new_name).to_string_lossy().to_string();
 
-        FFIResult::from(dir_ptr.rename_item(&current_name, &new_name))
+        dir_ptr.rename_item(&current_name, &new_name).into()
     }
 
     #[allow(clippy::missing_safety_doc)]

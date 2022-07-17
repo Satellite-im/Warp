@@ -1,6 +1,5 @@
 use crate::{error::Error, ffi::FFIResult_String};
-use crate::ffi::FFIResult;
-use libc::c_void;
+use crate::ffi::{FFIResult, FFIResult_Null};
 use std::{ffi::CStr, os::raw::c_char};
 
 use crate::tesseract::Tesseract;
@@ -30,17 +29,17 @@ pub unsafe extern "C" fn tesseract_from_file(file: *const c_char) -> FFIResult<T
 pub unsafe extern "C" fn tesseract_to_file(
     tesseract: *mut Tesseract,
     file: *const c_char,
-) -> FFIResult<c_void> {
+) -> FFIResult_Null {
     if tesseract.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
+        return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
     }
 
     if file.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Key cannot be null")));
+        return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Key cannot be null")));
     }
     let tesseract = &mut *tesseract;
     let cname = CStr::from_ptr(file).to_string_lossy().to_string();
-    FFIResult::from(tesseract.to_file(cname))
+    tesseract.to_file(cname).into()
 }
 
 #[allow(clippy::missing_safety_doc)]
@@ -116,13 +115,13 @@ pub unsafe extern "C" fn tesseract_is_key_check_enabled(tesseract: *const Tesser
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "C" fn tesseract_save(tesseract: *mut Tesseract) -> FFIResult<c_void> {
+pub unsafe extern "C" fn tesseract_save(tesseract: *mut Tesseract) -> FFIResult_Null {
     if tesseract.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
+        return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
     }
 
     let tesseract = &mut *tesseract;
-    FFIResult::from(tesseract.save())
+    tesseract.save().into()
 }
 
 #[allow(clippy::missing_safety_doc)]
@@ -131,22 +130,22 @@ pub unsafe extern "C" fn tesseract_set(
     tesseract: *mut Tesseract,
     key: *const c_char,
     val: *const c_char,
-) -> FFIResult<c_void> {
+) -> FFIResult_Null {
     if tesseract.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
+        return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
     }
     if key.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Key cannot be null")));
+        return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Key cannot be null")));
     }
     if val.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Value cannot be null")));
+        return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Value cannot be null")));
     }
 
     let tesseract = &mut *tesseract;
     let c_key = CStr::from_ptr(key).to_string_lossy().to_string();
     let c_val = CStr::from_ptr(val).to_string_lossy().to_string();
 
-    FFIResult::from(tesseract.set(&c_key, &c_val))
+    tesseract.set(&c_key, &c_val).into()
 }
 
 #[allow(clippy::missing_safety_doc)]
@@ -189,18 +188,18 @@ pub unsafe extern "C" fn tesseract_exist(tesseract: *mut Tesseract, key: *const 
 pub unsafe extern "C" fn tesseract_delete(
     tesseract: *mut Tesseract,
     key: *const c_char,
-) -> FFIResult<c_void> {
+) -> FFIResult_Null {
     if tesseract.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
+        return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
     }
 
     if key.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Key cannot be null")));
+        return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Key cannot be null")));
     }
 
     let tesseract = &mut *tesseract;
     let c_key = CStr::from_ptr(key).to_string_lossy().to_string();
-    FFIResult::from(tesseract.delete(&c_key))
+    tesseract.delete(&c_key).into()
 }
 
 #[allow(clippy::missing_safety_doc)]
@@ -231,18 +230,18 @@ pub unsafe extern "C" fn tesseract_is_unlock(tesseract: *const Tesseract) -> boo
 pub unsafe extern "C" fn tesseract_unlock(
     tesseract: *mut Tesseract,
     key: *const c_char,
-) -> FFIResult<c_void> {
+) -> FFIResult_Null {
     if tesseract.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
+        return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Tesseract cannot be null")));
     }
 
     if key.is_null() {
-        return FFIResult::err(Error::Any(anyhow::anyhow!("Key cannot be null")));
+        return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Key cannot be null")));
     }
 
     let tesseract = &mut *tesseract;
     let c_key = CStr::from_ptr(key).to_string_lossy().to_string();
-    FFIResult::from(tesseract.unlock(c_key.as_bytes()))
+    tesseract.unlock(c_key.as_bytes()).into()
 }
 
 #[allow(clippy::missing_safety_doc)]
