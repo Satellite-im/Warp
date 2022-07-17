@@ -79,7 +79,7 @@ impl IdentityStore {
         if discovery {
             let ipfs = store.ipfs.clone();
             tokio::spawn(async {
-                if let Err(_) = topic_discovery(ipfs, IDENTITY_BROADCAST).await {
+                if let Err(_e) = topic_discovery(ipfs, IDENTITY_BROADCAST).await {
                     //TODO: Log
                 }
             });
@@ -131,7 +131,7 @@ impl IdentityStore {
                         let ident = store.identity.read().clone();
                         if let Some(ident) = ident.as_ref() {
                             if let Ok(bytes) = serde_json::to_vec(&ident) {
-                                if let Err(_) = store.ipfs.pubsub_publish(IDENTITY_BROADCAST.into(), bytes).await {
+                                if let Err(_e) = store.ipfs.pubsub_publish(IDENTITY_BROADCAST.into(), bytes).await {
                                     continue
                                 }
                             }
@@ -208,12 +208,8 @@ impl IdentityStore {
 
         for ident in self.cache() {
             match &lookup {
-                LookupBy::PublicKey(pubkey) if &ident.public_key() == pubkey => {
-                    return Ok(ident.clone())
-                }
-                LookupBy::Username(username) if &ident.username() == username => {
-                    return Ok(ident.clone())
-                }
+                LookupBy::PublicKey(pubkey) if &ident.public_key() == pubkey => return Ok(ident),
+                LookupBy::Username(username) if &ident.username() == username => return Ok(ident),
                 _ => continue,
             }
         }

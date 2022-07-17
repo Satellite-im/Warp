@@ -136,7 +136,9 @@ pub mod ffi {
     impl FFIError {
         pub fn new(err: crate::error::Error) -> Self {
             let error_message = std::ffi::CString::new(err.to_string()).unwrap().into_raw();
-            let error_type = std::ffi::CString::new(err.enum_to_string()).unwrap().into_raw();
+            let error_type = std::ffi::CString::new(err.enum_to_string())
+                .unwrap()
+                .into_raw();
 
             FFIError {
                 error_type,
@@ -148,15 +150,20 @@ pub mod ffi {
             Box::into_raw(Box::new(self))
         }
 
-        pub fn from_ptr(ptr: *mut FFIError) -> (String, String) {
-            let error = unsafe { Box::from_raw(ptr) };
+        #[allow(clippy::missing_safety_doc)]
+        pub unsafe fn from_ptr(ptr: *mut FFIError) -> (String, String) {
+            let error = Box::from_raw(ptr);
             let error_type = match error.error_type.is_null() {
-                false => unsafe { std::ffi::CString::from_raw(error.error_type).into_string().unwrap() },
-                true => String::new()
+                false => std::ffi::CString::from_raw(error.error_type)
+                    .into_string()
+                    .unwrap(),
+                true => String::new(),
             };
             let error_message = match error.error_message.is_null() {
-                false => unsafe { std::ffi::CString::from_raw(error.error_message).into_string().unwrap() },
-                true => String::new()
+                false => std::ffi::CString::from_raw(error.error_message)
+                    .into_string()
+                    .unwrap(),
+                true => String::new(),
             };
 
             (error_type, error_message)
@@ -197,7 +204,7 @@ pub mod ffi {
                         data: std::ptr::null_mut(),
                         error,
                     }
-                },
+                }
             }
         }
     }
@@ -292,12 +299,12 @@ pub mod ffi {
         }
     }
 
+    #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn ffierror_free(ptr: *mut FFIError) {
         if ptr.is_null() {
             return;
         }
-
         let _ = FFIError::from_ptr(ptr);
     }
 }

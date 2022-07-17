@@ -57,7 +57,7 @@ impl Drop for IpfsIdentity {
         // If IpfsIdentity::temporary was used, `temp` would be true and it would
         // let is to delete the repo
         if self.temp {
-            if let Err(_) = std::fs::remove_dir_all(&self.path) {}
+            if let Err(_e) = std::fs::remove_dir_all(&self.path) {}
         }
     }
 }
@@ -229,7 +229,7 @@ impl MultiPass for IpfsIdentity {
                         }
                     }
                 }
-                return self.identity_store.lookup(LookupBy::PublicKey(pk));
+                self.identity_store.lookup(LookupBy::PublicKey(pk))
             }
             (None, Some(username), false) => {
                 if let Ok(cache) = self.get_cache() {
@@ -244,12 +244,12 @@ impl MultiPass for IpfsIdentity {
                         }
                     }
                 }
-                return self.identity_store.lookup(LookupBy::Username(username));
+                self.identity_store.lookup(LookupBy::Username(username))
             }
             (None, None, true) => {
                 return async_block_in_place_uncheck(self.identity_store.own_identity())
             }
-            _ => return Err(Error::InvalidIdentifierCondition),
+            _ => Err(Error::InvalidIdentifierCondition),
         }
     }
 
@@ -277,12 +277,9 @@ impl MultiPass for IpfsIdentity {
             _ => return Err(Error::CannotUpdateIdentity),
         }
 
-        match self.tesseract.retrieve("ident_cid") {
-            Ok(cid) => {
-                let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
-                async_block_in_place_uncheck(self.ipfs.remove_pin(&cid, false))?;
-            }
-            Err(_) => {}
+        if let Ok(cid) = self.tesseract.retrieve("ident_cid") {
+            let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
+            async_block_in_place_uncheck(self.ipfs.remove_pin(&cid, false))?;
         };
 
         let bytes = serde_json::to_vec(&identity)?;

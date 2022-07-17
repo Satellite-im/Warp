@@ -11,8 +11,8 @@ use warp::{
 pub mod friends;
 pub mod identity;
 
-pub const IDENTITY_BROADCAST: &'static str = "identity/broadcast";
-pub const FRIENDS_BROADCAST: &'static str = "friends/broadcast";
+pub const IDENTITY_BROADCAST: &str = "identity/broadcast";
+pub const FRIENDS_BROADCAST: &str = "friends/broadcast";
 
 fn pub_to_libp2p_pub(public_key: &PublicKey) -> anyhow::Result<libp2p::identity::PublicKey> {
     let pk = libp2p::identity::PublicKey::Ed25519(libp2p::identity::ed25519::PublicKey::decode(

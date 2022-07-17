@@ -391,9 +391,7 @@ impl Tesseract {
         }
         let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &*self.enc_pass.read())?;
         let data = Cipher::direct_encrypt(CipherType::Aes256Gcm, value.as_bytes(), &pkey)?;
-        {
-            self.internal.write().insert(key.to_string(), data);
-        }
+        self.internal.write().insert(key.to_string(), data);
         self.save()
     }
 
@@ -548,9 +546,7 @@ impl Tesseract {
 
 impl Tesseract {
     fn internal_keys(&self) -> Vec<String> {
-        let internal = self.internal.read();
-        let keys = internal.keys().clone();
-        keys.cloned().collect::<Vec<_>>()
+        self.internal.read().keys().cloned().collect::<Vec<_>>()
     }
 }
 

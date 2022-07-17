@@ -15,6 +15,7 @@ use directory::Directory;
 use item::Item;
 
 use warp_derive::FFIFree;
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -114,6 +115,7 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
     }
 
     /// Used to upload file to the filesystem with data from buffer
+    #[allow(clippy::ptr_arg)]
     async fn put_buffer(&mut self, _: &str, _: &Vec<u8>) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }

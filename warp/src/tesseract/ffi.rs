@@ -183,6 +183,7 @@ pub unsafe extern "C" fn tesseract_exist(tesseract: *mut Tesseract, key: *const 
     let c_key = CStr::from_ptr(key).to_string_lossy().to_string();
     tesseract.exist(&c_key)
 }
+
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
 pub unsafe extern "C" fn tesseract_delete(

@@ -75,7 +75,7 @@ impl FriendsStore {
         if discovery {
             let ipfs = store.ipfs.clone();
             tokio::spawn(async {
-                if let Err(_) = topic_discovery(ipfs, FRIENDS_BROADCAST).await {
+                if let Err(_e) = topic_discovery(ipfs, FRIENDS_BROADCAST).await {
                     //TODO: Log
                 }
             });
@@ -132,7 +132,7 @@ impl FriendsStore {
                                 request.set_status(data.status());
                                 request.set_date(data.date());
 
-                                if let Err(_) = verify_serde_sig(pk, &request, &signature) {
+                                if let Err(_e) = verify_serde_sig(pk, &request, &signature) {
                                     //Signature is not valid
                                     continue
                                 }
@@ -146,7 +146,7 @@ impl FriendsStore {
 
                                         let _ = store.outgoing_request.write().remove(index);
 
-                                        if let Err(_) = store.add_friend(request.from()).await {
+                                        if let Err(_e) = store.add_friend(request.from()).await {
                                             //TODO: Log
                                             continue
                                         }
@@ -171,7 +171,7 @@ impl FriendsStore {
                         let outgoing_request = store.outgoing_request.read().clone();
                         for request in outgoing_request.iter() {
                             if let Ok(bytes) = serde_json::to_vec(&request) {
-                                if let Err(_) = store.ipfs.pubsub_publish(FRIENDS_BROADCAST.into(), bytes).await {
+                                if let Err(_e) = store.ipfs.pubsub_publish(FRIENDS_BROADCAST.into(), bytes).await {
                                     continue
                                 }
                             }
@@ -361,7 +361,7 @@ impl FriendsStore {
         match self.tesseract.retrieve("block_cid") {
             Ok(cid) => {
                 let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
-                let path = IpfsPath::from(cid.clone());
+                let path = IpfsPath::from(cid);
                 match self.ipfs.get_dag(path).await {
                     Ok(Ipld::Bytes(bytes)) => {
                         let list =
@@ -372,7 +372,7 @@ impl FriendsStore {
                     _ => Err(Error::Other),
                 }
             }
-            Err(e) => return Err(e),
+            Err(e) => Err(e),
         }
     }
 
@@ -445,7 +445,7 @@ impl FriendsStore {
         match self.tesseract.retrieve("friends_cid") {
             Ok(cid) => {
                 let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
-                let path = IpfsPath::from(cid.clone());
+                let path = IpfsPath::from(cid);
                 match self.ipfs.get_dag(path).await {
                     Ok(Ipld::Bytes(bytes)) => {
                         let list =
@@ -456,7 +456,7 @@ impl FriendsStore {
                     _ => Err(Error::Other),
                 }
             }
-            Err(e) => return Err(e),
+            Err(e) => Err(e),
         }
     }
 
