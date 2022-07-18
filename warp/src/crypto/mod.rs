@@ -21,12 +21,13 @@ pub mod signature;
 
 use serde::{Deserialize, Serialize};
 use warp_derive::{FFIVec, FFIFree};
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 use zeroize::Zeroize;
 
 //TODO: Have internals match with various of crypto public keys
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIVec, FFIFree)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct PublicKey(Vec<u8>);
 
 impl AsRef<[u8]> for PublicKey {
@@ -35,25 +36,26 @@ impl AsRef<[u8]> for PublicKey {
     }
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl PublicKey {
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn from_vec(bytes: Vec<u8>) -> Self {
         Self(bytes)
     }
-    #[wasm_bindgen]
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn from_bytes(bytes: &[u8]) -> Self {
         Self(bytes.to_vec())
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn into_bytes(&self) -> Vec<u8> {
         self.0.clone()
     }
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIVec, FFIFree)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct PrivateKey(Vec<u8>);
 
 impl Drop for PrivateKey {
@@ -69,19 +71,19 @@ impl AsRef<[u8]> for PrivateKey {
 }
 
 //TODO: Have internals match with various of crypto private keys
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl PrivateKey {
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn from_vec(bytes: Vec<u8>) -> Self {
         Self(bytes)
     }
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn from_bytes(bytes: &[u8]) -> Self {
         Self(bytes.to_vec())
     }
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn generate(limit: usize) -> Vec<u8> {
     let mut buf = vec![0u8; limit];
     getrandom::getrandom(&mut buf).unwrap();

@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use warp_derive::{FFIFree};
+use warp_derive::FFIFree;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -635,15 +635,15 @@ impl Directory {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use crate::constellation::file::{File};
-    use crate::constellation::item::{Item};
-    use crate::constellation::{directory::{Directory}};
+    use crate::constellation::directory::Directory;
+    use crate::constellation::file::File;
     use crate::constellation::item::FFIVec_Item; //file::FFIVec_File,  directory::FFIVec_Directory};
+    use crate::constellation::item::Item;
     use crate::error::Error;
     use crate::ffi::{FFIResult, FFIResult_Null};
     use std::ffi::CStr;
     use std::ffi::CString;
-    use std::os::raw::{c_char};
+    use std::os::raw::c_char;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]

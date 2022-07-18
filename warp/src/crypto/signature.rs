@@ -3,17 +3,18 @@ use ed25519_dalek::{
     Keypair, PublicKey, SecretKey, Signature, Signer, Verifier, KEYPAIR_LENGTH, SECRET_KEY_LENGTH,
 };
 use getrandom::getrandom;
-use warp_derive::{FFIVec, FFIFree};
+use warp_derive::{FFIFree, FFIVec};
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;
 use zeroize::Zeroize;
 
 /// An Ed25519 Keypair Helper
 #[derive(FFIFree)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Ed25519Keypair(Keypair);
 
 #[derive(Copy, Clone, Eq, PartialEq, FFIVec, FFIFree)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Ed25519PublicKey(PublicKey);
 
 impl TryFrom<Vec<u8>> for Ed25519PublicKey {
@@ -23,15 +24,15 @@ impl TryFrom<Vec<u8>> for Ed25519PublicKey {
     }
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Ed25519PublicKey {
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn from_bytes(bytes: &[u8]) -> Result<Ed25519PublicKey, Error> {
         let public_key = PublicKey::from_bytes(bytes)?;
         Ok(Ed25519PublicKey(public_key))
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<(), Error> {
         let signature = Signature::from_bytes(signature)?;
         self.0.verify(data, &signature).map_err(Error::from)
@@ -75,10 +76,10 @@ impl Drop for Ed25519Keypair {
     }
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Ed25519Keypair {
     /// Creates a new keypair
-    #[wasm_bindgen(constructor)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new() -> Result<Ed25519Keypair, Error> {
         let mut secret_key = [0u8; 32];
         getrandom(&mut secret_key).map_err(|e| anyhow::anyhow!(e))?;
@@ -93,7 +94,7 @@ impl Ed25519Keypair {
     }
 
     /// Import keypair from 64 bytes
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn from_bytes(bytes: &[u8]) -> Result<Ed25519Keypair, Error> {
         Keypair::from_bytes(bytes)
             .map(Ed25519Keypair)
@@ -101,20 +102,20 @@ impl Ed25519Keypair {
     }
 
     /// Public key from ed25519 keypair
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn public_key(&self) -> Ed25519PublicKey {
         Ed25519PublicKey(self.0.public)
     }
 
     /// Sign a message with the keypair
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn sign(&self, data: &[u8]) -> Vec<u8> {
         let sig = self.0.sign(data);
         sig.to_bytes().to_vec()
     }
 
     /// Verify a signature with the keypair
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<(), Error> {
         let signature = Signature::from_bytes(signature)?;
         self.0.verify(data, &signature).map_err(Error::from)

@@ -1,5 +1,6 @@
 /// Errors that would host custom errors for modules, utilities, etc.
 use thiserror::Error;
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
 
 #[derive(Error, Debug)]
@@ -274,6 +275,7 @@ impl Error {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
 impl From<Error> for JsValue {
     fn from(error: Error) -> JsValue {
         JsValue::from_str(&error.to_string())

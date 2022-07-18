@@ -13,7 +13,8 @@ use uuid::Uuid;
 #[allow(unused_imports)]
 use crate::module::Module;
 
-use warp_derive::{FFIFree};
+use warp_derive::FFIFree;
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 pub type DataObject = Data;
@@ -21,7 +22,7 @@ pub type DataObject = Data;
 /// Standard DataObject used throughout warp.
 /// Unifies output from all modules
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Data {
     /// ID of the Data Object
     id: Uuid,
@@ -46,7 +47,7 @@ pub struct Data {
 #[derive(Hash, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum DataType {
     #[display(fmt = "messaging")]
     Messaging,

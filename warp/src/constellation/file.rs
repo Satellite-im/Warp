@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Seek, SeekFrom};
 use uuid::Uuid;
-use warp_derive::{FFIFree};
+use warp_derive::FFIFree;
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 /// `FileType` describes all supported file types.
@@ -16,7 +17,7 @@ use wasm_bindgen::prelude::*;
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum FileType {
     #[display(fmt = "generic")]
     Generic,

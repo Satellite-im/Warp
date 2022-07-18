@@ -2,7 +2,7 @@ pub mod generator;
 pub mod identity;
 
 use warp_derive::FFIFree;
-#[allow(unused_imports)]
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 use crate::error::Error;
@@ -249,30 +249,27 @@ impl MultiPassAdapter {
     }
 }
 
-cfg_if::cfg_if! {
-    if #[cfg(target_arch = "wasm32")] {
-        #[wasm_bindgen]
-        impl MultiPassAdapter {
-            #[wasm_bindgen]
-            pub fn list_incoming_request(&self) -> Result<JsValue, Error> {
-                self.inner_guard().list_incoming_request().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
-            }
+#[cfg(target_arch = "wasm32")] 
+#[wasm_bindgen]
+impl MultiPassAdapter {
+    #[wasm_bindgen]
+    pub fn list_incoming_request(&self) -> Result<JsValue, Error> {
+        self.inner_guard().list_incoming_request().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
+    }
 
-            #[wasm_bindgen]
-            pub fn list_outgoing_request(&self) -> Result<JsValue, Error> {
-                self.inner_guard().list_outgoing_request().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
-            }
+    #[wasm_bindgen]
+    pub fn list_outgoing_request(&self) -> Result<JsValue, Error> {
+        self.inner_guard().list_outgoing_request().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
+    }
 
-            #[wasm_bindgen]
-            pub fn list_friends(&self) -> Result<JsValue, Error> {
-                self.inner_guard().list_friends().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
-            }
+    #[wasm_bindgen]
+    pub fn list_friends(&self) -> Result<JsValue, Error> {
+        self.inner_guard().list_friends().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
+    }
 
-            #[wasm_bindgen]
-            pub fn list_all_request(&self) -> Result<JsValue, Error> {
-                self.inner_guard().list_all_request().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
-            }
-        }
+    #[wasm_bindgen]
+    pub fn list_all_request(&self) -> Result<JsValue, Error> {
+        self.inner_guard().list_all_request().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
     }
 }
 

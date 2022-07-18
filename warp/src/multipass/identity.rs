@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 use crate::crypto::PublicKey;
@@ -8,7 +9,7 @@ use std::collections::HashMap;
 use warp_derive::{FFIFree};
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Role {
     /// Name of the role
     name: String,
@@ -17,21 +18,21 @@ pub struct Role {
     level: u8,
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Role {
-    #[wasm_bindgen(getter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn name(&self) -> String {
         self.name.clone()
     }
 
-    #[wasm_bindgen(getter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn level(&self) -> u8 {
         self.level
     }
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Badge {
     /// TBD
     name: String,
@@ -40,21 +41,21 @@ pub struct Badge {
     icon: String,
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Badge {
-    #[wasm_bindgen(getter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn name(&self) -> String {
         self.name.clone()
     }
 
-    #[wasm_bindgen(getter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn icon(&self) -> String {
         self.icon.clone()
     }
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIFree)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Graphics {
     /// Hash to profile picture
     profile_picture: String,
@@ -63,34 +64,34 @@ pub struct Graphics {
     profile_banner: String,
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Graphics {
-    #[wasm_bindgen(setter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_profile_picture(&mut self, picture: &str) {
         self.profile_picture = picture.to_string();
     }
 
-    #[wasm_bindgen(setter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_profile_banner(&mut self, banner: &str) {
         self.profile_banner = banner.to_string();
     }
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Graphics {
-    #[wasm_bindgen(getter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn profile_picture(&self) -> String {
         self.profile_picture.clone()
     }
 
-    #[wasm_bindgen(getter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn profile_banner(&self) -> String {
         self.profile_banner.clone()
     }
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Identity {
     /// Username of the identity
     username: String,
@@ -120,29 +121,29 @@ pub struct Identity {
     linked_accounts: HashMap<String, String>,
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Identity {
-    #[wasm_bindgen(setter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_username(&mut self, user: &str) {
         self.username = user.to_string()
     }
 
-    #[wasm_bindgen(setter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_short_id(&mut self, id: u16) {
         self.short_id = id
     }
 
-    #[wasm_bindgen(setter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_public_key(&mut self, pubkey: PublicKey) {
         self.public_key = pubkey
     }
 
-    #[wasm_bindgen(setter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_graphics(&mut self, graphics: Graphics) {
         self.graphics = graphics
     }
 
-    #[wasm_bindgen(setter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_status_message(&mut self, message: Option<String>) {
         self.status_message = message
     }
@@ -152,34 +153,34 @@ impl Identity {
     // pub fn set_linked_accounts(&mut self) {}
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Identity {
-    #[wasm_bindgen(getter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn username(&self) -> String {
         self.username.clone()
     }
 
-    #[wasm_bindgen(getter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn short_id(&self) -> u16 {
         self.short_id
     }
 
-    #[wasm_bindgen(getter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn public_key(&self) -> PublicKey {
         self.public_key.clone()
     }
 
-    #[wasm_bindgen(getter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn graphics(&self) -> Graphics {
         self.graphics.clone()
     }
 
-    #[wasm_bindgen(getter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn status_message(&self) -> Option<String> {
         self.status_message.clone()
     }
 
-    #[wasm_bindgen(getter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn active_badge(&self) -> Badge {
         self.active_badge.clone()
     }
@@ -216,7 +217,7 @@ impl Identity {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct FriendRequest {
     /// The account where the request came from
     from: PublicKey,
@@ -247,47 +248,47 @@ impl Default for FriendRequest {
     }
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl FriendRequest {
-    #[wasm_bindgen(setter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_from(&mut self, key: PublicKey) {
         self.from = key
     }
 
-    #[wasm_bindgen(setter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_to(&mut self, key: PublicKey) {
         self.to = key
     }
 
-    #[wasm_bindgen(setter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_status(&mut self, status: FriendRequestStatus) {
         self.status = status
     }
 
-    #[wasm_bindgen(setter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_signature(&mut self, signature: Vec<u8>) {
         self.signature = Some(signature);
     }
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl FriendRequest {
-    #[wasm_bindgen(getter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn from(&self) -> PublicKey {
         self.from.clone()
     }
 
-    #[wasm_bindgen(getter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn to(&self) -> PublicKey {
         self.to.clone()
     }
 
-    #[wasm_bindgen(getter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn status(&self) -> FriendRequestStatus {
         self.status
     }
 
-    #[wasm_bindgen(getter)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn signature(&self) -> Option<Vec<u8>> {
         self.signature.clone()
     }
@@ -325,7 +326,7 @@ impl FriendRequest {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Display)]
 #[repr(C)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum FriendRequestStatus {
     #[display(fmt = "uninitialized")]
     Uninitialized,
@@ -348,7 +349,7 @@ impl Default for FriendRequestStatus {
 }
 
 #[derive(Default, Debug, Clone, FFIFree)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Identifier {
     /// Select identity based on public key
     public_key: Option<PublicKey>,
@@ -358,9 +359,9 @@ pub struct Identifier {
     own: bool,
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Identifier {
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn user_name(name: &str) -> Self {
         Identifier {
             user_name: Some(name.to_string()),
@@ -368,7 +369,7 @@ impl Identifier {
         }
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn public_key(key: PublicKey) -> Self {
         Identifier {
             public_key: Some(key),
@@ -376,7 +377,7 @@ impl Identifier {
         }
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn own() -> Self {
         Identifier {
             own: true,
@@ -410,7 +411,7 @@ impl<S: AsRef<str>> From<S> for Identifier {
 }
 
 #[derive(Debug, Clone, Default, FFIFree)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct IdentityUpdate {
     /// Setting Username
     username: Option<String>,
@@ -425,9 +426,9 @@ pub struct IdentityUpdate {
     status_message: Option<Option<String>>,
 }
 
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl IdentityUpdate {
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_username(username: String) -> IdentityUpdate {
         IdentityUpdate {
             username: Some(username),
@@ -435,7 +436,7 @@ impl IdentityUpdate {
         }
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_graphics_picture(graphics: String) -> IdentityUpdate {
         IdentityUpdate {
             graphics_picture: Some(graphics),
@@ -443,7 +444,7 @@ impl IdentityUpdate {
         }
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_graphics_banner(graphics: String) -> IdentityUpdate {
         IdentityUpdate {
             graphics_banner: Some(graphics),
@@ -451,7 +452,7 @@ impl IdentityUpdate {
         }
     }
 
-    #[wasm_bindgen]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_status_message(status_message: Option<String>) -> IdentityUpdate {
         IdentityUpdate {
             status_message: Some(status_message),

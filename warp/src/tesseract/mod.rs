@@ -26,13 +26,14 @@ use std::sync::atomic::AtomicBool;
 
 use crate::sync::{Arc, Mutex, RwLock};
 
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 type Result<T> = std::result::Result<T, Error>;
 
 /// The key store that holds encrypted strings that can be used for later use.
 #[derive(FFIFree)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Tesseract {
     internal: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     enc_pass: Arc<RwLock<Vec<u8>>>,
