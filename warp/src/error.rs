@@ -73,8 +73,10 @@ pub enum Error {
     PublicKeyIsntBlocked,
     #[error("Unable to send a friend request")]
     CannotSendFriendRequest,
-    #[error("friend request")]
+    #[error("Friend request already exist")]
     FriendRequestExist,
+    #[error("Friend request doesnt exist")]
+    FriendRequestDoesntExist,
     #[error("You cannot send yourself a friend request")]
     CannotSendSelfFriendRequest,
     #[error("You cannot accept yourself as a friend")]

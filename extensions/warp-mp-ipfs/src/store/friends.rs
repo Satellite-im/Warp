@@ -219,6 +219,10 @@ impl FriendsStore {
             return Err(Error::FriendExist);
         }
 
+        if self.has_request_from(pubkey.clone()) {
+            return Err(Error::FriendRequestExist);
+        }
+
         let peer: PeerId = pub_to_libp2p_pub(&pubkey)?.into();
 
         for request in self.outgoing_request.read().iter() {
@@ -255,6 +259,9 @@ impl FriendsStore {
             return Err(Error::CannotAcceptSelfAsFriend);
         }
 
+        if !self.has_request_from(pubkey.clone()) {
+            return Err(Error::FriendRequestDoesntExist);
+        }
         // Although the request been validated before storing, we should validate again just to be safe
 
         let index = self
@@ -310,7 +317,11 @@ impl FriendsStore {
         let local_public_key = libp2p_pub_to_pub(&local_ipfs_public_key)?;
 
         if local_public_key == pubkey {
-            return Err(Error::CannotAcceptSelfAsFriend);
+            return Err(Error::CannotDenySelfAsFriend);
+        }
+
+        if !self.has_request_from(pubkey.clone()) {
+            return Err(Error::FriendRequestDoesntExist);
         }
 
         // Although the request been validated before storing, we should validate again just to be safe
@@ -358,6 +369,17 @@ impl FriendsStore {
         self.incoming_request.write().remove(index);
 
         Ok(())
+    }
+
+    pub fn has_request_from(&self, pubkey: PublicKey) -> bool {
+        self.incoming_request
+            .read()
+            .iter()
+            .filter(|request| {
+                request.from() == pubkey && request.status() == FriendRequestStatus::Pending
+            })
+            .count()
+            != 0
     }
 }
 
