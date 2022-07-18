@@ -17,6 +17,7 @@ async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
     let config = Config {
         store_setting: StoreSetting {
             broadcast_interval: 5,
+            broadcast_with_connection: false,
             discovery: false,
         },
         ipfs_setting: IpfsSetting {

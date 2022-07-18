@@ -57,6 +57,7 @@ pub struct IpfsSetting {
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
     pub broadcast_interval: u64,
+    pub broadcast_with_connection: bool,
     pub discovery: bool,
 }
 
@@ -99,14 +100,12 @@ impl Default for Config {
                 },
                 relay_server: RelayServer { enable: false },
                 dcutr: Dcutr { enable: false },
-                rendezvous: Rendezvous {
-                    enable: false,
-                    ..Default::default()
-                },
+                ..Default::default()
             },
             store_setting: StoreSetting {
                 broadcast_interval: 100,
                 discovery: false,
+                broadcast_with_connection: false,
             },
         }
     }
@@ -114,6 +113,60 @@ impl Default for Config {
 
 impl Config {
     pub fn development() -> Config {
-        Self::default()
+        Config {
+            path: None,
+            listen_on: vec!["/ip4/127.0.0.1/tcp/0"]
+                .iter()
+                .filter_map(|s| Multiaddr::from_str(s).ok())
+                .collect::<Vec<_>>(),
+            ipfs_setting: IpfsSetting {
+                mdns: Mdns { enable: true },
+                autonat: Autonat {
+                    enable: false,
+                    servers: vec![],
+                },
+                relay_client: RelayClient {
+                    enable: false,
+                    relay_address: None,
+                },
+                dcutr: Dcutr { enable: false },
+                ..Default::default()
+            },
+            store_setting: StoreSetting {
+                broadcast_interval: 100,
+                discovery: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    pub fn production() -> Config {
+        Config {
+            path: None,
+            listen_on: vec!["/ip4/0.0.0.0/tcp/0", "/ip6/::/tcp/0"]
+                .iter()
+                .filter_map(|s| Multiaddr::from_str(s).ok())
+                .collect::<Vec<_>>(),
+            ipfs_setting: IpfsSetting {
+                mdns: Mdns { enable: true },
+                autonat: Autonat {
+                    enable: true,
+                    servers: vec![],
+                },
+                relay_client: RelayClient {
+                    enable: true,
+                    relay_address: None,
+                },
+                dcutr: Dcutr { enable: true },
+                ..Default::default()
+            },
+            store_setting: StoreSetting {
+                broadcast_interval: 100,
+                discovery: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
     }
 }

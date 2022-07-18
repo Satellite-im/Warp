@@ -32,7 +32,7 @@ pub struct FriendsStore {
     end_event: Arc<AtomicBool>,
 
     // Would enable a check to determine if peers are connected before broadcasting
-    check_peer: Arc<AtomicBool>,
+    broadcast_with_connection: Arc<AtomicBool>,
 
     // Request meant for the user
     incoming_request: Arc<RwLock<Vec<FriendRequest>>>,
@@ -55,16 +55,17 @@ impl FriendsStore {
         ipfs: Ipfs<Types>,
         tesseract: Tesseract,
         discovery: bool,
+        send_on_peer_connect: bool,
         interval: u64,
     ) -> anyhow::Result<Self> {
         let end_event = Arc::new(AtomicBool::new(false));
-        let check_peer = Arc::new(AtomicBool::new(false));
+        let broadcast_with_connection = Arc::new(AtomicBool::new(send_on_peer_connect));
         let incoming_request = Arc::new(Default::default());
         let outgoing_request = Arc::new(Default::default());
 
         let store = Self {
             ipfs,
-            check_peer,
+            broadcast_with_connection,
             end_event,
             incoming_request,
             outgoing_request,
@@ -172,9 +173,8 @@ impl FriendsStore {
                         }
                     }
                     _ = broadcast_interval.tick() => {
-                        //TODO: Add check to determine if peers are subscribed to topic before publishing
                         //TODO: Provide a signed and/or encrypted payload
-                        if store.check_peer.load(Ordering::SeqCst) {
+                        if store.broadcast_with_connection.load(Ordering::SeqCst) {
                             if let Ok(peers) = store.ipfs.pubsub_peers(Some(FRIENDS_BROADCAST.into())).await {
                                 if peers.is_empty() {
                                     continue;
@@ -605,6 +605,6 @@ impl FriendsStore {
     }
 
     pub fn set_check_peer(&mut self, val: bool) {
-        self.check_peer.store(val, Ordering::SeqCst)
+        self.broadcast_with_connection.store(val, Ordering::SeqCst)
     }
 }

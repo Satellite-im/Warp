@@ -31,7 +31,7 @@ pub struct IdentityStore {
 
     start_event: Arc<AtomicBool>,
 
-    check_peer: Arc<AtomicBool>,
+    broadcast_with_connection: Arc<AtomicBool>,
 
     end_event: Arc<AtomicBool>,
 
@@ -56,20 +56,21 @@ impl IdentityStore {
         ipfs: Ipfs<Types>,
         tesseract: Tesseract,
         discovery: bool,
+        broadcast_with_connection: bool,
         interval: u64,
     ) -> Result<Self, Error> {
         let cache = Arc::new(Default::default());
         let identity = Arc::new(Default::default());
         let start_event = Arc::new(Default::default());
         let end_event = Arc::new(Default::default());
-        let check_peer = Arc::new(Default::default());
+        let broadcast_with_connection = Arc::new(AtomicBool::new(broadcast_with_connection));
 
         let store = Self {
             ipfs,
             cache,
             identity,
             start_event,
-            check_peer,
+            broadcast_with_connection,
             end_event,
             tesseract,
         };
@@ -130,7 +131,7 @@ impl IdentityStore {
                     }
                     _ = tick.tick() => {
                         //TODO: Provide a signed and/or encrypted payload
-                        if store.check_peer.load(Ordering::SeqCst) {
+                        if store.broadcast_with_connection.load(Ordering::SeqCst) {
                             if let Ok(peers) = store.ipfs.pubsub_peers(Some(IDENTITY_BROADCAST.into())).await {
                                 if peers.is_empty() {
                                     continue;
@@ -291,6 +292,6 @@ impl IdentityStore {
     }
 
     pub fn set_check_peer(&mut self, val: bool) {
-        self.check_peer.store(val, Ordering::SeqCst)
+        self.broadcast_with_connection.store(val, Ordering::SeqCst)
     }
 }
