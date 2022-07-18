@@ -6,7 +6,11 @@ use std::{
 
 use futures::{SinkExt, StreamExt, TryFutureExt};
 use ipfs::{Ipfs, IpfsPath, Keypair, Types};
-use libipld::{ipld, Cid, Ipld};
+use libipld::{
+    ipld,
+    serde::{from_ipld, to_ipld},
+    Cid, Ipld,
+};
 use warp::{
     crypto::{rand::Rng, PublicKey},
     error::Error,
@@ -26,6 +30,8 @@ pub struct IdentityStore {
     cache: Arc<RwLock<Vec<Identity>>>,
 
     start_event: Arc<AtomicBool>,
+
+    check_peer: Arc<AtomicBool>,
 
     end_event: Arc<AtomicBool>,
 
@@ -56,12 +62,14 @@ impl IdentityStore {
         let identity = Arc::new(Default::default());
         let start_event = Arc::new(Default::default());
         let end_event = Arc::new(Default::default());
+        let check_peer = Arc::new(Default::default());
 
         let store = Self {
             ipfs,
             cache,
             identity,
             start_event,
+            check_peer,
             end_event,
             tesseract,
         };
@@ -112,22 +120,23 @@ impl IdentityStore {
                                     continue;
                                 }
 
-                                let index = store.cache.read()
-                                    .iter()
-                                    .position(|ident| ident.public_key() == identity.public_key());
-
-                                if let Some(index) = index {
+                                if let Some(index) = store.cache.read().iter().position(|ident| ident.public_key() == identity.public_key()) {
                                     store.cache.write().remove(index);
                                 }
 
                                 store.cache.write().push(identity);
                             }
                         }
-
                     }
                     _ = tick.tick() => {
-                        //TODO: Add check to determine if peers are subscribed to topic before publishing
                         //TODO: Provide a signed and/or encrypted payload
+                        if store.check_peer.load(Ordering::SeqCst) {
+                            if let Ok(peers) = store.ipfs.pubsub_peers(Some(IDENTITY_BROADCAST.into())).await {
+                                if peers.is_empty() {
+                                    continue;
+                                }
+                            }
+                        }
                         let ident = store.identity.read().clone();
                         if let Some(ident) = ident.as_ref() {
                             if let Ok(bytes) = serde_json::to_vec(&ident) {
@@ -168,14 +177,18 @@ impl IdentityStore {
         identity.set_short_id(warp::crypto::rand::thread_rng().gen_range(0, 9999));
         identity.set_public_key(public_key);
 
-        // TODO: Convert our identity to ipld(?)
-        let bytes = serde_json::to_vec(&identity)?;
+        let ipld = to_ipld(identity.clone()).map_err(anyhow::Error::from)?;
 
-        // Store the identity as a dag
-        // TODO: Create a single root dag for the Cid
-        let ident_cid = self.ipfs.put_dag(ipld!(bytes)).await?;
-        let friends_cid = self.ipfs.put_dag(ipld!(Vec::<u8>::new())).await?;
-        let block_cid = self.ipfs.put_dag(ipld!(Vec::<u8>::new())).await?;
+        // TODO: Create a single root dag for the Cids
+        let ident_cid = self.ipfs.put_dag(ipld).await?;
+        let friends_cid = self
+            .ipfs
+            .put_dag(to_ipld(Vec::<Vec<PublicKey>>::new()).map_err(anyhow::Error::from)?)
+            .await?;
+        let block_cid = self
+            .ipfs
+            .put_dag(to_ipld(Vec::<Vec<PublicKey>>::new()).map_err(anyhow::Error::from)?)
+            .await?;
 
         // Pin the dag
         self.ipfs.insert_pin(&ident_cid, false).await?;
@@ -242,8 +255,8 @@ impl IdentityStore {
                 let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
                 let path = IpfsPath::from(cid);
                 match self.ipfs.get_dag(path).await {
-                    Ok(Ipld::Bytes(bytes)) => serde_json::from_slice::<Identity>(&bytes)?,
-                    _ => return Err(Error::IdentityDoesntExist), //Note: It should not hit here unless the repo is corrupted
+                    Ok(ipld) => from_ipld::<Identity>(ipld).map_err(anyhow::Error::from)?,
+                    Err(e) => return Err(Error::Any(e)), //Note: It should not hit here unless the repo is corrupted
                 }
             }
             Err(_) => return Err(Error::IdentityDoesntExist),
@@ -275,5 +288,9 @@ impl IdentityStore {
 
     pub fn end_event(&mut self) {
         self.end_event.store(true, Ordering::SeqCst);
+    }
+
+    pub fn set_check_peer(&mut self, val: bool) {
+        self.check_peer.store(val, Ordering::SeqCst)
     }
 }

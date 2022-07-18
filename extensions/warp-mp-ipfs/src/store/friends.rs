@@ -5,6 +5,7 @@ use std::time::Duration;
 use futures::{SinkExt, StreamExt, TryFutureExt};
 use ipfs::{Ipfs, IpfsPath, Keypair, PeerId, Protocol, Types};
 
+use libipld::serde::{from_ipld, to_ipld};
 use libipld::{ipld, Cid, Ipld};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use warp::crypto::signature::Ed25519PublicKey;
@@ -30,6 +31,9 @@ pub struct FriendsStore {
     // Would be used to stop the look in the tokio task
     end_event: Arc<AtomicBool>,
 
+    // Would enable a check to determine if peers are connected before broadcasting
+    check_peer: Arc<AtomicBool>,
+
     // Request meant for the user
     incoming_request: Arc<RwLock<Vec<FriendRequest>>>,
 
@@ -54,11 +58,13 @@ impl FriendsStore {
         interval: u64,
     ) -> anyhow::Result<Self> {
         let end_event = Arc::new(AtomicBool::new(false));
+        let check_peer = Arc::new(AtomicBool::new(false));
         let incoming_request = Arc::new(Default::default());
         let outgoing_request = Arc::new(Default::default());
 
         let store = Self {
             ipfs,
+            check_peer,
             end_event,
             incoming_request,
             outgoing_request,
@@ -102,7 +108,6 @@ impl FriendsStore {
 
                                 // Before we validate the request, we should check to see if the key is blocked
                                 // If it is, skip the request so we dont wait resources storing it.
-                                // TODO: Block/ban peer connection
                                 match store.is_blocked(data.from()).await {
                                     Ok(true) => continue,
                                     Ok(false) => {},
@@ -134,6 +139,7 @@ impl FriendsStore {
 
                                 if let Err(_e) = verify_serde_sig(pk, &request, &signature) {
                                     //Signature is not valid
+                                    //TODO: Log
                                     continue
                                 }
 
@@ -168,6 +174,13 @@ impl FriendsStore {
                     _ = broadcast_interval.tick() => {
                         //TODO: Add check to determine if peers are subscribed to topic before publishing
                         //TODO: Provide a signed and/or encrypted payload
+                        if store.check_peer.load(Ordering::SeqCst) {
+                            if let Ok(peers) = store.ipfs.pubsub_peers(Some(FRIENDS_BROADCAST.into())).await {
+                                if peers.is_empty() {
+                                    continue;
+                                }
+                            }
+                        }
                         let outgoing_request = store.outgoing_request.read().clone();
                         for request in outgoing_request.iter() {
                             if let Ok(bytes) = serde_json::to_vec(&request) {
@@ -208,7 +221,6 @@ impl FriendsStore {
 
         let peer: PeerId = pub_to_libp2p_pub(&pubkey)?.into();
 
-        let mut found = false;
         for request in self.outgoing_request.read().iter() {
             // checking the from and status is just a precaution and not required
             if request.from() == local_public_key
@@ -216,13 +228,8 @@ impl FriendsStore {
                 && request.status() == FriendRequestStatus::Pending
             {
                 // since the request has already been sent, we should not be sending it again
-                found = true;
-                break;
+                return Err(Error::CannotSendFriendRequest);
             }
-        }
-
-        if found {
-            return Err(Error::CannotSendFriendRequest);
         }
 
         let mut request = FriendRequest::default();
@@ -308,19 +315,19 @@ impl FriendsStore {
 
         // Although the request been validated before storing, we should validate again just to be safe
 
-        let index = self
+        let (index, incoming_request) = match self
             .incoming_request
             .read()
             .iter()
-            .position(|request| request.from() == pubkey && request.to() == local_public_key);
-
-        let incoming_request = match index {
+            .position(|request| request.from() == pubkey && request.to() == local_public_key)
+        {
             Some(index) => match self.incoming_request.read().get(index).cloned() {
-                Some(r) => r,
+                Some(r) => (index, r),
                 None => return Err(Error::CannotFindFriendRequest),
             },
             None => return Err(Error::CannotFindFriendRequest),
         };
+
         let pk = Ed25519PublicKey::try_from(incoming_request.from().into_bytes())?;
 
         let mut request = FriendRequest::default();
@@ -331,7 +338,7 @@ impl FriendsStore {
 
         let signature = match incoming_request.signature() {
             Some(s) => s,
-            None => return Err(Error::Other), //TODO: Signature Missing
+            None => return Err(Error::InvalidSignature),
         };
 
         verify_serde_sig(pk, &request, &signature)?;
@@ -348,9 +355,7 @@ impl FriendsStore {
 
         self.outgoing_request.write().push(request);
 
-        if let Some(index) = index {
-            self.incoming_request.write().remove(index);
-        }
+        self.incoming_request.write().remove(index);
 
         Ok(())
     }
@@ -363,13 +368,11 @@ impl FriendsStore {
                 let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
                 let path = IpfsPath::from(cid);
                 match self.ipfs.get_dag(path).await {
-                    Ok(Ipld::Bytes(bytes)) => {
-                        let list =
-                            serde_json::from_slice::<Vec<PublicKey>>(&bytes).unwrap_or_default();
+                    Ok(ipld) => {
+                        let list = from_ipld::<Vec<PublicKey>>(ipld).unwrap_or_default();
                         Ok((cid, list))
                     }
                     Err(e) => Err(Error::Any(anyhow::anyhow!("Unable to get dag: {}", e))),
-                    _ => Err(Error::Other),
                 }
             }
             Err(e) => Err(e),
@@ -395,20 +398,26 @@ impl FriendsStore {
 
         if block_list.contains(&pubkey) {
             //TODO: Proper error related to blocking
-            return Err(Error::FriendExist);
+            return Err(Error::PublicKeyIsBlocked);
         }
 
-        block_list.push(pubkey);
+        block_list.push(pubkey.clone());
 
         self.ipfs.remove_pin(&block_cid, false).await?;
 
-        let block_list_bytes = serde_json::to_vec(&block_list)?;
+        let list = to_ipld(block_list).map_err(anyhow::Error::from)?;
 
-        let cid = self.ipfs.put_dag(ipld!(block_list_bytes)).await?;
+        let cid = self.ipfs.put_dag(ipld!(list)).await?;
 
         self.ipfs.insert_pin(&cid, false).await?;
 
         self.tesseract.set("block_cid", &cid.to_string())?;
+
+        if self.is_friend(pubkey.clone()).await.is_ok() {
+            if let Err(_e) = self.remove_friend(pubkey).await {
+                //TODO: Log error
+            }
+        }
         Ok(())
     }
 
@@ -429,9 +438,9 @@ impl FriendsStore {
 
         self.ipfs.remove_pin(&block_cid, false).await?;
 
-        let block_list_bytes = serde_json::to_vec(&block_list)?;
+        let list = to_ipld(block_list).map_err(anyhow::Error::from)?;
 
-        let cid = self.ipfs.put_dag(ipld!(block_list_bytes)).await?;
+        let cid = self.ipfs.put_dag(ipld!(list)).await?;
 
         self.ipfs.insert_pin(&cid, false).await?;
 
@@ -447,13 +456,11 @@ impl FriendsStore {
                 let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
                 let path = IpfsPath::from(cid);
                 match self.ipfs.get_dag(path).await {
-                    Ok(Ipld::Bytes(bytes)) => {
-                        let list =
-                            serde_json::from_slice::<Vec<PublicKey>>(&bytes).unwrap_or_default();
+                    Ok(ipld) => {
+                        let list = from_ipld::<Vec<PublicKey>>(ipld).unwrap_or_default();
                         Ok((cid, list))
                     }
                     Err(e) => Err(Error::Any(anyhow::anyhow!("Unable to get dag: {}", e))),
-                    _ => Err(Error::Other),
                 }
             }
             Err(e) => Err(e),
@@ -470,6 +477,10 @@ impl FriendsStore {
 
     // Should not be called directly but only after a request is accepted
     pub async fn add_friend(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+        if self.is_blocked(pubkey.clone()).await? {
+            return Err(Error::FriendDoesntExist); //TODO: Block error
+        }
+
         let (friend_cid, mut friend_list) = self.raw_friends_list().await?;
 
         if friend_list.contains(&pubkey) {
@@ -480,9 +491,9 @@ impl FriendsStore {
 
         self.ipfs.remove_pin(&friend_cid, false).await?;
 
-        let friend_list_bytes = serde_json::to_vec(&friend_list)?;
+        let list = to_ipld(friend_list).map_err(anyhow::Error::from)?;
 
-        let cid = self.ipfs.put_dag(ipld!(friend_list_bytes)).await?;
+        let cid = self.ipfs.put_dag(ipld!(list)).await?;
 
         self.ipfs.insert_pin(&cid, false).await?;
 
@@ -505,9 +516,9 @@ impl FriendsStore {
 
         self.ipfs.remove_pin(&friend_cid, false).await?;
 
-        let friend_list_bytes = serde_json::to_vec(&friend_list)?;
+        let list = to_ipld(friend_list).map_err(anyhow::Error::from)?;
 
-        let cid = self.ipfs.put_dag(ipld!(friend_list_bytes)).await?;
+        let cid = self.ipfs.put_dag(ipld!(list)).await?;
 
         self.ipfs.insert_pin(&cid, false).await?;
 
@@ -569,5 +580,9 @@ impl FriendsStore {
             .filter(|request| request.status() == FriendRequestStatus::Pending)
             .cloned()
             .collect::<Vec<_>>()
+    }
+
+    pub fn set_check_peer(&mut self, val: bool) {
+        self.check_peer.store(val, Ordering::SeqCst)
     }
 }

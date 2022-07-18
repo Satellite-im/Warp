@@ -55,6 +55,7 @@ async fn main() -> anyhow::Result<()> {
         username(&ident_b),
         bs58::encode(ident_b.public_key().as_ref()).into_string()
     );
+    println!();
 
     account_a.send_request(ident_b.public_key())?;
 
@@ -140,7 +141,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        1 | _ => {
+        _ => {
             println!("Denying {} friend request", username(&ident_a));
             account_b.deny_request(ident_a.public_key())?;
         }
@@ -169,7 +170,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 //Note: Because of the internal nature of this extension and not reliant on a central confirmation, this will be used to add delays to allow the separate
-//      task to
+//      background task to complete its action
 async fn delay() {
     fixed_delay(90).await;
 }

@@ -10,6 +10,7 @@ pub mod store;
 use anyhow::bail;
 use config::Config;
 use futures::{Future, TryFutureExt};
+use libipld::serde::to_ipld;
 use libipld::{ipld, Cid, Ipld};
 use serde::de::DeserializeOwned;
 use std::any::Any;
@@ -282,8 +283,8 @@ impl MultiPass for IpfsIdentity {
             async_block_in_place_uncheck(self.ipfs.remove_pin(&cid, false))?;
         };
 
-        let bytes = serde_json::to_vec(&identity)?;
-        let ident_cid = async_block_in_place_uncheck(self.ipfs.put_dag(ipld!(bytes)))?;
+        let ipld = to_ipld(&identity).map_err(anyhow::Error::from)?;
+        let ident_cid = async_block_in_place_uncheck(self.ipfs.put_dag(ipld))?;
 
         async_block_in_place_uncheck(self.ipfs.insert_pin(&ident_cid, false))?;
 
@@ -380,80 +381,6 @@ impl Friends for IpfsIdentity {
         }
         Err(Error::FriendDoesntExist)
     }
-}
-
-#[allow(dead_code)]
-fn to_ipld<S: serde::Serialize>(ser: S) -> anyhow::Result<Ipld> {
-    let value = serde_json::to_value(ser)?;
-    let item = match value {
-        serde_json::Value::Null => Ipld::Null,
-        serde_json::Value::Bool(bool) => Ipld::Bool(bool),
-        //TODO: Maybe perform explicit check since all numbers are returned as Option::is_some
-        //      otherwise this would continue to be null for a array of numbers
-        serde_json::Value::Number(n) => match (n.as_i64(), n.as_u64(), n.as_f64()) {
-            (Some(n), None, None) => Ipld::Integer(n as i128),
-            (None, Some(n), None) => Ipld::Integer(n as i128),
-            (None, None, Some(n)) => Ipld::Float(n),
-            _ => Ipld::Null,
-        },
-        serde_json::Value::String(string) => Ipld::String(string),
-        serde_json::Value::Array(arr) => {
-            let mut ipld_arr = vec![];
-            for item in arr {
-                ipld_arr.push(to_ipld(item)?)
-            }
-            Ipld::List(ipld_arr)
-        }
-        serde_json::Value::Object(val_map) => {
-            let mut map = BTreeMap::new();
-            for (k, v) in val_map {
-                let ipld = to_ipld(v)?;
-                map.insert(k, ipld);
-            }
-            Ipld::Map(map)
-        }
-    };
-
-    Ok(item)
-}
-
-#[allow(dead_code)]
-fn from_ipld<D: DeserializeOwned>(ipld: &Ipld) -> anyhow::Result<D> {
-    let value = match ipld {
-        Ipld::Null => serde_json::Value::Null,
-        Ipld::Bool(bool) => serde_json::Value::Bool(*bool),
-        Ipld::Integer(i) => {
-            if *i >= std::i64::MAX as i128 {
-                //since we dont to convert i128 to i64 if its over the max we will return a null for now
-                serde_json::Value::Null
-            } else {
-                let new_number = *i as i64;
-                serde_json::Value::from(new_number)
-            }
-        }
-        Ipld::Float(float) => serde_json::Value::from(*float),
-        Ipld::String(string) => serde_json::Value::String(string.clone()),
-        Ipld::Bytes(bytes) => serde_json::Value::from(bytes.clone()),
-        Ipld::List(array) => {
-            let mut value_arr = vec![];
-            for item in array {
-                let v = from_ipld(item)?;
-                value_arr.push(v);
-            }
-            serde_json::Value::Array(value_arr)
-        }
-        Ipld::Map(map) => {
-            let mut val_map = serde_json::Map::new();
-            for (k, v) in map {
-                let val = from_ipld(v)?;
-                val_map.insert(k.clone(), val);
-            }
-            serde_json::Value::Object(val_map)
-        }
-        Ipld::Link(_) => serde_json::Value::Null, //Since "Value" doesnt have a cid link, we will leave this null for now
-    };
-    let item = serde_json::from_value(value)?;
-    Ok(item)
 }
 
 pub mod ffi {
