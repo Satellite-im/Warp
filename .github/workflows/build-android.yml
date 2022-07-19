@@ -1,0 +1,46 @@
+name: Build Android Libraries
+on: [push]
+
+jobs:
+  build_android_libraries:
+    name: Building Libraries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        target: [aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android]
+        include:
+          - target: aarch64-linux-android
+            platform: android
+            os: ubuntu-latest
+          - target: armv7-linux-androideabi
+            platform: android
+            os: ubuntu-latest
+          - target: i686-linux-android
+            platform: android
+            os: ubuntu-latest
+          - target: x86_64-linux-android
+            platform: android
+            os: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+      - name: Install cbindgen
+        run: cargo install cbindgen
+      - name: Install cargo-ndk
+        if: ${{ matrix.platform == 'android' }}
+        run: cargo install cargo-ndk
+      - name: Set NDK 22 as default
+        if: ${{ matrix.platform == 'android' }}
+        run: |
+          ANDROID_ROOT=/usr/local/lib/android
+          ANDROID_SDK_ROOT=${ANDROID_ROOT}/sdk
+          ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk-bundle
+          ln -sfn $ANDROID_SDK_ROOT/ndk/22.1.7171670 $ANDROID_NDK_ROOT
+      - uses: actions-rs/cargo@v1
+        if: ${{ matrix.platform == 'android' }}
+        with:
+          command: ndk
+          args: --target ${{ matrix.target }} build -p warp -p warp-mp-ipfs
