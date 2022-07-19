@@ -87,9 +87,24 @@ impl FriendsStore {
                 }
             });
         }
-
+        
         tokio::spawn(async move {
             let mut store = store_inner;
+
+            // autoban the blocklist
+            match store.block_list().await {
+                Ok(list) => for pubkey in list {
+                    if let Ok(peer_id) = pub_to_libp2p_pub(&pubkey).map(|p| p.to_peer_id()) {
+                        if let Err(_e) = store.ipfs.ban_peer(peer_id).await {
+                            //TODO: Log
+                        } 
+                    }
+                },
+                Err(_e) => {
+                    //TODO: Log
+                }
+            };
+
 
             futures::pin_mut!(stream);
             let mut broadcast_interval = tokio::time::interval(Duration::from_millis(interval));
@@ -436,10 +451,14 @@ impl FriendsStore {
         self.tesseract.set("block_cid", &cid.to_string())?;
 
         if self.is_friend(pubkey.clone()).await.is_ok() {
-            if let Err(_e) = self.remove_friend(pubkey).await {
+            if let Err(_e) = self.remove_friend(pubkey.clone()).await {
                 //TODO: Log error
             }
         }
+
+        let peer_id = pub_to_libp2p_pub(&pubkey)?.to_peer_id();
+
+        self.ipfs.ban_peer(peer_id).await?;
         Ok(())
     }
 
@@ -467,6 +486,10 @@ impl FriendsStore {
         self.ipfs.insert_pin(&cid, false).await?;
 
         self.tesseract.set("block_cid", &cid.to_string())?;
+
+        let peer_id = pub_to_libp2p_pub(&pubkey)?.to_peer_id();
+
+        self.ipfs.unban_peer(peer_id).await?;
         Ok(())
     }
 }
