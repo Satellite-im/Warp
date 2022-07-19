@@ -287,7 +287,7 @@ impl FriendsStore {
 
         let signature = match incoming_request.signature() {
             Some(s) => s,
-            None => return Err(Error::Other), //TODO: Signature Missing
+            None => return Err(Error::InvalidSignature), //TODO: Signature Missing
         };
 
         verify_serde_sig(pk, &request, &signature)?;

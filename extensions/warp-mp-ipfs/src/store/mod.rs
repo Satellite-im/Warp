@@ -31,7 +31,7 @@ fn libp2p_pub_to_pub(public_key: &libp2p::identity::PublicKey) -> anyhow::Result
 
 // Note that this are temporary
 fn sign_serde<D: Serialize>(tesseract: &Tesseract, data: &D) -> anyhow::Result<Vec<u8>> {
-    let kp = tesseract.retrieve("ipfs_keypair")?;
+    let kp = tesseract.retrieve("keypair")?;
     let kp = bs58::decode(kp).into_vec()?;
     let keypair = Ed25519Keypair::from_bytes(&kp)?;
     let bytes = serde_json::to_vec(data)?;

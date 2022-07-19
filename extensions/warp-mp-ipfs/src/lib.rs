@@ -93,7 +93,7 @@ impl IpfsIdentity {
         tesseract: Tesseract,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity> {
-        let keypair = match tesseract.retrieve("ipfs_keypair") {
+        let keypair = match tesseract.retrieve("keypair") {
             Ok(keypair) => {
                 let kp = bs58::decode(keypair).into_vec()?;
                 let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
@@ -105,7 +105,7 @@ impl IpfsIdentity {
                 let mut tesseract = tesseract.clone();
                 if let Keypair::Ed25519(kp) = Keypair::generate_ed25519() {
                     let encoded_kp = bs58::encode(&kp.encode()).into_string();
-                    tesseract.set("ipfs_keypair", &encoded_kp)?;
+                    tesseract.set("keypair", &encoded_kp)?;
                     Keypair::Ed25519(kp)
                 } else {
                     anyhow::bail!("Unreachable")
@@ -138,7 +138,7 @@ impl IpfsIdentity {
             tokio::fs::create_dir(opts.ipfs_path.clone()).await?;
         }
 
-        let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
+        let (ipfs, fut) = UninitializedIpfs::new(opts).start().await.unwrap();
         tokio::spawn(fut);
 
         let identity_store = IdentityStore::new(

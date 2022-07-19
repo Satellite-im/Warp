@@ -231,7 +231,7 @@ impl IdentityStore {
     }
 
     pub fn get_keypair(&self) -> anyhow::Result<Keypair> {
-        match self.tesseract.retrieve("ipfs_keypair") {
+        match self.tesseract.retrieve("keypair") {
             Ok(keypair) => {
                 let kp = bs58::decode(keypair).into_vec()?;
                 let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
