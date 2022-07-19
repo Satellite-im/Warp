@@ -123,7 +123,7 @@ impl IpfsIdentity {
 
         let opts = IpfsOptions {
             ipfs_path: path.clone(),
-            keypair: keypair.clone(),
+            keypair,
             bootstrap: config.bootstrap,
             mdns: config.ipfs_setting.mdns.enable,
             kad_protocol: None,
