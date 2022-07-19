@@ -301,7 +301,7 @@ impl IdentityStore {
         self.end_event.store(true, Ordering::SeqCst);
     }
 
-    pub fn set_check_peer(&mut self, val: bool) {
+    pub fn set_broadcast_with_connection(&mut self, val: bool) {
         self.broadcast_with_connection.store(val, Ordering::SeqCst)
     }
 }

@@ -124,7 +124,7 @@ impl FriendsStore {
 
                                 // Before we validate the request, we should check to see if the key is blocked
                                 // If it is, skip the request so we dont wait resources storing it.
-                                match store.is_blocked(data.from()).await {
+                                match store.is_blocked(&data.from()).await {
                                     Ok(true) => continue,
                                     Ok(false) => {},
                                     Err(_e) => {
@@ -168,7 +168,7 @@ impl FriendsStore {
 
                                         let _ = store.outgoing_request.write().remove(index);
 
-                                        if let Err(_e) = store.add_friend(request.from()).await {
+                                        if let Err(_e) = store.add_friend(&request.from()).await {
                                             //TODO: Log
                                             continue
                                         }
@@ -222,28 +222,28 @@ impl FriendsStore {
 }
 
 impl FriendsStore {
-    pub async fn send_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+    pub async fn send_request(&mut self, pubkey: &PublicKey) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
         let local_public_key = libp2p_pub_to_pub(&local_ipfs_public_key)?;
 
-        if local_public_key == pubkey {
+        if local_public_key.eq(pubkey) {
             return Err(Error::CannotSendSelfFriendRequest);
         }
 
-        if self.is_friend(pubkey.clone()).await.is_ok() {
+        if self.is_friend(pubkey).await.is_ok() {
             return Err(Error::FriendExist);
         }
 
-        if self.has_request_from(pubkey.clone()) {
+        if self.has_request_from(pubkey) {
             return Err(Error::FriendRequestExist);
         }
 
-        let peer: PeerId = pub_to_libp2p_pub(&pubkey)?.into();
+        let peer: PeerId = pub_to_libp2p_pub(pubkey)?.into();
 
         for request in self.outgoing_request.read().iter() {
             // checking the from and status is just a precaution and not required
             if request.from() == local_public_key
-                && request.to() == pubkey
+                && request.to().eq(pubkey)
                 && request.status() == FriendRequestStatus::Pending
             {
                 // since the request has already been sent, we should not be sending it again
@@ -253,7 +253,7 @@ impl FriendsStore {
 
         let mut request = FriendRequest::default();
         request.set_from(local_public_key);
-        request.set_to(pubkey);
+        request.set_to(pubkey.clone());
         request.set_status(FriendRequestStatus::Pending);
         let signature = sign_serde(&self.tesseract, &request)?;
 
@@ -265,16 +265,16 @@ impl FriendsStore {
         Ok(())
     }
 
-    pub async fn accept_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+    pub async fn accept_request(&mut self, pubkey: &PublicKey) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
         let local_public_key = libp2p_pub_to_pub(&local_ipfs_public_key)?;
 
-        if local_public_key == pubkey {
+        if local_public_key.eq(pubkey) {
             return Err(Error::CannotAcceptSelfAsFriend);
         }
 
-        if !self.has_request_from(pubkey.clone()) {
+        if !self.has_request_from(pubkey) {
             return Err(Error::FriendRequestDoesntExist);
         }
         // Although the request been validated before storing, we should validate again just to be safe
@@ -283,7 +283,7 @@ impl FriendsStore {
             .incoming_request
             .read()
             .iter()
-            .position(|request| request.from() == pubkey && request.to() == local_public_key);
+            .position(|request| request.from().eq(pubkey) && request.to() == local_public_key);
 
         let incoming_request = match index {
             Some(index) => match self.incoming_request.read().get(index).cloned() {
@@ -326,16 +326,16 @@ impl FriendsStore {
         Ok(())
     }
 
-    pub async fn reject_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+    pub async fn reject_request(&mut self, pubkey: &PublicKey) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
         let local_public_key = libp2p_pub_to_pub(&local_ipfs_public_key)?;
 
-        if local_public_key == pubkey {
+        if local_public_key.eq(pubkey) {
             return Err(Error::CannotDenySelfAsFriend);
         }
 
-        if !self.has_request_from(pubkey.clone()) {
+        if !self.has_request_from(pubkey) {
             return Err(Error::FriendRequestDoesntExist);
         }
 
@@ -345,7 +345,7 @@ impl FriendsStore {
             .incoming_request
             .read()
             .iter()
-            .position(|request| request.from() == pubkey && request.to() == local_public_key)
+            .position(|request| request.from().eq(pubkey) && request.to() == local_public_key)
         {
             Some(index) => match self.incoming_request.read().get(index).cloned() {
                 Some(r) => (index, r),
@@ -386,12 +386,12 @@ impl FriendsStore {
         Ok(())
     }
 
-    pub fn has_request_from(&self, pubkey: PublicKey) -> bool {
+    pub fn has_request_from(&self, pubkey: &PublicKey) -> bool {
         self.incoming_request
             .read()
             .iter()
             .filter(|request| {
-                request.from() == pubkey && request.status() == FriendRequestStatus::Pending
+                request.from().eq(pubkey) && request.status() == FriendRequestStatus::Pending
             })
             .count()
             != 0
@@ -420,20 +420,20 @@ impl FriendsStore {
         self.raw_block_list().await.map(|(_, list)| list)
     }
 
-    pub async fn is_blocked(&self, public_key: PublicKey) -> Result<bool, Error> {
+    pub async fn is_blocked(&self, public_key: &PublicKey) -> Result<bool, Error> {
         self.block_list()
             .await
-            .map(|list| list.contains(&public_key))
+            .map(|list| list.contains(public_key))
     }
 
     pub async fn block_cid(&self) -> Result<Cid, Error> {
         self.raw_block_list().await.map(|(cid, _)| cid)
     }
 
-    pub async fn block(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+    pub async fn block(&mut self, pubkey: &PublicKey) -> Result<(), Error> {
         let (block_cid, mut block_list) = self.raw_block_list().await?;
 
-        if block_list.contains(&pubkey) {
+        if block_list.contains(pubkey) {
             //TODO: Proper error related to blocking
             return Err(Error::PublicKeyIsBlocked);
         }
@@ -450,29 +450,29 @@ impl FriendsStore {
 
         self.tesseract.set("block_cid", &cid.to_string())?;
 
-        if self.is_friend(pubkey.clone()).await.is_ok() {
-            if let Err(_e) = self.remove_friend(pubkey.clone()).await {
+        if self.is_friend(pubkey).await.is_ok() {
+            if let Err(_e) = self.remove_friend(pubkey).await {
                 //TODO: Log error
             }
         }
 
-        let peer_id = pub_to_libp2p_pub(&pubkey)?.to_peer_id();
+        let peer_id = pub_to_libp2p_pub(pubkey)?.to_peer_id();
 
         self.ipfs.ban_peer(peer_id).await?;
         Ok(())
     }
 
-    pub async fn unblock(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+    pub async fn unblock(&mut self, pubkey: &PublicKey) -> Result<(), Error> {
         let (block_cid, mut block_list) = self.raw_block_list().await?;
 
-        if !block_list.contains(&pubkey) {
+        if !block_list.contains(pubkey) {
             //TODO: Proper error related to blocking
             return Err(Error::FriendDoesntExist);
         }
 
         let index = block_list
             .iter()
-            .position(|pk| *pk == pubkey)
+            .position(|pk| pk.eq(pubkey))
             .ok_or(Error::ArrayPositionNotFound)?;
 
         block_list.remove(index);
@@ -521,18 +521,18 @@ impl FriendsStore {
     }
 
     // Should not be called directly but only after a request is accepted
-    pub async fn add_friend(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        if self.is_blocked(pubkey.clone()).await? {
+    pub async fn add_friend(&mut self, pubkey: &PublicKey) -> Result<(), Error> {
+        if self.is_blocked(pubkey).await? {
             return Err(Error::FriendDoesntExist); //TODO: Block error
         }
 
         let (friend_cid, mut friend_list) = self.raw_friends_list().await?;
 
-        if friend_list.contains(&pubkey) {
+        if friend_list.contains(pubkey) {
             return Err(Error::FriendExist);
         }
 
-        friend_list.push(pubkey);
+        friend_list.push(pubkey.clone());
 
         self.ipfs.remove_pin(&friend_cid, false).await?;
 
@@ -546,15 +546,15 @@ impl FriendsStore {
         Ok(())
     }
 
-    pub async fn remove_friend(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+    pub async fn remove_friend(&mut self, pubkey: &PublicKey) -> Result<(), Error> {
         let (friend_cid, mut friend_list) = self.raw_friends_list().await?;
-        if !friend_list.contains(&pubkey) {
+        if !friend_list.contains(pubkey) {
             return Err(Error::FriendDoesntExist);
         }
 
         let friend_index = friend_list
             .iter()
-            .position(|pk| *pk == pubkey)
+            .position(|pk| pk.eq(pubkey))
             .ok_or(Error::ArrayPositionNotFound)?;
 
         friend_list.remove(friend_index);
@@ -590,10 +590,10 @@ impl FriendsStore {
     //     Ok(identity_list)
     // }
 
-    pub async fn is_friend(&self, pubkey: PublicKey) -> Result<(), Error> {
+    pub async fn is_friend(&self, pubkey: &PublicKey) -> Result<(), Error> {
         let list = self.friends_list().await?;
         for pk in list {
-            if pk == pubkey {
+            if pk.eq(pubkey) {
                 return Ok(());
             }
         }
@@ -627,7 +627,7 @@ impl FriendsStore {
             .collect::<Vec<_>>()
     }
 
-    pub fn set_check_peer(&mut self, val: bool) {
+    pub fn set_broadcast_with_connection(&mut self, val: bool) {
         self.broadcast_with_connection.store(val, Ordering::SeqCst)
     }
 }

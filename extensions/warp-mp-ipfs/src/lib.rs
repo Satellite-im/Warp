@@ -350,7 +350,7 @@ impl MultiPass for IpfsIdentity {
 
 impl Friends for IpfsIdentity {
     fn send_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.send_request(pubkey.clone()))?;
+        async_block_in_place_uncheck(self.friend_store.send_request(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if let Some(request) = self
                 .list_outgoing_request()?
@@ -367,7 +367,7 @@ impl Friends for IpfsIdentity {
     }
 
     fn accept_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.accept_request(pubkey.clone()))?;
+        async_block_in_place_uncheck(self.friend_store.accept_request(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if let Some(key) = self
                 .list_friends()?
@@ -384,7 +384,7 @@ impl Friends for IpfsIdentity {
     }
 
     fn deny_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.reject_request(pubkey.clone()))?;
+        async_block_in_place_uncheck(self.friend_store.reject_request(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if !self
                 .list_all_request()?
@@ -411,7 +411,7 @@ impl Friends for IpfsIdentity {
     }
 
     fn remove_friend(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.remove_friend(pubkey.clone()))?;
+        async_block_in_place_uncheck(self.friend_store.remove_friend(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey.clone()).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
@@ -422,7 +422,7 @@ impl Friends for IpfsIdentity {
     }
 
     fn block(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.block(pubkey.clone()))?;
+        async_block_in_place_uncheck(self.friend_store.block(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey.clone()).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
@@ -433,7 +433,7 @@ impl Friends for IpfsIdentity {
     }
 
     fn unblock(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.unblock(pubkey.clone()))?;
+        async_block_in_place_uncheck(self.friend_store.unblock(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey.clone()).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
@@ -452,13 +452,7 @@ impl Friends for IpfsIdentity {
     }
 
     fn has_friend(&self, pubkey: PublicKey) -> Result<(), Error> {
-        let list = self.list_friends()?;
-        for pk in list {
-            if pk == pubkey {
-                return Ok(());
-            }
-        }
-        Err(Error::FriendDoesntExist)
+        async_block_in_place_uncheck(self.friend_store.is_friend(&pubkey))
     }
 }
 
