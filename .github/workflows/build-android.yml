@@ -27,8 +27,6 @@ jobs:
         with:
           toolchain: stable
           target: ${{ matrix.target }}
-      - name: Install cbindgen
-        run: cargo install cbindgen
       - name: Install cargo-ndk
         if: ${{ matrix.platform == 'android' }}
         run: cargo install cargo-ndk
