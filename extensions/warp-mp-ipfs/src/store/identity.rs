@@ -139,13 +139,23 @@ impl IdentityStore {
                             }
                         }
                         let ident = store.identity.read().clone();
-                        if let Some(ident) = ident.as_ref() {
-                            if let Ok(bytes) = serde_json::to_vec(&ident) {
-                                if let Err(_e) = store.ipfs.pubsub_publish(IDENTITY_BROADCAST.into(), bytes).await {
+                        let ident_bytes = match ident.as_ref() {
+                            Some(indent) => match serde_json::to_vec(&ident) {
+                                Ok(bytes) => bytes,
+                                Err(_e) => {
+                                    //TODO: Log
                                     continue
-                                }
-                            }
+                                },
+                            },
+                            //TODO: Log?
+                            None => continue
+                        };
+
+                        if let Err(_e) = store.ipfs.pubsub_publish(IDENTITY_BROADCAST.into(), ident_bytes).await {
+                            continue
                         }
+
+
                     }
                 }
             }

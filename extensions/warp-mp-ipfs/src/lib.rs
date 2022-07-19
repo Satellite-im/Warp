@@ -140,7 +140,7 @@ impl IpfsIdentity {
             tokio::fs::create_dir(opts.ipfs_path.clone()).await?;
         }
 
-        let (ipfs, fut) = UninitializedIpfs::new(opts).start().await.unwrap();
+        let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
         tokio::spawn(fut);
 
         let identity_store = IdentityStore::new(
