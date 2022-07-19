@@ -18,6 +18,5 @@ Cargo.lock
 **/.DS_Store
 .idea
 .vscode
-extensions/**/cbindgen.toml
 
 /data

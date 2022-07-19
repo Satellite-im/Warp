@@ -1,0 +1,20 @@
+
+
+language = "C"
+
+cpp_compat = true
+include_guard = "_WARP_RG_LIBP2P_H_"
+
+[export]
+
+exclude = ["FFIError"]
+
+[parse]
+parse_deps = true
+clean = false
+include = ["warp"]
+
+[parse.expand]
+crates = ["warp", "warp-rg-libp2p"]
+
+

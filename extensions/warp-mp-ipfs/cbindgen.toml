@@ -1,0 +1,20 @@
+
+
+language = "C"
+
+cpp_compat = true
+include_guard = "_WARP_MP_IPFS_H_"
+
+[export]
+
+exclude = ["FFIError"]
+
+[parse]
+parse_deps = true
+clean = false
+include = ["warp"]
+
+[parse.expand]
+crates = ["warp", "warp-mp-ipfs"]
+
+
