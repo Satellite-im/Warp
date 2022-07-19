@@ -20,6 +20,7 @@ use std::time::Duration;
 use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
 use warp::data::{DataObject, DataType};
+use warp::hooks::Hooks;
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::sync::{Arc, Mutex, MutexGuard};
 
@@ -43,6 +44,7 @@ use warp::multipass::{identity, Friends, MultiPass};
 pub struct IpfsIdentity {
     path: PathBuf,
     cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    hooks: Option<Hooks>,
     tesseract: Tesseract,
     ipfs: Ipfs<Types>,
     temp: bool,
@@ -159,10 +161,13 @@ impl IpfsIdentity {
         )
         .await?;
 
+        let hooks = None;
+
         let identity = IpfsIdentity {
             path,
             tesseract,
             cache,
+            hooks,
             ipfs,
             temp,
             friend_store,
@@ -179,6 +184,12 @@ impl IpfsIdentity {
             .ok_or(Error::PocketDimensionExtensionUnavailable)?;
 
         Ok(cache.lock())
+    }
+
+    pub fn get_hooks(&self) -> anyhow::Result<&Hooks> {
+        let hooks = self.hooks.as_ref().ok_or(Error::Other)?;
+
+        Ok(hooks)
     }
 }
 
@@ -212,6 +223,10 @@ impl MultiPass for IpfsIdentity {
         if let Ok(mut cache) = self.get_cache() {
             let object = DataObject::new(DataType::from(Module::Accounts), &identity)?;
             cache.add_data(DataType::from(Module::Accounts), &object)?;
+        }
+        if let Ok(hooks) = self.get_hooks() {
+            let object = DataObject::new(DataType::Accounts, identity.clone())?;
+            hooks.trigger("accounts::new_identity", &object);
         }
         Ok(identity.public_key())
     }
@@ -313,10 +328,10 @@ impl MultiPass for IpfsIdentity {
 
         async_block_in_place_uncheck(self.identity_store.update_identity())?;
 
-        // if let Ok(hooks) = self.get_hooks() {
-        //     let object = DataObject::new(DataType::Accounts, identity.clone())?;
-        //     hooks.trigger("accounts::update_identity", &object);
-        // }
+        if let Ok(hooks) = self.get_hooks() {
+            let object = DataObject::new(DataType::Accounts, identity.clone())?;
+            hooks.trigger("accounts::update_identity", &object);
+        }
 
         Ok(())
     }
@@ -335,15 +350,52 @@ impl MultiPass for IpfsIdentity {
 
 impl Friends for IpfsIdentity {
     fn send_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.send_request(pubkey))
+        async_block_in_place_uncheck(self.friend_store.send_request(pubkey.clone()))?;
+        if let Ok(hooks) = self.get_hooks() {
+            if let Some(request) = self
+                .list_outgoing_request()?
+                .iter()
+                .filter(|request| request.to() == pubkey)
+                .collect::<Vec<_>>()
+                .first()
+            {
+                let object = DataObject::new(DataType::Accounts, request)?;
+                hooks.trigger("accounts::send_friend_request", &object);
+            }
+        }
+        Ok(())
     }
 
     fn accept_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.accept_request(pubkey))
+        async_block_in_place_uncheck(self.friend_store.accept_request(pubkey.clone()))?;
+        if let Ok(hooks) = self.get_hooks() {
+            if let Some(key) = self
+                .list_friends()?
+                .iter()
+                .filter(|pk| **pk == pubkey)
+                .collect::<Vec<_>>()
+                .first()
+            {
+                let object = DataObject::new(DataType::Accounts, key)?;
+                hooks.trigger("accounts::accept_friend_request", &object);
+            }
+        }
+        Ok(())
     }
 
     fn deny_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.reject_request(pubkey))
+        async_block_in_place_uncheck(self.friend_store.reject_request(pubkey.clone()))?;
+        if let Ok(hooks) = self.get_hooks() {
+            if !self
+                .list_all_request()?
+                .iter()
+                .any(|request| request.from() == pubkey)
+            {
+                let object = DataObject::new(DataType::Accounts, ())?;
+                hooks.trigger("accounts::deny_friend_request", &object);
+            }
+        }
+        Ok(())
     }
 
     fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
@@ -359,11 +411,36 @@ impl Friends for IpfsIdentity {
     }
 
     fn remove_friend(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.remove_friend(pubkey))
+        async_block_in_place_uncheck(self.friend_store.remove_friend(pubkey.clone()))?;
+        if let Ok(hooks) = self.get_hooks() {
+            if self.has_friend(pubkey.clone()).is_err() {
+                let object = DataObject::new(DataType::Accounts, pubkey)?;
+                hooks.trigger("accounts::remove_friend", &object);
+            }
+        }
+        Ok(())
     }
 
     fn block(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.block(pubkey))
+        async_block_in_place_uncheck(self.friend_store.block(pubkey.clone()))?;
+        if let Ok(hooks) = self.get_hooks() {
+            if self.has_friend(pubkey.clone()).is_err() {
+                let object = DataObject::new(DataType::Accounts, pubkey)?;
+                hooks.trigger("accounts::block_key", &object);
+            }
+        }
+        Ok(())
+    }
+
+    fn unblock(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+        async_block_in_place_uncheck(self.friend_store.unblock(pubkey.clone()))?;
+        if let Ok(hooks) = self.get_hooks() {
+            if self.has_friend(pubkey.clone()).is_err() {
+                let object = DataObject::new(DataType::Accounts, pubkey)?;
+                hooks.trigger("accounts::unblock_key", &object);
+            }
+        }
+        Ok(())
     }
 
     fn block_list(&self) -> Result<Vec<PublicKey>, Error> {
