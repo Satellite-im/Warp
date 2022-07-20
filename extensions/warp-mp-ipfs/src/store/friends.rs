@@ -8,6 +8,7 @@ use ipfs::{Ipfs, IpfsPath, Keypair, PeerId, Protocol, Types};
 use libipld::serde::{from_ipld, to_ipld};
 use libipld::{ipld, Cid, Ipld};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use warp::async_block_in_place_uncheck;
 use warp::crypto::signature::Ed25519PublicKey;
 use warp::crypto::{signature::Ed25519Keypair, PublicKey};
 use warp::error::Error;
@@ -47,6 +48,14 @@ pub struct FriendsStore {
 impl Drop for FriendsStore {
     fn drop(&mut self) {
         self.end_event.store(true, Ordering::SeqCst);
+        async_block_in_place_uncheck(async {
+            if let Err(_e) = self.save_outgoing_requests().await {
+                //TODO: Log
+            }
+            if let Err(_e) = self.save_incoming_requests().await {
+                //TODO: Log
+            }
+        })
     }
 }
 
@@ -63,7 +72,7 @@ impl FriendsStore {
         let incoming_request = Arc::new(Default::default());
         let outgoing_request = Arc::new(Default::default());
 
-        let store = Self {
+        let mut store = Self {
             ipfs,
             broadcast_with_connection,
             end_event,
@@ -86,6 +95,14 @@ impl FriendsStore {
                     //TODO: Log
                 }
             });
+        }
+
+        if let Err(_e) = store.load_incoming_requests().await {
+            //TODO: Log
+        }
+
+        if let Err(_e) = store.load_outgoing_requests().await {
+            //TODO: Log
         }
 
         tokio::spawn(async move {
@@ -173,8 +190,19 @@ impl FriendsStore {
                                             //TODO: Log
                                             continue
                                         }
+                                        if let Err(_e) = store.save_incoming_requests().await {
+                                            //TODO: Log
+                                            continue
+                                        }
+        
                                     }
-                                    FriendRequestStatus::Pending => store.incoming_request.write().push(data),
+                                    FriendRequestStatus::Pending => {
+                                        store.incoming_request.write().push(data);
+                                        if let Err(_e) = store.save_incoming_requests().await {
+                                            //TODO: Log
+                                            continue
+                                        }
+                                    },
                                     FriendRequestStatus::Denied => {
                                         let index = match store.outgoing_request.read().iter().position(|request| request.from() == data.to() && request.status() == FriendRequestStatus::Pending) {
                                             Some(index) => index,
@@ -182,6 +210,10 @@ impl FriendsStore {
                                         };
 
                                         let _ = store.outgoing_request.write().remove(index);
+                                        if let Err(_e) = store.save_outgoing_requests().await {
+                                            //TODO: Log
+                                            continue
+                                        }
                                     },
                                     _ => {}
                                 };
@@ -248,7 +280,7 @@ impl FriendsStore {
                 && request.status() == FriendRequestStatus::Pending
             {
                 // since the request has already been sent, we should not be sending it again
-                return Err(Error::CannotSendFriendRequest);
+                return Err(Error::FriendRequestExist);
             }
         }
 
@@ -261,8 +293,7 @@ impl FriendsStore {
         request.set_signature(signature);
 
         self.outgoing_request.write().push(request);
-        //TODO: create dag of request
-
+        self.save_outgoing_requests().await?;
         Ok(())
     }
 
@@ -303,7 +334,7 @@ impl FriendsStore {
 
         let signature = match incoming_request.signature() {
             Some(s) => s,
-            None => return Err(Error::InvalidSignature), //TODO: Signature Missing
+            None => return Err(Error::InvalidSignature),
         };
 
         verify_serde_sig(pk, &request, &signature)?;
@@ -319,11 +350,11 @@ impl FriendsStore {
         self.add_friend(pubkey).await?;
 
         self.outgoing_request.write().push(request);
-
+        self.save_outgoing_requests().await?;
         if let Some(index) = index {
             self.incoming_request.write().remove(index);
+            self.save_incoming_requests().await?;
         }
-
         Ok(())
     }
 
@@ -381,9 +412,10 @@ impl FriendsStore {
         self.add_friend(pubkey).await?;
 
         self.outgoing_request.write().push(request);
+        self.save_outgoing_requests().await?;
 
         self.incoming_request.write().remove(index);
-
+        self.save_incoming_requests().await?;
         Ok(())
     }
 
@@ -440,8 +472,9 @@ impl FriendsStore {
         }
 
         block_list.push(pubkey.clone());
-
-        self.ipfs.remove_pin(&block_cid, false).await?;
+        if self.ipfs.is_pinned(&block_cid).await? {
+            self.ipfs.remove_pin(&block_cid, false).await?;
+        }
 
         let list = to_ipld(block_list).map_err(anyhow::Error::from)?;
 
@@ -478,7 +511,9 @@ impl FriendsStore {
 
         block_list.remove(index);
 
-        self.ipfs.remove_pin(&block_cid, false).await?;
+        if self.ipfs.is_pinned(&block_cid).await? {
+            self.ipfs.remove_pin(&block_cid, false).await?;
+        }
 
         let list = to_ipld(block_list).map_err(anyhow::Error::from)?;
 
@@ -535,7 +570,9 @@ impl FriendsStore {
 
         friend_list.push(pubkey.clone());
 
-        self.ipfs.remove_pin(&friend_cid, false).await?;
+        if self.ipfs.is_pinned(&friend_cid).await? {
+            self.ipfs.remove_pin(&friend_cid, false).await?;
+        }
 
         let list = to_ipld(friend_list).map_err(anyhow::Error::from)?;
 
@@ -560,7 +597,9 @@ impl FriendsStore {
 
         friend_list.remove(friend_index);
 
-        self.ipfs.remove_pin(&friend_cid, false).await?;
+        if self.ipfs.is_pinned(&friend_cid).await? {
+            self.ipfs.remove_pin(&friend_cid, false).await?;
+        }
 
         let list = to_ipld(friend_list).map_err(anyhow::Error::from)?;
 
@@ -585,6 +624,67 @@ impl FriendsStore {
 }
 
 impl FriendsStore {
+    pub async fn get_incoming_request_cid(&self) -> Result<Cid, Error> {
+        let cid = self.tesseract.retrieve("incoming_request_cid")?;
+        Ok(cid.parse().map_err(anyhow::Error::from)?)
+    }
+
+    pub async fn get_outgoing_request_cid(&self) -> Result<Cid, Error> {
+        let cid = self.tesseract.retrieve("outgoing_request_cid")?;
+        Ok(cid.parse().map_err(anyhow::Error::from)?)
+    }
+
+    pub async fn save_incoming_requests(&mut self) -> anyhow::Result<()> {
+        let incoming_ipld = to_ipld(self.incoming_request.read().clone())?;
+        let incoming_request_cid = self.ipfs.put_dag(incoming_ipld).await?;
+
+        if let Ok(old_incoming_cid) = self.get_incoming_request_cid().await {
+            if self.ipfs.is_pinned(&old_incoming_cid).await? {
+                self.ipfs.remove_pin(&old_incoming_cid, false).await?;
+            }
+        }
+
+        self.ipfs.insert_pin(&incoming_request_cid, false).await?;
+        self.tesseract
+            .set("incoming_request_cid", &incoming_request_cid.to_string())?;
+        Ok(())
+    }
+
+    pub async fn save_outgoing_requests(&mut self) -> anyhow::Result<()> {
+        let outgoing_ipld = to_ipld(self.outgoing_request.read().clone())?;
+        let outgoing_request_cid = self.ipfs.put_dag(outgoing_ipld).await?;
+
+        if let Ok(old_outgoing_cid) = self.get_outgoing_request_cid().await {
+            if self.ipfs.is_pinned(&old_outgoing_cid).await? {
+                self.ipfs.remove_pin(&old_outgoing_cid, false).await?;
+            }
+        }
+
+        self.ipfs.insert_pin(&outgoing_request_cid, false).await?;
+        self.tesseract
+            .set("outgoing_request_cid", &outgoing_request_cid.to_string())?;
+
+        Ok(())
+    }
+
+    pub async fn load_incoming_requests(&mut self) -> Result<(), Error> {
+        let cid = self.get_incoming_request_cid().await?;
+        let request_ipld = self.ipfs.get_dag(IpfsPath::from(cid)).await?;
+        let request_list: Vec<FriendRequest> =
+            from_ipld(request_ipld).map_err(anyhow::Error::from)?;
+        *self.incoming_request.write() = request_list;
+        Ok(())
+    }
+
+    pub async fn load_outgoing_requests(&mut self) -> Result<(), Error> {
+        let cid = self.get_outgoing_request_cid().await?;
+        let request_ipld = self.ipfs.get_dag(IpfsPath::from(cid)).await?;
+        let request_list: Vec<FriendRequest> =
+            from_ipld(request_ipld).map_err(anyhow::Error::from)?;
+        *self.outgoing_request.write() = request_list;
+        Ok(())
+    }
+
     pub fn list_all_request(&self) -> Vec<FriendRequest> {
         let mut requests = vec![];
         requests.extend(self.list_incoming_request());

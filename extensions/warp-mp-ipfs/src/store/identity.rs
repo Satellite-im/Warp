@@ -14,7 +14,7 @@ use libipld::{
 use warp::{
     crypto::{rand::Rng, PublicKey},
     error::Error,
-    multipass::identity::Identity,
+    multipass::identity::{FriendRequest, Identity},
     sync::{Arc, Mutex, RwLock},
     tesseract::Tesseract,
 };
@@ -200,11 +200,21 @@ impl IdentityStore {
             .ipfs
             .put_dag(to_ipld(Vec::<Vec<PublicKey>>::new()).map_err(anyhow::Error::from)?)
             .await?;
+        let incoming_request_cid = self
+            .ipfs
+            .put_dag(to_ipld(Vec::<Vec<FriendRequest>>::new()).map_err(anyhow::Error::from)?)
+            .await?;
+        let outgoing_request_cid = self
+            .ipfs
+            .put_dag(to_ipld(Vec::<Vec<FriendRequest>>::new()).map_err(anyhow::Error::from)?)
+            .await?;
 
         // Pin the dag
         self.ipfs.insert_pin(&ident_cid, false).await?;
         self.ipfs.insert_pin(&friends_cid, false).await?;
         self.ipfs.insert_pin(&block_cid, false).await?;
+        self.ipfs.insert_pin(&incoming_request_cid, false).await?;
+        self.ipfs.insert_pin(&outgoing_request_cid, false).await?;
 
         // Note that for the time being we will be storing the Cid to tesseract,
         // however this may be handled a different way.
@@ -213,6 +223,10 @@ impl IdentityStore {
         self.tesseract
             .set("friends_cid", &friends_cid.to_string())?;
         self.tesseract.set("block_cid", &block_cid.to_string())?;
+        self.tesseract
+            .set("incoming_request_cid", &incoming_request_cid.to_string())?;
+        self.tesseract
+            .set("outgoing_request_cid", &outgoing_request_cid.to_string())?;
 
         self.update_identity().await?;
         self.enable_event();
