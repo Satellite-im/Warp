@@ -6,9 +6,11 @@ use crate::crypto::PublicKey;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use warp_derive::{FFIFree};
+use warp_derive::FFIFree;
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree)]
+#[derive(
+    Default, Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree,
+)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Role {
     /// Name of the role
@@ -31,7 +33,9 @@ impl Role {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree)]
+#[derive(
+    Default, Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree,
+)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Badge {
     /// TBD
@@ -90,7 +94,9 @@ impl Graphics {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree)]
+#[derive(
+    Default, Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree,
+)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Identity {
     /// Username of the identity
@@ -233,7 +239,7 @@ pub struct FriendRequest {
 
     /// Signature of request
     #[serde(skip_serializing_if = "Option::is_none")]
-    signature: Option<Vec<u8>>
+    signature: Option<Vec<u8>>,
 }
 
 impl Default for FriendRequest {
@@ -243,7 +249,7 @@ impl Default for FriendRequest {
             to: Default::default(),
             status: Default::default(),
             date: Utc::now(),
-            signature: None
+            signature: None,
         }
     }
 }
@@ -296,11 +302,9 @@ impl FriendRequest {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl FriendRequest {
-
     pub fn set_date(&mut self, date: DateTime<Utc>) {
         self.date = date
     }
-
 
     pub fn date(&self) -> DateTime<Utc> {
         self.date
@@ -310,13 +314,11 @@ impl FriendRequest {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 impl FriendRequest {
-
     #[wasm_bindgen]
     pub fn set_date(&mut self) {
         //TODO: Use timestamp and convert it to Datetime
         self.date = Utc::now()
     }
-
 
     #[wasm_bindgen(getter)]
     pub fn date(&self) -> i64 {
@@ -508,8 +510,8 @@ impl IdentityUpdate {
 pub mod ffi {
     use crate::crypto::PublicKey;
     use crate::multipass::identity::{
-        Badge, FriendRequest, FriendRequestStatus, Graphics, Identifier, Identity, IdentityUpdate,
-        Role, FFIVec_Badge, FFIVec_Role
+        Badge, FFIVec_Badge, FFIVec_Role, FriendRequest, FriendRequestStatus, Graphics, Identifier,
+        Identity, IdentityUpdate, Role,
     };
     use std::ffi::{CStr, CString};
     use std::os::raw::{c_char, c_void};
@@ -682,9 +684,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_roles(
-        identity: *mut Identity,
-    ) -> *mut FFIVec_Role {
+    pub unsafe extern "C" fn multipass_identity_roles(identity: *mut Identity) -> *mut FFIVec_Role {
         if identity.is_null() {
             return std::ptr::null_mut();
         }

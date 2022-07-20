@@ -18,9 +18,9 @@ pub fn ffi_vec(item: TokenStream) -> TokenStream {
             }
 
             #[cfg(not(target_arch="wasm32"))]
-            impl Into<[<FFIVec_ #name>]> for Vec<#name> {
-                fn into(self) -> [<FFIVec_ #name>] {
-                    let list = self.iter().cloned().map(|item| Box::into_raw(Box::new(item))).collect::<Vec<_>>();
+            impl From<Vec<#name>> for [<FFIVec_ #name>] {
+                fn from(item: Vec<#name>) -> [<FFIVec_ #name>] {
+                    let list = item.iter().cloned().map(|item| Box::into_raw(Box::new(item))).collect::<Vec<_>>();
                     let mut vec = std::mem::ManuallyDrop::new(list);
                     let len = vec.len();
                     let cap = vec.capacity();
@@ -29,10 +29,11 @@ pub fn ffi_vec(item: TokenStream) -> TokenStream {
                 }
             }
 
+
             #[cfg(not(target_arch="wasm32"))]
-            impl Into<[<FFIVec_ #name>]> for &Vec<#name> {
-                fn into(self) -> [<FFIVec_ #name>] {
-                    let list = self.iter().cloned().map(|item| Box::into_raw(Box::new(item))).collect::<Vec<_>>();
+            impl From<&Vec<#name>> for [<FFIVec_ #name>] {
+                fn from(item: &Vec<#name>) -> [<FFIVec_ #name>] {
+                    let list = item.iter().cloned().map(|item| Box::into_raw(Box::new(item))).collect::<Vec<_>>();
                     let mut vec = std::mem::ManuallyDrop::new(list);
                     let len = vec.len();
                     let cap = vec.capacity();

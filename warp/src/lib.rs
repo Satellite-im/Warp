@@ -87,7 +87,7 @@ pub fn async_block_in_place_uncheck<F: futures::Future>(fut: F) -> F::Output {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub mod ffi {    
+pub mod ffi {
     #[repr(C)]
     pub struct FFIVec<T> {
         pub ptr: *mut T,
@@ -95,21 +95,23 @@ pub mod ffi {
         pub cap: usize,
     }
 
-    impl<T> Into<FFIVec<T>> for Vec<T> {
-        fn into(self) -> FFIVec<T> {
-            FFIVec::from(self)
-        }
-    }
-
-    impl<T> FFIVec<T> {
-        pub fn from(vec: Vec<T>) -> Self {
-            let mut vec = std::mem::ManuallyDrop::new(vec);
+    impl<T> From<Vec<T>> for FFIVec<T> {
+        fn from(item: Vec<T>) -> FFIVec<T> {
+            let mut vec = std::mem::ManuallyDrop::new(item);
             let len = vec.len();
             let cap = vec.capacity();
             let ptr = vec.as_mut_ptr();
             Self { ptr, len, cap }
         }
+    }
 
+    impl<T> From<FFIVec<T>> for Vec<T> {
+        fn from(item: FFIVec<T>) -> Vec<T> {
+            unsafe { Vec::from_raw_parts(item.ptr, item.len, item.cap) }
+        }
+    }
+
+    impl<T> FFIVec<T> {
         pub fn into_vec(self) -> Vec<T> {
             unsafe { Vec::from_raw_parts(self.ptr, self.len, self.cap) }
         }
@@ -123,37 +125,44 @@ pub mod ffi {
         pub cap: usize,
     }
 
-    impl Into<FFIVec_String> for Vec<String> {
-        fn into(self) -> FFIVec_String {
-            let list = self.iter().filter_map(|s| {
-                match std::ffi::CString::new(s.to_string()) {
+    impl From<Vec<String>> for FFIVec_String {
+        fn from(item: Vec<String>) -> FFIVec_String {
+            let list = item
+                .iter()
+                .filter_map(|s| match std::ffi::CString::new(s.to_string()) {
                     Ok(s) => Some(s.as_ptr() as *mut _),
-                    Err(_) => None
-                }
-            }).collect::<Vec<_>>();
+                    Err(_) => None,
+                })
+                .collect::<Vec<_>>();
 
             let mut vec = std::mem::ManuallyDrop::new(list);
             let len = vec.len();
             let cap = vec.capacity();
             let ptr = vec.as_mut_ptr();
-            FFIVec_String { len, cap, ptr}
+            FFIVec_String { len, cap, ptr }
         }
     }
 
     impl From<FFIVec_String> for Vec<String> {
         fn from(c_vec: FFIVec_String) -> Self {
-            unsafe { 
+            unsafe {
                 let raw_list = Vec::from_raw_parts(c_vec.ptr, c_vec.len, c_vec.cap);
-                raw_list.iter().filter_map(|ptr| std::ffi::CString::from_raw(*ptr).into_string().ok()).collect::<Vec<_>>()
+                raw_list
+                    .iter()
+                    .filter_map(|ptr| std::ffi::CString::from_raw(*ptr).into_string().ok())
+                    .collect::<Vec<_>>()
             }
         }
     }
 
     impl From<Box<FFIVec_String>> for Vec<String> {
         fn from(c_vec: Box<FFIVec_String>) -> Self {
-            unsafe { 
+            unsafe {
                 let raw_list = Vec::from_raw_parts(c_vec.ptr, c_vec.len, c_vec.cap);
-                raw_list.iter().filter_map(|ptr| std::ffi::CString::from_raw(*ptr).into_string().ok()).collect::<Vec<_>>()
+                raw_list
+                    .iter()
+                    .filter_map(|ptr| std::ffi::CString::from_raw(*ptr).into_string().ok())
+                    .collect::<Vec<_>>()
             }
         }
     }
@@ -229,7 +238,7 @@ pub mod ffi {
         pub error: *mut FFIError,
     }
 
-    /// Used when a function does not return anything when successful 
+    /// Used when a function does not return anything when successful
     #[repr(C)]
     pub struct FFIResult_Null {
         pub data: *mut std::os::raw::c_void,
@@ -246,9 +255,9 @@ pub mod ffi {
         }
     }
 
-    impl Into<FFIResult_Null> for Result<(), crate::error::Error> {
-        fn into(self) -> FFIResult_Null {
-            match self {
+    impl From<Result<(), crate::error::Error>> for FFIResult_Null {
+        fn from(item: Result<(), crate::error::Error>) -> FFIResult_Null {
+            match item {
                 Ok(_) => FFIResult_Null {
                     data: std::ptr::null_mut(),
                     error: std::ptr::null_mut(),
