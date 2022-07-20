@@ -574,7 +574,40 @@ pub mod ffi {
         async_on_block(async { mp.inner_guard().block(pk.clone()) }).into()
     }
 
-    //TODO: unblock and blocklist
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_unblock(
+        ctx: *mut MultiPassAdapter,
+        pubkey: *const PublicKey,
+    ) -> FFIResult_Null {
+        if ctx.is_null() {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        if pubkey.is_null() {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Argument is null")));
+        }
+
+        let mp = &mut *(ctx);
+        let pk = &*pubkey;
+        async_on_block(async { mp.inner_guard().unblock(pk.clone()) }).into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_block_list(
+        ctx: *mut MultiPassAdapter,
+    ) -> FFIResult<FFIVec_PublicKey> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        let mp = &mut *ctx;
+        match async_on_block(async { mp.inner_guard().block_list().map(|list| list.into()) }) {
+            Ok(list) => FFIResult::ok(list),
+            Err(e) => FFIResult::err(e)
+        }
+    }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
