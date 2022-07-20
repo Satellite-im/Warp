@@ -87,24 +87,25 @@ impl FriendsStore {
                 }
             });
         }
-        
+
         tokio::spawn(async move {
             let mut store = store_inner;
 
             // autoban the blocklist
             match store.block_list().await {
-                Ok(list) => for pubkey in list {
-                    if let Ok(peer_id) = pub_to_libp2p_pub(&pubkey).map(|p| p.to_peer_id()) {
-                        if let Err(_e) = store.ipfs.ban_peer(peer_id).await {
-                            //TODO: Log
-                        } 
+                Ok(list) => {
+                    for pubkey in list {
+                        if let Ok(peer_id) = pub_to_libp2p_pub(&pubkey).map(|p| p.to_peer_id()) {
+                            if let Err(_e) = store.ipfs.ban_peer(peer_id).await {
+                                //TODO: Log
+                            }
+                        }
                     }
-                },
+                }
                 Err(_e) => {
                     //TODO: Log
                 }
             };
-
 
             futures::pin_mut!(stream);
             let mut broadcast_interval = tokio::time::interval(Duration::from_millis(interval));
@@ -444,7 +445,7 @@ impl FriendsStore {
 
         let list = to_ipld(block_list).map_err(anyhow::Error::from)?;
 
-        let cid = self.ipfs.put_dag(ipld!(list)).await?;
+        let cid = self.ipfs.put_dag(list).await?;
 
         self.ipfs.insert_pin(&cid, false).await?;
 
@@ -481,13 +482,13 @@ impl FriendsStore {
 
         let list = to_ipld(block_list).map_err(anyhow::Error::from)?;
 
-        let cid = self.ipfs.put_dag(ipld!(list)).await?;
+        let cid = self.ipfs.put_dag(list).await?;
 
         self.ipfs.insert_pin(&cid, false).await?;
 
         self.tesseract.set("block_cid", &cid.to_string())?;
 
-        let peer_id = pub_to_libp2p_pub(&pubkey)?.to_peer_id();
+        let peer_id = pub_to_libp2p_pub(pubkey)?.to_peer_id();
 
         self.ipfs.unban_peer(peer_id).await?;
         Ok(())
@@ -538,7 +539,7 @@ impl FriendsStore {
 
         let list = to_ipld(friend_list).map_err(anyhow::Error::from)?;
 
-        let cid = self.ipfs.put_dag(ipld!(list)).await?;
+        let cid = self.ipfs.put_dag(list).await?;
 
         self.ipfs.insert_pin(&cid, false).await?;
 
@@ -563,7 +564,7 @@ impl FriendsStore {
 
         let list = to_ipld(friend_list).map_err(anyhow::Error::from)?;
 
-        let cid = self.ipfs.put_dag(ipld!(list)).await?;
+        let cid = self.ipfs.put_dag(list).await?;
 
         self.ipfs.insert_pin(&cid, false).await?;
 
@@ -571,24 +572,6 @@ impl FriendsStore {
 
         Ok(())
     }
-
-    // pub async fn friends_list_with_identity(&self) -> Result<Vec<Identity>, Error> {
-    //     let mut identity_list = vec![];
-
-    //     let list = self.friends_list().await?;
-
-    //     for pk in list {
-    //         let mut identity = Identity::default();
-    //         if let Ok(id) = self.identity_store.lookup(LookupBy::PublicKey(pk.clone())) {
-    //             identity = id;
-    //         } else {
-    //             //Since we are not able to resolve this lookup, we would just have the public key apart of the identity for the time being
-    //             identity.set_public_key(pk);
-    //         }
-    //         identity_list.push(identity);
-    //     }
-    //     Ok(identity_list)
-    // }
 
     pub async fn is_friend(&self, pubkey: &PublicKey) -> Result<(), Error> {
         let list = self.friends_list().await?;
