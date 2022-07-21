@@ -411,7 +411,7 @@ impl Friends for IpfsIdentity {
     }
 
     fn remove_friend(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.remove_friend(&pubkey))?;
+        async_block_in_place_uncheck(self.friend_store.remove_friend(&pubkey, true))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey.clone()).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;

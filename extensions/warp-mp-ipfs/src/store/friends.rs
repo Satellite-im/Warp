@@ -194,7 +194,7 @@ impl FriendsStore {
                                             //TODO: Log
                                             continue
                                         }
-        
+
                                     }
                                     FriendRequestStatus::Pending => {
                                         store.incoming_request.write().push(data);
@@ -215,6 +215,17 @@ impl FriendsStore {
                                             continue
                                         }
                                     },
+                                    FriendRequestStatus::FriendRemoved => {
+                                        if let Err(_e) = store.is_friend(&data.from()).await {
+                                            //TODO: Log
+                                            continue
+                                        }
+
+                                        if let Err(_e) = store.remove_friend(&data.from(), false).await {
+                                            //TODO: Log
+                                            continue
+                                        }
+                                    }
                                     _ => {}
                                 };
                             }
@@ -419,6 +430,27 @@ impl FriendsStore {
         Ok(())
     }
 
+    pub async fn close_request(&mut self, pubkey: &PublicKey) -> Result<(), Error> {
+        let (local_ipfs_public_key, _) = self.local().await?;
+
+        let local_public_key = libp2p_pub_to_pub(&local_ipfs_public_key)?;
+
+        let index = match self.outgoing_request.read().iter().position(|request| {
+            request.from().eq(pubkey)
+                && request.to().eq(&local_public_key)
+                && request.status() == FriendRequestStatus::Pending
+        }) {
+            Some(index) => index,
+            None => return Err(Error::CannotFindFriendRequest),
+        };
+
+        //TODO: Maybe broadcast closure of request?
+        self.outgoing_request.write().remove(index);
+        self.save_outgoing_requests().await?;
+
+        Ok(())
+    }
+
     pub fn has_request_from(&self, pubkey: &PublicKey) -> bool {
         self.incoming_request
             .read()
@@ -485,7 +517,7 @@ impl FriendsStore {
         self.tesseract.set("block_cid", &cid.to_string())?;
 
         if self.is_friend(pubkey).await.is_ok() {
-            if let Err(_e) = self.remove_friend(pubkey).await {
+            if let Err(_e) = self.remove_friend(pubkey, false).await {
                 //TODO: Log error
             }
         }
@@ -584,7 +616,11 @@ impl FriendsStore {
         Ok(())
     }
 
-    pub async fn remove_friend(&mut self, pubkey: &PublicKey) -> Result<(), Error> {
+    pub async fn remove_friend(
+        &mut self,
+        pubkey: &PublicKey,
+        broadcast: bool,
+    ) -> Result<(), Error> {
         let (friend_cid, mut friend_list) = self.raw_friends_list().await?;
         if !friend_list.contains(pubkey) {
             return Err(Error::FriendDoesntExist);
@@ -609,6 +645,20 @@ impl FriendsStore {
 
         self.tesseract.set("friends_cid", &cid.to_string())?;
 
+        if broadcast {
+            let (local_ipfs_public_key, _) = self.local().await?;
+
+            let local_public_key = libp2p_pub_to_pub(&local_ipfs_public_key)?;
+            let mut request = FriendRequest::default();
+            request.set_from(local_public_key);
+            request.set_to(pubkey.clone());
+            request.set_status(FriendRequestStatus::FriendRemoved);
+            let signature = sign_serde(&self.tesseract, &request)?;
+
+            request.set_signature(signature);
+
+            self.outgoing_request.write().push(request);
+        }
         Ok(())
     }
 
