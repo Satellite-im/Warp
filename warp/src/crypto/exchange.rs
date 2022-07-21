@@ -97,7 +97,7 @@ impl X25519Secret {
         X25519PublicKey(PublicKey::from(&self.0))
     }
 
-    /// Key exchange 
+    /// Key exchange
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn key_exchange(&self, public_key: X25519PublicKey) -> Vec<u8> {
         self.0
@@ -206,7 +206,7 @@ mod test {
 
     #[test]
     fn ed25519_key_exchange_encryption_using_ed25519_pk() -> anyhow::Result<()> {
-        // Used to test the public key conversion. 
+        // Used to test the public key conversion.
         let alice_keypair = Ed25519Keypair::new()?;
         let bob_keypair = Ed25519Keypair::new()?;
 

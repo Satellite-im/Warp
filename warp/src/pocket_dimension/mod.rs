@@ -240,7 +240,7 @@ impl PocketDimensionAdapter {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use crate::data::{Data, FFIVec_Data, DataType};
+    use crate::data::{Data, DataType, FFIVec_Data};
     use crate::error::Error;
     use crate::ffi::{FFIResult, FFIResult_Null};
     use crate::pocket_dimension::query::QueryBuilder;

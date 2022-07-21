@@ -8,7 +8,7 @@ use uuid::Uuid;
 use super::directory::Directory;
 use super::file::File;
 use crate::error::Error;
-use warp_derive::{FFIFree};
+use warp_derive::FFIFree;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -291,7 +291,7 @@ pub mod ffi {
     use crate::error::Error;
     use crate::ffi::{FFIResult, FFIResult_Null};
     use std::ffi::{CStr, CString};
-    use std::os::raw::{c_char};
+    use std::os::raw::c_char;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -412,10 +412,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_rename(
-        item: *mut Item,
-        name: *const c_char,
-    ) -> FFIResult_Null {
+    pub unsafe extern "C" fn item_rename(item: *mut Item, name: *const c_char) -> FFIResult_Null {
         if item.is_null() {
             return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }

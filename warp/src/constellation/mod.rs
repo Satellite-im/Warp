@@ -409,10 +409,10 @@ pub mod ffi {
     use crate::constellation::directory::Directory;
     use crate::constellation::{ConstellationAdapter, ConstellationDataType};
     use crate::error::Error;
-    use crate::ffi::{FFIResult, FFIVec, FFIResult_String, FFIResult_Null};
+    use crate::ffi::{FFIResult, FFIResult_Null, FFIResult_String, FFIVec};
     use crate::runtime_handle;
     use std::ffi::CStr;
-    use std::os::raw::{c_char};
+    use std::os::raw::c_char;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -541,9 +541,8 @@ pub mod ffi {
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let local = CStr::from_ptr(local).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async {
-            constellation.inner_guard().put(&remote, &local).await
-        }).into()
+        rt.block_on(async { constellation.inner_guard().put(&remote, &local).await })
+            .into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -574,13 +573,12 @@ pub mod ffi {
         let rt = runtime_handle();
 
         rt.block_on(async move {
-
-                constellation
-                    .inner_guard()
-                    .put_buffer(&remote.to_string_lossy().to_string(), &slice.to_vec())
-                    .await
-            
-        }).into()
+            constellation
+                .inner_guard()
+                .put_buffer(&remote.to_string_lossy().to_string(), &slice.to_vec())
+                .await
+        })
+        .into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -608,9 +606,8 @@ pub mod ffi {
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let local = CStr::from_ptr(local).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async move {
-            constellation.inner_guard().get(&remote, &local).await
-        }).into()
+        rt.block_on(async move { constellation.inner_guard().get(&remote, &local).await })
+            .into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -658,9 +655,8 @@ pub mod ffi {
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async move {
-            constellation.inner_guard().remove(&remote, recursive).await
-        }).into()
+        rt.block_on(async move { constellation.inner_guard().remove(&remote, recursive).await })
+            .into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -683,11 +679,12 @@ pub mod ffi {
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let rt = runtime_handle();
         rt.block_on(async move {
-                constellation
-                    .inner_guard()
-                    .create_directory(&remote, recursive)
-                    .await
-        }).into()
+            constellation
+                .inner_guard()
+                .create_directory(&remote, recursive)
+                .await
+        })
+        .into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -714,9 +711,8 @@ pub mod ffi {
         let src = CStr::from_ptr(src).to_string_lossy().to_string();
         let dst = CStr::from_ptr(dst).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async move {
-            constellation.inner_guard().move_item(&src, &dst).await
-        }).into()
+        rt.block_on(async move { constellation.inner_guard().move_item(&src, &dst).await })
+            .into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -737,9 +733,8 @@ pub mod ffi {
         let constellation = &mut *(ctx);
         let src = CStr::from_ptr(src).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(
-            async move { constellation.inner_guard().sync_ref(&src).await },
-        ).into()
+        rt.block_on(async move { constellation.inner_guard().sync_ref(&src).await })
+            .into()
     }
 
     #[allow(clippy::missing_safety_doc)]

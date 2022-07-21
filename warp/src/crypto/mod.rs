@@ -20,7 +20,7 @@ pub mod multihash;
 pub mod signature;
 
 use serde::{Deserialize, Serialize};
-use warp_derive::{FFIVec, FFIFree};
+use warp_derive::{FFIFree, FFIVec};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 use zeroize::Zeroize;

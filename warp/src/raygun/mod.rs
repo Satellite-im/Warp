@@ -5,7 +5,7 @@ use crate::error::Error;
 use crate::sync::{Arc, Mutex, MutexGuard};
 use crate::{Extension, SingleHandle};
 
-use warp_derive::{FFIFree};
+use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -394,13 +394,14 @@ impl RayGunAdapter {
 pub mod ffi {
     use crate::crypto::PublicKey;
     use crate::error::Error;
-    use crate::ffi::{FFIResult, FFIVec_String, FFIResult_Null};
+    use crate::ffi::{FFIResult, FFIResult_Null, FFIVec_String};
     use crate::raygun::{
-        EmbedState, Message, MessageOptions, PinState, RayGunAdapter, Reaction, ReactionState, FFIVec_Message, FFIVec_SenderId
+        EmbedState, FFIVec_Message, FFIVec_SenderId, Message, MessageOptions, PinState,
+        RayGunAdapter, Reaction, ReactionState,
     };
     use crate::runtime_handle;
     use std::ffi::{CStr, CString};
-    use std::os::raw::{c_char};
+    use std::os::raw::c_char;
     use std::str::{FromStr, Utf8Error};
     use uuid::Uuid;
 
@@ -412,7 +413,7 @@ pub mod ffi {
     pub unsafe extern "C" fn raygun_get_messages(
         ctx: *const RayGunAdapter,
         convo_id: *const c_char,
-    ) -> FFIResult<FFIVec_Message>{
+    ) -> FFIResult<FFIVec_Message> {
         if ctx.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
@@ -437,9 +438,7 @@ pub mod ffi {
                 .get_messages(convo_id, MessageOptions::default())
                 .await
         }) {
-            Ok(messages) => FFIResult::ok(
-                messages.into(),
-            ),
+            Ok(messages) => FFIResult::ok(messages.into()),
             Err(e) => FFIResult::err(e),
         }
     }
@@ -465,7 +464,9 @@ pub mod ffi {
         }
 
         if messages.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Message array cannot be null")));
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
+                "Message array cannot be null"
+            )));
         }
 
         if lines == 0 {
@@ -497,9 +498,9 @@ pub mod ffi {
 
         let adapter = &mut *ctx;
         let rt = runtime_handle();
-        
-        rt.block_on(async { adapter.inner_guard().send(convo_id, msg_id, messages).await }).into()
-        
+
+        rt.block_on(async { adapter.inner_guard().send(convo_id, msg_id, messages).await })
+            .into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -538,7 +539,8 @@ pub mod ffi {
 
         let adapter = &mut *ctx;
         let rt = runtime_handle();
-        rt.block_on(async { adapter.inner_guard().delete(convo_id, msg_id).await }).into()
+        rt.block_on(async { adapter.inner_guard().delete(convo_id, msg_id).await })
+            .into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -590,7 +592,8 @@ pub mod ffi {
                 .inner_guard()
                 .react(convo_id, msg_id, state, emoji)
                 .await
-        }).into()
+        })
+        .into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -630,8 +633,8 @@ pub mod ffi {
 
         let adapter = &mut *ctx;
         let rt = runtime_handle();
-        rt.block_on(async { adapter.inner_guard().pin(convo_id, msg_id, state).await }).into()
-        
+        rt.block_on(async { adapter.inner_guard().pin(convo_id, msg_id, state).await })
+            .into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -686,7 +689,8 @@ pub mod ffi {
                 .inner_guard()
                 .reply(convo_id, msg_id, messages)
                 .await
-        }).into()
+        })
+        .into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -714,7 +718,8 @@ pub mod ffi {
 
         let adapter = &mut *ctx;
         let rt = runtime_handle();
-        rt.block_on(async { adapter.inner_guard().ping(convo_id).await }).into()
+        rt.block_on(async { adapter.inner_guard().ping(convo_id).await })
+            .into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -755,8 +760,8 @@ pub mod ffi {
         let adapter = &mut *ctx;
         let rt = runtime_handle();
 
-        rt.block_on(async { adapter.inner_guard().embeds(convo_id, msg_id, state).await }).into()
-        
+        rt.block_on(async { adapter.inner_guard().embeds(convo_id, msg_id, state).await })
+            .into()
     }
 
     #[allow(clippy::missing_safety_doc)]

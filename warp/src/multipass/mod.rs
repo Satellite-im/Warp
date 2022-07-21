@@ -249,42 +249,50 @@ impl MultiPassAdapter {
     }
 }
 
-#[cfg(target_arch = "wasm32")] 
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 impl MultiPassAdapter {
     #[wasm_bindgen]
     pub fn list_incoming_request(&self) -> Result<JsValue, Error> {
-        self.inner_guard().list_incoming_request().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
+        self.inner_guard()
+            .list_incoming_request()
+            .map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
     }
 
     #[wasm_bindgen]
     pub fn list_outgoing_request(&self) -> Result<JsValue, Error> {
-        self.inner_guard().list_outgoing_request().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
+        self.inner_guard()
+            .list_outgoing_request()
+            .map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
     }
 
     #[wasm_bindgen]
     pub fn list_friends(&self) -> Result<JsValue, Error> {
-        self.inner_guard().list_friends().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
+        self.inner_guard()
+            .list_friends()
+            .map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
     }
 
     #[wasm_bindgen]
     pub fn list_all_request(&self) -> Result<JsValue, Error> {
-        self.inner_guard().list_all_request().map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
+        self.inner_guard()
+            .list_all_request()
+            .map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::async_on_block;
-    use crate::crypto::{PublicKey, FFIVec_PublicKey};
+    use crate::crypto::{FFIVec_PublicKey, PublicKey};
     use crate::error::Error;
-    use crate::ffi::{FFIResult, FFIVec, FFIResult_Null};
+    use crate::ffi::{FFIResult, FFIResult_Null, FFIVec};
     use crate::multipass::{
         identity::{FFIVec_FriendRequest, Identifier, Identity, IdentityUpdate},
         MultiPassAdapter,
     };
     use std::ffi::CStr;
-    use std::os::raw::{c_char};
+    use std::os::raw::c_char;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -314,11 +322,11 @@ pub mod ffi {
         };
 
         let mp = &mut *(ctx);
-       
-        match async_on_block(async { mp
-            .inner_guard()
-            .create_identity(username.as_deref(), passphrase.as_deref()) })
-        {
+
+        match async_on_block(async {
+            mp.inner_guard()
+                .create_identity(username.as_deref(), passphrase.as_deref())
+        }) {
             Ok(pkey) => FFIResult::ok(pkey),
             Err(e) => FFIResult::err(e),
         }
@@ -374,7 +382,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let option = &*option;
-        async_on_block(async { mp.inner_guard().update_identity(option.clone()) } ).into()
+        async_on_block(async { mp.inner_guard().update_identity(option.clone()) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -394,7 +402,8 @@ pub mod ffi {
             true => None,
         };
         let mp = &*(ctx);
-        match async_on_block(async { mp.inner_guard().decrypt_private_key(passphrase.as_deref()) }) {
+        match async_on_block(async { mp.inner_guard().decrypt_private_key(passphrase.as_deref()) })
+        {
             Ok(key) => FFIResult::ok(key.into()),
             Err(e) => FFIResult::err(e),
         }
@@ -402,9 +411,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_refresh_cache(
-        ctx: *mut MultiPassAdapter,
-    ) -> FFIResult_Null {
+    pub unsafe extern "C" fn multipass_refresh_cache(ctx: *mut MultiPassAdapter) -> FFIResult_Null {
         if ctx.is_null() {
             return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
@@ -466,7 +473,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        async_on_block(async {mp.inner_guard().deny_request(pk.clone()) }).into()
+        async_on_block(async { mp.inner_guard().deny_request(pk.clone()) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -485,7 +492,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        async_on_block(async {mp.inner_guard().close_request(pk.clone()) }).into()
+        async_on_block(async { mp.inner_guard().close_request(pk.clone()) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -498,7 +505,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match async_on_block(async { mp.inner_guard().list_incoming_request() }){
+        match async_on_block(async { mp.inner_guard().list_incoming_request() }) {
             Ok(list) => FFIResult::ok(list.into()),
             Err(e) => FFIResult::err(e),
         }
@@ -605,7 +612,7 @@ pub mod ffi {
         let mp = &mut *ctx;
         match async_on_block(async { mp.inner_guard().block_list().map(|list| list.into()) }) {
             Ok(list) => FFIResult::ok(list),
-            Err(e) => FFIResult::err(e)
+            Err(e) => FFIResult::err(e),
         }
     }
 

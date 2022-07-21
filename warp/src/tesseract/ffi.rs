@@ -1,5 +1,5 @@
-use crate::{error::Error, ffi::FFIResult_String};
 use crate::ffi::{FFIResult, FFIResult_Null};
+use crate::{error::Error, ffi::FFIResult_String};
 use std::{ffi::CStr, os::raw::c_char};
 
 use crate::tesseract::Tesseract;
