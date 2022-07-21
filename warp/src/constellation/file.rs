@@ -167,12 +167,6 @@ impl File {
         self.modified = Utc::now();
     }
 
-    //TODO: To be removed
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn set_ref(&mut self, reference: &str) {
-        self.set_reference(reference)
-    }
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn reference(&self) -> Option<String> {
         self.reference.clone()

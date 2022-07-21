@@ -246,7 +246,7 @@ impl Constellation for IpfsFileSystem {
 
         file.hash_mut().hash_from_file(path)?;
 
-        file.set_ref(&hash);
+        file.set_reference(&hash);
 
         self.current_directory_mut()?.add_item(file.clone())?;
 
@@ -385,7 +385,7 @@ impl Constellation for IpfsFileSystem {
             _ => return Err(Error::Unimplemented),
         };
         file.hash_mut().hash_from_slice(buffer)?;
-        file.set_ref(&hash);
+        file.set_reference(&hash);
 
         self.current_directory_mut()?.add_item(file.clone())?;
 

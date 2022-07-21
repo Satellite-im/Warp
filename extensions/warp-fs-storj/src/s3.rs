@@ -229,7 +229,7 @@ impl Constellation for StorjFilesystem {
 
         let mut file = warp::constellation::file::File::new(&name);
         file.set_size(size as i64);
-        file.set_ref(&url);
+        file.set_reference(&url);
         file.hash_mut().hash_from_file(&path)?;
 
         self.current_directory_mut()?.add_item(file.clone())?;
@@ -342,7 +342,7 @@ impl Constellation for StorjFilesystem {
         let mut file = warp::constellation::file::File::new(&name);
         file.set_size(buffer.len() as i64);
         file.hash_mut().hash_from_slice(buffer)?;
-        file.set_ref(&url);
+        file.set_reference(&url);
 
         self.current_directory_mut()?.add_item(file.clone())?;
 
@@ -445,7 +445,7 @@ impl Constellation for StorjFilesystem {
 
         let dir = self.current_directory_mut()?;
         let file = dir.get_item_mut(&name).and_then(Item::get_file_mut)?;
-        file.set_ref(&url);
+        file.set_reference(&url);
         self.modified = Utc::now();
         Ok(())
     }
