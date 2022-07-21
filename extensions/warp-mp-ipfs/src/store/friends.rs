@@ -204,7 +204,7 @@ impl FriendsStore {
                                         }
                                     },
                                     FriendRequestStatus::Denied => {
-                                        let index = match store.outgoing_request.read().iter().position(|request| request.from() == data.to() && request.status() == FriendRequestStatus::Pending) {
+                                        let index = match store.outgoing_request.read().iter().position(|request| request.to() == data.from() && request.status() == FriendRequestStatus::Pending) {
                                             Some(index) => index,
                                             None => continue,
                                         };
