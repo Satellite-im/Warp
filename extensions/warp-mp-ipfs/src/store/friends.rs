@@ -134,7 +134,25 @@ impl FriendsStore {
                     message = stream.next() => {
                         if let Some(message) = message {
                             if let Ok(data) = serde_json::from_slice::<FriendRequest>(&message.data) {
-
+                                //Validate public key against peer that sent it
+                                let pk = match pub_to_libp2p_pub(&data.from()) {
+                                    Ok(pk) => pk,
+                                    Err(_e) => {
+                                        //TODO: Log
+                                        continue
+                                    }
+                                };
+                                
+                                match message.source {
+                                    Some(peer) if peer == pk.to_peer_id() => {},
+                                    _ => {
+                                        //If the peer who sent this doesnt match the peer id of the request 
+                                        //or there isnt a source, we should go on and reject it.
+                                        //We should always have a Option::Some, but this check is a precaution
+                                        continue
+                                    }
+                                };
+                                
                                 if store.outgoing_request.read().contains(&data) ||
                                    store.incoming_request.read().contains(&data) {
                                     continue;
@@ -499,7 +517,6 @@ impl FriendsStore {
         let (block_cid, mut block_list) = self.raw_block_list().await?;
 
         if block_list.contains(pubkey) {
-            //TODO: Proper error related to blocking
             return Err(Error::PublicKeyIsBlocked);
         }
 
@@ -517,7 +534,7 @@ impl FriendsStore {
         self.tesseract.set("block_cid", &cid.to_string())?;
 
         if self.is_friend(pubkey).await.is_ok() {
-            if let Err(_e) = self.remove_friend(pubkey, false).await {
+            if let Err(_e) = self.remove_friend(pubkey, true).await {
                 //TODO: Log error
             }
         }
@@ -532,7 +549,6 @@ impl FriendsStore {
         let (block_cid, mut block_list) = self.raw_block_list().await?;
 
         if !block_list.contains(pubkey) {
-            //TODO: Proper error related to blocking
             return Err(Error::FriendDoesntExist);
         }
 

@@ -19,7 +19,7 @@ use warp::{
     tesseract::Tesseract,
 };
 
-use super::{libp2p_pub_to_pub, topic_discovery, IDENTITY_BROADCAST};
+use super::{libp2p_pub_to_pub, pub_to_libp2p_pub, topic_discovery, IDENTITY_BROADCAST};
 
 #[derive(Clone)]
 pub struct IdentityStore {
@@ -111,6 +111,26 @@ impl IdentityStore {
                     message = id_broadcast_stream.next() => {
                         if let Some(message) = message {
                             if let Ok(identity) = serde_json::from_slice::<Identity>(&message.data) {
+
+                                //Validate public key against peer that sent it
+                                let pk = match pub_to_libp2p_pub(&identity.public_key()) {
+                                    Ok(pk) => pk,
+                                    Err(_e) => {
+                                        //TODO: Log
+                                        continue
+                                    }
+                                };
+                                
+                                match message.source {
+                                    Some(peer) if peer == pk.to_peer_id() => {},
+                                    _ => {
+                                        //If the peer who sent this doesnt match the peer id of the identity 
+                                        //or there isnt a source, we should go on and reject it.
+                                        //We should always have a Option::Some, but this check is a precaution
+                                        continue
+                                    }
+                                };
+
                                 if let Some(own_id) = store.identity.read().clone() {
                                     if own_id == identity {
                                         continue
