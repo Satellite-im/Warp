@@ -12,7 +12,7 @@ async fn main() -> anyhow::Result<()> {
         file.read_to_end(&mut buf).await?;
         buf
     } else {
-        include_bytes!("fs_ipfs_example.rs").to_vec()
+        include_bytes!("ipfs-http-example.rs").to_vec()
     };
 
     system.put_buffer("testfile", &file).await?;
