@@ -324,17 +324,11 @@ pub mod ffi {
         }
     }
 
-    // impl From<Result<(), crate::error::Error>> for FFIResult<std::os::raw::c_void> {
-    //     fn from(res: Result<(), crate::error::Error>) -> Self {
-    //         match res {
-    //             Ok(_) => Self {
-    //                 data: std::ptr::null_mut(),
-    //                 error: std::ptr::null_mut(),
-    //             },
-    //             Err(err) => Self::err(err),
-    //         }
-    //     }
-    // }
+    impl<T> From<Result<T, crate::error::Error>> for FFIResult<T> {
+        fn from(res: Result<T, crate::error::Error>) -> Self {
+            Self::import(res)
+        }
+    }
 
     impl<T> FFIResult<T> {
         /// Convert a Result<T, warp::error::Error> into FFIResult
