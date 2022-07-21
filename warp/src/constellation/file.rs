@@ -156,15 +156,21 @@ impl File {
     /// use warp::constellation::{file::File, item::Item};
     ///
     /// let mut file = File::new("test.txt");
-    /// file.set_ref("test_file.txt");
+    /// file.set_reference("test_file.txt");
     ///
     /// assert_eq!(file.reference().is_some(), true);
     /// assert_eq!(file.reference().unwrap().as_str(), "test_file.txt");
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn set_ref(&mut self, reference: &str) {
+    pub fn set_reference(&mut self, reference: &str) {
         self.reference = Some(reference.to_string());
         self.modified = Utc::now();
+    }
+
+    //TODO: To be removed
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn set_ref(&mut self, reference: &str) {
+        self.set_reference(reference)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
