@@ -8,7 +8,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 
 [dependencies]
 ipfs-api-backend-hyper    = { version = "0.4", features = ["with-send-sync", "with-hyper-tls"] }
-hyper-tls = "0.5"
+hyper-tls = {version = "0.5", features = ["vendored"] }
 hyper                     = { version = "0.14", features = ["http1", "http2", "client", "tcp"] }
 http = "0.2"
 
