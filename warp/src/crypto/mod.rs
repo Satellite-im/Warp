@@ -36,11 +36,29 @@ impl AsRef<[u8]> for PublicKey {
     }
 }
 
+impl From<Vec<u8>> for PublicKey {
+    fn from(bytes: Vec<u8>) -> Self {
+        PublicKey(bytes)
+    }
+}
+
+impl From<PublicKey> for Vec<u8> {
+    fn from(public_key: PublicKey) -> Self {
+        public_key.0
+    }
+}
+
+impl From<&PublicKey> for Vec<u8> {
+    fn from(public_key: &PublicKey) -> Self {
+        public_key.0.to_vec()
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl PublicKey {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn from_vec(bytes: Vec<u8>) -> Self {
-        Self(bytes)
+        bytes.into()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -50,7 +68,7 @@ impl PublicKey {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn into_bytes(&self) -> Vec<u8> {
-        self.0.clone()
+        self.into()
     }
 }
 
