@@ -460,8 +460,6 @@ impl FriendsStore {
         let signature = sign_serde(&self.tesseract, &request)?;
         request.set_signature(signature);
 
-        self.add_friend(pubkey).await?;
-
         self.broadcast_request(&request).await?;
 
         self.incoming_request.write().remove(index);
