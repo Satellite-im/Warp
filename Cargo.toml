@@ -7,3 +7,4 @@ members = [
   "warp-bin",
   "warp-extensions",
 ]
+exclude = ["extensions/warp-mp-solana"]
