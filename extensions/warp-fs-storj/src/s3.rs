@@ -208,7 +208,7 @@ impl Constellation for StorjFilesystem {
             .bucket(&bucket, true)
             .await?
             .put_object_stream(&mut fs, &name)
-            .await?;
+            .await.map_err(anyhow::Error::from)?;
 
         if code != 200 {
             //TODO: Do a range check against the code
@@ -285,7 +285,7 @@ impl Constellation for StorjFilesystem {
             .bucket(bucket, false)
             .await?
             .get_object_stream(&name, &mut fs)
-            .await?;
+            .await.map_err(anyhow::Error::from)?;
 
         if code != 200 {
             return match tokio::fs::remove_file(path).await {
@@ -320,7 +320,7 @@ impl Constellation for StorjFilesystem {
             .bucket(&bucket, true)
             .await?
             .put_object(&name, buffer)
-            .await?;
+            .await.map_err(anyhow::Error::from)?;
 
         if code.1 != 200 {
             return Err(Error::Any(anyhow!(
@@ -386,7 +386,7 @@ impl Constellation for StorjFilesystem {
             .bucket(bucket, false)
             .await?
             .get_object(&name)
-            .await?;
+            .await.map_err(anyhow::Error::from)?;
 
         if code != 200 {
             return Err(Error::Any(anyhow!(
@@ -406,7 +406,7 @@ impl Constellation for StorjFilesystem {
             .bucket(bucket, false)
             .await?
             .delete_object(&name)
-            .await?;
+            .await.map_err(anyhow::Error::from)?;
 
         if code != 204 {
             return Err(Error::Any(anyhow!(

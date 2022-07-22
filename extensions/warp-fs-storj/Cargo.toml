@@ -7,10 +7,10 @@ edition = "2021"
 crate-type = ["cdylib", "rlib", "staticlib"]
 
 [dependencies]
-rust-s3 = { version = "0.30.0", optional = true }
-aws-config = { version = "0.10.1", optional = true }
-aws-sdk-s3 = { version = "0.10.1", optional = true }
-aws-endpoint = { version = "0.10.1", optional = true }
+rust-s3 = { version = "0.31", optional = true, default-features = false, features = ["tags", "tokio-rustls-tls", "fail-on-err"] }
+aws-config = { version = "0.46", optional = true }
+aws-sdk-s3 = { version = "0.16", optional = true }
+aws-endpoint = { version = "0.46", optional = true }
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["net"] }
