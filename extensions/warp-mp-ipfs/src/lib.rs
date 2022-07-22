@@ -272,68 +272,71 @@ impl MultiPass for IpfsIdentity {
     }
 
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
-        let mut identity = self.get_own_identity()?;
-        let old_identity = identity.clone();
-        match (
-            option.username(),
-            option.graphics_picture(),
-            option.graphics_banner(),
-            option.status_message(),
-        ) {
-            (Some(username), None, None, None) => identity.set_username(&username),
-            (None, Some(hash), None, None) => {
-                let mut graphics = identity.graphics();
-                graphics.set_profile_picture(&hash);
-                identity.set_graphics(graphics);
-            }
-            (None, None, Some(hash), None) => {
-                let mut graphics = identity.graphics();
-                graphics.set_profile_banner(&hash);
-                identity.set_graphics(graphics);
-            }
-            (None, None, None, Some(status)) => identity.set_status_message(status),
-            _ => return Err(Error::CannotUpdateIdentity),
-        }
-
-        if let Ok(cid) = self.tesseract.retrieve("ident_cid") {
-            let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
-            async_block_in_place_uncheck(self.ipfs.remove_pin(&cid, false))?;
-        };
-
-        let ipld = to_ipld(&identity).map_err(anyhow::Error::from)?;
-        let ident_cid = async_block_in_place_uncheck(self.ipfs.put_dag(ipld))?;
-
-        async_block_in_place_uncheck(self.ipfs.insert_pin(&ident_cid, false))?;
-
-        self.tesseract.set("ident_cid", &ident_cid.to_string())?;
-
-        if let Ok(mut cache) = self.get_cache() {
-            let mut query = QueryBuilder::default();
-            //TODO: Query by public key to tie/assiociate the username to identity in the event of dup
-            query.r#where("username", &old_identity.username())?;
-            if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query)) {
-                //get last
-                if !list.is_empty() {
-                    let mut obj = list.last().unwrap().clone();
-                    obj.set_payload(identity.clone())?;
-                    cache.add_data(DataType::from(Module::Accounts), &obj)?;
+        async_block_in_place_uncheck(async {
+            let mut identity = self.get_own_identity()?;
+            let old_identity = identity.clone();
+            match (
+                option.username(),
+                option.graphics_picture(),
+                option.graphics_banner(),
+                option.status_message(),
+            ) {
+                (Some(username), None, None, None) => identity.set_username(&username),
+                (None, Some(hash), None, None) => {
+                    let mut graphics = identity.graphics();
+                    graphics.set_profile_picture(&hash);
+                    identity.set_graphics(graphics);
                 }
-            } else {
-                cache.add_data(
-                    DataType::from(Module::Accounts),
-                    &DataObject::new(DataType::from(Module::Accounts), identity.clone())?,
-                )?;
+                (None, None, Some(hash), None) => {
+                    let mut graphics = identity.graphics();
+                    graphics.set_profile_banner(&hash);
+                    identity.set_graphics(graphics);
+                }
+                (None, None, None, Some(status)) => identity.set_status_message(status),
+                _ => return Err(Error::CannotUpdateIdentity),
             }
-        }
 
-        async_block_in_place_uncheck(self.identity_store.update_identity())?;
+            if let Ok(cid) = self.tesseract.retrieve("ident_cid") {
+                let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
+                if self.ipfs.is_pinned(&cid).await? {
+                    self.ipfs.remove_pin(&cid, false).await?;
+                }
+            };
 
-        if let Ok(hooks) = self.get_hooks() {
-            let object = DataObject::new(DataType::Accounts, identity.clone())?;
-            hooks.trigger("accounts::update_identity", &object);
-        }
+            let ipld = to_ipld(&identity).map_err(anyhow::Error::from)?;
+            let ident_cid = self.ipfs.put_dag(ipld).await?;
 
-        Ok(())
+            self.ipfs.insert_pin(&ident_cid, false).await?;
+
+            self.tesseract.set("ident_cid", &ident_cid.to_string())?;
+
+            if let Ok(mut cache) = self.get_cache() {
+                let mut query = QueryBuilder::default();
+                //TODO: Query by public key to tie/assiociate the username to identity in the event of dup
+                query.r#where("username", &old_identity.username())?;
+                if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query)) {
+                    //get last
+                    if !list.is_empty() {
+                        let mut obj = list.last().unwrap().clone();
+                        obj.set_payload(identity.clone())?;
+                        cache.add_data(DataType::from(Module::Accounts), &obj)?;
+                    }
+                } else {
+                    cache.add_data(
+                        DataType::from(Module::Accounts),
+                        &DataObject::new(DataType::from(Module::Accounts), identity.clone())?,
+                    )?;
+                }
+            }
+
+            self.identity_store.update_identity().await?;
+
+            if let Ok(hooks) = self.get_hooks() {
+                let object = DataObject::new(DataType::Accounts, identity.clone())?;
+                hooks.trigger("accounts::update_identity", &object);
+            }
+            Ok(())
+        })
     }
 
     fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<Vec<u8>, Error> {

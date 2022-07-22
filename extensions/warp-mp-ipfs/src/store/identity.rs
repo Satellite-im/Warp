@@ -120,11 +120,11 @@ impl IdentityStore {
                                         continue
                                     }
                                 };
-                                
+
                                 match message.source {
                                     Some(peer) if peer == pk.to_peer_id() => {},
                                     _ => {
-                                        //If the peer who sent this doesnt match the peer id of the identity 
+                                        //If the peer who sent this doesnt match the peer id of the identity
                                         //or there isnt a source, we should go on and reject it.
                                         //We should always have a Option::Some, but this check is a precaution
                                         continue
@@ -310,6 +310,7 @@ impl IdentityStore {
         let kp_public_key = libp2p_pub_to_pub(&self.get_keypair()?.public())?;
 
         if public_key != kp_public_key {
+            //Note if we reach this point, the identity would need to be reconstructed
             return Err(Error::IdentityDoesntExist);
         }
 
