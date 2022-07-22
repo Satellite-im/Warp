@@ -35,12 +35,15 @@ pub struct FriendsStore {
     // Would enable a check to determine if peers are connected before broadcasting
     broadcast_with_connection: Arc<AtomicBool>,
 
-    // Request meant for the user
+    // Request coming from others
     incoming_request: Arc<RwLock<Vec<FriendRequest>>>,
 
     // Request meant for others
     outgoing_request: Arc<RwLock<Vec<FriendRequest>>>,
 
+    // Used to broadcast request
+    broadcast_request: Arc<RwLock<Vec<FriendRequest>>>,
+    
     // Tesseract
     tesseract: Tesseract,
 }
@@ -71,6 +74,7 @@ impl FriendsStore {
         let broadcast_with_connection = Arc::new(AtomicBool::new(send_on_peer_connect));
         let incoming_request = Arc::new(Default::default());
         let outgoing_request = Arc::new(Default::default());
+        let broadcast_request = Arc::new(Default::default());
 
         let mut store = Self {
             ipfs,
@@ -78,6 +82,7 @@ impl FriendsStore {
             end_event,
             incoming_request,
             outgoing_request,
+            broadcast_request,
             tesseract,
         };
 
@@ -105,6 +110,10 @@ impl FriendsStore {
             //TODO: Log
         }
 
+        let (local_ipfs_public_key, _) = store.local().await?;
+
+        let local_public_key = libp2p_pub_to_pub(&local_ipfs_public_key)?;
+
         tokio::spawn(async move {
             let mut store = store_inner;
 
@@ -126,6 +135,7 @@ impl FriendsStore {
 
             futures::pin_mut!(stream);
             let mut broadcast_interval = tokio::time::interval(Duration::from_millis(interval));
+
             loop {
                 if store.end_event.load(Ordering::SeqCst) {
                     break;
@@ -152,6 +162,10 @@ impl FriendsStore {
                                         continue
                                     }
                                 };
+
+                                if data.to().ne(&local_public_key) {
+                                    continue;
+                                }
                                 
                                 if store.outgoing_request.read().contains(&data) ||
                                    store.incoming_request.read().contains(&data) {
@@ -202,13 +216,14 @@ impl FriendsStore {
                                             None => continue,
                                         };
 
-                                        let _ = store.outgoing_request.write().remove(index);
+                                        store.outgoing_request.write().remove(index);
 
                                         if let Err(_e) = store.add_friend(&request.from()).await {
                                             //TODO: Log
                                             continue
                                         }
-                                        if let Err(_e) = store.save_incoming_requests().await {
+
+                                        if let Err(_e) = store.save_outgoing_requests().await {
                                             //TODO: Log
                                             continue
                                         }
@@ -238,34 +253,41 @@ impl FriendsStore {
                                             //TODO: Log
                                             continue
                                         }
-
                                         if let Err(_e) = store.remove_friend(&data.from(), false).await {
+                                            //TODO: Log
+                                            continue
+                                        }
+                                    }
+                                    FriendRequestStatus::RequestRemoved => {
+                                        let index = match store.incoming_request.read().iter().position(|request| request.to() == data.to() && request.status() == FriendRequestStatus::Pending) {
+                                            Some(index) => index,
+                                            None => continue,
+                                        };
+
+                                        store.incoming_request.write().remove(index);
+                                        if let Err(_e) = store.save_incoming_requests().await {
                                             //TODO: Log
                                             continue
                                         }
                                     }
                                     _ => {}
                                 };
+
+                                *store.broadcast_request.write() = store.outgoing_request.read().clone();
                             }
                         }
                     }
                     _ = broadcast_interval.tick() => {
                         //TODO: Provide a signed and/or encrypted payload
-                        if store.broadcast_with_connection.load(Ordering::SeqCst) {
-                            if let Ok(peers) = store.ipfs.pubsub_peers(Some(FRIENDS_BROADCAST.into())).await {
-                                if peers.is_empty() {
-                                    continue;
-                                }
-                            }
-                        }
-                        let outgoing_request = store.outgoing_request.read().clone();
-                        for request in outgoing_request.iter() {
-                            if let Ok(bytes) = serde_json::to_vec(&request) {
-                                if let Err(_e) = store.ipfs.pubsub_publish(FRIENDS_BROADCAST.into(), bytes).await {
-                                    continue
-                                }
-                            }
-                        }
+                        // if let Ok(peers) = store.ipfs.pubsub_peers(Some(FRIENDS_BROADCAST.into())).await {
+                        //     if !peers.is_empty() {
+                        //         if let Err(_e) = store.broadcast_requests().await {
+                        //             //TODO: Log
+                        //             println!("{_e}");
+                        //             continue
+                        //         }
+                        //     }
+                        // }
                     }
                 }
             }
@@ -321,8 +343,8 @@ impl FriendsStore {
 
         request.set_signature(signature);
 
-        self.outgoing_request.write().push(request);
-        self.save_outgoing_requests().await?;
+        self.broadcast_request(&request).await?;
+        // 
         Ok(())
     }
 
@@ -378,8 +400,8 @@ impl FriendsStore {
 
         self.add_friend(pubkey).await?;
 
-        self.outgoing_request.write().push(request);
-        self.save_outgoing_requests().await?;
+        self.broadcast_request(&request).await?;
+        // self.save_outgoing_requests().await?;
         if let Some(index) = index {
             self.incoming_request.write().remove(index);
             self.save_incoming_requests().await?;
@@ -440,8 +462,7 @@ impl FriendsStore {
 
         self.add_friend(pubkey).await?;
 
-        self.outgoing_request.write().push(request);
-        self.save_outgoing_requests().await?;
+        self.broadcast_request(&request).await?;
 
         self.incoming_request.write().remove(index);
         self.save_incoming_requests().await?;
@@ -539,9 +560,9 @@ impl FriendsStore {
             }
         }
 
-        let peer_id = pub_to_libp2p_pub(pubkey)?.to_peer_id();
+        // let peer_id = pub_to_libp2p_pub(pubkey)?.to_peer_id();
 
-        self.ipfs.ban_peer(peer_id).await?;
+        // self.ipfs.ban_peer(peer_id).await?;
         Ok(())
     }
 
@@ -673,7 +694,7 @@ impl FriendsStore {
 
             request.set_signature(signature);
 
-            self.outgoing_request.write().push(request);
+            self.broadcast_request(&request).await?;
         }
         Ok(())
     }
@@ -747,7 +768,8 @@ impl FriendsStore {
         let request_ipld = self.ipfs.get_dag(IpfsPath::from(cid)).await?;
         let request_list: Vec<FriendRequest> =
             from_ipld(request_ipld).map_err(anyhow::Error::from)?;
-        *self.outgoing_request.write() = request_list;
+        *self.outgoing_request.write() = request_list.clone();
+        *self.broadcast_request.write() = request_list;
         Ok(())
     }
 
@@ -774,6 +796,29 @@ impl FriendsStore {
             .filter(|request| request.status() == FriendRequestStatus::Pending)
             .cloned()
             .collect::<Vec<_>>()
+    }
+
+    pub async fn broadcast_requests(&self) -> anyhow::Result<()> {
+        let list = self.broadcast_request.read().clone();
+        for request in list.iter() {
+            let bytes = serde_json::to_vec(request)?;
+            self.ipfs.pubsub_publish(FRIENDS_BROADCAST.into(), bytes).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn broadcast_request(&mut self, request: &FriendRequest) -> Result<(), Error> {
+        let bytes = serde_json::to_vec(request)?;
+        let remote_peer_id = pub_to_libp2p_pub(&request.to())?.to_peer_id();
+        let peers = self.ipfs.pubsub_peers(Some(FRIENDS_BROADCAST.into())).await?;
+        self.outgoing_request.write().push(request.clone());
+        if !peers.contains(&remote_peer_id) {
+            self.broadcast_request.write().push(request.clone());
+        } else {
+            self.ipfs.pubsub_publish(FRIENDS_BROADCAST.into(), bytes).await?;
+        }
+        self.save_outgoing_requests().await?;
+        Ok(())
     }
 
     pub fn set_broadcast_with_connection(&mut self, val: bool) {
