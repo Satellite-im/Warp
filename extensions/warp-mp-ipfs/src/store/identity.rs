@@ -151,13 +151,12 @@ impl IdentityStore {
                     }
                     _ = tick.tick() => {
                         //TODO: Provide a signed and/or encrypted payload
-                        if store.broadcast_with_connection.load(Ordering::SeqCst) {
-                            if let Ok(peers) = store.ipfs.pubsub_peers(Some(IDENTITY_BROADCAST.into())).await {
-                                if peers.is_empty() {
-                                    continue;
-                                }
+                        if let Ok(peers) = store.ipfs.pubsub_peers(Some(IDENTITY_BROADCAST.into())).await {
+                            if peers.is_empty() {
+                                continue;
                             }
                         }
+
                         let ident = store.identity.read().clone();
                         let ident_bytes = match ident.as_ref() {
                             Some(indent) => match serde_json::to_vec(&ident) {
