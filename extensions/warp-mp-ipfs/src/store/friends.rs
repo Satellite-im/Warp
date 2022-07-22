@@ -43,7 +43,7 @@ pub struct FriendsStore {
 
     // Used to broadcast request
     broadcast_request: Arc<RwLock<Vec<FriendRequest>>>,
-    
+
     // Tesseract
     tesseract: Tesseract,
 }
@@ -152,11 +152,11 @@ impl FriendsStore {
                                         continue
                                     }
                                 };
-                                
+
                                 match message.source {
                                     Some(peer) if peer == pk.to_peer_id() => {},
                                     _ => {
-                                        //If the peer who sent this doesnt match the peer id of the request 
+                                        //If the peer who sent this doesnt match the peer id of the request
                                         //or there isnt a source, we should go on and reject it.
                                         //We should always have a Option::Some, but this check is a precaution
                                         continue
@@ -166,7 +166,7 @@ impl FriendsStore {
                                 if data.to().ne(&local_public_key) {
                                     continue;
                                 }
-                                
+
                                 if store.outgoing_request.read().contains(&data) ||
                                    store.incoming_request.read().contains(&data) {
                                     continue;
@@ -184,27 +184,7 @@ impl FriendsStore {
                                 };
 
                                 //first verify the request before processing it
-                                let pk = match Ed25519PublicKey::try_from(data.from().into_bytes()) {
-                                    Ok(pk) => pk,
-                                    Err(_e) => {
-                                        //TODO: Log
-                                        continue
-                                    }
-                                };
-
-                                let signature = match data.signature() {
-                                    Some(s) => s,
-                                    None => continue
-                                };
-
-                                let mut request = FriendRequest::default();
-                                request.set_from(data.from());
-                                request.set_to(data.to());
-                                request.set_status(data.status());
-                                request.set_date(data.date());
-
-                                if let Err(_e) = verify_serde_sig(pk, &request, &signature) {
-                                    //Signature is not valid
+                                if let Err(_e) = validate_request(&data) {
                                     //TODO: Log
                                     continue
                                 }
@@ -218,7 +198,7 @@ impl FriendsStore {
 
                                         store.outgoing_request.write().remove(index);
 
-                                        if let Err(_e) = store.add_friend(&request.from()).await {
+                                        if let Err(_e) = store.add_friend(&data.from()).await {
                                             //TODO: Log
                                             continue
                                         }
@@ -344,7 +324,7 @@ impl FriendsStore {
         request.set_signature(signature);
 
         self.broadcast_request(&request).await?;
-        // 
+
         Ok(())
     }
 
@@ -375,20 +355,8 @@ impl FriendsStore {
             },
             None => return Err(Error::CannotFindFriendRequest),
         };
-        let pk = Ed25519PublicKey::try_from(incoming_request.from().into_bytes())?;
 
-        let mut request = FriendRequest::default();
-        request.set_from(incoming_request.from());
-        request.set_to(incoming_request.to());
-        request.set_status(incoming_request.status());
-        request.set_date(incoming_request.date());
-
-        let signature = match incoming_request.signature() {
-            Some(s) => s,
-            None => return Err(Error::InvalidSignature),
-        };
-
-        verify_serde_sig(pk, &request, &signature)?;
+        validate_request(&incoming_request)?;
 
         let mut request = FriendRequest::default();
         request.set_from(local_public_key);
@@ -437,20 +405,7 @@ impl FriendsStore {
             None => return Err(Error::CannotFindFriendRequest),
         };
 
-        let pk = Ed25519PublicKey::try_from(incoming_request.from().into_bytes())?;
-
-        let mut request = FriendRequest::default();
-        request.set_from(incoming_request.from());
-        request.set_to(incoming_request.to());
-        request.set_status(incoming_request.status());
-        request.set_date(incoming_request.date());
-
-        let signature = match incoming_request.signature() {
-            Some(s) => s,
-            None => return Err(Error::InvalidSignature),
-        };
-
-        verify_serde_sig(pk, &request, &signature)?;
+        validate_request(&incoming_request)?;
 
         let mut request = FriendRequest::default();
         request.set_from(local_public_key);
@@ -557,6 +512,9 @@ impl FriendsStore {
                 //TODO: Log error
             }
         }
+
+        // Since we want to broadcast the remove request, banning the peer after would not allow that to happen
+        // Although this may get uncomment in the future to block connections regardless if its sent or not
 
         // let peer_id = pub_to_libp2p_pub(pubkey)?.to_peer_id();
 
@@ -800,7 +758,9 @@ impl FriendsStore {
         let list = self.broadcast_request.read().clone();
         for request in list.iter() {
             let bytes = serde_json::to_vec(request)?;
-            self.ipfs.pubsub_publish(FRIENDS_BROADCAST.into(), bytes).await?;
+            self.ipfs
+                .pubsub_publish(FRIENDS_BROADCAST.into(), bytes)
+                .await?;
         }
         Ok(())
     }
@@ -808,12 +768,17 @@ impl FriendsStore {
     pub async fn broadcast_request(&mut self, request: &FriendRequest) -> Result<(), Error> {
         let bytes = serde_json::to_vec(request)?;
         let remote_peer_id = pub_to_libp2p_pub(&request.to())?.to_peer_id();
-        let peers = self.ipfs.pubsub_peers(Some(FRIENDS_BROADCAST.into())).await?;
+        let peers = self
+            .ipfs
+            .pubsub_peers(Some(FRIENDS_BROADCAST.into()))
+            .await?;
         self.outgoing_request.write().push(request.clone());
         if !peers.contains(&remote_peer_id) {
             self.broadcast_request.write().push(request.clone());
         } else {
-            self.ipfs.pubsub_publish(FRIENDS_BROADCAST.into(), bytes).await?;
+            self.ipfs
+                .pubsub_publish(FRIENDS_BROADCAST.into(), bytes)
+                .await?;
         }
         self.save_outgoing_requests().await?;
         Ok(())
@@ -822,4 +787,22 @@ impl FriendsStore {
     pub fn set_broadcast_with_connection(&mut self, val: bool) {
         self.broadcast_with_connection.store(val, Ordering::SeqCst)
     }
+}
+
+fn validate_request(real_request: &FriendRequest) -> Result<(), Error> {
+    let pk = Ed25519PublicKey::try_from(real_request.from().into_bytes())?;
+
+    let mut request = FriendRequest::default();
+    request.set_from(real_request.from());
+    request.set_to(real_request.to());
+    request.set_status(real_request.status());
+    request.set_date(real_request.date());
+
+    let signature = match real_request.signature() {
+        Some(s) => s,
+        None => return Err(Error::InvalidSignature),
+    };
+
+    verify_serde_sig(pk, &request, &signature)?;
+    Ok(())
 }
