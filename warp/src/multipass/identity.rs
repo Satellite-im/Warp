@@ -127,6 +127,15 @@ pub struct Identity {
     linked_accounts: HashMap<String, String>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, FFIFree)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[repr(C)]
+pub enum IdentityStatus {
+    Online,
+    Offline,
+    Blocked,
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Identity {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]

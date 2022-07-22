@@ -14,6 +14,8 @@ use identity::Identity;
 use crate::crypto::PublicKey;
 use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate};
 
+use self::identity::IdentityStatus;
+
 pub trait MultiPass: Extension + Friends + Sync + Send + SingleHandle {
     /// Create an [`Identity`]
     fn create_identity(
@@ -24,6 +26,11 @@ pub trait MultiPass: Extension + Friends + Sync + Send + SingleHandle {
 
     /// Obtain an [`Identity`] using [`Identifier`]
     fn get_identity(&self, id: Identifier) -> Result<Identity, Error>;
+
+    /// Obtain [`IdentityStatus`] using [`Identifier`]
+    fn identity_status(&mut self, _: Identifier) -> Result<IdentityStatus, Error> {
+        Err(Error::Unimplemented)
+    }
 
     /// Obtain your own [`Identity`]
     fn get_own_identity(&self) -> Result<Identity, Error> {
