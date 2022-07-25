@@ -44,7 +44,7 @@ mod tests {
     #[test]
     fn use_mp_with_pregenerated_wallet() -> anyhow::Result<()> {
         let tesseract = tesseract_with_random_key()?;
-        let mut account = SolanaAccount::with_devnet(&tesseract);
+        let mut account = SolanaAccount::with_devnet(&tesseract, None)?;
 
         account.insert_solana_wallet(pregenerated_wallet()?)?;
 

@@ -19,14 +19,18 @@ serde_json = "1.0"
 derive_more = "0.99"
 tiny-bip39 = "0.8"
 zeroize = "1"
+futures = { version = "0.3" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 users = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"], rev = "c55c84f89bffac4011f717f2798868b559351ba0" }
-friends = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"], rev = "c55c84f89bffac4011f717f2798868b559351ba0" }
+ipfs = { git = "https://github.com/dariusc93/rust-ipfs", branch = "next-usable" }
+libp2p = { default-features = false, version = "0.46.1" }
+libipld = { version = "0.13", features = ["serde-codec"] }
 anchor-client = "0.24.2"
-tokio = { version = "1", features = ["full"]}
+tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.11", features = ["json"] }
 borsh = "0.9.3"
+
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 solana-sdk = "1.9.20"

@@ -1,6 +1,10 @@
 pub mod solana;
+pub mod store;
+pub mod config;
 
 use anyhow::anyhow;
+use config::Config;
+use ipfs::{IpfsOptions, UninitializedIpfs};
 use warp::crypto::{rand::Rng, PublicKey};
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
@@ -12,13 +16,14 @@ use warp::pocket_dimension::query::QueryBuilder;
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::tesseract::Tesseract;
-use warp::{Extension, SingleHandle};
+use warp::{Extension, SingleHandle, async_block_in_place_uncheck, async_spawn};
 
-use crate::solana::helper::friends::{DirectFriendRequest, DirectStatus};
+use crate::store::friends::FriendsStore;
+
 use crate::solana::helper::user::UserHelper;
 use crate::solana::manager::SolanaManager;
 use crate::solana::wallet::{PhraseType, SolanaWallet};
-use crate::solana::{anchor_client::Cluster, helper};
+use crate::solana::{anchor_client::Cluster};
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::solana_sdk::signature::Keypair;
 
@@ -26,9 +31,10 @@ type Result<T> = std::result::Result<T, Error>;
 
 pub struct SolanaAccount {
     pub endpoint: Cluster,
-    pub contacts: Option<Vec<PublicKey>>,
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     pub tesseract: Tesseract,
+    pub friend_store: Option<FriendsStore>,
+    pub config: Config,
     pub hooks: Option<Hooks>,
 }
 
@@ -36,42 +42,53 @@ impl Default for SolanaAccount {
     fn default() -> Self {
         Self {
             endpoint: Cluster::Devnet,
-            contacts: None,
             cache: None,
             tesseract: Tesseract::default(),
+            config: Default::default(),
+            friend_store: None,
             hooks: None,
         }
     }
 }
 
 impl SolanaAccount {
-    pub fn new(endpoint: Cluster, tesseract: &Tesseract) -> Self {
+    pub fn new(endpoint: Cluster, tesseract: &Tesseract, config: Config) -> Result<Self> {
         let tesseract = tesseract.clone();
-        Self {
+        
+        let mut account = Self {
             tesseract,
             endpoint,
+            config,
             ..Default::default()
-        }
+        };
+
+        if let Err(_) = account.try_init_friend_store(false) {}
+
+        Ok(account)
     }
 
-    pub fn with_devnet(tesseract: &Tesseract) -> Self {
-        Self::new(Cluster::Devnet, tesseract)
+    pub fn with_devnet(tesseract: &Tesseract, config: Option<Config>) -> Result<Self> {
+        let config = config.unwrap_or(Config::development());
+        Self::new(Cluster::Devnet, tesseract, config)
     }
 
-    pub fn with_mainnet(tesseract: &Tesseract) -> Self {
-        Self::new(Cluster::Mainnet, tesseract)
+    pub fn with_mainnet(tesseract: &Tesseract, config: Option<Config>) -> Result<Self> {
+        let config = config.unwrap_or(Config::production());
+        Self::new(Cluster::Mainnet, tesseract, config)
     }
 
-    pub fn with_testnet(tesseract: &Tesseract) -> Self {
-        Self::new(Cluster::Testnet, tesseract)
+    pub fn with_testnet(tesseract: &Tesseract, config: Option<Config>) -> Result<Self> {
+        let config = config.unwrap_or(Config::development());
+        Self::new(Cluster::Testnet, tesseract, config)
     }
 
-    pub fn with_localnet(tesseract: &Tesseract) -> Self {
-        Self::new(Cluster::Localnet, tesseract)
+    pub fn with_localnet(tesseract: &Tesseract, config: Option<Config>) -> Result<Self> {
+        let config = config.unwrap_or(Config::development());
+        Self::new(Cluster::Localnet, tesseract, config)
     }
 
-    pub fn with_custom(url: &str, ws: &str, tesseract: &Tesseract) -> Self {
-        Self::new(Cluster::Custom(url.to_string(), ws.to_string()), tesseract)
+    pub fn with_custom(url: &str, ws: &str, tesseract: &Tesseract, config: Config) -> Result<Self> {
+        Self::new(Cluster::Custom(url.to_string(), ws.to_string()), tesseract, config)
     }
 
     pub fn set_cache(&mut self, cache: Arc<Mutex<Box<dyn PocketDimension>>>) {
@@ -80,6 +97,59 @@ impl SolanaAccount {
 
     pub fn set_hook(&mut self, hooks: &Hooks) {
         self.hooks = Some(hooks.clone())
+    }
+
+    pub fn try_init_friend_store(&mut self, init: bool) -> anyhow::Result<()> {
+
+        if self.friend_store().is_ok() {
+            anyhow::bail!("Friend store already initialized")
+        }
+
+        let config = self.config.clone();
+        let kp = self.get_private_key()?;
+        let secret = libp2p::identity::ed25519::SecretKey::from_bytes(kp.secret().as_bytes().to_vec())?;
+        let keypair = libp2p::identity::Keypair::Ed25519(secret.into());
+
+        let ipfs_path = config.ipfs_setting.path.clone().unwrap_or_else(|| {
+            let temp = warp::crypto::rand::thread_rng().gen_range(0, 1000);
+            std::env::temp_dir().join(&format!("ipfs-temp-{temp}"))
+        });
+    
+        let opts = IpfsOptions {
+                ipfs_path: ipfs_path.clone(),
+                keypair,
+                bootstrap: config.ipfs_setting.bootstrap.clone(),
+                mdns: config.ipfs_setting.mdns.enable,
+                kad_protocol: None,
+                listening_addrs: config.ipfs_setting.listen_on,
+                span: None,
+                dcutr: config.ipfs_setting.dcutr.enable,
+                relay: config.ipfs_setting.relay_client.enable,
+                relay_server: config.ipfs_setting.relay_server.enable,
+                relay_addr: config.ipfs_setting.relay_client.relay_address,
+        };
+
+        if !opts.ipfs_path.exists() {
+            std::fs::create_dir(opts.ipfs_path.clone())?;
+        }
+    
+        let (ipfs, fut) = async_block_in_place_uncheck(UninitializedIpfs::new(opts).start())?;
+        async_spawn(fut);
+
+        let friend_store = async_block_in_place_uncheck(FriendsStore::new(
+            ipfs,
+            self.tesseract.clone(),
+            config.ipfs_setting.store_setting.discovery,
+            config.ipfs_setting.store_setting.broadcast_with_connection,
+            config.ipfs_setting.store_setting.broadcast_interval,
+            config.ipfs_setting.temporary,
+            ipfs_path,
+            init
+        ))?;
+
+        self.friend_store = Some(friend_store);
+
+        Ok(())
     }
 
     pub fn insert_solana_wallet(&mut self, wallet: SolanaWallet) -> anyhow::Result<()> {
@@ -143,12 +213,15 @@ impl SolanaAccount {
         let helper = UserHelper::new_with_cluster(self.endpoint.clone(), &kp);
         Ok(helper)
     }
-
-    pub fn friend_helper(&self) -> anyhow::Result<helper::friends::Friends> {
-        let kp = self.get_private_key()?;
-        let helper = helper::friends::Friends::new_with_cluster(self.endpoint.clone(), &kp);
-        Ok(helper)
+    
+    pub fn friend_store(&self) -> anyhow::Result<&FriendsStore> {
+        self.friend_store.as_ref().ok_or(anyhow::anyhow!("Friends store is not initialized"))
     }
+
+    pub fn friend_store_mut(&mut self) -> anyhow::Result<&mut FriendsStore> {
+        self.friend_store.as_mut().ok_or(anyhow::anyhow!("Friends store is not initialized"))
+    }
+
 }
 
 impl Extension for SolanaAccount {
@@ -165,7 +238,14 @@ impl Extension for SolanaAccount {
     }
 }
 
-impl SingleHandle for SolanaAccount {}
+impl SingleHandle for SolanaAccount {
+    fn handle(&self) -> Result<Box<dyn core::any::Any>> {
+        if let Some(store) = self.friend_store.as_ref() {
+            return Ok(Box::new(store.ipfs()))
+        }
+        Err(Error::Unimplemented)
+    }
+}
 
 impl MultiPass for SolanaAccount {
     fn create_identity(&mut self, username: Option<&str>, _: Option<&str>) -> Result<PublicKey> {
@@ -226,6 +306,9 @@ impl MultiPass for SolanaAccount {
             let object = DataObject::new(DataType::Accounts, identity.clone())?;
             hooks.trigger("accounts::new_identity", &object);
         }
+
+        self.try_init_friend_store(true)?;
+
         Ok(identity.public_key())
     }
 
@@ -381,24 +464,7 @@ impl MultiPass for SolanaAccount {
 
 impl Friends for SolanaAccount {
     fn send_request(&mut self, pubkey: PublicKey) -> Result<()> {
-        let ident = self.get_own_identity()?;
-
-        if ident.public_key() == pubkey {
-            return Err(Error::CannotSendSelfFriendRequest);
-        }
-
-        if self.get_identity(Identifier::from(pubkey.clone())).is_err() {
-            return Err(Error::IdentityDoesntExist);
-        }
-
-        if self.has_friend(pubkey.clone()).is_ok() {
-            return Err(Error::FriendExist);
-        }
-
-        let helper = self.friend_helper()?;
-
-        helper.create_friend_request(Pubkey::new(pubkey.as_ref()), "")?;
-
+        async_block_in_place_uncheck(self.friend_store_mut()?.send_request(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if let Some(request) = self
                 .list_outgoing_request()?
@@ -415,33 +481,16 @@ impl Friends for SolanaAccount {
     }
 
     fn accept_request(&mut self, pubkey: PublicKey) -> Result<()> {
-        let ident = self.get_own_identity()?;
-
-        if ident.public_key() == pubkey {
-            return Err(Error::CannotAcceptSelfAsFriend);
-        }
-
-        if self.get_identity(Identifier::from(pubkey.clone())).is_err() {
-            return Err(Error::IdentityDoesntExist);
-        }
-
-        if self.has_friend(pubkey.clone()).is_ok() {
-            return Err(Error::FriendExist);
-        }
-
-        let helper = self.friend_helper()?;
-
-        helper.accept_friend_request(Pubkey::new(pubkey.as_ref()), "")?;
-
+        async_block_in_place_uncheck(self.friend_store_mut()?.accept_request(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
-            if let Some(request) = self
+            if let Some(key) = self
                 .list_friends()?
                 .iter()
                 .filter(|pk| **pk == pubkey)
                 .collect::<Vec<_>>()
                 .first()
             {
-                let object = DataObject::new(DataType::Accounts, request)?;
+                let object = DataObject::new(DataType::Accounts, key)?;
                 hooks.trigger("accounts::accept_friend_request", &object);
             }
         }
@@ -449,185 +498,78 @@ impl Friends for SolanaAccount {
     }
 
     fn deny_request(&mut self, pubkey: PublicKey) -> Result<()> {
-        let ident = self.get_own_identity()?;
-
-        if ident.public_key() == pubkey {
-            return Err(Error::CannotDenySelfAsFriend);
-        }
-
-        if self.get_identity(Identifier::from(pubkey.clone())).is_err() {
-            return Err(Error::IdentityDoesntExist);
-        }
-
-        if self.has_friend(pubkey.clone()).is_ok() {
-            return Err(Error::FriendExist);
-        }
-
-        let helper = self.friend_helper()?;
-
-        helper.deny_friend_request(Pubkey::new(pubkey.as_ref()))?;
+        async_block_in_place_uncheck(self.friend_store_mut()?.reject_request(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
-            if let Some(request) = self
+            if !self
                 .list_all_request()?
                 .iter()
-                .filter(|request| request.from() == pubkey)
-                .collect::<Vec<_>>()
-                .first()
+                .any(|request| request.from() == pubkey)
             {
-                let object = DataObject::new(DataType::Accounts, request)?;
+                let object = DataObject::new(DataType::Accounts, ())?;
                 hooks.trigger("accounts::deny_friend_request", &object);
             }
         }
         Ok(())
     }
 
-    fn close_request(&mut self, pubkey: PublicKey) -> Result<()> {
-        let ident = self.get_own_identity()?;
-
-        if ident.public_key() == pubkey {
-            return Err(Error::CannotUseSelfAsFriend);
-        }
-
-        if self.get_identity(Identifier::from(pubkey.clone())).is_err() {
-            return Err(Error::IdentityDoesntExist);
-        }
-
-        if self.has_friend(pubkey.clone()).is_ok() {
-            return Err(Error::FriendExist);
-        }
-
-        let helper = self.friend_helper()?;
-
-        helper.close_friend_request(Pubkey::new(pubkey.as_ref()))?;
-        if let Ok(hooks) = self.get_hooks() {
-            if let Some(request) = self
-                .list_all_request()?
-                .iter()
-                .filter(|request| request.from() == pubkey)
-                .collect::<Vec<_>>()
-                .first()
-            {
-                let object = DataObject::new(DataType::Accounts, request)?;
-                hooks.trigger("accounts::close_friend_request", &object);
-            }
-        }
-        Ok(())
-    }
-
     fn list_incoming_request(&self) -> Result<Vec<FriendRequest>> {
-        let helper = self.friend_helper()?;
-        let list = helper
-            .list_incoming_request()?
-            .iter()
-            .map(|(_, request)| request)
-            .map(DirectFriendRequest::from)
-            .map(fr_to_fr)
-            .filter(|fr| fr.status() == FriendRequestStatus::Pending)
-            .collect::<Vec<_>>();
-        Ok(list)
+        Ok(self.friend_store()?.list_incoming_request())
     }
 
     fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>> {
-        let helper = self.friend_helper()?;
-        let list = helper
-            .list_outgoing_request()?
-            .iter()
-            .map(|(_, request)| request)
-            .map(DirectFriendRequest::from)
-            .map(fr_to_fr)
-            .filter(|fr| fr.status() == FriendRequestStatus::Pending)
-            .collect::<Vec<_>>();
-        Ok(list)
+        Ok(self.friend_store()?.list_outgoing_request())
     }
 
     fn list_all_request(&self) -> Result<Vec<FriendRequest>> {
-        let helper = self.friend_helper()?;
-        let list = helper.list_requests()?;
-        let ident = self.get_own_identity()?;
-        let new_list = list
-            .iter()
-            .map(|(_, request)| request)
-            .map(DirectFriendRequest::from)
-            .map(fr_to_fr)
-            .filter(|fr| fr.from() == ident.public_key() || fr.to() == ident.public_key())
-            .collect::<Vec<_>>();
-        Ok(new_list)
+        Ok(self.friend_store()?.list_all_request())
     }
 
     fn remove_friend(&mut self, pubkey: PublicKey) -> Result<()> {
-        if self.get_identity(Identifier::from(pubkey.clone())).is_err() {
-            return Err(Error::CannotRemoveSelfAsFriend);
-        }
-
-        if self.has_friend(pubkey.clone()).is_err() {
-            return Err(Error::FriendDoesntExist);
-        }
-
-        let helper = self.friend_helper()?;
-
-        helper.remove_friend(Pubkey::new(pubkey.as_ref()))?;
+        async_block_in_place_uncheck(self.friend_store_mut()?.remove_friend(&pubkey, true))?;
         if let Ok(hooks) = self.get_hooks() {
-            if let Some(request) = self
-                .list_all_request()?
-                .iter()
-                .filter(|request| request.from() == pubkey || request.to() == pubkey)
-                .collect::<Vec<_>>()
-                .first()
-            {
-                let object = DataObject::new(DataType::Accounts, request)?;
+            if self.has_friend(pubkey.clone()).is_err() {
+                let object = DataObject::new(DataType::Accounts, pubkey)?;
                 hooks.trigger("accounts::remove_friend", &object);
             }
         }
         Ok(())
     }
 
-    fn list_friends(&self) -> Result<Vec<PublicKey>> {
-        let mut identities = vec![];
-        let list = self.list_all_request()?;
-        let ident = self.get_own_identity()?;
-        for request in list
-            .iter()
-            .filter(|r| r.status() == FriendRequestStatus::Accepted)
-        {
-            let identity = if request.to() != ident.public_key() {
-                request.to()
-            } else {
-                request.from()
-            };
-
-            identities.push(identity)
+    fn block(&mut self, pubkey: PublicKey) -> Result<()> {
+        async_block_in_place_uncheck(self.friend_store_mut()?.block(&pubkey))?;
+        if let Ok(hooks) = self.get_hooks() {
+            if self.has_friend(pubkey.clone()).is_err() {
+                let object = DataObject::new(DataType::Accounts, pubkey)?;
+                hooks.trigger("accounts::block_key", &object);
+            }
         }
-        Ok(identities)
+        Ok(())
+    }
+
+    fn unblock(&mut self, pubkey: PublicKey) -> Result<()> {
+        async_block_in_place_uncheck(self.friend_store_mut()?.unblock(&pubkey))?;
+        if let Ok(hooks) = self.get_hooks() {
+            if self.has_friend(pubkey.clone()).is_err() {
+                let object = DataObject::new(DataType::Accounts, pubkey)?;
+                hooks.trigger("accounts::unblock_key", &object);
+            }
+        }
+        Ok(())
+    }
+
+    fn block_list(&self) -> Result<Vec<PublicKey>> {
+        async_block_in_place_uncheck(self.friend_store()?.block_list())
+    }
+
+    fn list_friends(&self) -> Result<Vec<PublicKey>> {
+        async_block_in_place_uncheck(self.friend_store()?.friends_list())
     }
 
     fn has_friend(&self, pubkey: PublicKey) -> Result<()> {
-        let helper = self.friend_helper()?;
-        let request = helper
-            .get_request(Pubkey::new(pubkey.as_ref()))
-            .map(DirectFriendRequest::from)?;
-
-        if request.status == DirectStatus::Accepted {
-            return Ok(());
-        }
-
-        Err(Error::Any(anyhow!("Account is not friends")))
+        async_block_in_place_uncheck(self.friend_store()?.is_friend(&pubkey))
     }
 }
 
-fn fr_to_fr(fr: helper::friends::DirectFriendRequest) -> FriendRequest {
-    let mut new_fr = FriendRequest::default();
-    new_fr.set_status(match fr.status {
-        DirectStatus::Uninitilized => FriendRequestStatus::Uninitialized,
-        DirectStatus::Pending => FriendRequestStatus::Pending,
-        DirectStatus::Accepted => FriendRequestStatus::Accepted,
-        DirectStatus::Denied => FriendRequestStatus::Denied,
-        DirectStatus::RemovedFriend => FriendRequestStatus::RequestRemoved,
-        DirectStatus::RequestRemoved => FriendRequestStatus::RequestRemoved,
-    });
-    new_fr.set_from(PublicKey::from_bytes(&fr.from.to_bytes()));
-    new_fr.set_to(PublicKey::from_bytes(&fr.to.to_bytes()));
-    new_fr
-}
 
 fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Result<Identity> {
     let (user, pubkey) = match pubkey {
@@ -679,6 +621,11 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
 }
 
 pub mod ffi {
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
+
+    use warp::error::Error;
+    use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::sync::{Arc, Mutex};
@@ -691,7 +638,8 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_mp_solana_new_with_devnet(
         pocketdimension: *const PocketDimensionAdapter,
         tesseract: *const Tesseract,
-    ) -> *mut MultiPassAdapter {
+        config: *const c_char
+    ) -> FFIResult<MultiPassAdapter> {
         let tesseract = match tesseract.is_null() {
             false => {
                 let tesseract = &*tesseract;
@@ -700,7 +648,24 @@ pub mod ffi {
             true => Tesseract::default(),
         };
 
-        let mut account = SolanaAccount::with_devnet(&tesseract);
+
+        let config = match config.is_null() {
+            true => None,
+            false => {
+                let config = CStr::from_ptr(config).to_string_lossy().to_string();
+                match serde_json::from_str(&config) {
+                    Ok(c) => Some(c),
+                    Err(e) => return FFIResult::err(Error::from(e)),
+                }
+            }
+        };
+
+
+        let mut account = match SolanaAccount::with_devnet(&tesseract, config) {
+            Ok(account) => account,
+            Err(e) => return FFIResult::err(e)
+        };
+
         match pocketdimension.is_null() {
             true => {}
             false => {
@@ -710,7 +675,7 @@ pub mod ffi {
         }
 
         let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
-        Box::into_raw(Box::new(mp)) as *mut MultiPassAdapter
+        FFIResult::ok(mp)
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -718,7 +683,8 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_mp_solana_new_with_testnet(
         pocketdimension: *const PocketDimensionAdapter,
         tesseract: *const Tesseract,
-    ) -> *mut MultiPassAdapter {
+        config: *const c_char
+    ) -> FFIResult<MultiPassAdapter> {
         let tesseract = match tesseract.is_null() {
             false => {
                 let tesseract = &*tesseract;
@@ -726,7 +692,23 @@ pub mod ffi {
             }
             true => Tesseract::default(),
         };
-        let mut account = SolanaAccount::with_testnet(&tesseract);
+
+        let config = match config.is_null() {
+            true => None,
+            false => {
+                let config = CStr::from_ptr(config).to_string_lossy().to_string();
+                match serde_json::from_str(&config) {
+                    Ok(c) => Some(c),
+                    Err(e) => return FFIResult::err(Error::from(e)),
+                }
+            }
+        };
+
+        let mut account = match SolanaAccount::with_testnet(&tesseract, config) {
+            Ok(account) => account,
+            Err(e) => return FFIResult::err(e)
+        };
+
         match pocketdimension.is_null() {
             true => {}
             false => {
@@ -736,7 +718,7 @@ pub mod ffi {
         }
 
         let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
-        Box::into_raw(Box::new(mp)) as *mut MultiPassAdapter
+        FFIResult::ok(mp)
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -744,7 +726,8 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_mp_solana_new_with_mainnet(
         pocketdimension: *const PocketDimensionAdapter,
         tesseract: *const Tesseract,
-    ) -> *mut MultiPassAdapter {
+        config: *const c_char
+    ) -> FFIResult<MultiPassAdapter> {
         let tesseract = match tesseract.is_null() {
             false => {
                 let tesseract = &*(tesseract);
@@ -753,7 +736,22 @@ pub mod ffi {
             true => Tesseract::default(),
         };
 
-        let mut account = SolanaAccount::with_mainnet(&tesseract);
+        let config = match config.is_null() {
+            true => None,
+            false => {
+                let config = CStr::from_ptr(config).to_string_lossy().to_string();
+                match serde_json::from_str(&config) {
+                    Ok(c) => Some(c),
+                    Err(e) => return FFIResult::err(Error::from(e)),
+                }
+            }
+        };
+
+        let mut account = match SolanaAccount::with_mainnet(&tesseract, config) {
+            Ok(account) => account,
+            Err(e) => return FFIResult::err(e)
+        };
+
         match pocketdimension.is_null() {
             true => {}
             false => {
@@ -763,6 +761,6 @@ pub mod ffi {
         }
 
         let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
-        Box::into_raw(Box::new(mp)) as *mut MultiPassAdapter
+        FFIResult::ok(mp)
     }
 }

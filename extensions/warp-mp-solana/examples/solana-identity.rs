@@ -55,7 +55,7 @@ fn main() -> anyhow::Result<()> {
 
     let pd = cache_setup()?;
 
-    let mut account = SolanaAccount::with_devnet(&tesseract);
+    let mut account = SolanaAccount::with_devnet(&tesseract, None)?;
     account.set_cache(pd);
     // Uncomment this if you want to interact with an precreated account and comment out `account.create_identity`
     // account.insert_solana_wallet(generated_wallet()?)?;
