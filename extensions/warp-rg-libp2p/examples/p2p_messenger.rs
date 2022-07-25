@@ -40,7 +40,7 @@ fn create_account(
     tesseract.set_file(env);
     tesseract.set_autosave();
 
-    let mut account = SolanaAccount::with_devnet(&tesseract);
+    let mut account = SolanaAccount::with_devnet(&tesseract, None)?;
     account.set_cache(cache);
 
     if account.get_own_identity().is_ok() {
