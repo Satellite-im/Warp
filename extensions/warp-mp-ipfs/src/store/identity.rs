@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use std::{
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::Duration,
@@ -12,7 +11,7 @@ use libipld::{
     Cid, Ipld,
 };
 use warp::{
-    crypto::{rand::Rng, PublicKey, DIDKey, Ed25519KeyPair, DID},
+    crypto::{rand::Rng, DIDKey, Ed25519KeyPair, DID},
     error::Error,
     multipass::identity::{FriendRequest, Identity},
     sync::{Arc, Mutex, RwLock},
@@ -215,11 +214,11 @@ impl IdentityStore {
         let ident_cid = self.ipfs.put_dag(ipld).await?;
         let friends_cid = self
             .ipfs
-            .put_dag(to_ipld(Vec::<Vec<PublicKey>>::new()).map_err(anyhow::Error::from)?)
+            .put_dag(to_ipld(Vec::<Vec<DID>>::new()).map_err(anyhow::Error::from)?)
             .await?;
         let block_cid = self
             .ipfs
-            .put_dag(to_ipld(Vec::<Vec<PublicKey>>::new()).map_err(anyhow::Error::from)?)
+            .put_dag(to_ipld(Vec::<Vec<DID>>::new()).map_err(anyhow::Error::from)?)
             .await?;
         let incoming_request_cid = self
             .ipfs

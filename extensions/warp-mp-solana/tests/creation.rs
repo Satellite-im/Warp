@@ -40,7 +40,7 @@ mod tests {
         Ok(Arc::new(Mutex::new(tesseract)))
     }
 
-    //TODO: Correct test
+    //TODO: Correct test using did key
     #[test]
     #[ignore]
     fn use_mp_with_pregenerated_wallet() -> anyhow::Result<()> {
