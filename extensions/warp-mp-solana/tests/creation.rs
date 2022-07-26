@@ -7,7 +7,6 @@ mod tests {
     use warp::multipass::MultiPass;
     use warp::sync::{Arc, Mutex};
     use warp::tesseract::Tesseract;
-    use warp_mp_solana::solana::anchor_client::anchor_lang::prelude::Pubkey;
     use warp_mp_solana::solana::wallet::{PhraseType, SolanaWallet};
     use warp_mp_solana::SolanaAccount;
 
