@@ -48,17 +48,17 @@ async fn main() -> anyhow::Result<()> {
     println!(
         "{} with {}",
         username(&ident_a),
-        bs58::encode(ident_a.public_key().as_ref()).into_string()
+        ident_a.did_key().to_string()
     );
 
     println!(
         "{} with {}",
         username(&ident_b),
-        bs58::encode(ident_b.public_key().as_ref()).into_string()
+        ident_b.did_key().to_string()
     );
     println!();
 
-    account_a.send_request(ident_b.public_key())?;
+    account_a.send_request(&ident_b.did_key())?;
 
     delay().await;
 
@@ -86,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
     let coin = rng.gen_range(0, 2);
     match coin {
         0 => {
-            account_b.accept_request(ident_a.public_key())?;
+            account_b.accept_request(&ident_a.did_key())?;
 
             println!(
                 "{} accepted {} request",
@@ -98,29 +98,29 @@ async fn main() -> anyhow::Result<()> {
 
             println!("{} Friends:", username(&ident_a));
             for friend in account_a.list_friends()? {
-                let friend = account_a.get_identity(Identifier::public_key(friend))?;
+                let friend = account_a.get_identity(Identifier::did_key(friend))?;
                 println!("Username: {}", username(&friend));
                 println!(
                     "Public Key: {}",
-                    bs58::encode(friend.public_key().as_ref()).into_string()
+                    friend.did_key().to_string()
                 );
                 println!();
             }
 
             println!("{} Friends:", username(&ident_b));
             for friend in account_b.list_friends()? {
-                let friend = account_b.get_identity(Identifier::public_key(friend))?;
+                let friend = account_b.get_identity(Identifier::did_key(friend))?;
                 println!("Username: {}", username(&friend));
                 println!(
                     "Public Key: {}",
-                    bs58::encode(friend.public_key().as_ref()).into_string()
+                    friend.did_key().to_string()
                 );
                 println!();
             }
 
             if rand::random() {
-                account_a.remove_friend(ident_b.public_key())?;
-                if account_a.has_friend(ident_b.public_key()).is_ok() {
+                account_a.remove_friend(&ident_b.did_key())?;
+                if account_a.has_friend(&ident_b.did_key()).is_ok() {
                     println!(
                         "{} is stuck with {} forever",
                         username(&ident_a),
@@ -130,8 +130,8 @@ async fn main() -> anyhow::Result<()> {
                     println!("{} removed {}", username(&ident_a), username(&ident_b));
                 }
             } else {
-                account_b.remove_friend(ident_a.public_key())?;
-                if account_b.has_friend(ident_a.public_key()).is_ok() {
+                account_b.remove_friend(&ident_a.did_key())?;
+                if account_b.has_friend(&ident_a.did_key()).is_ok() {
                     println!(
                         "{} is stuck with {} forever",
                         username(&ident_b),
@@ -144,7 +144,7 @@ async fn main() -> anyhow::Result<()> {
         }
         _ => {
             println!("Denying {} friend request", username(&ident_a));
-            account_b.deny_request(ident_a.public_key())?;
+            account_b.deny_request(&ident_a.did_key())?;
         }
     }
 

@@ -9,6 +9,7 @@ use libipld::serde::{from_ipld, to_ipld};
 use libipld::{ipld, Cid, Ipld};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use warp::async_block_in_place_uncheck;
+use warp::crypto::DID;
 use warp::crypto::signature::Ed25519PublicKey;
 use warp::crypto::{signature::Ed25519Keypair, PublicKey};
 use warp::error::Error;
@@ -23,7 +24,7 @@ use warp::tesseract::Tesseract;
 use crate::store::verify_serde_sig;
 
 use super::identity::{IdentityStore, LookupBy};
-use super::{libp2p_pub_to_pub, pub_to_libp2p_pub, sign_serde, topic_discovery, FRIENDS_BROADCAST};
+use super::{libp2p_pub_to_did, did_to_libp2p_pub, sign_serde, topic_discovery, FRIENDS_BROADCAST};
 
 #[derive(Clone)]
 pub struct FriendsStore {
@@ -112,7 +113,7 @@ impl FriendsStore {
 
         let (local_ipfs_public_key, _) = store.local().await?;
 
-        let local_public_key = libp2p_pub_to_pub(&local_ipfs_public_key)?;
+        let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
 
         tokio::spawn(async move {
             let mut store = store_inner;
@@ -121,7 +122,7 @@ impl FriendsStore {
             match store.block_list().await {
                 Ok(list) => {
                     for pubkey in list {
-                        if let Ok(peer_id) = pub_to_libp2p_pub(&pubkey).map(|p| p.to_peer_id()) {
+                        if let Ok(peer_id) = did_to_libp2p_pub(&pubkey).map(|p| p.to_peer_id()) {
                             if let Err(_e) = store.ipfs.ban_peer(peer_id).await {
                                 //TODO: Log
                             }
@@ -145,7 +146,7 @@ impl FriendsStore {
                         if let Some(message) = message {
                             if let Ok(data) = serde_json::from_slice::<FriendRequest>(&message.data) {
                                 //Validate public key against peer that sent it
-                                let pk = match pub_to_libp2p_pub(&data.from()) {
+                                let pk = match did_to_libp2p_pub(&data.from()) {
                                     Ok(pk) => pk,
                                     Err(_e) => {
                                         //TODO: Log
@@ -286,9 +287,9 @@ impl FriendsStore {
 }
 
 impl FriendsStore {
-    pub async fn send_request(&mut self, pubkey: &PublicKey) -> Result<(), Error> {
+    pub async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
-        let local_public_key = libp2p_pub_to_pub(&local_ipfs_public_key)?;
+        let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
 
         if local_public_key.eq(pubkey) {
             return Err(Error::CannotSendSelfFriendRequest);
@@ -302,7 +303,7 @@ impl FriendsStore {
             return Err(Error::FriendRequestExist);
         }
 
-        let peer: PeerId = pub_to_libp2p_pub(pubkey)?.into();
+        let peer: PeerId = did_to_libp2p_pub(pubkey)?.into();
 
         for request in self.outgoing_request.read().iter() {
             // checking the from and status is just a precaution and not required
@@ -328,10 +329,10 @@ impl FriendsStore {
         Ok(())
     }
 
-    pub async fn accept_request(&mut self, pubkey: &PublicKey) -> Result<(), Error> {
+    pub async fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
-        let local_public_key = libp2p_pub_to_pub(&local_ipfs_public_key)?;
+        let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
 
         if local_public_key.eq(pubkey) {
             return Err(Error::CannotAcceptSelfAsFriend);
@@ -377,10 +378,10 @@ impl FriendsStore {
         Ok(())
     }
 
-    pub async fn reject_request(&mut self, pubkey: &PublicKey) -> Result<(), Error> {
+    pub async fn reject_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
-        let local_public_key = libp2p_pub_to_pub(&local_ipfs_public_key)?;
+        let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
 
         if local_public_key.eq(pubkey) {
             return Err(Error::CannotDenySelfAsFriend);
@@ -422,10 +423,10 @@ impl FriendsStore {
         Ok(())
     }
 
-    pub async fn close_request(&mut self, pubkey: &PublicKey) -> Result<(), Error> {
+    pub async fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
-        let local_public_key = libp2p_pub_to_pub(&local_ipfs_public_key)?;
+        let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
 
         let index = match self.outgoing_request.read().iter().position(|request| {
             request.from().eq(pubkey)
@@ -443,7 +444,7 @@ impl FriendsStore {
         Ok(())
     }
 
-    pub fn has_request_from(&self, pubkey: &PublicKey) -> bool {
+    pub fn has_request_from(&self, pubkey: &DID) -> bool {
         self.incoming_request
             .read()
             .iter()
@@ -456,14 +457,14 @@ impl FriendsStore {
 }
 
 impl FriendsStore {
-    pub async fn raw_block_list(&self) -> Result<(Cid, Vec<PublicKey>), Error> {
+    pub async fn raw_block_list(&self) -> Result<(Cid, Vec<DID>), Error> {
         match self.tesseract.retrieve("block_cid") {
             Ok(cid) => {
                 let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
                 let path = IpfsPath::from(cid);
                 match self.ipfs.get_dag(path).await {
                     Ok(ipld) => {
-                        let list = from_ipld::<Vec<PublicKey>>(ipld).unwrap_or_default();
+                        let list = from_ipld::<Vec<DID>>(ipld).unwrap_or_default();
                         Ok((cid, list))
                     }
                     Err(e) => Err(Error::Any(anyhow::anyhow!("Unable to get dag: {}", e))),
@@ -473,11 +474,11 @@ impl FriendsStore {
         }
     }
 
-    pub async fn block_list(&self) -> Result<Vec<PublicKey>, Error> {
+    pub async fn block_list(&self) -> Result<Vec<DID>, Error> {
         self.raw_block_list().await.map(|(_, list)| list)
     }
 
-    pub async fn is_blocked(&self, public_key: &PublicKey) -> Result<bool, Error> {
+    pub async fn is_blocked(&self, public_key: &DID) -> Result<bool, Error> {
         self.block_list()
             .await
             .map(|list| list.contains(public_key))
@@ -487,7 +488,7 @@ impl FriendsStore {
         self.raw_block_list().await.map(|(cid, _)| cid)
     }
 
-    pub async fn block(&mut self, pubkey: &PublicKey) -> Result<(), Error> {
+    pub async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (block_cid, mut block_list) = self.raw_block_list().await?;
 
         if block_list.contains(pubkey) {
@@ -516,13 +517,13 @@ impl FriendsStore {
         // Since we want to broadcast the remove request, banning the peer after would not allow that to happen
         // Although this may get uncomment in the future to block connections regardless if its sent or not
 
-        // let peer_id = pub_to_libp2p_pub(pubkey)?.to_peer_id();
+        // let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
         // self.ipfs.ban_peer(peer_id).await?;
         Ok(())
     }
 
-    pub async fn unblock(&mut self, pubkey: &PublicKey) -> Result<(), Error> {
+    pub async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (block_cid, mut block_list) = self.raw_block_list().await?;
 
         if !block_list.contains(pubkey) {
@@ -548,7 +549,7 @@ impl FriendsStore {
 
         self.tesseract.set("block_cid", &cid.to_string())?;
 
-        let peer_id = pub_to_libp2p_pub(pubkey)?.to_peer_id();
+        let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
         self.ipfs.unban_peer(peer_id).await?;
         Ok(())
@@ -556,14 +557,14 @@ impl FriendsStore {
 }
 
 impl FriendsStore {
-    pub async fn raw_friends_list(&self) -> Result<(Cid, Vec<PublicKey>), Error> {
+    pub async fn raw_friends_list(&self) -> Result<(Cid, Vec<DID>), Error> {
         match self.tesseract.retrieve("friends_cid") {
             Ok(cid) => {
                 let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
                 let path = IpfsPath::from(cid);
                 match self.ipfs.get_dag(path).await {
                     Ok(ipld) => {
-                        let list = from_ipld::<Vec<PublicKey>>(ipld).unwrap_or_default();
+                        let list = from_ipld::<Vec<DID>>(ipld).unwrap_or_default();
                         Ok((cid, list))
                     }
                     Err(e) => Err(Error::Any(anyhow::anyhow!("Unable to get dag: {}", e))),
@@ -573,7 +574,7 @@ impl FriendsStore {
         }
     }
 
-    pub async fn friends_list(&self) -> Result<Vec<PublicKey>, Error> {
+    pub async fn friends_list(&self) -> Result<Vec<DID>, Error> {
         self.raw_friends_list().await.map(|(_, list)| list)
     }
 
@@ -582,7 +583,7 @@ impl FriendsStore {
     }
 
     // Should not be called directly but only after a request is accepted
-    pub async fn add_friend(&mut self, pubkey: &PublicKey) -> Result<(), Error> {
+    pub async fn add_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
         if self.is_blocked(pubkey).await? {
             return Err(Error::FriendDoesntExist); //TODO: Block error
         }
@@ -611,7 +612,7 @@ impl FriendsStore {
 
     pub async fn remove_friend(
         &mut self,
-        pubkey: &PublicKey,
+        pubkey: &DID,
         broadcast: bool,
     ) -> Result<(), Error> {
         let (friend_cid, mut friend_list) = self.raw_friends_list().await?;
@@ -641,7 +642,7 @@ impl FriendsStore {
         if broadcast {
             let (local_ipfs_public_key, _) = self.local().await?;
 
-            let local_public_key = libp2p_pub_to_pub(&local_ipfs_public_key)?;
+            let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
             let mut request = FriendRequest::default();
             request.set_from(local_public_key);
             request.set_to(pubkey.clone());
@@ -655,7 +656,7 @@ impl FriendsStore {
         Ok(())
     }
 
-    pub async fn is_friend(&self, pubkey: &PublicKey) -> Result<(), Error> {
+    pub async fn is_friend(&self, pubkey: &DID) -> Result<(), Error> {
         let list = self.friends_list().await?;
         for pk in list {
             if pk.eq(pubkey) {
@@ -767,7 +768,7 @@ impl FriendsStore {
 
     pub async fn broadcast_request(&mut self, request: &FriendRequest) -> Result<(), Error> {
         let bytes = serde_json::to_vec(request)?;
-        let remote_peer_id = pub_to_libp2p_pub(&request.to())?.to_peer_id();
+        let remote_peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
         let peers = self
             .ipfs
             .pubsub_peers(Some(FRIENDS_BROADCAST.into()))
@@ -790,7 +791,7 @@ impl FriendsStore {
 }
 
 fn validate_request(real_request: &FriendRequest) -> Result<(), Error> {
-    let pk = Ed25519PublicKey::try_from(real_request.from().into_bytes())?;
+    let pk = real_request.from().clone();
 
     let mut request = FriendRequest::default();
     request.set_from(real_request.from());

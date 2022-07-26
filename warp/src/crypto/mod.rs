@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 pub use aead;
 pub use aes_gcm;
 pub use blake2;
@@ -33,6 +35,20 @@ use crate::error::Error;
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct DID(String);
 
+impl Display for DID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl TryFrom<String> for DID {
+    type Error = Error;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let did = did_key::resolve(&value).map_err(|_| Error::Other)?;
+        Ok(DID(format!("did:key:{}", did.fingerprint())))
+    }
+}
+
 impl From<DIDKey> for DID {
     fn from(did: DIDKey) -> Self {
         DID(format!("did:key:{}", did.fingerprint()))
@@ -50,14 +66,6 @@ impl TryFrom<DID> for DIDKey {
     type Error = Error;
     fn try_from(value: DID) -> Result<Self, Self::Error> {
         did_key::resolve(&value.0).map_err(|_| Error::Other)
-    }
-}
-
-impl TryFrom<DID> for PublicKey {
-    type Error = Error;
-    fn try_from(value: DID) -> Result<Self, Self::Error> {
-        let did: DIDKey = value.try_into()?;
-        Ok(PublicKey::from(did.public_key_bytes()))
     }
 }
 

@@ -5,7 +5,8 @@ pub mod config;
 use anyhow::anyhow;
 use config::Config;
 use ipfs::{IpfsOptions, UninitializedIpfs};
-use warp::crypto::{rand::Rng, PublicKey};
+use warp::crypto::{Ed25519KeyPair, DIDKey, KeyMaterial};
+use warp::crypto::{rand::Rng, DID};
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::hooks::Hooks;
@@ -248,7 +249,7 @@ impl SingleHandle for SolanaAccount {
 }
 
 impl MultiPass for SolanaAccount {
-    fn create_identity(&mut self, username: Option<&str>, _: Option<&str>) -> Result<PublicKey> {
+    fn create_identity(&mut self, username: Option<&str>, _: Option<&str>) -> Result<DID> {
         if let Ok(keypair) = &self.get_private_key() {
             if UserHelper::new_with_cluster(self.endpoint.clone(), keypair)
                 .get_current_user()
@@ -309,7 +310,7 @@ impl MultiPass for SolanaAccount {
 
         self.try_init_friend_store(true)?;
 
-        Ok(identity.public_key())
+        Ok(identity.did_key())
     }
 
     fn get_identity(&self, id: Identifier) -> Result<Identity> {
@@ -354,7 +355,7 @@ impl MultiPass for SolanaAccount {
             (Some(pkey), None, false) => {
                 if let Ok(cache) = self.get_cache() {
                     let mut query = QueryBuilder::default();
-                    query.r#where("public_key", &pkey)?;
+                    query.r#where("did_key", &pkey)?;
                     if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
                     {
                         //get last
@@ -364,7 +365,9 @@ impl MultiPass for SolanaAccount {
                         }
                     }
                 }
-                user_to_identity(&helper, Some(pkey.as_ref()))?
+                let did: DIDKey = pkey.try_into()?;
+
+                user_to_identity(&helper, Some(&did.public_key_bytes()))?
             }
             (None, None, true) => user_to_identity(&helper, None)?,
             _ => return Err(Error::InvalidIdentifierCondition),
@@ -372,7 +375,7 @@ impl MultiPass for SolanaAccount {
 
         if let Ok(mut cache) = self.get_cache() {
             let mut query = QueryBuilder::default();
-            query.r#where("public_key", &ident.public_key())?;
+            query.r#where("did_key", &ident.did_key())?;
             if cache
                 .has_data(DataType::from(Module::Accounts), &query)
                 .is_err()
@@ -463,13 +466,13 @@ impl MultiPass for SolanaAccount {
 }
 
 impl Friends for SolanaAccount {
-    fn send_request(&mut self, pubkey: PublicKey) -> Result<()> {
+    fn send_request(&mut self, pubkey: &DID) -> Result<()> {
         async_block_in_place_uncheck(self.friend_store_mut()?.send_request(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if let Some(request) = self
                 .list_outgoing_request()?
                 .iter()
-                .filter(|request| request.to() == pubkey)
+                .filter(|request| request.to().eq(pubkey))
                 .collect::<Vec<_>>()
                 .first()
             {
@@ -480,13 +483,13 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn accept_request(&mut self, pubkey: PublicKey) -> Result<()> {
+    fn accept_request(&mut self, pubkey: &DID) -> Result<()> {
         async_block_in_place_uncheck(self.friend_store_mut()?.accept_request(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if let Some(key) = self
                 .list_friends()?
                 .iter()
-                .filter(|pk| **pk == pubkey)
+                .filter(|pk| pk.eq(&pubkey))
                 .collect::<Vec<_>>()
                 .first()
             {
@@ -497,13 +500,13 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn deny_request(&mut self, pubkey: PublicKey) -> Result<()> {
+    fn deny_request(&mut self, pubkey: &DID) -> Result<()> {
         async_block_in_place_uncheck(self.friend_store_mut()?.reject_request(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if !self
                 .list_all_request()?
                 .iter()
-                .any(|request| request.from() == pubkey)
+                .any(|request| request.from().eq(pubkey) )
             {
                 let object = DataObject::new(DataType::Accounts, ())?;
                 hooks.trigger("accounts::deny_friend_request", &object);
@@ -524,10 +527,10 @@ impl Friends for SolanaAccount {
         Ok(self.friend_store()?.list_all_request())
     }
 
-    fn remove_friend(&mut self, pubkey: PublicKey) -> Result<()> {
+    fn remove_friend(&mut self, pubkey: &DID) -> Result<()> {
         async_block_in_place_uncheck(self.friend_store_mut()?.remove_friend(&pubkey, true))?;
         if let Ok(hooks) = self.get_hooks() {
-            if self.has_friend(pubkey.clone()).is_err() {
+            if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
                 hooks.trigger("accounts::remove_friend", &object);
             }
@@ -535,10 +538,10 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn block(&mut self, pubkey: PublicKey) -> Result<()> {
+    fn block(&mut self, pubkey: &DID) -> Result<()> {
         async_block_in_place_uncheck(self.friend_store_mut()?.block(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
-            if self.has_friend(pubkey.clone()).is_err() {
+            if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
                 hooks.trigger("accounts::block_key", &object);
             }
@@ -546,10 +549,10 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn unblock(&mut self, pubkey: PublicKey) -> Result<()> {
+    fn unblock(&mut self, pubkey: &DID) -> Result<()> {
         async_block_in_place_uncheck(self.friend_store_mut()?.unblock(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
-            if self.has_friend(pubkey.clone()).is_err() {
+            if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
                 hooks.trigger("accounts::unblock_key", &object);
             }
@@ -557,15 +560,15 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn block_list(&self) -> Result<Vec<PublicKey>> {
+    fn block_list(&self) -> Result<Vec<DID>> {
         async_block_in_place_uncheck(self.friend_store()?.block_list())
     }
 
-    fn list_friends(&self) -> Result<Vec<PublicKey>> {
+    fn list_friends(&self) -> Result<Vec<DID>> {
         async_block_in_place_uncheck(self.friend_store()?.friends_list())
     }
 
-    fn has_friend(&self, pubkey: PublicKey) -> Result<()> {
+    fn has_friend(&self, pubkey: &DID) -> Result<()> {
         async_block_in_place_uncheck(self.friend_store()?.is_friend(&pubkey))
     }
 }
@@ -611,7 +614,8 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
         identity.set_username(&user.name);
     };
 
-    identity.set_public_key(PublicKey::from_bytes(&pubkey.to_bytes()));
+    let did: DIDKey = Ed25519KeyPair::from_public_key(&pubkey.to_bytes()).into();
+    identity.set_did_key(did.into());
     identity.set_status_message(Some(user.status));
     let mut graphics = Graphics::default();
     graphics.set_profile_banner(&user.banner_image_hash);
