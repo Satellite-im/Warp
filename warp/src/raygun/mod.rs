@@ -1,6 +1,6 @@
 pub mod group;
 
-use crate::crypto::PublicKey;
+use crate::crypto::{DID};
 use crate::error::Error;
 use crate::sync::{Arc, Mutex, MutexGuard};
 use crate::{Extension, SingleHandle};
@@ -25,17 +25,12 @@ pub enum Uid {
     Id(Uuid),
 
     /// Public Key Identifier
-    PublicKey(PublicKey),
+    DIDKey(DID),
 }
 
 impl Uid {
     pub fn new_uuid() -> Uid {
         Uid::Id(Uuid::new_v4())
-    }
-
-    pub fn new_public_key() -> Uid {
-        let random = crate::crypto::generate(32);
-        Uid::PublicKey(PublicKey::from_vec(random))
     }
 }
 
@@ -119,21 +114,21 @@ impl SenderId {
         SenderId(Uid::Id(id))
     }
 
-    pub fn from_public_key(pubkey: PublicKey) -> SenderId {
-        SenderId(Uid::PublicKey(pubkey))
+    pub fn from_did_key(pubkey: DID) -> SenderId {
+        SenderId(Uid::DIDKey(pubkey))
     }
 
     pub fn get_id(&self) -> Option<Uuid> {
         match &self.0 {
             Uid::Id(id) => Some(*id),
-            Uid::PublicKey(_) => None,
+            Uid::DIDKey(_) => None,
         }
     }
 
-    pub fn get_public_key(&self) -> Option<PublicKey> {
+    pub fn get_public_key(&self) -> Option<DID> {
         match &self.0 {
             Uid::Id(_) => None,
-            Uid::PublicKey(k) => Some(k.clone()),
+            Uid::DIDKey(k) => Some(k.clone()),
         }
     }
 }
@@ -392,7 +387,7 @@ impl RayGunAdapter {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use crate::crypto::PublicKey;
+    use crate::crypto::{DID};
     use crate::error::Error;
     use crate::ffi::{FFIResult, FFIResult_Null, FFIVec_String};
     use crate::raygun::{
@@ -891,13 +886,13 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn sender_id_from_public_key(
-        public_key: *const PublicKey,
+        public_key: *const DID,
     ) -> *mut SenderId {
         if public_key.is_null() {
             return std::ptr::null_mut();
         }
         let pkey = &*public_key;
-        Box::into_raw(Box::new(SenderId::from_public_key(pkey.clone())))
+        Box::into_raw(Box::new(SenderId::from_did_key(pkey.clone())))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -924,7 +919,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn sender_id_get_public_key(
         sender_id: *const SenderId,
-    ) -> *mut PublicKey {
+    ) -> *mut DID {
         if sender_id.is_null() {
             return std::ptr::null_mut();
         }

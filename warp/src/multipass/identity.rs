@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-use crate::crypto::PublicKey;
+use crate::crypto::{DID};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -106,7 +106,7 @@ pub struct Identity {
     short_id: u16,
 
     /// Public key for the identity
-    public_key: PublicKey,
+    did_key: DID,
 
     /// TBD
     graphics: Graphics,
@@ -140,8 +140,8 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_public_key(&mut self, pubkey: PublicKey) {
-        self.public_key = pubkey
+    pub fn set_did_key(&mut self, pubkey: DID) {
+        self.did_key = pubkey
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
@@ -172,8 +172,8 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn public_key(&self) -> PublicKey {
-        self.public_key.clone()
+    pub fn did_key(&self) -> DID {
+        self.did_key.clone()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
@@ -226,10 +226,10 @@ impl Identity {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct FriendRequest {
     /// The account where the request came from
-    from: PublicKey,
+    from: DID,
 
     /// The account where the request was sent to
-    to: PublicKey,
+    to: DID,
 
     /// Status of the request
     status: FriendRequestStatus,
@@ -257,12 +257,12 @@ impl Default for FriendRequest {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl FriendRequest {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_from(&mut self, key: PublicKey) {
+    pub fn set_from(&mut self, key: DID) {
         self.from = key
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_to(&mut self, key: PublicKey) {
+    pub fn set_to(&mut self, key: DID) {
         self.to = key
     }
 
@@ -280,12 +280,12 @@ impl FriendRequest {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl FriendRequest {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn from(&self) -> PublicKey {
+    pub fn from(&self) -> DID {
         self.from.clone()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn to(&self) -> PublicKey {
+    pub fn to(&self) -> DID {
         self.to.clone()
     }
 
@@ -353,8 +353,8 @@ impl Default for FriendRequestStatus {
 #[derive(Default, Debug, Clone, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Identifier {
-    /// Select identity based on public key
-    public_key: Option<PublicKey>,
+    /// Select identity based on DID Key
+    did_key: Option<DID>,
     /// Select identity based on Username (eg `Username#0000`)
     user_name: Option<String>,
     /// Select own identity.
@@ -372,9 +372,9 @@ impl Identifier {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn public_key(key: PublicKey) -> Self {
+    pub fn did_key(key: DID) -> Self {
         Identifier {
-            public_key: Some(key),
+            did_key: Some(key),
             ..Default::default()
         }
     }
@@ -389,15 +389,15 @@ impl Identifier {
 }
 
 impl Identifier {
-    pub fn get_inner(&self) -> (Option<PublicKey>, Option<String>, bool) {
-        (self.public_key.clone(), self.user_name.clone(), self.own)
+    pub fn get_inner(&self) -> (Option<DID>, Option<String>, bool) {
+        (self.did_key.clone(), self.user_name.clone(), self.own)
     }
 }
 
-impl From<PublicKey> for Identifier {
-    fn from(pubkey: PublicKey) -> Self {
+impl From<DID> for Identifier {
+    fn from(did_key: DID) -> Self {
         Identifier {
-            public_key: Some(pubkey),
+            did_key: Some(did_key),
             ..Default::default()
         }
     }
@@ -508,7 +508,7 @@ impl IdentityUpdate {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use crate::crypto::PublicKey;
+    use crate::crypto::{DID};
     use crate::multipass::identity::{
         Badge, FFIVec_Badge, FFIVec_Role, FriendRequest, FriendRequestStatus, Graphics, Identifier,
         Identity, IdentityUpdate, Role,
@@ -636,16 +636,16 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_public_key(
+    pub unsafe extern "C" fn multipass_identity_did_key(
         identity: *const Identity,
-    ) -> *mut PublicKey {
+    ) -> *mut DID {
         if identity.is_null() {
             return std::ptr::null_mut();
         }
 
         let identity = &*identity;
 
-        Box::into_raw(Box::new(identity.public_key())) as *mut PublicKey
+        Box::into_raw(Box::new(identity.did_key()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -741,26 +741,26 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_friend_request_from(
         request: *const FriendRequest,
-    ) -> *mut PublicKey {
+    ) -> *mut DID {
         if request.is_null() {
             return std::ptr::null_mut();
         }
 
         let request = &*request;
-        Box::into_raw(Box::new(request.from())) as *mut PublicKey
+        Box::into_raw(Box::new(request.from()))
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_friend_request_to(
         request: *const FriendRequest,
-    ) -> *mut PublicKey {
+    ) -> *mut DID {
         if request.is_null() {
             return std::ptr::null_mut();
         }
 
         let request = &*request;
-        Box::into_raw(Box::new(request.to())) as *mut PublicKey
+        Box::into_raw(Box::new(request.to()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -792,8 +792,8 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_identifier_public_key(
-        key: *const PublicKey,
+    pub unsafe extern "C" fn multipass_identifier_did_key(
+        key: *const DID,
     ) -> *mut Identifier {
         if key.is_null() {
             return std::ptr::null_mut();
@@ -801,7 +801,7 @@ pub mod ffi {
 
         let key = &*key;
 
-        Box::into_raw(Box::new(Identifier::public_key(key.clone()))) as *mut Identifier
+        Box::into_raw(Box::new(Identifier::did_key(key.clone()))) as *mut Identifier
     }
 
     #[allow(clippy::missing_safety_doc)]

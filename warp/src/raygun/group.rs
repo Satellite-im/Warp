@@ -1,4 +1,4 @@
-use crate::crypto::PublicKey;
+use crate::crypto::{DID};
 use crate::error::Error;
 use crate::raygun::Uid;
 use serde::{Deserialize, Serialize};
@@ -25,29 +25,25 @@ impl GroupId {
         Self(Uid::new_uuid())
     }
 
-    pub fn new_public_key() -> GroupId {
-        Self(Uid::new_public_key())
-    }
-
     pub fn from_id(id: Uuid) -> GroupId {
         Self(Uid::Id(id))
     }
 
-    pub fn from_public_key(pubkey: PublicKey) -> GroupId {
-        Self(Uid::PublicKey(pubkey))
+    pub fn from_did_key(pubkey: DID) -> GroupId {
+        Self(Uid::DIDKey(pubkey))
     }
 
     pub fn get_id(&self) -> Option<Uuid> {
         match &self.0 {
             Uid::Id(id) => Some(*id),
-            Uid::PublicKey(_) => None,
+            Uid::DIDKey(_) => None,
         }
     }
 
-    pub fn get_public_key(&self) -> Option<PublicKey> {
+    pub fn get_public_key(&self) -> Option<DID> {
         match &self.0 {
             Uid::Id(_) => None,
-            Uid::PublicKey(k) => Some(k.clone()),
+            Uid::DIDKey(k) => Some(k.clone()),
         }
     }
 }
@@ -60,29 +56,25 @@ impl GroupMember {
         Self(Uid::new_uuid())
     }
 
-    pub fn new_public_key() -> GroupMember {
-        Self(Uid::new_public_key())
-    }
-
     pub fn from_id(id: Uuid) -> GroupMember {
         Self(Uid::Id(id))
     }
 
-    pub fn from_public_key(pubkey: PublicKey) -> GroupMember {
-        Self(Uid::PublicKey(pubkey))
+    pub fn from_did_key(pubkey: DID) -> GroupMember {
+        Self(Uid::DIDKey(pubkey))
     }
 
     pub fn get_id(&self) -> Option<Uuid> {
         match &self.0 {
             Uid::Id(id) => Some(*id),
-            Uid::PublicKey(_) => None,
+            Uid::DIDKey(_) => None,
         }
     }
 
-    pub fn get_public_key(&self) -> Option<PublicKey> {
+    pub fn get_public_key(&self) -> Option<DID> {
         match &self.0 {
             Uid::Id(_) => None,
-            Uid::PublicKey(k) => Some(k.clone()),
+            Uid::DIDKey(k) => Some(k.clone()),
         }
     }
 }
