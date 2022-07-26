@@ -47,7 +47,7 @@ fn account() -> anyhow::Result<SolanaAccount> {
 
     // let pd = cache_setup()?;
 
-    let mut account = SolanaAccount::with_devnet(&tesseract);
+    let mut account = SolanaAccount::with_devnet(&tesseract, None)?;
     // account.set_cache(pd);
     account.create_identity(None, None)?;
     Ok(account)
@@ -57,12 +57,14 @@ fn username(ident: &Identity) -> String {
     format!("{}#{}", &ident.username(), &ident.short_id())
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let mut rng = rand::thread_rng();
 
     let mut account_a = account()?;
     let mut account_b = account()?;
-
+    delay().await;
+    
     let ident_a = account_a.get_own_identity()?;
     println!(
         "{} with {}",
@@ -77,15 +79,9 @@ fn main() -> anyhow::Result<()> {
         Pubkey::new(ident_b.public_key().as_ref())
     );
 
+    delay().await;
+
     println!();
-    if account_a.has_friend(ident_b.public_key()).is_ok() {
-        println!(
-            "{} are friends with {}",
-            username(&ident_a),
-            username(&ident_b)
-        );
-        return Ok(());
-    }
 
     account_a.send_request(ident_b.public_key())?;
 
@@ -99,6 +95,8 @@ fn main() -> anyhow::Result<()> {
         println!();
     }
 
+    delay().await;
+
     println!("{} Incoming request:", username(&ident_b));
     for incoming in account_b.list_incoming_request()? {
         let ident_from = account_b.get_identity(Identifier::from(incoming.from()))?;
@@ -108,13 +106,17 @@ fn main() -> anyhow::Result<()> {
         println!("Status: {:?}", incoming.status());
         println!();
     }
+
+    delay().await;
     let coin = rng.gen_range(0, 2);
     match coin {
         0 => {
+            delay().await;
             account_b.accept_request(ident_a.public_key())?;
 
             println!("{} Friends:", username(&ident_a));
 
+            delay().await;
             for friend in account_a.list_friends()? {
                 let friend = account_a.get_identity(Identifier::public_key(friend))?;
                 println!("Username: {}", username(&friend));
@@ -124,6 +126,7 @@ fn main() -> anyhow::Result<()> {
 
             println!("{} Friends:", username(&ident_b));
 
+            delay().await;
             for friend in account_b.list_friends()? {
                 let friend = account_b.get_identity(Identifier::public_key(friend))?;
                 println!("Username: {}", username(&friend));
@@ -133,6 +136,7 @@ fn main() -> anyhow::Result<()> {
 
             if rand::random() {
                 account_a.remove_friend(ident_b.public_key())?;
+                delay().await;
                 if account_a.has_friend(ident_b.public_key()).is_ok() {
                     println!(
                         "{} is stuck with {} forever",
@@ -144,6 +148,7 @@ fn main() -> anyhow::Result<()> {
                 }
             } else {
                 account_b.remove_friend(ident_a.public_key())?;
+                delay().await;
                 if account_b.has_friend(ident_a.public_key()).is_ok() {
                     println!(
                         "{} is stuck with {} forever",
@@ -156,6 +161,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
         1 | _ => {
+            delay().await;
             println!("Denying {} friend request", username(&ident_a));
             account_b.deny_request(ident_a.public_key())?;
         }
@@ -163,6 +169,7 @@ fn main() -> anyhow::Result<()> {
 
     println!();
 
+    delay().await;
     println!("Request List for {}", username(&ident_a));
     for list in account_a.list_all_request()? {
         let ident_from = account_a.get_identity(Identifier::from(list.from()))?;
@@ -174,4 +181,14 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+//Note: Because of the internal nature of this extension and not reliant on a central confirmation for friends, this will be used to add delays to allow the separate
+//      background task to complete its action
+async fn delay() {
+    fixed_delay(100).await;
+}
+
+async fn fixed_delay(millis: u64) {
+    tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
 }

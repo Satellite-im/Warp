@@ -61,10 +61,24 @@ pub fn initialize() {
     // Allows us to show detailed error messages in console
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
 }
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::task::JoinHandle;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn runtime_handle() -> tokio::runtime::Handle {
     RUNTIME.handle().clone()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn async_spawn<F>(fut: F) -> JoinHandle<F::Output>
+    where F: futures::Future + Send + 'static,
+          <F as futures::Future>::Output: std::marker::Send
+{
+    let handle = match tokio::runtime::Handle::try_current() {
+        Ok(handle) => handle,
+        Err(_) => runtime_handle(),
+    };
+    handle.spawn(fut)
 }
 
 #[cfg(not(target_arch = "wasm32"))]

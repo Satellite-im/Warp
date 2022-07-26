@@ -15,11 +15,12 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{keypair_from_seed_and_derivation_path, Keypair, Signer},
 };
+#[cfg(target_arch="wasm32")]
 use wasm_bindgen::prelude::*;
 use zeroize::Zeroize;
 
 #[derive(Zeroize)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch="wasm32", wasm_bindgen)]
 pub struct SolanaWallet {
     mnemonic: Vec<u8>,
     keypair: [u8; 64],
@@ -45,7 +46,7 @@ impl std::fmt::Debug for SolanaWallet {
 
 #[derive(Clone, Display, Copy)]
 #[repr(C)]
-#[wasm_bindgen]
+#[cfg_attr(target_arch="wasm32", wasm_bindgen)]
 pub enum PhraseType {
     #[display(fmt = "standard")]
     Standard,
