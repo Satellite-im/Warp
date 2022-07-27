@@ -203,7 +203,7 @@ async fn main() -> anyhow::Result<()> {
                             };
 
                             for member in members.iter() {
-                                let username = match get_username(new_account.clone(), SenderId::from_did_key(member.get_public_key().unwrap())) {
+                                let username = match get_username(new_account.clone(), SenderId::from_did_key(member.get_did_key().unwrap())) {
                                     Ok(user) => user,
                                     Err(e) => {
                                         writeln!(stdout, "Error: {e}")?;
@@ -401,7 +401,7 @@ fn get_username(account: Arc<Mutex<Box<dyn MultiPass>>>, id: SenderId) -> anyhow
         return Ok(id.to_string());
     }
 
-    if let Some(pubkey) = id.get_public_key() {
+    if let Some(pubkey) = id.get_did_key() {
         let account = account.lock();
         let identity = account.get_identity(Identifier::did_key(pubkey))?;
         return Ok(format!("{}#{}", identity.username(), identity.short_id()));

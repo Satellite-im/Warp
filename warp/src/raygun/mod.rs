@@ -125,7 +125,7 @@ impl SenderId {
         }
     }
 
-    pub fn get_public_key(&self) -> Option<DID> {
+    pub fn get_did_key(&self) -> Option<DID> {
         match &self.0 {
             Uid::Id(_) => None,
             Uid::DIDKey(k) => Some(k.clone()),
@@ -885,7 +885,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn sender_id_from_public_key(
+    pub unsafe extern "C" fn sender_id_from_did_key(
         public_key: *const DID,
     ) -> *mut SenderId {
         if public_key.is_null() {
@@ -917,7 +917,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn sender_id_get_public_key(
+    pub unsafe extern "C" fn sender_id_get_did_key(
         sender_id: *const SenderId,
     ) -> *mut DID {
         if sender_id.is_null() {
@@ -926,7 +926,7 @@ pub mod ffi {
 
         let sender_id = &*sender_id;
 
-        let key = match sender_id.get_public_key() {
+        let key = match sender_id.get_did_key() {
             Some(key) => key,
             None => return std::ptr::null_mut(),
         };

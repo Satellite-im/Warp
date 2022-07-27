@@ -27,7 +27,7 @@ MultiPassAdapter *new_account(const char* file) {
         return NULL;
     }
 
-    const char *config = "{\"path\":null,\"bootstrap\":[\"/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN\"], \"listen_on\":[\"/ip4/0.0.0.0/tcp/0\"],\"ipfs_setting\":{\"mdns\":{\"enable\":true},\"autonat\":{\"enable\":false,\"servers\":[]},\"relay_client\":{\"enable\":false,\"relay_address\":null},\"relay_server\":{\"enable\":false},\"dcutr\":{\"enable\":false},\"rendezvous\":{\"enable\":false,\"address\":\"\"}},\"store_setting\":{\"broadcast_interval\":10,\"discovery\":false}}";
+    const char *config = "{\"path\":null,\"bootstrap\":[\"/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN\"], \"listen_on\":[\"/ip4/0.0.0.0/tcp/0\"],\"ipfs_setting\":{\"mdns\":{\"enable\":true},\"autonat\":{\"enable\":false,\"servers\":[]},\"relay_client\":{\"enable\":false,\"relay_address\":null},\"relay_server\":{\"enable\":false},\"dcutr\":{\"enable\":false},\"rendezvous\":{\"enable\":false,\"address\":\"\"}},\"store_setting\":{\"broadcast_interval\":10,\"broadcast_with_connection\":true, \"discovery\":false}}";
 
 
     FFIResult_MultiPassAdapter result_mp = multipass_mp_ipfs_temporary(NULL, tesseract, config);
@@ -38,7 +38,7 @@ MultiPassAdapter *new_account(const char* file) {
     }
 
     tesseract_free(tesseract);
-    FFIResult_PublicKey result_ignore_t = multipass_create_identity(result_mp.data, NULL, NULL);
+    FFIResult_DID result_ignore_t = multipass_create_identity(result_mp.data, NULL, NULL);
     if (result_ignore_t.error) {
         printf("Error creating identity\n");
         print_error(result_ignore_t.error);
@@ -62,9 +62,9 @@ char *get_username(const MultiPassAdapter *account, const SenderId* id) {
         return "Null User";
     }
 
-    PublicKey *key = sender_id_get_public_key(id);
+    DID *key = sender_id_get_did_key(id);
 
-    Identifier *ident = multipass_identifier_public_key(key);
+    Identifier *ident = multipass_identifier_did_key(key);
 
     if (!ident) {
         return "Null User";

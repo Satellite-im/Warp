@@ -49,7 +49,7 @@ mod tests {
 
         account.insert_solana_wallet(pregenerated_wallet()?)?;
 
-        let ident = account.get_own_identity()?;
+        let _ident = account.get_own_identity()?;
 
         // let pubkey = Pubkey::new(ident.did_key().as_ref());
 

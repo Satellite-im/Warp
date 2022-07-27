@@ -37,15 +37,19 @@ MultiPassAdapter *new_account(const char* file) {
         printf("Autosave is disabled\n");
     }
 
-    struct MultiPassAdapter *mp = multipass_mp_solana_new_with_devnet(NULL, tesseract);
+    const char *config = "{\"path\":null,\"bootstrap\":[\"/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN\"], \"listen_on\":[\"/ip4/0.0.0.0/tcp/0\"],\"ipfs_setting\":{\"mdns\":{\"enable\":true},\"autonat\":{\"enable\":false,\"servers\":[]},\"relay_client\":{\"enable\":false,\"relay_address\":null},\"relay_server\":{\"enable\":false},\"dcutr\":{\"enable\":false},\"rendezvous\":{\"enable\":false,\"address\":\"\"}},\"store_setting\":{\"broadcast_interval\":10,\"broadcast_with_connection\":true, \"discovery\":false}}";
 
-    if (!mp) {
+    FFIResult_MultiPassAdapter result_mp = multipass_mp_solana_new_with_devnet(NULL, tesseract, config);
+
+    if (result_mp.error) {
         printf("Adapter is null\n");
+        print_error(result_mp.error);
         return NULL;
     }
+    MultiPassAdapter *mp = result_mp.data;
 
     tesseract_free(tesseract);
-    FFIResult_PublicKey result_ignore_t = multipass_create_identity(mp, NULL, NULL);
+    FFIResult_DID result_ignore_t = multipass_create_identity(mp, NULL, NULL);
     if (result_ignore_t.error) {
         if(strcmp(result_ignore_t.error->error_type, "Any") && strcmp(result_ignore_t.error->error_message, "Account already exist")) {
             FFIResult_Identity result_identity_t = multipass_get_own_identity(mp);
@@ -120,8 +124,8 @@ int main() {
     print_identity(ident_b);
 
     //Assuming that the identity isnt null
-    struct PublicKey *acct_a_key = multipass_identity_public_key(ident_a);
-    struct PublicKey *acct_b_key = multipass_identity_public_key(ident_b);
+    struct DID *acct_a_key = multipass_identity_did_key(ident_a);
+    struct DID *acct_b_key = multipass_identity_did_key(ident_b);
 
     FFIResult_Null result_void = multipass_has_friend(account_a, acct_b_key);
 
@@ -141,19 +145,19 @@ int main() {
         }
     }
 
-    struct FFIResult_FFIVec_PublicKey result_friends = multipass_list_friends(account_a);
+    FFIResult_FFIVec_DID result_friends = multipass_list_friends(account_a);
 
     if(result_friends.error) {
         print_error(result_friends.error);
         goto drop;
     }
 
-    FFIVec_PublicKey *friends = result_friends.data;
+    FFIVec_DID *friends = result_friends.data;
 
     for(int i = 0; i<friends->len; i++) {
-        PublicKey *friend = friends->ptr[i];
+        DID *friend = friends->ptr[i];
         
-        FFIResult_Identity result_identity = multipass_get_identity(account_a, multipass_identifier_public_key(friend));
+        FFIResult_Identity result_identity = multipass_get_identity(account_a, multipass_identifier_did_key(friend));
 
         char *friend_name = multipass_identity_username(result_identity.data);
         if (!friend_name) {

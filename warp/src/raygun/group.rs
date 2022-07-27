@@ -71,7 +71,7 @@ impl GroupMember {
         }
     }
 
-    pub fn get_public_key(&self) -> Option<DID> {
+    pub fn get_did_key(&self) -> Option<DID> {
         match &self.0 {
             Uid::Id(_) => None,
             Uid::DIDKey(k) => Some(k.clone()),
