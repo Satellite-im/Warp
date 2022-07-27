@@ -35,6 +35,12 @@ use crate::error::Error;
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct DID(DIDKey);
 
+impl AsRef<DIDKey> for DID {
+    fn as_ref(&self) -> &DIDKey {
+        &self.0
+    }
+}
+
 impl std::fmt::Debug for DID {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("DID").field(&self.0.fingerprint()).finish()

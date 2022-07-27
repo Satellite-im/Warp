@@ -7,7 +7,8 @@ use futures::{StreamExt};
 use ipfs::{Ipfs, IpfsPath, PeerId, Types};
 
 use libipld::serde::{from_ipld, to_ipld};
-use libipld::{Cid};
+use libipld::{Cid, IpldCodec};
+use sata::{Sata, Kind};
 use warp::async_block_in_place_uncheck;
 use warp::crypto::{DID};
 use warp::error::Error;
@@ -17,7 +18,7 @@ use warp::tesseract::Tesseract;
 
 use crate::store::{verify_serde_sig, did_to_libp2p_pub};
 
-use super::{ sign_serde, topic_discovery, FRIENDS_BROADCAST, libp2p_pub_to_did};
+use super::{ sign_serde, topic_discovery, FRIENDS_BROADCAST, libp2p_pub_to_did, did_keypair};
 
 #[derive(Clone)]
 pub struct FriendsStore {
@@ -193,7 +194,23 @@ impl FriendsStore {
                 tokio::select! {
                     message = stream.next() => {
                         if let Some(message) = message {
-                            if let Ok(data) = serde_json::from_slice::<FriendRequest>(&message.data) {
+                            if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
+                                let kp = match did_keypair(&store.tesseract) {
+                                    Ok(did_kp) => did_kp,
+                                    Err(_e) => {
+                                        //TODO: Log
+                                        continue
+                                    }
+                                };
+
+                                let data = match data.decrypt::<FriendRequest>(kp.as_ref()) {
+                                    Ok(data) => data,
+                                    Err(_e) => {
+                                        //TODO: Log
+                                        continue
+                                    }
+                                };
+                                
                                 //Validate public key against peer that sent it
                                 let pk = match did_to_libp2p_pub(&data.from()) {
                                     Ok(pk) => pk,
@@ -823,16 +840,22 @@ impl FriendsStore {
     }
 
     pub async fn broadcast_request(&mut self, request: &FriendRequest) -> Result<(), Error> {
-        let bytes = serde_json::to_vec(request)?;
         let remote_peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
         let peers = self
             .ipfs
             .pubsub_peers(Some(FRIENDS_BROADCAST.into()))
             .await?;
+
         self.outgoing_request.write().push(request.clone());
+
         if !peers.contains(&remote_peer_id) {
             self.broadcast_request.write().push(request.clone());
         } else {
+            let mut data = Sata::default();
+            data.add_recipient(&request.to().try_into()?).map_err(anyhow::Error::from)?;
+            let kp = did_keypair(&self.tesseract)?;
+            let payload = data.encrypt(IpldCodec::DagJson, &kp.try_into()?, Kind::Static, request.clone()).map_err(anyhow::Error::from)?;
+            let bytes = serde_json::to_vec(&payload)?;
             self.ipfs
                 .pubsub_publish(FRIENDS_BROADCAST.into(), bytes)
                 .await?;
@@ -840,6 +863,7 @@ impl FriendsStore {
         self.save_outgoing_requests().await?;
         Ok(())
     }
+
 
     pub fn set_broadcast_with_connection(&mut self, val: bool) {
         self.broadcast_with_connection.store(val, Ordering::SeqCst)
