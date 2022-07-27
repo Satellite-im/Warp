@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use std::{
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::Duration,
@@ -12,14 +11,16 @@ use libipld::{
     Cid, Ipld,
 };
 use warp::{
-    crypto::{rand::Rng, PublicKey},
+    crypto::{rand::Rng, DIDKey, Ed25519KeyPair, DID},
     error::Error,
     multipass::identity::{FriendRequest, Identity},
     sync::{Arc, Mutex, RwLock},
     tesseract::Tesseract,
 };
 
-use super::{libp2p_pub_to_pub, pub_to_libp2p_pub, topic_discovery, IDENTITY_BROADCAST};
+use crate::store::did_to_libp2p_pub;
+
+use super::{topic_discovery, IDENTITY_BROADCAST, libp2p_pub_to_did};
 
 #[derive(Clone)]
 pub struct IdentityStore {
@@ -47,7 +48,7 @@ impl Drop for IdentityStore {
 
 #[derive(Debug, Clone)]
 pub enum LookupBy {
-    PublicKey(PublicKey),
+    DidKey(DID),
     Username(String),
 }
 
@@ -113,7 +114,7 @@ impl IdentityStore {
                             if let Ok(identity) = serde_json::from_slice::<Identity>(&message.data) {
 
                                 //Validate public key against peer that sent it
-                                let pk = match pub_to_libp2p_pub(&identity.public_key()) {
+                                let pk = match did_to_libp2p_pub(&identity.did_key()) {
                                     Ok(pk) => pk,
                                     Err(_e) => {
                                         //TODO: Log
@@ -141,7 +142,7 @@ impl IdentityStore {
                                     continue;
                                 }
 
-                                if let Some(index) = store.cache.read().iter().position(|ident| ident.public_key() == identity.public_key()) {
+                                if let Some(index) = store.cache.read().iter().position(|ident| ident.did_key() == identity.did_key()) {
                                     store.cache.write().remove(index);
                                 }
 
@@ -196,8 +197,8 @@ impl IdentityStore {
         let raw_kp = self.get_raw_keypair()?;
 
         let mut identity = Identity::default();
-        let public_key = PublicKey::from_bytes(&raw_kp.public().encode());
-
+        let public_key = DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().encode()));
+        
         let username = match username {
             Some(u) => u.to_string(),
             None => warp::multipass::generator::generate_name(),
@@ -205,7 +206,7 @@ impl IdentityStore {
 
         identity.set_username(&username);
         identity.set_short_id(warp::crypto::rand::thread_rng().gen_range(0, 9999));
-        identity.set_public_key(public_key);
+        identity.set_did_key(public_key.into());
 
         let ipld = to_ipld(identity.clone()).map_err(anyhow::Error::from)?;
 
@@ -213,11 +214,11 @@ impl IdentityStore {
         let ident_cid = self.ipfs.put_dag(ipld).await?;
         let friends_cid = self
             .ipfs
-            .put_dag(to_ipld(Vec::<Vec<PublicKey>>::new()).map_err(anyhow::Error::from)?)
+            .put_dag(to_ipld(Vec::<Vec<DID>>::new()).map_err(anyhow::Error::from)?)
             .await?;
         let block_cid = self
             .ipfs
-            .put_dag(to_ipld(Vec::<Vec<PublicKey>>::new()).map_err(anyhow::Error::from)?)
+            .put_dag(to_ipld(Vec::<Vec<DID>>::new()).map_err(anyhow::Error::from)?)
             .await?;
         let incoming_request_cid = self
             .ipfs
@@ -257,7 +258,7 @@ impl IdentityStore {
         // Check own identity just in case since we dont store this in the cache
         if let Some(ident) = self.identity.read().clone() {
             match lookup {
-                LookupBy::PublicKey(pubkey) if ident.public_key() == pubkey => return Ok(ident),
+                LookupBy::DidKey(pubkey) if ident.did_key() == pubkey => return Ok(ident),
                 LookupBy::Username(username) if ident.username() == username => return Ok(ident),
                 _ => {}
             };
@@ -265,10 +266,10 @@ impl IdentityStore {
 
         for ident in self.cache() {
             match &lookup {
-                LookupBy::PublicKey(pubkey) if &ident.public_key() == pubkey => return Ok(ident),
+                LookupBy::DidKey(pubkey) if &ident.did_key() == pubkey => return Ok(ident),
                 LookupBy::Username(username) if &ident.username() == username => return Ok(ident),
                 _ => continue,
-            }
+            } 
         }
         Err(Error::IdentityDoesntExist)
     }
@@ -306,8 +307,8 @@ impl IdentityStore {
             Err(_) => return Err(Error::IdentityDoesntExist),
         };
 
-        let public_key = identity.public_key();
-        let kp_public_key = libp2p_pub_to_pub(&self.get_keypair()?.public())?;
+        let public_key = identity.did_key();
+        let kp_public_key = libp2p_pub_to_did(&self.get_keypair()?.public())?;
 
         if public_key != kp_public_key {
             //Note if we reach this point, the identity would need to be reconstructed

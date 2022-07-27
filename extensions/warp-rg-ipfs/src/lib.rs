@@ -143,7 +143,7 @@ impl IpfsMessaging {
 
     pub fn sender_id(&self) -> anyhow::Result<SenderId> {
         let ident = self.account.lock().get_own_identity()?;
-        Ok(SenderId::from_public_key(ident.public_key()))
+        Ok(SenderId::from_did_key(ident.did_key()))
     }
 }
 

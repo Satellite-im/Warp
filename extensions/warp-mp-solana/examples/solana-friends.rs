@@ -4,7 +4,6 @@ use warp::multipass::{Friends, MultiPass};
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
-use warp_mp_solana::solana::anchor_client::anchor_lang::prelude::Pubkey;
 use warp_mp_solana::SolanaAccount;
 use warp_pd_flatfile::FlatfileStorage;
 // use warp_solana_utils::wallet::SolanaWallet;
@@ -69,21 +68,21 @@ async fn main() -> anyhow::Result<()> {
     println!(
         "{} with {}",
         username(&ident_a),
-        Pubkey::new(ident_a.public_key().as_ref())
+        ident_a.did_key()
     );
 
     let ident_b = account_b.get_own_identity()?;
     println!(
         "{} with {}",
         username(&ident_b),
-        Pubkey::new(ident_b.public_key().as_ref())
+        ident_b.did_key()
     );
 
     delay().await;
 
     println!();
 
-    account_a.send_request(ident_b.public_key())?;
+    account_a.send_request(&ident_b.did_key())?;
 
     println!("{} Outgoing request:", username(&ident_a));
     for outgoing in account_a.list_outgoing_request()? {
@@ -112,15 +111,15 @@ async fn main() -> anyhow::Result<()> {
     match coin {
         0 => {
             delay().await;
-            account_b.accept_request(ident_a.public_key())?;
+            account_b.accept_request(&ident_a.did_key())?;
 
             println!("{} Friends:", username(&ident_a));
 
             delay().await;
             for friend in account_a.list_friends()? {
-                let friend = account_a.get_identity(Identifier::public_key(friend))?;
+                let friend = account_a.get_identity(Identifier::did_key(friend))?;
                 println!("Username: {}", username(&friend));
-                println!("Public Key: {}", Pubkey::new(friend.public_key().as_ref()));
+                println!("Public Key: {}", friend.did_key());
                 println!();
             }
 
@@ -128,16 +127,16 @@ async fn main() -> anyhow::Result<()> {
 
             delay().await;
             for friend in account_b.list_friends()? {
-                let friend = account_b.get_identity(Identifier::public_key(friend))?;
+                let friend = account_b.get_identity(Identifier::did_key(friend))?;
                 println!("Username: {}", username(&friend));
-                println!("Public Key: {}", Pubkey::new(friend.public_key().as_ref()));
+                println!("Public Key: {}", friend.did_key());
                 println!();
             }
 
             if rand::random() {
-                account_a.remove_friend(ident_b.public_key())?;
+                account_a.remove_friend(&ident_b.did_key())?;
                 delay().await;
-                if account_a.has_friend(ident_b.public_key()).is_ok() {
+                if account_a.has_friend(&ident_b.did_key()).is_ok() {
                     println!(
                         "{} is stuck with {} forever",
                         username(&ident_a),
@@ -147,9 +146,9 @@ async fn main() -> anyhow::Result<()> {
                     println!("{} removed {}", username(&ident_a), username(&ident_b));
                 }
             } else {
-                account_b.remove_friend(ident_a.public_key())?;
+                account_b.remove_friend(&ident_a.did_key())?;
                 delay().await;
-                if account_b.has_friend(ident_a.public_key()).is_ok() {
+                if account_b.has_friend(&ident_a.did_key()).is_ok() {
                     println!(
                         "{} is stuck with {} forever",
                         username(&ident_b),
@@ -163,7 +162,7 @@ async fn main() -> anyhow::Result<()> {
         1 | _ => {
             delay().await;
             println!("Denying {} friend request", username(&ident_a));
-            account_b.deny_request(ident_a.public_key())?;
+            account_b.deny_request(&ident_a.did_key())?;
         }
     }
 

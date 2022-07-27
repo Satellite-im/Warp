@@ -3,26 +3,30 @@ pub mod friends;
 use serde::Serialize;
 use warp::{
     crypto::{
-        signature::{Ed25519Keypair, Ed25519PublicKey},
-        PublicKey,
+        did_key::{CoreSign, Generate},
+        DIDKey, Ed25519KeyPair, KeyMaterial, DID,
     },
     error::Error,
     tesseract::Tesseract,
 };
 
-
 pub const FRIENDS_BROADCAST: &str = "friends/broadcast";
 
-fn pub_to_libp2p_pub(public_key: &PublicKey) -> anyhow::Result<libp2p::identity::PublicKey> {
+fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<libp2p::identity::PublicKey> {
+    let did = public_key.clone();
+    let did: DIDKey = did.try_into()?;
     let pk = libp2p::identity::PublicKey::Ed25519(libp2p::identity::ed25519::PublicKey::decode(
-        &public_key.into_bytes(),
+        &did.public_key_bytes(),
     )?);
     Ok(pk)
 }
 
-fn libp2p_pub_to_pub(public_key: &libp2p::identity::PublicKey) -> anyhow::Result<PublicKey> {
+fn libp2p_pub_to_did(public_key: &libp2p::identity::PublicKey) -> anyhow::Result<DID> {
     let pk = match public_key {
-        libp2p::identity::PublicKey::Ed25519(pk) => PublicKey::from_bytes(&pk.encode()),
+        libp2p::identity::PublicKey::Ed25519(pk) => {
+            let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.encode()).into();
+            did.try_into()?
+        }
         _ => anyhow::bail!(Error::PublicKeyInvalid),
     };
     Ok(pk)
@@ -32,19 +36,18 @@ fn libp2p_pub_to_pub(public_key: &libp2p::identity::PublicKey) -> anyhow::Result
 fn sign_serde<D: Serialize>(tesseract: &Tesseract, data: &D) -> anyhow::Result<Vec<u8>> {
     let kp = tesseract.retrieve("keypair")?;
     let kp = bs58::decode(kp).into_vec()?;
-    let keypair = Ed25519Keypair::from_bytes(&kp)?;
+    let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
+    let did = Ed25519KeyPair::from_secret_key(id_kp.secret.as_bytes());
     let bytes = serde_json::to_vec(data)?;
-    Ok(keypair.sign(&bytes))
+    Ok(did.sign(&bytes))
 }
 
 // Note that this are temporary
-fn verify_serde_sig<D: Serialize>(
-    pk: Ed25519PublicKey,
-    data: &D,
-    signature: &[u8],
-) -> anyhow::Result<()> {
+fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow::Result<()> {
+    let did: DIDKey = pk.try_into()?;
     let bytes = serde_json::to_vec(data)?;
-    pk.verify(&bytes, signature)?;
+    did.verify(&bytes, signature)
+        .map_err(|e| anyhow::anyhow!("{:?}", e))?;
     Ok(())
 }
 

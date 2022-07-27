@@ -16,7 +16,7 @@ use anyhow::{anyhow, bail, Result as AnyResult};
 use serde_json::Value;
 use warp::constellation::{Constellation, ConstellationDataType};
 use warp::crypto::zeroize::Zeroize;
-use warp::crypto::PublicKey;
+use warp::crypto::{DID};
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::multipass::identity::Identifier;
@@ -313,8 +313,7 @@ async fn main() -> AnyResult<()> {
                         println!();
                         println!("Username: {}#{}", identity.username(), identity.short_id());
                         println!(
-                            "Public Key: {}",
-                            bs58::encode(identity.public_key().into_bytes()).into_string()
+                            "DID Key: {}", identity.did_key()
                         ); // Using bs58 due to account being solana related.
                         println!();
                         tesseract.to_file(warp_directory.join("datastore"))?;
@@ -339,8 +338,8 @@ async fn main() -> AnyResult<()> {
 
                 let ident = match pubkey {
                     Some(puk) => {
-                        let decoded_puk = bs58::decode(puk).into_vec().map(PublicKey::from_vec)?;
-                        account.get_identity(Identifier::from(decoded_puk))
+                        let did = DID::try_from(puk)?;
+                        account.get_identity(Identifier::from(did))
                     }
                     None => account.get_own_identity(),
                 };
@@ -351,7 +350,7 @@ async fn main() -> AnyResult<()> {
                         println!("Username: {}#{}", ident.username(), ident.short_id());
                         println!(
                             "Public Key: {}",
-                            bs58::encode(ident.public_key().into_bytes()).into_string()
+                            ident.did_key()
                         );
                         println!();
                         tesseract.to_file(warp_directory.join("datastore"))?;
@@ -371,8 +370,7 @@ async fn main() -> AnyResult<()> {
                         println!("Account Found\n");
                         println!("Username: {}#{}", ident.username(), ident.short_id());
                         println!(
-                            "Public Key: {}",
-                            bs58::encode(ident.public_key().into_bytes()).into_string()
+                            "Public Key: {}", ident.did_key()
                         );
                         println!();
                         tesseract.to_file(warp_directory.join("datastore"))?;
@@ -409,7 +407,7 @@ async fn main() -> AnyResult<()> {
                 for friend in friends {
                     table.add_row(vec![
                         &format!("{}#{}", &friend.username(), &friend.short_id()),
-                        &bs58::encode(friend.public_key().into_bytes()).into_string(),
+                        &friend.did_key().to_string(),
                     ]);
                 }
                 println!("{table}")
@@ -424,7 +422,7 @@ async fn main() -> AnyResult<()> {
                     let ident = account.get_identity(Identifier::from(request.from()))?;
                     table.add_row(vec![
                         &format!("{}#{}", &ident.username(), &ident.short_id()),
-                        &bs58::encode(ident.public_key().into_bytes()).into_string(),
+                        &ident.did_key().to_string(),
                         &request.status().to_string(),
                     ]);
                 }
@@ -440,7 +438,7 @@ async fn main() -> AnyResult<()> {
                     let ident = account.get_identity(Identifier::from(request.to()))?;
                     table.add_row(vec![
                         &format!("{}#{}", &ident.username(), &ident.short_id()),
-                        &bs58::encode(ident.public_key().into_bytes()).into_string(),
+                        &ident.did_key().to_string(),
                         &request.status().to_string(),
                     ]);
                 }
@@ -449,9 +447,9 @@ async fn main() -> AnyResult<()> {
             Command::SendFriendRequest { pubkey } => {
                 let account = manager.get_account()?;
                 let mut account = account.lock();
-                let decoded_pubkey = bs58::decode(pubkey).into_vec().map(PublicKey::from_vec)?;
-                account.send_request(decoded_pubkey.clone())?;
-                let ident = account.get_identity(Identifier::from(decoded_pubkey))?;
+                let did = DID::try_from(pubkey)?;
+                account.send_request(&did)?;
+                let ident = account.get_identity(Identifier::from(did))?;
                 println!(
                     "Sent {}#{} A Friend Request",
                     &ident.username(),
@@ -461,9 +459,9 @@ async fn main() -> AnyResult<()> {
             Command::AcceptFriendRequest { pubkey } => {
                 let account = manager.get_account()?;
                 let mut account = account.lock();
-                let decoded_pubkey = bs58::decode(pubkey).into_vec().map(PublicKey::from_vec)?;
-                account.accept_request(decoded_pubkey.clone())?;
-                let friend = account.get_identity(Identifier::from(decoded_pubkey))?;
+                let did = DID::try_from(pubkey)?;
+                account.accept_request(&did)?;
+                let friend = account.get_identity(Identifier::from(did))?;
                 println!(
                     "Accepted {}#{} Friend Request",
                     &friend.username(),
@@ -473,9 +471,9 @@ async fn main() -> AnyResult<()> {
             Command::DenyFriendRequest { pubkey } => {
                 let account = manager.get_account()?;
                 let mut account = account.lock();
-                let decoded_pubkey = bs58::decode(pubkey).into_vec().map(PublicKey::from_vec)?;
-                account.deny_request(decoded_pubkey.clone())?;
-                let friend = account.get_identity(Identifier::from(decoded_pubkey))?;
+                let did = DID::try_from(pubkey)?;
+                account.deny_request(&did)?;
+                let friend = account.get_identity(Identifier::from(did))?;
                 println!(
                     "Denied {}#{} Friend Request",
                     &friend.username(),
@@ -485,9 +483,9 @@ async fn main() -> AnyResult<()> {
             Command::RemoveFriend { pubkey } => {
                 let account = manager.get_account()?;
                 let mut account = account.lock();
-                let decoded_pubkey = bs58::decode(pubkey).into_vec().map(PublicKey::from_vec)?;
-                account.remove_friend(decoded_pubkey.clone())?;
-                let friend = account.get_identity(Identifier::from(decoded_pubkey))?;
+                let did = DID::try_from(pubkey)?;
+                account.remove_friend(&did)?;
+                let friend = account.get_identity(Identifier::from(did))?;
                 println!(
                     "Removed {}#{} from friend list",
                     &friend.username(),

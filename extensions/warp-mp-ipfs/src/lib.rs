@@ -34,7 +34,7 @@ use ipfs::{
 };
 use tokio::sync::mpsc::Sender;
 use warp::crypto::rand::Rng;
-use warp::crypto::PublicKey;
+use warp::crypto::{PublicKey, DID};
 use warp::error::Error;
 use warp::multipass::generator::generate_name;
 use warp::multipass::identity::{FriendRequest, Identifier, Identity, IdentityUpdate};
@@ -217,7 +217,7 @@ impl MultiPass for IpfsIdentity {
         &mut self,
         username: Option<&str>,
         passphrase: Option<&str>,
-    ) -> Result<PublicKey, Error> {
+    ) -> Result<DID, Error> {
         let identity = async_block_in_place_uncheck(self.identity_store.create_identity(username))?;
 
         if let Ok(mut cache) = self.get_cache() {
@@ -228,7 +228,7 @@ impl MultiPass for IpfsIdentity {
             let object = DataObject::new(DataType::Accounts, identity.clone())?;
             hooks.trigger("accounts::new_identity", &object);
         }
-        Ok(identity.public_key())
+        Ok(identity.did_key())
     }
 
     //TODO: Use DHT to perform lookups
@@ -247,7 +247,7 @@ impl MultiPass for IpfsIdentity {
                         }
                     }
                 }
-                self.identity_store.lookup(LookupBy::PublicKey(pk))
+                self.identity_store.lookup(LookupBy::DidKey(pk))
             }
             (None, Some(username), false) => {
                 if let Ok(cache) = self.get_cache() {
@@ -352,13 +352,13 @@ impl MultiPass for IpfsIdentity {
 }
 
 impl Friends for IpfsIdentity {
-    fn send_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.send_request(&pubkey))?;
+    fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+        async_block_in_place_uncheck(self.friend_store.send_request(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if let Some(request) = self
                 .list_outgoing_request()?
                 .iter()
-                .filter(|request| request.to() == pubkey)
+                .filter(|request| request.to().eq(pubkey) )
                 .collect::<Vec<_>>()
                 .first()
             {
@@ -369,13 +369,13 @@ impl Friends for IpfsIdentity {
         Ok(())
     }
 
-    fn accept_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.accept_request(&pubkey))?;
+    fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+        async_block_in_place_uncheck(self.friend_store.accept_request(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if let Some(key) = self
                 .list_friends()?
                 .iter()
-                .filter(|pk| **pk == pubkey)
+                .filter(|pk| *pk == pubkey)
                 .collect::<Vec<_>>()
                 .first()
             {
@@ -386,13 +386,13 @@ impl Friends for IpfsIdentity {
         Ok(())
     }
 
-    fn deny_request(&mut self, pubkey: PublicKey) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.reject_request(&pubkey))?;
+    fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+        async_block_in_place_uncheck(self.friend_store.reject_request(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if !self
                 .list_all_request()?
                 .iter()
-                .any(|request| request.from() == pubkey)
+                .any(|request| request.from().eq(pubkey) )
             {
                 let object = DataObject::new(DataType::Accounts, ())?;
                 hooks.trigger("accounts::deny_friend_request", &object);
@@ -413,10 +413,10 @@ impl Friends for IpfsIdentity {
         Ok(self.friend_store.list_all_request())
     }
 
-    fn remove_friend(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+    fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
         async_block_in_place_uncheck(self.friend_store.remove_friend(&pubkey, true))?;
         if let Ok(hooks) = self.get_hooks() {
-            if self.has_friend(pubkey.clone()).is_err() {
+            if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
                 hooks.trigger("accounts::remove_friend", &object);
             }
@@ -424,10 +424,10 @@ impl Friends for IpfsIdentity {
         Ok(())
     }
 
-    fn block(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+    fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
         async_block_in_place_uncheck(self.friend_store.block(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
-            if self.has_friend(pubkey.clone()).is_err() {
+            if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
                 hooks.trigger("accounts::block_key", &object);
             }
@@ -435,10 +435,10 @@ impl Friends for IpfsIdentity {
         Ok(())
     }
 
-    fn unblock(&mut self, pubkey: PublicKey) -> Result<(), Error> {
+    fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
         async_block_in_place_uncheck(self.friend_store.unblock(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
-            if self.has_friend(pubkey.clone()).is_err() {
+            if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
                 hooks.trigger("accounts::unblock_key", &object);
             }
@@ -446,15 +446,15 @@ impl Friends for IpfsIdentity {
         Ok(())
     }
 
-    fn block_list(&self) -> Result<Vec<PublicKey>, Error> {
+    fn block_list(&self) -> Result<Vec<DID>, Error> {
         async_block_in_place_uncheck(self.friend_store.block_list())
     }
 
-    fn list_friends(&self) -> Result<Vec<PublicKey>, Error> {
+    fn list_friends(&self) -> Result<Vec<DID>, Error> {
         async_block_in_place_uncheck(self.friend_store.friends_list())
     }
 
-    fn has_friend(&self, pubkey: PublicKey) -> Result<(), Error> {
+    fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
         async_block_in_place_uncheck(self.friend_store.is_friend(&pubkey))
     }
 }

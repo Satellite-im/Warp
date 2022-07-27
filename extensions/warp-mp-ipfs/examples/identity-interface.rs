@@ -1,7 +1,6 @@
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
-use warp::crypto::PublicKey;
 use std::io::Write;
 use warp::multipass::identity::{Identifier, IdentityUpdate};
 use warp::multipass::MultiPass;
@@ -69,13 +68,13 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for friend in friends.iter() {
-                                let username = match account.get_identity(Identifier::public_key(friend.clone())) {
+                                let username = match account.get_identity(Identifier::did_key(friend.clone())) {
                                     Ok(ident) => ident.username(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
                                     username,
-                                    bs58::encode(friend.into_bytes()).into_string(),
+                                    friend.to_string(),
                                 ]);
                             }
                             writeln!(stdout, "{}", table)?;
@@ -91,33 +90,33 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for item in block_list.iter() {
-                                let username = match account.get_identity(Identifier::public_key(item.clone())) {
+                                let username = match account.get_identity(Identifier::did_key(item.clone())) {
                                     Ok(ident) => ident.username(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
                                     username,
-                                    bs58::encode(item.into_bytes()).into_string(),
+                                    item.to_string(),
                                 ]);
                             }
                             writeln!(stdout, "{}", table)?;
                         }
                         Some("remove") => {
                             let pk = match cmd_line.next() {
-                                Some(pk) => match bs58::decode(pk).into_vec() {
-                                    Ok(bytes) => PublicKey::from(bytes),
+                                Some(pk) => match pk.to_string().try_into() {
+                                    Ok(did) => did,
                                     Err(e) => {
-                                        writeln!(stdout, "Error decoding public key: {}", e)?;
-                                        continue;
+                                        writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                        continue
                                     }
-                                },
+                                }
                                 None => {
                                     writeln!(stdout, "Public key required")?;
                                     continue;
                                 }
                             };
 
-                            if let Err(e) = account.remove_friend(pk) {
+                            if let Err(e) = account.remove_friend(&pk) {
                                 writeln!(stdout, "Error Removing Friend: {}", e)?;
                                 continue;
                             }
@@ -125,20 +124,20 @@ async fn main() -> anyhow::Result<()> {
                         }
                         Some("block") => {
                             let pk = match cmd_line.next() {
-                                Some(pk) => match bs58::decode(pk).into_vec() {
-                                    Ok(bytes) => PublicKey::from(bytes),
+                                Some(pk) => match pk.to_string().try_into() {
+                                    Ok(did) => did,
                                     Err(e) => {
-                                        writeln!(stdout, "Error decoding public key: {}", e)?;
-                                        continue;
+                                        writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                        continue
                                     }
-                                },
+                                }
                                 None => {
                                     writeln!(stdout, "Public key required")?;
                                     continue;
                                 }
                             };
 
-                            if let Err(e) = account.block(pk) {
+                            if let Err(e) = account.block(&pk) {
                                 writeln!(stdout, "Error Blocking Key: {}", e)?;
                                 continue;
                             }
@@ -146,20 +145,20 @@ async fn main() -> anyhow::Result<()> {
                         }
                         Some("unblock") => {
                             let pk = match cmd_line.next() {
-                                Some(pk) => match bs58::decode(pk).into_vec() {
-                                    Ok(bytes) => PublicKey::from(bytes),
+                                Some(pk) => match pk.to_string().try_into() {
+                                    Ok(did) => did,
                                     Err(e) => {
-                                        writeln!(stdout, "Error decoding public key: {}", e)?;
-                                        continue;
+                                        writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                        continue
                                     }
-                                },
+                                }
                                 None => {
                                     writeln!(stdout, "Public key required")?;
                                     continue;
                                 }
                             };
 
-                            if let Err(e) = account.unblock(pk) {
+                            if let Err(e) = account.unblock(&pk) {
                                 writeln!(stdout, "Error Unblocking Key: {}", e)?;
                                 continue;
                             }
@@ -169,20 +168,20 @@ async fn main() -> anyhow::Result<()> {
                             match cmd_line.next() {
                                 Some("send") => {
                                     let pk = match cmd_line.next() {
-                                        Some(pk) => match bs58::decode(pk).into_vec() {
-                                            Ok(bytes) => PublicKey::from(bytes),
+                                        Some(pk) => match pk.to_string().try_into() {
+                                            Ok(did) => did,
                                             Err(e) => {
-                                                writeln!(stdout, "Error decoding public key: {}", e)?;
-                                                continue;
+                                                writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                                continue
                                             }
-                                        },
+                                        }
                                         None => {
                                             writeln!(stdout, "Public key required")?;
                                             continue;
                                         }
                                     };
 
-                                    if let Err(e) = account.send_request(pk) {
+                                    if let Err(e) = account.send_request(&pk) {
                                         writeln!(stdout, "Error sending request: {}", e)?;
                                         continue;
                                     }
@@ -190,20 +189,20 @@ async fn main() -> anyhow::Result<()> {
                                 },
                                 Some("accept") => {
                                     let pk = match cmd_line.next() {
-                                        Some(pk) => match bs58::decode(pk).into_vec() {
-                                            Ok(bytes) => PublicKey::from(bytes),
+                                        Some(pk) => match pk.to_string().try_into() {
+                                            Ok(did) => did,
                                             Err(e) => {
-                                                writeln!(stdout, "Error decoding public key: {}", e)?;
-                                                continue;
+                                                writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                                continue
                                             }
-                                        },
+                                        }
                                         None => {
                                             writeln!(stdout, "Public key required")?;
                                             continue;
                                         }
                                     };
 
-                                    if let Err(e) = account.accept_request(pk) {
+                                    if let Err(e) = account.accept_request(&pk) {
                                         writeln!(stdout, "Error Accepting request: {}", e)?;
                                         continue;
                                     }
@@ -212,20 +211,20 @@ async fn main() -> anyhow::Result<()> {
                                 },
                                 Some("deny") => {
                                     let pk = match cmd_line.next() {
-                                        Some(pk) => match bs58::decode(pk).into_vec() {
-                                            Ok(bytes) => PublicKey::from(bytes),
+                                        Some(pk) => match pk.to_string().try_into() {
+                                            Ok(did) => did,
                                             Err(e) => {
-                                                writeln!(stdout, "Error decoding public key: {}", e)?;
-                                                continue;
+                                                writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                                continue
                                             }
-                                        },
+                                        }
                                         None => {
                                             writeln!(stdout, "Public key required")?;
                                             continue;
                                         }
                                     };
 
-                                    if let Err(e) = account.deny_request(pk) {
+                                    if let Err(e) = account.deny_request(&pk) {
                                         writeln!(stdout, "Error Denying request: {}", e)?;
                                         continue;
                                     }
@@ -249,9 +248,9 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for request in list.iter() {
-                                let username = match account.get_identity(Identifier::public_key(request.from())) {
+                                let username = match account.get_identity(Identifier::did_key(request.from())) {
                                     Ok(ident) => ident.username(),
-                                    Err(_) => bs58::encode(request.from().into_bytes()).into_string()
+                                    Err(_) => request.from().to_string()
                                 };
                                 table.add_row(vec![
                                     username,
@@ -272,9 +271,9 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for request in list.iter() {
-                                let username = match account.get_identity(Identifier::public_key(request.to())) {
+                                let username = match account.get_identity(Identifier::did_key(request.to())) {
                                     Ok(ident) => ident.username(),
-                                    Err(_) => bs58::encode(request.to().into_bytes()).into_string()
+                                    Err(_) => request.to().to_string()
                                 };
                                 table.add_row(vec![
                                     username,
@@ -333,22 +332,20 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                 },
                                 Some("publickey") | Some("public-key") => {
-                                    let publickey = match cmd_line.next() {
-                                        Some(pk) => {
-                                            match bs58::decode(pk).into_vec() {
-                                                Ok(bytes) => PublicKey::from(bytes),
-                                                Err(e) => {
-                                                    writeln!(stdout, "Error decoding public key: {}", e)?;
-                                                    continue;
-                                                }
+                                    let pk = match cmd_line.next() {
+                                        Some(pk) => match pk.to_string().try_into() {
+                                            Ok(did) => did,
+                                            Err(e) => {
+                                                writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                                continue
                                             }
-                                        },
+                                        }
                                         None => {
-                                            writeln!(stdout, "Username is required")?;
+                                            writeln!(stdout, "Public key required")?;
                                             continue;
                                         }
                                     };
-                                    match account.get_identity(Identifier::public_key(publickey)) {
+                                    match account.get_identity(Identifier::did_key(pk)) {
                                         Ok(identity) => identity,
                                         Err(e) => {
                                             writeln!(stdout, "Error obtaining identity by public key: {}", e)?;
@@ -374,7 +371,7 @@ async fn main() -> anyhow::Result<()> {
                             table.set_header(vec!["Username", "Public Key", "Status Message"]);
                             table.add_row(vec![
                                 identity.username(),
-                                bs58::encode(identity.public_key().as_ref()).into_string(),
+                                identity.did_key().to_string(),
                                 identity.status_message().unwrap_or_default()
                             ]);
                             writeln!(stdout, "{}", table)?;
