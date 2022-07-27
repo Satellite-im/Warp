@@ -26,7 +26,6 @@ use serde::{Deserialize, Serialize};
 use warp_derive::{FFIFree, FFIVec};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
-use zeroize::Zeroize;
 
 use crate::error::Error;
 
@@ -69,81 +68,6 @@ impl TryFrom<DID> for DIDKey {
     }
 }
 
-//TODO: Have internals match with various of crypto public keys
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIVec, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct PublicKey(Vec<u8>);
-
-impl AsRef<[u8]> for PublicKey {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_slice()
-    }
-}
-
-impl From<Vec<u8>> for PublicKey {
-    fn from(bytes: Vec<u8>) -> Self {
-        PublicKey(bytes)
-    }
-}
-
-impl From<PublicKey> for Vec<u8> {
-    fn from(public_key: PublicKey) -> Self {
-        public_key.0
-    }
-}
-
-impl From<&PublicKey> for Vec<u8> {
-    fn from(public_key: &PublicKey) -> Self {
-        public_key.0.to_vec()
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl PublicKey {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn from_vec(bytes: Vec<u8>) -> Self {
-        bytes.into()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        Self(bytes.to_vec())
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn into_bytes(&self) -> Vec<u8> {
-        self.into()
-    }
-}
-
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIVec, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct PrivateKey(Vec<u8>);
-
-impl Drop for PrivateKey {
-    fn drop(&mut self) {
-        self.0.zeroize();
-    }
-}
-
-impl AsRef<[u8]> for PrivateKey {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_slice()
-    }
-}
-
-//TODO: Have internals match with various of crypto private keys
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl PrivateKey {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn from_vec(bytes: Vec<u8>) -> Self {
-        Self(bytes)
-    }
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        Self(bytes.to_vec())
-    }
-}
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn generate(limit: usize) -> Vec<u8> {

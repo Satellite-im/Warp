@@ -10,8 +10,6 @@ use libipld::{ipld, Cid, Ipld};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use warp::async_block_in_place_uncheck;
 use warp::crypto::DID;
-use warp::crypto::signature::Ed25519PublicKey;
-use warp::crypto::{signature::Ed25519Keypair, PublicKey};
 use warp::error::Error;
 use warp::multipass::identity::{FriendRequest, FriendRequestStatus, Identity};
 use warp::multipass::MultiPass;

@@ -34,7 +34,7 @@ use ipfs::{
 };
 use tokio::sync::mpsc::Sender;
 use warp::crypto::rand::Rng;
-use warp::crypto::{PublicKey, DID};
+use warp::crypto::{DID};
 use warp::error::Error;
 use warp::multipass::generator::generate_name;
 use warp::multipass::identity::{FriendRequest, Identifier, Identity, IdentityUpdate};

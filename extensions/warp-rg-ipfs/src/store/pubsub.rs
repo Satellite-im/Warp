@@ -8,7 +8,6 @@ use ipfs::{Ipfs, PeerId, SubscriptionStream, Types};
 
 use serde::{Deserialize, Serialize};
 use warp::crypto::curve25519_dalek::traits::Identity;
-use warp::crypto::PublicKey;
 use warp::error::Error;
 use warp::multipass::identity::FriendRequest;
 use warp::multipass::MultiPass;
