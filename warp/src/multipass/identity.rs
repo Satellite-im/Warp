@@ -857,7 +857,7 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_identity_update_set_status_message(
         name: *const c_char,
     ) -> *mut IdentityUpdate {
-        let update = if name.is_null() {
+        let update = if !name.is_null() {
             let name = CStr::from_ptr(name).to_string_lossy().to_string();
             IdentityUpdate::set_status_message(Some(name))
         } else {
