@@ -10,6 +10,7 @@ use clap::{Parser, Subcommand};
 use comfy_table::Table;
 use log::{error, info, warn};
 use manager::ModuleManager;
+use warp::libipld::IpldCodec;
 use std::path::Path;
 use warp::sata::Sata;
 
@@ -18,7 +19,7 @@ use serde_json::Value;
 use warp::constellation::{Constellation, ConstellationDataType};
 use warp::crypto::zeroize::Zeroize;
 use warp::crypto::DID;
-use warp::data::{DataObject, DataType};
+use warp::data::{DataType};
 use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::pocket_dimension::PocketDimension;
@@ -649,7 +650,7 @@ fn import_from_cache(
 }
 
 fn export_to_cache(
-    dataobject: &Sata,
+    _: &Sata,
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
     handle: Arc<Mutex<Box<dyn Constellation>>>,
 ) -> AnyResult<()> {
@@ -657,12 +658,13 @@ fn export_to_cache(
     let mut cache = cache.lock();
 
     let data = handle.export(ConstellationDataType::Json)?;
+    
+    let versioning = cache.count(DataType::DataExport, None)?;
 
-    // let mut object = dataobject.clone();
-    // object.set_size(data.len() as u64);
-    // object.set_payload(serde_json::from_str::<Value>(&data)?)?;
-
-    // cache.add_data(warp::data::DataType::DataExport, &object)?;
+    let mut new_data = Sata::default();
+    new_data.set_version(versioning as u32);
+    let data = new_data.encode(IpldCodec::DagJson, warp::sata::Kind::Reference, data)?;
+    cache.add_data(warp::data::DataType::DataExport, &data)?;
 
     Ok(())
 }

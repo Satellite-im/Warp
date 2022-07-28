@@ -7,22 +7,22 @@ use warp_pd_memory::MemoryClient;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Item {
-    pub port: f64,
+    pub port: u64,
     pub data: String,
 }
 
 fn main() -> anyhow::Result<()> {
     let items = vec![
         Item {
-            port: 10000.,
+            port: 10000,
             data: "Local".into(),
         },
         Item {
-            port: 10001.,
+            port: 10001,
             data: "Global".into(),
         },
         Item {
-            port: 10002.,
+            port: 10002,
             data: "All".into(),
         },
     ];
@@ -45,8 +45,8 @@ fn main() -> anyhow::Result<()> {
         println!("Item::data={}", item.data);
     }
 
-    let count = cache.count(DataType::from(Module::Unknown), None)?;
+    // let count = cache.count(DataType::from(Module::Unknown), None)?;
 
-    assert!(count == 0);
+    // assert!(count == 0);
     Ok(())
 }

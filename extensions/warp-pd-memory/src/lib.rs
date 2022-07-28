@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use warp::{
     data::{DataType},
     module::Module,
-    Extension, SingleHandle, sata::Sata,
+    Extension, SingleHandle, sata::{Sata, State},
 };
-
+use warp::libipld::Ipld;
 use warp::error::Error;
 use warp::pocket_dimension::query::{ComparatorFilter, QueryBuilder};
 use warp::pocket_dimension::PocketDimension;
@@ -101,40 +101,38 @@ impl PocketDimension for MemoryClient {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn get_payload_as_value(data: &Sata) -> Result<serde_json::Value> {
-    data.decode().map_err(Error::from)
-}
-
-#[cfg(target_arch = "wasm32")]
-fn get_payload_as_value(data: &Sata) -> Result<serde_json::Value> {
-    let jsvalue = data.payload()?;
-    serde_wasm_bindgen::from_value(jsvalue)
-        .map_err(|e| anyhow::anyhow!("{}", e))
-        .map_err(Error::Any)
-}
+// #[cfg(not(target_arch = "wasm32"))]
+// fn get_payload_as_value(data: &Sata) -> Result<Ipld> {
+//     data.decode().map_err(Error::from)
+// }
 
 pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> {
     let mut list = Vec::new();
     for data in data.iter() {
-        let object = get_payload_as_value(data)?;
+        let object = match data.state() {
+            State::Encoded => data.decode::<Ipld>()?,
+            State::Encrypted | _ => continue,
+        };
 
-        if !object.is_object() {
-            continue;
-        }
-        let object = object.as_object().ok_or(Error::Other)?;
+        match object {
+            Ipld::Map(_) => {},
+            _ => continue
+        };
+
         for (key, val) in query.get_where().iter() {
-            if let Some(result) = object.get(key) {
-                if val == result {
+            if let Some(result) = object.get(key.as_str()).ok() {
+                if *val == *result {
                     list.push(data.clone());
                 }
             }
         }
+        
+
         for comp in query.get_comparator().iter() {
             match comp {
                 ComparatorFilter::Eq(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        if result == val {
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        if *result == *val {
                             if list.contains(data) {
                                 continue;
                             }
@@ -143,8 +141,8 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
                     }
                 }
                 ComparatorFilter::Ne(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        if result != val {
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        if *result != *val {
                             if list.contains(data) {
                                 continue;
                             }
@@ -153,51 +151,55 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
                     }
                 }
                 ComparatorFilter::Gte(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        let result = result.as_i64().unwrap();
-                        let val = val.as_i64().unwrap();
-                        if result >= val {
-                            if list.contains(data) {
-                                continue;
-                            }
-                            list.push(data.clone());
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        match (result, val) {
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res >= *v => {},
+                            (Ipld::Float(res), Ipld::Float(v)) if *res >= *v => {},
+                            _ => continue
+                        };
+                        if list.contains(data) {
+                            continue;
                         }
+                        list.push(data.clone());
                     }
                 }
                 ComparatorFilter::Gt(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        let result = result.as_i64().unwrap();
-                        let val = val.as_i64().unwrap();
-                        if result > val {
-                            if list.contains(data) {
-                                continue;
-                            }
-                            list.push(data.clone());
+                    if let Some(result) = object.get(key.as_str()).ok(){
+                        match (result, val) {
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res > *v => {},
+                            (Ipld::Float(res), Ipld::Float(v)) if *res > *v => {},
+                            _ => continue
+                        };
+                        if list.contains(data) {
+                            continue;
                         }
+                        list.push(data.clone());
                     }
                 }
                 ComparatorFilter::Lte(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        let result = result.as_i64().unwrap();
-                        let val = val.as_i64().unwrap();
-                        if result <= val {
-                            if list.contains(data) {
-                                continue;
-                            }
-                            list.push(data.clone());
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        match (result, val) {
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res <= *v => {},
+                            (Ipld::Float(res), Ipld::Float(v)) if *res <= *v => {},
+                            _ => continue
+                        };
+                        if list.contains(data) {
+                            continue;
                         }
+                        list.push(data.clone());
                     }
                 }
                 ComparatorFilter::Lt(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        let result = result.as_i64().unwrap();
-                        let val = val.as_i64().unwrap();
-                        if result < val {
-                            if list.contains(data) {
-                                continue;
-                            }
-                            list.push(data.clone());
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        match (result, val) {
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res < *v => {},
+                            (Ipld::Float(res), Ipld::Float(v)) if *res < *v => {},
+                            _ => continue
+                        };
+                        if list.contains(data) {
+                            continue;
                         }
+                        list.push(data.clone());
                     }
                 }
             }

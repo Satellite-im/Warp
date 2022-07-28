@@ -1,8 +1,7 @@
 use std::path::PathBuf;
 
-use warp::data::{DataObject, DataType};
+use warp::data::{DataType};
 use warp::error::Error;
-use warp::libipld::codec::Codec;
 use warp::module::Module;
 use warp::pocket_dimension::query::{Comparator, QueryBuilder};
 use warp::pocket_dimension::{DimensionData, PocketDimension};

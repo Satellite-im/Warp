@@ -7,22 +7,22 @@ use warp_pd_stretto::StrettoClient;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Item {
-    pub port: f64,
+    pub port: i64,
     pub data: String,
 }
 
 fn main() -> anyhow::Result<()> {
     let items = vec![
         Item {
-            port: 10000.,
+            port: 10000,
             data: "Local".into(),
         },
         Item {
-            port: 10001.,
+            port: 10001,
             data: "Global".into(),
         },
         Item {
-            port: 10002.,
+            port: 10002,
             data: "All".into(),
         },
     ];
@@ -35,7 +35,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     let mut query = QueryBuilder::default();
-    query.filter(Comparator::Eq, "port", 10001.)?;
+    query.filter(Comparator::Gte, "port", 10001)?;
     let data_list = cache.get_data(DataType::from(Module::Unknown), Some(&query))?;
     for data in data_list {
         let item = data.decode::<Item>()?;

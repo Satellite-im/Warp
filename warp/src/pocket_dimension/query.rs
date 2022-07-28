@@ -1,9 +1,10 @@
+use libipld::{Ipld, serde::to_ipld};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 use crate::error::Error;
 use serde::{Deserialize, Serialize};
-use serde_json::{self, Value};
+use serde_json::{self};
 use warp_derive::FFIFree;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -22,16 +23,16 @@ pub enum Comparator {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum ComparatorFilter {
-    Eq(String, Value),
-    Gt(String, Value),
-    Gte(String, Value),
-    Lt(String, Value),
-    Lte(String, Value),
-    Ne(String, Value),
+    Eq(String, Ipld),
+    Gt(String, Ipld),
+    Gte(String, Ipld),
+    Lt(String, Ipld),
+    Lte(String, Ipld),
+    Ne(String, Ipld),
 }
 
-impl From<(Comparator, String, Value)> for ComparatorFilter {
-    fn from((comp, key, val): (Comparator, String, Value)) -> Self {
+impl From<(Comparator, String, Ipld)> for ComparatorFilter {
+    fn from((comp, key, val): (Comparator, String, Ipld)) -> Self {
         match comp {
             Comparator::Eq => ComparatorFilter::Eq(key, val),
             Comparator::Ne => ComparatorFilter::Ne(key, val),
@@ -46,7 +47,7 @@ impl From<(Comparator, String, Value)> for ComparatorFilter {
 #[derive(Default, Serialize, Deserialize, Debug, Clone, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct QueryBuilder {
-    r#where: Vec<(String, Value)>,
+    r#where: Vec<(String, Ipld)>,
     comparator: Vec<ComparatorFilter>,
     limit: Option<usize>,
 }
@@ -60,7 +61,7 @@ impl QueryBuilder {
 }
 
 impl QueryBuilder {
-    pub fn get_where(&self) -> Vec<(String, Value)> {
+    pub fn get_where(&self) -> Vec<(String, Ipld)> {
         self.r#where.clone()
     }
 
@@ -79,7 +80,7 @@ impl QueryBuilder {
         I: Serialize,
     {
         self.r#where
-            .push((key.to_string(), serde_json::to_value(value)?));
+            .push((key.to_string(), to_ipld(value).map_err(anyhow::Error::from)?));
         Ok(self)
     }
 
@@ -95,7 +96,7 @@ impl QueryBuilder {
         self.comparator.push(ComparatorFilter::from((
             comparator,
             key.to_string(),
-            serde_json::to_value(value)?,
+            to_ipld(value).map_err(anyhow::Error::from)?,
         )));
         Ok(self)
     }

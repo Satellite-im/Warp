@@ -34,7 +34,7 @@ use crate::behaviour::SwarmCommands;
 use crate::config::Config;
 use crate::events::MessagingEvents;
 use crate::registry::{GroupRegistry};// PeerOption};
-use warp::data::{DataObject, DataType};
+use warp::data::{DataType};
 use warp::pocket_dimension::query::QueryBuilder;
 
 //These topics will be used for internal communication and not meant for direct use.

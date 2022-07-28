@@ -22,72 +22,59 @@ use wasm_bindgen::prelude::*;
 pub struct DimensionData(DimensionDataInner);
 
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DimensionData(pub DimensionDataInner);
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum DimensionDataInner {
-    Buffer { name: String, buffer: Vec<u8> },
-    BufferNoFile { name: String, internal: Vec<u8> },
-    Path { name: Option<String>, path: PathBuf },
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DimensionData {
+    pub name: Option<String>,
+    pub path: Option<PathBuf>,
+    pub buffer: Option<Vec<u8>>,
+    pub internal: Option<Vec<u8>>
 }
 
 impl<P: AsRef<std::path::Path>> From<P> for DimensionData {
     fn from(path: P) -> Self {
         let path = path.as_ref().to_path_buf();
         let name = path.file_name().map(|s| s.to_string_lossy().to_string());
-        DimensionData(DimensionDataInner::Path { name, path })
+        DimensionData { name, path: Some(path), ..Default::default()}
     }
 }
 
 impl DimensionData {
     pub fn from_path(name: &str, path: &str) -> Self {
-        DimensionData(DimensionDataInner::Path {
-            name: Some(name.to_string()),
-            path: std::path::PathBuf::from(path.to_string()),
-        })
+        DimensionData { name: Some(name.to_string()), path: Some(std::path::PathBuf::from(path.to_string())), ..Default::default()}
     }
 
     pub fn from_buffer(name: &str, buffer: &[u8]) -> Self {
         let name = name.to_string();
         let buffer = buffer.to_vec();
-        DimensionData(DimensionDataInner::Buffer { name, buffer })
+        DimensionData { name: Some(name), buffer: Some(buffer), ..Default::default()}
     }
 
     pub fn from_buffer_nofile(name: &str, internal: &[u8]) -> Self {
         let name = name.to_string();
         let internal = internal.to_vec();
-        DimensionData(DimensionDataInner::BufferNoFile { name, internal })
-    }
-}
-
-impl DimensionData {
-    pub fn get_inner(&self) -> &DimensionDataInner {
-        &self.0
+        DimensionData { name: Some(name), internal: Some(internal), ..Default::default()}
     }
 }
 
 impl DimensionData {
     pub fn name(&self) -> Result<String, Error> {
-        match self.get_inner() {
-            DimensionDataInner::Buffer { name, .. } => Ok(name.clone()),
-            DimensionDataInner::BufferNoFile { name, .. } => Ok(name.clone()),
-            DimensionDataInner::Path { name, .. } => name.clone().ok_or(Error::Other),
+        if let Self { name: Some(name), ..} = self {
+            return Ok(name.clone())
         }
+        return Err(Error::Other)
     }
 }
 
 impl DimensionData {
     pub fn path(&self) -> Result<PathBuf, Error> {
-        match self.get_inner() {
-            DimensionDataInner::Path { path, .. } => Ok(path.clone()),
-            _ => Err(Error::Other),
+        if let Self { path: Some(path), ..} = self {
+            return Ok(path.clone())
         }
+        Err(Error::Other)
     }
 
     pub fn write_to_buffer(&self, buffer: &mut [u8]) -> Result<(), Error> {
-        if let DimensionDataInner::BufferNoFile { internal, .. } = self.get_inner() {
+        if let Self { internal: Some(internal), ..} = self {
             buffer.copy_from_slice(internal);
             return Ok(());
         }
@@ -98,19 +85,19 @@ impl DimensionData {
 #[cfg(not(target_arch = "wasm32"))]
 impl DimensionData {
     pub fn write_from_path<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        match self.get_inner() {
-            DimensionDataInner::Path { name, path } if name.is_some() => {
+        match self {
+            Self { name: Some(_), path: Some(path), ..} => {
                 let mut file = std::fs::File::open(path)?;
                 std::io::copy(&mut file, writer)?;
                 return Ok(());
-            }
-            DimensionDataInner::BufferNoFile { internal, .. } => {
+            },
+            Self { internal: Some(internal), .. } => {
                 let mut cursor = std::io::Cursor::new(internal);
                 std::io::copy(&mut cursor, writer)?;
                 return Ok(());
             }
             _ => {}
-        }
+        };
         Err(Error::Other)
     }
 }

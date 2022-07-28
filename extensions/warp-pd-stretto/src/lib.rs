@@ -1,6 +1,7 @@
 use anyhow::anyhow;
 use warp::{
     data::DataType,
+    libipld::Ipld,
     module::Module,
     sata::{Sata, State},
     Extension, SingleHandle,
@@ -123,98 +124,104 @@ impl PocketDimension for StrettoClient {
 pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> {
     let mut list = Vec::new();
     for data in data.iter() {
-        if data.state() == State::Encoded {
-            let object = data.decode::<serde_json::Value>()?;
+        let object = match data.state() {
+            State::Encoded => data.decode::<Ipld>()?,
+            State::Encrypted | _ => continue,
+        };
 
-            if !object.is_object() {
-                continue;
+        match object {
+            Ipld::Map(_) => {}
+            _ => continue,
+        };
+
+        for (key, val) in query.get_where().iter() {
+            if let Some(result) = object.get(key.as_str()).ok() {
+                if *val == *result {
+                    list.push(data.clone());
+                }
             }
+        }
 
-            let object = object.as_object().ok_or(warp::error::Error::Other)?;
-            for (key, val) in query.get_where().iter() {
-                if let Some(result) = object.get(key) {
-                    if val == result {
+        for comp in query.get_comparator().iter() {
+            match comp {
+                ComparatorFilter::Eq(key, val) => {
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        if *result == *val {
+                            if list.contains(data) {
+                                continue;
+                            }
+                            list.push(data.clone());
+                        }
+                    }
+                }
+                ComparatorFilter::Ne(key, val) => {
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        if *result != *val {
+                            if list.contains(data) {
+                                continue;
+                            }
+                            list.push(data.clone());
+                        }
+                    }
+                }
+                ComparatorFilter::Gte(key, val) => {
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        match (result, val) {
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res >= *v => {}
+                            (Ipld::Float(res), Ipld::Float(v)) if *res >= *v => {}
+                            _ => continue,
+                        };
+                        if list.contains(data) {
+                            continue;
+                        }
+                        list.push(data.clone());
+                    }
+                }
+                ComparatorFilter::Gt(key, val) => {
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        match (result, val) {
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res > *v => {}
+                            (Ipld::Float(res), Ipld::Float(v)) if *res > *v => {}
+                            _ => continue,
+                        };
+                        if list.contains(data) {
+                            continue;
+                        }
+                        list.push(data.clone());
+                    }
+                }
+                ComparatorFilter::Lte(key, val) => {
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        match (result, val) {
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res <= *v => {}
+                            (Ipld::Float(res), Ipld::Float(v)) if *res <= *v => {}
+                            _ => continue,
+                        };
+                        if list.contains(data) {
+                            continue;
+                        }
+                        list.push(data.clone());
+                    }
+                }
+                ComparatorFilter::Lt(key, val) => {
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        match (result, val) {
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res < *v => {}
+                            (Ipld::Float(res), Ipld::Float(v)) if *res < *v => {}
+                            _ => continue,
+                        };
+                        if list.contains(data) {
+                            continue;
+                        }
                         list.push(data.clone());
                     }
                 }
             }
-            for comp in query.get_comparator().iter() {
-                match comp {
-                    ComparatorFilter::Eq(key, val) => {
-                        if let Some(result) = object.get(key) {
-                            if result == val {
-                                if list.contains(data) {
-                                    continue;
-                                }
-                                list.push(data.clone());
-                            }
-                        }
-                    }
-                    ComparatorFilter::Ne(key, val) => {
-                        if let Some(result) = object.get(key) {
-                            if result != val {
-                                if list.contains(data) {
-                                    continue;
-                                }
-                                list.push(data.clone());
-                            }
-                        }
-                    }
-                    ComparatorFilter::Gte(key, val) => {
-                        if let Some(result) = object.get(key) {
-                            let result = result.as_i64().unwrap();
-                            let val = val.as_i64().unwrap();
-                            if result >= val {
-                                if list.contains(data) {
-                                    continue;
-                                }
-                                list.push(data.clone());
-                            }
-                        }
-                    }
-                    ComparatorFilter::Gt(key, val) => {
-                        if let Some(result) = object.get(key) {
-                            let result = result.as_i64().unwrap();
-                            let val = val.as_i64().unwrap();
-                            if result > val {
-                                if list.contains(data) {
-                                    continue;
-                                }
-                                list.push(data.clone());
-                            }
-                        }
-                    }
-                    ComparatorFilter::Lte(key, val) => {
-                        if let Some(result) = object.get(key) {
-                            let result = result.as_i64().unwrap();
-                            let val = val.as_i64().unwrap();
-                            if result <= val {
-                                if list.contains(data) {
-                                    continue;
-                                }
-                                list.push(data.clone());
-                            }
-                        }
-                    }
-                    ComparatorFilter::Lt(key, val) => {
-                        if let Some(result) = object.get(key) {
-                            let result = result.as_i64().unwrap();
-                            let val = val.as_i64().unwrap();
-                            if result < val {
-                                if list.contains(data) {
-                                    continue;
-                                }
-                                list.push(data.clone());
-                            }
-                        }
-                    }
-                }
-            }
+        }
 
-            if let Some(limit) = query.get_limit() {
-                if list.len() > limit {
-                    list = list.drain(..limit).collect();
-                }
+        if let Some(limit) = query.get_limit() {
+            if list.len() > limit {
+                list = list.drain(..limit).collect();
             }
         }
     }
@@ -227,7 +234,6 @@ mod test {
     use serde::{Deserialize, Serialize};
     use warp::data::DataType;
     use warp::error::Error;
-    use warp::libipld::IpldCodec;
     use warp::module::Module;
     use warp::pocket_dimension::query::{Comparator, QueryBuilder};
     use warp::pocket_dimension::PocketDimension;
@@ -236,14 +242,14 @@ mod test {
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct SomeData {
         pub name: String,
-        pub age: f64,
+        pub age: i64,
     }
 
     impl Default for SomeData {
         fn default() -> Self {
             Self {
                 name: String::from("John Doe"),
-                age: 21.,
+                age: 21,
             }
         }
     }
@@ -252,38 +258,40 @@ mod test {
         pub fn set_name<S: AsRef<str>>(&mut self, name: S) {
             self.name = name.as_ref().to_string();
         }
-        pub fn set_age(&mut self, age: f64) {
-            self.age = age;
+        pub fn set_age(&mut self, age: i64) {
+            self.age = age
         }
     }
 
-    fn generate_data(system: &mut StrettoClient, amount: i8) {
+    fn generate_data(system: &mut StrettoClient, amount: i64) {
         for i in 0..amount {
-            let object = Sata::default();
             let mut data = SomeData::default();
             data.set_name(&format!("Test Subject {i}"));
-            data.set_age(18. + f64::from(i));
+            data.set_age(18 + i);
 
-            let object = object
-                .encode(IpldCodec::DagJson, warp::sata::Kind::Reference, data)
+            let object = Sata::default()
+                .encode(
+                    warp::libipld::IpldCodec::DagJson,
+                    warp::sata::Kind::Reference,
+                    data,
+                )
                 .unwrap();
             system
-                .add_data(DataType::from(Module::Unknown), &object)
+                .add_data(DataType::from(Module::Accounts), &object)
                 .unwrap();
         }
     }
 
     #[test]
-    #[ignore = "Extension is being worked on"]
     fn if_count_eq_five() -> Result<(), Error> {
         let mut memory = StrettoClient::new().map_err(|_| Error::Other)?;
 
         generate_data(&mut memory, 100);
 
         let mut query = QueryBuilder::default();
-        query.limit(5);
+        query.filter(Comparator::Gte, "age", 19)?.limit(5);
 
-        let count = memory.count(DataType::from(Module::Unknown), Some(&query))?;
+        let count = memory.count(DataType::from(Module::Accounts), Some(&query))?;
 
         assert_eq!(count, 5);
 
