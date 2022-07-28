@@ -82,10 +82,9 @@ impl PocketDimension for MemoryClient {
         }
     }
 
-    fn size(&self, _dimension: DataType, _query: Option<&QueryBuilder>) -> Result<i64> {
-        Err(Error::Unimplemented)
-        // self.get_data(dimension, query)
-        //     .map(|data| data.iter().map(|i| i.size() as i64).sum())
+    fn size(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
+        self.get_data(dimension, query)
+            .map(|data| data.iter().map(|i| i.data().len() as i64).sum())
     }
 
     fn count(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64> {

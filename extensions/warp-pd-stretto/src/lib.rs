@@ -97,10 +97,9 @@ impl PocketDimension for StrettoClient {
         }
     }
 
-    fn size(&self, _dimension: DataType, _query: Option<&QueryBuilder>) -> Result<i64> {
-        return Err(Error::Unimplemented);
-        // self.get_data(dimension, query)
-        //     .map(|data| data.iter().map(|i| i.size() as i64).sum())
+    fn size(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
+        self.get_data(dimension, query)
+            .map(|data| data.iter().map(|i| i.data().len() as i64).sum())
     }
 
     fn count(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
@@ -237,7 +236,7 @@ mod test {
     use warp::module::Module;
     use warp::pocket_dimension::query::{Comparator, QueryBuilder};
     use warp::pocket_dimension::PocketDimension;
-    use warp::sata::Sata;
+    use warp::sata::Sata; 
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct SomeData {
