@@ -12,6 +12,7 @@ use config::Config;
 use futures::{Future, TryFutureExt};
 use libipld::serde::to_ipld;
 use libipld::{ipld, Cid, Ipld};
+use sata::Sata;
 use serde::de::DeserializeOwned;
 use std::any::Any;
 use std::collections::BTreeMap;
@@ -221,7 +222,7 @@ impl MultiPass for IpfsIdentity {
         let identity = async_block_in_place_uncheck(self.identity_store.create_identity(username))?;
 
         if let Ok(mut cache) = self.get_cache() {
-            let object = DataObject::new(DataType::from(Module::Accounts), &identity)?;
+            let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, identity.clone())?;
             cache.add_data(DataType::from(Module::Accounts), &object)?;
         }
         if let Ok(hooks) = self.get_hooks() {
@@ -243,7 +244,7 @@ impl MultiPass for IpfsIdentity {
                         //get last
                         if !list.is_empty() {
                             let obj = list.last().unwrap();
-                            return obj.payload::<Identity>();
+                            return obj.decode::<Identity>().map_err(Error::from);
                         }
                     }
                 }
@@ -258,7 +259,7 @@ impl MultiPass for IpfsIdentity {
                         //get last
                         if !list.is_empty() {
                             let obj = list.last().unwrap();
-                            return obj.payload::<Identity>();
+                            return obj.decode::<Identity>().map_err(Error::from);
                         }
                     }
                 }
@@ -317,14 +318,17 @@ impl MultiPass for IpfsIdentity {
                 if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query)) {
                     //get last
                     if !list.is_empty() {
-                        let mut obj = list.last().unwrap().clone();
-                        obj.set_payload(identity.clone())?;
+                        // let mut obj = list.last().unwrap().clone();
+                        let mut object = Sata::default();
+                        object.set_version(list.len() as _);
+                        let obj = object.encode(warp::sata::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, identity.clone())?;
                         cache.add_data(DataType::from(Module::Accounts), &obj)?;
                     }
                 } else {
+                    let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, identity.clone())?;
                     cache.add_data(
                         DataType::from(Module::Accounts),
-                        &DataObject::new(DataType::from(Module::Accounts), identity.clone())?,
+                        &object,
                     )?;
                 }
             }

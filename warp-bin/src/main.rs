@@ -11,12 +11,13 @@ use comfy_table::Table;
 use log::{error, info, warn};
 use manager::ModuleManager;
 use std::path::Path;
+use warp::sata::Sata;
 
 use anyhow::{anyhow, bail, Result as AnyResult};
 use serde_json::Value;
 use warp::constellation::{Constellation, ConstellationDataType};
 use warp::crypto::zeroize::Zeroize;
-use warp::crypto::{DID};
+use warp::crypto::DID;
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::multipass::identity::Identifier;
@@ -255,7 +256,7 @@ async fn main() -> AnyResult<()> {
     }
 
     // If cache is enabled, check cache for filesystem structure and import it into constellation
-    let mut data = DataObject::default();
+    let mut data = Sata::default();
     if let Ok(cache) = manager.get_cache() {
         info!("Cache Extension is available");
         if let Ok(fs) = manager.get_filesystem() {
@@ -312,9 +313,7 @@ async fn main() -> AnyResult<()> {
                     Ok(identity) => {
                         println!();
                         println!("Username: {}#{}", identity.username(), identity.short_id());
-                        println!(
-                            "DID Key: {}", identity.did_key()
-                        ); // Using bs58 due to account being solana related.
+                        println!("DID Key: {}", identity.did_key()); // Using bs58 due to account being solana related.
                         println!();
                         tesseract.to_file(warp_directory.join("datastore"))?;
                     }
@@ -348,10 +347,7 @@ async fn main() -> AnyResult<()> {
                     Ok(ident) => {
                         println!("Account Found\n");
                         println!("Username: {}#{}", ident.username(), ident.short_id());
-                        println!(
-                            "Public Key: {}",
-                            ident.did_key()
-                        );
+                        println!("Public Key: {}", ident.did_key());
                         println!();
                         tesseract.to_file(warp_directory.join("datastore"))?;
                     }
@@ -369,9 +365,7 @@ async fn main() -> AnyResult<()> {
                     Ok(ident) => {
                         println!("Account Found\n");
                         println!("Username: {}#{}", ident.username(), ident.short_id());
-                        println!(
-                            "Public Key: {}", ident.did_key()
-                        );
+                        println!("Public Key: {}", ident.did_key());
                         println!();
                         tesseract.to_file(warp_directory.join("datastore"))?;
                     }
@@ -401,7 +395,11 @@ async fn main() -> AnyResult<()> {
             Command::ListFriends => {
                 let account = manager.get_account()?;
                 let account = account.lock();
-                let friends = account.list_friends()?.iter().filter_map(|pk| account.get_identity(Identifier::from(pk.clone())).ok()).collect::<Vec<_>>();
+                let friends = account
+                    .list_friends()?
+                    .iter()
+                    .filter_map(|pk| account.get_identity(Identifier::from(pk.clone())).ok())
+                    .collect::<Vec<_>>();
                 let mut table = Table::new();
                 table.set_header(vec!["Username", "Address"]);
                 for friend in friends {
@@ -632,7 +630,7 @@ async fn main() -> AnyResult<()> {
 fn import_from_cache(
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
     handle: Arc<Mutex<Box<dyn Constellation>>>,
-) -> AnyResult<DataObject> {
+) -> AnyResult<Sata> {
     let mut handle = handle.lock();
     let cache = cache.lock();
     let obj = cache.get_data(warp::data::DataType::DataExport, None)?;
@@ -640,7 +638,7 @@ fn import_from_cache(
     if !obj.is_empty() {
         if let Some(data) = obj.last() {
             //TODO: use if let conditions
-            let inner = data.payload::<Value>()?;
+            let inner = data.decode::<Value>()?;
             let inner = serde_json::to_string(&inner)?;
             handle.import(ConstellationDataType::Json, inner)?;
 
@@ -651,7 +649,7 @@ fn import_from_cache(
 }
 
 fn export_to_cache(
-    dataobject: &DataObject,
+    dataobject: &Sata,
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
     handle: Arc<Mutex<Box<dyn Constellation>>>,
 ) -> AnyResult<()> {
@@ -660,11 +658,11 @@ fn export_to_cache(
 
     let data = handle.export(ConstellationDataType::Json)?;
 
-    let mut object = dataobject.clone();
-    object.set_size(data.len() as u64);
-    object.set_payload(serde_json::from_str::<Value>(&data)?)?;
+    // let mut object = dataobject.clone();
+    // object.set_size(data.len() as u64);
+    // object.set_payload(serde_json::from_str::<Value>(&data)?)?;
 
-    cache.add_data(warp::data::DataType::DataExport, &object)?;
+    // cache.add_data(warp::data::DataType::DataExport, &object)?;
 
     Ok(())
 }

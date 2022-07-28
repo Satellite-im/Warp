@@ -1,10 +1,11 @@
 pub mod query;
 
-use crate::data::{DataObject, DataType};
+use crate::data::DataType;
 use crate::error::Error;
 use crate::sync::{Arc, Mutex, MutexGuard};
 use crate::{Extension, SingleHandle};
 use query::QueryBuilder;
+use sata::Sata;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
 use std::path::PathBuf;
@@ -120,7 +121,7 @@ impl DimensionData {
 /// results.
 pub trait PocketDimension: Extension + Send + Sync + SingleHandle {
     /// Used to add data to [`PocketDimension`] for [`Module`]
-    fn add_data(&mut self, dimension: DataType, data: &DataObject) -> Result<(), Error>;
+    fn add_data(&mut self, dimension: DataType, data: &Sata) -> Result<(), Error>;
 
     /// Used to check to see if data exist within [`PocketDimension`]
     fn has_data(&mut self, dimension: DataType, query: &QueryBuilder) -> Result<(), Error>;
@@ -130,7 +131,7 @@ pub trait PocketDimension: Extension + Send + Sync + SingleHandle {
         &self,
         dimension: DataType,
         query: Option<&QueryBuilder>,
-    ) -> Result<Vec<DataObject>, Error>;
+    ) -> Result<Vec<Sata>, Error>;
 
     /// Returns the total size within the [`Module`]
     fn size(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64, Error>;
@@ -165,7 +166,7 @@ impl PocketDimensionAdapter {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl PocketDimensionAdapter {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn add_data(&mut self, dim: DataType, data: &DataObject) -> Result<(), Error> {
+    pub fn add_data(&mut self, dim: DataType, data: &Sata) -> Result<(), Error> {
         self.inner_guard().add_data(dim, data)
     }
 
@@ -212,11 +213,7 @@ impl PocketDimensionAdapter {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl PocketDimensionAdapter {
-    pub fn get_data(
-        &self,
-        dim: DataType,
-        query: Option<QueryBuilder>,
-    ) -> Result<Vec<DataObject>, Error> {
+    pub fn get_data(&self, dim: DataType, query: Option<QueryBuilder>) -> Result<Vec<Sata>, Error> {
         self.inner_guard().get_data(dim, query.as_ref())
     }
 }
@@ -238,140 +235,140 @@ impl PocketDimensionAdapter {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub mod ffi {
-    use crate::data::{Data, DataType, FFIVec_Data};
-    use crate::error::Error;
-    use crate::ffi::{FFIResult, FFIResult_Null};
-    use crate::pocket_dimension::query::QueryBuilder;
-    use crate::pocket_dimension::PocketDimensionAdapter;
+// #[cfg(not(target_arch = "wasm32"))]
+// pub mod ffi {
+//     use crate::data::{Data, DataType, FFIVec_Data};
+//     use crate::error::Error;
+//     use crate::ffi::{FFIResult, FFIResult_Null};
+//     use crate::pocket_dimension::query::QueryBuilder;
+//     use crate::pocket_dimension::PocketDimensionAdapter;
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn pocket_dimension_add_data(
-        ctx: *mut PocketDimensionAdapter,
-        dimension: DataType,
-        data: *const Data,
-    ) -> FFIResult_Null {
-        if ctx.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
-        }
+//     #[allow(clippy::missing_safety_doc)]
+//     #[no_mangle]
+//     pub unsafe extern "C" fn pocket_dimension_add_data(
+//         ctx: *mut PocketDimensionAdapter,
+//         dimension: DataType,
+//         data: *const Data,
+//     ) -> FFIResult_Null {
+//         if ctx.is_null() {
+//             return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+//         }
 
-        if data.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Data cannot be null")));
-        }
+//         if data.is_null() {
+//             return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Data cannot be null")));
+//         }
 
-        let pd = &mut *ctx;
-        let data = &*data;
+//         let pd = &mut *ctx;
+//         let data = &*data;
 
-        pd.inner_guard().add_data(dimension, data).into()
-    }
+//         pd.inner_guard().add_data(dimension, data).into()
+//     }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn pocket_dimension_has_data(
-        ctx: *mut PocketDimensionAdapter,
-        dimension: DataType,
-        query: *const QueryBuilder,
-    ) -> FFIResult_Null {
-        if ctx.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
-        }
+//     #[allow(clippy::missing_safety_doc)]
+//     #[no_mangle]
+//     pub unsafe extern "C" fn pocket_dimension_has_data(
+//         ctx: *mut PocketDimensionAdapter,
+//         dimension: DataType,
+//         query: *const QueryBuilder,
+//     ) -> FFIResult_Null {
+//         if ctx.is_null() {
+//             return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+//         }
 
-        if query.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Query cannot be required")));
-        }
+//         if query.is_null() {
+//             return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Query cannot be required")));
+//         }
 
-        let pd = &mut *ctx;
-        let query = &*query;
+//         let pd = &mut *ctx;
+//         let query = &*query;
 
-        pd.inner_guard().has_data(dimension, query).into()
-    }
+//         pd.inner_guard().has_data(dimension, query).into()
+//     }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn pocket_dimension_get_data(
-        ctx: *const PocketDimensionAdapter,
-        dimension: DataType,
-        query: *const QueryBuilder,
-    ) -> FFIResult<FFIVec_Data> {
-        if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
-        }
+//     #[allow(clippy::missing_safety_doc)]
+//     #[no_mangle]
+//     pub unsafe extern "C" fn pocket_dimension_get_data(
+//         ctx: *const PocketDimensionAdapter,
+//         dimension: DataType,
+//         query: *const QueryBuilder,
+//     ) -> FFIResult<FFIVec_Data> {
+//         if ctx.is_null() {
+//             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+//         }
 
-        let query = match query.is_null() {
-            true => None,
-            false => Some(&*query),
-        };
+//         let query = match query.is_null() {
+//             true => None,
+//             false => Some(&*query),
+//         };
 
-        let pd = &*ctx;
+//         let pd = &*ctx;
 
-        match pd.inner_guard().get_data(dimension, query) {
-            Ok(list) => FFIResult::ok(list.into()),
-            Err(e) => FFIResult::err(e),
-        }
-    }
+//         match pd.inner_guard().get_data(dimension, query) {
+//             Ok(list) => FFIResult::ok(list.into()),
+//             Err(e) => FFIResult::err(e),
+//         }
+//     }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn pocket_dimension_size(
-        ctx: *const PocketDimensionAdapter,
-        dimension: DataType,
-        query: *const QueryBuilder,
-    ) -> FFIResult<i64> {
-        if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
-        }
+//     #[allow(clippy::missing_safety_doc)]
+//     #[no_mangle]
+//     pub unsafe extern "C" fn pocket_dimension_size(
+//         ctx: *const PocketDimensionAdapter,
+//         dimension: DataType,
+//         query: *const QueryBuilder,
+//     ) -> FFIResult<i64> {
+//         if ctx.is_null() {
+//             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+//         }
 
-        let query = match query.is_null() {
-            true => None,
-            false => Some(&*query),
-        };
+//         let query = match query.is_null() {
+//             true => None,
+//             false => Some(&*query),
+//         };
 
-        let pd = &*ctx;
+//         let pd = &*ctx;
 
-        match pd.inner_guard().size(dimension, query) {
-            Ok(size) => FFIResult::ok(size),
-            Err(e) => FFIResult::err(e),
-        }
-    }
+//         match pd.inner_guard().size(dimension, query) {
+//             Ok(size) => FFIResult::ok(size),
+//             Err(e) => FFIResult::err(e),
+//         }
+//     }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn pocket_dimension_count(
-        ctx: *const PocketDimensionAdapter,
-        dimension: DataType,
-        query: *const QueryBuilder,
-    ) -> FFIResult<i64> {
-        if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
-        }
+//     #[allow(clippy::missing_safety_doc)]
+//     #[no_mangle]
+//     pub unsafe extern "C" fn pocket_dimension_count(
+//         ctx: *const PocketDimensionAdapter,
+//         dimension: DataType,
+//         query: *const QueryBuilder,
+//     ) -> FFIResult<i64> {
+//         if ctx.is_null() {
+//             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+//         }
 
-        let query = match query.is_null() {
-            true => None,
-            false => Some(&*query),
-        };
+//         let query = match query.is_null() {
+//             true => None,
+//             false => Some(&*query),
+//         };
 
-        let pd = &*ctx;
+//         let pd = &*ctx;
 
-        match pd.inner_guard().count(dimension, query) {
-            Ok(size) => FFIResult::ok(size),
-            Err(e) => FFIResult::err(e),
-        }
-    }
+//         match pd.inner_guard().count(dimension, query) {
+//             Ok(size) => FFIResult::ok(size),
+//             Err(e) => FFIResult::err(e),
+//         }
+//     }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn pocket_dimension_empty(
-        ctx: *mut PocketDimensionAdapter,
-        dimension: DataType,
-    ) -> FFIResult_Null {
-        if ctx.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
-        }
+//     #[allow(clippy::missing_safety_doc)]
+//     #[no_mangle]
+//     pub unsafe extern "C" fn pocket_dimension_empty(
+//         ctx: *mut PocketDimensionAdapter,
+//         dimension: DataType,
+//     ) -> FFIResult_Null {
+//         if ctx.is_null() {
+//             return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+//         }
 
-        let pd = &mut *ctx;
+//         let pd = &mut *ctx;
 
-        pd.inner_guard().empty(dimension).into()
-    }
-}
+//         pd.inner_guard().empty(dimension).into()
+//     }
+// }

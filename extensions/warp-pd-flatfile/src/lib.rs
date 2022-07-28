@@ -9,10 +9,14 @@ use std::{
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
-use warp::Extension;
 use warp::{error::Error, SingleHandle};
+use warp::{
+    libipld::Cid,
+    sata::{Sata, State},
+    Extension,
+};
 
-use warp::data::{DataObject, DataType};
+use warp::data::DataType;
 use warp::module::Module;
 use warp::pocket_dimension::{
     query::{ComparatorFilter, QueryBuilder},
@@ -73,16 +77,16 @@ impl Extension for FlatfileStorage {
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct FlatfileIndex(pub Vec<DataObject>);
+pub struct FlatfileIndex(pub Vec<Sata>);
 
-impl AsRef<Vec<DataObject>> for FlatfileIndex {
-    fn as_ref(&self) -> &Vec<DataObject> {
+impl AsRef<Vec<Sata>> for FlatfileIndex {
+    fn as_ref(&self) -> &Vec<Sata> {
         &self.0
     }
 }
 
-impl AsMut<Vec<DataObject>> for FlatfileIndex {
-    fn as_mut(&mut self) -> &mut Vec<DataObject> {
+impl AsMut<Vec<Sata>> for FlatfileIndex {
+    fn as_mut(&mut self) -> &mut Vec<Sata> {
         &mut self.0
     }
 }
@@ -126,7 +130,7 @@ impl FlatfileIndex {
         Err(Error::Unimplemented)
     }
 
-    pub fn insert(&mut self, data: DataObject) -> Result<()> {
+    pub fn insert(&mut self, data: Sata) -> Result<()> {
         if self.0.contains(&data) {
             return Err(Error::Other);
         }
@@ -134,8 +138,7 @@ impl FlatfileIndex {
         Ok(())
     }
 
-    pub fn remove_by_id(&mut self, id: Uuid) -> Result<DataObject> {
-        //get index of said dataobject
+    pub fn remove_by_id(&mut self, id: Cid) -> Result<Sata> {
         let index = self
             .0
             .iter()
@@ -283,23 +286,23 @@ impl FlatfileStorage {
 impl SingleHandle for FlatfileStorage {}
 
 impl PocketDimension for FlatfileStorage {
-    fn add_data(&mut self, dimension: DataType, data: &warp::data::DataObject) -> Result<()> {
-        let mut data = data.clone();
-        data.set_data_type(dimension);
+    fn add_data(&mut self, dimension: DataType, data: &warp::sata::Sata) -> Result<()> {
+        let data = data.clone();
 
-        let version = self
-            .index
-            .as_ref()
-            .iter()
-            .filter(|inner| inner.id() == data.id() && inner.data_type() == data.data_type())
-            .count();
+        // let version = self
+        //     .index
+        //     .as_ref()
+        //     .iter()
+        //     .filter(|inner| inner.id() == data.id() && inner.data_type() == data.data_type())
+        //     .count();
 
-        data.set_version(version as u32);
+        // data.set_version(version as u32);
 
         match dimension {
             DataType::FileSystem => {
-                match data.payload::<DimensionData>()?.get_inner() {
+                match data.decode::<DimensionData>()?.get_inner() {
                     DimensionDataInner::Path { name, path } => {
+                        let new_data = Sata::default();
                         let old_path = path;
                         if !old_path.is_file() {
                             return Err(Error::ItemNotFile);
@@ -308,7 +311,7 @@ impl PocketDimension for FlatfileStorage {
 
                         let filename = name.as_ref().ok_or(Error::FileNotFound)?;
 
-                        data.set_size(size);
+                        // data.set_size(size);
 
                         let new_path = {
                             let mut path = self.directory.clone();
@@ -316,10 +319,14 @@ impl PocketDimension for FlatfileStorage {
                             path
                         };
 
-                        data.set_payload(DimensionData(DimensionDataInner::Path {
-                            name: Some(filename.clone()),
-                            path: new_path.clone(),
-                        }))?;
+                        let data = new_data.encode(
+                            warp::libipld::IpldCodec::DagCbor,
+                            warp::sata::Kind::Reference,
+                            DimensionData(DimensionDataInner::Path {
+                                name: Some(filename.clone()),
+                                path: new_path.clone(),
+                            }),
+                        )?;
                         let mut writer = std::fs::File::create(&new_path)?;
 
                         let mut reader = std::fs::File::open(old_path)?;
@@ -332,9 +339,10 @@ impl PocketDimension for FlatfileStorage {
                         }
                     }
                     DimensionDataInner::Buffer { name, buffer } => {
+                        let new_data = Sata::default();
                         //
-                        let size = buffer.len();
-                        data.set_size(size as u64);
+                        // let size = buffer.len(); 
+                        // data.set_size(size as u64);
 
                         let new_path = {
                             let mut path = self.directory.clone();
@@ -342,10 +350,14 @@ impl PocketDimension for FlatfileStorage {
                             path
                         };
 
-                        data.set_payload(DimensionData(DimensionDataInner::Path {
-                            name: Some(name.clone()),
-                            path: new_path.clone(),
-                        }))?;
+                        let data = new_data.encode(
+                            warp::libipld::IpldCodec::DagCbor,
+                            warp::sata::Kind::Reference,
+                            DimensionData(DimensionDataInner::Path {
+                                name: Some(name.clone()),
+                                path: new_path.clone(),
+                            }),
+                        )?;
 
                         let mut writer = std::fs::File::create(&new_path)?;
 
@@ -358,9 +370,9 @@ impl PocketDimension for FlatfileStorage {
                             return Err(e);
                         }
                     }
-                    DimensionDataInner::BufferNoFile { internal, .. } => {
-                        let size = internal.len();
-                        data.set_size(size as u64);
+                    DimensionDataInner::BufferNoFile { .. } => {
+                        // let size = internal.len();
+                        // data.set_size(size as u64);
                         self.index.insert(data)?
                     }
                 }
@@ -373,49 +385,52 @@ impl PocketDimension for FlatfileStorage {
 
     fn has_data(
         &mut self,
-        dimension: DataType,
-        query: &warp::pocket_dimension::query::QueryBuilder,
+        _dimension: DataType,
+        _query: &warp::pocket_dimension::query::QueryBuilder,
     ) -> Result<()> {
-        let list = self
-            .index
-            .as_ref()
-            .iter()
-            .filter(|data| data.data_type() == dimension)
-            .cloned()
-            .collect::<Vec<_>>();
+        // let list = self
+        //     .index
+        //     .as_ref()
+        //     .iter()
+        //     .filter(|data| data.data_type() == dimension)
+        //     .cloned()
+        //     .collect::<Vec<_>>();
 
-        if execute(&list, query)?.is_empty() {
-            Err(Error::ToBeDetermined)
-        } else {
-            Ok(())
-        }
+        // if execute(&list, query)?.is_empty() {
+        //     Err(Error::ToBeDetermined)
+        // } else {
+        //     Ok(())
+        // }
+        Err(Error::Unimplemented)
     }
 
     fn get_data(
         &self,
-        dimension: DataType,
-        query: Option<&warp::pocket_dimension::query::QueryBuilder>,
-    ) -> Result<Vec<warp::data::DataObject>> {
-        let list = self
-            .index
-            .as_ref()
-            .iter()
-            .filter(|data| data.data_type() == dimension)
-            .cloned()
-            .collect::<Vec<_>>();
-        match query {
-            Some(query) => execute(&list, query),
-            None => Ok(list),
-        }
+        _dimension: DataType,
+        _query: Option<&warp::pocket_dimension::query::QueryBuilder>,
+    ) -> Result<Vec<Sata>> {
+        // let list = self
+        //     .index
+        //     .as_ref()
+        //     .iter()
+        //     .filter(|data| data.data_type() == dimension)
+        //     .cloned()
+        //     .collect::<Vec<_>>();
+        // match query {
+        //     Some(query) => execute(&list, query),
+        //     None => Ok(list),
+        // }
+        Err(Error::Unimplemented)
     }
 
     fn size(
         &self,
-        dimension: DataType,
-        query: Option<&warp::pocket_dimension::query::QueryBuilder>,
+        _dimension: DataType,
+        _query: Option<&warp::pocket_dimension::query::QueryBuilder>,
     ) -> Result<i64> {
-        self.get_data(dimension, query)
-            .map(|list| list.iter().map(|i| i.size() as i64).sum())
+        Err(Error::Unimplemented)
+        // self.get_data(dimension, query)
+        //     .map(|list| list.iter().map(|i| i.size() as i64).sum())
     }
 
     fn count(
@@ -427,42 +442,47 @@ impl PocketDimension for FlatfileStorage {
             .map(|list| list.len() as i64)
     }
 
-    fn empty(&mut self, dimension: DataType) -> Result<()> {
-        let mut preserved = Vec::new();
+    fn empty(&mut self, _dimension: DataType) -> Result<()> {
+        // let mut preserved = Vec::new();
 
-        for item in self.index.as_ref().clone() {
-            if item.data_type() != dimension {
-                preserved.push(item);
-            }
-        }
+        // for item in self.index.as_ref().clone() {
+        //     if item.data_type() != dimension {
+        //         preserved.push(item);
+        //     }
+        // }
 
-        for item in self
-            .index
-            .as_ref()
-            .iter()
-            .filter(|data| data.data_type() == dimension)
-        {
-            if let DataType::FileSystem = &item.data_type() {
-                if let DimensionDataInner::Path { path, .. } =
-                    item.payload::<DimensionData>()?.get_inner()
-                {
-                    std::fs::remove_file(path)?;
-                }
-            }
-        }
+        // for item in self
+        //     .index
+        //     .as_ref()
+        //     .iter()
+        //     .filter(|data| data.data_type() == dimension)
+        // {
+        //     if let DataType::FileSystem = &item.data_type() {
+        //         if let DimensionDataInner::Path { path, .. } =
+        //             item.payload::<DimensionData>()?.get_inner()
+        //         {
+        //             std::fs::remove_file(path)?;
+        //         }
+        //     }
+        // }
 
-        self.index.0.clear();
+        // self.index.0.clear();
 
-        self.get_index_mut().0.extend(preserved);
+        // self.get_index_mut().0.extend(preserved);
 
-        self.sync()
+        // self.sync()
+        Err(Error::Unimplemented)
     }
 }
 
-fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<DataObject>> {
+fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> {
     let mut list = Vec::new();
     for data in data.iter() {
-        let object = data.payload::<Value>()?;
+        let object = match data.state() {
+            State::Encoded => data.decode::<Value>()?,
+            State::Encrypted | _ => return Err(Error::Unimplemented),
+        };
+
         if !object.is_object() {
             continue;
         }

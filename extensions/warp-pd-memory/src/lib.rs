@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use warp::{
-    data::{DataObject, DataType},
+    data::{DataType},
     module::Module,
-    Extension, SingleHandle,
+    Extension, SingleHandle, sata::Sata,
 };
 
 use warp::error::Error;
@@ -16,7 +16,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone, Default)]
 pub struct MemoryClient {
-    client: HashMap<DataType, Vec<DataObject>>,
+    client: HashMap<DataType, Vec<Sata>>,
 }
 
 impl Extension for MemoryClient {
@@ -47,10 +47,8 @@ impl MemoryClient {
 impl SingleHandle for MemoryClient {}
 
 impl PocketDimension for MemoryClient {
-    fn add_data(&mut self, dimension: DataType, data: &DataObject) -> Result<()> {
+    fn add_data(&mut self, dimension: DataType, data: &Sata) -> Result<()> {
         let mut data = data.clone();
-        data.set_data_type(dimension);
-
         if let Some(value) = self.client.get_mut(&dimension) {
             let version = value.iter().filter(|item| item.id() == data.id()).count() as u32;
             data.set_version(version);
@@ -72,7 +70,7 @@ impl PocketDimension for MemoryClient {
         &self,
         dimension: DataType,
         query: Option<&QueryBuilder>,
-    ) -> Result<Vec<DataObject>> {
+    ) -> Result<Vec<Sata>> {
         let data = self
             .client
             .get(&dimension)
@@ -84,9 +82,10 @@ impl PocketDimension for MemoryClient {
         }
     }
 
-    fn size(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
-        self.get_data(dimension, query)
-            .map(|data| data.iter().map(|i| i.size() as i64).sum())
+    fn size(&self, _dimension: DataType, _query: Option<&QueryBuilder>) -> Result<i64> {
+        Err(Error::Unimplemented)
+        // self.get_data(dimension, query)
+        //     .map(|data| data.iter().map(|i| i.size() as i64).sum())
     }
 
     fn count(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
@@ -103,19 +102,19 @@ impl PocketDimension for MemoryClient {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn get_payload_as_value(data: &DataObject) -> Result<serde_json::Value> {
-    data.payload().map_err(Error::from)
+fn get_payload_as_value(data: &Sata) -> Result<serde_json::Value> {
+    data.decode().map_err(Error::from)
 }
 
 #[cfg(target_arch = "wasm32")]
-fn get_payload_as_value(data: &DataObject) -> Result<serde_json::Value> {
+fn get_payload_as_value(data: &Sata) -> Result<serde_json::Value> {
     let jsvalue = data.payload()?;
     serde_wasm_bindgen::from_value(jsvalue)
         .map_err(|e| anyhow::anyhow!("{}", e))
         .map_err(Error::Any)
 }
 
-pub(crate) fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<DataObject>> {
+pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> {
     let mut list = Vec::new();
     for data in data.iter() {
         let object = get_payload_as_value(data)?;

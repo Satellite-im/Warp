@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use warp::sata::Sata;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use warp::data::{DataObject, DataType};
@@ -51,10 +52,7 @@ impl Constellation for MemorySystem {
 
         self.current_directory_mut()?.add_item(file.clone())?;
         if let Ok(mut cache) = self.get_cache() {
-            let mut data = DataObject::default();
-            data.set_size(bytes as u64);
-            data.set_payload(DimensionData::from(PathBuf::from(path)))?;
-
+            let data = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from(PathBuf::from(path)))?;
             cache.add_data(DataType::from(Module::FileSystem), &data)?;
         }
 
@@ -74,7 +72,7 @@ impl Constellation for MemorySystem {
                 if !list.is_empty() {
                     let obj = list.last().unwrap();
 
-                    if let Ok(data) = obj.payload::<DimensionData>() {
+                    if let Ok(data) = obj.decode::<DimensionData>() {
                         let mut file = std::fs::File::create(path)?;
                         return data.write_from_path(&mut file);
                     }
@@ -113,10 +111,7 @@ impl Constellation for MemorySystem {
 
         self.current_directory_mut()?.add_item(file.clone())?;
         if let Ok(mut cache) = self.get_cache() {
-            let mut data = DataObject::default();
-            data.set_size(bytes as u64);
-            data.set_payload(DimensionData::from_buffer(name, buf))?;
-
+            let data = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from_buffer(name, buf))?;
             cache.add_data(DataType::from(Module::FileSystem), &data)?;
         }
 
@@ -143,7 +138,7 @@ impl Constellation for MemorySystem {
                 if !list.is_empty() {
                     let obj = list.last().unwrap();
 
-                    if let Ok(data) = obj.payload::<DimensionData>() {
+                    if let Ok(data) = obj.decode::<DimensionData>() {
                         let mut buffer = vec![];
                         data.write_from_path(&mut buffer)?;
                         return Ok(buffer);

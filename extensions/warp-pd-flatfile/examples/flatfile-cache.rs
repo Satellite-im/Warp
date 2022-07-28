@@ -2,9 +2,11 @@ use std::path::PathBuf;
 
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
+use warp::libipld::codec::Codec;
 use warp::module::Module;
 use warp::pocket_dimension::query::{Comparator, QueryBuilder};
 use warp::pocket_dimension::{DimensionData, PocketDimension};
+use warp::sata::Sata;
 use warp_pd_flatfile::FlatfileStorage;
 
 fn main() -> anyhow::Result<()> {
@@ -19,24 +21,28 @@ fn main() -> anyhow::Result<()> {
     };
 
     let mut storage = FlatfileStorage::new_with_index_file(root, index)?;
-
-    let data = DataObject::new(
-        DataType::from(Module::FileSystem),
+    let data = Sata::default().encode(
+        warp::libipld::IpldCodec::DagCbor,
+        warp::sata::Kind::Reference,
         DimensionData::from("Cargo.toml"),
     )?;
 
     storage.add_data(DataType::from(Module::FileSystem), &data)?;
 
-    let bufdata = DataObject::new(
-        DataType::from(Module::FileSystem),
+    let bufdata = Sata::default().encode(
+        warp::libipld::IpldCodec::DagCbor,
+        warp::sata::Kind::Reference,
         DimensionData::from_buffer_nofile("testbin", b"Hello, World"),
     )?;
 
     storage.add_data(DataType::from(Module::FileSystem), &bufdata)?;
-    let bufdata = DataObject::new(
-        DataType::from(Module::FileSystem),
+
+    let bufdata = Sata::default().encode(
+        warp::libipld::IpldCodec::DagCbor,
+        warp::sata::Kind::Reference,
         DimensionData::from_buffer_nofile("test", b"Hello, World"),
     )?;
+
     storage.add_data(DataType::FileSystem, &bufdata)?;
 
     let mut query = QueryBuilder::default();
@@ -46,7 +52,7 @@ fn main() -> anyhow::Result<()> {
         .get_data(DataType::from(Module::FileSystem), Some(&query))?
         .last()
         .ok_or(Error::InvalidDataType)?
-        .payload::<DimensionData>()?;
+        .decode::<DimensionData>()?;
 
     let mut buf: Vec<u8> = vec![];
 
