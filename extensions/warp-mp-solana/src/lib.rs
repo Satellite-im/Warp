@@ -3,7 +3,7 @@ pub mod store;
 pub mod config;
 
 use anyhow::anyhow;
-use config::Config;
+use config::MpSolanaConfig;
 use ipfs::{IpfsOptions, UninitializedIpfs};
 use sata::Sata;
 use warp::crypto::{Ed25519KeyPair, DIDKey, KeyMaterial};
@@ -36,7 +36,7 @@ pub struct SolanaAccount {
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     pub tesseract: Tesseract,
     pub friend_store: Option<FriendsStore>,
-    pub config: Config,
+    pub config: MpSolanaConfig,
     pub hooks: Option<Hooks>,
 }
 
@@ -54,7 +54,7 @@ impl Default for SolanaAccount {
 }
 
 impl SolanaAccount {
-    pub fn new(endpoint: Cluster, tesseract: &Tesseract, config: Config) -> Result<Self> {
+    pub fn new(endpoint: Cluster, tesseract: &Tesseract, config: MpSolanaConfig) -> Result<Self> {
         let tesseract = tesseract.clone();
         
         let mut account = Self {
@@ -69,27 +69,27 @@ impl SolanaAccount {
         Ok(account)
     }
 
-    pub fn with_devnet(tesseract: &Tesseract, config: Option<Config>) -> Result<Self> {
-        let config = config.unwrap_or(Config::development());
+    pub fn with_devnet(tesseract: &Tesseract, config: Option<MpSolanaConfig>) -> Result<Self> {
+        let config = config.unwrap_or(MpSolanaConfig::development());
         Self::new(Cluster::Devnet, tesseract, config)
     }
 
-    pub fn with_mainnet(tesseract: &Tesseract, config: Option<Config>) -> Result<Self> {
-        let config = config.unwrap_or(Config::production());
+    pub fn with_mainnet(tesseract: &Tesseract, config: Option<MpSolanaConfig>) -> Result<Self> {
+        let config = config.unwrap_or(MpSolanaConfig::production());
         Self::new(Cluster::Mainnet, tesseract, config)
     }
 
-    pub fn with_testnet(tesseract: &Tesseract, config: Option<Config>) -> Result<Self> {
-        let config = config.unwrap_or(Config::development());
+    pub fn with_testnet(tesseract: &Tesseract, config: Option<MpSolanaConfig>) -> Result<Self> {
+        let config = config.unwrap_or(MpSolanaConfig::development());
         Self::new(Cluster::Testnet, tesseract, config)
     }
 
-    pub fn with_localnet(tesseract: &Tesseract, config: Option<Config>) -> Result<Self> {
-        let config = config.unwrap_or(Config::development());
+    pub fn with_localnet(tesseract: &Tesseract, config: Option<MpSolanaConfig>) -> Result<Self> {
+        let config = config.unwrap_or(MpSolanaConfig::development());
         Self::new(Cluster::Localnet, tesseract, config)
     }
 
-    pub fn with_custom(url: &str, ws: &str, tesseract: &Tesseract, config: Config) -> Result<Self> {
+    pub fn with_custom(url: &str, ws: &str, tesseract: &Tesseract, config: MpSolanaConfig) -> Result<Self> {
         Self::new(Cluster::Custom(url.to_string(), ws.to_string()), tesseract, config)
     }
 

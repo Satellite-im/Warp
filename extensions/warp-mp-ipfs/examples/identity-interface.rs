@@ -5,7 +5,7 @@ use std::io::Write;
 use warp::multipass::identity::{Identifier, IdentityUpdate};
 use warp::multipass::MultiPass;
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::config::{Config, IpfsSetting, StoreSetting};
+use warp_mp_ipfs::config::{MpIpfsConfig, IpfsSetting, StoreSetting};
 use warp_mp_ipfs::IpfsIdentity;
 
 async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
@@ -15,7 +15,7 @@ async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
 
     //Note: This uses mdns for this example. This example will not work if the system does not support mdns. This will change in the future
     //      The internal store will broadcast at 5ms but ideally it would want to be set to 100ms
-    let config = Config {
+    let config = MpIpfsConfig {
         store_setting: StoreSetting {
             broadcast_interval: 1000,
             broadcast_with_connection: true,

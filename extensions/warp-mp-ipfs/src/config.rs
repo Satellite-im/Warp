@@ -62,7 +62,7 @@ pub struct StoreSetting {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct Config {
+pub struct MpIpfsConfig {
     pub path: Option<PathBuf>,
     pub bootstrap: Vec<Multiaddr>,
     pub listen_on: Vec<Multiaddr>,
@@ -70,9 +70,9 @@ pub struct Config {
     pub store_setting: StoreSetting,
 }
 
-impl Default for Config {
+impl Default for MpIpfsConfig {
     fn default() -> Self {
-        Config {
+        MpIpfsConfig {
             path: None,
             bootstrap: vec![
                 "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
@@ -111,9 +111,9 @@ impl Default for Config {
     }
 }
 
-impl Config {
-    pub fn development() -> Config {
-        Config {
+impl MpIpfsConfig {
+    pub fn development() -> MpIpfsConfig {
+        MpIpfsConfig {
             path: None,
             listen_on: vec!["/ip4/127.0.0.1/tcp/0"]
                 .iter()
@@ -141,8 +141,8 @@ impl Config {
         }
     }
 
-    pub fn production() -> Config {
-        Config {
+    pub fn production() -> MpIpfsConfig {
+        MpIpfsConfig {
             path: None,
             listen_on: vec!["/ip4/0.0.0.0/tcp/0", "/ip6/::/tcp/0"]
                 .iter()

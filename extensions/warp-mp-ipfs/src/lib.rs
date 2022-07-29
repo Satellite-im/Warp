@@ -8,7 +8,7 @@ pub mod config;
 pub mod store;
 
 use anyhow::bail;
-use config::Config;
+use config::MpIpfsConfig;
 use futures::{Future, TryFutureExt};
 use libipld::serde::to_ipld;
 use libipld::{ipld, Cid, Ipld};
@@ -68,7 +68,7 @@ impl Drop for IpfsIdentity {
 
 impl IpfsIdentity {
     pub async fn temporary(
-        config: Option<Config>,
+        config: Option<MpIpfsConfig>,
         tesseract: Tesseract,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity> {
@@ -81,7 +81,7 @@ impl IpfsIdentity {
     }
 
     pub async fn persistent(
-        config: Config,
+        config: MpIpfsConfig,
         tesseract: Tesseract,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity> {
@@ -92,7 +92,7 @@ impl IpfsIdentity {
     }
 
     pub async fn new(
-        config: Config,
+        config: MpIpfsConfig,
         tesseract: Tesseract,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity> {
@@ -464,7 +464,7 @@ impl Friends for IpfsIdentity {
 }
 
 pub mod ffi {
-    use crate::config::Config;
+    use crate::config::MpIpfsConfig;
     use crate::IpfsIdentity;
     use std::ffi::CStr;
     use std::os::raw::c_char;

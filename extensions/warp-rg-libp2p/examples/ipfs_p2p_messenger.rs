@@ -37,7 +37,7 @@ async fn create_account(
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    let config = warp_mp_ipfs::config::Config {ipfs_setting: IpfsSetting { mdns: warp_mp_ipfs::config::Mdns { enable: true }, ..Default::default() }, ..Default::default() };
+    let config = warp_mp_ipfs::config::MpIpfsConfig {ipfs_setting: IpfsSetting { mdns: warp_mp_ipfs::config::Mdns { enable: true }, ..Default::default() }, ..Default::default() };
     let mut account = IpfsIdentity::temporary(Some(config), tesseract, Some(cache)).await?;
 
     account.create_identity(None, None)?;

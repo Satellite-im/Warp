@@ -67,12 +67,12 @@ pub struct StoreSetting {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct Config {
+pub struct MpSolanaConfig {
     pub ipfs_setting: IpfsSetting,
 }
-impl Default for Config {
+impl Default for MpSolanaConfig {
     fn default() -> Self {
-        Config {
+        MpSolanaConfig {
             ipfs_setting: IpfsSetting {
                 path: None,
                 bootstrap: vec![
@@ -111,9 +111,9 @@ impl Default for Config {
     }
 }
 
-impl Config {
-    pub fn development() -> Config {
-        Config {
+impl MpSolanaConfig {
+    pub fn development() -> MpSolanaConfig {
+        MpSolanaConfig {
             ipfs_setting: IpfsSetting {
                 path: None,
                 listen_on: vec!["/ip4/127.0.0.1/tcp/0"]
@@ -131,8 +131,8 @@ impl Config {
         }
     }
 
-    pub fn production() -> Config {
-        Config {
+    pub fn production() -> MpSolanaConfig {
+        MpSolanaConfig {
             ipfs_setting: IpfsSetting {
                 path: None,
                 listen_on: vec!["/ip4/0.0.0.0/tcp/0", "/ip6/::/tcp/0"]
