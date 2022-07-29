@@ -6,6 +6,7 @@ use anyhow::anyhow;
 use config::MpSolanaConfig;
 use ipfs::{IpfsOptions, UninitializedIpfs};
 use sata::Sata;
+use warp::crypto::did_key::Generate;
 use warp::crypto::{Ed25519KeyPair, DIDKey, KeyMaterial};
 use warp::crypto::{rand::Rng, DID};
 use warp::data::{DataObject, DataType};
@@ -28,8 +29,6 @@ use crate::solana::wallet::{PhraseType, SolanaWallet};
 use crate::solana::{anchor_client::Cluster};
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::solana_sdk::signature::Keypair;
-
-type Result<T> = std::result::Result<T, Error>;
 
 pub struct SolanaAccount {
     pub endpoint: Cluster,
@@ -54,7 +53,7 @@ impl Default for SolanaAccount {
 }
 
 impl SolanaAccount {
-    pub fn new(endpoint: Cluster, tesseract: &Tesseract, config: MpSolanaConfig) -> Result<Self> {
+    pub fn new(endpoint: Cluster, tesseract: &Tesseract, config: MpSolanaConfig) -> Result<Self, Error> {
         let tesseract = tesseract.clone();
         
         let mut account = Self {
@@ -69,27 +68,27 @@ impl SolanaAccount {
         Ok(account)
     }
 
-    pub fn with_devnet(tesseract: &Tesseract, config: Option<MpSolanaConfig>) -> Result<Self> {
+    pub fn with_devnet(tesseract: &Tesseract, config: Option<MpSolanaConfig>) -> Result<Self, Error> {
         let config = config.unwrap_or(MpSolanaConfig::development());
         Self::new(Cluster::Devnet, tesseract, config)
     }
 
-    pub fn with_mainnet(tesseract: &Tesseract, config: Option<MpSolanaConfig>) -> Result<Self> {
+    pub fn with_mainnet(tesseract: &Tesseract, config: Option<MpSolanaConfig>) -> Result<Self, Error> {
         let config = config.unwrap_or(MpSolanaConfig::production());
         Self::new(Cluster::Mainnet, tesseract, config)
     }
 
-    pub fn with_testnet(tesseract: &Tesseract, config: Option<MpSolanaConfig>) -> Result<Self> {
+    pub fn with_testnet(tesseract: &Tesseract, config: Option<MpSolanaConfig>) -> Result<Self, Error> {
         let config = config.unwrap_or(MpSolanaConfig::development());
         Self::new(Cluster::Testnet, tesseract, config)
     }
 
-    pub fn with_localnet(tesseract: &Tesseract, config: Option<MpSolanaConfig>) -> Result<Self> {
+    pub fn with_localnet(tesseract: &Tesseract, config: Option<MpSolanaConfig>) -> Result<Self, Error> {
         let config = config.unwrap_or(MpSolanaConfig::development());
         Self::new(Cluster::Localnet, tesseract, config)
     }
 
-    pub fn with_custom(url: &str, ws: &str, tesseract: &Tesseract, config: MpSolanaConfig) -> Result<Self> {
+    pub fn with_custom(url: &str, ws: &str, tesseract: &Tesseract, config: MpSolanaConfig) -> Result<Self, Error> {
         Self::new(Cluster::Custom(url.to_string(), ws.to_string()), tesseract, config)
     }
 
@@ -185,7 +184,7 @@ impl SolanaAccount {
         Ok(keypair)
     }
 
-    pub fn get_wallet(&self) -> Result<SolanaWallet> {
+    pub fn get_wallet(&self) -> Result<SolanaWallet, Error> {
         let tesseract = self.get_tesseract()?;
         let mnemonic = tesseract.retrieve("mnemonic")?;
         SolanaWallet::restore_from_mnemonic(None, &mnemonic)
@@ -241,7 +240,7 @@ impl Extension for SolanaAccount {
 }
 
 impl SingleHandle for SolanaAccount {
-    fn handle(&self) -> Result<Box<dyn core::any::Any>> {
+    fn handle(&self) -> Result<Box<dyn core::any::Any>, Error> {
         if let Some(store) = self.friend_store.as_ref() {
             return Ok(Box::new(store.ipfs()))
         }
@@ -250,7 +249,7 @@ impl SingleHandle for SolanaAccount {
 }
 
 impl MultiPass for SolanaAccount {
-    fn create_identity(&mut self, username: Option<&str>, _: Option<&str>) -> Result<DID> {
+    fn create_identity(&mut self, username: Option<&str>, _: Option<&str>) -> Result<DID, Error> {
         if let Ok(keypair) = &self.get_private_key() {
             if UserHelper::new_with_cluster(self.endpoint.clone(), keypair)
                 .get_current_user()
@@ -314,7 +313,7 @@ impl MultiPass for SolanaAccount {
         Ok(identity.did_key())
     }
 
-    fn get_identity(&self, id: Identifier) -> Result<Identity> {
+    fn get_identity(&self, id: Identifier) -> Result<Identity, Error> {
         let helper = self.user_helper()?;
         let ident = match id.get_inner() {
             (None, Some(username), false) => {
@@ -388,7 +387,7 @@ impl MultiPass for SolanaAccount {
         Ok(ident)
     }
 
-    fn update_identity(&mut self, option: IdentityUpdate) -> Result<()> {
+    fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
         let mut helper = self.user_helper()?;
 
         let mut identity = user_to_identity(&helper, None)?;
@@ -458,18 +457,19 @@ impl MultiPass for SolanaAccount {
         Ok(())
     }
 
-    fn decrypt_private_key(&self, _: Option<&str>) -> Result<Vec<u8>> {
+    fn decrypt_private_key(&self, _: Option<&str>) -> Result<DID, Error> {
         let keypair = self.get_private_key()?;
-        Ok(keypair.to_bytes().to_vec())
+        let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(keypair.secret().as_bytes()));
+        Ok(did.into())
     }
 
-    fn refresh_cache(&mut self) -> Result<()> {
+    fn refresh_cache(&mut self) -> Result<(), Error> {
         self.get_cache()?.empty(DataType::from(self.module()))
     }
 }
 
 impl Friends for SolanaAccount {
-    fn send_request(&mut self, pubkey: &DID) -> Result<()> {
+    fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         async_block_in_place_uncheck(self.friend_store_mut()?.send_request(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if let Some(request) = self
@@ -486,7 +486,7 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn accept_request(&mut self, pubkey: &DID) -> Result<()> {
+    fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         async_block_in_place_uncheck(self.friend_store_mut()?.accept_request(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if let Some(key) = self
@@ -503,7 +503,7 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn deny_request(&mut self, pubkey: &DID) -> Result<()> {
+    fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         async_block_in_place_uncheck(self.friend_store_mut()?.reject_request(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if !self
@@ -518,19 +518,19 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn list_incoming_request(&self) -> Result<Vec<FriendRequest>> {
+    fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
         Ok(self.friend_store()?.list_incoming_request())
     }
 
-    fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>> {
+    fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
         Ok(self.friend_store()?.list_outgoing_request())
     }
 
-    fn list_all_request(&self) -> Result<Vec<FriendRequest>> {
+    fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
         Ok(self.friend_store()?.list_all_request())
     }
 
-    fn remove_friend(&mut self, pubkey: &DID) -> Result<()> {
+    fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
         async_block_in_place_uncheck(self.friend_store_mut()?.remove_friend(&pubkey, true))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey).is_err() {
@@ -541,7 +541,7 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn block(&mut self, pubkey: &DID) -> Result<()> {
+    fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
         async_block_in_place_uncheck(self.friend_store_mut()?.block(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey).is_err() {
@@ -552,7 +552,7 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn unblock(&mut self, pubkey: &DID) -> Result<()> {
+    fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
         async_block_in_place_uncheck(self.friend_store_mut()?.unblock(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey).is_err() {
@@ -563,15 +563,15 @@ impl Friends for SolanaAccount {
         Ok(())
     }
 
-    fn block_list(&self) -> Result<Vec<DID>> {
+    fn block_list(&self) -> Result<Vec<DID>, Error> {
         async_block_in_place_uncheck(self.friend_store()?.block_list())
     }
 
-    fn list_friends(&self) -> Result<Vec<DID>> {
+    fn list_friends(&self) -> Result<Vec<DID>, Error> {
         async_block_in_place_uncheck(self.friend_store()?.friends_list())
     }
 
-    fn has_friend(&self, pubkey: &DID) -> Result<()> {
+    fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
         async_block_in_place_uncheck(self.friend_store()?.is_friend(&pubkey))
     }
 }

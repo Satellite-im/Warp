@@ -34,7 +34,7 @@ pub trait MultiPass: Extension + Friends + Sync + Send + SingleHandle {
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error>;
 
     /// Decrypt and provide private key for [`Identity`]
-    fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<Vec<u8>, Error>;
+    fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<DID, Error>;
 
     /// Clear out cache related to [`Module::Accounts`]
     fn refresh_cache(&mut self) -> Result<(), Error>;
@@ -164,7 +164,7 @@ impl MultiPassAdapter {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn decrypt_private_key(&self, passphrase: Option<String>) -> Result<Vec<u8>, Error> {
+    pub fn decrypt_private_key(&self, passphrase: Option<String>) -> Result<DID, Error> {
         self.inner_guard()
             .decrypt_private_key(passphrase.as_deref())
     }
@@ -286,7 +286,7 @@ pub mod ffi {
     use crate::async_on_block;
     use crate::crypto::{FFIVec_DID, DID};
     use crate::error::Error;
-    use crate::ffi::{FFIResult, FFIResult_Null, FFIVec};
+    use crate::ffi::{FFIResult, FFIResult_Null};
     use crate::multipass::{
         identity::{FFIVec_FriendRequest, Identifier, Identity, IdentityUpdate},
         MultiPassAdapter,
@@ -390,7 +390,7 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_decrypt_private_key(
         ctx: *mut MultiPassAdapter,
         passphrase: *const c_char,
-    ) -> FFIResult<FFIVec<u8>> {
+    ) -> FFIResult<DID> {
         if ctx.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }

@@ -6,6 +6,8 @@ mod store;
 use futures::pin_mut;
 use futures::StreamExt;
 use ipfs::{Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, TestTypes, Types, UninitializedIpfs};
+use libp2p::identity;
+use warp::crypto::KeyMaterial;
 use std::any::Any;
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -88,9 +90,8 @@ impl IpfsMessaging {
             None => {
                 let keypair = {
                     let prikey = account.lock().decrypt_private_key(None)?;
-                    let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&prikey)?;
-                    let mut sec_key = id_kp.secret.to_bytes();
-                    let id_secret = libp2p::identity::ed25519::SecretKey::from_bytes(&mut sec_key)?;
+                    let mut sec_key = prikey.as_ref().private_key_bytes();
+                    let id_secret = identity::ed25519::SecretKey::from_bytes(&mut sec_key)?;
                     Keypair::Ed25519(id_secret.into())
                 };
 
