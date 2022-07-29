@@ -10,7 +10,7 @@ use anyhow::anyhow;
 use libp2p::multiaddr::Protocol;
 use libp2p::{identity, PeerId};
 use registry::PeerRegistry;
-use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
+use warp::crypto::{DIDKey, Ed25519KeyPair, DID, did_key::KeyMaterial};
 use warp::raygun::group::*;
 use warp::SingleHandle;
 
@@ -82,8 +82,7 @@ impl Libp2pMessaging {
 
         let keypair = {
             let prikey = message.account.lock().decrypt_private_key(None)?;
-            let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&prikey)?;
-            let mut sec_key = id_kp.secret.to_bytes();
+            let mut sec_key = prikey.as_ref().private_key_bytes();
             let id_secret = identity::ed25519::SecretKey::from_bytes(&mut sec_key)?;
             identity::Keypair::Ed25519(id_secret.into())
         };
@@ -240,8 +239,19 @@ impl Libp2pMessaging {
 
     #[cfg(feature = "solana")]
     pub fn group_helper(&self) -> anyhow::Result<crate::solana::groupchat::GroupChat> {
+        use warp::crypto::ed25519_dalek::{PublicKey, KEYPAIR_LENGTH, SECRET_KEY_LENGTH};
+
         let private_key = self.account.lock().decrypt_private_key(None)?;
-        let kp = anchor_client::solana_sdk::signer::keypair::Keypair::from_bytes(&private_key)?;
+        let kp = {
+            let secret_key = warp::crypto::ed25519_dalek::SecretKey::from_bytes(&private_key.as_ref().private_key_bytes())?;
+            let public_key: PublicKey = (&secret_key).into();
+            let mut bytes: [u8; KEYPAIR_LENGTH] = [0u8; KEYPAIR_LENGTH];
+    
+            bytes[..SECRET_KEY_LENGTH].copy_from_slice(secret_key.as_bytes());
+            bytes[SECRET_KEY_LENGTH..].copy_from_slice(public_key.as_bytes());
+            bytes
+        };
+        let kp = anchor_client::solana_sdk::signer::keypair::Keypair::from_bytes(&kp)?;
         //TODO: Have option to switch between devnet and mainnet
         Ok(crate::solana::groupchat::GroupChat::devnet_keypair(&kp))
     }

@@ -14,6 +14,7 @@ use libipld::serde::to_ipld;
 use libipld::{ipld, Cid, Ipld};
 use sata::Sata;
 use serde::de::DeserializeOwned;
+use warp::crypto::did_key::Generate;
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -35,7 +36,7 @@ use ipfs::{
 };
 use tokio::sync::mpsc::Sender;
 use warp::crypto::rand::Rng;
-use warp::crypto::{DID};
+use warp::crypto::{DID, DIDKey, Ed25519KeyPair};
 use warp::error::Error;
 use warp::multipass::generator::generate_name;
 use warp::multipass::identity::{FriendRequest, Identifier, Identity, IdentityUpdate};
@@ -343,11 +344,11 @@ impl MultiPass for IpfsIdentity {
         })
     }
 
-    fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<Vec<u8>, Error> {
-        self.identity_store
-            .get_raw_keypair()
-            .map(|kp| kp.encode().to_vec())
-            .map_err(Error::from)
+    fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<DID, Error> {
+        let kp = self.identity_store.get_raw_keypair()?.encode();
+        let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
+        let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
+        Ok(did.into())
     }
 
     fn refresh_cache(&mut self) -> Result<(), Error> {
