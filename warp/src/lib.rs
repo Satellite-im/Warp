@@ -14,6 +14,9 @@ pub mod pocket_dimension;
 pub mod raygun;
 pub mod tesseract;
 
+pub use libipld;
+pub use sata;
+
 #[cfg(not(target_arch = "wasm32"))]
 static RUNTIME: once_cell::sync::Lazy<tokio::runtime::Runtime> = once_cell::sync::Lazy::new(|| {
     tokio::runtime::Builder::new_multi_thread()

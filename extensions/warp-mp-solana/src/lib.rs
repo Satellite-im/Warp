@@ -5,6 +5,7 @@ pub mod config;
 use anyhow::anyhow;
 use config::Config;
 use ipfs::{IpfsOptions, UninitializedIpfs};
+use sata::Sata;
 use warp::crypto::{Ed25519KeyPair, DIDKey, KeyMaterial};
 use warp::crypto::{rand::Rng, DID};
 use warp::data::{DataObject, DataType};
@@ -300,7 +301,7 @@ impl MultiPass for SolanaAccount {
         let identity = user_to_identity(&helper, None)?;
 
         if let Ok(mut cache) = self.get_cache() {
-            let object = DataObject::new(DataType::from(Module::Accounts), &identity)?;
+            let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, identity.clone())?;
             cache.add_data(DataType::from(Module::Accounts), &object)?;
         }
         if let Ok(hooks) = self.get_hooks() {
@@ -325,7 +326,7 @@ impl MultiPass for SolanaAccount {
                         //get last
                         if !list.is_empty() {
                             let obj = list.last().unwrap();
-                            return obj.payload::<Identity>();
+                            return obj.decode::<Identity>().map_err(Error::from);
                         }
                     }
                 }
@@ -361,7 +362,7 @@ impl MultiPass for SolanaAccount {
                         //get last
                         if !list.is_empty() {
                             let obj = list.last().unwrap();
-                            return obj.payload::<Identity>();
+                            return obj.decode::<Identity>().map_err(Error::from);
                         }
                     }
                 }
@@ -380,7 +381,7 @@ impl MultiPass for SolanaAccount {
                 .has_data(DataType::from(Module::Accounts), &query)
                 .is_err()
             {
-                let object = DataObject::new(DataType::from(Module::Accounts), &ident)?;
+                let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, ident.clone())?;
                 cache.add_data(DataType::from(Module::Accounts), &object)?;
             }
         }
@@ -435,14 +436,16 @@ impl MultiPass for SolanaAccount {
             if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query)) {
                 //get last
                 if !list.is_empty() {
-                    let mut obj = list.last().unwrap().clone();
-                    obj.set_payload(identity.clone())?;
+                    let mut object = Sata::default();
+                    object.set_version(list.len() as _);
+                    let obj = object.encode(warp::sata::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, identity.clone())?;
                     cache.add_data(DataType::from(Module::Accounts), &obj)?;
                 }
             } else {
+                let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, identity.clone())?;
                 cache.add_data(
                     DataType::from(Module::Accounts),
-                    &DataObject::new(DataType::from(Module::Accounts), identity.clone())?,
+                    &object,
                 )?;
             }
         }

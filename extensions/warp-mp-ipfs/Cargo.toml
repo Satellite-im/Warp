@@ -27,6 +27,9 @@ tracing = "0.1"
 
 hex = "0.4"
 
+sata = { git = "https://github.com/Satellite-im/Sata" }
+
+
 [dev-dependencies]
 bs58 = "0.4"
 warp-pd-stretto = { path = "../warp-pd-stretto" }

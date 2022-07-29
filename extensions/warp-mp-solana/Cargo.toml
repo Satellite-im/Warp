@@ -29,7 +29,7 @@ anchor-client = "0.24.2"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.11", default-features = false, features = ["json", "__rustls"] }
 borsh = "0.9.3"
-
+sata = { git = "https://github.com/Satellite-im/Sata" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { version = "0.2" }

@@ -219,6 +219,8 @@ pub enum Error {
     #[error("{0}")]
     RegexError(#[from] regex::Error),
     #[error(transparent)]
+    SataError(#[from] sata::error::Error),
+    #[error(transparent)]
     Any(#[from] anyhow::Error),
     #[error(transparent)]
     Bs58Error(#[from] bs58::decode::Error),

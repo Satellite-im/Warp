@@ -86,6 +86,10 @@ async fn main() -> anyhow::Result<()> {
     let coin = rng.gen_range(0, 2);
     match coin {
         0 => {
+            println!("Denying {} friend request", username(&ident_a));
+            account_b.deny_request(&ident_a.did_key())?;
+        }
+        _ => {
             account_b.accept_request(&ident_a.did_key())?;
 
             println!(
@@ -141,10 +145,6 @@ async fn main() -> anyhow::Result<()> {
                     println!("{} removed {}", username(&ident_b), username(&ident_a));
                 }
             }
-        }
-        _ => {
-            println!("Denying {} friend request", username(&ident_a));
-            account_b.deny_request(&ident_a.did_key())?;
         }
     }
 

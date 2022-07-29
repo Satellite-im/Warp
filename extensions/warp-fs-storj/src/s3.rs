@@ -2,6 +2,7 @@ use anyhow::{anyhow, bail};
 use aws_endpoint::partition::endpoint;
 use aws_endpoint::{CredentialScope, Partition, PartitionResolver};
 use aws_sdk_s3::presigning::config::PresigningConfig;
+use warp::sata::Sata;
 use std::path::PathBuf;
 use warp::sync::{Arc, Mutex, MutexGuard};
 
@@ -237,10 +238,7 @@ impl Constellation for StorjFilesystem {
         self.modified = Utc::now();
 
         if let Ok(mut cache) = self.get_cache() {
-            let object = DataObject::new(
-                DataType::from(Module::FileSystem),
-                DimensionData::from(path),
-            )?;
+            let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from(path))?;
             cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
 
@@ -264,7 +262,7 @@ impl Constellation for StorjFilesystem {
                 //get last
                 if !list.is_empty() {
                     let obj = list.last().unwrap();
-                    if let Ok(data) = obj.payload::<DimensionData>() {
+                    if let Ok(data) = obj.decode::<DimensionData>() {
                         if let Ok(mut file) = std::fs::File::create(path) {
                             return data.write_from_path(&mut file);
                         }
@@ -349,10 +347,7 @@ impl Constellation for StorjFilesystem {
         self.modified = Utc::now();
 
         if let Ok(mut cache) = self.get_cache() {
-            let object = DataObject::new(
-                DataType::from(Module::FileSystem),
-                DimensionData::from_buffer(&name, buffer),
-            )?;
+            let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from_buffer(&name, buffer))?;
             cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
 
@@ -372,7 +367,7 @@ impl Constellation for StorjFilesystem {
             if let Ok(list) = cache.get_data(DataType::from(Module::FileSystem), Some(&query)) {
                 if !list.is_empty() {
                     let obj = list.last().ok_or(Error::ArrayPositionNotFound)?;
-                    if let Ok(data) = obj.payload::<DimensionData>() {
+                    if let Ok(data) = obj.decode::<DimensionData>() {
                         let mut buffer = vec![];
                         data.write_from_path(&mut buffer)?;
                         return Ok(buffer);

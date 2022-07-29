@@ -34,7 +34,7 @@ use crate::behaviour::SwarmCommands;
 use crate::config::Config;
 use crate::events::MessagingEvents;
 use crate::registry::{GroupRegistry};// PeerOption};
-use warp::data::{DataObject, DataType};
+use warp::data::{DataType};
 use warp::pocket_dimension::query::QueryBuilder;
 
 //These topics will be used for internal communication and not meant for direct use.
@@ -313,14 +313,14 @@ impl RayGun for Libp2pMessaging {
         events::process_message_event(self.conversations.clone(), &event)?;
 
         //TODO: cache support edited messages
-        if let MessagingEvents::NewMessage(message) = event {
-            if let Ok(mut cache) = self.get_cache() {
-                let data = DataObject::new(DataType::Messaging, message)?;
-                if cache.add_data(DataType::Messaging, &data).is_err() {
-                    //TODO: Log error
-                }
-            }
-        }
+        // if let MessagingEvents::NewMessage(message) = event {
+        //     if let Ok(mut cache) = self.get_cache() {
+        //         let data = DataObject::new(DataType::Messaging, message)?;
+        //         if cache.add_data(DataType::Messaging, &data).is_err() {
+        //             //TODO: Log error
+        //         }
+        //     }
+        // }
 
         return Ok(());
     }
@@ -388,14 +388,14 @@ impl RayGun for Libp2pMessaging {
         self.send_event(&event).await?;
         events::process_message_event(self.conversations.clone(), &event)?;
 
-        if let MessagingEvents::NewMessage(message) = event {
-            if let Ok(mut cache) = self.get_cache() {
-                let data = DataObject::new(DataType::Messaging, message)?;
-                if cache.add_data(DataType::Messaging, &data).is_err() {
-                    //TODO: Log error
-                }
-            }
-        }
+        // if let MessagingEvents::NewMessage(message) = event {
+        //     if let Ok(mut cache) = self.get_cache() {
+        //         let data = DataObject::new(DataType::Messaging, message)?;
+        //         if cache.add_data(DataType::Messaging, &data).is_err() {
+        //             //TODO: Log error
+        //         }
+        //     }
+        // }
 
         return Ok(());
     }

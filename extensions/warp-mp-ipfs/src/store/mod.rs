@@ -33,21 +33,25 @@ fn libp2p_pub_to_did(public_key: &libp2p::identity::PublicKey) -> anyhow::Result
     Ok(pk)
 }
 
-// Note that this are temporary
-fn sign_serde<D: Serialize>(tesseract: &Tesseract, data: &D) -> anyhow::Result<Vec<u8>> {
+fn did_keypair(tesseract: &Tesseract) -> anyhow::Result<DID> {
     let kp = tesseract.retrieve("keypair")?;
     let kp = bs58::decode(kp).into_vec()?;
     let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-    let did = Ed25519KeyPair::from_secret_key(id_kp.secret.as_bytes());
+    let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(id_kp.secret.as_bytes()));
+    Ok(did.into())
+}
+
+// Note that this are temporary
+fn sign_serde<D: Serialize>(tesseract: &Tesseract, data: &D) -> anyhow::Result<Vec<u8>> {
+    let did = did_keypair(tesseract)?;
     let bytes = serde_json::to_vec(data)?;
-    Ok(did.sign(&bytes))
+    Ok(did.as_ref().sign(&bytes))
 }
 
 // Note that this are temporary
 fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow::Result<()> {
-    let did: DIDKey = pk.try_into()?;
     let bytes = serde_json::to_vec(data)?;
-    did.verify(&bytes, signature)
+    pk.as_ref().verify(&bytes, signature)
         .map_err(|e| anyhow::anyhow!("{:?}", e))?;
     Ok(())
 }

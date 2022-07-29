@@ -1,7 +1,9 @@
 use anyhow::anyhow;
 use warp::{
-    data::{DataObject, DataType},
+    data::DataType,
+    libipld::Ipld,
     module::Module,
+    sata::{Sata, State},
     Extension, SingleHandle,
 };
 
@@ -16,7 +18,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone)]
 pub struct StrettoClient {
-    client: Cache<DataType, Vec<DataObject>>,
+    client: Cache<DataType, Vec<Sata>>,
 }
 
 impl Extension for StrettoClient {
@@ -43,7 +45,7 @@ impl StrettoClient {
         Ok(Self { client })
     }
 
-    pub fn client(&self) -> &Cache<DataType, Vec<DataObject>> {
+    pub fn client(&self) -> &Cache<DataType, Vec<Sata>> {
         &self.client
     }
 }
@@ -51,17 +53,17 @@ impl StrettoClient {
 impl SingleHandle for StrettoClient {}
 
 impl PocketDimension for StrettoClient {
-    fn add_data(&mut self, dimension: DataType, data: &DataObject) -> Result<()> {
-        let mut data = data.clone();
-        data.set_data_type(dimension);
+    fn add_data(&mut self, dimension: DataType, data: &Sata) -> Result<()> {
+        let data = data.clone();
+        // data.set_data_type(dimension);
 
         if let Some(mut value) = self.client.get_mut(&dimension) {
-            let version = value
-                .value()
-                .iter()
-                .filter(|item| item.id() == data.id())
-                .count() as u32;
-            data.set_version(version);
+            // let version = value
+            //     .value()
+            //     .iter()
+            //     .filter(|item| item.id() == data.id())
+            //     .count() as u32;
+            // data.set_version(version);
             (*value.value_mut()).push(data);
             self.client
                 .wait()
@@ -82,11 +84,7 @@ impl PocketDimension for StrettoClient {
             .and_then(|data| execute(data.value(), query).map(|_| ()))
     }
 
-    fn get_data(
-        &self,
-        dimension: DataType,
-        query: Option<&QueryBuilder>,
-    ) -> Result<Vec<DataObject>> {
+    fn get_data(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<Vec<Sata>> {
         let data = self
             .client
             .get(&dimension)
@@ -101,7 +99,7 @@ impl PocketDimension for StrettoClient {
 
     fn size(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
         self.get_data(dimension, query)
-            .map(|data| data.iter().map(|i| i.size() as i64).sum())
+            .map(|data| data.iter().map(|i| i.data().len() as i64).sum())
     }
 
     fn count(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64> {
@@ -121,26 +119,33 @@ impl PocketDimension for StrettoClient {
     }
 }
 
-pub(crate) fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<DataObject>> {
+//TODO: Rewrite
+pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> {
     let mut list = Vec::new();
     for data in data.iter() {
-        let object = data.payload::<serde_json::Value>()?;
-        if !object.is_object() {
-            continue;
-        }
-        let object = object.as_object().ok_or(warp::error::Error::Other)?;
+        let object = match data.state() {
+            State::Encoded => data.decode::<Ipld>()?,
+            State::Encrypted | _ => continue,
+        };
+
+        match object {
+            Ipld::Map(_) => {}
+            _ => continue,
+        };
+
         for (key, val) in query.get_where().iter() {
-            if let Some(result) = object.get(key) {
-                if val == result {
+            if let Some(result) = object.get(key.as_str()).ok() {
+                if *val == *result {
                     list.push(data.clone());
                 }
             }
         }
+
         for comp in query.get_comparator().iter() {
             match comp {
                 ComparatorFilter::Eq(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        if result == val {
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        if *result == *val {
                             if list.contains(data) {
                                 continue;
                             }
@@ -149,8 +154,8 @@ pub(crate) fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<D
                     }
                 }
                 ComparatorFilter::Ne(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        if result != val {
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        if *result != *val {
                             if list.contains(data) {
                                 continue;
                             }
@@ -159,51 +164,55 @@ pub(crate) fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<D
                     }
                 }
                 ComparatorFilter::Gte(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        let result = result.as_i64().unwrap();
-                        let val = val.as_i64().unwrap();
-                        if result >= val {
-                            if list.contains(data) {
-                                continue;
-                            }
-                            list.push(data.clone());
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        match (result, val) {
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res >= *v => {}
+                            (Ipld::Float(res), Ipld::Float(v)) if *res >= *v => {}
+                            _ => continue,
+                        };
+                        if list.contains(data) {
+                            continue;
                         }
+                        list.push(data.clone());
                     }
                 }
                 ComparatorFilter::Gt(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        let result = result.as_i64().unwrap();
-                        let val = val.as_i64().unwrap();
-                        if result > val {
-                            if list.contains(data) {
-                                continue;
-                            }
-                            list.push(data.clone());
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        match (result, val) {
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res > *v => {}
+                            (Ipld::Float(res), Ipld::Float(v)) if *res > *v => {}
+                            _ => continue,
+                        };
+                        if list.contains(data) {
+                            continue;
                         }
+                        list.push(data.clone());
                     }
                 }
                 ComparatorFilter::Lte(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        let result = result.as_i64().unwrap();
-                        let val = val.as_i64().unwrap();
-                        if result <= val {
-                            if list.contains(data) {
-                                continue;
-                            }
-                            list.push(data.clone());
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        match (result, val) {
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res <= *v => {}
+                            (Ipld::Float(res), Ipld::Float(v)) if *res <= *v => {}
+                            _ => continue,
+                        };
+                        if list.contains(data) {
+                            continue;
                         }
+                        list.push(data.clone());
                     }
                 }
                 ComparatorFilter::Lt(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        let result = result.as_i64().unwrap();
-                        let val = val.as_i64().unwrap();
-                        if result < val {
-                            if list.contains(data) {
-                                continue;
-                            }
-                            list.push(data.clone());
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        match (result, val) {
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res < *v => {}
+                            (Ipld::Float(res), Ipld::Float(v)) if *res < *v => {}
+                            _ => continue,
+                        };
+                        if list.contains(data) {
+                            continue;
                         }
+                        list.push(data.clone());
                     }
                 }
             }
@@ -222,11 +231,12 @@ pub(crate) fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<D
 mod test {
     use crate::StrettoClient;
     use serde::{Deserialize, Serialize};
-    use warp::data::{DataObject, DataType};
+    use warp::data::DataType;
     use warp::error::Error;
     use warp::module::Module;
     use warp::pocket_dimension::query::{Comparator, QueryBuilder};
     use warp::pocket_dimension::PocketDimension;
+    use warp::sata::Sata; 
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct SomeData {
@@ -253,14 +263,18 @@ mod test {
     }
 
     fn generate_data(system: &mut StrettoClient, amount: i64) {
-        let mut object = DataObject::default();
-
         for i in 0..amount {
             let mut data = SomeData::default();
             data.set_name(&format!("Test Subject {i}"));
             data.set_age(18 + i);
 
-            object.set_payload(data).unwrap();
+            let object = Sata::default()
+                .encode(
+                    warp::libipld::IpldCodec::DagJson,
+                    warp::sata::Kind::Reference,
+                    data,
+                )
+                .unwrap();
             system
                 .add_data(DataType::from(Module::Accounts), &object)
                 .unwrap();

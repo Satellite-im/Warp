@@ -1,6 +1,7 @@
 pub mod config;
 
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
+use warp::sata::Sata;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use warp::sync::{Arc, Mutex, MutexGuard};
@@ -253,10 +254,7 @@ impl Constellation for IpfsFileSystem {
         self.modified = Utc::now();
 
         if let Ok(mut cache) = self.get_cache() {
-            let object = DataObject::new(
-                DataType::from(Module::FileSystem),
-                DimensionData::from(path),
-            )?;
+            let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from(path))?;
             cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
 
@@ -293,7 +291,7 @@ impl Constellation for IpfsFileSystem {
                 //get last
                 if !list.is_empty() {
                     let obj = list.last().unwrap();
-                    if let Ok(data) = obj.payload::<DimensionData>() {
+                    if let Ok(data) = obj.decode::<DimensionData>() {
                         if let Ok(mut file) = std::fs::File::create(path) {
                             data.write_from_path(&mut file)?;
                             return Ok(());
@@ -398,10 +396,7 @@ impl Constellation for IpfsFileSystem {
                 .to_string_lossy()
                 .to_string();
 
-            let object = DataObject::new(
-                DataType::from(Module::FileSystem),
-                DimensionData::from_buffer(&name, buffer),
-            )?;
+            let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from_buffer(&name, buffer))?;
             cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
 
@@ -429,7 +424,7 @@ impl Constellation for IpfsFileSystem {
                 //get last
                 if !list.is_empty() {
                     let obj = list.last().unwrap();
-                    if let Ok(data) = obj.payload::<DimensionData>() {
+                    if let Ok(data) = obj.decode::<DimensionData>() {
                         let mut buffer = vec![];
                         data.write_from_path(&mut buffer)?;
                         return Ok(buffer);

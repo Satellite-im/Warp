@@ -1,7 +1,7 @@
 pub mod config;
 
 use anyhow::anyhow;
-use serde_json::Value;
+use std::collections::HashMap;
 #[allow(unused_imports)]
 use std::{
     fs::OpenOptions,
@@ -9,14 +9,18 @@ use std::{
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
-use warp::Extension;
-use warp::{error::Error, SingleHandle};
+use warp::{error::Error, libipld::Ipld, SingleHandle};
+use warp::{
+    libipld::Cid,
+    sata::{Sata, State},
+    Extension,
+};
 
-use warp::data::{DataObject, DataType};
+use warp::data::DataType;
 use warp::module::Module;
 use warp::pocket_dimension::{
     query::{ComparatorFilter, QueryBuilder},
-    DimensionData, DimensionDataInner, PocketDimension,
+    DimensionData, PocketDimension,
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -73,16 +77,16 @@ impl Extension for FlatfileStorage {
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct FlatfileIndex(pub Vec<DataObject>);
+pub struct FlatfileIndex(pub HashMap<DataType, Vec<Sata>>);
 
-impl AsRef<Vec<DataObject>> for FlatfileIndex {
-    fn as_ref(&self) -> &Vec<DataObject> {
+impl AsRef<HashMap<DataType, Vec<Sata>>> for FlatfileIndex {
+    fn as_ref(&self) -> &HashMap<DataType, Vec<Sata>> {
         &self.0
     }
 }
 
-impl AsMut<Vec<DataObject>> for FlatfileIndex {
-    fn as_mut(&mut self) -> &mut Vec<DataObject> {
+impl AsMut<HashMap<DataType, Vec<Sata>>> for FlatfileIndex {
+    fn as_mut(&mut self) -> &mut HashMap<DataType, Vec<Sata>> {
         &mut self.0
     }
 }
@@ -126,25 +130,31 @@ impl FlatfileIndex {
         Err(Error::Unimplemented)
     }
 
-    pub fn insert(&mut self, data: DataObject) -> Result<()> {
-        if self.0.contains(&data) {
-            return Err(Error::Other);
+    pub fn insert(&mut self, data_type: DataType, data: Sata) -> Result<()> {
+        let index = self.as_mut();
+
+        if let Some(list) = index.get(&data_type) {
+            if list.contains(&data) {
+                return Err(Error::DataObjectExist);
+            }
         }
-        self.0.push(data);
+        index.entry(data_type).or_insert_with(Vec::new).push(data);
         Ok(())
     }
 
-    pub fn remove_by_id(&mut self, id: Uuid) -> Result<DataObject> {
-        //get index of said dataobject
-        let index = self
-            .0
-            .iter()
-            .position(|item| item.id() == id)
-            .ok_or(Error::ArrayPositionNotFound)?;
+    pub fn remove_by_id(&mut self, data_type: DataType, id: Cid) -> Result<Sata> {
+        let index = self.as_mut();
 
-        let object = self.0.remove(index);
+        if let Some(list) = index.get_mut(&data_type) {
+            let index = match list.iter().position(|data| data.id() == id) {
+                Some(index) => index,
+                None => return Err(Error::DataObjectNotFound),
+            };
 
-        Ok(object)
+            let item = list.remove(index);
+            return Ok(item);
+        }
+        return Err(Error::DataObjectNotFound);
     }
 
     pub fn build_index(&mut self) -> Result<()> {
@@ -283,32 +293,35 @@ impl FlatfileStorage {
 impl SingleHandle for FlatfileStorage {}
 
 impl PocketDimension for FlatfileStorage {
-    fn add_data(&mut self, dimension: DataType, data: &warp::data::DataObject) -> Result<()> {
-        let mut data = data.clone();
-        data.set_data_type(dimension);
+    fn add_data(&mut self, dimension: DataType, data: &warp::sata::Sata) -> Result<()> {
+        let data = data.clone();
 
-        let version = self
-            .index
-            .as_ref()
-            .iter()
-            .filter(|inner| inner.id() == data.id() && inner.data_type() == data.data_type())
-            .count();
+        // let version = self
+        //     .index
+        //     .as_ref()
+        //     .iter()
+        //     .filter(|inner| inner.id() == data.id() && inner.data_type() == data.data_type())
+        //     .count();
 
-        data.set_version(version as u32);
-
+        // data.set_version(version as u32);
         match dimension {
             DataType::FileSystem => {
-                match data.payload::<DimensionData>()?.get_inner() {
-                    DimensionDataInner::Path { name, path } => {
+                match data.decode::<DimensionData>()? {
+                    DimensionData {
+                        name,
+                        path: Some(path),
+                        ..
+                    } => {
+                        let new_data = Sata::default();
                         let old_path = path;
                         if !old_path.is_file() {
                             return Err(Error::ItemNotFile);
                         }
-                        let size = std::fs::metadata(&old_path)?.len();
+                        // let _size = std::fs::metadata(&old_path)?.len();
 
                         let filename = name.as_ref().ok_or(Error::FileNotFound)?;
 
-                        data.set_size(size);
+                        // data.set_size(size);
 
                         let new_path = {
                             let mut path = self.directory.clone();
@@ -316,25 +329,35 @@ impl PocketDimension for FlatfileStorage {
                             path
                         };
 
-                        data.set_payload(DimensionData(DimensionDataInner::Path {
-                            name: Some(filename.clone()),
-                            path: new_path.clone(),
-                        }))?;
+                        let data = new_data.encode(
+                            warp::libipld::IpldCodec::DagCbor,
+                            warp::sata::Kind::Reference,
+                            DimensionData {
+                                name: Some(filename.clone()),
+                                path: Some(new_path.clone()),
+                                ..Default::default()
+                            },
+                        )?;
                         let mut writer = std::fs::File::create(&new_path)?;
 
                         let mut reader = std::fs::File::open(old_path)?;
                         std::io::copy(&mut reader, &mut writer)?;
                         writer.flush()?;
 
-                        if let Err(e) = self.index.insert(data) {
+                        if let Err(e) = self.index.insert(DataType::FileSystem, data) {
                             std::fs::remove_file(new_path)?;
                             return Err(e);
                         }
                     }
-                    DimensionDataInner::Buffer { name, buffer } => {
+                    DimensionData {
+                        name: Some(name),
+                        buffer: Some(buffer),
+                        ..
+                    } => {
+                        let new_data = Sata::default();
                         //
-                        let size = buffer.len();
-                        data.set_size(size as u64);
+                        // let size = buffer.len();
+                        // data.set_size(size as u64);
 
                         let new_path = {
                             let mut path = self.directory.clone();
@@ -342,10 +365,15 @@ impl PocketDimension for FlatfileStorage {
                             path
                         };
 
-                        data.set_payload(DimensionData(DimensionDataInner::Path {
-                            name: Some(name.clone()),
-                            path: new_path.clone(),
-                        }))?;
+                        let data = new_data.encode(
+                            warp::libipld::IpldCodec::DagCbor,
+                            warp::sata::Kind::Reference,
+                            DimensionData {
+                                name: Some(name.clone()),
+                                path: Some(new_path.clone()),
+                                ..Default::default()
+                            },
+                        )?;
 
                         let mut writer = std::fs::File::create(&new_path)?;
 
@@ -353,19 +381,19 @@ impl PocketDimension for FlatfileStorage {
                         std::io::copy(&mut reader, &mut writer)?;
                         writer.flush()?;
 
-                        if let Err(e) = self.index.insert(data) {
+                        if let Err(e) = self.index.insert(DataType::FileSystem, data) {
                             std::fs::remove_file(new_path)?;
                             return Err(e);
                         }
                     }
-                    DimensionDataInner::BufferNoFile { internal, .. } => {
-                        let size = internal.len();
-                        data.set_size(size as u64);
-                        self.index.insert(data)?
+                    DimensionData { .. } => {
+                        // let size = internal.len();
+                        // data.set_size(size as u64);
+                        self.index.insert(DataType::FileSystem, data)?
                     }
                 }
             }
-            _ => self.index.insert(data)?,
+            _ => self.index.insert(dimension, data)?,
         }
 
         self.sync()
@@ -379,13 +407,12 @@ impl PocketDimension for FlatfileStorage {
         let list = self
             .index
             .as_ref()
-            .iter()
-            .filter(|data| data.data_type() == dimension)
+            .get(&dimension)
             .cloned()
-            .collect::<Vec<_>>();
+            .unwrap_or_default();
 
         if execute(&list, query)?.is_empty() {
-            Err(Error::ToBeDetermined)
+            Err(Error::DataObjectNotFound)
         } else {
             Ok(())
         }
@@ -395,14 +422,14 @@ impl PocketDimension for FlatfileStorage {
         &self,
         dimension: DataType,
         query: Option<&warp::pocket_dimension::query::QueryBuilder>,
-    ) -> Result<Vec<warp::data::DataObject>> {
+    ) -> Result<Vec<Sata>> {
         let list = self
             .index
             .as_ref()
-            .iter()
-            .filter(|data| data.data_type() == dimension)
+            .get(&dimension)
             .cloned()
-            .collect::<Vec<_>>();
+            .unwrap_or_default();
+
         match query {
             Some(query) => execute(&list, query),
             None => Ok(list),
@@ -414,8 +441,42 @@ impl PocketDimension for FlatfileStorage {
         dimension: DataType,
         query: Option<&warp::pocket_dimension::query::QueryBuilder>,
     ) -> Result<i64> {
-        self.get_data(dimension, query)
-            .map(|list| list.iter().map(|i| i.size() as i64).sum())
+        let mut size = 0;
+        let list = self.get_data(dimension, query)?;
+        for item in list {
+            match dimension {
+                DataType::FileSystem => {
+                    let data = match item.state() {
+                        State::Encoded => match item.decode::<DimensionData>() {
+                            Ok(item) => item,
+                            _ => continue,
+                        },
+                        _ => continue,
+                    };
+                    match data {
+                        DimensionData {
+                            path: Some(path), ..
+                        } => {
+                            if let Ok(meta) = std::fs::metadata(path) {
+                                size += meta.len() as i64;
+                            }
+                        }
+                        DimensionData {
+                            internal: Some(internal),
+                            ..
+                        } => {
+                            size += internal.len() as i64;
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {
+                    size += item.data().len() as i64;
+                }
+            }
+        }
+
+        Ok(size)
     }
 
     fn count(
@@ -428,57 +489,58 @@ impl PocketDimension for FlatfileStorage {
     }
 
     fn empty(&mut self, dimension: DataType) -> Result<()> {
-        let mut preserved = Vec::new();
+        let index = self.index.as_mut();
 
-        for item in self.index.as_ref().clone() {
-            if item.data_type() != dimension {
-                preserved.push(item);
-            }
-        }
+        let list = index.remove(&dimension);
 
-        for item in self
-            .index
-            .as_ref()
-            .iter()
-            .filter(|data| data.data_type() == dimension)
-        {
-            if let DataType::FileSystem = &item.data_type() {
-                if let DimensionDataInner::Path { path, .. } =
-                    item.payload::<DimensionData>()?.get_inner()
-                {
-                    std::fs::remove_file(path)?;
+        if let Some(list) = list {
+            for item in list {
+                if dimension == DataType::FileSystem {
+                    let data = match item.state() {
+                        State::Encoded => match item.decode::<DimensionData>() {
+                            Ok(data) => data,
+                            Err(_) => continue,
+                        },
+                        State::Encrypted | _ => continue,
+                    };
+
+                    if let Ok(path) = data.path() {
+                        std::fs::remove_file(path)?;
+                    }
                 }
             }
         }
-
-        self.index.0.clear();
-
-        self.get_index_mut().0.extend(preserved);
 
         self.sync()
     }
 }
 
-fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<DataObject>> {
+pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> {
     let mut list = Vec::new();
     for data in data.iter() {
-        let object = data.payload::<Value>()?;
-        if !object.is_object() {
-            continue;
-        }
-        let object = object.as_object().ok_or(Error::Other)?;
+        let object = match data.state() {
+            State::Encoded => data.decode::<Ipld>()?,
+            State::Encrypted | _ => continue,
+        };
+
+        match object {
+            Ipld::Map(_) => {}
+            _ => continue,
+        };
+
         for (key, val) in query.get_where().iter() {
-            if let Some(result) = object.get(key) {
-                if val == result {
+            if let Some(result) = object.get(key.as_str()).ok() {
+                if *val == *result {
                     list.push(data.clone());
                 }
             }
         }
+
         for comp in query.get_comparator().iter() {
             match comp {
                 ComparatorFilter::Eq(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        if result == val {
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        if *result == *val {
                             if list.contains(data) {
                                 continue;
                             }
@@ -487,8 +549,8 @@ fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<DataObject>>
                     }
                 }
                 ComparatorFilter::Ne(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        if result != val {
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        if *result != *val {
                             if list.contains(data) {
                                 continue;
                             }
@@ -497,51 +559,55 @@ fn execute(data: &[DataObject], query: &QueryBuilder) -> Result<Vec<DataObject>>
                     }
                 }
                 ComparatorFilter::Gte(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        let result = result.as_i64().unwrap();
-                        let val = val.as_i64().unwrap();
-                        if result >= val {
-                            if list.contains(data) {
-                                continue;
-                            }
-                            list.push(data.clone());
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        match (result, val) {
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res >= *v => {}
+                            (Ipld::Float(res), Ipld::Float(v)) if *res >= *v => {}
+                            _ => continue,
+                        };
+                        if list.contains(data) {
+                            continue;
                         }
+                        list.push(data.clone());
                     }
                 }
                 ComparatorFilter::Gt(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        let result = result.as_i64().unwrap();
-                        let val = val.as_i64().unwrap();
-                        if result > val {
-                            if list.contains(data) {
-                                continue;
-                            }
-                            list.push(data.clone());
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        match (result, val) {
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res > *v => {}
+                            (Ipld::Float(res), Ipld::Float(v)) if *res > *v => {}
+                            _ => continue,
+                        };
+                        if list.contains(data) {
+                            continue;
                         }
+                        list.push(data.clone());
                     }
                 }
                 ComparatorFilter::Lte(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        let result = result.as_i64().unwrap();
-                        let val = val.as_i64().unwrap();
-                        if result <= val {
-                            if list.contains(data) {
-                                continue;
-                            }
-                            list.push(data.clone());
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        match (result, val) {
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res <= *v => {}
+                            (Ipld::Float(res), Ipld::Float(v)) if *res <= *v => {}
+                            _ => continue,
+                        };
+                        if list.contains(data) {
+                            continue;
                         }
+                        list.push(data.clone());
                     }
                 }
                 ComparatorFilter::Lt(key, val) => {
-                    if let Some(result) = object.get(key) {
-                        let result = result.as_i64().unwrap();
-                        let val = val.as_i64().unwrap();
-                        if result < val {
-                            if list.contains(data) {
-                                continue;
-                            }
-                            list.push(data.clone());
+                    if let Some(result) = object.get(key.as_str()).ok() {
+                        match (result, val) {
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res < *v => {}
+                            (Ipld::Float(res), Ipld::Float(v)) if *res < *v => {}
+                            _ => continue,
+                        };
+                        if list.contains(data) {
+                            continue;
                         }
+                        list.push(data.clone());
                     }
                 }
             }

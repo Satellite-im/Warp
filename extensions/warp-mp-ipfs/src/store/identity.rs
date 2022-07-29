@@ -10,6 +10,7 @@ use libipld::{
     serde::{from_ipld, to_ipld},
     Cid, Ipld,
 };
+use sata::Sata;
 use warp::{
     crypto::{rand::Rng, DIDKey, Ed25519KeyPair, DID},
     error::Error,
@@ -111,67 +112,86 @@ impl IdentityStore {
                 tokio::select! {
                     message = id_broadcast_stream.next() => {
                         if let Some(message) = message {
-                            if let Ok(identity) = serde_json::from_slice::<Identity>(&message.data) {
+                            if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
+                                if let Ok(identity) = data.decode::<Identity>() {
+                                    //Validate public key against peer that sent it
+                                    let pk = match did_to_libp2p_pub(&identity.did_key()) {
+                                        Ok(pk) => pk,
+                                        Err(_e) => {
+                                            //TODO: Log
+                                            continue
+                                        }
+                                    };
 
-                                //Validate public key against peer that sent it
-                                let pk = match did_to_libp2p_pub(&identity.did_key()) {
-                                    Ok(pk) => pk,
-                                    Err(_e) => {
-                                        //TODO: Log
-                                        continue
+                                    match message.source {
+                                        Some(peer) if peer == pk.to_peer_id() => {},
+                                        _ => {
+                                            //If the peer who sent this doesnt match the peer id of the identity
+                                            //or there isnt a source, we should go on and reject it.
+                                            //We should always have a Option::Some, but this check is a precaution
+                                            continue
+                                        }
+                                    };
+
+                                    if let Some(own_id) = store.identity.read().clone() {
+                                        if own_id == identity {
+                                            continue
+                                        }
                                     }
-                                };
 
-                                match message.source {
-                                    Some(peer) if peer == pk.to_peer_id() => {},
-                                    _ => {
-                                        //If the peer who sent this doesnt match the peer id of the identity
-                                        //or there isnt a source, we should go on and reject it.
-                                        //We should always have a Option::Some, but this check is a precaution
-                                        continue
+                                    if store.cache.read().contains(&identity) {
+                                        continue;
                                     }
-                                };
 
-                                if let Some(own_id) = store.identity.read().clone() {
-                                    if own_id == identity {
-                                        continue
+                                    if let Some(index) = store.cache.read().iter().position(|ident| ident.did_key() == identity.did_key()) {
+                                        store.cache.write().remove(index);
                                     }
-                                }
 
-                                if store.cache.read().contains(&identity) {
-                                    continue;
+                                    store.cache.write().push(identity);
                                 }
-
-                                if let Some(index) = store.cache.read().iter().position(|ident| ident.did_key() == identity.did_key()) {
-                                    store.cache.write().remove(index);
-                                }
-
-                                store.cache.write().push(identity);
                             }
                         }
                     }
                     _ = tick.tick() => {
-                        //TODO: Provide a signed and/or encrypted payload
-                        if let Ok(peers) = store.ipfs.pubsub_peers(Some(IDENTITY_BROADCAST.into())).await {
-                            if peers.is_empty() {
-                                continue;
+                        
+                        let peers = match store.ipfs.pubsub_peers(Some(IDENTITY_BROADCAST.into())).await {
+                            Ok(peers) => peers,
+                            Err(_e) => {
+                                //TODO: Log
+                                continue
                             }
+                        };
+
+                        if peers.is_empty() {
+                            //Dont send out when there is no peers connected
+                            continue
                         }
 
-                        let ident = store.identity.read().clone();
-                        let ident_bytes = match ident.as_ref() {
-                            Some(indent) => match serde_json::to_vec(&ident) {
-                                Ok(bytes) => bytes,
-                                Err(_e) => {
-                                    //TODO: Log
-                                    continue
-                                },
-                            },
+                        let data = Sata::default();
+
+                        let ident = match store.identity.read().clone() {
+                            Some(ident) => ident,
                             //TODO: Log?
                             None => continue
                         };
 
-                        if let Err(_e) = store.ipfs.pubsub_publish(IDENTITY_BROADCAST.into(), ident_bytes).await {
+                        let res = match data.encode(libipld::IpldCodec::DagJson, sata::Kind::Static, ident) {
+                            Ok(data) => data,
+                            Err(_e) => {
+                                //TODO: Log
+                                continue
+                            }
+                        };
+
+                        let bytes = match serde_json::to_vec(&res) {
+                            Ok(bytes) => bytes,
+                            Err(_e) => {
+                                //TODO: Log
+                                continue
+                            }
+                        };
+
+                        if let Err(_e) = store.ipfs.pubsub_publish(IDENTITY_BROADCAST.into(), bytes).await {
                             continue
                         }
 
