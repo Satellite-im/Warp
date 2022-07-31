@@ -29,17 +29,9 @@ MultiPassAdapter *new_account(const char* file) {
         return NULL;
     }
 
-    tesseract_set_file(tesseract, file);
-
-    tesseract_set_autosave(tesseract);
-
-    if (!tesseract_autosave_enabled(tesseract)) {
-        printf("Autosave is disabled\n");
-    }
-
     const char *config = "{\"path\":null,\"bootstrap\":[\"/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN\"], \"listen_on\":[\"/ip4/0.0.0.0/tcp/0\"],\"ipfs_setting\":{\"mdns\":{\"enable\":true},\"autonat\":{\"enable\":false,\"servers\":[]},\"relay_client\":{\"enable\":false,\"relay_address\":null},\"relay_server\":{\"enable\":false},\"dcutr\":{\"enable\":false},\"rendezvous\":{\"enable\":false,\"address\":\"\"}},\"store_setting\":{\"broadcast_interval\":10,\"broadcast_with_connection\":true, \"discovery\":false}}";
 
-    FFIResult_MultiPassAdapter result_mp = multipass_mp_solana_new_with_devnet(NULL, tesseract, config);
+    FFIResult_MultiPassAdapter result_mp = multipass_mp_solana_temporary_with_devnet(NULL, tesseract, config);
 
     if (result_mp.error) {
         printf("Adapter is null\n");

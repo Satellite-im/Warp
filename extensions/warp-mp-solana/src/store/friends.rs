@@ -1,10 +1,8 @@
-#![allow(dead_code)]
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use futures::{StreamExt};
-use ipfs::{Ipfs, IpfsPath, PeerId, Types};
+use ipfs::{Ipfs, IpfsPath, PeerId, IpfsTypes};
 
 use libipld::serde::{from_ipld, to_ipld};
 use libipld::{Cid, IpldCodec};
@@ -20,9 +18,8 @@ use crate::store::{verify_serde_sig, did_to_libp2p_pub};
 
 use super::{ sign_serde, topic_discovery, FRIENDS_BROADCAST, libp2p_pub_to_did, did_keypair};
 
-#[derive(Clone)]
-pub struct FriendsStore {
-    ipfs: Ipfs<Types>,
+pub struct FriendsStore<T: IpfsTypes> {
+    ipfs: Ipfs<T>,
 
     // Would be used to stop the look in the tokio task
     end_event: Arc<AtomicBool>,
@@ -41,15 +38,23 @@ pub struct FriendsStore {
 
     // Tesseract
     tesseract: Tesseract,
-
-    // If ipfs will be temporary
-    temporary: bool,
-    
-    // Path to ipfs store
-    path: PathBuf,
 }
 
-impl Drop for FriendsStore {
+impl<T: IpfsTypes> Clone for FriendsStore<T> {
+    fn clone(&self) -> Self {
+        Self {
+            ipfs: self.ipfs.clone(),
+            end_event: self.end_event.clone(),
+            broadcast_with_connection: self.broadcast_with_connection.clone(),
+            incoming_request: self.incoming_request.clone(),
+            outgoing_request: self.outgoing_request.clone(),
+            broadcast_request: self.broadcast_request.clone(),
+            tesseract: self.tesseract.clone()
+        }
+    }
+}
+
+impl<T: IpfsTypes> Drop for FriendsStore<T> {
     fn drop(&mut self) {
         self.end_event.store(true, Ordering::SeqCst);
         async_block_in_place_uncheck(async {
@@ -63,25 +68,17 @@ impl Drop for FriendsStore {
 
             self.ipfs.clone().exit_daemon().await;
 
-            if self.temporary {
-                if let Err(_e) = tokio::fs::remove_dir_all(&self.path).await {
-                    //TODO: Log
-                }
-            }
-
         })
     }
 }
 
-impl FriendsStore {
+impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn new(
-        ipfs: Ipfs<Types>,
+        ipfs: Ipfs<T>,
         tesseract: Tesseract,
         discovery: bool,
         send_on_peer_connect: bool,
         interval: u64,
-        temporary: bool,
-        path: PathBuf,
         init: bool
     ) -> anyhow::Result<Self> {
         let end_event = Arc::new(AtomicBool::new(false));
@@ -98,8 +95,6 @@ impl FriendsStore {
             outgoing_request,
             broadcast_request,
             tesseract,
-            temporary,
-            path,
         };
 
         let store_inner = store.clone();
@@ -356,12 +351,12 @@ impl FriendsStore {
         Ok((local_ipfs_public_key, local_peer_id))
     }
 
-    pub fn ipfs(&self) -> Ipfs<Types> {
+    pub fn ipfs(&self) -> Ipfs<T> {
         self.ipfs.clone()
     }
 }
 
-impl FriendsStore {
+impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
         let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
@@ -529,7 +524,7 @@ impl FriendsStore {
     }
 }
 
-impl FriendsStore {
+impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn raw_block_list(&self) -> Result<(Cid, Vec<DID>), Error> {
         match self.tesseract.retrieve("block_cid") {
             Ok(cid) => {
@@ -629,7 +624,7 @@ impl FriendsStore {
     }
 }
 
-impl FriendsStore {
+impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn raw_friends_list(&self) -> Result<(Cid, Vec<DID>), Error> {
         match self.tesseract.retrieve("friends_cid") {
             Ok(cid) => {
@@ -740,7 +735,7 @@ impl FriendsStore {
     }
 }
 
-impl FriendsStore {
+impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn get_incoming_request_cid(&self) -> Result<Cid, Error> {
         let cid = self.tesseract.retrieve("incoming_request_cid")?;
         Ok(cid.parse().map_err(anyhow::Error::from)?)

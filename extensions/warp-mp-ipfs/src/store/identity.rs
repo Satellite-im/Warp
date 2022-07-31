@@ -4,7 +4,7 @@ use std::{
 };
 
 use futures::{SinkExt, StreamExt, TryFutureExt};
-use ipfs::{Ipfs, IpfsPath, Keypair, Types};
+use ipfs::{Ipfs, IpfsPath, IpfsTypes, Keypair};
 use libipld::{
     ipld,
     serde::{from_ipld, to_ipld},
@@ -21,11 +21,10 @@ use warp::{
 
 use crate::store::did_to_libp2p_pub;
 
-use super::{topic_discovery, IDENTITY_BROADCAST, libp2p_pub_to_did};
+use super::{libp2p_pub_to_did, topic_discovery, IDENTITY_BROADCAST};
 
-#[derive(Clone)]
-pub struct IdentityStore {
-    ipfs: Ipfs<Types>,
+pub struct IdentityStore<T: IpfsTypes> {
+    ipfs: Ipfs<T>,
 
     identity: Arc<RwLock<Option<Identity>>>,
 
@@ -40,7 +39,21 @@ pub struct IdentityStore {
     tesseract: Tesseract,
 }
 
-impl Drop for IdentityStore {
+impl<T: IpfsTypes> Clone for IdentityStore<T> {
+    fn clone(&self) -> Self {
+        Self {
+            ipfs: self.ipfs.clone(),
+            identity: self.identity.clone(),
+            cache: self.cache.clone(),
+            start_event: self.start_event.clone(),
+            broadcast_with_connection: self.broadcast_with_connection.clone(),
+            end_event: self.end_event.clone(),
+            tesseract: self.tesseract.clone()
+        }
+    }
+} 
+
+impl<T: IpfsTypes> Drop for IdentityStore<T> {
     fn drop(&mut self) {
         self.disable_event();
         self.end_event();
@@ -53,9 +66,9 @@ pub enum LookupBy {
     Username(String),
 }
 
-impl IdentityStore {
+impl<T: IpfsTypes> IdentityStore<T> {
     pub async fn new(
-        ipfs: Ipfs<Types>,
+        ipfs: Ipfs<T>,
         tesseract: Tesseract,
         discovery: bool,
         broadcast_with_connection: bool,
@@ -153,7 +166,7 @@ impl IdentityStore {
                         }
                     }
                     _ = tick.tick() => {
-                        
+
                         let peers = match store.ipfs.pubsub_peers(Some(IDENTITY_BROADCAST.into())).await {
                             Ok(peers) => peers,
                             Err(_e) => {
@@ -217,8 +230,9 @@ impl IdentityStore {
         let raw_kp = self.get_raw_keypair()?;
 
         let mut identity = Identity::default();
-        let public_key = DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().encode()));
-        
+        let public_key =
+            DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().encode()));
+
         let username = match username {
             Some(u) => u.to_string(),
             None => warp::multipass::generator::generate_name(),
@@ -289,7 +303,7 @@ impl IdentityStore {
                 LookupBy::DidKey(pubkey) if &ident.did_key() == pubkey => return Ok(ident),
                 LookupBy::Username(username) if &ident.username() == username => return Ok(ident),
                 _ => continue,
-            } 
+            }
         }
         Err(Error::IdentityDoesntExist)
     }

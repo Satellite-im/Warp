@@ -240,7 +240,7 @@ async fn main() -> AnyResult<()> {
 
     if config.modules.multipass {
         //TODO: Passthrough configuration
-        let mut account = SolanaAccount::with_devnet(&tesseract, None)?;
+        let mut account = SolanaAccount::<warp_extensions::mp_solana::Persistent>::with_devnet(&tesseract, None)?;
         if let Ok(cache) = manager.get_cache() {
             account.set_cache(cache.clone())
         }

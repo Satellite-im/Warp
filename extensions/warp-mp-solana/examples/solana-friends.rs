@@ -4,7 +4,7 @@ use warp::multipass::{Friends, MultiPass};
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
-use warp_mp_solana::SolanaAccount;
+use warp_mp_solana::{SolanaAccount, Temporary};
 use warp_pd_flatfile::FlatfileStorage;
 // use warp_solana_utils::wallet::SolanaWallet;
 
@@ -39,7 +39,7 @@ fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
     Ok(Arc::new(Mutex::new(Box::new(storage))))
 }
 
-fn account() -> anyhow::Result<SolanaAccount> {
+fn account() -> anyhow::Result<SolanaAccount<Temporary>> {
     let mut tesseract = Tesseract::default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;

@@ -4,7 +4,7 @@ pub mod config;
 
 use anyhow::anyhow;
 use config::MpSolanaConfig;
-use ipfs::{IpfsOptions, UninitializedIpfs};
+use ipfs::{IpfsOptions, UninitializedIpfs, IpfsTypes, TestTypes, Types};
 use sata::Sata;
 use warp::crypto::did_key::Generate;
 use warp::crypto::{Ed25519KeyPair, DIDKey, KeyMaterial};
@@ -30,16 +30,19 @@ use crate::solana::{anchor_client::Cluster};
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::solana_sdk::signature::Keypair;
 
-pub struct SolanaAccount {
+
+pub type Temporary = TestTypes;
+pub type Persistent = Types;
+pub struct SolanaAccount<T: IpfsTypes> {
     pub endpoint: Cluster,
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     pub tesseract: Tesseract,
-    pub friend_store: Option<FriendsStore>,
+    pub friend_store: Option<FriendsStore<T>>,
     pub config: MpSolanaConfig,
     pub hooks: Option<Hooks>,
 }
 
-impl Default for SolanaAccount {
+impl<T: IpfsTypes> Default for SolanaAccount<T> {
     fn default() -> Self {
         Self {
             endpoint: Cluster::Devnet,
@@ -52,7 +55,22 @@ impl Default for SolanaAccount {
     }
 }
 
-impl SolanaAccount {
+
+pub fn solana_persistent(endpoint: Cluster, tesseract: &Tesseract, config: MpSolanaConfig) -> anyhow::Result<SolanaAccount<Persistent>> { 
+    if config.ipfs_setting.path.is_none() {
+        anyhow::bail!("Path is required to be persistent data store")
+    }
+    SolanaAccount::new(endpoint, tesseract, config).map_err(anyhow::Error::from)
+}
+
+pub fn solana_temporary(endpoint: Cluster, tesseract: &Tesseract, config: MpSolanaConfig) -> anyhow::Result<SolanaAccount<Persistent>> { 
+    if config.ipfs_setting.path.is_some() {
+        anyhow::bail!("Path cannot be set")
+    }
+    SolanaAccount::new(endpoint, tesseract, config).map_err(anyhow::Error::from)
+}
+
+impl<T: IpfsTypes> SolanaAccount<T> {
     pub fn new(endpoint: Cluster, tesseract: &Tesseract, config: MpSolanaConfig) -> Result<Self, Error> {
         let tesseract = tesseract.clone();
         
@@ -111,13 +129,7 @@ impl SolanaAccount {
         let secret = libp2p::identity::ed25519::SecretKey::from_bytes(kp.secret().as_bytes().to_vec())?;
         let keypair = libp2p::identity::Keypair::Ed25519(secret.into());
 
-        let ipfs_path = config.ipfs_setting.path.clone().unwrap_or_else(|| {
-            let temp = warp::crypto::rand::thread_rng().gen_range(0, 1000);
-            std::env::temp_dir().join(&format!("ipfs-temp-{temp}"))
-        });
-    
         let opts = IpfsOptions {
-                ipfs_path: ipfs_path.clone(),
                 keypair,
                 bootstrap: config.ipfs_setting.bootstrap.clone(),
                 mdns: config.ipfs_setting.mdns.enable,
@@ -128,10 +140,13 @@ impl SolanaAccount {
                 relay: config.ipfs_setting.relay_client.enable,
                 relay_server: config.ipfs_setting.relay_server.enable,
                 relay_addr: config.ipfs_setting.relay_client.relay_address,
+                ..Default::default()
         };
 
-        if !opts.ipfs_path.exists() {
-            std::fs::create_dir(opts.ipfs_path.clone())?;
+        if let Some(path) = config.ipfs_setting.path.as_ref() {
+            if !path.exists() {
+                std::fs::create_dir(opts.ipfs_path.clone())?;
+            }
         }
     
         let (ipfs, fut) = async_block_in_place_uncheck(UninitializedIpfs::new(opts).start())?;
@@ -143,8 +158,6 @@ impl SolanaAccount {
             config.ipfs_setting.store_setting.discovery,
             config.ipfs_setting.store_setting.broadcast_with_connection,
             config.ipfs_setting.store_setting.broadcast_interval,
-            config.ipfs_setting.temporary,
-            ipfs_path,
             init
         ))?;
 
@@ -215,17 +228,17 @@ impl SolanaAccount {
         Ok(helper)
     }
     
-    pub fn friend_store(&self) -> anyhow::Result<&FriendsStore> {
+    pub fn friend_store(&self) -> anyhow::Result<&FriendsStore<T>> {
         self.friend_store.as_ref().ok_or(anyhow::anyhow!("Friends store is not initialized"))
     }
 
-    pub fn friend_store_mut(&mut self) -> anyhow::Result<&mut FriendsStore> {
+    pub fn friend_store_mut(&mut self) -> anyhow::Result<&mut FriendsStore<T>> {
         self.friend_store.as_mut().ok_or(anyhow::anyhow!("Friends store is not initialized"))
     }
 
 }
 
-impl Extension for SolanaAccount {
+impl<T: IpfsTypes> Extension for SolanaAccount<T> {
     fn id(&self) -> String {
         String::from("warp-mp-solana")
     }
@@ -239,7 +252,7 @@ impl Extension for SolanaAccount {
     }
 }
 
-impl SingleHandle for SolanaAccount {
+impl<T: IpfsTypes> SingleHandle for SolanaAccount<T> {
     fn handle(&self) -> Result<Box<dyn core::any::Any>, Error> {
         if let Some(store) = self.friend_store.as_ref() {
             return Ok(Box::new(store.ipfs()))
@@ -248,7 +261,7 @@ impl SingleHandle for SolanaAccount {
     }
 }
 
-impl MultiPass for SolanaAccount {
+impl<T: IpfsTypes> MultiPass for SolanaAccount<T> {
     fn create_identity(&mut self, username: Option<&str>, _: Option<&str>) -> Result<DID, Error> {
         if let Ok(keypair) = &self.get_private_key() {
             if UserHelper::new_with_cluster(self.endpoint.clone(), keypair)
@@ -468,7 +481,7 @@ impl MultiPass for SolanaAccount {
     }
 }
 
-impl Friends for SolanaAccount {
+impl<T: IpfsTypes> Friends for SolanaAccount<T> {
     fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         async_block_in_place_uncheck(self.friend_store_mut()?.send_request(&pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
@@ -638,11 +651,11 @@ pub mod ffi {
     use warp::sync::{Arc, Mutex};
     use warp::tesseract::Tesseract;
 
-    use crate::SolanaAccount;
+    use crate::{SolanaAccount, Persistent, Temporary};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_mp_solana_new_with_devnet(
+    pub unsafe extern "C" fn multipass_mp_solana_temporary_with_devnet(
         pocketdimension: *const PocketDimensionAdapter,
         tesseract: *const Tesseract,
         config: *const c_char
@@ -668,7 +681,52 @@ pub mod ffi {
         };
 
 
-        let mut account = match SolanaAccount::with_devnet(&tesseract, config) {
+        let mut account = match SolanaAccount::<Temporary>::with_devnet(&tesseract, config) {
+            Ok(account) => account,
+            Err(e) => return FFIResult::err(e)
+        };
+
+        match pocketdimension.is_null() {
+            true => {}
+            false => {
+                let pd = &*pocketdimension;
+                account.set_cache(pd.inner().clone());
+            }
+        }
+
+        let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
+        FFIResult::ok(mp)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_mp_solana_persistent_with_devnet(
+        pocketdimension: *const PocketDimensionAdapter,
+        tesseract: *const Tesseract,
+        config: *const c_char
+    ) -> FFIResult<MultiPassAdapter> {
+        let tesseract = match tesseract.is_null() {
+            false => {
+                let tesseract = &*tesseract;
+                tesseract.clone()
+            }
+            true => Tesseract::default(),
+        };
+
+
+        let config = match config.is_null() {
+            true => None,
+            false => {
+                let config = CStr::from_ptr(config).to_string_lossy().to_string();
+                match serde_json::from_str(&config) {
+                    Ok(c) => Some(c),
+                    Err(e) => return FFIResult::err(Error::from(e)),
+                }
+            }
+        };
+
+
+        let mut account = match SolanaAccount::<Persistent>::with_devnet(&tesseract, config) {
             Ok(account) => account,
             Err(e) => return FFIResult::err(e)
         };
@@ -711,7 +769,7 @@ pub mod ffi {
             }
         };
 
-        let mut account = match SolanaAccount::with_testnet(&tesseract, config) {
+        let mut account = match SolanaAccount::<Persistent>::with_testnet(&tesseract, config) {
             Ok(account) => account,
             Err(e) => return FFIResult::err(e)
         };
@@ -754,7 +812,7 @@ pub mod ffi {
             }
         };
 
-        let mut account = match SolanaAccount::with_mainnet(&tesseract, config) {
+        let mut account = match SolanaAccount::<Persistent>::with_mainnet(&tesseract, config) {
             Ok(account) => account,
             Err(e) => return FFIResult::err(e)
         };

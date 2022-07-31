@@ -16,7 +16,7 @@ use warp::raygun::group::GroupId;
 use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, SenderId};
 use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
-use warp_mp_solana::SolanaAccount;
+use warp_mp_solana::{SolanaAccount, Temporary};
 use warp_pd_stretto::StrettoClient;
 use warp_rg_libp2p::config::Config;
 
@@ -40,7 +40,7 @@ fn create_account(
     tesseract.set_file(env);
     tesseract.set_autosave();
 
-    let mut account = SolanaAccount::with_devnet(&tesseract, None)?;
+    let mut account = SolanaAccount::<Temporary>::with_devnet(&tesseract, None)?;
     account.set_cache(cache);
 
     if account.get_own_identity().is_ok() {
