@@ -63,13 +63,21 @@ impl<T: IpfsTypes> Drop for IpfsIdentity<T> {
     }
 }
 
-pub async fn ipfs_identity_persistent(config: MpIpfsConfig, tesseract: Tesseract, cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>) -> anyhow::Result<IpfsIdentity<Persistent>> { 
+pub async fn ipfs_identity_persistent(
+    config: MpIpfsConfig,
+    tesseract: Tesseract,
+    cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+) -> anyhow::Result<IpfsIdentity<Persistent>> {
     if config.path.is_none() {
         anyhow::bail!("Path is required for identity to be persistent")
     }
     IpfsIdentity::new(config, tesseract, cache).await
 }
-pub async fn ipfs_identity_temporary(config: Option<MpIpfsConfig>, tesseract: Tesseract, cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>) -> anyhow::Result<IpfsIdentity<Temporary>> { 
+pub async fn ipfs_identity_temporary(
+    config: Option<MpIpfsConfig>,
+    tesseract: Tesseract,
+    cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+) -> anyhow::Result<IpfsIdentity<Temporary>> {
     if let Some(config) = &config {
         if config.path.is_some() {
             anyhow::bail!("Path cannot be set")
@@ -104,22 +112,13 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             }
         };
 
-        
         let path = config.path.clone().unwrap_or_default();
-
-
-        // let path = config.path.unwrap_or_else(|| {
-        //     let temp = warp::crypto::rand::thread_rng().gen_range(0, 1000);
-        //     std::env::temp_dir().join(&format!("ipfs-temp-{temp}"))
-        // });
 
         let mut opts = IpfsOptions {
             keypair,
             bootstrap: config.bootstrap,
             mdns: config.ipfs_setting.mdns.enable,
-            kad_protocol: None,
             listening_addrs: config.listen_on,
-            span: None,
             dcutr: config.ipfs_setting.dcutr.enable,
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
@@ -127,11 +126,15 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             ..Default::default()
         };
 
-        // Create directory if it doesnt exist
-        if let Some(path) = config.path {
-            opts.ipfs_path = path;
+        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
+            // Create directory if it doesnt exist
+            let path = config
+                .path
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("\"path\" must be set"))?;
+            opts.ipfs_path = path.clone();
             if !opts.ipfs_path.exists() {
-                tokio::fs::create_dir(opts.ipfs_path.clone()).await?;
+                tokio::fs::create_dir(path).await?;
             }
         }
 
@@ -150,7 +153,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         let friend_store = FriendsStore::new(
             ipfs.clone(),
             tesseract.clone(),
-            config.store_setting.discovery, 
+            config.store_setting.discovery,
             config.store_setting.broadcast_with_connection,
             config.store_setting.broadcast_interval,
         )

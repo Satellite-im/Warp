@@ -1,14 +1,14 @@
+pub mod config;
 pub mod solana;
 pub mod store;
-pub mod config;
 
 use anyhow::anyhow;
 use config::MpSolanaConfig;
-use ipfs::{IpfsOptions, UninitializedIpfs, IpfsTypes, TestTypes, Types};
+use ipfs::{IpfsOptions, IpfsTypes, TestTypes, Types, UninitializedIpfs};
 use sata::Sata;
 use warp::crypto::did_key::Generate;
-use warp::crypto::{Ed25519KeyPair, DIDKey, KeyMaterial};
 use warp::crypto::{rand::Rng, DID};
+use warp::crypto::{DIDKey, Ed25519KeyPair, KeyMaterial};
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::hooks::Hooks;
@@ -19,17 +19,16 @@ use warp::pocket_dimension::query::QueryBuilder;
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, Mutex, MutexGuard};
 use warp::tesseract::Tesseract;
-use warp::{Extension, SingleHandle, async_block_in_place_uncheck, async_spawn};
+use warp::{async_block_in_place_uncheck, async_spawn, Extension, SingleHandle};
 
 use crate::store::friends::FriendsStore;
 
+use crate::solana::anchor_client::Cluster;
 use crate::solana::helper::user::UserHelper;
 use crate::solana::manager::SolanaManager;
 use crate::solana::wallet::{PhraseType, SolanaWallet};
-use crate::solana::{anchor_client::Cluster};
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_client::solana_sdk::signature::Keypair;
-
 
 pub type Temporary = TestTypes;
 pub type Persistent = Types;
@@ -55,25 +54,14 @@ impl<T: IpfsTypes> Default for SolanaAccount<T> {
     }
 }
 
-
-pub fn solana_persistent(endpoint: Cluster, tesseract: &Tesseract, config: MpSolanaConfig) -> anyhow::Result<SolanaAccount<Persistent>> { 
-    if config.ipfs_setting.path.is_none() {
-        anyhow::bail!("Path is required to be persistent data store")
-    }
-    SolanaAccount::new(endpoint, tesseract, config).map_err(anyhow::Error::from)
-}
-
-pub fn solana_temporary(endpoint: Cluster, tesseract: &Tesseract, config: MpSolanaConfig) -> anyhow::Result<SolanaAccount<Persistent>> { 
-    if config.ipfs_setting.path.is_some() {
-        anyhow::bail!("Path cannot be set")
-    }
-    SolanaAccount::new(endpoint, tesseract, config).map_err(anyhow::Error::from)
-}
-
 impl<T: IpfsTypes> SolanaAccount<T> {
-    pub fn new(endpoint: Cluster, tesseract: &Tesseract, config: MpSolanaConfig) -> Result<Self, Error> {
+    pub fn new(
+        endpoint: Cluster,
+        tesseract: &Tesseract,
+        config: MpSolanaConfig,
+    ) -> Result<Self, Error> {
         let tesseract = tesseract.clone();
-        
+
         let mut account = Self {
             tesseract,
             endpoint,
@@ -81,33 +69,54 @@ impl<T: IpfsTypes> SolanaAccount<T> {
             ..Default::default()
         };
 
-        if let Err(_) = account.try_init_friend_store(false) {}
+        if let Err(_e) = account.try_init_friend_store(false) {}
 
         Ok(account)
     }
 
-    pub fn with_devnet(tesseract: &Tesseract, config: Option<MpSolanaConfig>) -> Result<Self, Error> {
+    pub fn with_devnet(
+        tesseract: &Tesseract,
+        config: Option<MpSolanaConfig>,
+    ) -> Result<Self, Error> {
         let config = config.unwrap_or(MpSolanaConfig::development());
         Self::new(Cluster::Devnet, tesseract, config)
     }
 
-    pub fn with_mainnet(tesseract: &Tesseract, config: Option<MpSolanaConfig>) -> Result<Self, Error> {
+    pub fn with_mainnet(
+        tesseract: &Tesseract,
+        config: Option<MpSolanaConfig>,
+    ) -> Result<Self, Error> {
         let config = config.unwrap_or(MpSolanaConfig::production());
         Self::new(Cluster::Mainnet, tesseract, config)
     }
 
-    pub fn with_testnet(tesseract: &Tesseract, config: Option<MpSolanaConfig>) -> Result<Self, Error> {
+    pub fn with_testnet(
+        tesseract: &Tesseract,
+        config: Option<MpSolanaConfig>,
+    ) -> Result<Self, Error> {
         let config = config.unwrap_or(MpSolanaConfig::development());
         Self::new(Cluster::Testnet, tesseract, config)
     }
 
-    pub fn with_localnet(tesseract: &Tesseract, config: Option<MpSolanaConfig>) -> Result<Self, Error> {
+    pub fn with_localnet(
+        tesseract: &Tesseract,
+        config: Option<MpSolanaConfig>,
+    ) -> Result<Self, Error> {
         let config = config.unwrap_or(MpSolanaConfig::development());
         Self::new(Cluster::Localnet, tesseract, config)
     }
 
-    pub fn with_custom(url: &str, ws: &str, tesseract: &Tesseract, config: MpSolanaConfig) -> Result<Self, Error> {
-        Self::new(Cluster::Custom(url.to_string(), ws.to_string()), tesseract, config)
+    pub fn with_custom(
+        url: &str,
+        ws: &str,
+        tesseract: &Tesseract,
+        config: MpSolanaConfig,
+    ) -> Result<Self, Error> {
+        Self::new(
+            Cluster::Custom(url.to_string(), ws.to_string()),
+            tesseract,
+            config,
+        )
     }
 
     pub fn set_cache(&mut self, cache: Arc<Mutex<Box<dyn PocketDimension>>>) {
@@ -119,36 +128,40 @@ impl<T: IpfsTypes> SolanaAccount<T> {
     }
 
     pub fn try_init_friend_store(&mut self, init: bool) -> anyhow::Result<()> {
-
         if self.friend_store().is_ok() {
             anyhow::bail!("Friend store already initialized")
         }
 
         let config = self.config.clone();
         let kp = self.get_private_key()?;
-        let secret = libp2p::identity::ed25519::SecretKey::from_bytes(kp.secret().as_bytes().to_vec())?;
+        let secret =
+            libp2p::identity::ed25519::SecretKey::from_bytes(kp.secret().as_bytes().to_vec())?;
         let keypair = libp2p::identity::Keypair::Ed25519(secret.into());
 
-        let opts = IpfsOptions {
-                keypair,
-                bootstrap: config.ipfs_setting.bootstrap.clone(),
-                mdns: config.ipfs_setting.mdns.enable,
-                kad_protocol: None,
-                listening_addrs: config.ipfs_setting.listen_on,
-                span: None,
-                dcutr: config.ipfs_setting.dcutr.enable,
-                relay: config.ipfs_setting.relay_client.enable,
-                relay_server: config.ipfs_setting.relay_server.enable,
-                relay_addr: config.ipfs_setting.relay_client.relay_address,
-                ..Default::default()
+        let mut opts = IpfsOptions {
+            keypair,
+            bootstrap: config.ipfs_setting.bootstrap.clone(),
+            mdns: config.ipfs_setting.mdns.enable,
+            listening_addrs: config.ipfs_setting.listen_on,
+            dcutr: config.ipfs_setting.dcutr.enable,
+            relay: config.ipfs_setting.relay_client.enable,
+            relay_server: config.ipfs_setting.relay_server.enable,
+            relay_addr: config.ipfs_setting.relay_client.relay_address,
+            ..Default::default()
         };
 
-        if let Some(path) = config.ipfs_setting.path.as_ref() {
+        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
+            let path = config
+                .ipfs_setting
+                .path
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("\"path\" must be set"))?;
+            opts.ipfs_path = path.clone();
             if !path.exists() {
-                std::fs::create_dir(opts.ipfs_path.clone())?;
+                std::fs::create_dir(path)?;
             }
         }
-    
+
         let (ipfs, fut) = async_block_in_place_uncheck(UninitializedIpfs::new(opts).start())?;
         async_spawn(fut);
 
@@ -158,7 +171,7 @@ impl<T: IpfsTypes> SolanaAccount<T> {
             config.ipfs_setting.store_setting.discovery,
             config.ipfs_setting.store_setting.broadcast_with_connection,
             config.ipfs_setting.store_setting.broadcast_interval,
-            init
+            init,
         ))?;
 
         self.friend_store = Some(friend_store);
@@ -227,15 +240,18 @@ impl<T: IpfsTypes> SolanaAccount<T> {
         let helper = UserHelper::new_with_cluster(self.endpoint.clone(), &kp);
         Ok(helper)
     }
-    
+
     pub fn friend_store(&self) -> anyhow::Result<&FriendsStore<T>> {
-        self.friend_store.as_ref().ok_or(anyhow::anyhow!("Friends store is not initialized"))
+        self.friend_store
+            .as_ref()
+            .ok_or(anyhow::anyhow!("Friends store is not initialized"))
     }
 
     pub fn friend_store_mut(&mut self) -> anyhow::Result<&mut FriendsStore<T>> {
-        self.friend_store.as_mut().ok_or(anyhow::anyhow!("Friends store is not initialized"))
+        self.friend_store
+            .as_mut()
+            .ok_or(anyhow::anyhow!("Friends store is not initialized"))
     }
-
 }
 
 impl<T: IpfsTypes> Extension for SolanaAccount<T> {
@@ -255,7 +271,7 @@ impl<T: IpfsTypes> Extension for SolanaAccount<T> {
 impl<T: IpfsTypes> SingleHandle for SolanaAccount<T> {
     fn handle(&self) -> Result<Box<dyn core::any::Any>, Error> {
         if let Some(store) = self.friend_store.as_ref() {
-            return Ok(Box::new(store.ipfs()))
+            return Ok(Box::new(store.ipfs()));
         }
         Err(Error::Unimplemented)
     }
@@ -313,7 +329,11 @@ impl<T: IpfsTypes> MultiPass for SolanaAccount<T> {
         let identity = user_to_identity(&helper, None)?;
 
         if let Ok(mut cache) = self.get_cache() {
-            let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, identity.clone())?;
+            let object = Sata::default().encode(
+                warp::sata::libipld::IpldCodec::DagJson,
+                warp::sata::Kind::Reference,
+                identity.clone(),
+            )?;
             cache.add_data(DataType::from(Module::Accounts), &object)?;
         }
         if let Ok(hooks) = self.get_hooks() {
@@ -393,7 +413,11 @@ impl<T: IpfsTypes> MultiPass for SolanaAccount<T> {
                 .has_data(DataType::from(Module::Accounts), &query)
                 .is_err()
             {
-                let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, ident.clone())?;
+                let object = Sata::default().encode(
+                    warp::sata::libipld::IpldCodec::DagJson,
+                    warp::sata::Kind::Reference,
+                    ident.clone(),
+                )?;
                 cache.add_data(DataType::from(Module::Accounts), &object)?;
             }
         }
@@ -450,15 +474,20 @@ impl<T: IpfsTypes> MultiPass for SolanaAccount<T> {
                 if !list.is_empty() {
                     let mut object = Sata::default();
                     object.set_version(list.len() as _);
-                    let obj = object.encode(warp::sata::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, identity.clone())?;
+                    let obj = object.encode(
+                        warp::sata::libipld::IpldCodec::DagJson,
+                        warp::sata::Kind::Reference,
+                        identity.clone(),
+                    )?;
                     cache.add_data(DataType::from(Module::Accounts), &obj)?;
                 }
             } else {
-                let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, identity.clone())?;
-                cache.add_data(
-                    DataType::from(Module::Accounts),
-                    &object,
+                let object = Sata::default().encode(
+                    warp::sata::libipld::IpldCodec::DagJson,
+                    warp::sata::Kind::Reference,
+                    identity.clone(),
                 )?;
+                cache.add_data(DataType::from(Module::Accounts), &object)?;
             }
         }
 
@@ -522,7 +551,7 @@ impl<T: IpfsTypes> Friends for SolanaAccount<T> {
             if !self
                 .list_all_request()?
                 .iter()
-                .any(|request| request.from().eq(pubkey) )
+                .any(|request| request.from().eq(pubkey))
             {
                 let object = DataObject::new(DataType::Accounts, ())?;
                 hooks.trigger("accounts::deny_friend_request", &object);
@@ -589,7 +618,6 @@ impl<T: IpfsTypes> Friends for SolanaAccount<T> {
     }
 }
 
-
 fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Result<Identity> {
     let (user, pubkey) = match pubkey {
         Some(pubkey) => {
@@ -651,14 +679,14 @@ pub mod ffi {
     use warp::sync::{Arc, Mutex};
     use warp::tesseract::Tesseract;
 
-    use crate::{SolanaAccount, Persistent, Temporary};
+    use crate::{Persistent, SolanaAccount, Temporary};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_mp_solana_temporary_with_devnet(
         pocketdimension: *const PocketDimensionAdapter,
         tesseract: *const Tesseract,
-        config: *const c_char
+        config: *const c_char,
     ) -> FFIResult<MultiPassAdapter> {
         let tesseract = match tesseract.is_null() {
             false => {
@@ -667,7 +695,6 @@ pub mod ffi {
             }
             true => Tesseract::default(),
         };
-
 
         let config = match config.is_null() {
             true => None,
@@ -680,10 +707,9 @@ pub mod ffi {
             }
         };
 
-
         let mut account = match SolanaAccount::<Temporary>::with_devnet(&tesseract, config) {
             Ok(account) => account,
-            Err(e) => return FFIResult::err(e)
+            Err(e) => return FFIResult::err(e),
         };
 
         match pocketdimension.is_null() {
@@ -703,7 +729,7 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_mp_solana_persistent_with_devnet(
         pocketdimension: *const PocketDimensionAdapter,
         tesseract: *const Tesseract,
-        config: *const c_char
+        config: *const c_char,
     ) -> FFIResult<MultiPassAdapter> {
         let tesseract = match tesseract.is_null() {
             false => {
@@ -712,7 +738,6 @@ pub mod ffi {
             }
             true => Tesseract::default(),
         };
-
 
         let config = match config.is_null() {
             true => None,
@@ -725,10 +750,9 @@ pub mod ffi {
             }
         };
 
-
         let mut account = match SolanaAccount::<Persistent>::with_devnet(&tesseract, config) {
             Ok(account) => account,
-            Err(e) => return FFIResult::err(e)
+            Err(e) => return FFIResult::err(e),
         };
 
         match pocketdimension.is_null() {
@@ -748,7 +772,7 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_mp_solana_new_with_testnet(
         pocketdimension: *const PocketDimensionAdapter,
         tesseract: *const Tesseract,
-        config: *const c_char
+        config: *const c_char,
     ) -> FFIResult<MultiPassAdapter> {
         let tesseract = match tesseract.is_null() {
             false => {
@@ -771,7 +795,7 @@ pub mod ffi {
 
         let mut account = match SolanaAccount::<Persistent>::with_testnet(&tesseract, config) {
             Ok(account) => account,
-            Err(e) => return FFIResult::err(e)
+            Err(e) => return FFIResult::err(e),
         };
 
         match pocketdimension.is_null() {
@@ -791,7 +815,7 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_mp_solana_new_with_mainnet(
         pocketdimension: *const PocketDimensionAdapter,
         tesseract: *const Tesseract,
-        config: *const c_char
+        config: *const c_char,
     ) -> FFIResult<MultiPassAdapter> {
         let tesseract = match tesseract.is_null() {
             false => {
@@ -814,7 +838,7 @@ pub mod ffi {
 
         let mut account = match SolanaAccount::<Persistent>::with_mainnet(&tesseract, config) {
             Ok(account) => account,
-            Err(e) => return FFIResult::err(e)
+            Err(e) => return FFIResult::err(e),
         };
 
         match pocketdimension.is_null() {
