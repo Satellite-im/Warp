@@ -5,9 +5,9 @@ mod store;
 
 use futures::pin_mut;
 use futures::StreamExt;
+use ipfs::IpfsTypes;
 use ipfs::{Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, TestTypes, Types, UninitializedIpfs};
 use libp2p::identity;
-use warp::crypto::KeyMaterial;
 use std::any::Any;
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -16,6 +16,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use uuid::Uuid;
 use warp::crypto::rand::Rng;
+use warp::crypto::KeyMaterial;
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::module::Module;
@@ -37,11 +38,14 @@ use crate::events::MessagingEvents;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub struct IpfsMessaging {
+pub type Temporary = TestTypes;
+pub type Persistent = Types;
+
+pub struct IpfsMessaging<T: IpfsTypes> {
     pub account: Arc<Mutex<Box<dyn MultiPass>>>,
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     pub conversations: Arc<Mutex<Vec<Message>>>,
-    pub ipfs: Ipfs<Types>,
+    pub ipfs: Ipfs<T>,
     //TODO: DirectMessageStore
     //      * Subscribes to topic and store messages sent or received from peers
     //      * Lookup up conversation
@@ -53,22 +57,22 @@ pub struct IpfsMessaging {
     //      * TBD
 }
 
-impl IpfsMessaging {
-    pub async fn temporary(
-        account: Arc<Mutex<Box<dyn MultiPass>>>,
-        cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-    ) -> anyhow::Result<IpfsMessaging> {
-        IpfsMessaging::new(None, account, cache).await
-    }
+impl<T: IpfsTypes> IpfsMessaging<T> {
+    // pub async fn temporary(
+    //     account: Arc<Mutex<Box<dyn MultiPass>>>,
+    //     cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    // ) -> anyhow::Result<IpfsMessaging<T>> {
+    //     IpfsMessaging::new(None, account, cache).await
+    // }
 
-    pub async fn persistent<P: AsRef<std::path::Path>>(
-        path: P,
-        account: Arc<Mutex<Box<dyn MultiPass>>>,
-        cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-    ) -> anyhow::Result<IpfsMessaging> {
-        let path = path.as_ref();
-        IpfsMessaging::new(Some(path.to_path_buf()), account, cache).await
-    }
+    // pub async fn persistent<P: AsRef<std::path::Path>>(
+    //     path: P,
+    //     account: Arc<Mutex<Box<dyn MultiPass>>>,
+    //     cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    // ) -> anyhow::Result<IpfsMessaging<T>> {
+    //     let path = path.as_ref();
+    //     IpfsMessaging::new(Some(path.to_path_buf()), account, cache).await
+    // }
 
     pub async fn new(
         path: Option<PathBuf>,
@@ -76,12 +80,7 @@ impl IpfsMessaging {
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
         let ipfs_handle = match account.lock().handle() {
-            Ok(handle) if handle.is::<Ipfs<Types>>() => {
-                match handle.downcast_ref::<Ipfs<Types>>() {
-                    Some(ipfs) => Some(ipfs.clone()),
-                    None => None,
-                }
-            }
+            Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
             _ => None,
         };
 
@@ -148,7 +147,7 @@ impl IpfsMessaging {
     }
 }
 
-impl Extension for IpfsMessaging {
+impl<T: IpfsTypes> Extension for IpfsMessaging<T> {
     fn id(&self) -> String {
         "warp-rg-ipfs".to_string()
     }
@@ -163,14 +162,14 @@ impl Extension for IpfsMessaging {
 
 // pub fn message_task(conversation: Arc<Mutex<Vec<Message>>>) {}
 
-impl SingleHandle for IpfsMessaging {
+impl<T: IpfsTypes> SingleHandle for IpfsMessaging<T> {
     fn handle(&self) -> std::result::Result<Box<dyn core::any::Any>, warp::error::Error> {
         Ok(Box::new(self.ipfs.clone()))
     }
 }
 
 #[async_trait::async_trait]
-impl RayGun for IpfsMessaging {
+impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
     async fn get_messages(
         &self,
         _conversation_id: Uuid,
@@ -301,7 +300,7 @@ impl RayGun for IpfsMessaging {
     }
 }
 
-impl GroupChat for IpfsMessaging {
+impl<T: IpfsTypes> GroupChat for IpfsMessaging<T> {
     fn join_group(&mut self, id: GroupId) -> Result<()> {
         let _group_id = id.get_id().ok_or(warp::error::Error::InvalidGroupId)?;
 
@@ -317,7 +316,7 @@ impl GroupChat for IpfsMessaging {
     }
 }
 
-impl GroupChatManagement for IpfsMessaging {
+impl<T: IpfsTypes> GroupChatManagement for IpfsMessaging<T> {
     fn create_group(&mut self, _name: &str) -> Result<Group> {
         Err(Error::Unimplemented)
     }
@@ -351,7 +350,7 @@ impl GroupChatManagement for IpfsMessaging {
     }
 }
 
-impl GroupInvite for IpfsMessaging {
+impl<T: IpfsTypes> GroupInvite for IpfsMessaging<T> {
     fn send_invite(&mut self, _id: GroupId, _recipient: GroupMember) -> Result<()> {
         Err(Error::Unimplemented)
     }
