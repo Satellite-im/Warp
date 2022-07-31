@@ -5,7 +5,7 @@ use warp::multipass::identity::{Identifier, Identity};
 use warp::multipass::MultiPass;
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::config::{MpIpfsConfig, IpfsSetting, StoreSetting};
-use warp_mp_ipfs::IpfsIdentity;
+use warp_mp_ipfs::{ipfs_identity_temporary};
 
 async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
     let mut tesseract = Tesseract::default();
@@ -26,7 +26,7 @@ async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
         },
         ..Default::default()
     };
-    let mut account = IpfsIdentity::temporary(Some(config), tesseract, None).await?;
+    let mut account = ipfs_identity_temporary(Some(config), tesseract, None).await?;
     account.create_identity(username, None)?;
     Ok(Box::new(account))
 }

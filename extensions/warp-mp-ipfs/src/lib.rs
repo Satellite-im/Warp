@@ -14,13 +14,13 @@ use libipld::serde::to_ipld;
 use libipld::{ipld, Cid, Ipld};
 use sata::Sata;
 use serde::de::DeserializeOwned;
-use warp::crypto::did_key::Generate;
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
+use warp::crypto::did_key::Generate;
 use warp::data::{DataObject, DataType};
 use warp::hooks::Hooks;
 use warp::pocket_dimension::query::QueryBuilder;
@@ -32,71 +32,58 @@ use warp::tesseract::Tesseract;
 use warp::{async_block_in_place_uncheck, Extension, SingleHandle};
 
 use ipfs::{
-    Block, Ipfs, IpfsOptions, IpfsPath, Keypair, PeerId, Protocol, Types, UninitializedIpfs,
+    Block, Ipfs, IpfsOptions, IpfsPath, IpfsTypes, Keypair, PeerId, Protocol, TestTypes, Types,
+    UninitializedIpfs,
 };
 use tokio::sync::mpsc::Sender;
 use warp::crypto::rand::Rng;
-use warp::crypto::{DID, DIDKey, Ed25519KeyPair};
+use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
 use warp::error::Error;
 use warp::multipass::generator::generate_name;
 use warp::multipass::identity::{FriendRequest, Identifier, Identity, IdentityUpdate};
 use warp::multipass::{identity, Friends, MultiPass};
 
+pub type Temporary = TestTypes;
+pub type Persistent = Types;
+
 #[derive(Clone)]
-pub struct IpfsIdentity {
-    path: PathBuf,
+pub struct IpfsIdentity<T: IpfsTypes> {
     cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     hooks: Option<Hooks>,
     tesseract: Tesseract,
-    ipfs: Ipfs<Types>,
-    temp: bool,
-    friend_store: FriendsStore,
-    identity_store: IdentityStore,
+    ipfs: Ipfs<T>,
+    friend_store: FriendsStore<T>,
+    identity_store: IdentityStore<T>,
 }
 
-impl Drop for IpfsIdentity {
+impl<T: IpfsTypes> Drop for IpfsIdentity<T> {
     fn drop(&mut self) {
         // We want to gracefully close the ipfs repo to allow for any cleanup
         async_block_in_place_uncheck(self.ipfs.clone().exit_daemon());
-
-        // If IpfsIdentity::temporary was used, `temp` would be true and it would
-        // let is to delete the repo
-        if self.temp {
-            if let Err(_e) = std::fs::remove_dir_all(&self.path) {}
-        }
     }
 }
 
-impl IpfsIdentity {
-    pub async fn temporary(
-        config: Option<MpIpfsConfig>,
-        tesseract: Tesseract,
-        cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-    ) -> anyhow::Result<IpfsIdentity> {
-        if let Some(config) = &config {
-            if config.path.is_some() {
-                anyhow::bail!("Path cannot be set")
-            }
-        }
-        IpfsIdentity::new(config.unwrap_or_default(), tesseract, cache).await
+pub async fn ipfs_identity_persistent(config: MpIpfsConfig, tesseract: Tesseract, cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>) -> anyhow::Result<IpfsIdentity<Persistent>> { 
+    if config.path.is_none() {
+        anyhow::bail!("Path is required for identity to be persistent")
     }
-
-    pub async fn persistent(
-        config: MpIpfsConfig,
-        tesseract: Tesseract,
-        cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-    ) -> anyhow::Result<IpfsIdentity> {
-        if config.path.is_none() {
-            anyhow::bail!("Path is required for identity to be persistent")
+    IpfsIdentity::new(config, tesseract, cache).await
+}
+pub async fn ipfs_identity_temporary(config: Option<MpIpfsConfig>, tesseract: Tesseract, cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>) -> anyhow::Result<IpfsIdentity<Temporary>> { 
+    if let Some(config) = &config {
+        if config.path.is_some() {
+            anyhow::bail!("Path cannot be set")
         }
-        IpfsIdentity::new(config, tesseract, cache).await
     }
+    IpfsIdentity::new(config.unwrap_or_default(), tesseract, cache).await
+}
 
+impl<T: IpfsTypes> IpfsIdentity<T> {
     pub async fn new(
         config: MpIpfsConfig,
         tesseract: Tesseract,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-    ) -> anyhow::Result<IpfsIdentity> {
+    ) -> anyhow::Result<IpfsIdentity<T>> {
         let keypair = match tesseract.retrieve("keypair") {
             Ok(keypair) => {
                 let kp = bs58::decode(keypair).into_vec()?;
@@ -117,14 +104,16 @@ impl IpfsIdentity {
             }
         };
 
-        let temp = config.path.is_none();
-        let path = config.path.unwrap_or_else(|| {
-            let temp = warp::crypto::rand::thread_rng().gen_range(0, 1000);
-            std::env::temp_dir().join(&format!("ipfs-temp-{temp}"))
-        });
+        
+        let path = config.path.clone().unwrap_or_default();
 
-        let opts = IpfsOptions {
-            ipfs_path: path.clone(),
+
+        // let path = config.path.unwrap_or_else(|| {
+        //     let temp = warp::crypto::rand::thread_rng().gen_range(0, 1000);
+        //     std::env::temp_dir().join(&format!("ipfs-temp-{temp}"))
+        // });
+
+        let mut opts = IpfsOptions {
             keypair,
             bootstrap: config.bootstrap,
             mdns: config.ipfs_setting.mdns.enable,
@@ -135,11 +124,15 @@ impl IpfsIdentity {
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
             relay_addr: config.ipfs_setting.relay_client.relay_address,
+            ..Default::default()
         };
 
         // Create directory if it doesnt exist
-        if !opts.ipfs_path.exists() {
-            tokio::fs::create_dir(opts.ipfs_path.clone()).await?;
+        if let Some(path) = config.path {
+            opts.ipfs_path = path;
+            if !opts.ipfs_path.exists() {
+                tokio::fs::create_dir(opts.ipfs_path.clone()).await?;
+            }
         }
 
         let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
@@ -157,7 +150,7 @@ impl IpfsIdentity {
         let friend_store = FriendsStore::new(
             ipfs.clone(),
             tesseract.clone(),
-            config.store_setting.discovery,
+            config.store_setting.discovery, 
             config.store_setting.broadcast_with_connection,
             config.store_setting.broadcast_interval,
         )
@@ -166,12 +159,10 @@ impl IpfsIdentity {
         let hooks = None;
 
         let identity = IpfsIdentity {
-            path,
             tesseract,
             cache,
             hooks,
             ipfs,
-            temp,
             friend_store,
             identity_store,
         };
@@ -195,7 +186,7 @@ impl IpfsIdentity {
     }
 }
 
-impl Extension for IpfsIdentity {
+impl<T: IpfsTypes> Extension for IpfsIdentity<T> {
     fn id(&self) -> String {
         "warp-mp-ipfs".to_string()
     }
@@ -208,13 +199,13 @@ impl Extension for IpfsIdentity {
     }
 }
 
-impl SingleHandle for IpfsIdentity {
+impl<T: IpfsTypes> SingleHandle for IpfsIdentity<T> {
     fn handle(&self) -> Result<Box<dyn Any>, Error> {
         Ok(Box::new(self.ipfs.clone()))
     }
 }
 
-impl MultiPass for IpfsIdentity {
+impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
     fn create_identity(
         &mut self,
         username: Option<&str>,
@@ -223,7 +214,11 @@ impl MultiPass for IpfsIdentity {
         let identity = async_block_in_place_uncheck(self.identity_store.create_identity(username))?;
 
         if let Ok(mut cache) = self.get_cache() {
-            let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, identity.clone())?;
+            let object = Sata::default().encode(
+                warp::sata::libipld::IpldCodec::DagCbor,
+                warp::sata::Kind::Reference,
+                identity.clone(),
+            )?;
             cache.add_data(DataType::from(Module::Accounts), &object)?;
         }
         if let Ok(hooks) = self.get_hooks() {
@@ -322,15 +317,20 @@ impl MultiPass for IpfsIdentity {
                         // let mut obj = list.last().unwrap().clone();
                         let mut object = Sata::default();
                         object.set_version(list.len() as _);
-                        let obj = object.encode(warp::sata::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, identity.clone())?;
+                        let obj = object.encode(
+                            warp::sata::libipld::IpldCodec::DagJson,
+                            warp::sata::Kind::Reference,
+                            identity.clone(),
+                        )?;
                         cache.add_data(DataType::from(Module::Accounts), &obj)?;
                     }
                 } else {
-                    let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, identity.clone())?;
-                    cache.add_data(
-                        DataType::from(Module::Accounts),
-                        &object,
+                    let object = Sata::default().encode(
+                        warp::sata::libipld::IpldCodec::DagJson,
+                        warp::sata::Kind::Reference,
+                        identity.clone(),
                     )?;
+                    cache.add_data(DataType::from(Module::Accounts), &object)?;
                 }
             }
 
@@ -356,14 +356,14 @@ impl MultiPass for IpfsIdentity {
     }
 }
 
-impl Friends for IpfsIdentity {
+impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         async_block_in_place_uncheck(self.friend_store.send_request(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if let Some(request) = self
                 .list_outgoing_request()?
                 .iter()
-                .filter(|request| request.to().eq(pubkey) )
+                .filter(|request| request.to().eq(pubkey))
                 .collect::<Vec<_>>()
                 .first()
             {
@@ -397,7 +397,7 @@ impl Friends for IpfsIdentity {
             if !self
                 .list_all_request()?
                 .iter()
-                .any(|request| request.from().eq(pubkey) )
+                .any(|request| request.from().eq(pubkey))
             {
                 let object = DataObject::new(DataType::Accounts, ())?;
                 hooks.trigger("accounts::deny_friend_request", &object);
@@ -466,7 +466,7 @@ impl Friends for IpfsIdentity {
 
 pub mod ffi {
     use crate::config::MpIpfsConfig;
-    use crate::IpfsIdentity;
+    use crate::{IpfsIdentity, Persistent, Temporary};
     use std::ffi::CStr;
     use std::os::raw::c_char;
     use warp::error::Error;
@@ -493,11 +493,11 @@ pub mod ffi {
         };
 
         let config = match config.is_null() {
-            true => None,
+            true => MpIpfsConfig::default(),
             false => {
                 let config = CStr::from_ptr(config).to_string_lossy().to_string();
                 match serde_json::from_str(&config) {
-                    Ok(c) => Some(c),
+                    Ok(c) => c,
                     Err(e) => return FFIResult::err(Error::from(e)),
                 }
             }
@@ -508,7 +508,7 @@ pub mod ffi {
             false => Some(&*pocketdimension),
         };
 
-        let account = match async_on_block(IpfsIdentity::temporary(
+        let account = match async_on_block(IpfsIdentity::<Temporary>::new(
             config,
             tesseract,
             cache.map(|c| c.inner()),
@@ -555,7 +555,7 @@ pub mod ffi {
             false => Some(&*pocketdimension),
         };
 
-        let account = match async_on_block(IpfsIdentity::persistent(
+        let account = match async_on_block(IpfsIdentity::<Persistent>::new(
             config,
             tesseract,
             cache.map(|c| c.inner()),

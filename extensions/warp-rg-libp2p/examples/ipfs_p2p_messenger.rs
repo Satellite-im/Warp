@@ -17,7 +17,7 @@ use warp::raygun::group::GroupId;
 use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, SenderId};
 use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::IpfsIdentity;
+use warp_mp_ipfs::{ipfs_identity_temporary};
 use warp_pd_stretto::StrettoClient;
 use warp_rg_libp2p::config::Config;
 
@@ -38,7 +38,7 @@ async fn create_account(
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
     let config = warp_mp_ipfs::config::MpIpfsConfig {ipfs_setting: IpfsSetting { mdns: warp_mp_ipfs::config::Mdns { enable: true }, ..Default::default() }, ..Default::default() };
-    let mut account = IpfsIdentity::temporary(Some(config), tesseract, Some(cache)).await?;
+    let mut account = ipfs_identity_temporary(Some(config), tesseract, Some(cache)).await?;
 
     account.create_identity(None, None)?;
     Ok(Arc::new(Mutex::new(Box::new(account))))

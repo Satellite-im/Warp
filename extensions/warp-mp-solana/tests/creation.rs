@@ -8,7 +8,7 @@ mod tests {
     use warp::sync::{Arc, Mutex};
     use warp::tesseract::Tesseract;
     use warp_mp_solana::solana::wallet::{PhraseType, SolanaWallet};
-    use warp_mp_solana::SolanaAccount;
+    use warp_mp_solana::{SolanaAccount, Temporary};
 
     #[allow(unused)]
     fn pregenerated_wallet() -> anyhow::Result<SolanaWallet> {
@@ -45,7 +45,7 @@ mod tests {
     #[ignore]
     fn use_mp_with_pregenerated_wallet() -> anyhow::Result<()> {
         let tesseract = tesseract_with_random_key()?;
-        let mut account = SolanaAccount::with_devnet(&tesseract, None)?;
+        let mut account = SolanaAccount::<Temporary>::with_devnet(&tesseract, None)?;
 
         account.insert_solana_wallet(pregenerated_wallet()?)?;
 

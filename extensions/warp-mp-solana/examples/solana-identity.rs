@@ -4,7 +4,7 @@ use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
 use warp_mp_solana::solana::wallet::SolanaWallet;
-use warp_mp_solana::SolanaAccount;
+use warp_mp_solana::{SolanaAccount, Temporary};
 use warp_pd_flatfile::FlatfileStorage;
 
 fn update_name(account: &mut impl MultiPass, name: &str) -> anyhow::Result<()> {
@@ -55,7 +55,7 @@ fn main() -> anyhow::Result<()> {
 
     let pd = cache_setup()?;
 
-    let mut account = SolanaAccount::with_devnet(&tesseract, None)?;
+    let mut account = SolanaAccount::<Temporary>::with_devnet(&tesseract, None)?;
     account.set_cache(pd);
     // Uncomment this if you want to interact with an precreated account and comment out `account.create_identity`
     // account.insert_solana_wallet(generated_wallet()?)?;
