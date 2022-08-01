@@ -50,7 +50,7 @@ pub enum Error {
     //MultiPass Errors
     #[error("MultiPass extension is unavailable")]
     MultiPassExtensionUnavailable,
-    #[error("Username has to be atleast 3 characters long")]
+    #[error("Username has to be at least 3 characters long")]
     UsernameTooShort,
     #[error("Username cannot be more than 32 characters long")]
     UsernameTooLong,

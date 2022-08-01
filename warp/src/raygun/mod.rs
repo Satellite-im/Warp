@@ -309,7 +309,7 @@ pub enum EmbedState {
 
 #[async_trait::async_trait]
 pub trait RayGun: Extension + GroupChat + Sync + Send + SingleHandle {
-    /// Retreive all messages from a conversation
+    /// Retrieve all messages from a conversation
     async fn get_messages(
         &self,
         conversation_id: Uuid,
