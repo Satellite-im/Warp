@@ -1,6 +1,5 @@
 #![allow(unused_imports)]
 
-mod events;
 mod store;
 
 use futures::pin_mut;
@@ -12,11 +11,13 @@ use std::any::Any;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
+use store::direct::DirectMessageStore;
 #[allow(unused_imports)]
 use tokio::sync::mpsc::{Receiver, Sender};
 use uuid::Uuid;
 use warp::crypto::rand::Rng;
 use warp::crypto::KeyMaterial;
+use warp::crypto::DID;
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::module::Module;
@@ -34,7 +35,7 @@ use warp::tesseract::Tesseract;
 use warp::Extension;
 use warp::SingleHandle;
 
-use crate::events::MessagingEvents;
+// use crate::events::MessagingEvents;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -44,12 +45,8 @@ pub type Persistent = Types;
 pub struct IpfsMessaging<T: IpfsTypes> {
     pub account: Arc<Mutex<Box<dyn MultiPass>>>,
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-    pub conversations: Arc<Mutex<Vec<Message>>>,
     pub ipfs: Ipfs<T>,
-    //TODO: DirectMessageStore
-    //      * Subscribes to topic and store messages sent or received from peers
-    //      * Lookup up conversation
-    //      * Execute events
+    pub direct_store: DirectMessageStore<T>,
     //TODO: GroupManager
     //      * Create, Join, and Leave GroupChats
     //      * Send message
@@ -75,7 +72,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
     // }
 
     pub async fn new(
-        path: Option<PathBuf>,
+        _: Option<PathBuf>,
         account: Arc<Mutex<Box<dyn MultiPass>>>,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
@@ -95,20 +92,8 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
                 };
 
                 let opts = IpfsOptions {
-                    ipfs_path: path.unwrap_or_else(|| {
-                        let temp = warp::crypto::rand::thread_rng().gen_range(0, 1000);
-                        std::env::temp_dir().join(&format!("ipfs-rg-temp-{temp}"))
-                    }),
                     keypair: keypair.clone(),
-                    bootstrap: vec![],
-                    mdns: false,
-                    kad_protocol: None,
-                    listening_addrs: vec!["/ip4/0.0.0.0/tcp/0".parse().unwrap()],
-                    span: None,
-                    dcutr: false,
-                    relay: false,
-                    relay_server: false,
-                    relay_addr: None,
+                    ..Default::default()
                 };
 
                 if !opts.ipfs_path.exists() {
@@ -121,14 +106,12 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
                 ipfs
             }
         };
-
-        let conversations = Arc::new(Mutex::new(Vec::new()));
-
+        let direct_store = DirectMessageStore::new(ipfs.clone(), account.clone()).await?;
         let messaging = IpfsMessaging {
             account,
             cache,
-            conversations,
             ipfs,
+            direct_store,
         };
         Ok(messaging)
     }
@@ -168,6 +151,19 @@ impl<T: IpfsTypes> SingleHandle for IpfsMessaging<T> {
     }
 }
 
+impl<T: IpfsTypes> IpfsMessaging<T> {
+    pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Uuid> {
+        self.direct_store
+            .create_conversation(did_key)
+            .await
+            .map_err(Error::from)
+    }
+
+    pub fn list_conversations(&self) -> Result<Vec<Uuid>> {
+        Ok(self.direct_store.list_conversations())
+    }
+}
+
 #[async_trait::async_trait]
 impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
     async fn get_messages(
@@ -181,27 +177,27 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
 
     async fn send(
         &mut self,
-        conversation_id: Uuid,
-        message_id: Option<Uuid>,
+        _conversation_id: Uuid,
+        _message_id: Option<Uuid>,
         value: Vec<String>,
     ) -> Result<()> {
         if value.is_empty() {
             return Err(Error::EmptyMessage);
         }
-        let sender = self.sender_id()?;
-        let event = match message_id {
-            Some(id) => MessagingEvents::EditMessage(conversation_id, id, value),
-            None => {
-                let mut message = Message::new();
-                message.set_conversation_id(conversation_id);
-                message.set_sender(sender);
-                message.set_value(value);
-                MessagingEvents::NewMessage(message)
-            }
-        };
+        // let sender = self.sender_id()?;
+        // let event = match message_id {
+        //     Some(id) => MessagingEvents::EditMessage(conversation_id, id, value),
+        //     None => {
+        //         let mut message = Message::new();
+        //         message.set_conversation_id(conversation_id);
+        //         message.set_sender(sender);
+        //         message.set_value(value);
+        //         MessagingEvents::NewMessage(message)
+        //     }
+        // };
 
         // self.send_event(&event).await?;
-        events::process_message_event(self.conversations.clone(), &event)?;
+        // events::process_message_event(self.conversations.clone(), &event)?;
 
         //TODO: cache support edited messages
         // if let MessagingEvents::NewMessage(message) = event {
@@ -216,67 +212,67 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         return Ok(());
     }
 
-    async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()> {
-        let event = MessagingEvents::DeleteMessage(conversation_id, message_id);
+    async fn delete(&mut self, _: Uuid, _: Uuid) -> Result<()> {
+        // let event = MessagingEvents::DeleteMessage(conversation_id, message_id);
         // self.send_event(&event).await?;
-        events::process_message_event(self.conversations.clone(), &event)?;
+        // events::process_message_event(self.conversations.clone(), &event)?;
         Ok(())
     }
 
     async fn react(
         &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: ReactionState,
-        emoji: String,
+        _conversation_id: Uuid,
+        _message_id: Uuid,
+        _state: ReactionState,
+        _emoji: String,
     ) -> Result<()> {
-        let sender = self.sender_id()?;
-        let event = MessagingEvents::ReactMessage(
-            conversation_id,
-            sender.clone(),
-            message_id,
-            state,
-            emoji.clone(),
-        );
+        // let sender = self.sender_id()?;
+        // let event = MessagingEvents::ReactMessage(
+        //     conversation_id,
+        //     sender.clone(),
+        //     message_id,
+        //     state,
+        //     emoji.clone(),
+        // );
         // self.send_event(&event).await?;
-        events::process_message_event(self.conversations.clone(), &event)?;
+        // events::process_message_event(self.conversations.clone(), &event)?;
         Ok(())
     }
 
     async fn pin(
         &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: PinState,
+        _conversation_id: Uuid,
+        _message_id: Uuid,
+        _state: PinState,
     ) -> Result<()> {
-        let sender = self.sender_id()?;
-        let event = MessagingEvents::PinMessage(conversation_id, sender, message_id, state);
+        // let sender = self.sender_id()?;
+        // let event = MessagingEvents::PinMessage(conversation_id, sender, message_id, state);
         // self.send_event(&event).await?;
-        events::process_message_event(self.conversations.clone(), &event)?;
+        // events::process_message_event(self.conversations.clone(), &event)?;
         Ok(())
     }
 
     async fn reply(
         &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        value: Vec<String>,
+        _conversation_id: Uuid,
+        _message_id: Uuid,
+        _value: Vec<String>,
     ) -> Result<()> {
-        if value.is_empty() {
-            return Err(Error::EmptyMessage);
-        }
-        let sender = self.sender_id()?;
-        let mut message = Message::new();
-        message.set_conversation_id(conversation_id);
-        message.set_replied(Some(message_id));
-        message.set_sender(sender);
+        // if value.is_empty() {
+        //     return Err(Error::EmptyMessage);
+        // }
+        // let sender = self.sender_id()?;
+        // let mut message = Message::new();
+        // message.set_conversation_id(conversation_id);
+        // message.set_replied(Some(message_id));
+        // message.set_sender(sender);
 
-        message.set_value(value);
+        // message.set_value(value);
 
-        let event = MessagingEvents::NewMessage(message);
+        // let event = MessagingEvents::NewMessage(message);
 
         // self.send_event(&event).await?;
-        events::process_message_event(self.conversations.clone(), &event)?;
+        // events::process_message_event(self.conversations.clone(), &event)?;
 
         // if let MessagingEvents::NewMessage(message) = event {
         //     if let Ok(mut cache) = self.get_cache() {
@@ -300,70 +296,8 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
     }
 }
 
-impl<T: IpfsTypes> GroupChat for IpfsMessaging<T> {
-    fn join_group(&mut self, id: GroupId) -> Result<()> {
-        let _group_id = id.get_id().ok_or(warp::error::Error::InvalidGroupId)?;
+impl<T: IpfsTypes> GroupChat for IpfsMessaging<T> {}
 
-        Ok(())
-    }
+impl<T: IpfsTypes> GroupChatManagement for IpfsMessaging<T> {}
 
-    fn leave_group(&mut self, _id: GroupId) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn list_members(&self, _id: GroupId) -> Result<Vec<GroupMember>> {
-        Err(Error::Unimplemented)
-    }
-}
-
-impl<T: IpfsTypes> GroupChatManagement for IpfsMessaging<T> {
-    fn create_group(&mut self, _name: &str) -> Result<Group> {
-        Err(Error::Unimplemented)
-    }
-
-    fn change_group_name(&mut self, _id: GroupId, _name: &str) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn open_group(&mut self, _id: GroupId) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn close_group(&mut self, _id: GroupId) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn change_admin(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn assign_admin(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn kick_member(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn ban_member(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-}
-
-impl<T: IpfsTypes> GroupInvite for IpfsMessaging<T> {
-    fn send_invite(&mut self, _id: GroupId, _recipient: GroupMember) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn accept_invite(&mut self, _id: GroupId) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn deny_invite(&mut self, _id: GroupId) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn block_group(&mut self, _id: GroupId) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-}
+impl<T: IpfsTypes> GroupInvite for IpfsMessaging<T> {}
