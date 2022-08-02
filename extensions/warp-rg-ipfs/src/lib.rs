@@ -55,22 +55,6 @@ pub struct IpfsMessaging<T: IpfsTypes> {
 }
 
 impl<T: IpfsTypes> IpfsMessaging<T> {
-    // pub async fn temporary(
-    //     account: Arc<Mutex<Box<dyn MultiPass>>>,
-    //     cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-    // ) -> anyhow::Result<IpfsMessaging<T>> {
-    //     IpfsMessaging::new(None, account, cache).await
-    // }
-
-    // pub async fn persistent<P: AsRef<std::path::Path>>(
-    //     path: P,
-    //     account: Arc<Mutex<Box<dyn MultiPass>>>,
-    //     cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-    // ) -> anyhow::Result<IpfsMessaging<T>> {
-    //     let path = path.as_ref();
-    //     IpfsMessaging::new(Some(path.to_path_buf()), account, cache).await
-    // }
-
     pub async fn new(
         _: Option<PathBuf>,
         account: Arc<Mutex<Box<dyn MultiPass>>>,
@@ -168,131 +152,64 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
 impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
     async fn get_messages(
         &self,
-        _conversation_id: Uuid,
+        conversation_id: Uuid,
         _: MessageOptions,
     ) -> Result<Vec<Message>> {
-        let list = vec![];
-        Ok(list)
+        self.direct_store.get_messages(conversation_id, None).map_err(Error::from)
     }
 
     async fn send(
         &mut self,
-        _conversation_id: Uuid,
-        _message_id: Option<Uuid>,
+        conversation_id: Uuid,
+        message_id: Option<Uuid>,
         value: Vec<String>,
     ) -> Result<()> {
-        if value.is_empty() {
-            return Err(Error::EmptyMessage);
+        match message_id {
+            Some(id) => self.direct_store.edit_message(conversation_id, id, value).await.map_err(Error::from),
+            None => self.direct_store.send_message(conversation_id, value).await.map_err(Error::from)
         }
-        // let sender = self.sender_id()?;
-        // let event = match message_id {
-        //     Some(id) => MessagingEvents::EditMessage(conversation_id, id, value),
-        //     None => {
-        //         let mut message = Message::new();
-        //         message.set_conversation_id(conversation_id);
-        //         message.set_sender(sender);
-        //         message.set_value(value);
-        //         MessagingEvents::NewMessage(message)
-        //     }
-        // };
-
-        // self.send_event(&event).await?;
-        // events::process_message_event(self.conversations.clone(), &event)?;
-
-        //TODO: cache support edited messages
-        // if let MessagingEvents::NewMessage(message) = event {
-        //     if let Ok(mut cache) = self.get_cache() {
-        //         let data = DataObject::new(DataType::Messaging, message)?;
-        //         if cache.add_data(DataType::Messaging, &data).is_err() {
-        //             //TODO: Log error
-        //         }
-        //     }
-        // }
-
-        return Ok(());
     }
 
-    async fn delete(&mut self, _: Uuid, _: Uuid) -> Result<()> {
-        // let event = MessagingEvents::DeleteMessage(conversation_id, message_id);
-        // self.send_event(&event).await?;
-        // events::process_message_event(self.conversations.clone(), &event)?;
-        Ok(())
+    //TODO: Mark message_id as optional to allow deleting conversation
+    async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()> {
+        self.direct_store.delete_message(conversation_id, message_id, true).await.map_err(Error::from)
     }
 
     async fn react(
         &mut self,
-        _conversation_id: Uuid,
-        _message_id: Uuid,
-        _state: ReactionState,
-        _emoji: String,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: String,
     ) -> Result<()> {
-        // let sender = self.sender_id()?;
-        // let event = MessagingEvents::ReactMessage(
-        //     conversation_id,
-        //     sender.clone(),
-        //     message_id,
-        //     state,
-        //     emoji.clone(),
-        // );
-        // self.send_event(&event).await?;
-        // events::process_message_event(self.conversations.clone(), &event)?;
-        Ok(())
+        self.direct_store.react(conversation_id, message_id, state, emoji).await.map_err(Error::from)
     }
 
     async fn pin(
         &mut self,
-        _conversation_id: Uuid,
-        _message_id: Uuid,
-        _state: PinState,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: PinState,
     ) -> Result<()> {
-        // let sender = self.sender_id()?;
-        // let event = MessagingEvents::PinMessage(conversation_id, sender, message_id, state);
-        // self.send_event(&event).await?;
-        // events::process_message_event(self.conversations.clone(), &event)?;
-        Ok(())
+        self.direct_store.pin_message(conversation_id, message_id, state).await.map_err(Error::from)
     }
 
     async fn reply(
         &mut self,
-        _conversation_id: Uuid,
-        _message_id: Uuid,
-        _value: Vec<String>,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        value: Vec<String>,
     ) -> Result<()> {
-        // if value.is_empty() {
-        //     return Err(Error::EmptyMessage);
-        // }
-        // let sender = self.sender_id()?;
-        // let mut message = Message::new();
-        // message.set_conversation_id(conversation_id);
-        // message.set_replied(Some(message_id));
-        // message.set_sender(sender);
-
-        // message.set_value(value);
-
-        // let event = MessagingEvents::NewMessage(message);
-
-        // self.send_event(&event).await?;
-        // events::process_message_event(self.conversations.clone(), &event)?;
-
-        // if let MessagingEvents::NewMessage(message) = event {
-        //     if let Ok(mut cache) = self.get_cache() {
-        //         let data = DataObject::new(DataType::Messaging, message)?;
-        //         if cache.add_data(DataType::Messaging, &data).is_err() {
-        //             //TODO: Log error
-        //         }
-        //     }
-        // }
-
-        return Ok(());
+        self.direct_store.reply_message(conversation_id, message_id, value).await.map_err(Error::from)
     }
 
     async fn embeds(
         &mut self,
-        _conversation_id: Uuid,
-        _message_id: Uuid,
-        _state: EmbedState,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: EmbedState,
     ) -> Result<()> {
-        Err(Error::Unimplemented)
+        self.direct_store.embeds(conversation_id, message_id, state).await.map_err(Error::from)
     }
 }
 

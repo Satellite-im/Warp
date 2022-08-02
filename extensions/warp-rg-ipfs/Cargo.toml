@@ -29,8 +29,11 @@ cfg-if = "1.0"
 hex = "0.4"
 
 [dev-dependencies]
+warp-pd-stretto = { path = "../warp-pd-stretto" }
 warp-mp-ipfs = { path = "../warp-mp-ipfs" }
-
+rustyline-async = "0.2"
+comfy-table = "6.0"
+tracing-subscriber = "0.3"
 
 [features]
 default = []

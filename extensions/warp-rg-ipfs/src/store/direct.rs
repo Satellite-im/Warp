@@ -1,5 +1,5 @@
-#![allow(dead_code)]
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::atomic::AtomicBool;
 
 use futures::{FutureExt, StreamExt};
@@ -13,7 +13,7 @@ use warp::error::Error;
 use warp::multipass::identity::FriendRequest;
 use warp::multipass::MultiPass;
 use warp::raygun::group::GroupId;
-use warp::raygun::{Message, PinState, Reaction, ReactionState};
+use warp::raygun::{Message, PinState, Reaction, ReactionState, EmbedState, SenderId};
 use warp::sync::{Arc, Mutex, RwLock};
 
 use tokio::sync::mpsc::Sender;
@@ -21,7 +21,6 @@ use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender}
 
 use super::{MessagingEvents, libp2p_pub_to_did};
 
-// use crate::events::MessagingEvents;
 
 pub struct DirectMessageStore<T: IpfsTypes> {
     // ipfs instance
@@ -74,8 +73,14 @@ impl DirectConversation {
         &self.recipients
     }
     
-    pub fn messages(&self) -> &[Message] {
+    pub fn messages(&self) -> &Vec<Message> {
         &self.messages
+    }
+}
+
+impl DirectConversation {
+    pub fn messages_mut(&mut self) -> &mut Vec<Message> {
+        &mut self.messages
     }
 }
 
@@ -143,6 +148,14 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         Ok(convo_id)
     }
 
+    pub fn messages_count(&self, conversation: Uuid) -> anyhow::Result<usize> {
+        let index = self.direct_conversation.read().iter().position(|convo| convo.id() == conversation).ok_or(Error::InvalidConversation)?;
+        if let Some(convo) = self.direct_conversation.read().get(index) {
+            return Ok(convo.messages().len())
+        }
+        anyhow::bail!(Error::InvalidConversation)
+    }
+
     pub async fn delete_conversation(&mut self, conversation: Uuid, broadcast: bool) -> anyhow::Result<DirectConversation> {
         let index = match self.direct_conversation.read().iter().position(|convo| convo.id() == conversation) {
             Some(index) => index,
@@ -150,16 +163,19 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         };
 
         let conversation = self.direct_conversation.write().remove(index);
-
-        if broadcast {
-            //TODO: Inform peer that conversation been deleted 
-        }
-
-        // unsubscribe
-        let item = self.direct_stream.write().remove(&conversation.id());
         
-        if item.is_some() {
-            self.ipfs.pubsub_unsubscribe(&format!("direct/{}", conversation.id())).await?;
+        if broadcast {
+            // Since we are notifying the peer of the topic being deleted, we should
+            // also unsubscribe from the topic
+            //TODO: Inform peer that conversation been deleted 
+  
+
+            // remove the stream from the map
+            let item = self.direct_stream.write().remove(&conversation.id());
+            
+            if item.is_some() {
+                self.ipfs.pubsub_unsubscribe(&format!("direct/{}", conversation.id())).await?;
+            }
         }
 
         Ok(conversation)
@@ -167,6 +183,19 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
     pub fn list_conversations(&self) -> Vec<Uuid> {
         self.direct_conversation.read().iter().map(|convo| convo.id()).collect::<Vec<_>>()
+    }
+
+    pub fn get_messages(&self, conversation: Uuid, range: Option<Range<usize>>) -> anyhow::Result<Vec<Message>> {
+        let index = self.direct_conversation.read().iter().position(|convo| convo.id() == conversation).ok_or(Error::InvalidConversation)?;
+        if let Some(convo) = self.direct_conversation.read().get(index) {
+            let mut messages = convo.messages().clone();
+            let list = match range {
+                Some(range) => messages.drain(range).collect::<Vec<_>>(),
+                None => messages
+            };
+            return Ok(list)
+        }
+        anyhow::bail!(Error::InvalidConversation)
     }
 
     pub async fn exist(&self, conversation: Uuid) -> anyhow::Result<bool> {
@@ -181,38 +210,203 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
     pub async fn send_message(
         &mut self,
-        _conversation: &str,
-        _message: &[u8],
+        conversation: Uuid,
+        messages: Vec<String>,
     ) -> anyhow::Result<()> {
-        // if !self.exist(conversation).await? {
-        //     self.create(conversation).await;
-        // }
+        if !self.exist(conversation).await? {
+            anyhow::bail!(Error::InvalidConversation)
+        }
 
-        // self.ipfs
-        //     .pubsub_publish(conversation.to_string(), message.to_vec())
-        //     .await?;
+        if messages.is_empty() {
+            anyhow::bail!(Error::EmptyMessage);
+        }
+
+        let index = self.direct_conversation.read().iter().position(|convo| convo.id() == conversation).ok_or(Error::InvalidConversation)?;
+
+
+        let own_did = self.account.lock().decrypt_private_key(None)?;
+
+        let mut message = Message::default();
+        message.set_conversation_id(conversation);
+        message.set_sender(SenderId::from_did_key(own_did.clone()));
+        message.set_value(messages);
+
+        //TODO: Sign message 
+
+        let event = MessagingEvents::NewMessage(message);
+
+        if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
+            direct_message_event(conversation.messages_mut(), &event)?;
+        }
+
+        //TODO: Send event
 
         Ok(())
     }
 
-    // pub async fn send_event(
-    //     &mut self,
-    //     _conversation: &str,
-    //     _event: MessagingEvents,
-    // ) -> anyhow::Result<()> {
-    //     Ok(())
-    // }
+    pub async fn edit_message(
+        &mut self,
+        conversation: Uuid,
+        message_id: Uuid,
+        messages: Vec<String>,
+    ) -> anyhow::Result<()> {
+        if !self.exist(conversation).await? {
+            anyhow::bail!(Error::InvalidConversation)
+        }
+
+        if messages.is_empty() {
+            anyhow::bail!(Error::EmptyMessage);
+        }
+
+        let index = self.direct_conversation.read().iter().position(|convo| convo.id() == conversation).ok_or(Error::InvalidConversation)?;
+
+        //TODO: Validate message being edit to be sure it belongs to the sender before editing
+
+        let event = MessagingEvents::EditMessage(conversation, message_id, messages);
+
+        if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
+            direct_message_event(conversation.messages_mut(), &event)?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn reply_message(
+        &mut self,
+        conversation: Uuid,
+        message_id: Uuid,
+        messages: Vec<String>,
+    ) -> anyhow::Result<()> {
+        if !self.exist(conversation).await? {
+            anyhow::bail!(Error::InvalidConversation)
+        }
+
+        if messages.is_empty() {
+            anyhow::bail!(Error::EmptyMessage);
+        }
+
+        let index = self.direct_conversation.read().iter().position(|convo| convo.id() == conversation).ok_or(Error::InvalidConversation)?;
+
+        let own_did = self.account.lock().decrypt_private_key(None)?;
+
+        let mut message = Message::default();
+        message.set_conversation_id(conversation);
+        message.set_sender(SenderId::from_did_key(own_did.clone()));
+        message.set_value(messages);
+        message.set_replied(Some(message_id));
+
+        let event = MessagingEvents::NewMessage(message);
+        if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
+            direct_message_event(conversation.messages_mut(), &event)?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn delete_message(
+        &mut self,
+        conversation: Uuid,
+        message_id: Uuid,
+        _broadcast: bool
+    ) -> anyhow::Result<()> {
+        if !self.exist(conversation).await? {
+            anyhow::bail!(Error::InvalidConversation)
+        }
+
+        let index = self.direct_conversation.read().iter().position(|convo| convo.id() == conversation).ok_or(Error::InvalidConversation)?;
+
+        let event = MessagingEvents::DeleteMessage(conversation, message_id);
+        if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
+            direct_message_event(conversation.messages_mut(), &event)?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn pin_message(
+        &mut self,
+        conversation: Uuid,
+        message_id: Uuid,
+        state: PinState
+    ) -> anyhow::Result<()> {
+        if !self.exist(conversation).await? {
+            anyhow::bail!(Error::InvalidConversation)
+        }
+
+        let own_did = self.account.lock().decrypt_private_key(None)?;
+
+        let sender = SenderId::from_did_key(own_did.clone());
+
+        let index = self.direct_conversation.read().iter().position(|convo| convo.id() == conversation).ok_or(Error::InvalidConversation)?;
+        let event = MessagingEvents::PinMessage(conversation, sender, message_id, state);
+        if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
+            direct_message_event(conversation.messages_mut(), &event)?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn embeds(
+        &mut self,
+        conversation: Uuid,
+        _message_id: Uuid,
+        _state: EmbedState
+    ) -> anyhow::Result<()> {
+        if !self.exist(conversation).await? {
+            anyhow::bail!(Error::InvalidConversation)
+        }
+        Err(Error::Unimplemented)
+    }
+
+    pub async fn react(
+        &mut self,
+        conversation: Uuid,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: String
+    ) -> anyhow::Result<()> {
+        if !self.exist(conversation).await? {
+            anyhow::bail!(Error::InvalidConversation)
+        }
+
+        let own_did = self.account.lock().decrypt_private_key(None)?;
+
+        let sender = SenderId::from_did_key(own_did.clone());
+
+        let event = MessagingEvents::ReactMessage(
+            conversation,
+            sender,
+            message_id,
+            state,
+            emoji,
+        );
+
+        let index = self.direct_conversation.read().iter().position(|convo| convo.id() == conversation).ok_or(Error::InvalidConversation)?;
+
+        if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
+            direct_message_event(conversation.messages_mut(), &event)?;
+        }
+
+        Ok(())
+    }
+
+
+    pub async fn send_event(
+        &mut self,
+        _conversation: Uuid,
+        _event: MessagingEvents,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 pub fn direct_message_event(
-    conversation: Arc<Mutex<Vec<Message>>>,
+    messages: &mut Vec<Message>,
     events: &MessagingEvents,
 ) -> Result<(), Error> {
     match events.clone() {
-        MessagingEvents::NewMessage(message) => conversation.lock().push(message),
+        MessagingEvents::NewMessage(message) => messages.push(message),
         MessagingEvents::EditMessage(convo_id, message_id, val) => {
-            let mut messages = conversation.lock();
-
             let index = messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
@@ -225,7 +419,6 @@ pub fn direct_message_event(
             *message.value_mut() = val;
         }
         MessagingEvents::DeleteMessage(convo_id, message_id) => {
-            let mut messages = conversation.lock();
 
             let index = messages
                 .iter()
@@ -235,7 +428,6 @@ pub fn direct_message_event(
             let _ = messages.remove(index);
         }
         MessagingEvents::PinMessage(convo_id, _, message_id, state) => {
-            let mut messages = conversation.lock();
 
             let index = messages
                 .iter()
@@ -252,7 +444,6 @@ pub fn direct_message_event(
             }
         }
         MessagingEvents::ReactMessage(convo_id, sender, message_id, state, emoji) => {
-            let mut messages = conversation.lock();
 
             let index = messages
                 .iter()
