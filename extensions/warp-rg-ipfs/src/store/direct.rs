@@ -14,12 +14,13 @@ use warp::multipass::identity::FriendRequest;
 use warp::multipass::MultiPass;
 use warp::raygun::group::GroupId;
 use warp::raygun::{Message, PinState, Reaction, ReactionState, EmbedState, SenderId};
+use warp::sata::Sata;
 use warp::sync::{Arc, Mutex, RwLock};
 
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender};
 
-use super::{MessagingEvents, libp2p_pub_to_did};
+use super::{MessagingEvents, ConversationEvents, libp2p_pub_to_did, DIRECT_BROADCAST};
 
 
 pub struct DirectMessageStore<T: IpfsTypes> {
@@ -62,6 +63,14 @@ impl DirectConversation {
             messages: Vec::new()
         }
     }
+
+    pub fn new_with_id(id: Uuid, recipients: [DID; 2]) -> Self {
+        Self {
+            id,
+            recipients,
+            messages: Vec::new()
+        }
+    }
 }
 
 impl DirectConversation {
@@ -98,9 +107,57 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             account,
         };
 
+        let own_did = store.account.lock().decrypt_private_key(None)?;
+
+        let stream = store.ipfs.pubsub_subscribe(DIRECT_BROADCAST.into()).await?;
+
         let inner = store.clone();
-        tokio::spawn(async {
-            let _store = inner;
+        tokio::spawn(async move {
+            let store = inner;
+
+            futures::pin_mut!(stream);
+            loop {
+                tokio::select! {
+                    message = stream.next() => {
+                        if let Some(message) = message {
+                            if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
+                                if let Ok(events) = data.decrypt::<ConversationEvents>(own_did.as_ref()) {
+                                    match events {
+                                        ConversationEvents::NewConversation(id, peer) => {
+                                            match store.exist(id).await {
+                                                Ok(true) => continue,
+                                                Ok(false) => {},
+                                                Err(_e) => {
+                                                    //TODO: Log
+                                                    continue
+                                                }
+                                            };
+                                            let list = [own_did.clone(), peer];
+                                            let convo = DirectConversation::new_with_id(id, list);
+   
+
+                                            //TODO: Maybe pass this portion off to its own task? 
+                                            let stream = match store.ipfs.pubsub_subscribe(format!("direct/{}", id)).await {
+                                                Ok(stream) => stream,
+                                                Err(_e) => {
+                                                    //TODO: Log
+                                                    continue
+                                                }
+                                            };
+                                            store.direct_conversation.write().push(convo);
+                                            store.direct_stream.write().insert(id, stream);
+                                        }
+                                        ConversationEvents::DeleteConversation(_) => {
+                                            //TODO
+                                        }
+                                    }
+
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         });
         Ok(store)
     }
@@ -157,10 +214,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     }
 
     pub async fn delete_conversation(&mut self, conversation: Uuid, broadcast: bool) -> anyhow::Result<DirectConversation> {
-        let index = match self.direct_conversation.read().iter().position(|convo| convo.id() == conversation) {
-            Some(index) => index,
-            None => anyhow::bail!(Error::InvalidConversation)
-        };
+        let index = self.direct_conversation.read().iter().position(|convo| convo.id() == conversation).ok_or(Error::InvalidConversation)?;
 
         let conversation = self.direct_conversation.write().remove(index);
         
