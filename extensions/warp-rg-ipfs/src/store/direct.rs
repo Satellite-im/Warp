@@ -355,7 +355,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         if !self.exist(conversation).await? {
             anyhow::bail!(Error::InvalidConversation)
         }
-        Err(Error::Unimplemented)
+        anyhow::bail!(Error::Unimplemented)
     }
 
     pub async fn react(
