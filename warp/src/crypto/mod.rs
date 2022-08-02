@@ -33,7 +33,7 @@ use crate::error::Error;
 
 #[derive(FFIVec, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct DID(DIDKey);
+pub struct DID(pub DIDKey);
 
 impl AsRef<DIDKey> for DID {
     fn as_ref(&self) -> &DIDKey {
