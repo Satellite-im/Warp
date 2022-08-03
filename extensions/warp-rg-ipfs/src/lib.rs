@@ -150,12 +150,10 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
 
 #[async_trait::async_trait]
 impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
-    async fn get_messages(
-        &self,
-        conversation_id: Uuid,
-        _: MessageOptions,
-    ) -> Result<Vec<Message>> {
-        self.direct_store.get_messages(conversation_id, None).map_err(Error::from)
+    async fn get_messages(&self, conversation_id: Uuid, _: MessageOptions) -> Result<Vec<Message>> {
+        self.direct_store
+            .get_messages(conversation_id, None)
+            .map_err(Error::from)
     }
 
     async fn send(
@@ -165,14 +163,25 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         value: Vec<String>,
     ) -> Result<()> {
         match message_id {
-            Some(id) => self.direct_store.edit_message(conversation_id, id, value).await.map_err(Error::from),
-            None => self.direct_store.send_message(conversation_id, value).await.map_err(Error::from)
+            Some(id) => self
+                .direct_store
+                .edit_message(conversation_id, id, value)
+                .await
+                .map_err(Error::from),
+            None => self
+                .direct_store
+                .send_message(conversation_id, value)
+                .await
+                .map_err(Error::from),
         }
     }
 
     //TODO: Mark message_id as optional to allow deleting conversation
     async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()> {
-        self.direct_store.delete_message(conversation_id, message_id, true).await.map_err(Error::from)
+        self.direct_store
+            .delete_message(conversation_id, message_id, true)
+            .await
+            .map_err(Error::from)
     }
 
     async fn react(
@@ -182,7 +191,10 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         state: ReactionState,
         emoji: String,
     ) -> Result<()> {
-        self.direct_store.react(conversation_id, message_id, state, emoji).await.map_err(Error::from)
+        self.direct_store
+            .react(conversation_id, message_id, state, emoji)
+            .await
+            .map_err(Error::from)
     }
 
     async fn pin(
@@ -191,7 +203,10 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         message_id: Uuid,
         state: PinState,
     ) -> Result<()> {
-        self.direct_store.pin_message(conversation_id, message_id, state).await.map_err(Error::from)
+        self.direct_store
+            .pin_message(conversation_id, message_id, state)
+            .await
+            .map_err(Error::from)
     }
 
     async fn reply(
@@ -200,7 +215,10 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         message_id: Uuid,
         value: Vec<String>,
     ) -> Result<()> {
-        self.direct_store.reply_message(conversation_id, message_id, value).await.map_err(Error::from)
+        self.direct_store
+            .reply_message(conversation_id, message_id, value)
+            .await
+            .map_err(Error::from)
     }
 
     async fn embeds(
@@ -209,7 +227,10 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         message_id: Uuid,
         state: EmbedState,
     ) -> Result<()> {
-        self.direct_store.embeds(conversation_id, message_id, state).await.map_err(Error::from)
+        self.direct_store
+            .embeds(conversation_id, message_id, state)
+            .await
+            .map_err(Error::from)
     }
 }
 

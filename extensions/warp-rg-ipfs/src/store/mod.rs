@@ -2,10 +2,10 @@
 #![allow(dead_code)]
 pub mod direct;
 
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use uuid::Uuid;
 use warp::{
-    crypto::{hash::sha256_hash, DID, DIDKey, Ed25519KeyPair, KeyMaterial},
+    crypto::{hash::sha256_hash, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
     raygun::{Message, PinState, ReactionState, SenderId},
     sync::{Arc, Mutex},
@@ -33,7 +33,6 @@ pub fn generate_uuid(generate: &str) -> Uuid {
     let topic_hash = sha256_hash(generate.as_bytes(), None);
     Uuid::from_slice(&topic_hash[..topic_hash.len() / 2]).unwrap_or_default()
 }
-
 
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<libp2p::identity::PublicKey> {
     let did = public_key.clone();
