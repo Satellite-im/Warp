@@ -143,7 +143,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             .map_err(Error::from)
     }
 
-    pub fn list_conversations(&self) -> Result<Vec<Uuid>> {
+    pub async fn list_conversations(&self) -> Result<Vec<Uuid>> {
         Ok(self.direct_store.list_conversations())
     }
 }
