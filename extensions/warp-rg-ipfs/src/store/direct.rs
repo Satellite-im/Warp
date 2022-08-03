@@ -139,40 +139,41 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     message = stream.next() => {
                         if let Some(message) = message {
                             if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
-                                if let Ok(events) = data.decrypt::<ConversationEvents>(own_did.as_ref()) {
-                                    match events {
-                                        ConversationEvents::NewConversation(id, peer) => {
-                                            match store.exist(id).await {
-                                                Ok(true) => continue,
-                                                Ok(false) => {},
-                                                Err(_e) => {
-                                                    //TODO: Log
-                                                    continue
-                                                }
-                                            };
-                                            let list = [own_did.clone(), peer];
-                                            let convo = DirectConversation::new_with_id(id, list);
+                                if let Ok(data) = data.decrypt::<Vec<u8>>(own_did.as_ref()) {
+                                    if let Ok(events) = serde_json::from_slice::<ConversationEvents>(&data) {
+                                        match events {
+                                            ConversationEvents::NewConversation(id, peer) => {
+                                                match store.exist(id).await {
+                                                    Ok(true) => continue,
+                                                    Ok(false) => {},
+                                                    Err(_e) => {
+                                                        //TODO: Log
+                                                        continue
+                                                    }
+                                                };
+                                                let list = [own_did.clone(), peer];
+                                                let convo = DirectConversation::new_with_id(id, list);
 
 
-                                            //TODO: Maybe pass this portion off to its own task?
-                                            let stream = match store.ipfs.pubsub_subscribe(format!("direct/{}", id)).await {
-                                                Ok(stream) => stream,
-                                                Err(_e) => {
-                                                    //TODO: Log
-                                                    continue
-                                                }
-                                            };
-                                            store.direct_conversation.write().push(convo);
+                                                //TODO: Maybe pass this portion off to its own task?
+                                                let stream = match store.ipfs.pubsub_subscribe(format!("direct/{}", id)).await {
+                                                    Ok(stream) => stream,
+                                                    Err(_e) => {
+                                                        //TODO: Log
+                                                        continue
+                                                    }
+                                                };
+                                                store.direct_conversation.write().push(convo);
 
-                                            // Maybe store the thread into a vector or map?
-                                            tokio::spawn(direct_conversation_process(store.clone(), id, stream));
-                                            // store.direct_stream.write().insert(id, stream);
-                                        }
-                                        ConversationEvents::DeleteConversation(_) => {
-                                            //TODO
+                                                // Maybe store the thread into a vector or map?
+                                                tokio::spawn(direct_conversation_process(store.clone(), id, stream));
+                                                // store.direct_stream.write().insert(id, stream);
+                                            }
+                                            ConversationEvents::DeleteConversation(_) => {
+                                                //TODO
+                                            }
                                         }
                                     }
-
                                 }
                             }
                         }
@@ -242,6 +243,36 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .await?;
 
         tokio::spawn(direct_conversation_process(self.clone(), convo_id, stream));
+
+        let peers = self
+            .ipfs
+            .pubsub_peers(Some(DIRECT_BROADCAST.into()))
+            .await?;
+
+        let peer_id = did_to_libp2p_pub(did_key)?.to_peer_id();
+
+        let mut data = Sata::default();
+        data.add_recipient(did_key.as_ref())?;
+
+        let data = data.encrypt(
+            libipld::IpldCodec::DagJson,
+            own_did.as_ref(),
+            warp::sata::Kind::Reference,
+            serde_json::to_vec(&ConversationEvents::NewConversation(
+                convo_id,
+                own_did.clone(),
+            ))?,
+        )?;
+
+        match peers.contains(&peer_id) {
+            true => {
+                let bytes = serde_json::to_vec(&data)?;
+                self.ipfs
+                    .pubsub_publish(DIRECT_BROADCAST.into(), bytes)
+                    .await?;
+            }
+            false => self.queue.write().push((DIRECT_BROADCAST.into(), data)),
+        };
 
         Ok(convo_id)
     }
@@ -565,7 +596,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             libipld::IpldCodec::DagJson,
             own_did.as_ref(),
             warp::sata::Kind::Reference,
-            event,
+            serde_json::to_vec(&event)?,
         )?;
 
         let peers = self.ipfs.pubsub_peers(Some(convo.topic())).await?;
@@ -703,27 +734,29 @@ async fn direct_conversation_process<T: IpfsTypes>(
 
     while let Some(stream) = stream.next().await {
         if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
-            if let Ok(event) = data.decrypt::<MessagingEvents>(own_did.as_ref()) {
-                let index = match store
-                    .direct_conversation
-                    .read()
-                    .iter()
-                    .position(|convo| convo.id() == conversation)
-                {
-                    Some(index) => index,
-                    None => continue,
-                };
+            if let Ok(data) = data.decrypt::<Vec<u8>>(own_did.as_ref()) {
+                if let Ok(event) = serde_json::from_slice::<MessagingEvents>(&data) {
+                    let index = match store
+                        .direct_conversation
+                        .read()
+                        .iter()
+                        .position(|convo| convo.id() == conversation)
+                    {
+                        Some(index) => index,
+                        None => continue,
+                    };
 
-                let mut list = store.direct_conversation.write();
+                    let mut list = store.direct_conversation.write();
 
-                let convo = match list.get_mut(index) {
-                    Some(convo) => convo,
-                    None => continue,
-                };
+                    let convo = match list.get_mut(index) {
+                        Some(convo) => convo,
+                        None => continue,
+                    };
 
-                if let Err(_e) = direct_message_event(convo.messages_mut(), &event) {
-                    //TODO: Log
-                    continue;
+                    if let Err(_e) = direct_message_event(convo.messages_mut(), &event) {
+                        //TODO: Log
+                        continue;
+                    }
                 }
             }
         }
