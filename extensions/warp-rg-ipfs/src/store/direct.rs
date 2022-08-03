@@ -220,11 +220,11 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         // self.account.lock().has_friend(did_key)?;
 
         let own_did = self.account.lock().decrypt_private_key(None)?;
-        // for convo in &*self.direct_conversation.read() {
-        //     if convo.recipients.contains(did_key) && convo.recipients.contains(&own_did) {
-        //         anyhow::bail!("Conversation exist with did key");
-        //     }
-        // }
+        for convo in &*self.direct_conversation.read() {
+            if convo.recipients.contains(did_key) && convo.recipients.contains(&own_did) {
+                anyhow::bail!("Conversation exist with did key");
+            }
+        }
 
         //Temporary limit
         if self.direct_conversation.read().len() == 32 {
