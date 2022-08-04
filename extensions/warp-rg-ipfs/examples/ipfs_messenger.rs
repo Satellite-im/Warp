@@ -99,7 +99,27 @@ async fn main() -> anyhow::Result<()> {
 
     let mut topic = Uuid::nil();
 
-    writeln!(stdout, "Type anything and press enter to send...")?;
+    let message = r#"
+        Use `/create <did>` to create the conversation
+        In the other client do `/list-conversations` to list all active/opened conversations
+        In that same client do `/select-conversation <id>`
+        Send away on either client
+
+        Note: You can only have one conversation per key
+
+        list of commands:
+            /create <did> - create conversation with another user
+            /remove-conversation <id> - delete conversation. This will delete it on both ends
+            /set-conversation <id> - switch to a conversation
+            /list-conversations - list all active conversations
+            /list - list all messages in the conversation. This provides more info
+            /edit <id> <message-id> <message> - edit message in the conversation
+            /react <add | remove> <id> <message-id> <emoji> - add or remove reaction to a message
+            /pin <all | id> - pin a message in a the conversation.
+            /unpin <all | id> - unpin a message in the conversation.
+    "#;
+
+    writeln!(stdout, "{message}")?;
 
     let mut convo_size: HashMap<Uuid, usize> = HashMap::new();
 
