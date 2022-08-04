@@ -40,7 +40,7 @@ pub struct DirectMessageStore<T: IpfsTypes> {
     account: Arc<Mutex<Box<dyn MultiPass>>>,
 
     // Queue
-    queue: Arc<RwLock<Vec<(String, Sata)>>>,
+    queue: Arc<RwLock<Vec<Queue>>>,
 }
 
 impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
@@ -123,7 +123,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             account,
             queue,
         };
-
+        let interval_ms = 1000;
         let own_did = store.account.lock().decrypt_private_key(None)?;
 
         let stream = store.ipfs.pubsub_subscribe(DIRECT_BROADCAST.into()).await?;
@@ -133,7 +133,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             let store = inner;
 
             futures::pin_mut!(stream);
-            let mut interval = tokio::time::interval(Duration::from_millis(1000));
+            let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
             loop {
                 tokio::select! {
                     message = stream.next() => {
@@ -181,19 +181,23 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     _ = interval.tick() => {
                         // let mut clearing = vec![];
                         let list = store.queue.read().clone();
-                        for (topic, data) in list.iter() {
-                            if let Ok(_peers) = store.ipfs.pubsub_peers(Some(topic.clone())).await {
+                        for item in list.iter() {
+                            let Queue::Direct(_, peer, topic, data) = item;
+                            if let Ok(peers) = store.ipfs.pubsub_peers(Some(topic.clone())).await {
                                 //TODO: Check peer against conversation to see if they are connected
-                                let bytes = match serde_json::to_vec(&data) {
-                                    Ok(bytes) => bytes,
-                                    Err(_e) => {
+                                if peers.contains(peer) {
+                                    let bytes = match serde_json::to_vec(&data) {
+                                        Ok(bytes) => bytes,
+                                        Err(_e) => {
+                                            //TODO: Log
+                                            continue
+                                        }
+                                    };
+                                    if let Err(_e) = store.ipfs.pubsub_publish(topic.clone(), bytes).await {
                                         //TODO: Log
                                         continue
                                     }
-                                };
-                                if let Err(_e) = store.ipfs.pubsub_publish(topic.clone(), bytes).await {
-                                    //TODO: Log
-                                    continue
+                                    //TODO: Remove queue from iteration
                                 }
                             }
                         }
@@ -271,7 +275,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     .pubsub_publish(DIRECT_BROADCAST.into(), bytes)
                     .await?;
             }
-            false => self.queue.write().push((DIRECT_BROADCAST.into(), data)),
+            false => self.queue.write().push(Queue::Direct(
+                convo_id,
+                peer_id,
+                DIRECT_BROADCAST.into(),
+                data,
+            )),
         };
 
         Ok(convo_id)
@@ -342,7 +351,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .direct_conversation
             .read()
             .iter()
-            .filter(|conv| conv.id == conversation)
+            .filter(|conv| conv.id() == conversation)
             .count()
             == 1;
         let subscribed = self
@@ -608,7 +617,11 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 let bytes = serde_json::to_vec(&data)?;
                 self.ipfs.pubsub_publish(convo.topic(), bytes).await?;
             }
-            false => self.queue.write().push((convo.topic(), data)),
+            false => {
+                self.queue
+                    .write()
+                    .push(Queue::Direct(conversation, peer_id, convo.topic(), data))
+            }
         };
 
         Ok(())
@@ -761,4 +774,9 @@ async fn direct_conversation_process<T: IpfsTypes>(
             }
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum Queue {
+    Direct(Uuid, PeerId, String, Sata),
 }
