@@ -179,21 +179,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                     }
                                                 };
 
-                                                let conversation = {
-                                                    // We use a write lock instead of a read to prevent the chance of
-                                                    // 2 events being sent at the same time and causing a panic when attempting
-                                                    // to remove while using write
-                                                    // This may get reverted back to using a readlock over the iterator then removing
-                                                    // with write lock in the future
-                                                    let mut direct = store.direct_conversation.write();
-
-                                                    let index = match direct.iter().position(|convo| convo.id() == id) {
-                                                        Some(index) => index,
-                                                        None => continue
-                                                    };
-
-                                                    direct.remove(index)
+                                                let index = match store.direct_conversation.read().iter().position(|convo| convo.id() == id) {
+                                                    Some(index) => index,
+                                                    None => continue
                                                 };
+
+                                                let conversation = store.direct_conversation.write().remove(index);
 
 
                                                 if let Err(_e) = store.ipfs.pubsub_unsubscribe(&conversation.topic()).await {
