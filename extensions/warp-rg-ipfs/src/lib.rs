@@ -143,6 +143,13 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             .map_err(Error::from)
     }
 
+    pub async fn delete_conversation(&mut self, conversation_id: Uuid) -> Result<()> {
+        self.direct_store
+            .delete_conversation(conversation_id, true)
+            .await?;
+        Ok(())
+    }
+
     pub async fn list_conversations(&self) -> Result<Vec<Uuid>> {
         Ok(self.direct_store.list_conversations())
     }

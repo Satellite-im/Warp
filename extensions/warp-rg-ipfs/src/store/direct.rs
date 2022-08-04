@@ -169,8 +169,36 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                 tokio::spawn(direct_conversation_process(store.clone(), id, stream));
                                                 // store.direct_stream.write().insert(id, stream);
                                             }
-                                            ConversationEvents::DeleteConversation(_) => {
-                                                //TODO
+                                            ConversationEvents::DeleteConversation(id) => {
+                                                match store.exist(id).await {
+                                                    Ok(true) => {},
+                                                    Ok(false) => continue,
+                                                    Err(_e) => {
+                                                        //TODO: Log
+                                                        continue
+                                                    }
+                                                };
+
+                                                let conversation = {
+                                                    // We use a write lock instead of a read to prevent the chance of
+                                                    // 2 events being sent at the same time and causing a panic when attempting
+                                                    // to remove while using write
+                                                    // This may get reverted back to using a readlock over the iterator then removing
+                                                    // with write lock in the future
+                                                    let mut direct = store.direct_conversation.write();
+
+                                                    let index = match direct.iter().position(|convo| convo.id() == id) {
+                                                        Some(index) => index,
+                                                        None => continue
+                                                    };
+
+                                                    direct.remove(index)
+                                                };
+
+
+                                                if let Err(_e) = store.ipfs.pubsub_unsubscribe(&conversation.topic()).await {
+                                                    //TODO: Log
+                                                }
                                             }
                                         }
                                     }
@@ -286,6 +314,72 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         Ok(convo_id)
     }
 
+    pub async fn delete_conversation(
+        &mut self,
+        conversation: Uuid,
+        broadcast: bool,
+    ) -> anyhow::Result<DirectConversation> {
+        let index = self
+            .direct_conversation
+            .read()
+            .iter()
+            .position(|convo| convo.id() == conversation)
+            .ok_or(Error::InvalidConversation)?;
+
+        let conversation = self.direct_conversation.write().remove(index);
+        if broadcast {
+            let recipients = conversation.recipients();
+
+            let own_did = self.account.lock().decrypt_private_key(None)?;
+
+            let recipient: &DID = match recipients.iter().filter(|did| own_did.ne(did)).last() {
+                Some(r) => r,
+                None => anyhow::bail!(Error::PublicKeyInvalid),
+            };
+
+            let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
+
+            let mut data = Sata::default();
+            data.add_recipient(recipient.as_ref())?;
+
+            let data = data.encrypt(
+                libipld::IpldCodec::DagJson,
+                own_did.as_ref(),
+                warp::sata::Kind::Reference,
+                serde_json::to_vec(&ConversationEvents::DeleteConversation(conversation.id()))?,
+            )?;
+
+            let peers = self
+                .ipfs
+                .pubsub_peers(Some(DIRECT_BROADCAST.into()))
+                .await?;
+
+            match peers.contains(&peer_id) {
+                true => {
+                    let bytes = serde_json::to_vec(&data)?;
+                    self.ipfs
+                        .pubsub_publish(DIRECT_BROADCAST.into(), bytes)
+                        .await?;
+                }
+                false => self.queue.write().push(Queue::Direct(
+                    conversation.id(),
+                    peer_id,
+                    DIRECT_BROADCAST.into(),
+                    data,
+                )),
+            };
+        }
+        Ok(conversation)
+    }
+
+    pub fn list_conversations(&self) -> Vec<Uuid> {
+        self.direct_conversation
+            .read()
+            .iter()
+            .map(|convo| convo.id())
+            .collect::<Vec<_>>()
+    }
+
     pub fn messages_count(&self, conversation: Uuid) -> anyhow::Result<usize> {
         let index = self
             .direct_conversation
@@ -297,31 +391,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             return Ok(convo.messages().len());
         }
         anyhow::bail!(Error::InvalidConversation)
-    }
-
-    pub async fn delete_conversation(
-        &mut self,
-        conversation: Uuid,
-        _broadcast: bool,
-    ) -> anyhow::Result<DirectConversation> {
-        let index = self
-            .direct_conversation
-            .read()
-            .iter()
-            .position(|convo| convo.id() == conversation)
-            .ok_or(Error::InvalidConversation)?;
-
-        let conversation = self.direct_conversation.write().remove(index);
-
-        Ok(conversation)
-    }
-
-    pub fn list_conversations(&self) -> Vec<Uuid> {
-        self.direct_conversation
-            .read()
-            .iter()
-            .map(|convo| convo.id())
-            .collect::<Vec<_>>()
     }
 
     pub fn get_messages(
