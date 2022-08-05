@@ -106,10 +106,13 @@ async fn main() -> anyhow::Result<()> {
     let message = r#"
         Use `/create <did>` to create the conversation
         In the other client do `/list-conversations` to list all active/opened conversations
-        In that same client do `/select-conversation <id>`
+        In that same client do `/set-conversation <id>`
         Send away on either client
 
-        Note: You can only have one conversation per key
+        Note: 
+            - You can only have one conversation per did.
+            - If a new conversation is created, the client will automatically switch
+            - If you have multiple conversation, use `/set-conversation <id>` to switch conversation 
 
         list of commands:
             /create <did> - create conversation with another user

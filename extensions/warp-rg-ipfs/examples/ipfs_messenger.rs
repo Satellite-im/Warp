@@ -89,7 +89,10 @@ async fn main() -> anyhow::Result<()> {
         In that same client do `/set-conversation <id>`
         Send away on either client
 
-        Note: You can only have one conversation per key
+        Note: 
+            - You can only have one conversation per did.
+            - If a new conversation is created, the client will automatically switch
+            - If you have multiple conversation, use `/set-conversation <id>` to switch conversation
 
         list of commands:
             /create <did> - create conversation with another user
