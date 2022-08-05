@@ -151,11 +151,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                         continue
                                                     }
                                                 };
+
                                                 let list = [own_did.clone(), peer];
                                                 let convo = DirectConversation::new_with_id(id, list);
 
-
-                                                //TODO: Maybe pass this portion off to its own task?
                                                 let stream = match store.ipfs.pubsub_subscribe(format!("direct/{}", id)).await {
                                                     Ok(stream) => stream,
                                                     Err(_e) => {
@@ -186,7 +185,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
                                                 let conversation = store.direct_conversation.write().remove(index);
 
-
                                                 if let Err(_e) = store.ipfs.pubsub_unsubscribe(&conversation.topic()).await {
                                                     //TODO: Log
                                                 }
@@ -201,7 +199,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         // let mut clearing = vec![];
                         let list = store.queue.read().clone();
                         for item in list.iter() {
-                            let Queue::Direct(_, peer, topic, data) = item;
+                            let Queue::Direct(id, peer, topic, data) = item;
                             if let Ok(peers) = store.ipfs.pubsub_peers(Some(topic.clone())).await {
                                 //TODO: Check peer against conversation to see if they are connected
                                 if peers.contains(peer) {
@@ -216,7 +214,16 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                         //TODO: Log
                                         continue
                                     }
-                                    //TODO: Remove queue from iteration
+
+                                    let index = match store.queue.read().iter().position(|q| {
+                                        Queue::Direct(*id, *peer, topic.clone(), data.clone()).eq(q)
+                                    }) {
+                                        Some(index) => index,
+                                        //If we somehow ended up here then there is likely a race condition
+                                        None => continue
+                                    };
+
+                                    let _ = store.queue.write().remove(index);
                                 }
                             }
                         }
