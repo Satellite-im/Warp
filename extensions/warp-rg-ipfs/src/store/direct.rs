@@ -62,7 +62,6 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DirectConversation {
     id: Uuid,
-    topic: String,
     recipients: [DID; 2],
     messages: Vec<Message>,
 }
@@ -72,7 +71,6 @@ impl DirectConversation {
         let id = Uuid::new_v4();
         Self {
             id,
-            topic: format!("direct/{}", id),
             recipients,
             messages: Vec::new(),
         }
@@ -81,7 +79,6 @@ impl DirectConversation {
     pub fn new_with_id(id: Uuid, recipients: [DID; 2]) -> Self {
         Self {
             id,
-            topic: format!("direct/{}", id),
             recipients,
             messages: Vec::new(),
         }
@@ -130,7 +127,7 @@ impl DirectConversation {
     }
 
     pub fn topic(&self) -> String {
-        self.topic.clone()
+        format!("direct/{}", self.id)
     }
 
     pub fn recipients(&self) -> &[DID; 2] {
@@ -188,8 +185,32 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     let entry = entry?;
                     let path = entry.path();
                     if path.is_file() {
-                        let conversation = DirectConversation::from_file(&path, &own_did)?;
-                        store.direct_conversation.write().push(conversation);
+                        //TODO: Check filename itself rather than the end of the path
+                        if path.ends_with("queue") {
+                            continue;
+                        }
+                        match DirectConversation::from_file(&path, &own_did) {
+                            Ok(conversation) => {
+                                let id = conversation.id();
+                                let stream =
+                                    match store.ipfs.pubsub_subscribe(conversation.topic()).await {
+                                        Ok(stream) => stream,
+                                        Err(_e) => {
+                                            //TODO: Log
+                                            continue;
+                                        }
+                                    };
+                                store.direct_conversation.write().push(conversation);
+                                tokio::spawn(direct_conversation_process(
+                                    store.clone(),
+                                    id,
+                                    stream,
+                                ));
+                            }
+                            Err(_e) => {
+                                //TODO: Log
+                            }
+                        };
                     }
                 }
             }
@@ -273,7 +294,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         // let mut clearing = vec![];
                         let list = store.queue.read().clone();
                         for item in list.iter() {
-                            let Queue::Direct(id, peer, topic, data) = item;
+                            let Queue::Direct { id, peer, topic, data } = item;
                             if let Ok(peers) = store.ipfs.pubsub_peers(Some(topic.clone())).await {
                                 //TODO: Check peer against conversation to see if they are connected
                                 if peers.contains(peer) {
@@ -290,7 +311,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                     }
 
                                     let index = match store.queue.read().iter().position(|q| {
-                                        Queue::Direct(*id, *peer, topic.clone(), data.clone()).eq(q)
+                                        Queue::Direct { id:*id, peer:*peer, topic: topic.clone(), data: data.clone() }.eq(q)
                                     }) {
                                         Some(index) => index,
                                         //If we somehow ended up here then there is likely a race condition
@@ -298,6 +319,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                     };
 
                                     let _ = store.queue.write().remove(index);
+
                                     if let Some(path) = store.path.as_ref() {
                                         let bytes = match serde_json::to_vec(&*store.queue.read()) {
                                             Ok(bytes) => bytes,
@@ -350,13 +372,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let conversation = DirectConversation::new([own_did.clone(), did_key.clone()]);
 
         let convo_id = conversation.id();
-
+        let topic = conversation.topic();
         self.direct_conversation.write().push(conversation);
 
-        let stream = self
-            .ipfs
-            .pubsub_subscribe(format!("direct/{}", convo_id))
-            .await?;
+        let stream = self.ipfs.pubsub_subscribe(topic).await?;
 
         tokio::spawn(direct_conversation_process(self.clone(), convo_id, stream));
 
@@ -383,16 +402,37 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         match peers.contains(&peer_id) {
             true => {
                 let bytes = serde_json::to_vec(&data)?;
-                self.ipfs
+                if let Err(_e) = self
+                    .ipfs
                     .pubsub_publish(DIRECT_BROADCAST.into(), bytes)
-                    .await?;
+                    .await
+                {
+                    if let Err(_e) = self
+                        .queue_event(Queue::direct(
+                            convo_id,
+                            peer_id,
+                            DIRECT_BROADCAST.into(),
+                            data,
+                        ))
+                        .await
+                    {
+                        //TODO: Log
+                    }
+                }
             }
-            false => self.queue.write().push(Queue::Direct(
-                convo_id,
-                peer_id,
-                DIRECT_BROADCAST.into(),
-                data,
-            )),
+            false => {
+                if let Err(_e) = self
+                    .queue_event(Queue::direct(
+                        convo_id,
+                        peer_id,
+                        DIRECT_BROADCAST.into(),
+                        data,
+                    ))
+                    .await
+                {
+                    //TODO: Log
+                }
+            }
         };
 
         Ok(convo_id)
@@ -452,7 +492,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         //      "max_transmit_size" within rust-libp2p gossipsub
                         //      For now we will queue the message if we hit an error
                         if let Err(_e) = self
-                            .queue_event(Queue::Direct(
+                            .queue_event(Queue::direct(
                                 conversation.id(),
                                 peer_id,
                                 DIRECT_BROADCAST.into(),
@@ -466,7 +506,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 }
                 false => {
                     if let Err(_e) = self
-                        .queue_event(Queue::Direct(
+                        .queue_event(Queue::direct(
                             conversation.id(),
                             peer_id,
                             DIRECT_BROADCAST.into(),
@@ -840,7 +880,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 let bytes = serde_json::to_vec(&data)?;
                 if let Err(_e) = self.ipfs.pubsub_publish(convo.topic(), bytes).await {
                     if let Err(_e) = self
-                        .queue_event(Queue::Direct(conversation, peer_id, convo.topic(), data))
+                        .queue_event(Queue::direct(conversation, peer_id, convo.topic(), data))
                         .await
                     {
                         //TODO: Log
@@ -849,7 +889,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             }
             false => {
                 if let Err(_e) = self
-                    .queue_event(Queue::Direct(conversation, peer_id, convo.topic(), data))
+                    .queue_event(Queue::direct(conversation, peer_id, convo.topic(), data))
                     .await
                 {
                     //TODO: Log
@@ -1013,6 +1053,12 @@ async fn direct_conversation_process<T: IpfsTypes>(
                         //TODO: Log
                         continue;
                     }
+
+                    if let Some(path) = store.path.as_ref() {
+                        if let Err(_e) = convo.to_file(path, &own_did) {
+                            //TODO: Log
+                        }
+                    }
                 }
             }
         }
@@ -1020,6 +1066,23 @@ async fn direct_conversation_process<T: IpfsTypes>(
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
 pub enum Queue {
-    Direct(Uuid, PeerId, String, Sata),
+    Direct {
+        id: Uuid,
+        peer: PeerId,
+        topic: String,
+        data: Sata,
+    },
+}
+
+impl Queue {
+    pub fn direct(id: Uuid, peer: PeerId, topic: String, data: Sata) -> Self {
+        Queue::Direct {
+            id,
+            peer,
+            topic,
+            data,
+        }
+    }
 }
