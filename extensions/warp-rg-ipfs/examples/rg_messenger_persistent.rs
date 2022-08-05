@@ -125,7 +125,7 @@ async fn main() -> anyhow::Result<()> {
     writeln!(stdout, "{message}")?;
 
     let mut convo_size: HashMap<Uuid, usize> = HashMap::new();
-
+    let mut convo_list = vec![];
     loop {
         tokio::select! {
             //TODO: Optimize by clearing terminal and displaying all messages instead of getting last line
@@ -139,6 +139,15 @@ async fn main() -> anyhow::Result<()> {
                     let username = get_username(new_account.clone(), msg.sender())?;
                     //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
                     writeln!(stdout, "[{}] @> {}", username, msg.value().join("\n"))?;
+                }
+            }
+            //Will switch to the last/newest conversation in the list
+            conversation = chat.list_conversations() => {
+                if let Ok(list) = conversation {
+                    if !list.is_empty() && convo_list != list {
+                        topic = *(list.last().unwrap());
+                        convo_list = list;
+                    }
                 }
             }
             line = rl.readline().fuse() => match line {
