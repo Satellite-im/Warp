@@ -5,7 +5,7 @@ pub mod direct;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use uuid::Uuid;
 use warp::{
-    crypto::{hash::sha256_hash, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
+    crypto::{did_key::CoreSign, hash::sha256_hash, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
     raygun::{Message, PinState, ReactionState, SenderId},
     sync::{Arc, Mutex},
@@ -52,4 +52,19 @@ fn libp2p_pub_to_did(public_key: &libp2p::identity::PublicKey) -> anyhow::Result
         _ => anyhow::bail!(Error::PublicKeyInvalid),
     };
     Ok(pk)
+}
+
+// Note that this are temporary
+fn sign_serde<D: Serialize>(did: &DID, data: &D) -> anyhow::Result<Vec<u8>> {
+    let bytes = serde_json::to_vec(data)?;
+    Ok(did.as_ref().sign(&bytes))
+}
+
+// Note that this are temporary
+fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow::Result<()> {
+    let bytes = serde_json::to_vec(data)?;
+    pk.as_ref()
+        .verify(&bytes, signature)
+        .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+    Ok(())
 }

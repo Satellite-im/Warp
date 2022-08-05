@@ -56,7 +56,7 @@ pub struct IpfsMessaging<T: IpfsTypes> {
 
 impl<T: IpfsTypes> IpfsMessaging<T> {
     pub async fn new(
-        _: Option<PathBuf>,
+        path: Option<PathBuf>,
         account: Arc<Mutex<Box<dyn MultiPass>>>,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
@@ -90,7 +90,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
                 ipfs
             }
         };
-        let direct_store = DirectMessageStore::new(ipfs.clone(), account.clone()).await?;
+        let direct_store = DirectMessageStore::new(ipfs.clone(), path, account.clone()).await?;
         let messaging = IpfsMessaging {
             account,
             cache,

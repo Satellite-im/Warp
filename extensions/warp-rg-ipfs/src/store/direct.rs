@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 use std::os::unix::prelude::OsStringExt;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
@@ -30,6 +31,9 @@ pub struct DirectMessageStore<T: IpfsTypes> {
     // ipfs instance
     ipfs: Ipfs<T>,
 
+    // Write handler
+    path: Option<PathBuf>,
+
     // list of conversations
     direct_conversation: Arc<RwLock<Vec<DirectConversation>>>,
 
@@ -47,6 +51,7 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
     fn clone(&self) -> Self {
         Self {
             ipfs: self.ipfs.clone(),
+            path: self.path.clone(),
             direct_conversation: self.direct_conversation.clone(),
             direct_stream: self.direct_stream.clone(),
             account: self.account.clone(),
@@ -82,6 +87,18 @@ impl DirectConversation {
             messages: Vec::new(),
         }
     }
+
+    pub fn from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
+        let fs = std::fs::File::open(path)?;
+        let conversation = serde_json::from_reader(fs)?;
+        Ok(conversation)
+    }
+
+    pub fn to_file<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
+        let mut fs = std::fs::OpenOptions::new().write(true).open(path)?;
+        serde_json::to_writer(&mut fs, self)?;
+        Ok(())
+    }
 }
 
 impl DirectConversation {
@@ -111,12 +128,14 @@ impl DirectConversation {
 impl<T: IpfsTypes> DirectMessageStore<T> {
     pub async fn new(
         ipfs: Ipfs<T>,
+        path: Option<PathBuf>,
         account: Arc<Mutex<Box<dyn MultiPass>>>,
     ) -> anyhow::Result<Self> {
         let direct_conversation = Arc::new(Default::default());
         let direct_stream = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
         let store = Self {
+            path,
             ipfs,
             direct_conversation,
             direct_stream,
@@ -426,6 +445,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .filter(|conv| conv.id() == conversation)
             .count()
             == 1;
+
         let subscribed = self
             .ipfs
             .pubsub_subscribed()
@@ -460,9 +480,26 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let mut message = Message::default();
         message.set_conversation_id(conversation);
         message.set_sender(SenderId::from_did_key(own_did.clone()));
-        message.set_value(messages);
+        message.set_value(messages.clone());
 
-        //TODO: Sign message
+        // TODO: Construct the message into a body of bytes that would be used for signing
+        // Note: Take into account that we only need specific parts of the struct
+        //       that does not mutate along with contents that would in the future (eg value field)
+        // let _construct = vec![
+        //     conversation.into_bytes().to_vec(),
+        //     own_did.to_string().as_bytes().to_vec(),
+        //     messages
+        //         .iter()
+        //         .map(|s| s.as_bytes())
+        //         .collect::<Vec<_>>()
+        //         .concat(),
+        // ]
+        // .concat();
+
+        // let signature = sign_serde(&own_did, &message)?;
+        // message
+        //     .metadata_mut()
+        //     .insert("signature".into(), bs58::encode(signature).into_string());
 
         let event = MessagingEvents::NewMessage(message);
 
@@ -493,8 +530,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .iter()
             .position(|convo| convo.id() == conversation)
             .ok_or(Error::InvalidConversation)?;
-
-        //TODO: Validate message being edit to be sure it belongs to the sender before editing
 
         let event = MessagingEvents::EditMessage(conversation, message_id, messages);
 
@@ -721,6 +756,7 @@ pub fn direct_message_event(
                 .get_mut(index)
                 .ok_or(Error::ArrayPositionNotFound)?;
 
+            //TODO: Validate signature.
             *message.value_mut() = val;
         }
         MessagingEvents::DeleteMessage(convo_id, message_id) => {
