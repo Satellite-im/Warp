@@ -113,7 +113,7 @@ impl DirectConversation {
     }
 
     pub fn delete<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
-        let path = path.as_ref();
+        let path = path.as_ref().join(self.id.to_string());
         if !path.is_file() {
             anyhow::bail!(Error::FileInvalid);
         }
@@ -242,6 +242,14 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
                                                 if let Err(_e) = store.ipfs.pubsub_unsubscribe(&conversation.topic()).await {
                                                     //TODO: Log
+                                                    continue
+                                                }
+
+                                                if let Some(path) = store.path.as_ref() {
+                                                    if let Err(_e) = conversation.delete(path) {
+                                                        //TODO: Log
+
+                                                    }
                                                 }
                                             }
                                         }
