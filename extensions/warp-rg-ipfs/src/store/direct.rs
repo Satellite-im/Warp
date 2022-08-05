@@ -38,9 +38,6 @@ pub struct DirectMessageStore<T: IpfsTypes> {
     // list of conversations
     direct_conversation: Arc<RwLock<Vec<DirectConversation>>>,
 
-    // list of streams linked to conversations
-    direct_stream: Arc<RwLock<HashMap<Uuid, SubscriptionStream>>>,
-
     // account instance
     account: Arc<Mutex<Box<dyn MultiPass>>>,
 
@@ -54,7 +51,6 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
             ipfs: self.ipfs.clone(),
             path: self.path.clone(),
             direct_conversation: self.direct_conversation.clone(),
-            direct_stream: self.direct_stream.clone(),
             account: self.account.clone(),
             queue: self.queue.clone(),
         }
@@ -162,13 +158,11 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             }
         }
         let direct_conversation = Arc::new(Default::default());
-        let direct_stream = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
         let store = Self {
             path,
             ipfs,
             direct_conversation,
-            direct_stream,
             account,
             queue,
         };
@@ -228,7 +222,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
                                                 // Maybe store the thread into a vector or map?
                                                 tokio::spawn(direct_conversation_process(store.clone(), id, stream));
-                                                // store.direct_stream.write().insert(id, stream);
                                             }
                                             ConversationEvents::DeleteConversation(id) => {
                                                 match store.exist(id).await {
