@@ -160,6 +160,7 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
     async fn get_messages(&self, conversation_id: Uuid, _: MessageOptions) -> Result<Vec<Message>> {
         self.direct_store
             .get_messages(conversation_id, None)
+            .await
             .map_err(Error::from)
     }
 

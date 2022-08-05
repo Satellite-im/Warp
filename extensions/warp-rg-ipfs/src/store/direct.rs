@@ -391,17 +391,22 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         anyhow::bail!(Error::InvalidConversation)
     }
 
-    pub fn get_messages(
+    pub async fn get_messages(
         &self,
         conversation: Uuid,
         range: Option<Range<usize>>,
     ) -> anyhow::Result<Vec<Message>> {
+        if !self.exist(conversation).await? {
+            anyhow::bail!(Error::InvalidConversation);
+        }
+
         let index = self
             .direct_conversation
             .read()
             .iter()
             .position(|convo| convo.id() == conversation)
             .ok_or(Error::InvalidConversation)?;
+
         if let Some(convo) = self.direct_conversation.read().get(index) {
             let mut messages = convo.messages().clone();
             let list = match range {
