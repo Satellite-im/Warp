@@ -4,6 +4,7 @@ use rustyline_async::{Readline, ReadlineError};
 use std::collections::HashMap;
 use std::io::Write;
 use std::str::FromStr;
+use std::time::Duration;
 use uuid::Uuid;
 use warp::crypto::DID;
 use warp::multipass::identity::Identifier;
@@ -85,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
     let message = r#"
         Use `/create <did>` to create the conversation
         In the other client do `/list-conversations` to list all active/opened conversations
-        In that same client do `/select-conversation <id>`
+        In that same client do `/set-conversation <id>`
         Send away on either client
 
         Note: You can only have one conversation per key
@@ -105,7 +106,8 @@ async fn main() -> anyhow::Result<()> {
     writeln!(stdout, "{message}")?;
 
     let mut convo_size: HashMap<Uuid, usize> = HashMap::new();
-
+    let mut convo_list = vec![];
+    let mut interval = tokio::time::interval(Duration::from_millis(500));
     loop {
         tokio::select! {
             //TODO: Optimize by clearing terminal and displaying all messages instead of getting last line
@@ -384,6 +386,15 @@ async fn main() -> anyhow::Result<()> {
                 Err(ReadlineError::Eof) => break,
                 Err(e) => {
                     writeln!(stdout, "Error: {}", e)?;
+                }
+            },
+            _ = interval.tick() => {
+                if let Ok(list) = chat.list_conversations().await {
+                    if !list.is_empty() && convo_list != list {
+                        topic = *(list.last().unwrap());
+                        convo_list = list;
+                        writeln!(stdout, "Set conversation to {}", topic)?;
+                    }
                 }
             }
         }
