@@ -1,8 +1,10 @@
+use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
 use std::collections::HashMap;
 use std::io::Write;
+use std::path::PathBuf;
 use std::str::FromStr;
 use uuid::Uuid;
 use warp::crypto::DID;
@@ -13,58 +15,76 @@ use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, SenderId};
 use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::config::IpfsSetting;
-use warp_mp_ipfs::ipfs_identity_temporary;
+use warp_mp_ipfs::{ipfs_identity_persistent, Persistent};
 use warp_pd_stretto::StrettoClient;
 use warp_rg_ipfs::IpfsMessaging;
-use warp_rg_ipfs::Temporary;
+
+#[derive(Debug, Parser)]
+#[clap(name = "")]
+struct Opt {
+    #[clap(long)]
+    path: PathBuf,
+}
 
 fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
     let storage = StrettoClient::new()?;
     Ok(Arc::new(Mutex::new(Box::new(storage))))
 }
 
-async fn create_account(
+async fn create_or_load_account(
+    path: PathBuf,
     cache: Arc<Mutex<Box<dyn PocketDimension>>>,
 ) -> anyhow::Result<Arc<Mutex<Box<dyn MultiPass>>>> {
-    let mut tesseract = Tesseract::default();
+    let mut tesseract = Tesseract::from_file(path.join("tesseract_store")).unwrap_or_default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
+    tesseract.set_file(path.join("tesseract_store"));
+    tesseract.set_autosave();
+
     let config = warp_mp_ipfs::config::MpIpfsConfig {
+        path: Some(path),
         ipfs_setting: IpfsSetting {
             mdns: warp_mp_ipfs::config::Mdns { enable: true },
             ..Default::default()
         },
         ..Default::default()
     };
-    let mut account = ipfs_identity_temporary(Some(config), tesseract, Some(cache)).await?;
-
-    account.create_identity(None, None)?;
+    let mut account = ipfs_identity_persistent(config, tesseract, Some(cache)).await?;
+    if account.get_own_identity().is_err() {
+        account.create_identity(None, None)?;
+    }
     Ok(Arc::new(Mutex::new(Box::new(account))))
 }
 
 #[allow(dead_code)]
-async fn create_rg(account: Arc<Mutex<Box<dyn MultiPass>>>) -> anyhow::Result<Box<dyn RayGun>> {
-    let p2p_chat = create_rg_direct(account).await?;
+async fn create_rg(
+    path: PathBuf,
+    account: Arc<Mutex<Box<dyn MultiPass>>>,
+) -> anyhow::Result<Box<dyn RayGun>> {
+    let p2p_chat = create_rg_direct(path, account).await?;
     Ok(Box::new(p2p_chat))
 }
 
 async fn create_rg_direct(
+    path: PathBuf,
     account: Arc<Mutex<Box<dyn MultiPass>>>,
-) -> anyhow::Result<IpfsMessaging<Temporary>> {
-    IpfsMessaging::new(None, account, None)
+) -> anyhow::Result<IpfsMessaging<Persistent>> {
+    IpfsMessaging::new(Some(path), account, None)
         .await
         .map_err(|e| anyhow::anyhow!(e))
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let opt = Opt::parse();
+
     let cache = cache_setup()?;
 
     println!("Creating or obtaining account...");
-    let new_account = create_account(cache.clone()).await?;
+    let new_account = create_or_load_account(opt.path.clone(), cache.clone()).await?;
 
-    let mut chat = create_rg_direct(new_account.clone()).await?;
+    let mut chat = create_rg_direct(opt.path, new_account.clone()).await?;
 
     println!("Obtaining identity....");
     let identity = new_account.lock().get_own_identity()?;
@@ -170,7 +190,7 @@ async fn main() -> anyhow::Result<()> {
                             let conversation_id = match cmd_line.next() {
                                 Some(id) => id.parse()?,
                                 None => {
-                                    writeln!(stdout, "/set <conversation-id>")?;
+                                    writeln!(stdout, "/set-conversation <conversation-id>")?;
                                     continue
                                 }
                             };
