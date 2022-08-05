@@ -173,10 +173,16 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             account,
             queue,
         };
+
         let interval_ms = 1000;
         let own_did = store.account.lock().decrypt_private_key(None)?;
 
         if let Some(path) = store.path.as_ref() {
+            if let Ok(queue) = tokio::fs::read(path.join("queue")).await {
+                if let Ok(queue) = serde_json::from_slice(&queue) {
+                    *store.queue.write() = queue;
+                }
+            }
             if path.is_dir() {
                 for entry in std::fs::read_dir(path)? {
                     let entry = entry?;
@@ -218,7 +224,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                 let list = [own_did.clone(), peer];
                                                 let convo = DirectConversation::new_with_id(id, list);
 
-                                                let stream = match store.ipfs.pubsub_subscribe(format!("direct/{}", id)).await {
+                                                let stream = match store.ipfs.pubsub_subscribe(convo.topic()).await {
                                                     Ok(stream) => stream,
                                                     Err(_e) => {
                                                         //TODO: Log
@@ -227,7 +233,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                 };
                                                 store.direct_conversation.write().push(convo);
 
-                                                // Maybe store the thread into a vector or map?
                                                 tokio::spawn(direct_conversation_process(store.clone(), id, stream));
                                             }
                                             ConversationEvents::DeleteConversation(id) => {
@@ -255,7 +260,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                 if let Some(path) = store.path.as_ref() {
                                                     if let Err(_e) = conversation.delete(path) {
                                                         //TODO: Log
-
                                                     }
                                                 }
                                             }
@@ -294,6 +298,18 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                     };
 
                                     let _ = store.queue.write().remove(index);
+                                    if let Some(path) = store.path.as_ref() {
+                                        let bytes = match serde_json::to_vec(&*store.queue.read()) {
+                                            Ok(bytes) => bytes,
+                                            Err(_) => {
+                                                //TODO: Log
+                                                continue;
+                                            }
+                                        };
+                                        if let Err(_e) = std::fs::write(path.join("queue"), bytes) {
+                                            //TODO: Log
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -425,16 +441,42 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             match peers.contains(&peer_id) {
                 true => {
                     let bytes = serde_json::to_vec(&data)?;
-                    self.ipfs
+                    if let Err(_e) = self
+                        .ipfs
                         .pubsub_publish(DIRECT_BROADCAST.into(), bytes)
-                        .await?;
+                        .await
+                    {
+                        //TODO: Log
+                        //Note: If the error is related to peer not available then we should push this to queue but if
+                        //      its due to the message limit being reached we should probably break up the message to fix into
+                        //      "max_transmit_size" within rust-libp2p gossipsub
+                        //      For now we will queue the message if we hit an error
+                        if let Err(_e) = self
+                            .queue_event(Queue::Direct(
+                                conversation.id(),
+                                peer_id,
+                                DIRECT_BROADCAST.into(),
+                                data,
+                            ))
+                            .await
+                        {
+                            //TODO: Log
+                        }
+                    }
                 }
-                false => self.queue.write().push(Queue::Direct(
-                    conversation.id(),
-                    peer_id,
-                    DIRECT_BROADCAST.into(),
-                    data,
-                )),
+                false => {
+                    if let Err(_e) = self
+                        .queue_event(Queue::Direct(
+                            conversation.id(),
+                            peer_id,
+                            DIRECT_BROADCAST.into(),
+                            data,
+                        ))
+                        .await
+                    {
+                        //TODO: Log
+                    }
+                }
             };
         }
         if let Some(path) = self.path.as_ref() {
@@ -796,15 +838,34 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         match peers.contains(&peer_id) {
             true => {
                 let bytes = serde_json::to_vec(&data)?;
-                self.ipfs.pubsub_publish(convo.topic(), bytes).await?;
+                if let Err(_e) = self.ipfs.pubsub_publish(convo.topic(), bytes).await {
+                    if let Err(_e) = self
+                        .queue_event(Queue::Direct(conversation, peer_id, convo.topic(), data))
+                        .await
+                    {
+                        //TODO: Log
+                    }
+                }
             }
             false => {
-                self.queue
-                    .write()
-                    .push(Queue::Direct(conversation, peer_id, convo.topic(), data))
+                if let Err(_e) = self
+                    .queue_event(Queue::Direct(conversation, peer_id, convo.topic(), data))
+                    .await
+                {
+                    //TODO: Log
+                }
             }
         };
 
+        Ok(())
+    }
+
+    async fn queue_event(&mut self, queue: Queue) -> anyhow::Result<()> {
+        self.queue.write().push(queue);
+        if let Some(path) = self.path.as_ref() {
+            let bytes = serde_json::to_vec(&*self.queue.read())?;
+            tokio::fs::write(path.join("queue"), bytes).await?;
+        }
         Ok(())
     }
 }
