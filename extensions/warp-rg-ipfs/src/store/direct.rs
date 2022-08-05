@@ -24,6 +24,8 @@ use warp::sync::{Arc, Mutex, RwLock};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender};
 
+use crate::Persistent;
+
 use super::{
     did_to_libp2p_pub, libp2p_pub_to_did, ConversationEvents, MessagingEvents, DIRECT_BROADCAST,
 };
@@ -152,6 +154,11 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         path: Option<PathBuf>,
         account: Arc<Mutex<Box<dyn MultiPass>>>,
     ) -> anyhow::Result<Self> {
+        let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
+            true => path,
+            false => None,
+        };
+
         if let Some(path) = path.as_ref() {
             if !path.exists() {
                 tokio::fs::create_dir_all(path).await?;
