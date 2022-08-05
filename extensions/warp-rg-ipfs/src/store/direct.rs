@@ -8,6 +8,7 @@ use std::time::Duration;
 use futures::{FutureExt, StreamExt};
 use ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream, Types};
 
+use libipld::IpldCodec;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp::crypto::curve25519_dalek::traits::Identity;
@@ -88,15 +89,39 @@ impl DirectConversation {
         }
     }
 
-    pub fn from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
+    pub fn from_file<P: AsRef<Path>>(path: P, key: &DID) -> anyhow::Result<Self> {
         let fs = std::fs::File::open(path)?;
-        let conversation = serde_json::from_reader(fs)?;
+        let data: Sata = serde_json::from_reader(fs)?;
+        let bytes = data.decrypt::<Vec<u8>>(key.as_ref())?;
+        let conversation = serde_json::from_slice(&bytes)?;
         Ok(conversation)
     }
 
-    pub fn to_file<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
-        let mut fs = std::fs::OpenOptions::new().write(true).open(path)?;
-        serde_json::to_writer(&mut fs, self)?;
+    pub fn to_file<P: AsRef<Path>>(&self, path: P, key: &DID) -> anyhow::Result<()> {
+        let mut fs = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(path.as_ref().join(self.id.to_string()))?;
+
+        let mut data = Sata::default();
+        data.add_recipient(key.as_ref())?;
+        let data = data.encrypt(
+            IpldCodec::DagJson,
+            key.as_ref(),
+            warp::sata::Kind::Reference,
+            serde_json::to_vec(self)?,
+        )?;
+
+        serde_json::to_writer(&mut fs, &data)?;
+        Ok(())
+    }
+
+    pub fn delete<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
+        let path = path.as_ref();
+        if !path.is_file() {
+            anyhow::bail!(Error::FileInvalid);
+        }
+        std::fs::remove_file(path)?;
         Ok(())
     }
 }
@@ -131,6 +156,11 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         path: Option<PathBuf>,
         account: Arc<Mutex<Box<dyn MultiPass>>>,
     ) -> anyhow::Result<Self> {
+        if let Some(path) = path.as_ref() {
+            if !path.exists() {
+                tokio::fs::create_dir_all(path).await?;
+            }
+        }
         let direct_conversation = Arc::new(Default::default());
         let direct_stream = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
@@ -144,6 +174,19 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         };
         let interval_ms = 1000;
         let own_did = store.account.lock().decrypt_private_key(None)?;
+
+        if let Some(path) = store.path.as_ref() {
+            if path.is_dir() {
+                for entry in std::fs::read_dir(path)? {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if path.is_file() {
+                        let conversation = DirectConversation::from_file(&path, &own_did)?;
+                        store.direct_conversation.write().push(conversation);
+                    }
+                }
+            }
+        }
 
         let stream = store.ipfs.pubsub_subscribe(DIRECT_BROADCAST.into()).await?;
 
@@ -386,6 +429,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 )),
             };
         }
+        if let Some(path) = self.path.as_ref() {
+            conversation.delete(path)?;
+        }
         Ok(conversation)
     }
 
@@ -505,6 +551,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
+            if let Some(path) = self.path.as_ref() {
+                conversation.to_file(path, &own_did)?;
+            }
         }
 
         self.send_event(conversation, event).await
@@ -535,6 +584,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
+            if let Some(path) = self.path.as_ref() {
+                let own_did = self.account.lock().decrypt_private_key(None)?;
+                conversation.to_file(path, &own_did)?;
+            }
         }
 
         self.send_event(conversation, event).await
@@ -572,6 +625,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::NewMessage(message);
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
+            if let Some(path) = self.path.as_ref() {
+                conversation.to_file(path, &own_did)?;
+            }
         }
 
         self.send_event(conversation, event).await
@@ -597,6 +653,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::DeleteMessage(conversation, message_id);
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
+            if let Some(path) = self.path.as_ref() {
+                let own_did = self.account.lock().decrypt_private_key(None)?;
+                conversation.to_file(path, &own_did)?;
+            }
         }
 
         if broadcast {
@@ -618,7 +678,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let own_did = self.account.lock().decrypt_private_key(None)?;
 
-        let sender = SenderId::from_did_key(own_did);
+        let sender = SenderId::from_did_key(own_did.clone());
 
         let index = self
             .direct_conversation
@@ -629,6 +689,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::PinMessage(conversation, sender, message_id, state);
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
+            if let Some(path) = self.path.as_ref() {
+                conversation.to_file(path, &own_did)?;
+            }
         }
 
         self.send_event(conversation, event).await
@@ -659,7 +722,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let own_did = self.account.lock().decrypt_private_key(None)?;
 
-        let sender = SenderId::from_did_key(own_did);
+        let sender = SenderId::from_did_key(own_did.clone());
 
         let event = MessagingEvents::ReactMessage(conversation, sender, message_id, state, emoji);
 
@@ -672,6 +735,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
+            if let Some(path) = self.path.as_ref() {
+                conversation.to_file(path, &own_did)?;
+            }
         }
 
         self.send_event(conversation, event).await

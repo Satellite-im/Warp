@@ -90,7 +90,12 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
                 ipfs
             }
         };
-        let direct_store = DirectMessageStore::new(ipfs.clone(), path, account.clone()).await?;
+        let direct_store = DirectMessageStore::new(
+            ipfs.clone(),
+            path.map(|p| p.join("messages")),
+            account.clone(),
+        )
+        .await?;
         let messaging = IpfsMessaging {
             account,
             cache,
