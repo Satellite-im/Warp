@@ -4,7 +4,7 @@ use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
 use uuid::Uuid;
@@ -17,7 +17,7 @@ use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::config::IpfsSetting;
 use warp_mp_ipfs::{ipfs_identity_persistent, Persistent};
-use warp_pd_stretto::StrettoClient;
+use warp_pd_flatfile::FlatfileStorage;
 use warp_rg_ipfs::IpfsMessaging;
 
 #[derive(Debug, Parser)]
@@ -27,8 +27,11 @@ struct Opt {
     path: PathBuf,
 }
 
-fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
-    let storage = StrettoClient::new()?;
+fn cache_setup<P: AsRef<Path>>(
+    root: P,
+    index: P,
+) -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
+    let storage = FlatfileStorage::new_with_index_file(root, index)?;
     Ok(Arc::new(Mutex::new(Box::new(storage))))
 }
 
@@ -79,8 +82,8 @@ async fn create_rg_direct(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
-
-    let cache = cache_setup()?;
+    println!("{:?}", opt.path);
+    let cache = cache_setup(&opt.path.join("cache"), &PathBuf::from("cache-index"))?;
 
     println!("Creating or obtaining account...");
     let new_account = create_or_load_account(opt.path.clone(), cache.clone()).await?;
