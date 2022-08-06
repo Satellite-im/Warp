@@ -13,8 +13,8 @@ use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, SenderId};
 use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
-use warp_mp_solana::config::IpfsSetting;
 use warp_mp_solana::config::MpSolanaConfig;
+use warp_mp_solana::config::{IpfsSetting, StoreSetting};
 use warp_mp_solana::SolanaAccount;
 use warp_pd_stretto::StrettoClient;
 use warp_rg_ipfs::IpfsMessaging;
@@ -35,6 +35,10 @@ async fn create_account(
     let config = MpSolanaConfig {
         ipfs_setting: IpfsSetting {
             mdns: warp_mp_solana::config::Mdns { enable: true },
+            store_setting: StoreSetting {
+                broadcast_interval: 100,
+                ..Default::default()
+            },
             ..Default::default()
         },
     };
