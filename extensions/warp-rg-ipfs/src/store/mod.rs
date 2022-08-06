@@ -2,6 +2,9 @@
 #![allow(dead_code)]
 pub mod direct;
 
+use std::time::Duration;
+
+use ipfs::IpfsTypes;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use uuid::Uuid;
 use warp::{
@@ -67,4 +70,46 @@ fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow
         .verify(&bytes, signature)
         .map_err(|e| anyhow::anyhow!("{:?}", e))?;
     Ok(())
+}
+
+pub async fn topic_discovery<T: IpfsTypes, S: AsRef<str>>(
+    ipfs: ipfs::Ipfs<T>,
+    topic: S,
+) -> anyhow::Result<()> {
+    let topic = topic.as_ref();
+    let topic_hash = sha256_hash(format!("gossipsub:{}", topic).as_bytes(), None);
+    let cid = ipfs.put_dag(libipld::ipld!(topic_hash)).await?;
+    ipfs.provide(cid).await?;
+
+    loop {
+        if let Ok(list) = ipfs.get_providers(cid).await {
+            for peer in list {
+                // Check to see if we are already connected to the peer
+                if let Ok(connections) = ipfs.peers().await {
+                    if connections
+                        .iter()
+                        .filter(|connection| connection.addr.peer_id == peer)
+                        .count()
+                        >= 1
+                    {
+                        continue;
+                    }
+                }
+
+                // Get address(es) of peer and connect to them
+                if let Ok(addrs) = ipfs.find_peer(peer).await {
+                    for addr in addrs {
+                        let addr = addr.with(ipfs::Protocol::P2p(peer.into()));
+                        if let Ok(addr) = addr.try_into() {
+                            if let Err(_e) = ipfs.connect(addr).await {
+                                //TODO: Log
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }

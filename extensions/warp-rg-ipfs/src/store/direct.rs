@@ -27,7 +27,8 @@ use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender}
 use crate::Persistent;
 
 use super::{
-    did_to_libp2p_pub, libp2p_pub_to_did, ConversationEvents, MessagingEvents, DIRECT_BROADCAST,
+    did_to_libp2p_pub, libp2p_pub_to_did, topic_discovery, ConversationEvents, MessagingEvents,
+    DIRECT_BROADCAST,
 };
 
 pub struct DirectMessageStore<T: IpfsTypes> {
@@ -154,6 +155,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         ipfs: Ipfs<T>,
         path: Option<PathBuf>,
         account: Arc<Mutex<Box<dyn MultiPass>>>,
+        discovery: bool,
     ) -> anyhow::Result<Self> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -220,6 +222,15 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     }
                 }
             }
+        }
+
+        if discovery {
+            let ipfs = store.ipfs.clone();
+            tokio::spawn(async {
+                if let Err(_e) = topic_discovery(ipfs, DIRECT_BROADCAST).await {
+                    //TODO: Log
+                }
+            });
         }
 
         let stream = store.ipfs.pubsub_subscribe(DIRECT_BROADCAST.into()).await?;

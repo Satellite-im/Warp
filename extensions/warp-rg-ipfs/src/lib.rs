@@ -94,6 +94,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             ipfs.clone(),
             path.map(|p| p.join("messages")),
             account.clone(),
+            false,
         )
         .await?;
         let messaging = IpfsMessaging {
