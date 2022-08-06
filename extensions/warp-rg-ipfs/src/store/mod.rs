@@ -16,7 +16,7 @@ pub const GROUP_BROADCAST: &str = "group/broadcast";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConversationEvents {
-    NewConversation(Uuid, DID),
+    NewConversation(Uuid, Box<DID>),
     DeleteConversation(Uuid),
 }
 

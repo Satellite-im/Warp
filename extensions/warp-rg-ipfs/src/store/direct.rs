@@ -248,7 +248,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                     }
                                                 };
 
-                                                let list = [did.clone(), peer];
+                                                let list = [did.clone(), *peer];
                                                 let convo = DirectConversation::new_with_id(id, list);
 
                                                 let stream = match store.ipfs.pubsub_subscribe(convo.topic()).await {
@@ -400,7 +400,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             warp::sata::Kind::Reference,
             serde_json::to_vec(&ConversationEvents::NewConversation(
                 convo_id,
-                own_did.clone(),
+                Box::new(own_did.clone()),
             ))?,
         )?;
 
@@ -784,7 +784,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
             if let Some(path) = self.path.as_ref() {
-                conversation.to_file(path, &own_did)?;
+                conversation.to_file(path, own_did)?;
             }
         }
 
@@ -830,7 +830,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
             if let Some(path) = self.path.as_ref() {
-                conversation.to_file(path, &own_did)?;
+                conversation.to_file(path, own_did)?;
             }
         }
 
