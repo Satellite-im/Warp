@@ -45,6 +45,9 @@ pub struct DirectMessageStore<T: IpfsTypes> {
 
     // Queue
     queue: Arc<RwLock<Vec<Queue>>>,
+
+    // DID
+    did: Arc<DID>,
 }
 
 impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
@@ -55,6 +58,7 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
             direct_conversation: self.direct_conversation.clone(),
             account: self.account.clone(),
             queue: self.queue.clone(),
+            did: self.did.clone(),
         }
     }
 }
@@ -163,16 +167,18 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         }
         let direct_conversation = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
+        let did = Arc::new(account.lock().decrypt_private_key(None)?);
         let store = Self {
             path,
             ipfs,
             direct_conversation,
             account,
             queue,
+            did,
         };
 
+        //TODO: Move to be a configuration
         let interval_ms = 1000;
-        let own_did = store.account.lock().decrypt_private_key(None)?;
 
         if let Some(path) = store.path.as_ref() {
             if let Ok(queue) = tokio::fs::read(path.join("queue")).await {
@@ -189,7 +195,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         if path.ends_with("queue") {
                             continue;
                         }
-                        match DirectConversation::from_file(&path, &own_did) {
+                        match DirectConversation::from_file(&path, &*store.did) {
                             Ok(conversation) => {
                                 let id = conversation.id();
                                 let stream =
@@ -221,7 +227,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let inner = store.clone();
         tokio::spawn(async move {
             let store = inner;
-
+            let did = &*store.did;
             futures::pin_mut!(stream);
             let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
             loop {
@@ -229,7 +235,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     message = stream.next() => {
                         if let Some(message) = message {
                             if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
-                                if let Ok(data) = data.decrypt::<Vec<u8>>(own_did.as_ref()) {
+                                if let Ok(data) = data.decrypt::<Vec<u8>>(did.as_ref()) {
                                     if let Ok(events) = serde_json::from_slice::<ConversationEvents>(&data) {
                                         match events {
                                             ConversationEvents::NewConversation(id, peer) => {
@@ -242,7 +248,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                     }
                                                 };
 
-                                                let list = [own_did.clone(), peer];
+                                                let list = [did.clone(), peer];
                                                 let convo = DirectConversation::new_with_id(id, list);
 
                                                 let stream = match store.ipfs.pubsub_subscribe(convo.topic()).await {
@@ -291,7 +297,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         }
                     }
                     _ = interval.tick() => {
-                        // let mut clearing = vec![];
                         let list = store.queue.read().clone();
                         for item in list.iter() {
                             let Queue::Direct { id, peer, topic, data } = item;
@@ -357,9 +362,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         // maybe only start conversation with one we are friends with?
         // self.account.lock().has_friend(did_key)?;
 
-        let own_did = self.account.lock().decrypt_private_key(None)?;
+        let own_did = &*self.did;
         for convo in &*self.direct_conversation.read() {
-            if convo.recipients.contains(did_key) && convo.recipients.contains(&own_did) {
+            if convo.recipients.contains(did_key) && convo.recipients.contains(own_did) {
                 anyhow::bail!("Conversation exist with did key");
             }
         }
@@ -454,7 +459,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         if broadcast {
             let recipients = conversation.recipients();
 
-            let own_did = self.account.lock().decrypt_private_key(None)?;
+            let own_did = &*self.did;
 
             let recipient: &DID = match recipients.iter().filter(|did| own_did.ne(did)).last() {
                 Some(r) => r,
@@ -611,7 +616,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .position(|convo| convo.id() == conversation)
             .ok_or(Error::InvalidConversation)?;
 
-        let own_did = self.account.lock().decrypt_private_key(None)?;
+        let own_did = &*self.did.clone();
 
         let mut message = Message::default();
         message.set_conversation_id(conversation);
@@ -642,7 +647,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
             if let Some(path) = self.path.as_ref() {
-                conversation.to_file(path, &own_did)?;
+                conversation.to_file(path, own_did)?;
             }
         }
 
@@ -675,8 +680,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
             if let Some(path) = self.path.as_ref() {
-                let own_did = self.account.lock().decrypt_private_key(None)?;
-                conversation.to_file(path, &own_did)?;
+                conversation.to_file(path, &*self.did)?;
             }
         }
 
@@ -704,7 +708,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .position(|convo| convo.id() == conversation)
             .ok_or(Error::InvalidConversation)?;
 
-        let own_did = self.account.lock().decrypt_private_key(None)?;
+        let own_did = &*self.did;
 
         let mut message = Message::default();
         message.set_conversation_id(conversation);
@@ -716,7 +720,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
             if let Some(path) = self.path.as_ref() {
-                conversation.to_file(path, &own_did)?;
+                conversation.to_file(path, own_did)?;
             }
         }
 
@@ -744,8 +748,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
             if let Some(path) = self.path.as_ref() {
-                let own_did = self.account.lock().decrypt_private_key(None)?;
-                conversation.to_file(path, &own_did)?;
+                conversation.to_file(path, &*self.did)?;
             }
         }
 
@@ -766,7 +769,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             anyhow::bail!(Error::InvalidConversation)
         }
 
-        let own_did = self.account.lock().decrypt_private_key(None)?;
+        let own_did = &*self.did;
 
         let sender = SenderId::from_did_key(own_did.clone());
 
@@ -810,7 +813,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             anyhow::bail!(Error::InvalidConversation)
         }
 
-        let own_did = self.account.lock().decrypt_private_key(None)?;
+        let own_did = &*self.did;
 
         let sender = SenderId::from_did_key(own_did.clone());
 
@@ -854,7 +857,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let recipients = convo.recipients();
 
-        let own_did = self.account.lock().decrypt_private_key(None)?;
+        let own_did = &*self.did;
 
         let recipient: &DID = match recipients.iter().filter(|did| own_did.ne(did)).last() {
             Some(r) => r,
@@ -1020,13 +1023,7 @@ async fn direct_conversation_process<T: IpfsTypes>(
     stream: SubscriptionStream,
 ) {
     futures::pin_mut!(stream);
-    let own_did = match store.account.lock().decrypt_private_key(None) {
-        Ok(did) => did,
-        Err(_e) => {
-            //TODO: Log
-            return;
-        }
-    };
+    let own_did = &*store.did;
 
     while let Some(stream) = stream.next().await {
         if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
@@ -1055,7 +1052,7 @@ async fn direct_conversation_process<T: IpfsTypes>(
                     }
 
                     if let Some(path) = store.path.as_ref() {
-                        if let Err(_e) = convo.to_file(path, &own_did) {
+                        if let Err(_e) = convo.to_file(path, own_did) {
                             //TODO: Log
                         }
                     }
