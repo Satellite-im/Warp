@@ -779,6 +779,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .iter()
             .position(|convo| convo.id() == conversation)
             .ok_or(Error::InvalidConversation)?;
+
         let event = MessagingEvents::PinMessage(conversation, sender, message_id, state);
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
@@ -928,11 +929,9 @@ pub fn direct_message_event(
             let index = messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
-                .ok_or(Error::ArrayPositionNotFound)?;
+                .ok_or(Error::MessageNotFound)?;
 
-            let message = messages
-                .get_mut(index)
-                .ok_or(Error::ArrayPositionNotFound)?;
+            let message = messages.get_mut(index).ok_or(Error::MessageNotFound)?;
 
             //TODO: Validate signature.
             *message.value_mut() = val;
