@@ -90,6 +90,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
                 ipfs
             }
         };
+
         let direct_store = DirectMessageStore::new(
             ipfs.clone(),
             path.map(|p| p.join("messages")),
@@ -97,6 +98,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             false,
         )
         .await?;
+
         let messaging = IpfsMessaging {
             account,
             cache,
@@ -253,3 +255,81 @@ impl<T: IpfsTypes> GroupChat for IpfsMessaging<T> {}
 impl<T: IpfsTypes> GroupChatManagement for IpfsMessaging<T> {}
 
 impl<T: IpfsTypes> GroupInvite for IpfsMessaging<T> {}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ffi {
+    use crate::IpfsMessaging;
+    use crate::{Persistent, Temporary};
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
+    use std::path::PathBuf;
+    use warp::error::Error;
+    use warp::ffi::FFIResult;
+    use warp::multipass::MultiPassAdapter;
+    use warp::pocket_dimension::PocketDimensionAdapter;
+    use warp::raygun::RayGunAdapter;
+    use warp::sync::{Arc, Mutex};
+    use warp::{async_on_block, runtime_handle};
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn warp_rg_ipfs_temporary_new(
+        account: *const MultiPassAdapter,
+        cache: *const PocketDimensionAdapter,
+    ) -> FFIResult<RayGunAdapter> {
+        if account.is_null() {
+            return FFIResult::err(Error::MultiPassExtensionUnavailable);
+        }
+
+        let cache = match cache.is_null() {
+            true => None,
+            false => Some(&*cache),
+        };
+
+        let account = &*account;
+
+        match async_on_block(IpfsMessaging::<Temporary>::new(
+            None,
+            account.get_inner().clone(),
+            cache.map(|p| p.inner()),
+        )) {
+            Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(Mutex::new(Box::new(a))))),
+            Err(e) => FFIResult::err(Error::from(e)),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn warp_rg_ipfs_persistent_new(
+        account: *const MultiPassAdapter,
+        cache: *const PocketDimensionAdapter,
+        path: *const c_char,
+    ) -> FFIResult<RayGunAdapter> {
+        if account.is_null() {
+            return FFIResult::err(Error::MultiPassExtensionUnavailable);
+        }
+
+        let cache = match cache.is_null() {
+            true => None,
+            false => Some(&*cache),
+        };
+
+        let path = match path.is_null() {
+            true => return FFIResult::err(Error::InvalidPath),
+            false => Some(PathBuf::from(
+                CStr::from_ptr(path).to_string_lossy().to_string(),
+            )),
+        };
+
+        let account = &*account;
+
+        match async_on_block(IpfsMessaging::<Persistent>::new(
+            path,
+            account.get_inner().clone(),
+            cache.map(|p| p.inner()),
+        )) {
+            Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(Mutex::new(Box::new(a))))),
+            Err(e) => FFIResult::err(Error::from(e)),
+        }
+    }
+}
