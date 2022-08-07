@@ -667,7 +667,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         //     .metadata_mut()
         //     .insert("signature".into(), bs58::encode(signature).into_string());
 
-        let event = MessagingEvents::NewMessage(message);
+        let event = MessagingEvents::New(message);
 
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
@@ -700,7 +700,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .position(|convo| convo.id() == conversation)
             .ok_or(Error::InvalidConversation)?;
 
-        let event = MessagingEvents::EditMessage(conversation, message_id, messages);
+        let event = MessagingEvents::Edit(conversation, message_id, messages);
 
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
@@ -741,7 +741,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         message.set_value(messages);
         message.set_replied(Some(message_id));
 
-        let event = MessagingEvents::NewMessage(message);
+        let event = MessagingEvents::New(message);
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
             if let Some(path) = self.path.as_ref() {
@@ -769,7 +769,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .position(|convo| convo.id() == conversation)
             .ok_or(Error::InvalidConversation)?;
 
-        let event = MessagingEvents::DeleteMessage(conversation, message_id);
+        let event = MessagingEvents::Delete(conversation, message_id);
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
             if let Some(path) = self.path.as_ref() {
@@ -805,7 +805,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .position(|convo| convo.id() == conversation)
             .ok_or(Error::InvalidConversation)?;
 
-        let event = MessagingEvents::PinMessage(conversation, sender, message_id, state);
+        let event = MessagingEvents::Pin(conversation, sender, message_id, state);
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event)?;
             if let Some(path) = self.path.as_ref() {
@@ -843,7 +843,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let sender = SenderId::from_did_key(own_did.clone());
 
-        let event = MessagingEvents::ReactMessage(conversation, sender, message_id, state, emoji);
+        let event = MessagingEvents::React(conversation, sender, message_id, state, emoji);
 
         let index = self
             .direct_conversation
@@ -944,13 +944,13 @@ pub fn direct_message_event(
     events: &MessagingEvents,
 ) -> Result<(), Error> {
     match events.clone() {
-        MessagingEvents::NewMessage(message) => {
+        MessagingEvents::New(message) => {
             if messages.contains(&message) {
                 return Err(Error::MessageFound);
             }
             messages.push(message)
         }
-        MessagingEvents::EditMessage(convo_id, message_id, val) => {
+        MessagingEvents::Edit(convo_id, message_id, val) => {
             let index = messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
@@ -961,7 +961,7 @@ pub fn direct_message_event(
             //TODO: Validate signature.
             *message.value_mut() = val;
         }
-        MessagingEvents::DeleteMessage(convo_id, message_id) => {
+        MessagingEvents::Delete(convo_id, message_id) => {
             let index = messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
@@ -969,7 +969,7 @@ pub fn direct_message_event(
 
             let _ = messages.remove(index);
         }
-        MessagingEvents::PinMessage(convo_id, _, message_id, state) => {
+        MessagingEvents::Pin(convo_id, _, message_id, state) => {
             let index = messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
@@ -982,7 +982,7 @@ pub fn direct_message_event(
                 PinState::Unpin => *message.pinned_mut() = false,
             }
         }
-        MessagingEvents::ReactMessage(convo_id, sender, message_id, state, emoji) => {
+        MessagingEvents::React(convo_id, sender, message_id, state, emoji) => {
             let index = messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)

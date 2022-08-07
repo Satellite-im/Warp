@@ -25,11 +25,11 @@ pub enum ConversationEvents {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessagingEvents {
-    NewMessage(Message),
-    EditMessage(Uuid, Uuid, Vec<String>),
-    DeleteMessage(Uuid, Uuid),
-    PinMessage(Uuid, SenderId, Uuid, PinState),
-    ReactMessage(Uuid, SenderId, Uuid, ReactionState, String),
+    New(Message),
+    Edit(Uuid, Uuid, Vec<String>),
+    Delete(Uuid, Uuid),
+    Pin(Uuid, SenderId, Uuid, PinState),
+    React(Uuid, SenderId, Uuid, ReactionState, String),
 }
 
 pub fn generate_uuid(generate: &str) -> Uuid {
