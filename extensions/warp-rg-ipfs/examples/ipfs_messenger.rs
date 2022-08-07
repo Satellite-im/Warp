@@ -65,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
     println!("Creating or obtaining account...");
     let new_account = create_account(cache.clone()).await?;
 
-    let mut chat = create_rg_direct(new_account.clone()).await?;
+    let mut chat = create_rg(new_account.clone()).await?;
 
     println!("Obtaining identity....");
     let identity = new_account.lock().get_own_identity()?;
@@ -164,7 +164,7 @@ async fn main() -> anyhow::Result<()> {
                                     continue
                                 }
                             };
-                            if let Err(e) = chat.delete_conversation(conversation_id).await {
+                            if let Err(e) = chat.delete(conversation_id, None).await {
                                     writeln!(stdout, "Error deleting conversation: {e}")?;
                                     continue
                             }

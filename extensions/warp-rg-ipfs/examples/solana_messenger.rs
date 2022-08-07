@@ -169,7 +169,7 @@ async fn main() -> anyhow::Result<()> {
                                     continue
                                 }
                             };
-                            if let Err(e) = chat.delete_conversation(conversation_id).await {
+                            if let Err(e) = chat.delete(conversation_id, None).await {
                                     writeln!(stdout, "Error deleting conversation: {e}")?;
                                     continue
                             }

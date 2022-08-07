@@ -143,28 +143,19 @@ impl<T: IpfsTypes> SingleHandle for IpfsMessaging<T> {
     }
 }
 
-impl<T: IpfsTypes> IpfsMessaging<T> {
-    pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Uuid> {
+#[async_trait::async_trait]
+impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
+    async fn create_conversation(&mut self, did_key: &DID) -> Result<Uuid> {
         self.direct_store
             .create_conversation(did_key)
             .await
             .map_err(Error::from)
     }
 
-    pub async fn delete_conversation(&mut self, conversation_id: Uuid) -> Result<()> {
-        self.direct_store
-            .delete_conversation(conversation_id, true)
-            .await?;
-        Ok(())
-    }
-
-    pub async fn list_conversations(&self) -> Result<Vec<Uuid>> {
+    async fn list_conversations(&self) -> Result<Vec<Uuid>> {
         Ok(self.direct_store.list_conversations())
     }
-}
 
-#[async_trait::async_trait]
-impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
     async fn get_messages(&self, conversation_id: Uuid, _: MessageOptions) -> Result<Vec<Message>> {
         self.direct_store
             .get_messages(conversation_id, None)
@@ -192,12 +183,20 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         }
     }
 
-    //TODO: Mark message_id as optional to allow deleting conversation
-    async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()> {
-        self.direct_store
-            .delete_message(conversation_id, message_id, true)
-            .await
-            .map_err(Error::from)
+    async fn delete(&mut self, conversation_id: Uuid, message_id: Option<Uuid>) -> Result<()> {
+        match message_id {
+            Some(id) => self
+                .direct_store
+                .delete_message(conversation_id, id, true)
+                .await
+                .map_err(Error::from),
+            None => self
+                .direct_store
+                .delete_conversation(conversation_id, true)
+                .await
+                .map(|_| ())
+                .map_err(Error::from),
+        }
     }
 
     async fn react(
