@@ -10,6 +10,7 @@ use ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream, Types};
 
 use libipld::IpldCodec;
 use serde::{Deserialize, Serialize};
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 use warp::crypto::curve25519_dalek::traits::Identity;
 use warp::crypto::DID;
@@ -259,6 +260,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                     }
                                                 };
 
+                                                if let Ok(list) = store.account.lock().block_list() {
+                                                    if list.contains(&*peer) {
+                                                        continue
+                                                    }
+                                                }
+
                                                 let list = [did.clone(), *peer];
                                                 let convo = DirectConversation::new_with_id(id, list);
 
@@ -321,6 +328,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                             continue
                                         }
                                     };
+
                                     if let Err(_e) = store.ipfs.pubsub_publish(topic.clone(), bytes).await {
                                         //TODO: Log
                                         continue
@@ -372,6 +380,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     pub async fn create_conversation(&mut self, did_key: &DID) -> anyhow::Result<Uuid> {
         // maybe only start conversation with one we are friends with?
         // self.account.lock().has_friend(did_key)?;
+
+        if let Ok(list) = self.account.lock().block_list() {
+            if list.contains(did_key) {
+                anyhow::bail!(Error::PublicKeyIsBlocked);
+            }
+        }
 
         let own_did = &*self.did;
         for convo in &*self.direct_conversation.read() {
