@@ -309,6 +309,7 @@ pub enum EmbedState {
 
 #[async_trait::async_trait]
 pub trait RayGun: Extension + GroupChat + Sync + Send + SingleHandle {
+
     // Start a new conversation.
     async fn create_conversation(&mut self, _: &DID) -> Result<Uuid, Error> {
         Err(Error::Unimplemented)
