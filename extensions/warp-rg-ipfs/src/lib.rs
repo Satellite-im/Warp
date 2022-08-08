@@ -1,7 +1,9 @@
 #![allow(unused_imports)]
 
+pub mod config;
 mod store;
 
+use config::RgIpfsConfig;
 use futures::pin_mut;
 use futures::StreamExt;
 use ipfs::IpfsTypes;
@@ -56,10 +58,11 @@ pub struct IpfsMessaging<T: IpfsTypes> {
 
 impl<T: IpfsTypes> IpfsMessaging<T> {
     pub async fn new(
-        path: Option<PathBuf>,
+        config: Option<RgIpfsConfig>,
         account: Arc<Mutex<Box<dyn MultiPass>>>,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
+        let config = config.clone().unwrap_or_default();
         let ipfs_handle = match account.lock().handle() {
             Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
             _ => None,
@@ -75,13 +78,27 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
                     Keypair::Ed25519(id_secret.into())
                 };
 
-                let opts = IpfsOptions {
-                    keypair: keypair.clone(),
+                let mut opts = IpfsOptions {
+                    keypair,
+                    bootstrap: config.bootstrap,
+                    mdns: config.ipfs_setting.mdns.enable,
+                    listening_addrs: config.listen_on,
+                    dcutr: config.ipfs_setting.dcutr.enable,
+                    relay: config.ipfs_setting.relay_client.enable,
+                    relay_server: config.ipfs_setting.relay_server.enable,
                     ..Default::default()
                 };
 
-                if !opts.ipfs_path.exists() {
-                    tokio::fs::create_dir(opts.ipfs_path.clone()).await?;
+                if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
+                    // Create directory if it doesnt exist
+                    let path = config
+                        .path
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("\"path\" must be set"))?;
+                    opts.ipfs_path = path.clone();
+                    if !opts.ipfs_path.exists() {
+                        tokio::fs::create_dir(path).await?;
+                    }
                 }
 
                 let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
@@ -93,7 +110,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
 
         let direct_store = DirectMessageStore::new(
             ipfs.clone(),
-            path.map(|p| p.join("messages")),
+            config.path.map(|p| p.join("messages")),
             account.clone(),
             false,
         )
@@ -114,11 +131,6 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             .as_ref()
             .ok_or(Error::PocketDimensionExtensionUnavailable)?;
         Ok(cache.lock())
-    }
-
-    pub fn sender_id(&self) -> anyhow::Result<SenderId> {
-        let ident = self.account.lock().get_own_identity()?;
-        Ok(SenderId::from_did_key(ident.did_key()))
     }
 }
 
@@ -275,6 +287,7 @@ pub mod ffi {
     pub unsafe extern "C" fn warp_rg_ipfs_temporary_new(
         account: *const MultiPassAdapter,
         cache: *const PocketDimensionAdapter,
+        config: *const c_char,
     ) -> FFIResult<RayGunAdapter> {
         if account.is_null() {
             return FFIResult::err(Error::MultiPassExtensionUnavailable);
@@ -285,10 +298,20 @@ pub mod ffi {
             false => Some(&*cache),
         };
 
+        let config = match config.is_null() {
+            true => return FFIResult::err(Error::InvalidPath),
+            false => {
+                match serde_json::from_str(&CStr::from_ptr(config).to_string_lossy().to_string()) {
+                    Ok(c) => Some(c),
+                    Err(e) => return FFIResult::err(Error::from(e)),
+                }
+            }
+        };
+
         let account = &*account;
 
         match async_on_block(IpfsMessaging::<Temporary>::new(
-            None,
+            config,
             account.get_inner().clone(),
             cache.map(|p| p.inner()),
         )) {
@@ -302,7 +325,7 @@ pub mod ffi {
     pub unsafe extern "C" fn warp_rg_ipfs_persistent_new(
         account: *const MultiPassAdapter,
         cache: *const PocketDimensionAdapter,
-        path: *const c_char,
+        config: *const c_char,
     ) -> FFIResult<RayGunAdapter> {
         if account.is_null() {
             return FFIResult::err(Error::MultiPassExtensionUnavailable);
@@ -313,17 +336,20 @@ pub mod ffi {
             false => Some(&*cache),
         };
 
-        let path = match path.is_null() {
+        let config = match config.is_null() {
             true => return FFIResult::err(Error::InvalidPath),
-            false => Some(PathBuf::from(
-                CStr::from_ptr(path).to_string_lossy().to_string(),
-            )),
+            false => {
+                match serde_json::from_str(&CStr::from_ptr(config).to_string_lossy().to_string()) {
+                    Ok(c) => Some(c),
+                    Err(e) => return FFIResult::err(Error::from(e)),
+                }
+            }
         };
 
         let account = &*account;
 
         match async_on_block(IpfsMessaging::<Persistent>::new(
-            path,
+            config,
             account.get_inner().clone(),
             cache.map(|p| p.inner()),
         )) {

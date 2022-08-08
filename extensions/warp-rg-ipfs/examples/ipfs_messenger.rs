@@ -13,7 +13,7 @@ use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, SenderId};
 use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::config::IpfsSetting;
+use warp_mp_ipfs::config::{Autonat, Dcutr, IpfsSetting, RelayClient, StoreSetting};
 use warp_mp_ipfs::ipfs_identity_temporary;
 use warp_pd_stretto::StrettoClient;
 use warp_rg_ipfs::IpfsMessaging;
@@ -34,10 +34,25 @@ async fn create_account(
     let config = warp_mp_ipfs::config::MpIpfsConfig {
         ipfs_setting: IpfsSetting {
             mdns: warp_mp_ipfs::config::Mdns { enable: true },
+            relay_client: RelayClient {
+                enable: true,
+                ..Default::default()
+            },
+            dcutr: Dcutr { enable: true },
+            autonat: Autonat {
+                enable: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        store_setting: StoreSetting {
+            discovery: true,
+            broadcast_interval: 100,
             ..Default::default()
         },
         ..Default::default()
     };
+
     let mut account = ipfs_identity_temporary(Some(config), tesseract, Some(cache)).await?;
 
     account.create_identity(None, None)?;

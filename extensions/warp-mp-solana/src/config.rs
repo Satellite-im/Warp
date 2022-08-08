@@ -21,7 +21,7 @@ pub struct Autonat {
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct RelayClient {
     pub enable: bool,
-    pub relay_address: Option<Multiaddr>,
+    pub relay_address: Vec<Multiaddr>,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
@@ -96,7 +96,15 @@ impl Default for MpSolanaConfig {
                 },
                 relay_client: RelayClient {
                     enable: false,
-                    relay_address: None,
+                    relay_address: vec![
+                "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN/p2p-circuit",
+                "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa/p2p-circuit",
+                "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb/p2p-circuit",
+                "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt/p2p-circuit",
+            ]
+                    .iter()
+                    .filter_map(|s| Multiaddr::from_str(s).ok())
+                    .collect::<Vec<_>>(),
                 },
                 relay_server: RelayServer { enable: false },
                 dcutr: Dcutr { enable: false },
@@ -115,11 +123,6 @@ impl MpSolanaConfig {
     pub fn development() -> MpSolanaConfig {
         MpSolanaConfig {
             ipfs_setting: IpfsSetting {
-                path: None,
-                listen_on: vec!["/ip4/127.0.0.1/tcp/0"]
-                    .iter()
-                    .filter_map(|s| Multiaddr::from_str(s).ok())
-                    .collect::<Vec<_>>(),
                 mdns: Mdns { enable: true },
                 store_setting: StoreSetting {
                     broadcast_interval: 50,
@@ -135,10 +138,6 @@ impl MpSolanaConfig {
         MpSolanaConfig {
             ipfs_setting: IpfsSetting {
                 path: None,
-                listen_on: vec!["/ip4/0.0.0.0/tcp/0", "/ip6/::/tcp/0"]
-                    .iter()
-                    .filter_map(|s| Multiaddr::from_str(s).ok())
-                    .collect::<Vec<_>>(),
                 mdns: Mdns { enable: true },
                 autonat: Autonat {
                     enable: true,
@@ -146,12 +145,12 @@ impl MpSolanaConfig {
                 },
                 relay_client: RelayClient {
                     enable: true,
-                    relay_address: None,
+                    ..Default::default()
                 },
                 dcutr: Dcutr { enable: true },
                 store_setting: StoreSetting {
                     broadcast_interval: 100,
-                    discovery: false,
+                    discovery: true,
                     ..Default::default()
                 },
                 temporary: false,

@@ -15,9 +15,9 @@ use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, SenderId};
 use warp::sync::{Arc, Mutex};
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::config::IpfsSetting;
 use warp_mp_ipfs::{ipfs_identity_persistent, Persistent};
 use warp_pd_flatfile::FlatfileStorage;
+use warp_rg_ipfs::config::RgIpfsConfig;
 use warp_rg_ipfs::IpfsMessaging;
 
 #[derive(Debug, Parser)]
@@ -46,14 +46,8 @@ async fn create_or_load_account(
     tesseract.set_file(path.join("tesseract_store"));
     tesseract.set_autosave();
 
-    let config = warp_mp_ipfs::config::MpIpfsConfig {
-        path: Some(path),
-        ipfs_setting: IpfsSetting {
-            mdns: warp_mp_ipfs::config::Mdns { enable: true },
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let config = warp_mp_ipfs::config::MpIpfsConfig::production(path);
+
     let mut account = ipfs_identity_persistent(config, tesseract, Some(cache)).await?;
     if account.get_own_identity().is_err() {
         account.create_identity(None, None)?;
@@ -74,7 +68,8 @@ async fn create_rg_direct(
     path: PathBuf,
     account: Arc<Mutex<Box<dyn MultiPass>>>,
 ) -> anyhow::Result<IpfsMessaging<Persistent>> {
-    IpfsMessaging::new(Some(path), account, None)
+    let config = RgIpfsConfig::production(path);
+    IpfsMessaging::new(Some(config), account, None)
         .await
         .map_err(|e| anyhow::anyhow!(e))
 }

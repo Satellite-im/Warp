@@ -122,7 +122,6 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             dcutr: config.ipfs_setting.dcutr.enable,
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
-            relay_addr: config.ipfs_setting.relay_client.relay_address,
             ..Default::default()
         };
 
@@ -140,6 +139,19 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
         let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
         tokio::spawn(fut);
+
+        if config.ipfs_setting.relay_client.enable {
+            for relay_addr in config.ipfs_setting.relay_client.relay_address {
+                if let Err(_e) = ipfs.swarm_listen_on(relay_addr).await {
+                    //TODO: Log
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        }
+
+        if let Err(_e) = ipfs.direct_bootstrap().await {
+            //TODO: Log
+        }
 
         let identity_store = IdentityStore::new(
             ipfs.clone(),
