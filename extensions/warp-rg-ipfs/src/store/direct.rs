@@ -157,6 +157,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         path: Option<PathBuf>,
         account: Arc<Mutex<Box<dyn MultiPass>>>,
         discovery: bool,
+        interval_ms: u64,
     ) -> anyhow::Result<Self> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -179,9 +180,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             queue,
             did,
         };
-
-        //TODO: Move to be a configuration
-        let interval_ms = 1000;
 
         if let Some(path) = store.path.as_ref() {
             if let Ok(queue) = tokio::fs::read(path.join("queue")).await {

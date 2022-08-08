@@ -112,7 +112,8 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             ipfs.clone(),
             config.path.map(|p| p.join("messages")),
             account.clone(),
-            false,
+            config.store_setting.discovery,
+            config.store_setting.broadcast_interval
         )
         .await?;
 

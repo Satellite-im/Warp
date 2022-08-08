@@ -121,7 +121,7 @@ impl Default for RgIpfsConfig {
             },
             store_setting: StoreSetting {
                 broadcast_interval: 100,
-                discovery: false,
+                discovery: true,
                 broadcast_with_connection: false,
             },
         }
@@ -137,7 +137,6 @@ impl RgIpfsConfig {
             },
             store_setting: StoreSetting {
                 broadcast_interval: 100,
-                discovery: false,
                 ..Default::default()
             },
             ..Default::default()
