@@ -77,7 +77,6 @@ async fn create_rg_direct(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
-    println!("{:?}", opt.path);
     let cache = cache_setup(&opt.path.join("cache"), &PathBuf::from("cache-index"))?;
 
     println!("Creating or obtaining account...");

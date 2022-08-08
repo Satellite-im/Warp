@@ -24,7 +24,7 @@ MultiPassAdapter *new_account(const char* pass) {
         return NULL;
     }
 
-    const char *config = "{\"path\":null,\"bootstrap\":[\"/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN\"], \"listen_on\":[\"/ip4/0.0.0.0/tcp/0\"],\"ipfs_setting\":{\"mdns\":{\"enable\":true},\"autonat\":{\"enable\":false,\"servers\":[]},\"relay_client\":{\"enable\":false,\"relay_address\":null},\"relay_server\":{\"enable\":false},\"dcutr\":{\"enable\":false},\"rendezvous\":{\"enable\":false,\"address\":\"\"}},\"store_setting\":{\"broadcast_interval\":10,\"broadcast_with_connection\":true, \"discovery\":false}}";
+    const char *config = "{\"path\":null,\"bootstrap\":[\"/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN\"], \"listen_on\":[\"/ip4/0.0.0.0/tcp/0\"],\"ipfs_setting\":{\"mdns\":{\"enable\":true},\"autonat\":{\"enable\":false,\"servers\":[]},\"relay_client\":{\"enable\":false,\"relay_address\":[]},\"relay_server\":{\"enable\":false},\"dcutr\":{\"enable\":false},\"rendezvous\":{\"enable\":false,\"address\":\"\"}},\"store_setting\":{\"broadcast_interval\":10,\"broadcast_with_connection\":true, \"discovery\":false}}";
 
 
     FFIResult_MultiPassAdapter result_mp = multipass_mp_ipfs_temporary(NULL, tesseract, config);
@@ -46,7 +46,7 @@ MultiPassAdapter *new_account(const char* pass) {
 }
 
 RayGunAdapter *new_chat(const MultiPassAdapter* mp) {
-    FFIResult_RayGunAdapter result_rg_t = warp_rg_ipfs_temporary_new(mp, NULL);
+    FFIResult_RayGunAdapter result_rg_t = warp_rg_ipfs_temporary_new(mp, NULL, NULL);
     if (result_rg_t.error) {
         print_error(result_rg_t.error);
         return NULL;

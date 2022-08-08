@@ -299,7 +299,7 @@ pub mod ffi {
         };
 
         let config = match config.is_null() {
-            true => return FFIResult::err(Error::InvalidPath),
+            true => None,
             false => {
                 match serde_json::from_str(&CStr::from_ptr(config).to_string_lossy().to_string()) {
                     Ok(c) => Some(c),
@@ -337,7 +337,7 @@ pub mod ffi {
         };
 
         let config = match config.is_null() {
-            true => return FFIResult::err(Error::InvalidPath),
+            true => return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is needed"))),
             false => {
                 match serde_json::from_str(&CStr::from_ptr(config).to_string_lossy().to_string()) {
                     Ok(c) => Some(c),
