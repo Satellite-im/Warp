@@ -17,7 +17,7 @@ async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
     //      The internal store will broadcast at 5ms but ideally it would want to be set to 100ms
     let config = MpIpfsConfig {
         store_setting: StoreSetting {
-            broadcast_interval: 1000,
+            broadcast_interval: 100,
             broadcast_with_connection: true,
             discovery: false,
         },

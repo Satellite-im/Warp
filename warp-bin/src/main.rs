@@ -23,7 +23,7 @@ use warp::data::{DataType};
 use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::pocket_dimension::PocketDimension;
-use warp::sync::{Arc, Mutex};
+use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_configuration::Config;
 use warp_extensions::fs_ipfs::IpfsFileSystem;
@@ -163,7 +163,7 @@ async fn read_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Vec<u8>> {
 async fn main() -> AnyResult<()> {
     //TODO: Add a logger for outputting to stdout/stderr
     //TODO: Provide hooks to any extensions that may utilize it
-    let mut _hooks = Arc::new(Mutex::new(warp::hooks::Hooks::new()));
+    let mut _hooks = Arc::new(RwLock::new(warp::hooks::Hooks::new()));
 
     let cli = CommandArgs::parse();
 
@@ -204,14 +204,14 @@ async fn main() -> AnyResult<()> {
 
     //TODO: Have the module manager handle the checks
     if config.modules.pocket_dimension {
-        manager.set_cache(Arc::new(Mutex::new(Box::new(StrettoClient::new()?))));
+        manager.set_cache(Arc::new(RwLock::new(Box::new(StrettoClient::new()?))));
         //TODO: Have the configuration point to the cache directory, or if not define to use system local directory
         let cache_dir = Path::new(&warp_directory).join("cache");
 
         let index = Path::new("cache-index").to_path_buf();
 
         let storage = FlatfileStorage::new_with_index_file(cache_dir, index)?;
-        manager.set_cache(Arc::new(Mutex::new(Box::new(storage))));
+        manager.set_cache(Arc::new(RwLock::new(Box::new(storage))));
 
         // get the extension from the config and set it
         if let Some(cache_ext_name) = cli
@@ -244,7 +244,7 @@ async fn main() -> AnyResult<()> {
         if let Ok(cache) = manager.get_cache() {
             account.set_cache(cache.clone())
         }
-        manager.set_account(Arc::new(Mutex::new(Box::new(account))));
+        manager.set_account(Arc::new(RwLock::new(Box::new(account))));
         if let Some(ext) = cli
             .multipass_module
             .as_ref()
@@ -308,9 +308,8 @@ async fn main() -> AnyResult<()> {
                 //Note `spawn_blocking` is used due to reqwest using a separate runtime in its blocking feature in `warp-solana-utils`
 
                 let username = username.as_deref();
-                let mut account = account.lock();
-                account.create_identity(username, None)?;
-                match account.get_own_identity().map_err(|e| anyhow!(e)) {
+                account.write().create_identity(username, None)?;
+                match account.read().get_own_identity().map_err(|e| anyhow!(e)) {
                     Ok(identity) => {
                         println!();
                         println!("Username: {}#{}", identity.username(), identity.short_id());
@@ -334,7 +333,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::ViewAccount { pubkey } => {
                 let account = manager.get_account()?;
-                let account = account.lock();
+                let account = account.read();
 
                 let ident = match pubkey {
                     Some(puk) => {
@@ -360,7 +359,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::ViewAccountByUsername { username } => {
                 let account = manager.get_account()?;
-                let account = account.lock();
+                let account = account.read();
 
                 match account.get_identity(Identifier::from(username)) {
                     Ok(ident) => {
@@ -378,7 +377,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::ListAllRequest => {
                 let account = manager.get_account()?;
-                let account = account.lock();
+                let account = account.read();
 
                 let mut table = Table::new();
                 table.set_header(vec!["From", "To", "Status"]);
@@ -395,7 +394,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::ListFriends => {
                 let account = manager.get_account()?;
-                let account = account.lock();
+                let account = account.read();
                 let friends = account
                     .list_friends()?
                     .iter()
@@ -413,7 +412,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::ListIncomingRequest => {
                 let account = manager.get_account()?;
-                let account = account.lock();
+                let account = account.read();
 
                 let mut table = Table::new();
                 table.set_header(vec!["From", "Address", "Status"]);
@@ -429,7 +428,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::ListOutgoingRequest => {
                 let account = manager.get_account()?;
-                let account = account.lock();
+                let account = account.read();
 
                 let mut table = Table::new();
                 table.set_header(vec!["To", "Address", "Status"]);
@@ -445,10 +444,9 @@ async fn main() -> AnyResult<()> {
             }
             Command::SendFriendRequest { pubkey } => {
                 let account = manager.get_account()?;
-                let mut account = account.lock();
                 let did = DID::try_from(pubkey)?;
-                account.send_request(&did)?;
-                let ident = account.get_identity(Identifier::from(did))?;
+                account.write().send_request(&did)?;
+                let ident = account.read().get_identity(Identifier::from(did))?;
                 println!(
                     "Sent {}#{} A Friend Request",
                     &ident.username(),
@@ -457,10 +455,9 @@ async fn main() -> AnyResult<()> {
             }
             Command::AcceptFriendRequest { pubkey } => {
                 let account = manager.get_account()?;
-                let mut account = account.lock();
                 let did = DID::try_from(pubkey)?;
-                account.accept_request(&did)?;
-                let friend = account.get_identity(Identifier::from(did))?;
+                account.write().accept_request(&did)?;
+                let friend = account.read().get_identity(Identifier::from(did))?;
                 println!(
                     "Accepted {}#{} Friend Request",
                     &friend.username(),
@@ -469,10 +466,9 @@ async fn main() -> AnyResult<()> {
             }
             Command::DenyFriendRequest { pubkey } => {
                 let account = manager.get_account()?;
-                let mut account = account.lock();
                 let did = DID::try_from(pubkey)?;
-                account.deny_request(&did)?;
-                let friend = account.get_identity(Identifier::from(did))?;
+                account.write().deny_request(&did)?;
+                let friend = account.read().get_identity(Identifier::from(did))?;
                 println!(
                     "Denied {}#{} Friend Request",
                     &friend.username(),
@@ -481,10 +477,9 @@ async fn main() -> AnyResult<()> {
             }
             Command::RemoveFriend { pubkey } => {
                 let account = manager.get_account()?;
-                let mut account = account.lock();
                 let did = DID::try_from(pubkey)?;
-                account.remove_friend(&did)?;
-                let friend = account.get_identity(Identifier::from(did))?;
+                account.write().remove_friend(&did)?;
+                let friend = account.read().get_identity(Identifier::from(did))?;
                 println!(
                     "Removed {}#{} from friend list",
                     &friend.username(),
@@ -503,13 +498,14 @@ async fn main() -> AnyResult<()> {
                 }
 
                 let filesystem = manager.get_filesystem()?;
-                let mut filesystem = filesystem.lock();
 
                 let remote =
-                    remote.unwrap_or(file.file_name().unwrap().to_string_lossy().to_string());
-                filesystem
+                    remote.unwrap_or_else(|| file.file_name().unwrap().to_string_lossy().to_string());
+                filesystem.write()
                     .put(&remote, &file.to_string_lossy().to_string())
                     .await?;
+
+                let filesystem = filesystem.read();
 
                 if let Ok(file) = filesystem
                     .current_directory()
@@ -524,16 +520,15 @@ async fn main() -> AnyResult<()> {
             }
             Command::DownloadFile { remote, local } => {
                 let filesystem = manager.get_filesystem()?;
-                let filesystem = filesystem.lock();
 
-                match filesystem.get(&remote, &local).await {
+                match filesystem.read().get(&remote, &local).await {
                     Ok(_) => println!("File is downloaded to {local}"),
                     Err(e) => println!("Error downloading file: {e}"),
                 };
             }
             Command::DeleteFile { remote } => {
                 let filesystem = manager.get_filesystem()?;
-                let mut filesystem = filesystem.lock();
+                let mut filesystem = filesystem.write();
 
                 match filesystem.remove(&remote, true).await {
                     Ok(_) => println!("{remote} is deleted"),
@@ -542,7 +537,7 @@ async fn main() -> AnyResult<()> {
             }
             Command::FileReference { remote } => {
                 let filesystem = manager.get_filesystem()?;
-                let mut filesystem = filesystem.lock();
+                let mut filesystem = filesystem.write();
 
                 match filesystem.sync_ref(&remote).await {
                     Ok(_) => {}
@@ -591,17 +586,17 @@ async fn main() -> AnyResult<()> {
                 };
 
                 let cache = manager.get_cache()?;
-                let mut cache = cache.lock();
+                let mut cache = cache.write();
 
                 if !data_type.is_empty() {
                     for data_type in data_type.iter() {
-                        println!("Clearing {}", data_type.to_string());
+                        println!("Clearing {}", data_type);
                         match cache.empty(*data_type) {
-                            Ok(_) => println!("{} cleared", data_type.to_string()),
+                            Ok(_) => println!("{} cleared", data_type),
                             Err(e) => {
                                 println!(
                                     "Unable to clear {} with error {}",
-                                    data_type.to_string(),
+                                    data_type,
                                     e
                                 );
                             }
@@ -629,19 +624,17 @@ async fn main() -> AnyResult<()> {
 }
 
 fn import_from_cache(
-    cache: Arc<Mutex<Box<dyn PocketDimension>>>,
-    handle: Arc<Mutex<Box<dyn Constellation>>>,
+    cache: Arc<RwLock<Box<dyn PocketDimension>>>,
+    handle: Arc<RwLock<Box<dyn Constellation>>>,
 ) -> AnyResult<Sata> {
-    let mut handle = handle.lock();
-    let cache = cache.lock();
-    let obj = cache.get_data(warp::data::DataType::DataExport, None)?;
+    let obj = cache.read().get_data(warp::data::DataType::DataExport, None)?;
 
     if !obj.is_empty() {
         if let Some(data) = obj.last() {
             //TODO: use if let conditions
             let inner = data.decode::<Value>()?;
             let inner = serde_json::to_string(&inner)?;
-            handle.import(ConstellationDataType::Json, inner)?;
+            handle.write().import(ConstellationDataType::Json, inner)?;
 
             return Ok(data.clone());
         }
@@ -651,20 +644,18 @@ fn import_from_cache(
 
 fn export_to_cache(
     _: &Sata,
-    cache: Arc<Mutex<Box<dyn PocketDimension>>>,
-    handle: Arc<Mutex<Box<dyn Constellation>>>,
+    cache: Arc<RwLock<Box<dyn PocketDimension>>>,
+    handle: Arc<RwLock<Box<dyn Constellation>>>,
 ) -> AnyResult<()> {
-    let handle = handle.lock();
-    let mut cache = cache.lock();
 
-    let data = handle.export(ConstellationDataType::Json)?;
+    let data = handle.read().export(ConstellationDataType::Json)?;
     
-    let versioning = cache.count(DataType::DataExport, None)?;
+    let versioning = cache.read().count(DataType::DataExport, None)?;
 
     let mut new_data = Sata::default();
     new_data.set_version(versioning as u32);
     let data = new_data.encode(IpldCodec::DagJson, warp::sata::Kind::Reference, data)?;
-    cache.add_data(warp::data::DataType::DataExport, &data)?;
+    cache.write().add_data(warp::data::DataType::DataExport, &data)?;
 
     Ok(())
 }
@@ -675,7 +666,7 @@ fn register_fs_ext(
     manager: &mut ModuleManager,
     tesseract: &Tesseract,
 ) -> AnyResult<()> {
-    manager.set_filesystem(Arc::new(Mutex::new(Box::new({
+    manager.set_filesystem(Arc::new(RwLock::new(Box::new({
         //TODO: Have `IpfsFileSystem` provide a custom initialization
         let mut fs = IpfsFileSystem::new();
         if config.modules.pocket_dimension {
@@ -686,7 +677,7 @@ fn register_fs_ext(
         fs
     }))));
 
-    manager.set_filesystem(Arc::new(Mutex::new(Box::new({
+    manager.set_filesystem(Arc::new(RwLock::new(Box::new({
         //TODO: supply passphrase to this function rather than read from cli
         let (akey, skey) = if let Some("warp-fs-storj") = cli
             .constellation_module
@@ -710,7 +701,7 @@ fn register_fs_ext(
         handle
     }))));
 
-    manager.set_filesystem(Arc::new(Mutex::new(Box::new({
+    manager.set_filesystem(Arc::new(RwLock::new(Box::new({
         let mut handle = MemorySystem::new();
         if config.modules.pocket_dimension {
             if let Ok(cache) = manager.get_cache() {

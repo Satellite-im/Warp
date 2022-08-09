@@ -2,7 +2,7 @@ pub mod group;
 
 use crate::crypto::DID;
 use crate::error::Error;
-use crate::sync::{Arc, Mutex, MutexGuard};
+use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::{Extension, SingleHandle};
 
 use warp_derive::FFIFree;
@@ -383,20 +383,24 @@ pub trait RayGun: Extension + GroupChat + Sync + Send + SingleHandle {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(FFIFree)]
 pub struct RayGunAdapter {
-    object: Arc<Mutex<Box<dyn RayGun>>>,
+    object: Arc<RwLock<Box<dyn RayGun>>>,
 }
 
 impl RayGunAdapter {
-    pub fn new(object: Arc<Mutex<Box<dyn RayGun>>>) -> Self {
+    pub fn new(object: Arc<RwLock<Box<dyn RayGun>>>) -> Self {
         RayGunAdapter { object }
     }
 
-    pub fn get_inner(&self) -> Arc<Mutex<Box<dyn RayGun>>> {
+    pub fn inner(&self) -> Arc<RwLock<Box<dyn RayGun>>> {
         self.object.clone()
     }
 
-    pub fn inner_guard(&self) -> MutexGuard<Box<dyn RayGun>> {
-        self.object.lock()
+    pub fn read_guard(&self) -> RwLockReadGuard<Box<dyn RayGun>> {
+        self.object.read()
+    }
+
+    pub fn write_guard(&mut self) -> RwLockWriteGuard<Box<dyn RayGun>> {
+        self.object.write()
     }
 }
 
@@ -421,7 +425,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn raygun_create_conversation(
-        ctx: *const RayGunAdapter,
+        ctx: *mut RayGunAdapter,
         did_key: *const DID,
     ) -> FFIResult_String {
         if ctx.is_null() {
@@ -432,9 +436,9 @@ pub mod ffi {
             return FFIResult_String::err(Error::Any(anyhow::anyhow!("did_key cannot be null")));
         }
 
-        let adapter = &*ctx;
+        let adapter = &mut *ctx;
 
-        async_on_block(adapter.inner_guard().create_conversation(&*did_key))
+        async_on_block(adapter.write_guard().create_conversation(&*did_key))
             .map(|s| s.to_string())
             .into()
     }
@@ -451,7 +455,7 @@ pub mod ffi {
 
         let adapter = &*ctx;
 
-        match async_on_block(adapter.inner_guard().list_conversations())
+        match async_on_block(adapter.read_guard().list_conversations())
             .map(|s| s.iter().map(|id| id.to_string()).collect::<Vec<_>>())
             .map(FFIVec_String::from)
         {
@@ -487,7 +491,7 @@ pub mod ffi {
         let rt = runtime_handle();
         match rt.block_on(async {
             adapter
-                .inner_guard()
+                .read_guard()
                 .get_messages(convo_id, MessageOptions::default())
                 .await
         }) {
@@ -552,7 +556,7 @@ pub mod ffi {
         let adapter = &mut *ctx;
         let rt = runtime_handle();
 
-        rt.block_on(async { adapter.inner_guard().send(convo_id, msg_id, messages).await })
+        rt.block_on(async { adapter.write_guard().send(convo_id, msg_id, messages).await })
             .into()
     }
 
@@ -592,7 +596,7 @@ pub mod ffi {
 
         let adapter = &mut *ctx;
         let rt = runtime_handle();
-        rt.block_on(async { adapter.inner_guard().delete(convo_id, msg_id).await })
+        rt.block_on(async { adapter.write_guard().delete(convo_id, msg_id).await })
             .into()
     }
 
@@ -642,7 +646,7 @@ pub mod ffi {
         let rt = runtime_handle();
         rt.block_on(async {
             adapter
-                .inner_guard()
+                .write_guard()
                 .react(convo_id, msg_id, state, emoji)
                 .await
         })
@@ -686,7 +690,7 @@ pub mod ffi {
 
         let adapter = &mut *ctx;
         let rt = runtime_handle();
-        rt.block_on(async { adapter.inner_guard().pin(convo_id, msg_id, state).await })
+        rt.block_on(async { adapter.write_guard().pin(convo_id, msg_id, state).await })
             .into()
     }
 
@@ -739,7 +743,7 @@ pub mod ffi {
         let rt = runtime_handle();
         rt.block_on(async {
             adapter
-                .inner_guard()
+                .write_guard()
                 .reply(convo_id, msg_id, messages)
                 .await
         })
@@ -771,7 +775,7 @@ pub mod ffi {
 
         let adapter = &mut *ctx;
         let rt = runtime_handle();
-        rt.block_on(async { adapter.inner_guard().ping(convo_id).await })
+        rt.block_on(async { adapter.write_guard().ping(convo_id).await })
             .into()
     }
 
@@ -813,7 +817,7 @@ pub mod ffi {
         let adapter = &mut *ctx;
         let rt = runtime_handle();
 
-        rt.block_on(async { adapter.inner_guard().embeds(convo_id, msg_id, state).await })
+        rt.block_on(async { adapter.write_guard().embeds(convo_id, msg_id, state).await })
             .into()
     }
 

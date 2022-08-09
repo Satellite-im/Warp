@@ -19,7 +19,7 @@ use warp::multipass::generator::generate_name;
 use warp::multipass::{identity::*, Friends, MultiPass};
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::pocket_dimension::PocketDimension;
-use warp::sync::{Arc, Mutex, MutexGuard};
+use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use warp::tesseract::Tesseract;
 use warp::{async_block_in_place_uncheck, async_spawn, Extension, SingleHandle};
 
@@ -36,7 +36,7 @@ pub type Temporary = TestTypes;
 pub type Persistent = Types;
 pub struct SolanaAccount<T: IpfsTypes> {
     pub endpoint: Cluster,
-    pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    pub cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     pub tesseract: Tesseract,
     pub friend_store: Option<FriendsStore<T>>,
     pub config: MpSolanaConfig,
@@ -121,7 +121,7 @@ impl<T: IpfsTypes> SolanaAccount<T> {
         )
     }
 
-    pub fn set_cache(&mut self, cache: Arc<Mutex<Box<dyn PocketDimension>>>) {
+    pub fn set_cache(&mut self, cache: Arc<RwLock<Box<dyn PocketDimension>>>) {
         self.cache = Some(cache);
     }
 
@@ -234,13 +234,24 @@ impl<T: IpfsTypes> SolanaAccount<T> {
         Ok(self.tesseract.clone())
     }
 
-    pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
+    pub fn get_cache(&self) -> anyhow::Result<RwLockReadGuard<Box<dyn PocketDimension>>> {
         let cache = self
             .cache
             .as_ref()
-            .ok_or(Error::PocketDimensionExtensionUnavailable)?;
+            .ok_or_else(|| anyhow::anyhow!("Pocket Dimension Extension is not set"))?;
 
-        Ok(cache.lock())
+        let inner = cache.read();
+        Ok(inner)
+    }
+
+    pub fn get_cache_mut(&self) -> anyhow::Result<RwLockWriteGuard<Box<dyn PocketDimension>>> {
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Pocket Dimension Extension is not set"))?;
+
+        let inner = cache.write();
+        Ok(inner)
     }
 
     pub fn get_hooks(&self) -> anyhow::Result<&Hooks> {
@@ -342,7 +353,7 @@ impl<T: IpfsTypes> MultiPass for SolanaAccount<T> {
 
         let identity = user_to_identity(&helper, None)?;
 
-        if let Ok(mut cache) = self.get_cache() {
+        if let Ok(mut cache) = self.get_cache_mut() {
             let object = Sata::default().encode(
                 warp::sata::libipld::IpldCodec::DagJson,
                 warp::sata::Kind::Reference,
@@ -420,7 +431,7 @@ impl<T: IpfsTypes> MultiPass for SolanaAccount<T> {
             _ => return Err(Error::InvalidIdentifierCondition),
         };
 
-        if let Ok(mut cache) = self.get_cache() {
+        if let Ok(mut cache) = self.get_cache_mut() {
             let mut query = QueryBuilder::default();
             query.r#where("did_key", &ident.did_key())?;
             if cache
@@ -480,7 +491,7 @@ impl<T: IpfsTypes> MultiPass for SolanaAccount<T> {
             _ => return Err(Error::CannotUpdateIdentity),
         }
 
-        if let Ok(mut cache) = self.get_cache() {
+        if let Ok(mut cache) = self.get_cache_mut() {
             let mut query = QueryBuilder::default();
             query.r#where("username", &old_identity.username())?;
             if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query)) {
@@ -520,7 +531,7 @@ impl<T: IpfsTypes> MultiPass for SolanaAccount<T> {
     }
 
     fn refresh_cache(&mut self) -> Result<(), Error> {
-        self.get_cache()?.empty(DataType::from(self.module()))
+        self.get_cache_mut()?.empty(DataType::from(self.module()))
     }
 }
 
@@ -690,7 +701,7 @@ pub mod ffi {
     use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::sync::{Arc, Mutex};
+    use warp::sync::{Arc, RwLock};
     use warp::tesseract::Tesseract;
 
     use crate::{Persistent, SolanaAccount, Temporary};
@@ -734,7 +745,7 @@ pub mod ffi {
             }
         }
 
-        let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
+        let mp = MultiPassAdapter::new(Arc::new(RwLock::new(Box::new(account))));
         FFIResult::ok(mp)
     }
 
@@ -777,7 +788,7 @@ pub mod ffi {
             }
         }
 
-        let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
+        let mp = MultiPassAdapter::new(Arc::new(RwLock::new(Box::new(account))));
         FFIResult::ok(mp)
     }
 
@@ -820,7 +831,7 @@ pub mod ffi {
             }
         }
 
-        let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
+        let mp = MultiPassAdapter::new(Arc::new(RwLock::new(Box::new(account))));
         FFIResult::ok(mp)
     }
 
@@ -863,7 +874,7 @@ pub mod ffi {
             }
         }
 
-        let mp = MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(account))));
+        let mp = MultiPassAdapter::new(Arc::new(RwLock::new(Box::new(account))));
         FFIResult::ok(mp)
     }
 }

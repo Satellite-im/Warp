@@ -24,7 +24,7 @@ use warp::crypto::did_key::Generate;
 use warp::data::{DataObject, DataType};
 use warp::hooks::Hooks;
 use warp::pocket_dimension::query::QueryBuilder;
-use warp::sync::{Arc, Mutex, MutexGuard};
+use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::module::Module;
 use warp::pocket_dimension::PocketDimension;
@@ -48,7 +48,7 @@ pub type Persistent = Types;
 
 #[derive(Clone)]
 pub struct IpfsIdentity<T: IpfsTypes> {
-    cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     hooks: Option<Hooks>,
     tesseract: Tesseract,
     ipfs: Ipfs<T>,
@@ -66,7 +66,7 @@ impl<T: IpfsTypes> Drop for IpfsIdentity<T> {
 pub async fn ipfs_identity_persistent(
     config: MpIpfsConfig,
     tesseract: Tesseract,
-    cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
 ) -> anyhow::Result<IpfsIdentity<Persistent>> {
     if config.path.is_none() {
         anyhow::bail!("Path is required for identity to be persistent")
@@ -76,7 +76,7 @@ pub async fn ipfs_identity_persistent(
 pub async fn ipfs_identity_temporary(
     config: Option<MpIpfsConfig>,
     tesseract: Tesseract,
-    cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
 ) -> anyhow::Result<IpfsIdentity<Temporary>> {
     if let Some(config) = &config {
         if config.path.is_some() {
@@ -90,7 +90,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
     pub async fn new(
         config: MpIpfsConfig,
         tesseract: Tesseract,
-        cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+        cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity<T>> {
         let keypair = match tesseract.retrieve("keypair") {
             Ok(keypair) => {
@@ -185,13 +185,24 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         Ok(identity)
     }
 
-    pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
+    pub fn get_cache(&self) -> anyhow::Result<RwLockReadGuard<Box<dyn PocketDimension>>> {
         let cache = self
             .cache
             .as_ref()
-            .ok_or(Error::PocketDimensionExtensionUnavailable)?;
+            .ok_or_else(|| anyhow::anyhow!("Pocket Dimension Extension is not set"))?;
 
-        Ok(cache.lock())
+        let inner = cache.read();
+        Ok(inner)
+    }
+
+    pub fn get_cache_mut(&self) -> anyhow::Result<RwLockWriteGuard<Box<dyn PocketDimension>>> {
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Pocket Dimension Extension is not set"))?;
+
+        let inner = cache.write();
+        Ok(inner)
     }
 
     pub fn get_hooks(&self) -> anyhow::Result<&Hooks> {
@@ -228,7 +239,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
     ) -> Result<DID, Error> {
         let identity = async_block_in_place_uncheck(self.identity_store.create_identity(username))?;
 
-        if let Ok(mut cache) = self.get_cache() {
+        if let Ok(mut cache) = self.get_cache_mut() {
             let object = Sata::default().encode(
                 warp::sata::libipld::IpldCodec::DagCbor,
                 warp::sata::Kind::Reference,
@@ -322,7 +333,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
 
             self.tesseract.set("ident_cid", &ident_cid.to_string())?;
 
-            if let Ok(mut cache) = self.get_cache() {
+            if let Ok(mut cache) = self.get_cache_mut() {
                 let mut query = QueryBuilder::default();
                 //TODO: Query by public key to tie/assiociate the username to identity in the event of dup
                 query.r#where("username", &old_identity.username())?;
@@ -367,7 +378,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
     }
 
     fn refresh_cache(&mut self) -> Result<(), Error> {
-        self.get_cache()?.empty(DataType::from(self.module()))
+        self.get_cache_mut()?.empty(DataType::from(self.module()))
     }
 }
 
@@ -488,7 +499,7 @@ pub mod ffi {
     use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::sync::{Arc, Mutex};
+    use warp::sync::{Arc, RwLock};
     use warp::tesseract::Tesseract;
     use warp::{async_on_block, runtime_handle};
 
@@ -532,7 +543,7 @@ pub mod ffi {
             Err(e) => return FFIResult::err(Error::from(e)),
         };
 
-        FFIResult::ok(MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(
+        FFIResult::ok(MultiPassAdapter::new(Arc::new(RwLock::new(Box::new(
             account,
         )))))
     }
@@ -579,7 +590,7 @@ pub mod ffi {
             Err(e) => return FFIResult::err(Error::from(e)),
         };
 
-        FFIResult::ok(MultiPassAdapter::new(Arc::new(Mutex::new(Box::new(
+        FFIResult::ok(MultiPassAdapter::new(Arc::new(RwLock::new(Box::new(
             account,
         )))))
     }

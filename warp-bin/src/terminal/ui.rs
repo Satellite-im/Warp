@@ -148,7 +148,7 @@ impl<'a> WarpApp<'a> {
         let hooks: Vec<ListItem> = self
             .hooks_trigger
             .clone()
-            .lock()
+            .read()
             .iter()
             .map(|i| ListItem::new(vec![Spans::from(Span::from(i.to_string()))]))
             .collect();
@@ -239,7 +239,7 @@ impl<'a> WarpApp<'a> {
             .split(area);
 
         let cache = match self.cache.as_ref() {
-            Some(cache) => cache.lock(),
+            Some(cache) => cache.read(),
             None => return,
         };
 

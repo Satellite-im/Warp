@@ -17,23 +17,24 @@ use warp::data::DataType;
 use warp::hooks::Hooks;
 use warp::module::Module;
 use warp::pocket_dimension::PocketDimension;
-use warp::sync::{Arc, Mutex};
+use warp::sync::{Arc, RwLock};
 use warp::Extension;
 use warp_extensions::fs_memory::MemorySystem;
 use warp_extensions::pd_stretto::StrettoClient;
 
 //Using lazy static to handle global hooks for the time being
-pub static HOOKS: once_cell::sync::Lazy<Mutex<Hooks>> =
-    once_cell::sync::Lazy::new(|| Mutex::new(Hooks::default()));
+//TODO: Use const primitives
+pub static HOOKS: once_cell::sync::Lazy<RwLock<Hooks>> =
+    once_cell::sync::Lazy::new(|| RwLock::new(Hooks::default()));
 
 #[derive(Default)]
 pub struct WarpApp<'a> {
     pub title: &'a str,
-    pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    pub cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     pub filesystem: Option<Box<dyn Constellation>>,
     pub modules: Modules,
     pub extensions: Extensions,
-    pub hooks_trigger: Arc<Mutex<Vec<String>>>,
+    pub hooks_trigger: Arc<RwLock<Vec<String>>>,
     pub config: Config,
     pub tools: Tools,
     pub tabs: Tabs<'a>,
@@ -224,29 +225,32 @@ impl<'a> WarpApp<'a> {
         let mut app = WarpApp::default();
         app.title = title;
 
-        let mut hook_system = HOOKS.lock();
+        {
+            let mut hook_system = HOOKS.write();
 
-        // Register different qualified hooks TODO: Implement a function to register multiple hooks from a vector
-        // filesystem hooks
-        hook_system.create(Module::FileSystem, "new_file")?;
-        hook_system.create(Module::FileSystem, "new_directory")?;
-        hook_system.create(Module::FileSystem, "delete_file")?;
-        hook_system.create(Module::FileSystem, "delete_directory")?;
-        hook_system.create(Module::FileSystem, "move_file")?;
-        hook_system.create(Module::FileSystem, "move_directory")?;
-        hook_system.create(Module::FileSystem, "rename_file")?;
-        hook_system.create(Module::FileSystem, "rename_directory")?;
+            // Register different qualified hooks TODO: Implement a function to register multiple hooks from a vector
+            // filesystem hooks
+            hook_system.create(Module::FileSystem, "new_file")?;
+            hook_system.create(Module::FileSystem, "new_directory")?;
+            hook_system.create(Module::FileSystem, "delete_file")?;
+            hook_system.create(Module::FileSystem, "delete_directory")?;
+            hook_system.create(Module::FileSystem, "move_file")?;
+            hook_system.create(Module::FileSystem, "move_directory")?;
+            hook_system.create(Module::FileSystem, "rename_file")?;
+            hook_system.create(Module::FileSystem, "rename_directory")?;
+ 
 
-        // pocketdimension hooks
-        //TODO
+            // pocketdimension hooks
+            //TODO
 
-        app.hooks_trigger = Arc::new(Mutex::new(Vec::new()));
+            app.hooks_trigger = Arc::new(RwLock::new(Vec::new()));
 
-        let trigger_list = app.hooks_trigger.clone();
-        hook_system.subscribe("filesystem::new_file", move |hook, data| {
-            info!(target:"Warp", "{}, with {} bytes, was uploaded to the filesystem", data.payload::<(String, Vec<u8>)>().unwrap().0, data.size());
-            trigger_list.lock().push(hook.to_string())
-        })?;
+            let trigger_list = app.hooks_trigger.clone();
+            hook_system.subscribe("filesystem::new_file", move |hook, data| {
+                info!(target:"Warp", "{}, with {} bytes, was uploaded to the filesystem", data.payload::<(String, Vec<u8>)>().unwrap().0, data.size());
+                trigger_list.write().push(hook.to_string())
+            })?;
+        }
 
         app.tabs = Tabs::new(vec!["Main", "Extensions", "Config"]);
         app.tools = Tools::new(
@@ -261,7 +265,7 @@ impl<'a> WarpApp<'a> {
 
         ext.register(Box::new(cache.clone()));
 
-        let cache: Arc<Mutex<Box<dyn PocketDimension>>> = Arc::new(Mutex::new(Box::new(cache)));
+        let cache: Arc<RwLock<Box<dyn PocketDimension>>> = Arc::new(RwLock::new(Box::new(cache)));
 
         app.modules = Modules::new();
 
@@ -325,7 +329,7 @@ impl<'a> WarpApp<'a> {
                                     info!(target:"Warp", "Clearing cache...");
                                     match self.cache.as_mut() {
                                         Some(cache) => {
-                                            let mut cache = cache.lock();
+                                            let mut cache = cache.write();
                                             for (module, active) in self.modules.modules.iter() {
                                                 if *active {
                                                     info!(target:"Warp", "{} items cached for {}", cache.count(DataType::from(module.clone()), None).unwrap_or_default(), module.to_string().to_lowercase());

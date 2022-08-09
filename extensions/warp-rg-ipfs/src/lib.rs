@@ -31,13 +31,12 @@ use warp::raygun::group::{
 use warp::raygun::{
     Callback, EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState, SenderId,
 };
-use warp::sync::Mutex;
-use warp::sync::MutexGuard;
+use warp::sync::RwLock;
+use warp::sync::{RwLockReadGuard, RwLockWriteGuard};
 use warp::tesseract::Tesseract;
 use warp::Extension;
 use warp::SingleHandle;
 
-// use crate::events::MessagingEvents;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -45,8 +44,8 @@ pub type Temporary = TestTypes;
 pub type Persistent = Types;
 
 pub struct IpfsMessaging<T: IpfsTypes> {
-    pub account: Arc<Mutex<Box<dyn MultiPass>>>,
-    pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    pub account: Arc<RwLock<Box<dyn MultiPass>>>,
+    pub cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     pub ipfs: Ipfs<T>,
     pub direct_store: DirectMessageStore<T>,
     //TODO: GroupManager
@@ -59,11 +58,11 @@ pub struct IpfsMessaging<T: IpfsTypes> {
 impl<T: IpfsTypes> IpfsMessaging<T> {
     pub async fn new(
         config: Option<RgIpfsConfig>,
-        account: Arc<Mutex<Box<dyn MultiPass>>>,
-        cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+        account: Arc<RwLock<Box<dyn MultiPass>>>,
+        cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
         let config = config.clone().unwrap_or_default();
-        let ipfs_handle = match account.lock().handle() {
+        let ipfs_handle = match account.read().handle() {
             Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
             _ => None,
         };
@@ -72,7 +71,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             Some(ipfs) => ipfs,
             None => {
                 let keypair = {
-                    let prikey = account.lock().decrypt_private_key(None)?;
+                    let prikey = account.read().decrypt_private_key(None)?;
                     let mut sec_key = prikey.as_ref().private_key_bytes();
                     let id_secret = identity::ed25519::SecretKey::from_bytes(&mut sec_key)?;
                     Keypair::Ed25519(id_secret.into())
@@ -126,12 +125,24 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         Ok(messaging)
     }
 
-    pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
+    pub fn get_cache(&self) -> anyhow::Result<RwLockReadGuard<Box<dyn PocketDimension>>> {
         let cache = self
             .cache
             .as_ref()
-            .ok_or(Error::PocketDimensionExtensionUnavailable)?;
-        Ok(cache.lock())
+            .ok_or_else(|| anyhow::anyhow!("Pocket Dimension Extension is not set"))?;
+
+        let inner = cache.read();
+        Ok(inner)
+    }
+
+    pub fn get_cache_mut(&mut self) -> anyhow::Result<RwLockWriteGuard<Box<dyn PocketDimension>>> {
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Pocket Dimension Extension is not set"))?;
+
+        let inner = cache.write();
+        Ok(inner)
     }
 }
 
@@ -280,7 +291,7 @@ pub mod ffi {
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::raygun::RayGunAdapter;
-    use warp::sync::{Arc, Mutex};
+    use warp::sync::{Arc, RwLock};
     use warp::{async_on_block, runtime_handle};
 
     #[allow(clippy::missing_safety_doc)]
@@ -313,10 +324,10 @@ pub mod ffi {
 
         match async_on_block(IpfsMessaging::<Temporary>::new(
             config,
-            account.get_inner().clone(),
+            account.inner(),
             cache.map(|p| p.inner()),
         )) {
-            Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(Mutex::new(Box::new(a))))),
+            Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(RwLock::new(Box::new(a))))),
             Err(e) => FFIResult::err(Error::from(e)),
         }
     }
@@ -351,10 +362,10 @@ pub mod ffi {
 
         match async_on_block(IpfsMessaging::<Persistent>::new(
             config,
-            account.get_inner().clone(),
+            account.inner(),
             cache.map(|p| p.inner()),
         )) {
-            Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(Mutex::new(Box::new(a))))),
+            Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(RwLock::new(Box::new(a))))),
             Err(e) => FFIResult::err(Error::from(e)),
         }
     }

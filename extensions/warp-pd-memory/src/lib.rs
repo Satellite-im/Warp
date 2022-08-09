@@ -218,19 +218,19 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
 pub fn pocketdimension_pd_memory() -> warp::pocket_dimension::PocketDimensionAdapter {
     let client = MemoryClient::new();
     warp::pocket_dimension::PocketDimensionAdapter::new(warp::sync::Arc::new(
-        warp::sync::Mutex::new(Box::new(client)),
+        warp::sync::RwLock::new(Box::new(client)),
     ))
 }
 
 pub mod ffi {
     use crate::MemoryClient;
     use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::sync::{Arc, Mutex};
+    use warp::sync::{Arc, RwLock};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocketdimension_memory_new() -> *mut PocketDimensionAdapter {
-        let obj = Box::new(PocketDimensionAdapter::new(Arc::new(Mutex::new(Box::new(
+        let obj = Box::new(PocketDimensionAdapter::new(Arc::new(RwLock::new(Box::new(
             MemoryClient::new(),
         )))));
         Box::into_raw(obj) as *mut PocketDimensionAdapter

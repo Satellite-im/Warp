@@ -43,7 +43,7 @@ pub struct DirectMessageStore<T: IpfsTypes> {
     direct_conversation: Arc<RwLock<Vec<DirectConversation>>>,
 
     // account instance
-    account: Arc<Mutex<Box<dyn MultiPass>>>,
+    account: Arc<RwLock<Box<dyn MultiPass>>>,
 
     // Queue
     queue: Arc<RwLock<Vec<Queue>>>,
@@ -155,7 +155,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     pub async fn new(
         ipfs: Ipfs<T>,
         path: Option<PathBuf>,
-        account: Arc<Mutex<Box<dyn MultiPass>>>,
+        account: Arc<RwLock<Box<dyn MultiPass>>>,
         discovery: bool,
         interval_ms: u64,
     ) -> anyhow::Result<Self> {
@@ -171,7 +171,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         }
         let direct_conversation = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
-        let did = Arc::new(account.lock().decrypt_private_key(None)?);
+        let did = Arc::new(account.read().decrypt_private_key(None)?);
         let store = Self {
             path,
             ipfs,
@@ -258,7 +258,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                     }
                                                 };
 
-                                                if let Ok(list) = store.account.lock().block_list() {
+                                                if let Ok(list) = store.account.read().block_list() {
                                                     if list.contains(&*peer) {
                                                         continue
                                                     }
@@ -379,7 +379,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         // maybe only start conversation with one we are friends with?
         // self.account.lock().has_friend(did_key)?;
 
-        if let Ok(list) = self.account.lock().block_list() {
+        if let Ok(list) = self.account.read().block_list() {
             if list.contains(did_key) {
                 anyhow::bail!(Error::PublicKeyIsBlocked);
             }

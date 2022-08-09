@@ -4,7 +4,7 @@ use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
 use warp::sata::Sata;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use warp::sync::{Arc, Mutex, MutexGuard};
+use warp::sync::{Arc, RwLock, RwLockWriteGuard, RwLockReadGuard};
 // use warp_common::futures::TryStreamExt;
 use warp::module::Module;
 
@@ -32,7 +32,7 @@ pub struct IpfsFileSystem {
     #[serde(skip)]
     pub client: IpfsInternalClient,
     #[serde(skip)]
-    pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    pub cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     #[serde(skip)]
     pub hooks: Option<Hooks>,
 }
@@ -120,7 +120,7 @@ impl IpfsFileSystem {
         Ok(system)
     }
 
-    pub fn set_cache(&mut self, cache: Arc<Mutex<Box<dyn PocketDimension>>>) {
+    pub fn set_cache(&mut self, cache: Arc<RwLock<Box<dyn PocketDimension>>>) {
         self.cache = Some(cache);
     }
 
@@ -128,13 +128,23 @@ impl IpfsFileSystem {
         self.hooks = Some(hook)
     }
 
-    pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
+    pub fn get_cache(&self) -> anyhow::Result<RwLockReadGuard<Box<dyn PocketDimension>>> {
         let cache = self
             .cache
             .as_ref()
             .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
 
-        let inner = cache.lock();
+        let inner = cache.read();
+        Ok(inner)
+    }
+
+    pub fn get_cache_mut(&self) -> anyhow::Result<RwLockWriteGuard<Box<dyn PocketDimension>>> {
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Pocket Dimension Extension is not set"))?;
+
+        let inner = cache.write();
         Ok(inner)
     }
 }
@@ -253,7 +263,7 @@ impl Constellation for IpfsFileSystem {
 
         self.modified = Utc::now();
 
-        if let Ok(mut cache) = self.get_cache() {
+        if let Ok(mut cache) = self.get_cache_mut() {
             let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from(path))?;
             cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
@@ -389,7 +399,7 @@ impl Constellation for IpfsFileSystem {
 
         self.modified = Utc::now();
 
-        if let Ok(mut cache) = self.get_cache() {
+        if let Ok(mut cache) = self.get_cache_mut() {
             let name = Path::new(&name)
                 .file_name()
                 .ok_or(Error::Other)?
@@ -579,7 +589,7 @@ pub mod ffi {
     use warp::error::Error;
     use warp::ffi::FFIResult;
     use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::sync::{Arc, Mutex};
+    use warp::sync::{Arc, RwLock};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -593,7 +603,7 @@ pub mod ffi {
             ipfs.set_cache(pd.inner().clone());
         }
 
-        let obj = Box::new(ConstellationAdapter::new(Arc::new(Mutex::new(Box::new(
+        let obj = Box::new(ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(
             ipfs,
         )))));
         Box::into_raw(obj) as *mut ConstellationAdapter
@@ -621,7 +631,7 @@ pub mod ffi {
             ipfs.set_cache(pd.inner().clone());
         }
 
-        FFIResult::ok(ConstellationAdapter::new(Arc::new(Mutex::new(Box::new(
+        FFIResult::ok(ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(
             ipfs,
         )))))
     }

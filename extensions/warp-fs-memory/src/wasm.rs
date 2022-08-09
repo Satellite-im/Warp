@@ -6,7 +6,7 @@ use warp::pocket_dimension::query::QueryBuilder;
 use warp::pocket_dimension::DimensionData;
 use wasm_bindgen::JsValue;
 
-use warp::sync::{Arc, Mutex};
+use warp::sync::{Arc, RwLock};
 
 use crate::{item, MemorySystem, Result};
 use warp::constellation::directory::Directory;
@@ -58,7 +58,7 @@ impl Constellation for MemorySystem {
         file.hash_mut().hash_from_slice(buf)?;
 
         self.current_directory_mut()?.add_item(file.clone())?;
-        if let Ok(mut cache) = self.get_cache() {
+        if let Ok(mut cache) = self.get_cache_mut() {
             let mut data = DataObject::default();
             data.set_size(bytes as u64);
             data.set_payload(
@@ -163,5 +163,5 @@ impl Constellation for MemorySystem {
 
 #[wasm_bindgen]
 pub fn constellation_fs_memory() -> ConstellationAdapter {
-    ConstellationAdapter::new(Arc::new(Mutex::new(Box::new(MemorySystem::new()))))
+    ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(MemorySystem::new()))))
 }

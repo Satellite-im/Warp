@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use warp::error::Error;
 
 use warp::pocket_dimension::PocketDimension;
-use warp::sync::{Arc, Mutex, MutexGuard};
+use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::constellation::directory::Directory;
 use warp::hooks::Hooks;
@@ -52,7 +52,7 @@ pub struct MemorySystem {
     #[serde(skip)]
     internal: MemorySystemInternal,
     #[serde(skip)]
-    cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     #[serde(skip)]
     hooks: Option<Hooks>,
 }
@@ -78,7 +78,7 @@ impl MemorySystem {
         MemorySystem::default()
     }
 
-    pub fn set_cache(&mut self, cache: Arc<Mutex<Box<dyn PocketDimension>>>) {
+    pub fn set_cache(&mut self, cache: Arc<RwLock<Box<dyn PocketDimension>>>) {
         self.cache = Some(cache);
     }
 
@@ -86,16 +86,27 @@ impl MemorySystem {
         self.hooks = Some(hook.clone())
     }
 
-    pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
+    pub fn get_cache(&self) -> anyhow::Result<RwLockReadGuard<Box<dyn PocketDimension>>> {
         let cache = self
             .cache
             .as_ref()
             .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
 
-        let inner = cache.lock();
+        let inner = cache.read();
+        Ok(inner)
+    }
+
+    pub fn get_cache_mut(&self) -> anyhow::Result<RwLockWriteGuard<Box<dyn PocketDimension>>> {
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Pocket Dimension Extension is not set"))?;
+
+        let inner = cache.write();
         Ok(inner)
     }
 }
+
 
 impl MemorySystemInternal {
     pub fn new() -> Self {
@@ -123,12 +134,12 @@ impl Extension for MemorySystem {
 pub mod ffi {
     use crate::MemorySystem;
     use warp::constellation::ConstellationAdapter;
-    use warp::sync::{Arc, Mutex};
+    use warp::sync::{Arc, RwLock};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_fs_memory_create_context() -> *mut ConstellationAdapter {
-        let obj = Box::new(ConstellationAdapter::new(Arc::new(Mutex::new(Box::new(
+        let obj = Box::new(ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(
             MemorySystem::new(),
         )))));
         Box::into_raw(obj) as *mut ConstellationAdapter

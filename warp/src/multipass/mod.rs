@@ -6,7 +6,7 @@ use warp_derive::FFIFree;
 use wasm_bindgen::prelude::*;
 
 use crate::error::Error;
-use crate::sync::{Arc, Mutex, MutexGuard};
+use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::{Extension, SingleHandle};
 use identity::Identity;
@@ -38,12 +38,6 @@ pub trait MultiPass: Extension + Friends + Sync + Send + SingleHandle {
 
     /// Clear out cache related to [`Module::Accounts`]
     fn refresh_cache(&mut self) -> Result<(), Error>;
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-#[derive(FFIFree)]
-pub struct MultiPassAdapter {
-    object: Arc<Mutex<Box<dyn MultiPass>>>,
 }
 
 pub trait Friends: Sync + Send {
@@ -118,22 +112,29 @@ pub trait Friends: Sync + Send {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+#[derive(FFIFree)]
+pub struct MultiPassAdapter {
+    object: Arc<RwLock<Box<dyn MultiPass>>>,
+}
+
 impl MultiPassAdapter {
-    pub fn new(object: Arc<Mutex<Box<dyn MultiPass>>>) -> Self {
+    pub fn new(object: Arc<RwLock<Box<dyn MultiPass>>>) -> Self {
         MultiPassAdapter { object }
     }
 
-    pub fn get_inner(&self) -> Arc<Mutex<Box<dyn MultiPass>>> {
+    pub fn inner(&self) -> Arc<RwLock<Box<dyn MultiPass>>> {
         self.object.clone()
     }
 
-    pub fn inner_guard(&self) -> MutexGuard<Box<dyn MultiPass>> {
-        self.object.lock()
+    pub fn read_guard(&self) -> RwLockReadGuard<Box<dyn MultiPass>> {
+        self.object.read()
     }
 
-    pub fn inner_ptr(&self) -> *const std::ffi::c_void {
-        Arc::into_raw(self.object.clone()) as *const std::ffi::c_void
+    pub fn write_guard(&mut self) -> RwLockWriteGuard<Box<dyn MultiPass>> {
+        self.object.write()
     }
+
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -144,108 +145,108 @@ impl MultiPassAdapter {
         username: Option<String>,
         passphrase: Option<String>,
     ) -> Result<DID, Error> {
-        self.inner_guard()
+        self.write_guard()
             .create_identity(username.as_deref(), passphrase.as_deref())
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn get_identity(&self, id: Identifier) -> Result<Identity, Error> {
-        self.inner_guard().get_identity(id)
+        self.read_guard().get_identity(id)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn get_own_identity(&self) -> Result<Identity, Error> {
-        self.inner_guard().get_own_identity()
+        self.read_guard().get_own_identity()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
-        self.inner_guard().update_identity(option)
+        self.write_guard().update_identity(option)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn decrypt_private_key(&self, passphrase: Option<String>) -> Result<DID, Error> {
-        self.inner_guard()
+        self.read_guard()
             .decrypt_private_key(passphrase.as_deref())
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn refresh_cache(&mut self) -> Result<(), Error> {
-        self.inner_guard().refresh_cache()
+        self.write_guard().refresh_cache()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.inner_guard().send_request(pubkey)
+        self.write_guard().send_request(pubkey)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.inner_guard().accept_request(pubkey)
+        self.write_guard().accept_request(pubkey)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.inner_guard().deny_request(pubkey)
+        self.write_guard().deny_request(pubkey)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.inner_guard().close_request(pubkey)
+        self.write_guard().close_request(pubkey)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.inner_guard().remove_friend(pubkey)
+        self.write_guard().remove_friend(pubkey)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn block_key(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.inner_guard().block_key(pubkey)
+        self.write_guard().block_key(pubkey)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
-        self.inner_guard().has_friend(pubkey)
+        self.read_guard().has_friend(pubkey)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn id(&self) -> String {
-        self.inner_guard().id()
+        self.read_guard().id()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn name(&self) -> String {
-        self.inner_guard().name()
+        self.read_guard().name()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn description(&self) -> String {
-        self.inner_guard().description()
+        self.read_guard().description()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn module(&self) -> crate::module::Module {
-        self.inner_guard().module()
+        self.read_guard().module()
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl MultiPassAdapter {
     pub fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        self.inner_guard().list_incoming_request()
+        self.read_guard().list_incoming_request()
     }
 
     pub fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        self.inner_guard().list_outgoing_request()
+        self.read_guard().list_outgoing_request()
     }
 
     pub fn list_friends(&self) -> Result<Vec<DID>, Error> {
-        self.inner_guard().list_friends()
+        self.read_guard().list_friends()
     }
 
     pub fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        self.inner_guard().list_all_request()
+        self.read_guard().list_all_request()
     }
 }
 
@@ -254,28 +255,28 @@ impl MultiPassAdapter {
 impl MultiPassAdapter {
     #[wasm_bindgen]
     pub fn list_incoming_request(&self) -> Result<JsValue, Error> {
-        self.inner_guard()
+        self.read_guard()
             .list_incoming_request()
             .map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
     }
 
     #[wasm_bindgen]
     pub fn list_outgoing_request(&self) -> Result<JsValue, Error> {
-        self.inner_guard()
+        self.read_guard()
             .list_outgoing_request()
             .map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
     }
 
     #[wasm_bindgen]
     pub fn list_friends(&self) -> Result<JsValue, Error> {
-        self.inner_guard()
+        self.read_guard()
             .list_friends()
             .map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
     }
 
     #[wasm_bindgen]
     pub fn list_all_request(&self) -> Result<JsValue, Error> {
-        self.inner_guard()
+        self.read_guard()
             .list_all_request()
             .map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
     }
@@ -324,7 +325,7 @@ pub mod ffi {
         let mp = &mut *(ctx);
 
         match async_on_block(async {
-            mp.inner_guard()
+            mp.write_guard()
                 .create_identity(username.as_deref(), passphrase.as_deref())
         }) {
             Ok(pkey) => FFIResult::ok(pkey),
@@ -347,8 +348,8 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        let id = &*(identifier as *mut Identifier);
-        match async_on_block(async { mp.inner_guard().get_identity(id.clone()) }) {
+        let id = &*(identifier);
+        match async_on_block(async { mp.read_guard().get_identity(id.clone()) }) {
             Ok(identity) => FFIResult::ok(identity),
             Err(e) => FFIResult::err(e),
         }
@@ -364,7 +365,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match async_on_block(async { mp.inner_guard().get_own_identity() }) {
+        match async_on_block(async { mp.read_guard().get_own_identity() }) {
             Ok(identity) => FFIResult::ok(identity),
             Err(e) => FFIResult::err(e),
         }
@@ -382,7 +383,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let option = &*option;
-        async_on_block(async { mp.inner_guard().update_identity(option.clone()) }).into()
+        async_on_block(async { mp.write_guard().update_identity(option.clone()) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -402,7 +403,7 @@ pub mod ffi {
             true => None,
         };
         let mp = &*(ctx);
-        match async_on_block(async { mp.inner_guard().decrypt_private_key(passphrase.as_deref()) })
+        match async_on_block(async { mp.read_guard().decrypt_private_key(passphrase.as_deref()) })
         {
             Ok(key) => FFIResult::ok(key.into()),
             Err(e) => FFIResult::err(e),
@@ -417,7 +418,7 @@ pub mod ffi {
         }
 
         let mp = &mut *(ctx);
-        async_on_block(async { mp.inner_guard().refresh_cache() }).into()
+        async_on_block(async { mp.write_guard().refresh_cache() }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -435,7 +436,7 @@ pub mod ffi {
         }
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        async_on_block(async { mp.inner_guard().send_request(pk) }).into()
+        async_on_block(async { mp.write_guard().send_request(pk) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -454,7 +455,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        async_on_block(async { mp.inner_guard().accept_request(pk) }).into()
+        async_on_block(async { mp.write_guard().accept_request(pk) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -473,7 +474,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        async_on_block(async { mp.inner_guard().deny_request(pk) }).into()
+        async_on_block(async { mp.write_guard().deny_request(pk) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -492,7 +493,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        async_on_block(async { mp.inner_guard().close_request(pk) }).into()
+        async_on_block(async { mp.write_guard().close_request(pk) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -505,7 +506,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match async_on_block(async { mp.inner_guard().list_incoming_request() }) {
+        match async_on_block(async { mp.read_guard().list_incoming_request() }) {
             Ok(list) => FFIResult::ok(list.into()),
             Err(e) => FFIResult::err(e),
         }
@@ -521,7 +522,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match async_on_block(async { mp.inner_guard().list_outgoing_request() }) {
+        match async_on_block(async { mp.read_guard().list_outgoing_request() }) {
             Ok(list) => FFIResult::ok(list.into()),
             Err(e) => FFIResult::err(e),
         }
@@ -537,7 +538,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match async_on_block(async { mp.inner_guard().list_all_request() }) {
+        match async_on_block(async { mp.read_guard().list_all_request() }) {
             Ok(list) => FFIResult::ok(list.into()),
             Err(e) => FFIResult::err(e),
         }
@@ -559,7 +560,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        async_on_block(async { mp.inner_guard().remove_friend(pk) }).into()
+        async_on_block(async { mp.write_guard().remove_friend(pk) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -578,7 +579,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        async_on_block(async { mp.inner_guard().block(pk) }).into()
+        async_on_block(async { mp.write_guard().block(pk) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -597,7 +598,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        async_on_block(async { mp.inner_guard().unblock(pk) }).into()
+        async_on_block(async { mp.write_guard().unblock(pk) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -610,7 +611,7 @@ pub mod ffi {
         }
 
         let mp = &mut *ctx;
-        match async_on_block(async { mp.inner_guard().block_list().map(|list| list.into()) }) {
+        match async_on_block(async { mp.read_guard().block_list().map(|list| list.into()) }) {
             Ok(list) => FFIResult::ok(list),
             Err(e) => FFIResult::err(e),
         }
@@ -626,7 +627,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match async_on_block(async { mp.inner_guard().list_friends() }) {
+        match async_on_block(async { mp.read_guard().list_friends() }) {
             Ok(list) => FFIResult::ok(list.into()),
             Err(e) => FFIResult::err(e),
         }
@@ -649,6 +650,6 @@ pub mod ffi {
         let mp = &*(ctx);
         let pk = &*pubkey;
 
-        async_on_block(async { mp.inner_guard().has_friend(pk) }).into()
+        async_on_block(async { mp.read_guard().has_friend(pk) }).into()
     }
 }
