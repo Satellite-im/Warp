@@ -1,6 +1,6 @@
 pub mod group;
 
-use crate::crypto::{DID};
+use crate::crypto::DID;
 use crate::error::Error;
 use crate::sync::{Arc, Mutex, MutexGuard};
 use crate::{Extension, SingleHandle};
@@ -309,7 +309,18 @@ pub enum EmbedState {
 
 #[async_trait::async_trait]
 pub trait RayGun: Extension + GroupChat + Sync + Send + SingleHandle {
-    /// Retrieve all messages from a conversation
+
+    // Start a new conversation.
+    async fn create_conversation(&mut self, _: &DID) -> Result<Uuid, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    // List all active conversations
+    async fn list_conversations(&self) -> Result<Vec<Uuid>, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Retreive all messages from a conversation
     async fn get_messages(
         &self,
         conversation_id: Uuid,
@@ -325,7 +336,11 @@ pub trait RayGun: Extension + GroupChat + Sync + Send + SingleHandle {
     ) -> Result<(), Error>;
 
     /// Delete message from a conversation
-    async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<(), Error>;
+    async fn delete(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Option<Uuid>,
+    ) -> Result<(), Error>;
 
     /// React to a message
     async fn react(
@@ -387,20 +402,63 @@ impl RayGunAdapter {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use crate::crypto::{DID};
+    use crate::crypto::DID;
     use crate::error::Error;
-    use crate::ffi::{FFIResult, FFIResult_Null, FFIVec_String};
+    use crate::ffi::{FFIResult, FFIResult_Null, FFIResult_String, FFIVec_String};
     use crate::raygun::{
         EmbedState, FFIVec_Message, FFIVec_SenderId, Message, MessageOptions, PinState,
         RayGunAdapter, Reaction, ReactionState,
     };
-    use crate::runtime_handle;
+    use crate::{async_on_block, runtime_handle};
     use std::ffi::{CStr, CString};
     use std::os::raw::c_char;
     use std::str::{FromStr, Utf8Error};
     use uuid::Uuid;
 
     use super::SenderId;
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_create_conversation(
+        ctx: *const RayGunAdapter,
+        did_key: *const DID,
+    ) -> FFIResult_String {
+        if ctx.is_null() {
+            return FFIResult_String::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        if did_key.is_null() {
+            return FFIResult_String::err(Error::Any(anyhow::anyhow!("did_key cannot be null")));
+        }
+
+        let adapter = &*ctx;
+
+        async_on_block(adapter.inner_guard().create_conversation(&*did_key))
+            .map(|s| s.to_string())
+            .into()
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_list_conversations(
+        ctx: *const RayGunAdapter,
+    ) -> FFIResult<FFIVec_String> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        let adapter = &*ctx;
+
+        match async_on_block(adapter.inner_guard().list_conversations())
+            .map(|s| s.iter().map(|id| id.to_string()).collect::<Vec<_>>())
+            .map(FFIVec_String::from)
+        {
+            Ok(list) => FFIResult::ok(list),
+            Err(e) => FFIResult::err(e),
+        }
+    }
 
     #[allow(clippy::await_holding_lock)]
     #[allow(clippy::missing_safety_doc)]
@@ -516,20 +574,20 @@ pub mod ffi {
             )));
         }
 
-        if message_id.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
-        }
-
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy().to_string())
         {
             Ok(uuid) => uuid,
             Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
-        let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string())
-        {
-            Ok(uuid) => uuid,
-            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
+        let msg_id = match message_id.is_null() {
+            true => None,
+            false => {
+                match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy().to_string()) {
+                    Ok(uuid) => Some(uuid),
+                    Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
+                }
+            }
         };
 
         let adapter = &mut *ctx;
@@ -885,9 +943,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn sender_id_from_did_key(
-        public_key: *const DID,
-    ) -> *mut SenderId {
+    pub unsafe extern "C" fn sender_id_from_did_key(public_key: *const DID) -> *mut SenderId {
         if public_key.is_null() {
             return std::ptr::null_mut();
         }
@@ -917,9 +973,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn sender_id_get_did_key(
-        sender_id: *const SenderId,
-    ) -> *mut DID {
+    pub unsafe extern "C" fn sender_id_get_did_key(sender_id: *const SenderId) -> *mut DID {
         if sender_id.is_null() {
             return std::ptr::null_mut();
         }

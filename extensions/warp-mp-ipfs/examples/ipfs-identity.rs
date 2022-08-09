@@ -1,7 +1,7 @@
 use warp::multipass::identity::IdentityUpdate;
 use warp::multipass::MultiPass;
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::{ipfs_identity_temporary};
+use warp_mp_ipfs::ipfs_identity_temporary;
 
 fn update_name(account: &mut impl MultiPass, name: &str) -> anyhow::Result<()> {
     account.update_identity(IdentityUpdate::set_username(name.to_string()))?;
@@ -17,7 +17,7 @@ fn update_status(account: &mut impl MultiPass, status: &str) -> anyhow::Result<(
     println!();
     println!("Updated Identity: {}", serde_json::to_string(&ident)?);
     Ok(())
-} 
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

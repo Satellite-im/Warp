@@ -1,8 +1,9 @@
 #![allow(unused_imports)]
 
-mod events;
+pub mod config;
 mod store;
 
+use config::RgIpfsConfig;
 use futures::pin_mut;
 use futures::StreamExt;
 use ipfs::IpfsTypes;
@@ -12,11 +13,13 @@ use std::any::Any;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
+use store::direct::DirectMessageStore;
 #[allow(unused_imports)]
 use tokio::sync::mpsc::{Receiver, Sender};
 use uuid::Uuid;
 use warp::crypto::rand::Rng;
 use warp::crypto::KeyMaterial;
+use warp::crypto::DID;
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::module::Module;
@@ -34,7 +37,7 @@ use warp::tesseract::Tesseract;
 use warp::Extension;
 use warp::SingleHandle;
 
-use crate::events::MessagingEvents;
+// use crate::events::MessagingEvents;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -44,12 +47,8 @@ pub type Persistent = Types;
 pub struct IpfsMessaging<T: IpfsTypes> {
     pub account: Arc<Mutex<Box<dyn MultiPass>>>,
     pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-    pub conversations: Arc<Mutex<Vec<Message>>>,
     pub ipfs: Ipfs<T>,
-    //TODO: DirectMessageStore
-    //      * Subscribes to topic and store messages sent or received from peers
-    //      * Lookup up conversation
-    //      * Execute events
+    pub direct_store: DirectMessageStore<T>,
     //TODO: GroupManager
     //      * Create, Join, and Leave GroupChats
     //      * Send message
@@ -58,27 +57,12 @@ pub struct IpfsMessaging<T: IpfsTypes> {
 }
 
 impl<T: IpfsTypes> IpfsMessaging<T> {
-    // pub async fn temporary(
-    //     account: Arc<Mutex<Box<dyn MultiPass>>>,
-    //     cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-    // ) -> anyhow::Result<IpfsMessaging<T>> {
-    //     IpfsMessaging::new(None, account, cache).await
-    // }
-
-    // pub async fn persistent<P: AsRef<std::path::Path>>(
-    //     path: P,
-    //     account: Arc<Mutex<Box<dyn MultiPass>>>,
-    //     cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
-    // ) -> anyhow::Result<IpfsMessaging<T>> {
-    //     let path = path.as_ref();
-    //     IpfsMessaging::new(Some(path.to_path_buf()), account, cache).await
-    // }
-
     pub async fn new(
-        path: Option<PathBuf>,
+        config: Option<RgIpfsConfig>,
         account: Arc<Mutex<Box<dyn MultiPass>>>,
         cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
+        let config = config.clone().unwrap_or_default();
         let ipfs_handle = match account.lock().handle() {
             Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
             _ => None,
@@ -94,25 +78,27 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
                     Keypair::Ed25519(id_secret.into())
                 };
 
-                let opts = IpfsOptions {
-                    ipfs_path: path.unwrap_or_else(|| {
-                        let temp = warp::crypto::rand::thread_rng().gen_range(0, 1000);
-                        std::env::temp_dir().join(&format!("ipfs-rg-temp-{temp}"))
-                    }),
-                    keypair: keypair.clone(),
-                    bootstrap: vec![],
-                    mdns: false,
-                    kad_protocol: None,
-                    listening_addrs: vec!["/ip4/0.0.0.0/tcp/0".parse().unwrap()],
-                    span: None,
-                    dcutr: false,
-                    relay: false,
-                    relay_server: false,
-                    relay_addr: None,
+                let mut opts = IpfsOptions {
+                    keypair,
+                    bootstrap: config.bootstrap,
+                    mdns: config.ipfs_setting.mdns.enable,
+                    listening_addrs: config.listen_on,
+                    dcutr: config.ipfs_setting.dcutr.enable,
+                    relay: config.ipfs_setting.relay_client.enable,
+                    relay_server: config.ipfs_setting.relay_server.enable,
+                    ..Default::default()
                 };
 
-                if !opts.ipfs_path.exists() {
-                    tokio::fs::create_dir(opts.ipfs_path.clone()).await?;
+                if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
+                    // Create directory if it doesnt exist
+                    let path = config
+                        .path
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("\"path\" must be set"))?;
+                    opts.ipfs_path = path.clone();
+                    if !opts.ipfs_path.exists() {
+                        tokio::fs::create_dir(path).await?;
+                    }
                 }
 
                 let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
@@ -122,13 +108,20 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             }
         };
 
-        let conversations = Arc::new(Mutex::new(Vec::new()));
+        let direct_store = DirectMessageStore::new(
+            ipfs.clone(),
+            config.path.map(|p| p.join("messages")),
+            account.clone(),
+            config.store_setting.discovery,
+            config.store_setting.broadcast_interval
+        )
+        .await?;
 
         let messaging = IpfsMessaging {
             account,
             cache,
-            conversations,
             ipfs,
+            direct_store,
         };
         Ok(messaging)
     }
@@ -139,11 +132,6 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             .as_ref()
             .ok_or(Error::PocketDimensionExtensionUnavailable)?;
         Ok(cache.lock())
-    }
-
-    pub fn sender_id(&self) -> anyhow::Result<SenderId> {
-        let ident = self.account.lock().get_own_identity()?;
-        Ok(SenderId::from_did_key(ident.did_key()))
     }
 }
 
@@ -170,13 +158,22 @@ impl<T: IpfsTypes> SingleHandle for IpfsMessaging<T> {
 
 #[async_trait::async_trait]
 impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
-    async fn get_messages(
-        &self,
-        _conversation_id: Uuid,
-        _: MessageOptions,
-    ) -> Result<Vec<Message>> {
-        let list = vec![];
-        Ok(list)
+    async fn create_conversation(&mut self, did_key: &DID) -> Result<Uuid> {
+        self.direct_store
+            .create_conversation(did_key)
+            .await
+            .map_err(Error::from)
+    }
+
+    async fn list_conversations(&self) -> Result<Vec<Uuid>> {
+        Ok(self.direct_store.list_conversations())
+    }
+
+    async fn get_messages(&self, conversation_id: Uuid, _: MessageOptions) -> Result<Vec<Message>> {
+        self.direct_store
+            .get_messages(conversation_id, None)
+            .await
+            .map_err(Error::from)
     }
 
     async fn send(
@@ -185,42 +182,34 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         message_id: Option<Uuid>,
         value: Vec<String>,
     ) -> Result<()> {
-        if value.is_empty() {
-            return Err(Error::EmptyMessage);
+        match message_id {
+            Some(id) => self
+                .direct_store
+                .edit_message(conversation_id, id, value)
+                .await
+                .map_err(Error::from),
+            None => self
+                .direct_store
+                .send_message(conversation_id, value)
+                .await
+                .map_err(Error::from),
         }
-        let sender = self.sender_id()?;
-        let event = match message_id {
-            Some(id) => MessagingEvents::EditMessage(conversation_id, id, value),
-            None => {
-                let mut message = Message::new();
-                message.set_conversation_id(conversation_id);
-                message.set_sender(sender);
-                message.set_value(value);
-                MessagingEvents::NewMessage(message)
-            }
-        };
-
-        // self.send_event(&event).await?;
-        events::process_message_event(self.conversations.clone(), &event)?;
-
-        //TODO: cache support edited messages
-        // if let MessagingEvents::NewMessage(message) = event {
-        //     if let Ok(mut cache) = self.get_cache() {
-        //         let data = DataObject::new(DataType::Messaging, message)?;
-        //         if cache.add_data(DataType::Messaging, &data).is_err() {
-        //             //TODO: Log error
-        //         }
-        //     }
-        // }
-
-        return Ok(());
     }
 
-    async fn delete(&mut self, conversation_id: Uuid, message_id: Uuid) -> Result<()> {
-        let event = MessagingEvents::DeleteMessage(conversation_id, message_id);
-        // self.send_event(&event).await?;
-        events::process_message_event(self.conversations.clone(), &event)?;
-        Ok(())
+    async fn delete(&mut self, conversation_id: Uuid, message_id: Option<Uuid>) -> Result<()> {
+        match message_id {
+            Some(id) => self
+                .direct_store
+                .delete_message(conversation_id, id, true)
+                .await
+                .map_err(Error::from),
+            None => self
+                .direct_store
+                .delete_conversation(conversation_id, true)
+                .await
+                .map(|_| ())
+                .map_err(Error::from),
+        }
     }
 
     async fn react(
@@ -230,17 +219,10 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         state: ReactionState,
         emoji: String,
     ) -> Result<()> {
-        let sender = self.sender_id()?;
-        let event = MessagingEvents::ReactMessage(
-            conversation_id,
-            sender.clone(),
-            message_id,
-            state,
-            emoji.clone(),
-        );
-        // self.send_event(&event).await?;
-        events::process_message_event(self.conversations.clone(), &event)?;
-        Ok(())
+        self.direct_store
+            .react(conversation_id, message_id, state, emoji)
+            .await
+            .map_err(Error::from)
     }
 
     async fn pin(
@@ -249,11 +231,10 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         message_id: Uuid,
         state: PinState,
     ) -> Result<()> {
-        let sender = self.sender_id()?;
-        let event = MessagingEvents::PinMessage(conversation_id, sender, message_id, state);
-        // self.send_event(&event).await?;
-        events::process_message_event(self.conversations.clone(), &event)?;
-        Ok(())
+        self.direct_store
+            .pin_message(conversation_id, message_id, state)
+            .await
+            .map_err(Error::from)
     }
 
     async fn reply(
@@ -262,108 +243,119 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         message_id: Uuid,
         value: Vec<String>,
     ) -> Result<()> {
-        if value.is_empty() {
-            return Err(Error::EmptyMessage);
-        }
-        let sender = self.sender_id()?;
-        let mut message = Message::new();
-        message.set_conversation_id(conversation_id);
-        message.set_replied(Some(message_id));
-        message.set_sender(sender);
-
-        message.set_value(value);
-
-        let event = MessagingEvents::NewMessage(message);
-
-        // self.send_event(&event).await?;
-        events::process_message_event(self.conversations.clone(), &event)?;
-
-        // if let MessagingEvents::NewMessage(message) = event {
-        //     if let Ok(mut cache) = self.get_cache() {
-        //         let data = DataObject::new(DataType::Messaging, message)?;
-        //         if cache.add_data(DataType::Messaging, &data).is_err() {
-        //             //TODO: Log error
-        //         }
-        //     }
-        // }
-
-        return Ok(());
+        self.direct_store
+            .reply_message(conversation_id, message_id, value)
+            .await
+            .map_err(Error::from)
     }
 
     async fn embeds(
         &mut self,
-        _conversation_id: Uuid,
-        _message_id: Uuid,
-        _state: EmbedState,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: EmbedState,
     ) -> Result<()> {
-        Err(Error::Unimplemented)
+        self.direct_store
+            .embeds(conversation_id, message_id, state)
+            .await
+            .map_err(Error::from)
     }
 }
 
-impl<T: IpfsTypes> GroupChat for IpfsMessaging<T> {
-    fn join_group(&mut self, id: GroupId) -> Result<()> {
-        let _group_id = id.get_id().ok_or(warp::error::Error::InvalidGroupId)?;
+impl<T: IpfsTypes> GroupChat for IpfsMessaging<T> {}
 
-        Ok(())
+impl<T: IpfsTypes> GroupChatManagement for IpfsMessaging<T> {}
+
+impl<T: IpfsTypes> GroupInvite for IpfsMessaging<T> {}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ffi {
+    use crate::IpfsMessaging;
+    use crate::{Persistent, Temporary};
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
+    use std::path::PathBuf;
+    use warp::error::Error;
+    use warp::ffi::FFIResult;
+    use warp::multipass::MultiPassAdapter;
+    use warp::pocket_dimension::PocketDimensionAdapter;
+    use warp::raygun::RayGunAdapter;
+    use warp::sync::{Arc, Mutex};
+    use warp::{async_on_block, runtime_handle};
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn warp_rg_ipfs_temporary_new(
+        account: *const MultiPassAdapter,
+        cache: *const PocketDimensionAdapter,
+        config: *const c_char,
+    ) -> FFIResult<RayGunAdapter> {
+        if account.is_null() {
+            return FFIResult::err(Error::MultiPassExtensionUnavailable);
+        }
+
+        let cache = match cache.is_null() {
+            true => None,
+            false => Some(&*cache),
+        };
+
+        let config = match config.is_null() {
+            true => None,
+            false => {
+                match serde_json::from_str(&CStr::from_ptr(config).to_string_lossy().to_string()) {
+                    Ok(c) => Some(c),
+                    Err(e) => return FFIResult::err(Error::from(e)),
+                }
+            }
+        };
+
+        let account = &*account;
+
+        match async_on_block(IpfsMessaging::<Temporary>::new(
+            config,
+            account.get_inner().clone(),
+            cache.map(|p| p.inner()),
+        )) {
+            Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(Mutex::new(Box::new(a))))),
+            Err(e) => FFIResult::err(Error::from(e)),
+        }
     }
 
-    fn leave_group(&mut self, _id: GroupId) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn warp_rg_ipfs_persistent_new(
+        account: *const MultiPassAdapter,
+        cache: *const PocketDimensionAdapter,
+        config: *const c_char,
+    ) -> FFIResult<RayGunAdapter> {
+        if account.is_null() {
+            return FFIResult::err(Error::MultiPassExtensionUnavailable);
+        }
 
-    fn list_members(&self, _id: GroupId) -> Result<Vec<GroupMember>> {
-        Err(Error::Unimplemented)
-    }
-}
+        let cache = match cache.is_null() {
+            true => None,
+            false => Some(&*cache),
+        };
 
-impl<T: IpfsTypes> GroupChatManagement for IpfsMessaging<T> {
-    fn create_group(&mut self, _name: &str) -> Result<Group> {
-        Err(Error::Unimplemented)
-    }
+        let config = match config.is_null() {
+            true => return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is needed"))),
+            false => {
+                match serde_json::from_str(&CStr::from_ptr(config).to_string_lossy().to_string()) {
+                    Ok(c) => Some(c),
+                    Err(e) => return FFIResult::err(Error::from(e)),
+                }
+            }
+        };
 
-    fn change_group_name(&mut self, _id: GroupId, _name: &str) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
+        let account = &*account;
 
-    fn open_group(&mut self, _id: GroupId) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn close_group(&mut self, _id: GroupId) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn change_admin(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn assign_admin(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn kick_member(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn ban_member(&mut self, _id: GroupId, _member: GroupMember) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-}
-
-impl<T: IpfsTypes> GroupInvite for IpfsMessaging<T> {
-    fn send_invite(&mut self, _id: GroupId, _recipient: GroupMember) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn accept_invite(&mut self, _id: GroupId) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn deny_invite(&mut self, _id: GroupId) -> Result<()> {
-        Err(Error::Unimplemented)
-    }
-
-    fn block_group(&mut self, _id: GroupId) -> Result<()> {
-        Err(Error::Unimplemented)
+        match async_on_block(IpfsMessaging::<Persistent>::new(
+            config,
+            account.get_inner().clone(),
+            cache.map(|p| p.inner()),
+        )) {
+            Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(Mutex::new(Box::new(a))))),
+            Err(e) => FFIResult::err(Error::from(e)),
+        }
     }
 }

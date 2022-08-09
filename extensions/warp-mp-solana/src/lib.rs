@@ -2,6 +2,8 @@ pub mod config;
 pub mod solana;
 pub mod store;
 
+use std::time::Duration;
+
 use anyhow::anyhow;
 use config::MpSolanaConfig;
 use ipfs::{IpfsOptions, IpfsTypes, TestTypes, Types, UninitializedIpfs};
@@ -146,7 +148,6 @@ impl<T: IpfsTypes> SolanaAccount<T> {
             dcutr: config.ipfs_setting.dcutr.enable,
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
-            relay_addr: config.ipfs_setting.relay_client.relay_address,
             ..Default::default()
         };
 
@@ -164,6 +165,19 @@ impl<T: IpfsTypes> SolanaAccount<T> {
 
         let (ipfs, fut) = async_block_in_place_uncheck(UninitializedIpfs::new(opts).start())?;
         async_spawn(fut);
+
+        if config.ipfs_setting.relay_client.enable {
+            for relay_addr in config.ipfs_setting.relay_client.relay_address {
+                if let Err(_e) = async_block_in_place_uncheck(ipfs.swarm_listen_on(relay_addr)) {
+                    //TODO: Log
+                }
+                async_block_in_place_uncheck(tokio::time::sleep(Duration::from_millis(500)));
+            }
+        }
+
+        if let Err(_e) = async_block_in_place_uncheck(ipfs.direct_bootstrap()) {
+            //TODO: Log
+        }
 
         let friend_store = async_block_in_place_uncheck(FriendsStore::new(
             ipfs,

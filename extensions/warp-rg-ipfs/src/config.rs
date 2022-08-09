@@ -79,7 +79,7 @@ pub struct StoreSetting {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MpIpfsConfig {
+pub struct RgIpfsConfig {
     pub path: Option<PathBuf>,
     pub bootstrap: Vec<Multiaddr>,
     pub listen_on: Vec<Multiaddr>,
@@ -87,9 +87,9 @@ pub struct MpIpfsConfig {
     pub store_setting: StoreSetting,
 }
 
-impl Default for MpIpfsConfig {
+impl Default for RgIpfsConfig {
     fn default() -> Self {
-        MpIpfsConfig {
+        RgIpfsConfig {
             path: None,
             bootstrap: vec![
                 "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
@@ -107,45 +107,50 @@ impl Default for MpIpfsConfig {
                 .collect::<Vec<_>>(),
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
+                autonat: Autonat {
+                    enable: false,
+                    servers: vec![],
+                },
+                relay_client: RelayClient {
+                    enable: false,
+                    ..Default::default()
+                },
+                relay_server: RelayServer { enable: false },
+                dcutr: Dcutr { enable: false },
                 ..Default::default()
             },
             store_setting: StoreSetting {
                 broadcast_interval: 100,
-                ..Default::default()
+                discovery: true,
+                broadcast_with_connection: false,
             },
         }
     }
 }
 
-impl MpIpfsConfig {
-    pub fn development() -> MpIpfsConfig {
-        MpIpfsConfig {
-            path: None,
+impl RgIpfsConfig {
+    pub fn local() -> RgIpfsConfig {
+        RgIpfsConfig {
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
-                autonat: Autonat {
-                    enable: false,
-                    servers: vec![],
-                },
                 ..Default::default()
             },
             store_setting: StoreSetting {
                 broadcast_interval: 100,
-                discovery: false,
                 ..Default::default()
             },
             ..Default::default()
         }
     }
 
-    pub fn production<P: AsRef<std::path::Path>>(path: P) -> MpIpfsConfig {
-        MpIpfsConfig {
+    pub fn production<P: AsRef<std::path::Path>>(path: P) -> RgIpfsConfig {
+        RgIpfsConfig {
             path: Some(path.as_ref().to_path_buf()),
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
                 autonat: Autonat {
                     enable: true,
-                    ..Default::default()
+                    servers: vec![],
                 },
                 relay_client: RelayClient {
                     enable: true,

@@ -74,8 +74,9 @@ pub fn runtime_handle() -> tokio::runtime::Handle {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn async_spawn<F>(fut: F) -> JoinHandle<F::Output>
-    where F: futures::Future + Send + 'static,
-          <F as futures::Future>::Output: std::marker::Send
+where
+    F: futures::Future + Send + 'static,
+    <F as futures::Future>::Output: std::marker::Send,
 {
     let handle = match tokio::runtime::Handle::try_current() {
         Ok(handle) => handle,
@@ -147,7 +148,7 @@ pub mod ffi {
             let list = item
                 .iter()
                 .filter_map(|s| match std::ffi::CString::new(s.to_string()) {
-                    Ok(s) => Some(s.as_ptr() as *mut _),
+                    Ok(s) => Some(s.into_raw()),
                     Err(_) => None,
                 })
                 .collect::<Vec<_>>();

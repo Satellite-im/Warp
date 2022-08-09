@@ -29,5 +29,5 @@ build_static_pd_flatfile:
 build_shared_pd_flatfile:
 				mkdir -p bin && clang -Wall -Wextra pd_flatfile.c -o bin/pd_flatfile -L ../target/debug -lwarp -lwarp_pd_flatfile -lpthread -ldl -lm
 
-build_static_rg_libp2p:
-				mkdir -p bin && clang -Wall -Wextra rg_libp2p.c -o bin/rg_libp2p ../target/debug/libwarp.a ../target/debug/libwarp_rg_libp2p.a ../target/debug/libwarp_mp_ipfs.a -lz -lssl -lcrypto -lbz2 -lm -ludev
+build_static_rg_ipfs:
+				mkdir -p bin && clang -Wall -Wextra rg_ipfs.c -o bin/rg_ipfs ../target/debug/libwarp.a ../target/debug/libwarp_rg_ipfs.a ../target/debug/libwarp_mp_ipfs.a -lz -lm
