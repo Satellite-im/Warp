@@ -1,7 +1,7 @@
 use warp::multipass::identity::IdentityUpdate;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::sync::{Arc, Mutex};
+use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_mp_solana::solana::wallet::SolanaWallet;
 use warp_mp_solana::{SolanaAccount, Temporary};
@@ -32,7 +32,7 @@ fn generated_wallet() -> anyhow::Result<SolanaWallet> {
     .map_err(anyhow::Error::from)
 }
 
-fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
+fn cache_setup() -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
     let mut root = std::env::temp_dir();
     root.push("pd-cache");
 
@@ -45,7 +45,7 @@ fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
 
     let storage = FlatfileStorage::new_with_index_file(root, index)?;
 
-    Ok(Arc::new(Mutex::new(Box::new(storage))))
+    Ok(Arc::new(RwLock::new(Box::new(storage))))
 }
 
 fn main() -> anyhow::Result<()> {

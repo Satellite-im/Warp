@@ -51,7 +51,7 @@ impl Constellation for MemorySystem {
         file.hash_mut().hash_from_file(path)?;
 
         self.current_directory_mut()?.add_item(file.clone())?;
-        if let Ok(mut cache) = self.get_cache() {
+        if let Ok(mut cache) = self.get_cache_mut() {
             let data = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from(PathBuf::from(path)))?;
             cache.add_data(DataType::from(Module::FileSystem), &data)?;
         }
@@ -110,7 +110,7 @@ impl Constellation for MemorySystem {
         file.hash_mut().hash_from_slice(buf)?;
 
         self.current_directory_mut()?.add_item(file.clone())?;
-        if let Ok(mut cache) = self.get_cache() {
+        if let Ok(mut cache) = self.get_cache_mut() {
             let data = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from_buffer(name, buf))?;
             cache.add_data(DataType::from(Module::FileSystem), &data)?;
         }

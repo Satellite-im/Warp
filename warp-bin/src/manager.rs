@@ -4,7 +4,7 @@ use warp::{
     multipass::MultiPass,
     pocket_dimension::PocketDimension,
     raygun::RayGun,
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
 };
 
 pub trait Information {
@@ -14,85 +14,85 @@ pub trait Information {
 
 #[derive(Clone)]
 pub struct FileSystem {
-    pub handle: Arc<Mutex<Box<dyn Constellation>>>,
+    pub handle: Arc<RwLock<Box<dyn Constellation>>>,
     pub active: bool,
 }
 
 impl Information for FileSystem {
     fn name(&self) -> String {
-        self.handle.lock().name()
+        self.handle.read().name()
     }
     fn id(&self) -> String {
-        self.handle.lock().id()
+        self.handle.read().id()
     }
 }
 
-impl AsRef<Arc<Mutex<Box<dyn Constellation>>>> for FileSystem {
-    fn as_ref(&self) -> &Arc<Mutex<Box<dyn Constellation>>> {
+impl AsRef<Arc<RwLock<Box<dyn Constellation>>>> for FileSystem {
+    fn as_ref(&self) -> &Arc<RwLock<Box<dyn Constellation>>> {
         &self.handle
     }
 }
 
 #[derive(Clone)]
 pub struct Cache {
-    pub handle: Arc<Mutex<Box<dyn PocketDimension>>>,
+    pub handle: Arc<RwLock<Box<dyn PocketDimension>>>,
     pub active: bool,
 }
 
-impl AsRef<Arc<Mutex<Box<dyn PocketDimension>>>> for Cache {
-    fn as_ref(&self) -> &Arc<Mutex<Box<dyn PocketDimension>>> {
+impl AsRef<Arc<RwLock<Box<dyn PocketDimension>>>> for Cache {
+    fn as_ref(&self) -> &Arc<RwLock<Box<dyn PocketDimension>>> {
         &self.handle
     }
 }
 
 impl Information for Cache {
     fn name(&self) -> String {
-        self.handle.lock().name()
+        self.handle.read().name()
     }
     fn id(&self) -> String {
-        self.handle.lock().id()
+        self.handle.read().id()
     }
 }
 
 #[derive(Clone)]
 pub struct Account {
-    pub handle: Arc<Mutex<Box<dyn MultiPass>>>,
+    pub handle: Arc<RwLock<Box<dyn MultiPass>>>,
     pub active: bool,
 }
 
-impl AsRef<Arc<Mutex<Box<dyn MultiPass>>>> for Account {
-    fn as_ref(&self) -> &Arc<Mutex<Box<dyn MultiPass>>> {
+impl AsRef<Arc<RwLock<Box<dyn MultiPass>>>> for Account {
+    fn as_ref(&self) -> &Arc<RwLock<Box<dyn MultiPass>>> {
         &self.handle
     }
 }
 
 impl Information for Messaging {
     fn name(&self) -> String {
-        self.handle.lock().name()
+        self.handle.read().name()
     }
     fn id(&self) -> String {
-        self.handle.lock().id()
+        self.handle.read().id()
     }
 }
 
 #[derive(Clone)]
 pub struct Messaging {
-    pub handle: Arc<Mutex<Box<dyn RayGun>>>,
+    pub handle: Arc<RwLock<Box<dyn RayGun>>>,
     pub active: bool,
 }
 
-impl AsRef<Arc<Mutex<Box<dyn RayGun>>>> for Messaging {
-    fn as_ref(&self) -> &Arc<Mutex<Box<dyn RayGun>>> {
+impl AsRef<Arc<RwLock<Box<dyn RayGun>>>> for Messaging {
+    fn as_ref(&self) -> &Arc<RwLock<Box<dyn RayGun>>> {
         &self.handle
     }
 }
 
 impl Information for Account {
     fn name(&self) -> String {
-        self.handle.lock().name()
+        self.handle.read().name()
     }
     fn id(&self) -> String {
-        self.handle.lock().id()
+        self.handle.read().id()
     }
 }
 
@@ -105,11 +105,11 @@ pub struct ModuleManager {
 }
 
 impl ModuleManager {
-    pub fn set_filesystem(&mut self, handle: Arc<Mutex<Box<dyn Constellation>>>) {
+    pub fn set_filesystem(&mut self, handle: Arc<RwLock<Box<dyn Constellation>>>) {
         if self
             .filesystem
             .iter()
-            .filter(|fs| fs.id() == handle.lock().id())
+            .filter(|fs| fs.id() == handle.read().id())
             .count()
             != 0
         {
@@ -180,11 +180,11 @@ impl ModuleManager {
         Ok(())
     }
 
-    pub fn set_cache(&mut self, handle: Arc<Mutex<Box<dyn PocketDimension>>>) {
+    pub fn set_cache(&mut self, handle: Arc<RwLock<Box<dyn PocketDimension>>>) {
         if self
             .cache
             .iter()
-            .filter(|cs| cs.id() == handle.lock().id())
+            .filter(|cs| cs.id() == handle.read().id())
             .count()
             != 0
         {
@@ -226,11 +226,11 @@ impl ModuleManager {
         Ok(())
     }
 
-    pub fn set_account(&mut self, handle: Arc<Mutex<Box<dyn MultiPass>>>) {
+    pub fn set_account(&mut self, handle: Arc<RwLock<Box<dyn MultiPass>>>) {
         if self
             .account
             .iter()
-            .filter(|cs| cs.id() == handle.lock().id())
+            .filter(|cs| cs.id() == handle.read().id())
             .count()
             != 0
         {
@@ -242,7 +242,7 @@ impl ModuleManager {
         })
     }
 
-    pub fn get_filesystem(&self) -> anyhow::Result<Arc<Mutex<Box<dyn Constellation>>>> {
+    pub fn get_filesystem(&self) -> anyhow::Result<Arc<RwLock<Box<dyn Constellation>>>> {
         let index = self
             .filesystem
             .iter()
@@ -254,7 +254,7 @@ impl ModuleManager {
         Ok(fs.as_ref().clone())
     }
 
-    pub fn get_cache(&self) -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
+    pub fn get_cache(&self) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
         let index = self
             .cache
             .iter()
@@ -266,7 +266,7 @@ impl ModuleManager {
         Ok(cs.as_ref().clone())
     }
 
-    pub fn get_account(&self) -> anyhow::Result<Arc<Mutex<Box<dyn MultiPass>>>> {
+    pub fn get_account(&self) -> anyhow::Result<Arc<RwLock<Box<dyn MultiPass>>>> {
         let index = self
             .account
             .iter()

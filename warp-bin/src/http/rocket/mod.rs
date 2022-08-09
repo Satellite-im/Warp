@@ -1,7 +1,7 @@
 mod constellation;
 use crate::manager::ModuleManager;
 use warp::pocket_dimension::PocketDimension;
-use warp::sync::{Arc, Mutex};
+use warp::sync::{Arc, RwLock};
 
 #[allow(unused_imports)]
 use rocket::{
@@ -14,10 +14,10 @@ use rocket::{
     Build, Request, Rocket, State,
 };
 
-pub struct CacheSystem(Arc<Mutex<Box<dyn PocketDimension>>>);
+pub struct CacheSystem(Arc<RwLock<Box<dyn PocketDimension>>>);
 
-impl AsRef<Arc<Mutex<Box<dyn PocketDimension>>>> for CacheSystem {
-    fn as_ref(&self) -> &Arc<Mutex<Box<dyn PocketDimension>>> {
+impl AsRef<Arc<RwLock<Box<dyn PocketDimension>>>> for CacheSystem {
+    fn as_ref(&self) -> &Arc<RwLock<Box<dyn PocketDimension>>> {
         &self.0
     }
 }
@@ -33,7 +33,7 @@ pub async fn http_main(manage: &mut ModuleManager) -> anyhow::Result<()> {
     let cache = manage.get_cache()?;
     //TODO: Remove
     if fs
-        .lock()
+        .write()
         .put_buffer("readme.txt", &b"This file was uploaded from Warp".to_vec())
         .await
         .is_err()

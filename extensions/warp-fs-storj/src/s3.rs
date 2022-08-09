@@ -4,7 +4,7 @@ use aws_endpoint::{CredentialScope, Partition, PartitionResolver};
 use aws_sdk_s3::presigning::config::PresigningConfig;
 use warp::sata::Sata;
 use std::path::PathBuf;
-use warp::sync::{Arc, Mutex, MutexGuard};
+use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::module::Module;
 
@@ -119,7 +119,7 @@ pub struct StorjFilesystem {
     #[serde(skip)]
     pub client: StorjClient,
     #[serde(skip)]
-    pub cache: Option<Arc<Mutex<Box<dyn PocketDimension>>>>,
+    pub cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     #[serde(skip)]
     pub hooks: Option<Hooks>,
 }
@@ -147,7 +147,7 @@ impl StorjFilesystem {
         system
     }
 
-    pub fn set_cache(&mut self, cache: Arc<Mutex<Box<dyn PocketDimension>>>) {
+    pub fn set_cache(&mut self, cache: Arc<RwLock<Box<dyn PocketDimension>>>) {
         self.cache = Some(cache);
     }
 
@@ -155,14 +155,23 @@ impl StorjFilesystem {
         self.hooks = Some(hook.clone())
     }
 
-    pub fn get_cache(&self) -> anyhow::Result<MutexGuard<Box<dyn PocketDimension>>> {
+    pub fn get_cache(&self) -> anyhow::Result<RwLockReadGuard<Box<dyn PocketDimension>>> {
         let cache = self
             .cache
             .as_ref()
             .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
 
-        let inner = cache.lock();
+        let inner = cache.read();
+        Ok(inner)
+    }
 
+    pub fn get_cache_mut(&self) -> anyhow::Result<RwLockWriteGuard<Box<dyn PocketDimension>>> {
+        let cache = self
+            .cache
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Pocket Dimension Extension is not set"))?;
+
+        let inner = cache.write();
         Ok(inner)
     }
 }
@@ -237,7 +246,7 @@ impl Constellation for StorjFilesystem {
 
         self.modified = Utc::now();
 
-        if let Ok(mut cache) = self.get_cache() {
+        if let Ok(mut cache) = self.get_cache_mut() {
             let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from(path))?;
             cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
@@ -346,7 +355,7 @@ impl Constellation for StorjFilesystem {
 
         self.modified = Utc::now();
 
-        if let Ok(mut cache) = self.get_cache() {
+        if let Ok(mut cache) = self.get_cache_mut() {
             let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from_buffer(&name, buffer))?;
             cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
@@ -512,7 +521,7 @@ pub mod ffi {
     use std::os::raw::c_char;
     use warp::constellation::ConstellationAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::sync::{Arc, Mutex};
+    use warp::sync::{Arc, RwLock};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -540,7 +549,7 @@ pub mod ffi {
             client.set_cache(pd.inner().clone());
         }
 
-        let obj = Box::new(ConstellationAdapter::new(Arc::new(Mutex::new(Box::new(
+        let obj = Box::new(ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(
             client,
         )))));
         Box::into_raw(obj) as *mut ConstellationAdapter

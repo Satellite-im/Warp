@@ -11,7 +11,7 @@ use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, SenderId};
-use warp::sync::{Arc, Mutex};
+use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_mp_solana::config::MpSolanaConfig;
 use warp_mp_solana::config::{IpfsSetting, StoreSetting};
@@ -20,14 +20,14 @@ use warp_pd_stretto::StrettoClient;
 use warp_rg_ipfs::IpfsMessaging;
 use warp_rg_ipfs::Temporary;
 
-fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
+fn cache_setup() -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
     let storage = StrettoClient::new()?;
-    Ok(Arc::new(Mutex::new(Box::new(storage))))
+    Ok(Arc::new(RwLock::new(Box::new(storage))))
 }
 
 async fn create_account(
-    cache: Arc<Mutex<Box<dyn PocketDimension>>>,
-) -> anyhow::Result<Arc<Mutex<Box<dyn MultiPass>>>> {
+    cache: Arc<RwLock<Box<dyn PocketDimension>>>,
+) -> anyhow::Result<Arc<RwLock<Box<dyn MultiPass>>>> {
     let mut tesseract = Tesseract::default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
@@ -46,17 +46,17 @@ async fn create_account(
     account.set_cache(cache);
 
     account.create_identity(None, None)?;
-    Ok(Arc::new(Mutex::new(Box::new(account))))
+    Ok(Arc::new(RwLock::new(Box::new(account))))
 }
 
 #[allow(dead_code)]
-async fn create_rg(account: Arc<Mutex<Box<dyn MultiPass>>>) -> anyhow::Result<Box<dyn RayGun>> {
+async fn create_rg(account: Arc<RwLock<Box<dyn MultiPass>>>) -> anyhow::Result<Box<dyn RayGun>> {
     let p2p_chat = create_rg_direct(account).await?;
     Ok(Box::new(p2p_chat))
 }
 
 async fn create_rg_direct(
-    account: Arc<Mutex<Box<dyn MultiPass>>>,
+    account: Arc<RwLock<Box<dyn MultiPass>>>,
 ) -> anyhow::Result<IpfsMessaging<Temporary>> {
     IpfsMessaging::new(None, account, None)
         .await
@@ -73,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
     let mut chat = create_rg_direct(new_account.clone()).await?;
 
     println!("Obtaining identity....");
-    let identity = new_account.lock().get_own_identity()?;
+    let identity = new_account.read().get_own_identity()?;
     println!(
         "Registered user {}#{}",
         identity.username(),
@@ -411,14 +411,14 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn get_username(account: Arc<Mutex<Box<dyn MultiPass>>>, id: SenderId) -> anyhow::Result<String> {
+fn get_username(account: Arc<RwLock<Box<dyn MultiPass>>>, id: SenderId) -> anyhow::Result<String> {
     if let Some(id) = id.get_id() {
         //if for some reason uuid is used, we can just return that instead as a string
         return Ok(id.to_string());
     }
 
     if let Some(pubkey) = id.get_did_key() {
-        let account = account.lock();
+        let account = account.read();
         let identity = account.get_identity(Identifier::did_key(pubkey))?;
         return Ok(format!("{}#{}", identity.username(), identity.short_id()));
     }

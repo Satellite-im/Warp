@@ -4,7 +4,7 @@ pub mod item;
 
 use std::path::{Path, PathBuf};
 
-use crate::sync::{Arc, Mutex, MutexGuard};
+use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::error::Error;
 use crate::{Extension, SingleHandle};
@@ -202,20 +202,24 @@ impl<S: AsRef<str>> From<S> for ConstellationDataType {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(FFIFree)]
 pub struct ConstellationAdapter {
-    object: Arc<Mutex<Box<dyn Constellation>>>,
+    object: Arc<RwLock<Box<dyn Constellation>>>,
 }
 
 impl ConstellationAdapter {
-    pub fn new(object: Arc<Mutex<Box<dyn Constellation>>>) -> ConstellationAdapter {
+    pub fn new(object: Arc<RwLock<Box<dyn Constellation>>>) -> ConstellationAdapter {
         ConstellationAdapter { object }
     }
 
-    pub fn inner(&self) -> Arc<Mutex<Box<dyn Constellation>>> {
+    pub fn inner(&self) -> Arc<RwLock<Box<dyn Constellation>>> {
         self.object.clone()
     }
 
-    pub fn inner_guard(&self) -> MutexGuard<Box<dyn Constellation>> {
-        self.object.lock()
+    pub fn read_guard(&self) -> RwLockReadGuard<Box<dyn Constellation>> {
+        self.object.read()
+    }
+
+    pub fn write_guard(&mut self) -> RwLockWriteGuard<Box<dyn Constellation>> {
+        self.object.write()
     }
 }
 
@@ -224,51 +228,49 @@ impl ConstellationAdapter {
 impl ConstellationAdapter {
     #[wasm_bindgen]
     pub fn modified(&self) -> i64 {
-        self.inner_guard().modified().timestamp()
+        self.object.read().modified().timestamp()
     }
 
     #[wasm_bindgen]
     pub fn version(&self) -> String {
-        let constellation = self.inner_guard();
-        constellation.version().to_string()
+        self.object.read().version().to_string()
     }
 
     #[wasm_bindgen]
     pub fn root_directory(&self) -> Directory {
-        self.inner_guard().root_directory().clone()
+        self.object.read().root_directory().clone()
     }
 
     #[wasm_bindgen]
     pub fn current_directory(&self) -> Directory {
-        self.inner_guard().current_directory().clone()
+        self.object.read().current_directory().clone()
     }
 
     #[wasm_bindgen]
     pub fn select(&mut self, path: &str) -> Result<(), Error> {
-        self.inner_guard().select(path)
+        self.object.write().select(path)
     }
 
     #[wasm_bindgen]
     pub fn go_back(&mut self) -> Result<(), Error> {
-        self.inner_guard().go_back()
+        self.object.write().go_back()
     }
 
     #[wasm_bindgen]
     pub fn export(&self, data_type: ConstellationDataType) -> Result<String, Error> {
-        self.inner_guard().export(data_type)
+        self.object.read().export(data_type)
     }
 
     #[wasm_bindgen]
     pub fn import(&mut self, data_type: ConstellationDataType, data: String) -> Result<(), Error> {
-        self.inner_guard().import(data_type, data)
+        self.object.write().import(data_type, data)
     }
 
     #[wasm_bindgen]
     pub fn put(&mut self, remote: String, local: String) -> Promise {
-        let inner = self.inner().clone();
+        let inner = self.object.clone();
         future_to_promise(async move {
-            let mut inner = inner.lock();
-            inner
+            let mut inner = inner.write()
                 .put(&remote, &local)
                 .await
                 .map_err(crate::error::into_error)
@@ -280,10 +282,9 @@ impl ConstellationAdapter {
 
     #[wasm_bindgen]
     pub fn get(&self, remote: String, local: String) -> Promise {
-        let inner = self.inner().clone();
+        let inner = self.object.clone();
         future_to_promise(async move {
-            let inner = inner.lock();
-            inner
+            let inner = inner.read()
                 .get(&remote, &local)
                 .await
                 .map_err(crate::error::into_error)
@@ -295,10 +296,9 @@ impl ConstellationAdapter {
 
     #[wasm_bindgen]
     pub fn put_buffer(&mut self, remote: String, data: Vec<u8>) -> Promise {
-        let inner = self.inner().clone();
+        let inner = self.object.clone();
         future_to_promise(async move {
-            let mut inner = inner.lock();
-            inner
+            let mut inner = inner.write()
                 .put_buffer(&remote, &data)
                 .await
                 .map_err(crate::error::into_error)
@@ -310,9 +310,9 @@ impl ConstellationAdapter {
 
     #[wasm_bindgen]
     pub fn get_buffer(&self, remote: String) -> Promise {
-        let inner = self.inner().clone();
+        let inner = self.object.clone();
         future_to_promise(async move {
-            let inner = inner.lock();
+            let inner = inner.read();
             let data = inner
                 .get_buffer(&remote)
                 .await
@@ -324,9 +324,9 @@ impl ConstellationAdapter {
 
     #[wasm_bindgen]
     pub fn remove(&mut self, remote: String, recursive: bool) -> Promise {
-        let inner = self.inner().clone();
+        let inner = self.object.clone();
         future_to_promise(async move {
-            let mut inner = inner.lock();
+            let mut inner = inner.write();
             inner
                 .remove(&remote, recursive)
                 .await
@@ -339,10 +339,9 @@ impl ConstellationAdapter {
 
     #[wasm_bindgen]
     pub fn move_item(&mut self, from: String, to: String) -> Promise {
-        let inner = self.inner().clone();
+        let inner = self.object.clone();
         future_to_promise(async move {
-            let mut inner = inner.lock();
-            inner
+            let mut inner = inner.write()
                 .move_item(&from, &to)
                 .await
                 .map_err(crate::error::into_error)
@@ -354,9 +353,9 @@ impl ConstellationAdapter {
 
     #[wasm_bindgen]
     pub fn create_directory(&mut self, remote: String, recursive: bool) -> Promise {
-        let inner = self.inner().clone();
+        let inner = self.object.clone();
         future_to_promise(async move {
-            let mut inner = inner.lock();
+            let mut inner = inner.write();
             inner
                 .create_directory(&remote, recursive)
                 .await
@@ -369,9 +368,9 @@ impl ConstellationAdapter {
 
     #[wasm_bindgen]
     pub fn sync_ref(&mut self, remote: String) -> Promise {
-        let inner = self.inner().clone();
+        let inner = self.object.clone();
         future_to_promise(async move {
-            let mut inner = inner.lock();
+            let mut inner = inner.write();
             inner
                 .sync_ref(&remote)
                 .await
@@ -384,22 +383,22 @@ impl ConstellationAdapter {
 
     #[wasm_bindgen]
     pub fn id(&self) -> String {
-        self.inner_guard().id()
+        self.object.read().id()
     }
 
     #[wasm_bindgen]
     pub fn name(&self) -> String {
-        self.inner_guard().name()
+        self.object.read().name()
     }
 
     #[wasm_bindgen]
     pub fn description(&self) -> String {
-        self.inner_guard().description()
+        self.object.read().description()
     }
 
     #[wasm_bindgen]
     pub fn module(&self) -> crate::module::Module {
-        self.inner_guard().module()
+        self.object.read().module()
     }
 }
 
@@ -431,7 +430,7 @@ pub mod ffi {
         let cname = CStr::from_ptr(name).to_string_lossy().to_string();
 
         let constellation = &mut *(ctx);
-        constellation.inner_guard().select(&cname).into()
+        constellation.write_guard().select(&cname).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -444,7 +443,7 @@ pub mod ffi {
         }
 
         let constellation = &mut *(ctx);
-        constellation.inner_guard().go_back().into()
+        constellation.write_guard().go_back().into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -464,7 +463,7 @@ pub mod ffi {
         let cname = CStr::from_ptr(name).to_string_lossy().to_string();
 
         let constellation = &mut *(ctx);
-        match constellation.inner_guard().open_directory(&cname) {
+        match constellation.write_guard().open_directory(&cname) {
             Ok(directory) => FFIResult::ok(directory.clone()),
             Err(e) => FFIResult::err(e),
         }
@@ -479,7 +478,7 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
         let constellation = &*(ctx);
-        let constellation = constellation.inner_guard();
+        let constellation = constellation.read_guard();
         let directory = constellation.root_directory();
         Box::into_raw(Box::new(directory.clone())) as *mut Directory
     }
@@ -493,7 +492,7 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
         let constellation = &*(ctx);
-        let constellation = constellation.inner_guard();
+        let constellation = constellation.read_guard();
         let current_directory = constellation.current_directory();
         Box::into_raw(Box::new(current_directory.clone())) as *mut Directory
     }
@@ -508,7 +507,7 @@ pub mod ffi {
         }
 
         let constellation = &mut *(ctx);
-        match constellation.inner_guard().current_directory_mut() {
+        match constellation.write_guard().current_directory_mut() {
             Ok(directory) => {
                 let directory = std::mem::ManuallyDrop::new(directory);
                 Box::into_raw(Box::new(directory)) as *mut Directory
@@ -541,7 +540,7 @@ pub mod ffi {
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let local = CStr::from_ptr(local).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async { constellation.inner_guard().put(&remote, &local).await })
+        rt.block_on(async { constellation.write_guard().put(&remote, &local).await })
             .into()
     }
 
@@ -574,7 +573,7 @@ pub mod ffi {
 
         rt.block_on(async move {
             constellation
-                .inner_guard()
+                .write_guard()
                 .put_buffer(&remote.to_string_lossy().to_string(), &slice.to_vec())
                 .await
         })
@@ -606,7 +605,7 @@ pub mod ffi {
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let local = CStr::from_ptr(local).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async move { constellation.inner_guard().get(&remote, &local).await })
+        rt.block_on(async move { constellation.read_guard().get(&remote, &local).await })
             .into()
     }
 
@@ -629,7 +628,7 @@ pub mod ffi {
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let rt = runtime_handle();
         rt.block_on(async move {
-            match constellation.inner_guard().get_buffer(&remote).await {
+            match constellation.read_guard().get_buffer(&remote).await {
                 Ok(temp_buf) => FFIResult::ok(FFIVec::from(temp_buf)),
                 Err(e) => FFIResult::err(e),
             }
@@ -655,7 +654,7 @@ pub mod ffi {
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async move { constellation.inner_guard().remove(&remote, recursive).await })
+        rt.block_on(async move { constellation.write_guard().remove(&remote, recursive).await })
             .into()
     }
 
@@ -680,7 +679,7 @@ pub mod ffi {
         let rt = runtime_handle();
         rt.block_on(async move {
             constellation
-                .inner_guard()
+                .write_guard()
                 .create_directory(&remote, recursive)
                 .await
         })
@@ -711,7 +710,7 @@ pub mod ffi {
         let src = CStr::from_ptr(src).to_string_lossy().to_string();
         let dst = CStr::from_ptr(dst).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async move { constellation.inner_guard().move_item(&src, &dst).await })
+        rt.block_on(async move { constellation.write_guard().move_item(&src, &dst).await })
             .into()
     }
 
@@ -733,7 +732,7 @@ pub mod ffi {
         let constellation = &mut *(ctx);
         let src = CStr::from_ptr(src).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async move { constellation.inner_guard().sync_ref(&src).await })
+        rt.block_on(async move { constellation.write_guard().sync_ref(&src).await })
             .into()
     }
 
@@ -749,7 +748,7 @@ pub mod ffi {
 
         let constellation = &*(ctx);
 
-        FFIResult_String::from(constellation.inner_guard().export(datatype))
+        FFIResult_String::from(constellation.read_guard().export(datatype))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -769,6 +768,6 @@ pub mod ffi {
 
         let constellation = &mut *(ctx);
         let data = CStr::from_ptr(data).to_string_lossy().to_string();
-        constellation.inner_guard().import(datatype, data).into()
+        constellation.write_guard().import(datatype, data).into()
     }
 }

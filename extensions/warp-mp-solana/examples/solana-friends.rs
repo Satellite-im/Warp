@@ -2,7 +2,7 @@ use warp::crypto::rand::{self, prelude::*};
 use warp::multipass::identity::{Identifier, Identity};
 use warp::multipass::{Friends, MultiPass};
 use warp::pocket_dimension::PocketDimension;
-use warp::sync::{Arc, Mutex};
+use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_mp_solana::{SolanaAccount, Temporary};
 use warp_pd_flatfile::FlatfileStorage;
@@ -23,7 +23,7 @@ use warp_pd_flatfile::FlatfileStorage;
 // }
 
 #[allow(unused)]
-fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
+fn cache_setup() -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
     let mut root = std::env::temp_dir();
     root.push("pd-cache");
 
@@ -36,7 +36,7 @@ fn cache_setup() -> anyhow::Result<Arc<Mutex<Box<dyn PocketDimension>>>> {
 
     let storage = FlatfileStorage::new_with_index_file(root, index)?;
 
-    Ok(Arc::new(Mutex::new(Box::new(storage))))
+    Ok(Arc::new(RwLock::new(Box::new(storage))))
 }
 
 fn account() -> anyhow::Result<SolanaAccount<Temporary>> {
