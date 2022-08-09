@@ -320,7 +320,7 @@ pub trait RayGun: Extension + GroupChat + Sync + Send + SingleHandle {
         Err(Error::Unimplemented)
     }
 
-    /// Retreive all messages from a conversation
+    /// Retrieve all messages from a conversation
     async fn get_messages(
         &self,
         conversation_id: Uuid,
