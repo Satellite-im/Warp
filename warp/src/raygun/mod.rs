@@ -251,7 +251,7 @@ impl Message {
     }
 }
 
-#[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq, FFIFree)]
+#[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 pub struct Reaction {
     /// Emoji unicode for `Reaction`
     emoji: String,
@@ -410,7 +410,7 @@ pub mod ffi {
     use crate::error::Error;
     use crate::ffi::{FFIResult, FFIResult_Null, FFIResult_String, FFIVec_String};
     use crate::raygun::{
-        EmbedState, FFIVec_Message, FFIVec_SenderId, Message, MessageOptions, PinState,
+        EmbedState, FFIVec_Message, FFIVec_SenderId, FFIVec_Reaction, Message, MessageOptions, PinState,
         RayGunAdapter, Reaction, ReactionState,
     };
     use crate::{async_on_block, runtime_handle};
@@ -882,14 +882,27 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn message_reactions(ctx: *const Message) -> *mut c_char {
+    pub unsafe extern "C" fn message_reactions(ctx: *const Message) -> *mut FFIVec_Reaction {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
         let adapter = &*ctx;
-        match CString::new(adapter.date().to_string()) {
-            Ok(c) => c.into_raw(),
-            Err(_) => std::ptr::null_mut(),
+        Box::into_raw(Box::new(adapter.reactions().into()))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn message_replied(ctx: *const Message) -> *mut c_char {
+        if ctx.is_null() {
+            return std::ptr::null_mut();
+        }
+        let adapter = &*ctx;
+        match adapter.replied() {
+            Some(id) => match CString::new(id.to_string()) {
+                Ok(c) => c.into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            },
+            None => std::ptr::null_mut()
         }
     }
 
