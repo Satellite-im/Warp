@@ -29,6 +29,7 @@ hex = "0.4"
 
 sata = { git = "https://github.com/Satellite-im/Sata" }
 
+chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
 bs58 = "0.4"

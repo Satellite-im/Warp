@@ -136,16 +136,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                         }
                                     };
 
-                                    match message.source {
-                                        Some(peer) if peer == pk.to_peer_id() => {},
-                                        _ => {
-                                            //If the peer who sent this doesnt match the peer id of the identity
-                                            //or there isnt a source, we should go on and reject it.
-                                            //We should always have a Option::Some, but this check is a precaution
-                                            continue
-                                        }
-                                    };
-
                                     if let Some(own_id) = store.identity.read().clone() {
                                         if own_id == identity {
                                             continue
@@ -168,17 +158,15 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     _ = tick.tick() => {
 
                         let peers = match store.ipfs.pubsub_peers(Some(IDENTITY_BROADCAST.into())).await {
-                            Ok(peers) => peers,
+                            Ok(peers) => if peers.is_empty() {
+                                //Dont send out when there is no peers connected
+                                continue
+                            },
                             Err(_e) => {
                                 //TODO: Log
                                 continue
                             }
                         };
-
-                        if peers.is_empty() {
-                            //Dont send out when there is no peers connected
-                            continue
-                        }
 
                         let data = Sata::default();
 
