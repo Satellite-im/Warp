@@ -27,54 +27,80 @@ pub struct DimensionData {
     pub name: Option<String>,
     pub path: Option<PathBuf>,
     pub buffer: Option<Vec<u8>>,
-    pub internal: Option<Vec<u8>>
+    pub internal: Option<Vec<u8>>,
 }
 
 impl<P: AsRef<std::path::Path>> From<P> for DimensionData {
     fn from(path: P) -> Self {
         let path = path.as_ref().to_path_buf();
         let name = path.file_name().map(|s| s.to_string_lossy().to_string());
-        DimensionData { name, path: Some(path), ..Default::default()}
+        DimensionData {
+            name,
+            path: Some(path),
+            ..Default::default()
+        }
     }
 }
 
 impl DimensionData {
     pub fn from_path(name: &str, path: &str) -> Self {
-        DimensionData { name: Some(name.to_string()), path: Some(std::path::PathBuf::from(path.to_string())), ..Default::default()}
+        DimensionData {
+            name: Some(name.to_string()),
+            path: Some(std::path::PathBuf::from(path.to_string())),
+            ..Default::default()
+        }
     }
 
     pub fn from_buffer(name: &str, buffer: &[u8]) -> Self {
         let name = name.to_string();
         let buffer = buffer.to_vec();
-        DimensionData { name: Some(name), buffer: Some(buffer), ..Default::default()}
+        DimensionData {
+            name: Some(name),
+            buffer: Some(buffer),
+            ..Default::default()
+        }
     }
 
     pub fn from_buffer_nofile(name: &str, internal: &[u8]) -> Self {
         let name = name.to_string();
         let internal = internal.to_vec();
-        DimensionData { name: Some(name), internal: Some(internal), ..Default::default()}
+        DimensionData {
+            name: Some(name),
+            internal: Some(internal),
+            ..Default::default()
+        }
     }
 }
 
 impl DimensionData {
     pub fn name(&self) -> Result<String, Error> {
-        if let Self { name: Some(name), ..} = self {
-            return Ok(name.clone())
+        if let Self {
+            name: Some(name), ..
+        } = self
+        {
+            return Ok(name.clone());
         }
-        return Err(Error::Other)
+        Err(Error::Other)
     }
 }
 
 impl DimensionData {
     pub fn path(&self) -> Result<PathBuf, Error> {
-        if let Self { path: Some(path), ..} = self {
-            return Ok(path.clone())
+        if let Self {
+            path: Some(path), ..
+        } = self
+        {
+            return Ok(path.clone());
         }
         Err(Error::Other)
     }
 
     pub fn write_to_buffer(&self, buffer: &mut [u8]) -> Result<(), Error> {
-        if let Self { internal: Some(internal), ..} = self {
+        if let Self {
+            internal: Some(internal),
+            ..
+        } = self
+        {
             buffer.copy_from_slice(internal);
             return Ok(());
         }
@@ -86,12 +112,19 @@ impl DimensionData {
 impl DimensionData {
     pub fn write_from_path<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         match self {
-            Self { name: Some(_), path: Some(path), ..} => {
+            Self {
+                name: Some(_),
+                path: Some(path),
+                ..
+            } => {
                 let mut file = std::fs::File::open(path)?;
                 std::io::copy(&mut file, writer)?;
                 return Ok(());
-            },
-            Self { internal: Some(internal), .. } => {
+            }
+            Self {
+                internal: Some(internal),
+                ..
+            } => {
                 let mut cursor = std::io::Cursor::new(internal);
                 std::io::copy(&mut cursor, writer)?;
                 return Ok(());
