@@ -270,7 +270,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                         }
                     }
                 }
-                self.identity_store.lookup(LookupBy::DidKey(pk))
+                self.identity_store.lookup(LookupBy::DidKey(Box::new(pk)))
             }
             (None, Some(username), false) => {
                 if let Ok(cache) = self.get_cache() {
@@ -445,7 +445,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 
     fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.remove_friend(&pubkey, true))?;
+        async_block_in_place_uncheck(self.friend_store.remove_friend(pubkey, true))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
@@ -456,7 +456,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 
     fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.block(&pubkey))?;
+        async_block_in_place_uncheck(self.friend_store.block(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
@@ -467,7 +467,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 
     fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.unblock(&pubkey))?;
+        async_block_in_place_uncheck(self.friend_store.unblock(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
@@ -486,7 +486,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 
     fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.is_friend(&pubkey))
+        async_block_in_place_uncheck(self.friend_store.is_friend(pubkey))
     }
 }
 

@@ -42,12 +42,6 @@ pub struct FriendsStore<T: IpfsTypes> {
     // Would be used to stop the look in the tokio task
     end_event: Arc<AtomicBool>,
 
-    // // Request coming from others
-    // incoming_request: Arc<RwLock<Vec<FriendRequest>>>,
-
-    // // Request meant for others
-    // outgoing_request: Arc<RwLock<Vec<FriendRequest>>>,
-
     // Profile containing friends, block, and request list
     profile: Arc<RwLock<InternalProfile>>,
 
@@ -181,7 +175,7 @@ impl InternalProfile {
             return Err(Error::FriendRequestExist);
         }
 
-        self.requests.push(request.clone());
+        self.requests.push(request);
         Ok(())
     }
 
@@ -314,8 +308,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
         interval: u64,
     ) -> anyhow::Result<Self> {
         let end_event = Arc::new(AtomicBool::new(false));
-        // let incoming_request = Arc::new(Default::default());
-        // let outgoing_request = Arc::new(Default::default());
         let profile = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
         let did_key = Arc::new(did_keypair(&tesseract)?);
@@ -324,8 +316,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
             did_key,
             path,
             end_event,
-            // incoming_request,
-            // outgoing_request,
             profile,
             queue,
             tesseract,
@@ -395,7 +385,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     message = stream.next() => {
                         if let Some(message) = message {
                             if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
-
                                 let data = match data.decrypt::<FriendRequest>((&*store.did_key).as_ref()) {
                                     Ok(data) => data,
                                     Err(_e) => {
@@ -513,8 +502,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                     }
                                     _ => {}
                                 };
-
-                                // *store.queue.write() = store.outgoing_request.read().clone();
                             }
                         }
                     }
@@ -718,8 +705,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         self.broadcast_request(&request).await?;
 
-        // self.incoming_request.write().remove(index);
-        // self.save_incoming_requests().await?;
         Ok(())
     }
 
@@ -728,24 +713,19 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
 
-        let index = match self
-            .profile
-            .read()
-            .outgoing_request()
-            .iter()
-            .position(|request| {
-                request.from().eq(pubkey)
-                    && request.to().eq(&local_public_key)
-                    && request.status() == FriendRequestStatus::Pending
-            }) {
+        let index = match self.profile.read().requests().iter().position(|request| {
+            request.request_type() == InternalRequestType::Outgoing
+                && request.from().eq(pubkey)
+                && request.to().eq(&local_public_key)
+                && request.status() == FriendRequestStatus::Pending
+        }) {
             Some(index) => index,
             None => return Err(Error::CannotFindFriendRequest),
         };
 
-        //TODO: Maybe broadcast closure of request?
-        // self.outgoing_request.write().remove(index);
-        // self.save_outgoing_requests().await?;
+        self.profile.write().requests_mut().remove(index);
 
+        //TODO: Maybe broadcast closure of request?
         Ok(())
     }
 
@@ -763,23 +743,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
 }
 
 impl<T: IpfsTypes> FriendsStore<T> {
-    pub async fn raw_block_list(&self) -> Result<(Cid, Vec<DID>), Error> {
-        match self.tesseract.retrieve("block_cid") {
-            Ok(cid) => {
-                let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
-                let path = IpfsPath::from(cid);
-                match self.ipfs.get_dag(path).await {
-                    Ok(ipld) => {
-                        let list = from_ipld::<Vec<DID>>(ipld).unwrap_or_default();
-                        Ok((cid, list))
-                    }
-                    Err(e) => Err(Error::Any(anyhow::anyhow!("Unable to get dag: {}", e))),
-                }
-            }
-            Err(e) => Err(e),
-        }
-    }
-
     pub async fn block_list(&self) -> Result<Vec<DID>, Error> {
         Ok(self.profile.read().block_list())
     }
@@ -788,29 +751,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
         Ok(self.profile.read().block_list().contains(public_key))
     }
 
-    pub async fn block_cid(&self) -> Result<Cid, Error> {
-        self.raw_block_list().await.map(|(cid, _)| cid)
-    }
-
     pub async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let (block_cid, mut block_list) = self.raw_block_list().await?;
-
-        if block_list.contains(pubkey) {
-            return Err(Error::PublicKeyIsBlocked);
-        }
-
-        block_list.push(pubkey.clone());
-        if self.ipfs.is_pinned(&block_cid).await? {
-            self.ipfs.remove_pin(&block_cid, false).await?;
-        }
-
-        let list = to_ipld(block_list).map_err(anyhow::Error::from)?;
-
-        let cid = self.ipfs.put_dag(list).await?;
-
-        self.ipfs.insert_pin(&cid, false).await?;
-
-        self.tesseract.set("block_cid", &cid.to_string())?;
+        self.profile.write().block(pubkey)?;
 
         if self.is_friend(pubkey).await.is_ok() {
             if let Err(_e) = self.remove_friend(pubkey, true).await {
@@ -830,18 +772,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
         self.profile.write().unblock(pubkey)?;
 
-        // if self.ipfs.is_pinned(&block_cid).await? {
-        //     self.ipfs.remove_pin(&block_cid, false).await?;
-        // }
-
-        // let list = to_ipld(block_list).map_err(anyhow::Error::from)?;
-
-        // let cid = self.ipfs.put_dag(list).await?;
-
-        // self.ipfs.insert_pin(&cid, false).await?;
-
-        // self.tesseract.set("block_cid", &cid.to_string())?;
-
         let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
         self.ipfs.unban_peer(peer_id).await?;
@@ -850,29 +780,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
 }
 
 impl<T: IpfsTypes> FriendsStore<T> {
-    pub async fn raw_friends_list(&self) -> Result<(Cid, Vec<DID>), Error> {
-        match self.tesseract.retrieve("friends_cid") {
-            Ok(cid) => {
-                let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
-                let path = IpfsPath::from(cid);
-                match self.ipfs.get_dag(path).await {
-                    Ok(ipld) => {
-                        let list = from_ipld::<Vec<DID>>(ipld).unwrap_or_default();
-                        Ok((cid, list))
-                    }
-                    Err(e) => Err(Error::Any(anyhow::anyhow!("Unable to get dag: {}", e))),
-                }
-            }
-            Err(e) => Err(e),
-        }
-    }
-
     pub async fn friends_list(&self) -> Result<Vec<DID>, Error> {
         Ok(self.profile.read().friends())
-    }
-
-    pub async fn friends_cid(&self) -> Result<Cid, Error> {
-        self.raw_friends_list().await.map(|(cid, _)| cid)
     }
 
     // Should not be called directly but only after a request is accepted
@@ -887,17 +796,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         self.profile.write().add_friend(pubkey)?;
 
-        // if self.ipfs.is_pinned(&friend_cid).await? {
-        //     self.ipfs.remove_pin(&friend_cid, false).await?;
-        // }
-
-        // let list = to_ipld(friend_list).map_err(anyhow::Error::from)?;
-
-        // let cid = self.ipfs.put_dag(list).await?;
-
-        // self.ipfs.insert_pin(&cid, false).await?;
-
-        // self.tesseract.set("friends_cid", &cid.to_string())?;
         Ok(())
     }
 
@@ -905,18 +803,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
         self.is_friend(pubkey).await?;
 
         self.profile.write().remove_friend(pubkey)?;
-
-        // if self.ipfs.is_pinned(&friend_cid).await? {
-        //     self.ipfs.remove_pin(&friend_cid, false).await?;
-        // }
-
-        // let list = to_ipld(friend_list).map_err(anyhow::Error::from)?;
-
-        // let cid = self.ipfs.put_dag(list).await?;
-
-        // self.ipfs.insert_pin(&cid, false).await?;
-
-        // self.tesseract.set("friends_cid", &cid.to_string())?;
 
         if broadcast {
             let (local_ipfs_public_key, _) = self.local().await?;
@@ -945,68 +831,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
 }
 
 impl<T: IpfsTypes> FriendsStore<T> {
-    // pub async fn get_incoming_request_cid(&self) -> Result<Cid, Error> {
-    //     let cid = self.tesseract.retrieve("incoming_request_cid")?;
-    //     Ok(cid.parse().map_err(anyhow::Error::from)?)
-    // }
-
-    // pub async fn get_outgoing_request_cid(&self) -> Result<Cid, Error> {
-    //     let cid = self.tesseract.retrieve("outgoing_request_cid")?;
-    //     Ok(cid.parse().map_err(anyhow::Error::from)?)
-    // }
-
-    // pub async fn save_incoming_requests(&mut self) -> anyhow::Result<()> {
-    //     let incoming_ipld = to_ipld(self.incoming_request.read().clone())?;
-    //     let incoming_request_cid = self.ipfs.put_dag(incoming_ipld).await?;
-
-    //     if let Ok(old_incoming_cid) = self.get_incoming_request_cid().await {
-    //         if self.ipfs.is_pinned(&old_incoming_cid).await? {
-    //             self.ipfs.remove_pin(&old_incoming_cid, false).await?;
-    //         }
-    //     }
-
-    //     self.ipfs.insert_pin(&incoming_request_cid, false).await?;
-    //     self.tesseract
-    //         .set("incoming_request_cid", &incoming_request_cid.to_string())?;
-    //     Ok(())
-    // }
-
-    // pub async fn save_outgoing_requests(&mut self) -> anyhow::Result<()> {
-    //     let outgoing_ipld = to_ipld(self.outgoing_request.read().clone())?;
-    //     let outgoing_request_cid = self.ipfs.put_dag(outgoing_ipld).await?;
-
-    //     if let Ok(old_outgoing_cid) = self.get_outgoing_request_cid().await {
-    //         if self.ipfs.is_pinned(&old_outgoing_cid).await? {
-    //             self.ipfs.remove_pin(&old_outgoing_cid, false).await?;
-    //         }
-    //     }
-
-    //     self.ipfs.insert_pin(&outgoing_request_cid, false).await?;
-    //     self.tesseract
-    //         .set("outgoing_request_cid", &outgoing_request_cid.to_string())?;
-
-    //     Ok(())
-    // }
-
-    // pub async fn load_incoming_requests(&mut self) -> Result<(), Error> {
-    //     let cid = self.get_incoming_request_cid().await?;
-    //     let request_ipld = self.ipfs.get_dag(IpfsPath::from(cid)).await?;
-    //     let request_list: Vec<FriendRequest> =
-    //         from_ipld(request_ipld).map_err(anyhow::Error::from)?;
-    //     *self.incoming_request.write() = request_list;
-    //     Ok(())
-    // }
-
-    // pub async fn load_outgoing_requests(&mut self) -> Result<(), Error> {
-    //     let cid = self.get_outgoing_request_cid().await?;
-    //     let request_ipld = self.ipfs.get_dag(IpfsPath::from(cid)).await?;
-    //     let request_list: Vec<FriendRequest> =
-    //         from_ipld(request_ipld).map_err(anyhow::Error::from)?;
-    //     *self.outgoing_request.write() = request_list.clone();
-    //     *self.broadcast_request.write() = request_list;
-    //     Ok(())
-    // }
-
     pub fn list_all_request(&self) -> Vec<FriendRequest> {
         let mut requests = vec![];
         requests.extend(self.list_incoming_request());
@@ -1032,17 +856,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
             .filter(|request| request.status() == FriendRequestStatus::Pending)
             .cloned()
             .collect::<Vec<_>>()
-    }
-
-    pub async fn broadcast_requests(&self) -> anyhow::Result<()> {
-        let list = self.queue.read().clone();
-        for request in list.iter() {
-            let bytes = serde_json::to_vec(request)?;
-            self.ipfs
-                .pubsub_publish(FRIENDS_BROADCAST.into(), bytes)
-                .await?;
-        }
-        Ok(())
     }
 
     pub async fn broadcast_request(&mut self, request: &FriendRequest) -> Result<(), Error> {

@@ -48,10 +48,10 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
             start_event: self.start_event.clone(),
             broadcast_with_connection: self.broadcast_with_connection.clone(),
             end_event: self.end_event.clone(),
-            tesseract: self.tesseract.clone()
+            tesseract: self.tesseract.clone(),
         }
     }
-} 
+}
 
 impl<T: IpfsTypes> Drop for IdentityStore<T> {
     fn drop(&mut self) {
@@ -62,7 +62,7 @@ impl<T: IpfsTypes> Drop for IdentityStore<T> {
 
 #[derive(Debug, Clone)]
 pub enum LookupBy {
-    DidKey(DID),
+    DidKey(Box<DID>),
     Username(String),
 }
 
@@ -157,7 +157,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     }
                     _ = tick.tick() => {
 
-                        let peers = match store.ipfs.pubsub_peers(Some(IDENTITY_BROADCAST.into())).await {
+                        match store.ipfs.pubsub_peers(Some(IDENTITY_BROADCAST.into())).await {
                             Ok(peers) => if peers.is_empty() {
                                 //Dont send out when there is no peers connected
                                 continue
@@ -234,41 +234,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         // TODO: Create a single root dag for the Cids
         let ident_cid = self.ipfs.put_dag(ipld).await?;
-        let friends_cid = self
-            .ipfs
-            .put_dag(to_ipld(Vec::<Vec<DID>>::new()).map_err(anyhow::Error::from)?)
-            .await?;
-        let block_cid = self
-            .ipfs
-            .put_dag(to_ipld(Vec::<Vec<DID>>::new()).map_err(anyhow::Error::from)?)
-            .await?;
-        let incoming_request_cid = self
-            .ipfs
-            .put_dag(to_ipld(Vec::<Vec<FriendRequest>>::new()).map_err(anyhow::Error::from)?)
-            .await?;
-        let outgoing_request_cid = self
-            .ipfs
-            .put_dag(to_ipld(Vec::<Vec<FriendRequest>>::new()).map_err(anyhow::Error::from)?)
-            .await?;
 
         // Pin the dag
         self.ipfs.insert_pin(&ident_cid, false).await?;
-        self.ipfs.insert_pin(&friends_cid, false).await?;
-        self.ipfs.insert_pin(&block_cid, false).await?;
-        self.ipfs.insert_pin(&incoming_request_cid, false).await?;
-        self.ipfs.insert_pin(&outgoing_request_cid, false).await?;
 
         // Note that for the time being we will be storing the Cid to tesseract,
         // however this may be handled a different way.
         // TODO: Provide the Cid to DHT
         self.tesseract.set("ident_cid", &ident_cid.to_string())?;
-        self.tesseract
-            .set("friends_cid", &friends_cid.to_string())?;
-        self.tesseract.set("block_cid", &block_cid.to_string())?;
-        self.tesseract
-            .set("incoming_request_cid", &incoming_request_cid.to_string())?;
-        self.tesseract
-            .set("outgoing_request_cid", &outgoing_request_cid.to_string())?;
 
         self.update_identity().await?;
         self.enable_event();
@@ -280,7 +253,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         // Check own identity just in case since we dont store this in the cache
         if let Some(ident) = self.identity.read().clone() {
             match lookup {
-                LookupBy::DidKey(pubkey) if ident.did_key() == pubkey => return Ok(ident),
+                LookupBy::DidKey(pubkey) if ident.did_key() == *pubkey => return Ok(ident),
                 LookupBy::Username(username) if ident.username() == username => return Ok(ident),
                 _ => {}
             };
@@ -288,7 +261,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         for ident in self.cache() {
             match &lookup {
-                LookupBy::DidKey(pubkey) if &ident.did_key() == pubkey => return Ok(ident),
+                LookupBy::DidKey(pubkey) if ident.did_key() == *pubkey.clone() => return Ok(ident),
                 LookupBy::Username(username) if &ident.username() == username => return Ok(ident),
                 _ => continue,
             }
