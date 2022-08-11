@@ -164,7 +164,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
         let friend_store = FriendsStore::new(
             ipfs.clone(),
-            None,
+            config.path,
             tesseract.clone(),
             config.store_setting.discovery,
             config.store_setting.broadcast_interval,
