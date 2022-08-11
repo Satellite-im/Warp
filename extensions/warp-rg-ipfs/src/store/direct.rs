@@ -101,6 +101,7 @@ impl DirectConversation {
     pub fn to_file<P: AsRef<Path>>(&self, path: P, key: &DID) -> anyhow::Result<()> {
         let mut fs = std::fs::OpenOptions::new()
             .create(true)
+            .truncate(true)
             .write(true)
             .open(path.as_ref().join(self.id.to_string()))?;
 
