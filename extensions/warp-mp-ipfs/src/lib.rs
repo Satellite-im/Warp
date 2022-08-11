@@ -46,11 +46,9 @@ use warp::multipass::{identity, Friends, MultiPass};
 pub type Temporary = TestTypes;
 pub type Persistent = Types;
 
-#[derive(Clone)]
 pub struct IpfsIdentity<T: IpfsTypes> {
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     hooks: Option<Hooks>,
-    tesseract: Tesseract,
     ipfs: Ipfs<T>,
     friend_store: FriendsStore<T>,
     identity_store: IdentityStore<T>,
@@ -155,6 +153,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
         let identity_store = IdentityStore::new(
             ipfs.clone(),
+            config.path.clone(),
             tesseract.clone(),
             config.store_setting.discovery,
             config.store_setting.broadcast_with_connection,
@@ -174,7 +173,6 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         let hooks = None;
 
         let identity = IpfsIdentity {
-            tesseract,
             cache,
             hooks,
             ipfs,
@@ -319,8 +317,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 _ => return Err(Error::CannotUpdateIdentity),
             }
 
-            if let Ok(cid) = self.tesseract.retrieve("ident_cid") {
-                let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
+            if let Ok(cid) = self.identity_store.get_cid() {
                 if self.ipfs.is_pinned(&cid).await? {
                     self.ipfs.remove_pin(&cid, false).await?;
                 }
@@ -331,7 +328,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
 
             self.ipfs.insert_pin(&ident_cid, false).await?;
 
-            self.tesseract.set("ident_cid", &ident_cid.to_string())?;
+            self.identity_store.save_cid(ident_cid)?;
 
             if let Ok(mut cache) = self.get_cache_mut() {
                 let mut query = QueryBuilder::default();

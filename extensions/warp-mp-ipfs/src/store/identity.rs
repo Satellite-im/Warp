@@ -1,4 +1,5 @@
 use std::{
+    path::{Path, PathBuf},
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::Duration,
 };
@@ -19,12 +20,16 @@ use warp::{
     tesseract::Tesseract,
 };
 
-use crate::store::did_to_libp2p_pub;
+use crate::{store::did_to_libp2p_pub, Persistent};
 
 use super::{libp2p_pub_to_did, topic_discovery, IDENTITY_BROADCAST};
 
 pub struct IdentityStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
+
+    path: Option<PathBuf>,
+
+    ident_cid: Arc<RwLock<Option<Cid>>>,
 
     identity: Arc<RwLock<Option<Identity>>>,
 
@@ -43,6 +48,8 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
     fn clone(&self) -> Self {
         Self {
             ipfs: self.ipfs.clone(),
+            path: self.path.clone(),
+            ident_cid: self.ident_cid.clone(),
             identity: self.identity.clone(),
             cache: self.cache.clone(),
             start_event: self.start_event.clone(),
@@ -69,19 +76,32 @@ pub enum LookupBy {
 impl<T: IpfsTypes> IdentityStore<T> {
     pub async fn new(
         ipfs: Ipfs<T>,
+        path: Option<PathBuf>,
         tesseract: Tesseract,
         discovery: bool,
         broadcast_with_connection: bool,
         interval: u64,
     ) -> Result<Self, Error> {
+        let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
+            true => path,
+            false => None,
+        };
+
+        if let Some(path) = path.as_ref() {
+            if !path.exists() {
+                tokio::fs::create_dir_all(path).await?;
+            }
+        }
         let cache = Arc::new(Default::default());
         let identity = Arc::new(Default::default());
         let start_event = Arc::new(Default::default());
         let end_event = Arc::new(Default::default());
         let broadcast_with_connection = Arc::new(AtomicBool::new(broadcast_with_connection));
-
+        let ident_cid = Arc::new(Default::default());
         let store = Self {
             ipfs,
+            path,
+            ident_cid,
             cache,
             identity,
             start_event,
@@ -238,10 +258,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         // Pin the dag
         self.ipfs.insert_pin(&ident_cid, false).await?;
 
-        // Note that for the time being we will be storing the Cid to tesseract,
-        // however this may be handled a different way.
-        // TODO: Provide the Cid to DHT
-        self.tesseract.set("ident_cid", &ident_cid.to_string())?;
+        self.save_cid(ident_cid)?;
 
         self.update_identity().await?;
         self.enable_event();
@@ -290,27 +307,53 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn own_identity(&self) -> Result<Identity, Error> {
-        let identity = match self.tesseract.retrieve("ident_cid") {
-            Ok(cid) => {
-                let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
-                let path = IpfsPath::from(cid);
-                match self.ipfs.get_dag(path).await {
-                    Ok(ipld) => from_ipld::<Identity>(ipld).map_err(anyhow::Error::from)?,
-                    Err(e) => return Err(Error::Any(e)), //Note: It should not hit here unless the repo is corrupted
-                }
-            }
-            Err(_) => return Err(Error::IdentityDoesntExist),
+        let ident_cid = self.get_cid()?;
+        let path = IpfsPath::from(ident_cid);
+        let identity = match self.ipfs.get_dag(path).await {
+            Ok(ipld) => from_ipld::<Identity>(ipld).map_err(anyhow::Error::from)?,
+            Err(e) => return Err(Error::Any(e)), //Note: It should not hit here unless the repo is corrupted
         };
-
         let public_key = identity.did_key();
         let kp_public_key = libp2p_pub_to_did(&self.get_keypair()?.public())?;
-
         if public_key != kp_public_key {
             //Note if we reach this point, the identity would need to be reconstructed
             return Err(Error::IdentityDoesntExist);
         }
 
         Ok(identity)
+    }
+
+    pub fn save_cid(&mut self, cid: Cid) -> Result<(), Error> {
+        *self.ident_cid.write() = Some(cid);
+        if let Some(path) = self.path.as_ref() {
+            let cid = cid.to_string();
+            std::fs::write(path.join(".id"), cid)?;
+        }
+        Ok(())
+    }
+
+    //We need to clone the cid from the lock so the lock would drop and allow the writer to proceed
+    #[allow(clippy::clone_on_copy)]
+    pub fn get_cid(&self) -> Result<Cid, Error> {
+        if let Some(path) = self.path.as_ref() {
+            if let Ok(cid_str) = std::fs::read(path.join(".id"))
+                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            {
+                let cid: Cid = cid_str.parse().map_err(anyhow::Error::from)?;
+                let ident_cid = self.ident_cid.read().clone();
+                match ident_cid {
+                    Some(ident_cid) => {
+                        if cid != ident_cid {
+                            *self.ident_cid.write() = Some(cid);
+                        }
+                    }
+                    None => {
+                        *self.ident_cid.write() = Some(cid);
+                    }
+                }
+            }
+        }
+        (*self.ident_cid.read()).ok_or(Error::IdentityDoesntExist)
     }
 
     pub async fn update_identity(&self) -> Result<(), Error> {
