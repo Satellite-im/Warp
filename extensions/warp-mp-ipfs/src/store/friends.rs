@@ -258,6 +258,14 @@ impl InternalProfile {
         &mut self.requests
     }
 
+    pub fn set_outgoing_request(&mut self, request: &FriendRequest) -> Result<(), Error> {
+        self.add_request(InternalRequest::Out(request.clone()))
+    }
+
+    pub fn set_incoming_request(&mut self, request: &FriendRequest) -> Result<(), Error> {
+        self.add_request(InternalRequest::In(request.clone()))
+    }
+
     pub fn incoming_request(&self) -> Vec<FriendRequest> {
         self.requests
             .iter()
@@ -307,7 +315,6 @@ impl<T: IpfsTypes> Drop for FriendsStore<T> {
         self.end_event.store(true, Ordering::SeqCst);
         if let Some(path) = self.path.as_ref() {
             if let Err(_e) = self.profile.write().to_file(path, &*self.did_key) {
-
                 //TODO: Log,
             }
         }
@@ -420,7 +427,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                     Ok(data) => data,
                                     Err(_e) => {
                                         //TODO: Log
-
                                         continue
                                     }
                                 };
@@ -454,35 +460,42 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
                                 match data.status() {
                                     FriendRequestStatus::Accepted => {
-                                        let index = match store.profile.read().requests().iter().position(|request| request.request_type() == InternalRequestType::Outgoing && request.from() == data.to() && request.status() == FriendRequestStatus::Pending) {
+                                        let index = match store.profile.read().requests().iter().position(|request| {
+                                            request.request_type() == InternalRequestType::Outgoing &&
+                                            request.to() == data.from() &&
+                                            request.status() == FriendRequestStatus::Pending
+                                        }) {
                                             Some(index) => index,
-                                            None => continue,
+                                            None => {
+                                                continue
+                                            },
                                         };
 
                                         store.profile.write().requests_mut().remove(index);
 
                                         if let Err(_e) = store.add_friend(&data.from()).await {
                                             //TODO: Log
-
                                             continue
                                         }
                                     }
                                     FriendRequestStatus::Pending => {
-                                        if let Err(_e) = store.profile.write().add_request(InternalRequest::In(data)) {
+                                        if let Err(_e) = store.profile.write().set_incoming_request(&data) {
                                             //TODO: Log,
-
                                             continue
                                         }
 
                                         if let Some(path) = store.path.as_ref() {
                                             if let Err(_e) = store.profile.write().to_file(path, &*store.did_key) {
-
                                                 continue
                                             }
                                         }
                                     },
                                     FriendRequestStatus::Denied => {
-                                        let index = match store.profile.read().requests().iter().position(|request| request.request_type() == InternalRequestType::Outgoing && request.to() == data.from() && request.status() == FriendRequestStatus::Pending) {
+                                        let index = match store.profile.read().requests().iter().position(|request| {
+                                            request.request_type() == InternalRequestType::Outgoing &&
+                                            request.to() == data.from() &&
+                                            request.status() == FriendRequestStatus::Pending
+                                        }) {
                                             Some(index) => index,
                                             None => continue,
                                         };
@@ -507,11 +520,13 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                             //TODO: Log
                                             continue;
                                         }
-
-
                                     }
                                     FriendRequestStatus::RequestRemoved => {
-                                        let index = match store.profile.read().requests().iter().position(|request| request.request_type() == InternalRequestType::Incoming && request.to() == data.to() && request.status() == FriendRequestStatus::Pending) {
+                                        let index = match store.profile.read().requests().iter().position(|request|{
+                                             request.request_type() == InternalRequestType::Incoming &&
+                                             request.to() == data.to() &&
+                                             request.status() == FriendRequestStatus::Pending
+                                        }) {
                                             Some(index) => index,
                                             None => continue,
                                         };
@@ -536,7 +551,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         for item in list.iter() {
                             let Queue(peer, data) = item;
                             if let Ok(peers) = store.ipfs.pubsub_peers(Some(FRIENDS_BROADCAST.into())).await {
-                                //TODO: Check peer against conversation to see if they are connected
                                 if peers.contains(peer) {
                                     let bytes = match serde_json::to_vec(&data) {
                                         Ok(bytes) => bytes,
@@ -903,10 +917,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
     ) -> Result<(), Error> {
         let remote_peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
         if save {
-            self.profile
-                .write()
-                .requests_mut()
-                .push(InternalRequest::Out(request.clone()));
+            self.profile.write().set_outgoing_request(request)?;
         }
 
         let mut data = Sata::default();
