@@ -268,8 +268,30 @@ async fn main() -> anyhow::Result<()> {
 
                                     writeln!(stdout, "Request Denied")?;
                                 },
+                                Some("close") => {
+                                    let pk = match cmd_line.next() {
+                                        Some(pk) => match pk.to_string().try_into() {
+                                            Ok(did) => did,
+                                            Err(e) => {
+                                                writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                                continue
+                                            }
+                                        }
+                                        None => {
+                                            writeln!(stdout, "Public key required")?;
+                                            continue;
+                                        }
+                                    };
+
+                                    if let Err(e) = account.close_request(&pk) {
+                                        writeln!(stdout, "Error Closing request: {}", e)?;
+                                        continue;
+                                    }
+
+                                    writeln!(stdout, "Request Closed")?;
+                                },
                                 _ => {
-                                    writeln!(stdout, "/request <send | accept | deny> <publickey>")?;
+                                    writeln!(stdout, "/request <send | accept | deny | close> <publickey>")?;
                                     continue
                                 }
                             }
