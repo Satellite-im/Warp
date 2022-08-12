@@ -429,6 +429,21 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         Ok(())
     }
 
+    fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+        async_block_in_place_uncheck(self.friend_store.close_request(pubkey))?;
+        if let Ok(hooks) = self.get_hooks() {
+            if !self
+                .list_all_request()?
+                .iter()
+                .any(|request| request.from().eq(pubkey))
+            {
+                let object = DataObject::new(DataType::Accounts, ())?;
+                hooks.trigger("accounts::closed_friend_request", &object);
+            }
+        }
+        Ok(())
+    }
+
     fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
         Ok(self.friend_store.list_incoming_request())
     }
@@ -442,7 +457,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 
     fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.remove_friend(pubkey, true))?;
+        async_block_in_place_uncheck(self.friend_store.remove_friend(pubkey, true, true))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
