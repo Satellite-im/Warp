@@ -156,6 +156,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             config.path.clone(),
             tesseract.clone(),
             config.store_setting.discovery,
+            cache.clone(),
             config.store_setting.broadcast_with_connection,
             config.store_setting.broadcast_interval,
         )
@@ -252,9 +253,8 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
         Ok(identity.did_key())
     }
 
-    //TODO: Use DHT to perform lookups
     fn get_identity(&self, id: Identifier) -> Result<Identity, Error> {
-        match id.get_inner() {
+        let ident = match id.get_inner() {
             (Some(pk), None, false) => {
                 if let Ok(cache) = self.get_cache() {
                     let mut query = QueryBuilder::default();
@@ -289,7 +289,25 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 return async_block_in_place_uncheck(self.identity_store.own_identity())
             }
             _ => Err(Error::InvalidIdentifierCondition),
+        }?;
+
+        if let Ok(mut cache) = self.get_cache_mut() {
+            let mut query = QueryBuilder::default();
+            query.r#where("did_key", &ident.did_key())?;
+            if cache
+                .has_data(DataType::from(Module::Accounts), &query)
+                .is_err()
+            {
+                let object = Sata::default().encode(
+                    warp::sata::libipld::IpldCodec::DagJson,
+                    warp::sata::Kind::Reference,
+                    ident.clone(),
+                )?;
+                cache.add_data(DataType::from(Module::Accounts), &object)?;
+            }
         }
+
+        Ok(ident)
     }
 
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
