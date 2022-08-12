@@ -5,7 +5,7 @@ use ipfs::{Ipfs, IpfsPath, IpfsTypes, Keypair, PeerId, Protocol, Types};
 use std::io::Write;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use libipld::serde::{from_ipld, to_ipld};
@@ -52,6 +52,8 @@ pub struct FriendsStore<T: IpfsTypes> {
 
     // Tesseract
     tesseract: Tesseract,
+
+    internal_counter: Arc<AtomicUsize>,
 }
 
 #[derive(Default, Deserialize, Serialize, Debug, Clone)]
@@ -298,6 +300,11 @@ impl InternalProfile {
 
 impl<T: IpfsTypes> Clone for FriendsStore<T> {
     fn clone(&self) -> Self {
+        {
+            let mut counter = self.internal_counter.load(Ordering::SeqCst);
+            counter += 1;
+            self.internal_counter.store(counter, Ordering::SeqCst);
+        }
         Self {
             ipfs: self.ipfs.clone(),
             did_key: self.did_key.clone(),
@@ -306,16 +313,28 @@ impl<T: IpfsTypes> Clone for FriendsStore<T> {
             profile: self.profile.clone(),
             queue: self.queue.clone(),
             tesseract: self.tesseract.clone(),
+            internal_counter: self.internal_counter.clone(),
         }
     }
 }
 
 impl<T: IpfsTypes> Drop for FriendsStore<T> {
     fn drop(&mut self) {
-        self.end_event.store(true, Ordering::SeqCst);
-        if let Some(path) = self.path.as_ref() {
-            if let Err(_e) = self.profile.write().to_file(path, &*self.did_key) {
-                //TODO: Log,
+        let counter = {
+            let mut counter = self.internal_counter.load(Ordering::SeqCst);
+            if counter != 0 {
+                counter -= 1;
+                self.internal_counter.store(counter, Ordering::SeqCst)
+            }
+            counter
+        };
+        
+        if counter == 0 {
+            self.end_event.store(true, Ordering::SeqCst);
+            if let Some(path) = self.path.as_ref() {
+                if let Err(_e) = self.profile.write().to_file(path, &*self.did_key) {
+                    //TODO: Log,
+                }
             }
         }
     }
@@ -344,7 +363,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let profile = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
         let did_key = Arc::new(did_keypair(&tesseract)?);
-        let mut store = Self {
+        let internal_counter = Arc::new(AtomicUsize::new(1));
+
+        let store = Self {
             ipfs,
             did_key,
             path,
@@ -352,6 +373,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             profile,
             queue,
             tesseract,
+            internal_counter,
         };
 
         let store_inner = store.clone();
@@ -370,32 +392,30 @@ impl<T: IpfsTypes> FriendsStore<T> {
             });
         }
 
-        if let Some(path) = store.path.as_ref() {
-            if let Ok(queue) = tokio::fs::read(path.join("queue")).await {
-                if let Ok(queue) = serde_json::from_slice(&queue) {
-                    *store.queue.write() = queue;
-                }
-            }
-            match InternalProfile::from_file(path, &*store.did_key) {
-                Ok(mut profile) => {
-                    if let Err(_e) = profile.remove_invalid_request() {
-                        //TODO: Log
-                    }
-                    store.profile = Arc::new(RwLock::new(profile));
-                }
-                Err(_e) => {
-                    //TODO: Log Error
-                }
-            };
-        }
-
         let (local_ipfs_public_key, _) = store.local().await?;
 
         let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
 
         tokio::spawn(async move {
             let mut store = store_inner;
-
+            if let Some(path) = store.path.as_ref() {
+                if let Ok(queue) = tokio::fs::read(path.join("queue")).await {
+                    if let Ok(queue) = serde_json::from_slice(&queue) {
+                        *store.queue.write() = queue;
+                    }
+                }
+                match InternalProfile::from_file(path, &*store.did_key) {
+                    Ok(mut profile) => {
+                        if let Err(_e) = profile.remove_invalid_request() {
+                            //TODO: Log
+                        }
+                        *store.profile.write() = profile;
+                    }
+                    Err(_e) => {
+                        //TODO: Log Error
+                    }
+                };
+            }
             // autoban the blocklist
             match store.block_list().await {
                 Ok(list) => {
