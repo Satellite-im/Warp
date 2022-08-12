@@ -156,7 +156,6 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             config.path.clone(),
             tesseract.clone(),
             config.store_setting.discovery,
-            cache.clone(),
             config.store_setting.broadcast_with_connection,
             config.store_setting.broadcast_interval,
         )

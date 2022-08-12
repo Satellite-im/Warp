@@ -13,14 +13,11 @@ use libipld::{
     Cid, Ipld,
 };
 use sata::Sata;
-use warp::data::{DataObject, DataType};
-use warp::pocket_dimension::query::QueryBuilder;
 use warp::{
     crypto::{rand::Rng, DIDKey, Ed25519KeyPair, DID},
     error::Error,
     module::Module,
     multipass::identity::{FriendRequest, Identity},
-    pocket_dimension::PocketDimension,
     sync::{Arc, Mutex, RwLock},
     tesseract::Tesseract,
 };
@@ -40,8 +37,6 @@ pub struct IdentityStore<T: IpfsTypes> {
 
     start_event: Arc<AtomicBool>,
 
-    pd: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-
     broadcast_with_connection: Arc<AtomicBool>,
 
     end_event: Arc<AtomicBool>,
@@ -58,7 +53,6 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
             identity: self.identity.clone(),
             cache: self.cache.clone(),
             start_event: self.start_event.clone(),
-            pd: self.pd.clone(),
             broadcast_with_connection: self.broadcast_with_connection.clone(),
             end_event: self.end_event.clone(),
             tesseract: self.tesseract.clone(),
@@ -85,7 +79,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
         path: Option<PathBuf>,
         tesseract: Tesseract,
         discovery: bool,
-        pd: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
         broadcast_with_connection: bool,
         interval: u64,
     ) -> Result<Self, Error> {
@@ -111,7 +104,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
             ident_cid,
             cache,
             identity,
-            pd,
             start_event,
             broadcast_with_connection,
             end_event,
@@ -177,26 +169,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                     if let Some(index) = store.cache.read().iter().position(|ident| ident.did_key() == identity.did_key()) {
                                         store.cache.write().remove(index);
                                     }
-
-                                    // if let Some(cache) = store.cache.clone() {
-                                    //     let mut query = QueryBuilder::default();
-                                    //     if let Ok(q) = query.r#where("did_key", &identity.did_key()) {
-                                    //         if cache.read()
-                                    //             .has_data(DataType::from(Module::Accounts), &query)
-                                    //             .is_err()
-                                    //         {
-                                    //             if let Ok(obj) = Sata::default().encode(
-                                    //                 warp::sata::libipld::IpldCodec::DagJson,
-                                    //                 warp::sata::Kind::Reference,
-                                    //                 identity.clone(),
-                                    //             ) {
-                                    //                 if let Err(_e) = cache.write().add_data(DataType::from(Module::Accounts), &obj) {
-
-                                    //                 }
-                                    //             }
-                                    //         }
-                                    //     }
-                                    // }
 
                                     store.cache.write().push(identity);
                                 }
