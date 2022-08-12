@@ -258,7 +258,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
             (Some(pk), None, false) => {
                 if let Ok(cache) = self.get_cache() {
                     let mut query = QueryBuilder::default();
-                    query.r#where("public_key", &pk)?;
+                    query.r#where("did_key", &pk)?;
                     if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
                     {
                         //get last
