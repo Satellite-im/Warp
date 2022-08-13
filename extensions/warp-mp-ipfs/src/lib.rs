@@ -537,7 +537,7 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_mp_ipfs_temporary(
         pocketdimension: *const PocketDimensionAdapter,
         tesseract: *const Tesseract,
-        config: *const c_char,
+        config: *const MpIpfsConfig,
     ) -> FFIResult<MultiPassAdapter> {
         let tesseract = match tesseract.is_null() {
             false => {
@@ -548,14 +548,8 @@ pub mod ffi {
         };
 
         let config = match config.is_null() {
-            true => MpIpfsConfig::default(),
-            false => {
-                let config = CStr::from_ptr(config).to_string_lossy().to_string();
-                match serde_json::from_str(&config) {
-                    Ok(c) => c,
-                    Err(e) => return FFIResult::err(Error::from(e)),
-                }
-            }
+            true => MpIpfsConfig::testing(),
+            false =>  (&*config).clone()
         };
 
         let cache = match pocketdimension.is_null() {
@@ -582,7 +576,7 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_mp_ipfs_persistent(
         pocketdimension: *const PocketDimensionAdapter,
         tesseract: *const Tesseract,
-        config: *const c_char,
+        config: *const MpIpfsConfig,
     ) -> FFIResult<MultiPassAdapter> {
         let tesseract = match tesseract.is_null() {
             false => {
@@ -593,16 +587,8 @@ pub mod ffi {
         };
 
         let config = match config.is_null() {
-            true => {
-                return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is invalid")))
-            }
-            false => {
-                let config = CStr::from_ptr(config).to_string_lossy().to_string();
-                match serde_json::from_str(&config) {
-                    Ok(c) => c,
-                    Err(e) => return FFIResult::err(Error::from(e)),
-                }
-            }
+            true => return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is invalid"))),
+            false => (&*config).clone()
         };
 
         let cache = match pocketdimension.is_null() {

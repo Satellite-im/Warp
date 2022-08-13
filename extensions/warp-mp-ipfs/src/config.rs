@@ -189,3 +189,80 @@ impl MpIpfsConfig {
         }
     }
 }
+
+pub mod ffi {
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
+    use warp::error::Error;
+    use warp::ffi::FFIResult;
+    use crate::MpIpfsConfig;
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn mp_ipfs_config_from_file(
+        file: *const c_char,
+    ) -> FFIResult<MpIpfsConfig> {
+
+        if file.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("file cannot be null")));
+        }
+
+        let file = CStr::from_ptr(file).to_string_lossy().to_string();
+
+        let bytes = match std::fs::read(file) {
+            Ok(bytes) => bytes,
+            Err(e) => return FFIResult::err(Error::from(e))
+        };
+
+        let config = match serde_json::from_slice(&bytes) {
+            Ok(config) => config,
+            Err(e) => return FFIResult::err(Error::from(e))
+        };
+
+        FFIResult::ok(config)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn mp_ipfs_config_from_str(
+        config: *const c_char,
+    ) -> FFIResult<MpIpfsConfig> {
+
+        if config.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
+        }
+
+        let data = CStr::from_ptr(config).to_string_lossy().to_string();
+
+        let config = match serde_json::from_str(&data) {
+            Ok(config) => config,
+            Err(e) => return FFIResult::err(Error::from(e))
+        };
+
+        FFIResult::ok(config)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn mp_ipfs_config_development() -> *mut MpIpfsConfig {
+        Box::into_raw(Box::new(MpIpfsConfig::development()))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn mp_ipfs_config_testing() -> *mut MpIpfsConfig {
+        Box::into_raw(Box::new(MpIpfsConfig::testing()))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn mp_ipfs_config_production(path: *const c_char) -> FFIResult<MpIpfsConfig> {
+        if path.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
+        }
+
+        let path = CStr::from_ptr(path).to_string_lossy().to_string();
+
+        FFIResult::ok(MpIpfsConfig::production(path))
+    }
+}
