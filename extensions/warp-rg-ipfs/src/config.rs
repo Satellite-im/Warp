@@ -208,7 +208,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn mp_ipfs_config_from_file(
+    pub unsafe extern "C" fn rg_ipfs_config_from_file(
         file: *const c_char,
     ) -> FFIResult<RgIpfsConfig> {
 
@@ -233,7 +233,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn mp_ipfs_config_from_str(
+    pub unsafe extern "C" fn rg_ipfs_config_from_str(
         config: *const c_char,
     ) -> FFIResult<RgIpfsConfig> {
 
@@ -253,19 +253,19 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn mp_ipfs_config_development() -> *mut RgIpfsConfig {
+    pub unsafe extern "C" fn rg_ipfs_config_development() -> *mut RgIpfsConfig {
         Box::into_raw(Box::new(RgIpfsConfig::development()))
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn mp_ipfs_config_testing() -> *mut RgIpfsConfig {
+    pub unsafe extern "C" fn rg_ipfs_config_testing() -> *mut RgIpfsConfig {
         Box::into_raw(Box::new(RgIpfsConfig::testing()))
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn mp_ipfs_config_production(path: *const c_char) -> FFIResult<RgIpfsConfig> {
+    pub unsafe extern "C" fn rg_ipfs_config_production(path: *const c_char) -> FFIResult<RgIpfsConfig> {
         if path.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
         }
