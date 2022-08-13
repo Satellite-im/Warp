@@ -22,7 +22,7 @@ zeroize = "1"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures = { version = "0.3" }
 users = { git = "https://github.com/Satellite-im/solana-programs", features = ["no-entrypoint"], rev = "c55c84f89bffac4011f717f2798868b559351ba0" }
-ipfs = { git = "https://github.com/dariusc93/rust-ipfs", branch = "next-usable" }
+ipfs = { git = "https://github.com/Satellite-im/rust-ipfs", branch = "next-usable" }
 libp2p = { default-features = false, version = "0.46.1" }
 libipld = { version = "0.13", features = ["serde-codec"] }
 anchor-client = "0.24.2"
