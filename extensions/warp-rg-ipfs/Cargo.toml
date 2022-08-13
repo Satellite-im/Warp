@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 [dependencies]
 warp = { path = "../../warp" }
 
-ipfs = { git = "https://github.com/dariusc93/rust-ipfs", branch = "next-usable" }
+ipfs = { git = "https://github.com/Satellite-im/rust-ipfs", branch = "next-usable" }
 libp2p = { default-features = false, version = "0.46.1" }
 libipld = { version = "0.13", features = ["serde-codec"] }
 
