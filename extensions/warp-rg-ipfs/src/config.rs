@@ -149,6 +149,30 @@ impl RgIpfsConfig {
         }
     }
 
+    pub fn testing() -> RgIpfsConfig {
+        RgIpfsConfig {
+            ipfs_setting: IpfsSetting {
+                mdns: Mdns { enable: true },
+                relay_client: RelayClient {
+                    enable: true,
+                    ..Default::default()
+                },
+                dcutr: Dcutr { enable: true },
+                autonat: Autonat {
+                    enable: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            store_setting: StoreSetting {
+                discovery: true,
+                broadcast_interval: 100,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
     pub fn production<P: AsRef<std::path::Path>>(path: P) -> RgIpfsConfig {
         RgIpfsConfig {
             path: Some(path.as_ref().to_path_buf()),
