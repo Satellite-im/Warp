@@ -235,8 +235,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
             return Err(Error::IdentityExist);
         }
 
-        let raw_kp = self.get_raw_keypair()?;
-
         let mut identity = Identity::default();
         let public_key =
             DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().encode()));

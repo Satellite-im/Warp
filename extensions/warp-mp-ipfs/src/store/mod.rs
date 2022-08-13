@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use ipfs::IpfsTypes;
 use serde::Serialize;
 use warp::{
@@ -101,5 +103,6 @@ pub async fn topic_discovery<T: IpfsTypes, S: AsRef<str>>(
                 }
             }
         }
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
