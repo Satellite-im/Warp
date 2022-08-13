@@ -1,9 +1,11 @@
-use crate::error::Error;
+use crate::{error::Error, tesseract::Tesseract};
 use bip39::{Language, Mnemonic, MnemonicType, Seed};
 use derive_more::Display;
-use ed25519_dalek::SecretKey;
+use did_key::KeyMaterial;
+use ed25519_dalek::{SecretKey, Keypair, PublicKey, KEYPAIR_LENGTH, SECRET_KEY_LENGTH};
 use hmac::{Hmac, Mac};
 use sha2::Sha512;
+use zeroize::Zeroizing;
 
 use super::DID;
 
@@ -50,6 +52,34 @@ pub fn did_from_mnemonic(mnemonic: &str, passphrase: Option<&str>) -> Result<DID
     Ok(secret.into())
 }
 
+pub fn mnemonic_into_tesseract(tesseract: &mut Tesseract, mnemonic: &str, passphrase: Option<&str>) -> Result<(), Error> {
+    if !tesseract.is_unlock() {
+        return Err(Error::TesseractLocked);
+    }
+
+    if tesseract.exist("keypair") {
+        return Err(Error::Any(anyhow::anyhow!("Keypair already exist")));
+    }
+
+    let did = did_from_mnemonic(mnemonic, passphrase)?;
+    
+    let bytes = Zeroizing::new(did.as_ref().private_key_bytes());
+    let secret_key = SecretKey::from_bytes(&bytes)?;
+    let public_key: PublicKey = (&secret_key).into();
+    let mut bytes: Zeroizing<[u8; KEYPAIR_LENGTH]> = Zeroizing::new([0u8; KEYPAIR_LENGTH]);
+
+    bytes[..SECRET_KEY_LENGTH].copy_from_slice(secret_key.as_bytes());
+    bytes[SECRET_KEY_LENGTH..].copy_from_slice(public_key.as_bytes());
+
+    let kp = Keypair::from_bytes(&*bytes)?;
+
+    let encoded = Zeroizing::new(bs58::encode(&kp.to_bytes()).into_string());
+
+    tesseract.set("keypair", &encoded)?;
+
+    Ok(())
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use std::{
@@ -57,7 +87,7 @@ pub mod ffi {
         os::raw::c_char,
     };
 
-    use crate::{error::Error, ffi::FFIResult};
+    use crate::{error::Error, ffi::{FFIResult, FFIResult_Null}, tesseract::Tesseract};
 
     use super::{DID, PhraseType};
 
@@ -81,6 +111,22 @@ pub mod ffi {
 
         let phrase = CStr::from_ptr(phrase).to_string_lossy().to_string();
         super::did_from_mnemonic(&phrase, None).into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn mnemonic_into_tesseract(tesseract: *mut Tesseract, phrase: *const c_char) -> FFIResult_Null {
+        if tesseract.is_null() {
+            return FFIResult_Null::err(Error::from(anyhow::anyhow!("Tesseract cannot be null")));
+        }
+
+        if phrase.is_null() {
+            return FFIResult_Null::err(Error::from(anyhow::anyhow!("Phrase cannot be null")));
+        }
+
+        let phrase = CStr::from_ptr(phrase).to_string_lossy().to_string();
+
+        super::mnemonic_into_tesseract(&mut *tesseract,&phrase, None).into()
     }
 }
 
