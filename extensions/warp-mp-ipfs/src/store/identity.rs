@@ -330,16 +330,13 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(())
     }
 
-    //We need to clone the cid from the lock so the lock would drop and allow the writer to proceed
-    #[allow(clippy::clone_on_copy)]
     pub fn get_cid(&self) -> Result<Cid, Error> {
         if let Some(path) = self.path.as_ref() {
             if let Ok(cid_str) = std::fs::read(path.join(".id"))
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
             {
                 let cid: Cid = cid_str.parse().map_err(anyhow::Error::from)?;
-                let ident_cid = self.ident_cid.read().clone();
-                match ident_cid {
+                match *self.ident_cid.read() {
                     Some(ident_cid) => {
                         if cid != ident_cid {
                             *self.ident_cid.write() = Some(cid);
