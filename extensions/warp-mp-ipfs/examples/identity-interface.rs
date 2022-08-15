@@ -4,6 +4,7 @@ use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use warp::multipass::identity::{Identifier, IdentityUpdate};
 use warp::multipass::MultiPass;
 use warp::tesseract::Tesseract;
@@ -87,7 +88,9 @@ async fn main() -> anyhow::Result<()> {
         identity.username(),
         identity.short_id()
     ))?;
-
+    let mut incoming_list = vec![];
+    let mut friends_list = account.list_friends()?;
+    let mut interval = tokio::time::interval(Duration::from_millis(500));
     loop {
         tokio::select! {
             line = rl.readline().fuse() => match line {
@@ -442,6 +445,36 @@ async fn main() -> anyhow::Result<()> {
                 Err(ReadlineError::Eof) => break,
                 Err(e) => {
                     writeln!(stdout, "Error: {}", e)?;
+                }
+            },
+            _ = interval.tick() => {
+                if let Ok(list) = account.list_incoming_request() {
+                    if !list.is_empty() && incoming_list != list {
+                        let mut inner_list = list.clone();
+                        inner_list.retain(|item| !incoming_list.contains(item));
+                        for item in &inner_list {
+                            let username = match account.get_identity(Identifier::did_key(item.from())) {
+                                Ok(ident) => ident.username(),
+                                Err(_) => item.from().to_string()
+                            };
+                            writeln!(stdout, "Pending request from {}. Do \"request accept {}\" to accept", username, item.from())?;
+                        }
+                        incoming_list = list.clone();
+                    }
+                }
+                if let Ok(list) = account.list_friends() {
+                    if !list.is_empty() && friends_list != list {
+                        let mut inner_list = list.clone();
+                        inner_list.retain(|item| !friends_list.contains(item));
+                        for item in &inner_list {
+                            let username = match account.get_identity(Identifier::did_key(item.clone())) {
+                                Ok(ident) => ident.username(),
+                                Err(_) => item.to_string()
+                            };
+                            writeln!(stdout, "You are now friends with {}", username)?;
+                        }
+                        friends_list = list.clone();
+                    }
                 }
             }
         }
