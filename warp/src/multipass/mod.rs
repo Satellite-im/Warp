@@ -11,7 +11,7 @@ use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::{Extension, SingleHandle};
 use identity::Identity;
 
-use crate::crypto::{DID};
+use crate::crypto::DID;
 use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate};
 
 pub trait MultiPass: Extension + Friends + Sync + Send + SingleHandle {
@@ -134,7 +134,6 @@ impl MultiPassAdapter {
     pub fn write_guard(&mut self) -> RwLockWriteGuard<Box<dyn MultiPass>> {
         self.object.write()
     }
-
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -166,8 +165,7 @@ impl MultiPassAdapter {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn decrypt_private_key(&self, passphrase: Option<String>) -> Result<DID, Error> {
-        self.read_guard()
-            .decrypt_private_key(passphrase.as_deref())
+        self.read_guard().decrypt_private_key(passphrase.as_deref())
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -403,9 +401,8 @@ pub mod ffi {
             true => None,
         };
         let mp = &*(ctx);
-        match async_on_block(async { mp.read_guard().decrypt_private_key(passphrase.as_deref()) })
-        {
-            Ok(key) => FFIResult::ok(key.into()),
+        match async_on_block(async { mp.read_guard().decrypt_private_key(passphrase.as_deref()) }) {
+            Ok(key) => FFIResult::ok(key),
             Err(e) => FFIResult::err(e),
         }
     }

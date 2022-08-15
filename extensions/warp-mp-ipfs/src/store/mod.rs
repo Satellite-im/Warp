@@ -1,12 +1,15 @@
+use std::time::Duration;
+
+use ipfs::IpfsTypes;
 use serde::Serialize;
 use warp::{
-    crypto::{Ed25519KeyPair,
-        DIDKey, KeyMaterial, DID, did_key::{Generate, CoreSign},
+    crypto::{
+        did_key::{CoreSign, Generate},
+        DIDKey, Ed25519KeyPair, KeyMaterial, DID,
     },
     error::Error,
     tesseract::Tesseract,
 };
-use ipfs::IpfsTypes;
 
 pub mod friends;
 pub mod identity;
@@ -52,7 +55,8 @@ fn sign_serde<D: Serialize>(tesseract: &Tesseract, data: &D) -> anyhow::Result<V
 // Note that this are temporary
 fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow::Result<()> {
     let bytes = serde_json::to_vec(data)?;
-    pk.as_ref().verify(&bytes, signature)
+    pk.as_ref()
+        .verify(&bytes, signature)
         .map_err(|e| anyhow::anyhow!("{:?}", e))?;
     Ok(())
 }
@@ -86,8 +90,6 @@ pub async fn topic_discovery<T: IpfsTypes, S: AsRef<str>>(
                     }
                 }
 
-                // Get address(es) of peer and connect to them
-                // TODO: Maybe use a relay or give an option when connecting?
                 if let Ok(addrs) = ipfs.find_peer(peer).await {
                     for addr in addrs {
                         let addr = addr.with(ipfs::Protocol::P2p(peer.into()));
@@ -101,5 +103,6 @@ pub async fn topic_discovery<T: IpfsTypes, S: AsRef<str>>(
                 }
             }
         }
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }

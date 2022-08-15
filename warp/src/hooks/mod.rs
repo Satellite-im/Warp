@@ -20,7 +20,7 @@ pub trait HookType: std::fmt::Display {
 }
 
 /// `Hook` contains identifying information about a given hook.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hook {
     /// Name of the hook/event
     name: String,

@@ -9,7 +9,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 [dependencies]
 warp = { path = "../../warp" }
 # TODO: Point to different repo once additional changes and testing are done
-ipfs = { git = "https://github.com/dariusc93/rust-ipfs", branch = "next-usable" }
+ipfs = { git = "https://github.com/Satellite-im/rust-ipfs", branch = "next-usable" }
 libp2p = { default-features = false, version = "0.46.1" }
 libipld = { version = "0.13", features = ["serde-codec"] }
 uuid = { version = "1.0", features = ["serde", "v4"] }
@@ -29,6 +29,7 @@ hex = "0.4"
 
 sata = { git = "https://github.com/Satellite-im/Sata" }
 
+chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
 bs58 = "0.4"
@@ -36,6 +37,7 @@ warp-pd-stretto = { path = "../warp-pd-stretto" }
 rustyline-async = "0.2"
 comfy-table = "6.0"
 tracing-subscriber = "0.3"
+clap = {version = "3.2", features = ["derive"]}
 
 [features]
 default = []

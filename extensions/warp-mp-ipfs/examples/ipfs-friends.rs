@@ -48,13 +48,13 @@ async fn main() -> anyhow::Result<()> {
     println!(
         "{} with {}",
         username(&ident_a),
-        ident_a.did_key().to_string()
+        ident_a.did_key()
     );
 
     println!(
         "{} with {}",
         username(&ident_b),
-        ident_b.did_key().to_string()
+        ident_b.did_key()
     );
     println!();
 
@@ -106,7 +106,7 @@ async fn main() -> anyhow::Result<()> {
                 println!("Username: {}", username(&friend));
                 println!(
                     "Public Key: {}",
-                    friend.did_key().to_string()
+                    friend.did_key()
                 );
                 println!();
             }
@@ -117,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
                 println!("Username: {}", username(&friend));
                 println!(
                     "Public Key: {}",
-                    friend.did_key().to_string()
+                    friend.did_key()
                 );
                 println!();
             }

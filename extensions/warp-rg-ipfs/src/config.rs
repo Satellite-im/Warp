@@ -15,12 +15,14 @@ pub struct Mdns {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Autonat {
     pub enable: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub servers: Vec<Multiaddr>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelayClient {
     pub enable: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub relay_address: Vec<Multiaddr>,
 }
 
@@ -49,6 +51,7 @@ pub struct RelayServer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rendezvous {
     pub enable: bool,
+    #[serde(skip_serializing_if = "Multiaddr::is_empty")]
     pub address: Multiaddr,
 }
 
@@ -80,8 +83,11 @@ pub struct StoreSetting {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RgIpfsConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub bootstrap: Vec<Multiaddr>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub listen_on: Vec<Multiaddr>,
     pub ipfs_setting: IpfsSetting,
     pub store_setting: StoreSetting,
@@ -129,13 +135,37 @@ impl Default for RgIpfsConfig {
 }
 
 impl RgIpfsConfig {
-    pub fn local() -> RgIpfsConfig {
+    pub fn development() -> RgIpfsConfig {
         RgIpfsConfig {
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
                 ..Default::default()
             },
             store_setting: StoreSetting {
+                broadcast_interval: 100,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    pub fn testing() -> RgIpfsConfig {
+        RgIpfsConfig {
+            ipfs_setting: IpfsSetting {
+                mdns: Mdns { enable: true },
+                relay_client: RelayClient {
+                    enable: true,
+                    ..Default::default()
+                },
+                dcutr: Dcutr { enable: true },
+                autonat: Autonat {
+                    enable: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            store_setting: StoreSetting {
+                discovery: true,
                 broadcast_interval: 100,
                 ..Default::default()
             },
@@ -166,5 +196,82 @@ impl RgIpfsConfig {
             },
             ..Default::default()
         }
+    }
+}
+
+pub mod ffi {
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
+    use warp::error::Error;
+    use warp::ffi::FFIResult;
+    use crate::RgIpfsConfig;
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn rg_ipfs_config_from_file(
+        file: *const c_char,
+    ) -> FFIResult<RgIpfsConfig> {
+
+        if file.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("file cannot be null")));
+        }
+
+        let file = CStr::from_ptr(file).to_string_lossy().to_string();
+
+        let bytes = match std::fs::read(file) {
+            Ok(bytes) => bytes,
+            Err(e) => return FFIResult::err(Error::from(e))
+        };
+
+        let config = match serde_json::from_slice(&bytes) {
+            Ok(config) => config,
+            Err(e) => return FFIResult::err(Error::from(e))
+        };
+
+        FFIResult::ok(config)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn rg_ipfs_config_from_str(
+        config: *const c_char,
+    ) -> FFIResult<RgIpfsConfig> {
+
+        if config.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
+        }
+
+        let data = CStr::from_ptr(config).to_string_lossy().to_string();
+
+        let config = match serde_json::from_str(&data) {
+            Ok(config) => config,
+            Err(e) => return FFIResult::err(Error::from(e))
+        };
+
+        FFIResult::ok(config)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn rg_ipfs_config_development() -> *mut RgIpfsConfig {
+        Box::into_raw(Box::new(RgIpfsConfig::development()))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn rg_ipfs_config_testing() -> *mut RgIpfsConfig {
+        Box::into_raw(Box::new(RgIpfsConfig::testing()))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn rg_ipfs_config_production(path: *const c_char) -> FFIResult<RgIpfsConfig> {
+        if path.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
+        }
+
+        let path = CStr::from_ptr(path).to_string_lossy().to_string();
+
+        FFIResult::ok(RgIpfsConfig::production(path))
     }
 }

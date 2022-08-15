@@ -122,6 +122,7 @@ impl Tesseract {
         let data = serde_json::from_reader(fs)?;
         let file = std::fs::canonicalize(&file).unwrap_or_else(|_| file.as_ref().to_path_buf());
         store.set_file(file);
+        store.set_autosave();
         store.internal = Arc::new(RwLock::new(data));
         Ok(store)
     }

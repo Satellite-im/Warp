@@ -87,7 +87,11 @@ where
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn async_on_block<F: futures::Future>(fut: F) -> F::Output {
-    runtime_handle().block_on(fut)
+    let handle = match tokio::runtime::Handle::try_current() {
+        Ok(handle) => handle,
+        Err(_) => runtime_handle(),
+    };
+    handle.block_on(fut)
 }
 
 #[cfg(not(target_arch = "wasm32"))]

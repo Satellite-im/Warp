@@ -46,11 +46,9 @@ use warp::multipass::{identity, Friends, MultiPass};
 pub type Temporary = TestTypes;
 pub type Persistent = Types;
 
-#[derive(Clone)]
 pub struct IpfsIdentity<T: IpfsTypes> {
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     hooks: Option<Hooks>,
-    tesseract: Tesseract,
     ipfs: Ipfs<T>,
     friend_store: FriendsStore<T>,
     identity_store: IdentityStore<T>,
@@ -155,6 +153,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
         let identity_store = IdentityStore::new(
             ipfs.clone(),
+            config.path.clone(),
             tesseract.clone(),
             config.store_setting.discovery,
             config.store_setting.broadcast_with_connection,
@@ -164,9 +163,9 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
         let friend_store = FriendsStore::new(
             ipfs.clone(),
+            config.path.map(|p| p.join("friends")),
             tesseract.clone(),
             config.store_setting.discovery,
-            config.store_setting.broadcast_with_connection,
             config.store_setting.broadcast_interval,
         )
         .await?;
@@ -174,7 +173,6 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         let hooks = None;
 
         let identity = IpfsIdentity {
-            tesseract,
             cache,
             hooks,
             ipfs,
@@ -254,13 +252,12 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
         Ok(identity.did_key())
     }
 
-    //TODO: Use DHT to perform lookups
     fn get_identity(&self, id: Identifier) -> Result<Identity, Error> {
-        match id.get_inner() {
+        let ident = match id.get_inner() {
             (Some(pk), None, false) => {
                 if let Ok(cache) = self.get_cache() {
                     let mut query = QueryBuilder::default();
-                    query.r#where("public_key", &pk)?;
+                    query.r#where("did_key", &pk)?;
                     if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
                     {
                         //get last
@@ -270,7 +267,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                         }
                     }
                 }
-                self.identity_store.lookup(LookupBy::DidKey(pk))
+                self.identity_store.lookup(LookupBy::DidKey(Box::new(pk)))
             }
             (None, Some(username), false) => {
                 if let Ok(cache) = self.get_cache() {
@@ -291,7 +288,25 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 return async_block_in_place_uncheck(self.identity_store.own_identity())
             }
             _ => Err(Error::InvalidIdentifierCondition),
+        }?;
+
+        if let Ok(mut cache) = self.get_cache_mut() {
+            let mut query = QueryBuilder::default();
+            query.r#where("did_key", &ident.did_key())?;
+            if cache
+                .has_data(DataType::from(Module::Accounts), &query)
+                .is_err()
+            {
+                let object = Sata::default().encode(
+                    warp::sata::libipld::IpldCodec::DagJson,
+                    warp::sata::Kind::Reference,
+                    ident.clone(),
+                )?;
+                cache.add_data(DataType::from(Module::Accounts), &object)?;
+            }
         }
+
+        Ok(ident)
     }
 
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
@@ -319,8 +334,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 _ => return Err(Error::CannotUpdateIdentity),
             }
 
-            if let Ok(cid) = self.tesseract.retrieve("ident_cid") {
-                let cid: Cid = cid.parse().map_err(anyhow::Error::from)?;
+            if let Ok(cid) = self.identity_store.get_cid() {
                 if self.ipfs.is_pinned(&cid).await? {
                     self.ipfs.remove_pin(&cid, false).await?;
                 }
@@ -331,7 +345,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
 
             self.ipfs.insert_pin(&ident_cid, false).await?;
 
-            self.tesseract.set("ident_cid", &ident_cid.to_string())?;
+            self.identity_store.save_cid(ident_cid)?;
 
             if let Ok(mut cache) = self.get_cache_mut() {
                 let mut query = QueryBuilder::default();
@@ -432,6 +446,21 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         Ok(())
     }
 
+    fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+        async_block_in_place_uncheck(self.friend_store.close_request(pubkey))?;
+        if let Ok(hooks) = self.get_hooks() {
+            if !self
+                .list_all_request()?
+                .iter()
+                .any(|request| request.from().eq(pubkey))
+            {
+                let object = DataObject::new(DataType::Accounts, ())?;
+                hooks.trigger("accounts::closed_friend_request", &object);
+            }
+        }
+        Ok(())
+    }
+
     fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
         Ok(self.friend_store.list_incoming_request())
     }
@@ -445,7 +474,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 
     fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.remove_friend(&pubkey, true))?;
+        async_block_in_place_uncheck(self.friend_store.remove_friend(pubkey, true, true))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
@@ -456,7 +485,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 
     fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.block(&pubkey))?;
+        async_block_in_place_uncheck(self.friend_store.block(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
@@ -467,7 +496,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 
     fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.unblock(&pubkey))?;
+        async_block_in_place_uncheck(self.friend_store.unblock(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
@@ -486,7 +515,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 
     fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.is_friend(&pubkey))
+        async_block_in_place_uncheck(self.friend_store.is_friend(pubkey))
     }
 }
 
@@ -508,7 +537,7 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_mp_ipfs_temporary(
         pocketdimension: *const PocketDimensionAdapter,
         tesseract: *const Tesseract,
-        config: *const c_char,
+        config: *const MpIpfsConfig,
     ) -> FFIResult<MultiPassAdapter> {
         let tesseract = match tesseract.is_null() {
             false => {
@@ -519,14 +548,8 @@ pub mod ffi {
         };
 
         let config = match config.is_null() {
-            true => MpIpfsConfig::default(),
-            false => {
-                let config = CStr::from_ptr(config).to_string_lossy().to_string();
-                match serde_json::from_str(&config) {
-                    Ok(c) => c,
-                    Err(e) => return FFIResult::err(Error::from(e)),
-                }
-            }
+            true => MpIpfsConfig::testing(),
+            false =>  (&*config).clone()
         };
 
         let cache = match pocketdimension.is_null() {
@@ -553,7 +576,7 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_mp_ipfs_persistent(
         pocketdimension: *const PocketDimensionAdapter,
         tesseract: *const Tesseract,
-        config: *const c_char,
+        config: *const MpIpfsConfig,
     ) -> FFIResult<MultiPassAdapter> {
         let tesseract = match tesseract.is_null() {
             false => {
@@ -564,16 +587,8 @@ pub mod ffi {
         };
 
         let config = match config.is_null() {
-            true => {
-                return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is invalid")))
-            }
-            false => {
-                let config = CStr::from_ptr(config).to_string_lossy().to_string();
-                match serde_json::from_str(&config) {
-                    Ok(c) => c,
-                    Err(e) => return FFIResult::err(Error::from(e)),
-                }
-            }
+            true => return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is invalid"))),
+            false => (&*config).clone()
         };
 
         let cache = match pocketdimension.is_null() {

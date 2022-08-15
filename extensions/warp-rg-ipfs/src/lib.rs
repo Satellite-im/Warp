@@ -281,7 +281,7 @@ impl<T: IpfsTypes> GroupInvite for IpfsMessaging<T> {}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use crate::IpfsMessaging;
+    use crate::{IpfsMessaging, RgIpfsConfig};
     use crate::{Persistent, Temporary};
     use std::ffi::CStr;
     use std::os::raw::c_char;
@@ -299,7 +299,7 @@ pub mod ffi {
     pub unsafe extern "C" fn warp_rg_ipfs_temporary_new(
         account: *const MultiPassAdapter,
         cache: *const PocketDimensionAdapter,
-        config: *const c_char,
+        config: *const RgIpfsConfig,
     ) -> FFIResult<RayGunAdapter> {
         if account.is_null() {
             return FFIResult::err(Error::MultiPassExtensionUnavailable);
@@ -312,12 +312,7 @@ pub mod ffi {
 
         let config = match config.is_null() {
             true => None,
-            false => {
-                match serde_json::from_str(&CStr::from_ptr(config).to_string_lossy().to_string()) {
-                    Ok(c) => Some(c),
-                    Err(e) => return FFIResult::err(Error::from(e)),
-                }
-            }
+            false => Some((&*config).clone())
         };
 
         let account = &*account;
@@ -337,7 +332,7 @@ pub mod ffi {
     pub unsafe extern "C" fn warp_rg_ipfs_persistent_new(
         account: *const MultiPassAdapter,
         cache: *const PocketDimensionAdapter,
-        config: *const c_char,
+        config: *const RgIpfsConfig,
     ) -> FFIResult<RayGunAdapter> {
         if account.is_null() {
             return FFIResult::err(Error::MultiPassExtensionUnavailable);
@@ -350,12 +345,7 @@ pub mod ffi {
 
         let config = match config.is_null() {
             true => return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is needed"))),
-            false => {
-                match serde_json::from_str(&CStr::from_ptr(config).to_string_lossy().to_string()) {
-                    Ok(c) => Some(c),
-                    Err(e) => return FFIResult::err(Error::from(e)),
-                }
-            }
+            false => Some((&*config).clone())
         };
 
         let account = &*account;

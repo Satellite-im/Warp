@@ -15,12 +15,14 @@ pub struct Mdns {
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Autonat {
     pub enable: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub servers: Vec<Multiaddr>,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct RelayClient {
     pub enable: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub relay_address: Vec<Multiaddr>,
 }
 
@@ -32,6 +34,7 @@ pub struct RelayServer {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Rendezvous {
     pub enable: bool,
+    #[serde(skip_serializing_if = "Multiaddr::is_empty")]
     pub address: Multiaddr,
 }
 
@@ -47,8 +50,11 @@ impl Default for Rendezvous {
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct IpfsSetting {
     pub temporary: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub bootstrap: Vec<Multiaddr>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub listen_on: Vec<Multiaddr>,
     pub mdns: Mdns,
     pub autonat: Autonat,

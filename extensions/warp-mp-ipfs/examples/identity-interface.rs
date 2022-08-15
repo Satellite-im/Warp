@@ -1,12 +1,22 @@
+use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
 use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 use warp::multipass::identity::{Identifier, IdentityUpdate};
 use warp::multipass::MultiPass;
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::config::{MpIpfsConfig, IpfsSetting, StoreSetting};
-use warp_mp_ipfs::{ipfs_identity_temporary};
+use warp_mp_ipfs::config::{IpfsSetting, MpIpfsConfig, StoreSetting};
+use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
+
+#[derive(Debug, Parser)]
+#[clap(name = "")]
+struct Opt {
+    #[clap(long)]
+    path: Option<PathBuf>,
+}
 
 async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
     let mut tesseract = Tesseract::default();
@@ -32,9 +42,39 @@ async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
     Ok(Box::new(account))
 }
 
+async fn account_persistent<P: AsRef<Path>>(
+    username: Option<&str>,
+    path: P,
+) -> anyhow::Result<Box<dyn MultiPass>> {
+    let path = path.as_ref();
+    let mut tesseract = match Tesseract::from_file(path.join("tdatastore")) {
+        Ok(tess) => tess,
+        Err(_) => {
+            let mut tess = Tesseract::default();
+            tess.set_file(path.join("tdatastore"));
+            tess.set_autosave();
+            tess
+        }
+    };
+
+    tesseract
+        .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
+
+    let config = MpIpfsConfig::production(&path);
+    let mut account = ipfs_identity_persistent(config, tesseract, None).await?;
+    if account.get_own_identity().is_err() {
+        account.create_identity(username, None)?;
+    }
+    Ok(Box::new(account))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut account = account(None).await?;
+    let opt = Opt::parse();
+    let mut account = match opt.path.as_ref() {
+        Some(path) => account_persistent(None, path).await?,
+        None => account(None).await?,
+    };
 
     println!("Obtaining identity....");
     let identity = account.get_own_identity()?;
@@ -48,9 +88,9 @@ async fn main() -> anyhow::Result<()> {
         identity.username(),
         identity.short_id()
     ))?;
-
-
-
+    let mut incoming_list = vec![];
+    let mut friends_list = account.list_friends()?;
+    let mut interval = tokio::time::interval(Duration::from_millis(500));
     loop {
         tokio::select! {
             line = rl.readline().fuse() => match line {
@@ -228,11 +268,33 @@ async fn main() -> anyhow::Result<()> {
                                         writeln!(stdout, "Error Denying request: {}", e)?;
                                         continue;
                                     }
-                                    
+
                                     writeln!(stdout, "Request Denied")?;
                                 },
+                                Some("close") => {
+                                    let pk = match cmd_line.next() {
+                                        Some(pk) => match pk.to_string().try_into() {
+                                            Ok(did) => did,
+                                            Err(e) => {
+                                                writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                                continue
+                                            }
+                                        }
+                                        None => {
+                                            writeln!(stdout, "Public key required")?;
+                                            continue;
+                                        }
+                                    };
+
+                                    if let Err(e) = account.close_request(&pk) {
+                                        writeln!(stdout, "Error Closing request: {}", e)?;
+                                        continue;
+                                    }
+
+                                    writeln!(stdout, "Request Closed")?;
+                                },
                                 _ => {
-                                    writeln!(stdout, "/request <send | accept | deny> <publickey>")?;
+                                    writeln!(stdout, "/request <send | accept | deny | close> <publickey>")?;
                                     continue
                                 }
                             }
@@ -383,6 +445,36 @@ async fn main() -> anyhow::Result<()> {
                 Err(ReadlineError::Eof) => break,
                 Err(e) => {
                     writeln!(stdout, "Error: {}", e)?;
+                }
+            },
+            _ = interval.tick() => {
+                if let Ok(list) = account.list_incoming_request() {
+                    if !list.is_empty() && incoming_list != list {
+                        let mut inner_list = list.clone();
+                        inner_list.retain(|item| !incoming_list.contains(item));
+                        for item in &inner_list {
+                            let username = match account.get_identity(Identifier::did_key(item.from())) {
+                                Ok(ident) => ident.username(),
+                                Err(_) => item.from().to_string()
+                            };
+                            writeln!(stdout, "Pending request from {}. Do \"request accept {}\" to accept", username, item.from())?;
+                        }
+                        incoming_list = list;
+                    }
+                }
+                if let Ok(list) = account.list_friends() {
+                    if !list.is_empty() && friends_list != list {
+                        let mut inner_list = list.clone();
+                        inner_list.retain(|item| !friends_list.contains(item));
+                        for item in &inner_list {
+                            let username = match account.get_identity(Identifier::did_key(item.clone())) {
+                                Ok(ident) => ident.username(),
+                                Err(_) => item.to_string()
+                            };
+                            writeln!(stdout, "You are now friends with {}", username)?;
+                        }
+                        friends_list = list;
+                    }
                 }
             }
         }

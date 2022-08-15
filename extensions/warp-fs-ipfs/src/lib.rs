@@ -39,7 +39,7 @@ pub struct IpfsFileSystem {
 
 #[derive(Default, Clone)]
 pub struct IpfsInternalClient {
-    pub client: IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>,
+    pub client: IpfsClient<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>,
     pub option: IpfsOption,
 }
 
@@ -57,25 +57,25 @@ impl Default for IpfsOption {
 
 impl IpfsInternalClient {
     pub fn new(
-        client: IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>,
+        client: IpfsClient<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>,
         option: IpfsOption,
     ) -> Self {
         Self { client, option }
     }
 }
 
-impl AsRef<IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>>
+impl AsRef<IpfsClient<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>>
     for IpfsInternalClient
 {
-    fn as_ref(&self) -> &IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>> {
+    fn as_ref(&self) -> &IpfsClient<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>> {
         &self.client
     }
 }
 
-impl From<IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>>
+impl From<IpfsClient<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>>
     for IpfsInternalClient
 {
-    fn from(client: IpfsClient<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>) -> Self {
+    fn from(client: IpfsClient<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>) -> Self {
         Self {
             client,
             ..Default::default()
@@ -113,7 +113,7 @@ impl IpfsFileSystem {
     pub fn new_with_uri<S: AsRef<str>>(uri: S) -> anyhow::Result<Self> {
         let mut system = IpfsFileSystem::default();
         let client =
-            IpfsClient::<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>::from_str(
+            IpfsClient::<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>::from_str(
                 uri.as_ref(),
             )?;
         system.client = IpfsInternalClient::from(client);
