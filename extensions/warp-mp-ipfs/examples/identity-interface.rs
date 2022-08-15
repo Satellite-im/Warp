@@ -459,7 +459,7 @@ async fn main() -> anyhow::Result<()> {
                             };
                             writeln!(stdout, "Pending request from {}. Do \"request accept {}\" to accept", username, item.from())?;
                         }
-                        incoming_list = list.clone();
+                        incoming_list = list;
                     }
                 }
                 if let Ok(list) = account.list_friends() {
@@ -473,7 +473,7 @@ async fn main() -> anyhow::Result<()> {
                             };
                             writeln!(stdout, "You are now friends with {}", username)?;
                         }
-                        friends_list = list.clone();
+                        friends_list = list;
                     }
                 }
             }

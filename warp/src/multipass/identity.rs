@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use warp_derive::FFIFree;
 
 #[derive(
-    Default, Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree,
+    Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
 )]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Role {
@@ -34,7 +34,7 @@ impl Role {
 }
 
 #[derive(
-    Default, Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree,
+    Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
 )]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Badge {
@@ -58,7 +58,7 @@ impl Badge {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, FFIFree)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Graphics {
     /// Hash to profile picture
@@ -95,7 +95,7 @@ impl Graphics {
 }
 
 #[derive(
-    Default, Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree,
+    Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
 )]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Identity {
@@ -222,7 +222,7 @@ impl Identity {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, warp_derive::FFIVec, FFIFree)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct FriendRequest {
     /// The account where the request came from
@@ -326,7 +326,7 @@ impl FriendRequest {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Display)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
 #[repr(C)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum FriendRequestStatus {

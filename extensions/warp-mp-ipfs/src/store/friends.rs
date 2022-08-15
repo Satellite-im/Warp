@@ -91,7 +91,7 @@ impl InternalRequest {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InternalRequestType {
     Incoming,
     Outgoing,
@@ -99,19 +99,18 @@ pub enum InternalRequestType {
 
 impl InternalRequest {
     pub fn valid(&self) -> Result<(), Error> {
-        let real_request = &*self;
         let mut request = FriendRequest::default();
-        request.set_from(real_request.from());
-        request.set_to(real_request.to());
-        request.set_status(real_request.status());
-        request.set_date(real_request.date());
+        request.set_from(self.from());
+        request.set_to(self.to());
+        request.set_status(self.status());
+        request.set_date(self.date());
 
-        let signature = match real_request.signature() {
+        let signature = match self.signature() {
             Some(s) => s,
             None => return Err(Error::InvalidSignature),
         };
 
-        verify_serde_sig(real_request.from(), &request, &signature)?;
+        verify_serde_sig(self.from(), &request, &signature)?;
 
         Ok(())
     }
@@ -891,11 +890,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
             request.set_signature(signature);
 
             self.broadcast_request(&request, save).await?;
-        } else {
-            if let Some(path) = self.path.as_ref() {
-                if let Err(_e) = self.profile.write().friends_to_file(path) {
-                    //TODO: Log,
-                }
+        } else if let Some(path) = self.path.as_ref() {
+            if let Err(_e) = self.profile.write().friends_to_file(path) {
+                //TODO: Log,
             }
         }
 
