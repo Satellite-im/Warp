@@ -1,0 +1,135 @@
+name: Update warp-dart repo
+
+env:
+  DESTINATION_REPO: Satellite-im/warp-dart
+  DESTINATION_BRANCH: update-from-wapr
+on:
+  push:
+    branches:
+      - main
+jobs:
+  generate_dart_bindings:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Warp repo
+        uses: actions/checkout@v3
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-dev cmake libudev-dev
+      - name: Setup rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          default: true
+          override: true
+      - run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
+      - name: Build headers
+        run: cargo build --features "build-header"
+        working-directory: ./warp
+      - name: Setup the flutter environment.
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.0.5' # you can also specify exact version of flutter
+          cache: true
+      - name: Cache LLVM and Clang
+        id: cache-llvm
+        uses: actions/cache@v2
+        with:
+          path: ./llvm
+          key: llvm-10
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: '10.0'
+          cached: ${{ steps.cache-llvm.outputs.cache-hit }}
+      - name: Checkout warp-dart repo
+        uses: actions/checkout@v3
+        with:
+          repository: 'Satellite-im/warp-dart'
+          token: ${{ secrets.GH_PAT }}
+          #ref: 'warp_dart_wrapper'
+          path: 'warp-dart'
+      - name: Get flutter dependencies.
+        run: flutter pub get
+        working-directory: ./warp-dart
+      - name: Update vvlm location
+        run: sed -i "s|llvm-path:|llvm-path:\n  - '$LLVM_PATH'|" ./ffigen.yaml
+        working-directory: ./warp-dart
+      - name: Generate bindings.
+        run: flutter pub run ffigen --config ffigen.yaml
+        working-directory: ./warp-dart
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          path: ./warp-dart/lib*
+
+  build_android_libraries:
+    name: Building Libraries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        target: [aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android]
+        include:
+          - target: aarch64-linux-android
+            platform: android
+            os: ubuntu-latest
+          - target: armv7-linux-androideabi
+            platform: android
+            os: ubuntu-latest
+          - target: i686-linux-android
+            platform: android
+            os: ubuntu-latest
+          - target: x86_64-linux-android
+            platform: android
+            os: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r22b
+          add-to-path: false
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+      - name: Install cargo-ndk
+        if: ${{ matrix.platform == 'android' }}
+        run: cargo install cargo-ndk
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-dev cmake libudev-dev
+      - uses: actions-rs/cargo@v1
+        if: ${{ matrix.platform == 'android' }}
+        with:
+          command: ndk
+          args: --target ${{ matrix.target }} -p 29 -o ./jniLibs build -p warp -p warp-mp-ipfs
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          path: ./jniLibs*
+
+  update_warp_dart:
+    runs-on: ubuntu-latest
+    needs: [generate_dart_bindings,build_android_libraries]
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+
+      - run: mkdir -p artifact/android/src/main
+      - run: mv artifact/jniLibs artifact/android/src/main
+
+      - name: Pushes dart bindings
+        uses: dmnemec/copy_file_to_another_repo_action@main
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.GH_PAT }}
+        with:
+          source_file: 'artifact/.'
+          destination_repo: ${{ env.DESTINATION_REPO }}
+          destination_branch: ${{ env.DESTINATION_BRANCH }}
+          user_email: 'github-action@satellite.im'
+          user_name: 'github-action'
