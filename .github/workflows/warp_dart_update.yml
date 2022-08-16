@@ -2,7 +2,7 @@ name: Update warp-dart repo
 
 env:
   DESTINATION_REPO: Satellite-im/warp-dart
-  DESTINATION_BRANCH: update-from-wapr
+  DESTINATION_BRANCH: update-from-warp
 on:
   push:
     branches:
