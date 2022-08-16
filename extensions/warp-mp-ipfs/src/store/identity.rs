@@ -336,7 +336,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
             {
                 let cid: Cid = cid_str.parse().map_err(anyhow::Error::from)?;
-                match *self.ident_cid.read() {
+                let ident = self.ident_cid.read().clone();
+                match ident {
                     Some(ident_cid) => {
                         if cid != ident_cid {
                             *self.ident_cid.write() = Some(cid);
