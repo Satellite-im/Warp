@@ -71,6 +71,46 @@ pub fn ffi_vec(item: TokenStream) -> TokenStream {
             }
 
             #[cfg(not(target_arch="wasm32"))]
+            #[repr(C)]
+            pub struct [<FFIResult_FFIVec_ #name>] {
+                pub data: *mut [<FFIVec_ #name>],
+                pub error: *mut crate::ffi::FFIError,
+            }
+
+            #[cfg(not(target_arch="wasm32"))]
+            impl From<Result<Vec<#name>, crate::error::Error>> for [<FFIResult_FFIVec_ #name>] {
+                fn from(res: Result<Vec<#name>, crate::error::Error>) -> Self {
+                    match res {
+                        Ok(t) => {
+                            let ffivec: [<FFIVec_ #name>] = t.into();
+                            let data = Box::into_raw(Box::new(ffivec));
+                            Self {
+                                data,
+                                error: std::ptr::null_mut(),
+                            }
+                        }
+                        Err(err) => {
+                            let error = crate::ffi::FFIError::new(err).to_ptr();
+                            Self {
+                                data: std::ptr::null_mut(),
+                                error,
+                            }
+                        }
+                    }
+                }
+            }
+
+            impl [<FFIResult_FFIVec_ #name>] {
+                pub fn err(err: crate::error::Error) -> Self {
+                    let error = crate::ffi::FFIError::new(err).to_ptr();
+                    Self {
+                        data: std::ptr::null_mut(),
+                        error,
+                    }
+                }
+            }
+
+            #[cfg(not(target_arch="wasm32"))]
             #[no_mangle]
             pub unsafe extern "C" fn [<ffivec_ #name:lower _free>](cvec: *mut [<FFIVec_ #name>]) {
                 let raw_list = Box::from_raw(cvec);
