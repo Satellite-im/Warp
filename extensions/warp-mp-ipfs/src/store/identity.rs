@@ -14,7 +14,7 @@ use libipld::{
 };
 use sata::Sata;
 use warp::{
-    crypto::{rand::Rng, DIDKey, Ed25519KeyPair, DID},
+    crypto::{rand::Rng, DIDKey, Ed25519KeyPair, DID, Fingerprint, KeyMaterial},
     error::Error,
     module::Module,
     multipass::identity::{FriendRequest, Identity},
@@ -245,7 +245,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
         };
 
         identity.set_username(&username);
-        identity.set_short_id(warp::crypto::rand::thread_rng().gen_range(0, 9999));
+        let fingerprint = public_key.fingerprint();
+        let bytes = fingerprint.as_bytes();
+    
+        identity.set_short_id(bytes[bytes.len()-10..].try_into().map_err(anyhow::Error::from)?);
         identity.set_did_key(public_key.into());
 
         let ipld = to_ipld(identity.clone()).map_err(anyhow::Error::from)?;

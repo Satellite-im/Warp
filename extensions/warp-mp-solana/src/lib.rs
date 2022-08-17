@@ -670,11 +670,11 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
         } else {
             match (
                 split_data.get(0).ok_or(Error::Other).map(|s| s.to_string()),
-                split_data.get(1).ok_or(Error::Other)?.parse(),
+                split_data.get(1).ok_or(Error::Other).map(|s| s.to_string()),
             ) {
                 (Ok(name), Ok(code)) => {
                     identity.set_username(&name);
-                    identity.set_short_id(code);
+                    identity.set_short_id(code.as_bytes().try_into()?);
                 }
                 _ => identity.set_username(&user.name),
             };

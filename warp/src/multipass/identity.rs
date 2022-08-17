@@ -103,7 +103,7 @@ pub struct Identity {
     username: String,
 
     /// Short 4-digit numeric id to be used along side `Identity::username` (eg `Username#0000`)
-    short_id: u16,
+    short_id: [u8; 10],
 
     /// Public key for the identity
     did_key: DID,
@@ -135,7 +135,7 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_short_id(&mut self, id: u16) {
+    pub fn set_short_id(&mut self, id: [u8; 10]) {
         self.short_id = id
     }
 
@@ -167,8 +167,8 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn short_id(&self) -> u16 {
-        self.short_id
+    pub fn short_id(&self) -> String {
+        String::from_utf8_lossy(&self.short_id).to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
@@ -624,14 +624,16 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_short_id(identity: *const Identity) -> u16 {
+    pub unsafe extern "C" fn multipass_identity_short_id(identity: *const Identity) -> *mut c_char {
         if identity.is_null() {
-            return 0;
+            return std::ptr::null_mut();
         }
 
         let identity = &*identity;
-
-        identity.short_id()
+        match CString::new(identity.short_id()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
