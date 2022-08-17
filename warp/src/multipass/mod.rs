@@ -23,11 +23,11 @@ pub trait MultiPass: Extension + Friends + Sync + Send + SingleHandle {
     ) -> Result<DID, Error>;
 
     /// Obtain an [`Identity`] using [`Identifier`]
-    fn get_identity(&self, id: Identifier) -> Result<Identity, Error>;
+    fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error>;
 
     /// Obtain your own [`Identity`]
     fn get_own_identity(&self) -> Result<Identity, Error> {
-        self.get_identity(Identifier::own())
+        self.get_identity(Identifier::own()).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))
     }
 
     /// Update your own [`Identity`] using [`IdentityUpdate`]
@@ -149,7 +149,7 @@ impl MultiPassAdapter {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn get_identity(&self, id: Identifier) -> Result<Identity, Error> {
+    pub fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
         self.read_guard().get_identity(id)
     }
 
@@ -287,7 +287,7 @@ pub mod ffi {
     use crate::error::Error;
     use crate::ffi::{FFIResult, FFIResult_Null};
     use crate::multipass::{
-        identity::{FFIVec_FriendRequest, Identifier, Identity, IdentityUpdate},
+        identity::{FFIVec_FriendRequest, FFIResult_FFIVec_Identity, Identifier, Identity, IdentityUpdate},
         MultiPassAdapter,
     };
     use std::ffi::CStr;
@@ -336,21 +336,18 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_get_identity(
         ctx: *const MultiPassAdapter,
         identifier: *const Identifier,
-    ) -> FFIResult<Identity> {
+    ) -> FFIResult_FFIVec_Identity {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult_FFIVec_Identity::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if identifier.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("Argument is null")));
+            return FFIResult_FFIVec_Identity::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }
 
         let mp = &*(ctx);
         let id = &*(identifier);
-        match async_on_block(async { mp.read_guard().get_identity(id.clone()) }) {
-            Ok(identity) => FFIResult::ok(identity),
-            Err(e) => FFIResult::err(e),
-        }
+        async_on_block(async { mp.read_guard().get_identity(id.clone()) }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]

@@ -299,7 +299,7 @@ impl UserHelper {
         Ok(())
     }
 
-    pub fn get_user_by_name(&self, name: &str) -> anyhow::Result<User> {
+    pub fn get_user_by_name(&self, name: &str) -> anyhow::Result<Vec<User>> {
         let name_length = name.chars().count();
         ensure!(
             name_length > 3 || name_length <= 32,
@@ -314,7 +314,7 @@ impl UserHelper {
             encoding: None,
         });
 
-        self.program
+        Ok(self.program
             .accounts(vec![filter])
             .map_err(|e| match e {
                 ClientError::ProgramError(ProgramError::Custom(code)) => {
@@ -325,10 +325,7 @@ impl UserHelper {
             .iter()
             .cloned()
             .map(|(_, account)| account)
-            .collect::<Vec<_>>()
-            .first()
-            .cloned()
-            .ok_or_else(|| anyhow!("User not found"))
+            .collect::<Vec<_>>())
     }
 
     pub fn user_pubkey(&self) -> Pubkey {

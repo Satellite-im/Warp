@@ -252,19 +252,21 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
         Ok(identity.did_key())
     }
 
-    fn get_identity(&self, id: Identifier) -> Result<Identity, Error> {
-        let ident = match id.get_inner() {
+    fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
+        let idents = match id.get_inner() {
             (Some(pk), None, false) => {
                 if let Ok(cache) = self.get_cache() {
                     let mut query = QueryBuilder::default();
                     query.r#where("did_key", &pk)?;
                     if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
                     {
-                        //get last
-                        if !list.is_empty() {
-                            let obj = list.last().unwrap();
-                            return obj.decode::<Identity>().map_err(Error::from);
+                        let mut items = vec![];
+                        for object in list { 
+                            if let Ok(ident) = object.decode::<Identity>().map_err(Error::from) {
+                                items.push(ident);
+                            }
                         }
+                        return Ok(items);
                     }
                 }
                 self.identity_store.lookup(LookupBy::DidKey(Box::new(pk)))
@@ -275,38 +277,42 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                     query.r#where("username", &username)?;
                     if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
                     {
-                        //get last
-                        if !list.is_empty() {
-                            let obj = list.last().unwrap();
-                            return obj.decode::<Identity>().map_err(Error::from);
+                        let mut items = vec![];
+                        for object in list { 
+                            if let Ok(ident) = object.decode::<Identity>().map_err(Error::from) {
+                                items.push(ident);
+                            }
                         }
+                        return Ok(items);
                     }
                 }
                 self.identity_store.lookup(LookupBy::Username(username))
             }
             (None, None, true) => {
-                return async_block_in_place_uncheck(self.identity_store.own_identity())
+                return async_block_in_place_uncheck(self.identity_store.own_identity()).map(|i| vec![i.clone()])
             }
             _ => Err(Error::InvalidIdentifierCondition),
         }?;
 
-        if let Ok(mut cache) = self.get_cache_mut() {
-            let mut query = QueryBuilder::default();
-            query.r#where("did_key", &ident.did_key())?;
-            if cache
-                .has_data(DataType::from(Module::Accounts), &query)
-                .is_err()
-            {
-                let object = Sata::default().encode(
-                    warp::sata::libipld::IpldCodec::DagJson,
-                    warp::sata::Kind::Reference,
-                    ident.clone(),
-                )?;
-                cache.add_data(DataType::from(Module::Accounts), &object)?;
+        for ident in &idents {
+            if let Ok(mut cache) = self.get_cache_mut() {
+                let mut query = QueryBuilder::default();
+                query.r#where("did_key", &ident.did_key())?;
+                if cache
+                    .has_data(DataType::from(Module::Accounts), &query)
+                    .is_err()
+                {
+                    let object = Sata::default().encode(
+                        warp::sata::libipld::IpldCodec::DagJson,
+                        warp::sata::Kind::Reference,
+                        ident.clone(),
+                    )?;
+                    cache.add_data(DataType::from(Module::Accounts), &object)?;
+                }
             }
         }
 
-        Ok(ident)
+        Ok(idents)
     }
 
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {

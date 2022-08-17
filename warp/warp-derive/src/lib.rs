@@ -100,6 +100,7 @@ pub fn ffi_vec(item: TokenStream) -> TokenStream {
                 }
             }
 
+            #[cfg(not(target_arch="wasm32"))]
             impl [<FFIResult_FFIVec_ #name>] {
                 pub fn err(err: crate::error::Error) -> Self {
                     let error = crate::ffi::FFIError::new(err).to_ptr();

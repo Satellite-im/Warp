@@ -267,24 +267,71 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(identity)
     }
 
-    pub fn lookup(&self, lookup: LookupBy) -> Result<Identity, Error> {
+    pub fn lookup(&self, lookup: LookupBy) -> Result<Vec<Identity>, Error> {
         // Check own identity just in case since we dont store this in the cache
         if let Some(ident) = self.identity.read().clone() {
             match lookup {
-                LookupBy::DidKey(pubkey) if ident.did_key() == *pubkey => return Ok(ident),
-                LookupBy::Username(username) if ident.username() == username => return Ok(ident),
+                LookupBy::DidKey(pubkey) if ident.did_key() == *pubkey => return Ok(vec![ident]),
+                LookupBy::Username(username) if ident.username() == username => return Ok(vec![ident]),
+                LookupBy::Username(username) if username.contains("#") => {
+                    let split_data = username.split('#').collect::<Vec<&str>>();
+
+                    let ident = if split_data.len() != 2 {
+                        if ident.username() == username {
+                            vec![ident]
+                        } else {
+                            vec![]
+                        }
+                    } else {
+                        match (
+                            split_data.get(0).ok_or(Error::Other),
+                            split_data.get(1).ok_or(Error::Other),
+                        ) {
+                            (Ok(name), Ok(code)) => {
+                                if ident.username().eq(name) && ident.short_id().eq(code) {
+                                    vec![ident]
+                                } else {
+                                    vec![]
+                                }
+                            }
+                            _ => vec![],
+                        }
+                    };
+                    return Ok(ident);
+                }
                 _ => {}
             };
         }
 
-        for ident in self.cache() {
-            match &lookup {
-                LookupBy::DidKey(pubkey) if ident.did_key() == *pubkey.clone() => return Ok(ident),
-                LookupBy::Username(username) if &ident.username() == username => return Ok(ident),
-                _ => continue,
+        let idents = match &lookup {
+            //Note: If this returns more than one identity, then either
+            //      A) The memory cache never got updated and somehow bypassed the check likely caused from a race condition; or
+            //      B) There is literally 2 identities, which should be impossible because of A
+            LookupBy::DidKey(pubkey) => {
+                self.cache().iter().filter(|ident| ident.did_key() == *pubkey.clone()).cloned().collect::<Vec<_>>()
+            },
+            LookupBy::Username(username) if username.contains("#") => {
+                let split_data = username.split('#').collect::<Vec<&str>>();
+
+                if split_data.len() != 2 {
+                    self.cache().iter().filter(|ident| ident.username().eq(username)).cloned().collect::<Vec<_>>()
+                } else {
+                    match (
+                        split_data.get(0).ok_or(Error::Other),
+                        split_data.get(1).ok_or(Error::Other),
+                    ) {
+                        (Ok(name), Ok(code)) => {
+                            self.cache().iter().filter(|ident| ident.username().eq(name) && ident.short_id().contains(code)).cloned().collect::<Vec<_>>()
+                        }
+                        _ => vec![],
+                    }
+                }
+            },
+            LookupBy::Username(username) => {
+                self.cache().iter().filter(|ident| ident.username().contains(username)).cloned().collect::<Vec<_>>()
             }
-        }
-        Err(Error::IdentityDoesntExist)
+        };
+        Ok(idents)
     }
 
     pub fn get_keypair(&self) -> anyhow::Result<Keypair> {
