@@ -380,11 +380,13 @@ impl<T: IpfsTypes> MultiPass for SolanaAccount<T> {
                     query.r#where("username", &username)?;
                     if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
                     {
-                        //get last
-                        if !list.is_empty() {
-                            let obj = list.last().unwrap();
-                            return obj.decode::<Identity>().map_err(Error::from).map(|i| vec![i]);
+                        let mut items = vec![];
+                        for object in list { 
+                            if let Ok(ident) = object.decode::<Identity>().map_err(Error::from) {
+                                items.push(ident);
+                            }
                         }
+                        return Ok(items);
                     }
                 }
                 let mut idents = vec![];
@@ -407,7 +409,7 @@ impl<T: IpfsTypes> MultiPass for SolanaAccount<T> {
                             }
                             idents.push(user_to_identity(&helper, Some(&pkey))?);
                         }
-                        Err(e) => continue,
+                        Err(_) => continue,
                     }
                 }
                 idents
