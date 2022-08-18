@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::ops::Range;
-use std::os::unix::prelude::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
