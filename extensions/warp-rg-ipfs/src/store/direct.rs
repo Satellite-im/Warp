@@ -25,7 +25,7 @@ use warp::sync::{Arc, Mutex, RwLock};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender};
 
-use crate::Persistent;
+use crate::{Persistent, SpamFilter};
 
 use super::{
     did_to_libp2p_pub, libp2p_pub_to_did, topic_discovery, ConversationEvents, MessagingEvents,
@@ -50,6 +50,8 @@ pub struct DirectMessageStore<T: IpfsTypes> {
 
     // DID
     did: Arc<DID>,
+
+    spam_filter: Arc<Option<SpamFilter>>,
 }
 
 impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
@@ -61,6 +63,7 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
             account: self.account.clone(),
             queue: self.queue.clone(),
             did: self.did.clone(),
+            spam_filter: self.spam_filter.clone(),
         }
     }
 }
@@ -159,6 +162,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         account: Arc<RwLock<Box<dyn MultiPass>>>,
         discovery: bool,
         interval_ms: u64,
+        check_spam: bool,
     ) -> anyhow::Result<Self> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -173,6 +177,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let direct_conversation = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
         let did = Arc::new(account.read().decrypt_private_key(None)?);
+        let spam_filter = Arc::new(if check_spam { Some(SpamFilter::default()) } else { None });
         let store = Self {
             path,
             ipfs,
@@ -180,6 +185,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             account,
             queue,
             did,
+            spam_filter,
         };
 
         if let Some(path) = store.path.as_ref() {
@@ -669,7 +675,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::New(message);
 
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
-            direct_message_event(conversation.messages_mut(), &event)?;
+            direct_message_event(conversation.messages_mut(), &event, &self)?;
             if let Some(path) = self.path.as_ref() {
                 conversation.to_file(path, own_did)?;
             }
@@ -702,7 +708,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::Edit(conversation, message_id, messages);
 
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
-            direct_message_event(conversation.messages_mut(), &event)?;
+            direct_message_event(conversation.messages_mut(), &event, &self)?;
             if let Some(path) = self.path.as_ref() {
                 conversation.to_file(path, &*self.did)?;
             }
@@ -742,7 +748,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let event = MessagingEvents::New(message);
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
-            direct_message_event(conversation.messages_mut(), &event)?;
+            direct_message_event(conversation.messages_mut(), &event, &self)?;
             if let Some(path) = self.path.as_ref() {
                 conversation.to_file(path, own_did)?;
             }
@@ -770,7 +776,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let event = MessagingEvents::Delete(conversation, message_id);
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
-            direct_message_event(conversation.messages_mut(), &event)?;
+            direct_message_event(conversation.messages_mut(), &event, &self)?;
             if let Some(path) = self.path.as_ref() {
                 conversation.to_file(path, &*self.did)?;
             }
@@ -806,7 +812,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let event = MessagingEvents::Pin(conversation, sender, message_id, state);
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
-            direct_message_event(conversation.messages_mut(), &event)?;
+            direct_message_event(conversation.messages_mut(), &event, &self)?;
             if let Some(path) = self.path.as_ref() {
                 conversation.to_file(path, own_did)?;
             }
@@ -852,7 +858,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .ok_or(Error::InvalidConversation)?;
 
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
-            direct_message_event(conversation.messages_mut(), &event)?;
+            direct_message_event(conversation.messages_mut(), &event, &self)?;
             if let Some(path) = self.path.as_ref() {
                 conversation.to_file(path, own_did)?;
             }
@@ -938,15 +944,17 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     }
 }
 
-pub fn direct_message_event(
+pub fn direct_message_event<T: IpfsTypes>(
     messages: &mut Vec<Message>,
     events: &MessagingEvents,
+    store: &DirectMessageStore<T>,
 ) -> Result<(), Error> {
     match events.clone() {
-        MessagingEvents::New(message) => {
+        MessagingEvents::New(mut message) => {
             if messages.contains(&message) {
                 return Err(Error::MessageFound);
             }
+            spam_check(&mut message, store)?;
             messages.push(message)
         }
         MessagingEvents::Edit(convo_id, message_id, val) => {
@@ -1069,7 +1077,7 @@ async fn direct_conversation_process<T: IpfsTypes>(
                         None => continue,
                     };
 
-                    if let Err(_e) = direct_message_event(convo.messages_mut(), &event) {
+                    if let Err(_e) = direct_message_event(convo.messages_mut(), &event, &store) {
                         //TODO: Log
                         continue;
                     }
@@ -1105,4 +1113,20 @@ impl Queue {
             data,
         }
     }
+}
+
+pub fn spam_check<T: IpfsTypes>(
+    message: &mut Message,
+    store: &DirectMessageStore<T>,
+) -> anyhow::Result<()> {
+    let filter = &store.spam_filter.as_ref();
+    match filter {
+        Some(filter) => {
+            if filter.process(&message.value().join(" "))? {
+                message.metadata_mut().insert("is_spam".to_owned(), "true".to_owned());
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }

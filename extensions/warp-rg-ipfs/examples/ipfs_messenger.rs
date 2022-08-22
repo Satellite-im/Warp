@@ -138,7 +138,15 @@ async fn main() -> anyhow::Result<()> {
                     let msg = msg.last().unwrap();
                     let username = get_username(new_account.clone(), msg.sender())?;
                     //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
-                    writeln!(stdout, "[{}] @> {}", username, msg.value().join("\n"))?;
+                    match msg.metadata().get("is_spam") {
+                        Some(_) => {
+                            writeln!(stdout, "[{}] @> [SPAM!] {}", username, msg.value().join("\n"))?;
+                        }
+                        None => {
+                            writeln!(stdout, "[{}] @> {}", username, msg.value().join("\n"))?;
+                        }
+                    }
+
                 }
             }
             line = rl.readline().fuse() => match line {
