@@ -177,7 +177,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let direct_conversation = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
         let did = Arc::new(account.read().decrypt_private_key(None)?);
-        let spam_filter = Arc::new(if check_spam { Some(SpamFilter::default()) } else { None });
+        let spam_filter = Arc::new(if check_spam { Some(SpamFilter::default()?) } else { None });
         let store = Self {
             path,
             ipfs,
