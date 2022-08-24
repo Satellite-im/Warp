@@ -675,7 +675,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::New(message);
 
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
-            direct_message_event(conversation.messages_mut(), &event, &self)?;
+            direct_message_event(conversation.messages_mut(), &event, &self.spam_filter)?;
             if let Some(path) = self.path.as_ref() {
                 conversation.to_file(path, own_did)?;
             }
@@ -708,7 +708,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::Edit(conversation, message_id, messages);
 
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
-            direct_message_event(conversation.messages_mut(), &event, &self)?;
+            direct_message_event(conversation.messages_mut(), &event, &self.spam_filter)?;
             if let Some(path) = self.path.as_ref() {
                 conversation.to_file(path, &*self.did)?;
             }
@@ -748,7 +748,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let event = MessagingEvents::New(message);
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
-            direct_message_event(conversation.messages_mut(), &event, &self)?;
+            direct_message_event(conversation.messages_mut(), &event, &self.spam_filter)?;
             if let Some(path) = self.path.as_ref() {
                 conversation.to_file(path, own_did)?;
             }
@@ -776,7 +776,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let event = MessagingEvents::Delete(conversation, message_id);
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
-            direct_message_event(conversation.messages_mut(), &event, &self)?;
+            direct_message_event(conversation.messages_mut(), &event, &self.spam_filter)?;
             if let Some(path) = self.path.as_ref() {
                 conversation.to_file(path, &*self.did)?;
             }
@@ -812,7 +812,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let event = MessagingEvents::Pin(conversation, sender, message_id, state);
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
-            direct_message_event(conversation.messages_mut(), &event, &self)?;
+            direct_message_event(conversation.messages_mut(), &event, &self.spam_filter)?;
             if let Some(path) = self.path.as_ref() {
                 conversation.to_file(path, own_did)?;
             }
@@ -858,7 +858,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .ok_or(Error::InvalidConversation)?;
 
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
-            direct_message_event(conversation.messages_mut(), &event, &self)?;
+            direct_message_event(conversation.messages_mut(), &event, &self.spam_filter)?;
             if let Some(path) = self.path.as_ref() {
                 conversation.to_file(path, own_did)?;
             }
@@ -944,17 +944,17 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     }
 }
 
-pub fn direct_message_event<T: IpfsTypes>(
+pub fn direct_message_event(
     messages: &mut Vec<Message>,
     events: &MessagingEvents,
-    store: &DirectMessageStore<T>,
+    filter: &Arc<Option<SpamFilter>>,
 ) -> Result<(), Error> {
     match events.clone() {
         MessagingEvents::New(mut message) => {
             if messages.contains(&message) {
                 return Err(Error::MessageFound);
             }
-            spam_check(&mut message, store)?;
+            spam_check(&mut message, filter)?;
             messages.push(message)
         }
         MessagingEvents::Edit(convo_id, message_id, val) => {
@@ -1077,7 +1077,7 @@ async fn direct_conversation_process<T: IpfsTypes>(
                         None => continue,
                     };
 
-                    if let Err(_e) = direct_message_event(convo.messages_mut(), &event, &store) {
+                    if let Err(_e) = direct_message_event(convo.messages_mut(), &event, &store.spam_filter) {
                         //TODO: Log
                         continue;
                     }
@@ -1115,18 +1115,14 @@ impl Queue {
     }
 }
 
-pub fn spam_check<T: IpfsTypes>(
+pub fn spam_check(
     message: &mut Message,
-    store: &DirectMessageStore<T>,
+    filter: &Arc<Option<SpamFilter>>,
 ) -> anyhow::Result<()> {
-    let filter = &store.spam_filter.as_ref();
-    match filter {
-        Some(filter) => {
-            if filter.process(&message.value().join(" "))? {
-                message.metadata_mut().insert("is_spam".to_owned(), "true".to_owned());
-            }
+    if let Some(filter) = filter.as_ref() {
+        if filter.process(&message.value().join(" "))? {
+            message.metadata_mut().insert("is_spam".to_owned(), "true".to_owned());
         }
-        _ => {}
     }
     Ok(())
 }
