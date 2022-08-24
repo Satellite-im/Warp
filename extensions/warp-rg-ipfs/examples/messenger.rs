@@ -13,7 +13,7 @@ use warp::crypto::DID;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, SenderId};
+use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState};
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::config::{Autonat, Dcutr, IpfsSetting, RelayClient, StoreSetting};
@@ -436,16 +436,8 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn get_username(account: Arc<RwLock<Box<dyn MultiPass>>>, id: SenderId) -> anyhow::Result<String> {
-    if let Some(id) = id.get_id() {
-        //if for some reason uuid is used, we can just return that instead as a string
-        return Ok(id.to_string());
-    }
-
-    if let Some(pubkey) = id.get_did_key() {
-        let account = account.read();
-        let identity = account.get_identity(Identifier::did_key(pubkey))?;
-        return Ok(format!("{}#{}", identity.username(), identity.short_id()));
-    }
-    anyhow::bail!("Invalid SenderId")
+fn get_username(account: Arc<RwLock<Box<dyn MultiPass>>>, did: DID) -> anyhow::Result<String> {
+    let account = account.read();
+    let identity = account.get_identity(Identifier::did_key(did))?;
+    Ok(format!("{}#{}", identity.username(), identity.short_id()))
 }
