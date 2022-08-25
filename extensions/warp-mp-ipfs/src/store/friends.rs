@@ -824,9 +824,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
             }
         }
         // Since we want to broadcast the remove request, banning the peer after would not allow that to happen
-        // Although this may get uncomment in the future to block connections regardless if its sent or not, however
+        // Although this may get uncomment in the future to block connections regardless if its sent or not, or
+        // if we decide to send the request through a relay to broadcast it to the peer, however
         // the moment this extension is reloaded the block list are considered as a "banned peer" in libp2p
-
+    
         // let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
         // self.ipfs.ban_peer(peer_id).await?;
@@ -949,11 +950,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let mut data = Sata::default();
         data.add_recipient(&request.to().try_into()?)
             .map_err(anyhow::Error::from)?;
-        let kp = did_keypair(&self.tesseract)?;
+        let kp = &*self.did_key;
         let payload = data
             .encrypt(
                 IpldCodec::DagJson,
-                &kp.try_into()?,
+                kp.as_ref(),
                 Kind::Static,
                 request.clone(),
             )
@@ -993,7 +994,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 Ok(bytes) => bytes,
                 Err(_e) => {
                     //TODO: Log
-
                     return;
                 }
             };

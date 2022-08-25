@@ -71,6 +71,7 @@ impl<T: IpfsTypes> Drop for IdentityStore<T> {
 pub enum LookupBy {
     DidKey(Box<DID>),
     Username(String),
+    ShortId(String)
 }
 
 impl<T: IpfsTypes> IdentityStore<T> {
@@ -299,6 +300,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     };
                     return Ok(ident);
                 }
+                LookupBy::ShortId(id) if ident.short_id().eq(&id) => return Ok(vec![ident]),
                 _ => {}
             };
         }
@@ -330,6 +332,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
             LookupBy::Username(username) => {
                 let username = username.to_lowercase();
                 self.cache().iter().filter(|ident| ident.username().to_lowercase().contains(&username)).cloned().collect::<Vec<_>>()
+            },
+            LookupBy::ShortId(id) => {
+                self.cache().iter().filter(|ident| ident.short_id().eq(id)).cloned().collect::<Vec<_>>()
             }
         };
         Ok(idents)
@@ -387,6 +392,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
             {
                 let cid: Cid = cid_str.parse().map_err(anyhow::Error::from)?;
+                // Note: This is clonded to prevent a deadlock when writing to `ident_cid`
                 let ident = self.ident_cid.read().clone();
                 match ident {
                     Some(ident_cid) => {
