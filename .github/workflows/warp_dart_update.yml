@@ -25,8 +25,7 @@ jobs:
           override: true
       - run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
       - name: Build headers
-        run: cargo build --features "build-header"
-        working-directory: ./warp
+        run: cargo build --features "build-header" -p warp -p warp-mp-ipfs -p warp-rg-ipfs -p warp-pd-flatfile -p warp-pd-memory -p warp-pd-stretto -p warp-fs-storj -p warp-fs-memory
       - name: Setup the flutter environment.
         uses: subosito/flutter-action@v2
         with:
@@ -37,11 +36,11 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ./llvm
-          key: llvm-10
+          key: llvm-14
       - name: Install LLVM and Clang
         uses: KyleMayes/install-llvm-action@v1
         with:
-          version: '10.0'
+          version: '14.0'
           cached: ${{ steps.cache-llvm.outputs.cache-hit }}
       - name: Checkout warp-dart repo
         uses: actions/checkout@v3
@@ -53,7 +52,7 @@ jobs:
       - name: Get flutter dependencies.
         run: flutter pub get
         working-directory: ./warp-dart
-      - name: Update vvlm location
+      - name: Update llvm location
         run: sed -i "s|llvm-path:|llvm-path:\n  - '$LLVM_PATH'|" ./ffigen.yaml
         working-directory: ./warp-dart
       - name: Generate bindings.
@@ -105,7 +104,7 @@ jobs:
         if: ${{ matrix.platform == 'android' }}
         with:
           command: ndk
-          args: --target ${{ matrix.target }} -p 29 -o ./jniLibs build -p warp -p warp-mp-ipfs
+          args: --target ${{ matrix.target }} -p 29 -o ./jniLibs build -p warp -p warp-mp-ipfs -p warp-rg-ipfs -p warp-pd-flatfile -p warp-pd-memory -p warp-pd-stretto -p warp-fs-storj -p warp-fs-memory --release
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
       - name: Upload artifact
