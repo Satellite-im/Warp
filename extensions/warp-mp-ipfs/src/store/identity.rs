@@ -272,23 +272,23 @@ impl<T: IpfsTypes> IdentityStore<T> {
         if let Some(ident) = self.identity.read().clone() {
             match lookup {
                 LookupBy::DidKey(pubkey) if ident.did_key() == *pubkey => return Ok(vec![ident]),
-                LookupBy::Username(username) if ident.username() == username => return Ok(vec![ident]),
-                LookupBy::Username(username) if username.contains("#") => {
+                LookupBy::Username(username) if ident.username().to_lowercase().contains(&username.to_lowercase()) => return Ok(vec![ident]),
+                LookupBy::Username(username) if username.contains('#') => {
                     let split_data = username.split('#').collect::<Vec<&str>>();
 
                     let ident = if split_data.len() != 2 {
-                        if ident.username() == username {
+                        if ident.username().to_lowercase() == username.to_lowercase() {
                             vec![ident]
                         } else {
                             vec![]
                         }
                     } else {
                         match (
-                            split_data.get(0).ok_or(Error::Other),
-                            split_data.get(1).ok_or(Error::Other),
+                            split_data.first().map(|s| s.to_lowercase()),
+                            split_data.last().map(|s| s.to_lowercase()),
                         ) {
-                            (Ok(name), Ok(code)) => {
-                                if ident.username().eq(name) && ident.short_id().eq(code) {
+                            (Some(name), Some(code)) => {
+                                if ident.username().to_lowercase().eq(&name) && ident.short_id().to_lowercase().eq(&code) {
                                     vec![ident]
                                 } else {
                                     vec![]
@@ -310,25 +310,26 @@ impl<T: IpfsTypes> IdentityStore<T> {
             LookupBy::DidKey(pubkey) => {
                 self.cache().iter().filter(|ident| ident.did_key() == *pubkey.clone()).cloned().collect::<Vec<_>>()
             },
-            LookupBy::Username(username) if username.contains("#") => {
+            LookupBy::Username(username) if username.contains('#') => {
                 let split_data = username.split('#').collect::<Vec<&str>>();
 
                 if split_data.len() != 2 {
-                    self.cache().iter().filter(|ident| ident.username().eq(username)).cloned().collect::<Vec<_>>()
+                    self.cache().iter().filter(|ident| ident.username().to_lowercase().contains(&username.to_lowercase())).cloned().collect::<Vec<_>>()
                 } else {
                     match (
-                        split_data.get(0).ok_or(Error::Other),
-                        split_data.get(1).ok_or(Error::Other),
+                        split_data.first().map(|s| s.to_lowercase()),
+                        split_data.last().map(|s| s.to_lowercase()),
                     ) {
-                        (Ok(name), Ok(code)) => {
-                            self.cache().iter().filter(|ident| ident.username().eq(name) && ident.short_id().contains(code)).cloned().collect::<Vec<_>>()
+                        (Some(name), Some(code)) => {
+                            self.cache().iter().filter(|ident| ident.username().to_lowercase().eq(&name) && ident.short_id().to_lowercase().eq(&code)).cloned().collect::<Vec<_>>()
                         }
                         _ => vec![],
                     }
                 }
             },
             LookupBy::Username(username) => {
-                self.cache().iter().filter(|ident| ident.username().contains(username)).cloned().collect::<Vec<_>>()
+                let username = username.to_lowercase();
+                self.cache().iter().filter(|ident| ident.username().to_lowercase().contains(&username)).cloned().collect::<Vec<_>>()
             }
         };
         Ok(idents)
