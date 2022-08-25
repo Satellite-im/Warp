@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::ops::Range;
-use std::os::unix::prelude::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -412,7 +411,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let stream = self.ipfs.pubsub_subscribe(topic).await?;
 
-        tokio::spawn(direct_conversation_process(self.clone(), convo_id, stream));
+        warp::async_spawn(direct_conversation_process(self.clone(), convo_id, stream));
 
         let peers = self
             .ipfs
