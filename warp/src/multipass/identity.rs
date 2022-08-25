@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use warp_derive::FFIFree;
 
+pub const SHORT_ID_SIZE: usize = 8;
+
 #[derive(
     Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
 )]
@@ -102,8 +104,8 @@ pub struct Identity {
     /// Username of the identity
     username: String,
 
-    /// Short 4-digit numeric id to be used along side `Identity::username` (eg `Username#0000`)
-    short_id: [u8; 10],
+    /// Short id derived from the DID to be used along side `Identity::username` (eg `Username#0000`)
+    short_id: [u8; SHORT_ID_SIZE],
 
     /// Public key for the identity
     did_key: DID,
@@ -135,7 +137,7 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_short_id(&mut self, id: [u8; 10]) {
+    pub fn set_short_id(&mut self, id: [u8; SHORT_ID_SIZE]) {
         self.short_id = id
     }
 
@@ -168,7 +170,7 @@ impl Identity {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn short_id(&self) -> String {
-        String::from_utf8_lossy(&self.short_id).to_string()
+        String::from_utf8_lossy(&self.short_id).to_uppercase()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
