@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-use crate::crypto::{DID};
+use crate::crypto::DID;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -127,6 +127,10 @@ pub struct Identity {
 
     /// TBD
     linked_accounts: HashMap<String, String>,
+
+    /// Signature of the identity
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signature: Option<Vec<u8>>,
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -155,6 +159,12 @@ impl Identity {
     pub fn set_status_message(&mut self, message: Option<String>) {
         self.status_message = message
     }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_signature(&mut self, signature: Option<Vec<u8>>) {
+        self.signature = signature;
+    }
+
     // pub fn set_roles(&mut self) {}
     // pub fn set_available_badges(&mut self) {}
     // pub fn set_active_badge(&mut self) {}
@@ -191,6 +201,11 @@ impl Identity {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn active_badge(&self) -> Badge {
         self.active_badge.clone()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn signature(&self) -> Option<Vec<u8>> {
+        self.signature.clone()
     }
 
     // #[cfg_attr(target_arch = "wasm32", wasm_bindgen(skip))]
@@ -510,7 +525,7 @@ impl IdentityUpdate {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use crate::crypto::{DID};
+    use crate::crypto::DID;
     use crate::multipass::identity::{
         Badge, FFIVec_Badge, FFIVec_Role, FriendRequest, FriendRequestStatus, Graphics, Identifier,
         Identity, IdentityUpdate, Role,
@@ -640,9 +655,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_did_key(
-        identity: *const Identity,
-    ) -> *mut DID {
+    pub unsafe extern "C" fn multipass_identity_did_key(identity: *const Identity) -> *mut DID {
         if identity.is_null() {
             return std::ptr::null_mut();
         }
@@ -796,9 +809,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_identifier_did_key(
-        key: *const DID,
-    ) -> *mut Identifier {
+    pub unsafe extern "C" fn multipass_identifier_did_key(key: *const DID) -> *mut Identifier {
         if key.is_null() {
             return std::ptr::null_mut();
         }
