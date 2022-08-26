@@ -1,7 +1,14 @@
+mod config;
+
 use std::fs::File;
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::Path;
 use bayespam;
+use config::Config;
 use super::Classifier;
+
+
+const FILE_NAME: &str = "filter_model.json";
 
 pub struct BayesClassifier {
     classifier: bayespam::classifier::Classifier,
@@ -10,7 +17,7 @@ pub struct BayesClassifier {
 #[allow(dead_code)]
 impl BayesClassifier {
     pub fn new() -> anyhow::Result<Box<Self>> {
-        let file_name = "spam_model.json".to_owned();
+        let file_name = FILE_NAME.to_string();
 
         let mut file = File::options()
             .create(true)
@@ -20,12 +27,23 @@ impl BayesClassifier {
 
         if file.metadata()?.len() == 0 {
             file.write(include_bytes!("def_model.json"))?;
-            file.seek(SeekFrom::Start(0))?;
+            file.rewind()?;
         }
 
         let classifier = bayespam::classifier::Classifier::new_from_pre_trained(&mut file)?;
 
-        Ok(Box::new(BayesClassifier { classifier, file_name }))
+        Ok(Box::new(Self { classifier, file_name }))
+    }
+
+    pub fn from_config(config: Config) -> anyhow::Result<Box<Self>> {
+        let mut file = File::options()
+            .read(true)
+            .write(true)
+            .open(&config.file_name)?;
+
+        let classifier = bayespam::classifier::Classifier::new_from_pre_trained(&mut file)?;
+
+        Ok(Box::new(Self { classifier, file_name: config.file_name }))
     }
 }
 

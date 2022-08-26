@@ -1,9 +1,15 @@
+mod config;
+
 use std::collections::HashSet;
 use std::fs::File;
+use std::path::Path;
 use std::io::{Seek};
 use serde_json::{from_reader, to_writer};
 use serde::{Deserialize, Serialize};
+use config::Config;
 use super::Classifier;
+
+const FILE_NAME: &str = "filter_keywords.json";
 
 #[derive(Serialize,Deserialize)]
 pub struct Keywords {
@@ -14,29 +20,32 @@ pub struct SimpleClassifier {
     keywords: Keywords,
     file_name: String,
 }
+
+#[allow(dead_code)]
 impl SimpleClassifier {
     pub fn new() -> anyhow::Result<Box<dyn Classifier>> {
-        let mut keywords: Keywords = serde_json::from_str(include_str!("def_keywords.json"))?;
-        let file_name = "filter_keywords.json".to_string();
-        let mut file = File::options()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(&file_name)?;
+        let file_name = FILE_NAME.to_string();
 
-        if file.metadata().unwrap().len() > 0 {
-            keywords = from_reader(&file)?;
+        if Path::new(&file_name).is_file() {
+            let file = File::options().read(true).open(&file_name)?;
+            let keywords: Keywords = from_reader(&file)?;
+
+            Ok(Self::from_config(Config { keywords })?)
         } else {
-            to_writer(&mut file, &keywords)?;
+            Ok(Self::from_config(Config::default())?)
         }
+    }
 
-        let classifier = SimpleClassifier {
-            file_name,
-            keywords,
+    pub fn from_config(config: Config) -> anyhow::Result<Box<dyn Classifier>> {
+        let classifier = Self {
+            keywords: config.keywords,
+            file_name: FILE_NAME.to_string(),
         };
         Ok(Box::new(classifier))
     }
+
 }
+
 impl Classifier for SimpleClassifier {
     fn process(&self, msg: &str) -> bool {
         let index = self.keywords.blacklist
