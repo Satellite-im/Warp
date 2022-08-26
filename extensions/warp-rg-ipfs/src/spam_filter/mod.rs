@@ -1,17 +1,17 @@
 pub mod classifiers;
 
 use std::{
+    fs::File,
     fs::OpenOptions,
     io::{ErrorKind, Read, Write},
     path::{Path, PathBuf},
-    fs::{File}
 };
-use warp::{error::Error};
-use warp::{Extension};
+use warp::error::Error;
 use warp::module::Module;
+use warp::Extension;
 
 #[allow(unused_imports)]
-use classifiers::{Classifier, SimpleClassifier, BayesClassifier};
+use classifiers::{BayesClassifier, Classifier, SimpleClassifier};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -25,10 +25,9 @@ impl SpamFilter {
         Ok(SpamFilter::with_classifier(SimpleClassifier::new()?))
     }
 
-    pub fn with_classifier(classifier: Box<dyn Classifier>) -> Self {
-        SpamFilter {
-            classifier
-        }
+    pub fn with_classifier(classifier: SimpleClassifier) -> Self {
+        let classifier = Box::new(classifier);
+        SpamFilter { classifier }
     }
 
     pub fn process(&self, str: &str) -> Result<bool> {
@@ -40,7 +39,8 @@ impl SpamFilter {
     }
 
     pub fn add_not_spam(&mut self, str: &str) -> Result<()> {
-        Ok(self.classifier.add_not_spam(str))
+        self.classifier.add_not_spam(str);
+        Ok(())
     }
 
     pub fn score(&self, str: &str) -> Result<f32> {

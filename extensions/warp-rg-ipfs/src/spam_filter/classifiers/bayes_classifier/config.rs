@@ -6,7 +6,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            file_name: FILE_NAME.to_string()
+            file_name: FILE_NAME.to_string(),
         }
     }
 }

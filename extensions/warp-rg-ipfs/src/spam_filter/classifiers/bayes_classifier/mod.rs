@@ -1,12 +1,11 @@
 mod config;
 
+use super::Classifier;
+use bayespam;
+use config::Config;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
-use bayespam;
-use config::Config;
-use super::Classifier;
-
 
 const FILE_NAME: &str = "filter_model.json";
 
@@ -26,13 +25,16 @@ impl BayesClassifier {
             .open(&file_name)?;
 
         if file.metadata()?.len() == 0 {
-            file.write(include_bytes!("def_model.json"))?;
+            file.write_all(include_bytes!("def_model.json"))?;
             file.rewind()?;
         }
 
         let classifier = bayespam::classifier::Classifier::new_from_pre_trained(&mut file)?;
 
-        Ok(Box::new(Self { classifier, file_name }))
+        Ok(Box::new(Self {
+            classifier,
+            file_name,
+        }))
     }
 
     pub fn from_config(config: Config) -> anyhow::Result<Box<Self>> {
@@ -43,7 +45,10 @@ impl BayesClassifier {
 
         let classifier = bayespam::classifier::Classifier::new_from_pre_trained(&mut file)?;
 
-        Ok(Box::new(Self { classifier, file_name: config.file_name }))
+        Ok(Box::new(Self {
+            classifier,
+            file_name: config.file_name,
+        }))
     }
 }
 

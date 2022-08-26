@@ -1,17 +1,17 @@
 mod config;
 
+use super::Classifier;
+use config::Config;
+use serde::{Deserialize, Serialize};
+use serde_json::{from_reader, to_writer};
 use std::collections::HashSet;
 use std::fs::File;
+use std::io::Seek;
 use std::path::Path;
-use std::io::{Seek};
-use serde_json::{from_reader, to_writer};
-use serde::{Deserialize, Serialize};
-use config::Config;
-use super::Classifier;
 
 const FILE_NAME: &str = "filter_keywords.json";
 
-#[derive(Serialize,Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Keywords {
     blacklist: HashSet<String>,
     whitelist: HashSet<String>,
@@ -23,32 +23,33 @@ pub struct SimpleClassifier {
 
 #[allow(dead_code)]
 impl SimpleClassifier {
-    pub fn new() -> anyhow::Result<Box<dyn Classifier>> {
+    pub fn new() -> anyhow::Result<Self> {
         let file_name = FILE_NAME.to_string();
 
         if Path::new(&file_name).is_file() {
             let file = File::options().read(true).open(&file_name)?;
             let keywords: Keywords = from_reader(&file)?;
 
-            Ok(Self::from_config(Config { keywords })?)
+            Self::from_config(Config { keywords })
         } else {
-            Ok(Self::from_config(Config::default())?)
+            Self::from_config(Config::default())
         }
     }
 
-    pub fn from_config(config: Config) -> anyhow::Result<Box<dyn Classifier>> {
+    pub fn from_config(config: Config) -> anyhow::Result<Self> {
         let classifier = Self {
             keywords: config.keywords,
             file_name: FILE_NAME.to_string(),
         };
-        Ok(Box::new(classifier))
+        Ok(classifier)
     }
-
 }
 
 impl Classifier for SimpleClassifier {
     fn process(&self, msg: &str) -> bool {
-        let index = self.keywords.blacklist
+        let index = self
+            .keywords
+            .blacklist
             .iter()
             .position(|r| msg.to_lowercase().contains(&r.to_lowercase()));
 
