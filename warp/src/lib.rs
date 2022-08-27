@@ -387,4 +387,14 @@ pub mod ffi {
         }
         let _ = FFIError::from_ptr(ptr);
     }
+
+    #[cfg(not(target_arch="wasm32"))]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn ffivec_string(cvec: *mut FFIVec_String) {
+        let raw_list = Box::from_raw(cvec);
+        let list = Vec::<String>::from(raw_list);
+        drop(list)
+    }
+
 }

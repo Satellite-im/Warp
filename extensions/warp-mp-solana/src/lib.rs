@@ -371,44 +371,48 @@ impl<T: IpfsTypes> MultiPass for SolanaAccount<T> {
         Ok(identity.did_key())
     }
 
-    fn get_identity(&self, id: Identifier) -> Result<Identity, Error> {
+    fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
         let helper = self.user_helper()?;
-        let ident = match id.get_inner() {
+        let idents = match id.get_inner() {
             (None, Some(username), false) => {
                 if let Ok(cache) = self.get_cache() {
                     let mut query = QueryBuilder::default();
                     query.r#where("username", &username)?;
                     if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
                     {
-                        //get last
-                        if !list.is_empty() {
-                            let obj = list.last().unwrap();
-                            return obj.decode::<Identity>().map_err(Error::from);
+                        let mut items = vec![];
+                        for object in list { 
+                            if let Ok(ident) = object.decode::<Identity>().map_err(Error::from) {
+                                items.push(ident);
+                            }
                         }
+                        return Ok(items);
                     }
                 }
-                let user = helper.get_user_by_name(&username)?;
-                // If this field is empty or cannot be decoded from base58 we should return an error
-                // Note: We may have to cross check the public key against the account that holds it
-                //       for security purpose
-                if user.extra_1.is_empty() {
-                    return Err(Error::Any(anyhow!(
-                        "Unable to obtain identity by username (Incompatible Account)"
-                    )));
-                }
+                let mut idents = vec![];
+                let users = helper.get_user_by_name(&username)?;
+                for user in users {
+                    // If this field is empty or cannot be decoded from base58 we should return an error
+                    // Note: We may have to cross check the public key against the account that holds it
+                    //       for security purpose
+                    if user.extra_1.is_empty() {
+                        continue;
+                    }
 
-                match bs58::decode(&user.extra_1)
-                    .into_vec()
-                    .map_err(|e| anyhow!(e))
-                {
-                    Ok(pkey) => {
-                        if pkey.is_empty() || pkey.len() < 31 {
-                            return Err(Error::InvalidPublicKeyLength);
+                    match bs58::decode(&user.extra_1)
+                        .into_vec()
+                        .map_err(|e| anyhow!(e))
+                    {
+                        Ok(pkey) => {
+                            if pkey.is_empty() || pkey.len() < 31 {
+                                return Err(Error::InvalidPublicKeyLength);
+                            }
+                            idents.push(user_to_identity(&helper, Some(&pkey))?);
                         }
-                        user_to_identity(&helper, Some(&pkey))?
+                        Err(_) => continue,
                     }
-                    Err(e) => return Err(Error::Any(e)),
                 }
+                idents
             }
             (Some(pkey), None, false) => {
                 if let Ok(cache) = self.get_cache() {
@@ -419,34 +423,36 @@ impl<T: IpfsTypes> MultiPass for SolanaAccount<T> {
                         //get last
                         if !list.is_empty() {
                             let obj = list.last().unwrap();
-                            return obj.decode::<Identity>().map_err(Error::from);
+                            return obj.decode::<Identity>().map_err(Error::from).map(|i| vec![i]);
                         }
                     }
                 }
                 let did: DIDKey = pkey.try_into()?;
 
-                user_to_identity(&helper, Some(&did.public_key_bytes()))?
+                vec![user_to_identity(&helper, Some(&did.public_key_bytes()))?]
             }
-            (None, None, true) => user_to_identity(&helper, None)?,
+            (None, None, true) => vec![user_to_identity(&helper, None)?],
             _ => return Err(Error::InvalidIdentifierCondition),
         };
 
-        if let Ok(mut cache) = self.get_cache_mut() {
-            let mut query = QueryBuilder::default();
-            query.r#where("did_key", &ident.did_key())?;
-            if cache
-                .has_data(DataType::from(Module::Accounts), &query)
-                .is_err()
-            {
-                let object = Sata::default().encode(
-                    warp::sata::libipld::IpldCodec::DagJson,
-                    warp::sata::Kind::Reference,
-                    ident.clone(),
-                )?;
-                cache.add_data(DataType::from(Module::Accounts), &object)?;
+        for ident in &idents {
+            if let Ok(mut cache) = self.get_cache_mut() {
+                let mut query = QueryBuilder::default();
+                query.r#where("did_key", &ident.did_key())?;
+                if cache
+                    .has_data(DataType::from(Module::Accounts), &query)
+                    .is_err()
+                {
+                    let object = Sata::default().encode(
+                        warp::sata::libipld::IpldCodec::DagJson,
+                        warp::sata::Kind::Reference,
+                        ident.clone(),
+                    )?;
+                    cache.add_data(DataType::from(Module::Accounts), &object)?;
+                }
             }
         }
-        Ok(ident)
+        Ok(idents)
     }
 
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
@@ -670,11 +676,11 @@ fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Resul
         } else {
             match (
                 split_data.get(0).ok_or(Error::Other).map(|s| s.to_string()),
-                split_data.get(1).ok_or(Error::Other)?.parse(),
+                split_data.get(1).ok_or(Error::Other).map(|s| s.to_string()),
             ) {
                 (Ok(name), Ok(code)) => {
                     identity.set_username(&name);
-                    identity.set_short_id(code);
+                    identity.set_short_id(code.as_bytes().try_into()?);
                 }
                 _ => identity.set_username(&user.name),
             };

@@ -2,6 +2,7 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
+use warp::error::Error;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -433,7 +434,7 @@ fn get_username(account: Arc<RwLock<Box<dyn MultiPass>>>, id: SenderId) -> anyho
 
     if let Some(pubkey) = id.get_did_key() {
         let account = account.read();
-        let identity = account.get_identity(Identifier::did_key(pubkey))?;
+        let identity = account.get_identity(Identifier::did_key(pubkey)).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
         return Ok(format!("{}#{}", identity.username(), identity.short_id()));
     }
     anyhow::bail!("Invalid SenderId")
