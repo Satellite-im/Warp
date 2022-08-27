@@ -54,13 +54,6 @@ pub struct IpfsIdentity<T: IpfsTypes> {
     identity_store: IdentityStore<T>,
 }
 
-impl<T: IpfsTypes> Drop for IpfsIdentity<T> {
-    fn drop(&mut self) {
-        // We want to gracefully close the ipfs repo to allow for any cleanup
-        async_block_in_place_uncheck(self.ipfs.clone().exit_daemon());
-    }
-}
-
 pub async fn ipfs_identity_persistent(
     config: MpIpfsConfig,
     tesseract: Tesseract,

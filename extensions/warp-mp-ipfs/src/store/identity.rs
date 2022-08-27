@@ -14,7 +14,7 @@ use libipld::{
 };
 use sata::Sata;
 use warp::{
-    crypto::{rand::Rng, DIDKey, Ed25519KeyPair, DID, Fingerprint, KeyMaterial},
+    crypto::{rand::Rng, DIDKey, Ed25519KeyPair, Fingerprint, KeyMaterial, DID},
     error::Error,
     module::Module,
     multipass::identity::{FriendRequest, Identity, SHORT_ID_SIZE},
@@ -71,7 +71,7 @@ impl<T: IpfsTypes> Drop for IdentityStore<T> {
 pub enum LookupBy {
     DidKey(Box<DID>),
     Username(String),
-    ShortId(String)
+    ShortId(String),
 }
 
 impl<T: IpfsTypes> IdentityStore<T> {
@@ -167,10 +167,16 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                         continue;
                                     }
 
-                                    if let Some(index) = store.cache.read().iter().position(|ident| ident.did_key() == identity.did_key()) {
+                                    let index = store
+                                    .cache
+                                    .read()
+                                    .iter()
+                                    .position(|ident| ident.did_key() == identity.did_key());
+
+                                    if let Some(index) = index {
                                         store.cache.write().remove(index);
                                     }
-
+                                    
                                     store.cache.write().push(identity);
                                 }
                             }
@@ -248,8 +254,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
         identity.set_username(&username);
         let fingerprint = public_key.fingerprint();
         let bytes = fingerprint.as_bytes();
-    
-        identity.set_short_id(bytes[bytes.len()-SHORT_ID_SIZE..].try_into().map_err(anyhow::Error::from)?);
+
+        identity.set_short_id(
+            bytes[bytes.len() - SHORT_ID_SIZE..]
+                .try_into()
+                .map_err(anyhow::Error::from)?,
+        );
         identity.set_did_key(public_key.into());
 
         let ipld = to_ipld(identity.clone()).map_err(anyhow::Error::from)?;
@@ -273,7 +283,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
         if let Some(ident) = self.identity.read().clone() {
             match lookup {
                 LookupBy::DidKey(pubkey) if ident.did_key() == *pubkey => return Ok(vec![ident]),
-                LookupBy::Username(username) if ident.username().to_lowercase().contains(&username.to_lowercase()) => return Ok(vec![ident]),
+                LookupBy::Username(username)
+                    if ident
+                        .username()
+                        .to_lowercase()
+                        .contains(&username.to_lowercase()) =>
+                {
+                    return Ok(vec![ident])
+                }
                 LookupBy::Username(username) if username.contains('#') => {
                     let split_data = username.split('#').collect::<Vec<&str>>();
 
@@ -289,7 +306,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
                             split_data.last().map(|s| s.to_lowercase()),
                         ) {
                             (Some(name), Some(code)) => {
-                                if ident.username().to_lowercase().eq(&name) && ident.short_id().to_lowercase().eq(&code) {
+                                if ident.username().to_lowercase().eq(&name)
+                                    && ident.short_id().to_lowercase().eq(&code)
+                                {
                                     vec![ident]
                                 } else {
                                     vec![]
@@ -309,33 +328,58 @@ impl<T: IpfsTypes> IdentityStore<T> {
             //Note: If this returns more than one identity, then either
             //      A) The memory cache never got updated and somehow bypassed the check likely caused from a race condition; or
             //      B) There is literally 2 identities, which should be impossible because of A
-            LookupBy::DidKey(pubkey) => {
-                self.cache().iter().filter(|ident| ident.did_key() == *pubkey.clone()).cloned().collect::<Vec<_>>()
-            },
+            LookupBy::DidKey(pubkey) => self
+                .cache()
+                .iter()
+                .filter(|ident| ident.did_key() == *pubkey.clone())
+                .cloned()
+                .collect::<Vec<_>>(),
             LookupBy::Username(username) if username.contains('#') => {
                 let split_data = username.split('#').collect::<Vec<&str>>();
 
                 if split_data.len() != 2 {
-                    self.cache().iter().filter(|ident| ident.username().to_lowercase().contains(&username.to_lowercase())).cloned().collect::<Vec<_>>()
+                    self.cache()
+                        .iter()
+                        .filter(|ident| {
+                            ident
+                                .username()
+                                .to_lowercase()
+                                .contains(&username.to_lowercase())
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>()
                 } else {
                     match (
                         split_data.first().map(|s| s.to_lowercase()),
                         split_data.last().map(|s| s.to_lowercase()),
                     ) {
-                        (Some(name), Some(code)) => {
-                            self.cache().iter().filter(|ident| ident.username().to_lowercase().eq(&name) && ident.short_id().to_lowercase().eq(&code)).cloned().collect::<Vec<_>>()
-                        }
+                        (Some(name), Some(code)) => self
+                            .cache()
+                            .iter()
+                            .filter(|ident| {
+                                ident.username().to_lowercase().eq(&name)
+                                    && ident.short_id().to_lowercase().eq(&code)
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>(),
                         _ => vec![],
                     }
                 }
-            },
+            }
             LookupBy::Username(username) => {
                 let username = username.to_lowercase();
-                self.cache().iter().filter(|ident| ident.username().to_lowercase().contains(&username)).cloned().collect::<Vec<_>>()
-            },
-            LookupBy::ShortId(id) => {
-                self.cache().iter().filter(|ident| ident.short_id().eq(id)).cloned().collect::<Vec<_>>()
+                self.cache()
+                    .iter()
+                    .filter(|ident| ident.username().to_lowercase().contains(&username))
+                    .cloned()
+                    .collect::<Vec<_>>()
             }
+            LookupBy::ShortId(id) => self
+                .cache()
+                .iter()
+                .filter(|ident| ident.short_id().eq(id))
+                .cloned()
+                .collect::<Vec<_>>(),
         };
         Ok(idents)
     }
