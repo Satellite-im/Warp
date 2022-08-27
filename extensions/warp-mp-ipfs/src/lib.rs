@@ -253,13 +253,16 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                     query.r#where("did_key", &pk)?;
                     if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
                     {
-                        let mut items = vec![];
-                        for object in list { 
-                            if let Ok(ident) = object.decode::<Identity>().map_err(Error::from) {
-                                items.push(ident);
+                        if !list.is_empty() {
+                            let mut items = vec![];
+                            for object in list {
+                                if let Ok(ident) = object.decode::<Identity>().map_err(Error::from)
+                                {
+                                    items.push(ident);
+                                }
                             }
+                            return Ok(items);
                         }
-                        return Ok(items);
                     }
                 }
                 self.identity_store.lookup(LookupBy::DidKey(Box::new(pk)))
@@ -270,19 +273,23 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                     query.r#where("username", &username)?;
                     if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
                     {
-                        let mut items = vec![];
-                        for object in list { 
-                            if let Ok(ident) = object.decode::<Identity>().map_err(Error::from) {
-                                items.push(ident);
+                        if !list.is_empty() {
+                            let mut items = vec![];
+                            for object in list {
+                                if let Ok(ident) = object.decode::<Identity>().map_err(Error::from)
+                                {
+                                    items.push(ident);
+                                }
                             }
+                            return Ok(items);
                         }
-                        return Ok(items);
                     }
                 }
                 self.identity_store.lookup(LookupBy::Username(username))
             }
             (None, None, true) => {
-                return async_block_in_place_uncheck(self.identity_store.own_identity()).map(|i| vec![i.clone()])
+                return async_block_in_place_uncheck(self.identity_store.own_identity())
+                    .map(|i| vec![i])
             }
             _ => Err(Error::InvalidIdentifierCondition),
         }?;
@@ -548,7 +555,7 @@ pub mod ffi {
 
         let config = match config.is_null() {
             true => MpIpfsConfig::testing(),
-            false =>  (&*config).clone()
+            false => (&*config).clone(),
         };
 
         let cache = match pocketdimension.is_null() {
@@ -586,8 +593,10 @@ pub mod ffi {
         };
 
         let config = match config.is_null() {
-            true => return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is invalid"))),
-            false => (&*config).clone()
+            true => {
+                return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is invalid")))
+            }
+            false => (&*config).clone(),
         };
 
         let cache = match pocketdimension.is_null() {
