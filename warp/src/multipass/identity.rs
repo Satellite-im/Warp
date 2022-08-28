@@ -2,11 +2,13 @@ use chrono::{DateTime, Utc};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-use crate::crypto::{DID};
+use crate::crypto::DID;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use warp_derive::FFIFree;
+
+pub const SHORT_ID_SIZE: usize = 8;
 
 #[derive(
     Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
@@ -102,8 +104,8 @@ pub struct Identity {
     /// Username of the identity
     username: String,
 
-    /// Short 4-digit numeric id to be used along side `Identity::username` (eg `Username#0000`)
-    short_id: u16,
+    /// Short id derived from the DID to be used along side `Identity::username` (eg `Username#0000`)
+    short_id: [u8; SHORT_ID_SIZE],
 
     /// Public key for the identity
     did_key: DID,
@@ -125,6 +127,10 @@ pub struct Identity {
 
     /// TBD
     linked_accounts: HashMap<String, String>,
+
+    /// Signature of the identity
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signature: Option<Vec<u8>>,
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -135,7 +141,7 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_short_id(&mut self, id: u16) {
+    pub fn set_short_id(&mut self, id: [u8; SHORT_ID_SIZE]) {
         self.short_id = id
     }
 
@@ -153,6 +159,12 @@ impl Identity {
     pub fn set_status_message(&mut self, message: Option<String>) {
         self.status_message = message
     }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_signature(&mut self, signature: Option<Vec<u8>>) {
+        self.signature = signature;
+    }
+
     // pub fn set_roles(&mut self) {}
     // pub fn set_available_badges(&mut self) {}
     // pub fn set_active_badge(&mut self) {}
@@ -167,8 +179,8 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn short_id(&self) -> u16 {
-        self.short_id
+    pub fn short_id(&self) -> String {
+        String::from_utf8_lossy(&self.short_id).to_uppercase()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
@@ -189,6 +201,11 @@ impl Identity {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn active_badge(&self) -> Badge {
         self.active_badge.clone()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn signature(&self) -> Option<Vec<u8>> {
+        self.signature.clone()
     }
 
     // #[cfg_attr(target_arch = "wasm32", wasm_bindgen(skip))]
@@ -508,7 +525,7 @@ impl IdentityUpdate {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use crate::crypto::{DID};
+    use crate::crypto::DID;
     use crate::multipass::identity::{
         Badge, FFIVec_Badge, FFIVec_Role, FriendRequest, FriendRequestStatus, Graphics, Identifier,
         Identity, IdentityUpdate, Role,
@@ -624,21 +641,21 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_short_id(identity: *const Identity) -> u16 {
+    pub unsafe extern "C" fn multipass_identity_short_id(identity: *const Identity) -> *mut c_char {
         if identity.is_null() {
-            return 0;
+            return std::ptr::null_mut();
         }
 
         let identity = &*identity;
-
-        identity.short_id()
+        match CString::new(identity.short_id()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_did_key(
-        identity: *const Identity,
-    ) -> *mut DID {
+    pub unsafe extern "C" fn multipass_identity_did_key(identity: *const Identity) -> *mut DID {
         if identity.is_null() {
             return std::ptr::null_mut();
         }
@@ -792,9 +809,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_identifier_did_key(
-        key: *const DID,
-    ) -> *mut Identifier {
+    pub unsafe extern "C" fn multipass_identifier_did_key(key: *const DID) -> *mut Identifier {
         if key.is_null() {
             return std::ptr::null_mut();
         }

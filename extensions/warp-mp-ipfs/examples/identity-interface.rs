@@ -2,6 +2,7 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
+use warp::error::Error;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -109,7 +110,7 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for friend in friends.iter() {
                                 let username = match account.get_identity(Identifier::did_key(friend.clone())) {
-                                    Ok(ident) => ident.username(),
+                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(friend)).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
@@ -131,11 +132,11 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for item in block_list.iter() {
                                 let username = match account.get_identity(Identifier::did_key(item.clone())) {
-                                    Ok(ident) => ident.username(),
+                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(item)).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
-                                    username,
+                                    username.to_string(),
                                     item.to_string(),
                                 ]);
                             }
@@ -311,11 +312,11 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for request in list.iter() {
                                 let username = match account.get_identity(Identifier::did_key(request.from())) {
-                                    Ok(ident) => ident.username(),
-                                    Err(_) => request.from().to_string()
+                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(&request.from())).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
+                                    Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
-                                    username,
+                                    username.to_string(),
                                     request.status().to_string(),
                                     request.date().to_string(),
                                 ]);
@@ -334,11 +335,11 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for request in list.iter() {
                                 let username = match account.get_identity(Identifier::did_key(request.to())) {
-                                    Ok(ident) => ident.username(),
-                                    Err(_) => request.to().to_string()
+                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(&request.to())).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
+                                    Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
-                                    username,
+                                    username.to_string(),
                                     request.status().to_string(),
                                     request.date().to_string()
                                 ]);
@@ -376,7 +377,7 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "Username updated")?;
                         },
                         Some("lookup") => {
-                            let identity = match cmd_line.next() {
+                            let idents = match cmd_line.next() {
                                 Some("username") => {
                                     let username = match cmd_line.next() {
                                         Some(username) => username,
@@ -431,11 +432,13 @@ async fn main() -> anyhow::Result<()> {
                             };
                             let mut table = Table::new();
                             table.set_header(vec!["Username", "Public Key", "Status Message"]);
-                            table.add_row(vec![
-                                identity.username(),
-                                identity.did_key().to_string(),
-                                identity.status_message().unwrap_or_default()
-                            ]);
+                            for identity in idents {
+                                table.add_row(vec![
+                                    identity.username(),
+                                    identity.did_key().to_string(),
+                                    identity.status_message().unwrap_or_default()
+                                ]);
+                            }
                             writeln!(stdout, "{}", table)?;
                         }
                         _ => continue
@@ -453,7 +456,7 @@ async fn main() -> anyhow::Result<()> {
                         let mut inner_list = list.clone();
                         inner_list.retain(|item| !incoming_list.contains(item));
                         for item in &inner_list {
-                            let username = match account.get_identity(Identifier::did_key(item.from())) {
+                            let username = match account.get_identity(Identifier::did_key(item.from())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
                                 Ok(ident) => ident.username(),
                                 Err(_) => item.from().to_string()
                             };
@@ -467,8 +470,8 @@ async fn main() -> anyhow::Result<()> {
                         let mut inner_list = list.clone();
                         inner_list.retain(|item| !friends_list.contains(item));
                         for item in &inner_list {
-                            let username = match account.get_identity(Identifier::did_key(item.clone())) {
-                                Ok(ident) => ident.username(),
+                            let username = match account.get_identity(Identifier::did_key(item.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
+                                Ok(idents) => idents.username(),
                                 Err(_) => item.to_string()
                             };
                             writeln!(stdout, "You are now friends with {}", username)?;
