@@ -148,11 +148,22 @@ impl InternalProfile {
     pub fn from_file<P: AsRef<Path>>(path: P, key: &DID) -> anyhow::Result<Self> {
         let mut profile = InternalProfile::default();
         let path = path.as_ref();
-        profile.friends = serde_json::from_reader(&std::fs::File::open(path.join("friends"))?)?;
-        profile.block_list =
-            serde_json::from_reader(&std::fs::File::open(path.join("block_list"))?)?;
-        profile.requests =
-            serde_json::from_reader(&std::fs::File::open(path.join("request_list"))?)?;
+        if let Ok(fs) = std::fs::File::open(path.join("friends")) {
+            if let Ok(data) = serde_json::from_reader(fs) {
+                profile.friends = data;
+            }
+        }
+        if let Ok(fs) = std::fs::File::open(path.join("block_list")) {
+            if let Ok(data) = serde_json::from_reader(fs) {
+                profile.block_list = data;
+            }
+        }
+        if let Ok(fs) = std::fs::File::open(path.join("request_list")) {
+            if let Ok(data) = serde_json::from_reader(fs) {
+                profile.requests = data;
+            }
+        }
+
         Ok(profile)
     }
 
@@ -507,7 +518,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                             //TODO: Log
                                             continue
                                         }
-                                        
+
                                         if let Some(path) = store.path.as_ref() {
                                             if let Err(_e) = store.profile.write().request_to_file(path) {
                                                 //TODO: Log,
