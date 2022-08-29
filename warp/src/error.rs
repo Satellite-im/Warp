@@ -188,6 +188,10 @@ pub enum Error {
     InvalidDataType,
 
     //Misc
+    #[error("Context \"{pointer}\" cannot be null")]
+    NullPointerContext { pointer: String },
+    #[error("{0}")]
+    OtherWithContext(String),
     #[error("Async runtime is unavailable")]
     AsyncRuntimeUnavailable,
     #[error("Sender Channel Unavailable")]
@@ -270,6 +274,8 @@ impl Error {
             Error::RegexError(_) => String::from("RegexError"),
             Error::UuidError(_) => String::from("UuidError"),
             Error::Any(_) => String::from("Any"),
+            Error::NullPointerContext { .. } => String::from("NullPointerContext"),
+            Error::OtherWithContext(_) => String::from("OtherWithContext"),
             Error::IoError(_) => String::from("IoError"),
             Error::Unimplemented => String::from("Unimplemented"),
             _ => String::from("Other"),

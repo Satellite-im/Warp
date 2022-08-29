@@ -7,6 +7,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use uuid::Uuid;
 use warp::crypto::DID;
+use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
@@ -138,7 +139,15 @@ async fn main() -> anyhow::Result<()> {
                     let msg = msg.last().unwrap();
                     let username = get_username(new_account.clone(), msg.sender())?;
                     //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
-                    writeln!(stdout, "[{}] @> {}", username, msg.value().join("\n"))?;
+                    match msg.metadata().get("is_spam") {
+                        Some(_) => {
+                            writeln!(stdout, "[{}] @> [SPAM!] {}", username, msg.value().join("\n"))?;
+                        }
+                        None => {
+                            writeln!(stdout, "[{}] @> {}", username, msg.value().join("\n"))?;
+                        }
+                    }
+
                 }
             }
             line = rl.readline().fuse() => match line {
@@ -422,7 +431,9 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn get_username(account: Arc<RwLock<Box<dyn MultiPass>>>, did: DID) -> anyhow::Result<String> {
-        let account = account.read();
-        let identity = account.get_identity(Identifier::did_key(did))?;
-        Ok(format!("{}#{}", identity.username(), identity.short_id()))
+    let account = account.read();
+    let identity = account
+        .get_identity(Identifier::did_key(did))
+        .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
+    Ok(format!("{}#{}", identity.username(), identity.short_id()))
 }

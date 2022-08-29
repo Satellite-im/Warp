@@ -104,6 +104,15 @@ impl Drop for Tesseract {
     }
 }
 
+impl PartialEq for Tesseract {
+    fn eq(&self, other: &Self) -> bool {
+        self.autosave.load(Ordering::SeqCst) == other.autosave.load(Ordering::SeqCst) &&
+        self.unlock.load(Ordering::SeqCst) == other.unlock.load(Ordering::SeqCst) &&
+        *self.internal.read() == *other.internal.read() &&
+        *self.enc_pass.read() == *other.enc_pass.read()
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 impl Tesseract {
     /// Loads the keystore from a file
@@ -713,4 +722,19 @@ mod test {
 
         Ok(())
     }
+
+    #[test]
+    pub fn tesseract_eq() -> anyhow::Result<()> {
+        let mut tesseract = Tesseract::default();
+        let key = generate(32);
+        tesseract.unlock(&key)?;
+        assert!(tesseract.is_unlock());
+        tesseract.set("API", "MYKEY")?;
+        let tess_dup = tesseract.clone();
+
+        assert_eq!(tesseract, tess_dup);
+
+        Ok(())
+    }
+
 }

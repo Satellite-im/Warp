@@ -2,11 +2,16 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
+use warp::error::Error;
+use warp::pocket_dimension::PocketDimension;
+use warp_pd_flatfile::FlatfileStorage;
+use warp_pd_stretto::StrettoClient;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use warp::multipass::identity::{Identifier, IdentityUpdate};
 use warp::multipass::MultiPass;
+use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::config::{IpfsSetting, MpIpfsConfig, StoreSetting};
 use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
@@ -18,7 +23,16 @@ struct Opt {
     path: Option<PathBuf>,
 }
 
-async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
+fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
+    if let Some(root) = root {
+        let storage = FlatfileStorage::new_with_index_file(root.join("cache"), PathBuf::from("cache-index"))?;
+        return Ok(Arc::new(RwLock::new(Box::new(storage))));
+    }
+    let storage = StrettoClient::new()?;
+    Ok(Arc::new(RwLock::new(Box::new(storage))))
+}
+
+async fn account(username: Option<&str>, cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>) -> anyhow::Result<Box<dyn MultiPass>> {
     let mut tesseract = Tesseract::default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
@@ -37,7 +51,7 @@ async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
         },
         ..Default::default()
     };
-    let mut account = ipfs_identity_temporary(Some(config), tesseract, None).await?;
+    let mut account = ipfs_identity_temporary(Some(config), tesseract, cache).await?;
     account.create_identity(username, None)?;
     Ok(Box::new(account))
 }
@@ -45,6 +59,7 @@ async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
 async fn account_persistent<P: AsRef<Path>>(
     username: Option<&str>,
     path: P,
+    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let path = path.as_ref();
     let mut tesseract = match Tesseract::from_file(path.join("tdatastore")) {
@@ -61,7 +76,7 @@ async fn account_persistent<P: AsRef<Path>>(
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
     let config = MpIpfsConfig::production(&path);
-    let mut account = ipfs_identity_persistent(config, tesseract, None).await?;
+    let mut account = ipfs_identity_persistent(config, tesseract, cache).await?;
     if account.get_own_identity().is_err() {
         account.create_identity(username, None)?;
     }
@@ -71,9 +86,12 @@ async fn account_persistent<P: AsRef<Path>>(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
+
+    let cache = cache_setup(opt.path.clone()).ok();
+
     let mut account = match opt.path.as_ref() {
-        Some(path) => account_persistent(None, path).await?,
-        None => account(None).await?,
+        Some(path) => account_persistent(None, path, cache).await?,
+        None => account(None, cache).await?,
     };
 
     println!("Obtaining identity....");
@@ -109,7 +127,7 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for friend in friends.iter() {
                                 let username = match account.get_identity(Identifier::did_key(friend.clone())) {
-                                    Ok(ident) => ident.username(),
+                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(friend)).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
@@ -131,11 +149,11 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for item in block_list.iter() {
                                 let username = match account.get_identity(Identifier::did_key(item.clone())) {
-                                    Ok(ident) => ident.username(),
+                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(item)).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
-                                    username,
+                                    username.to_string(),
                                     item.to_string(),
                                 ]);
                             }
@@ -311,11 +329,11 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for request in list.iter() {
                                 let username = match account.get_identity(Identifier::did_key(request.from())) {
-                                    Ok(ident) => ident.username(),
-                                    Err(_) => request.from().to_string()
+                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(&request.from())).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
+                                    Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
-                                    username,
+                                    username.to_string(),
                                     request.status().to_string(),
                                     request.date().to_string(),
                                 ]);
@@ -334,11 +352,11 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for request in list.iter() {
                                 let username = match account.get_identity(Identifier::did_key(request.to())) {
-                                    Ok(ident) => ident.username(),
-                                    Err(_) => request.to().to_string()
+                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(&request.to())).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
+                                    Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
-                                    username,
+                                    username.to_string(),
                                     request.status().to_string(),
                                     request.date().to_string()
                                 ]);
@@ -376,7 +394,7 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "Username updated")?;
                         },
                         Some("lookup") => {
-                            let identity = match cmd_line.next() {
+                            let idents = match cmd_line.next() {
                                 Some("username") => {
                                     let username = match cmd_line.next() {
                                         Some(username) => username,
@@ -431,11 +449,13 @@ async fn main() -> anyhow::Result<()> {
                             };
                             let mut table = Table::new();
                             table.set_header(vec!["Username", "Public Key", "Status Message"]);
-                            table.add_row(vec![
-                                identity.username(),
-                                identity.did_key().to_string(),
-                                identity.status_message().unwrap_or_default()
-                            ]);
+                            for identity in idents {
+                                table.add_row(vec![
+                                    identity.username(),
+                                    identity.did_key().to_string(),
+                                    identity.status_message().unwrap_or_default()
+                                ]);
+                            }
                             writeln!(stdout, "{}", table)?;
                         }
                         _ => continue
@@ -453,7 +473,7 @@ async fn main() -> anyhow::Result<()> {
                         let mut inner_list = list.clone();
                         inner_list.retain(|item| !incoming_list.contains(item));
                         for item in &inner_list {
-                            let username = match account.get_identity(Identifier::did_key(item.from())) {
+                            let username = match account.get_identity(Identifier::did_key(item.from())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
                                 Ok(ident) => ident.username(),
                                 Err(_) => item.from().to_string()
                             };
@@ -467,8 +487,8 @@ async fn main() -> anyhow::Result<()> {
                         let mut inner_list = list.clone();
                         inner_list.retain(|item| !friends_list.contains(item));
                         for item in &inner_list {
-                            let username = match account.get_identity(Identifier::did_key(item.clone())) {
-                                Ok(ident) => ident.username(),
+                            let username = match account.get_identity(Identifier::did_key(item.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
+                                Ok(idents) => idents.username(),
                                 Err(_) => item.to_string()
                             };
                             writeln!(stdout, "You are now friends with {}", username)?;

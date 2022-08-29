@@ -338,7 +338,7 @@ async fn main() -> AnyResult<()> {
                 let ident = match pubkey {
                     Some(puk) => {
                         let did = DID::try_from(puk)?;
-                        account.get_identity(Identifier::from(did))
+                        account.get_identity(Identifier::from(did)).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))
                     }
                     None => account.get_own_identity(),
                 };
@@ -362,11 +362,13 @@ async fn main() -> AnyResult<()> {
                 let account = account.read();
 
                 match account.get_identity(Identifier::from(username)) {
-                    Ok(ident) => {
-                        println!("Account Found\n");
-                        println!("Username: {}#{}", ident.username(), ident.short_id());
-                        println!("Public Key: {}", ident.did_key());
-                        println!();
+                    Ok(idents) => {
+                        for ident in idents {
+                            println!("Account Found\n");
+                            println!("Username: {}#{}", ident.username(), ident.short_id());
+                            println!("Public Key: {}", ident.did_key());
+                            println!();
+                        }
                         tesseract.to_file(warp_directory.join("datastore"))?;
                     }
                     Err(e) => {
@@ -382,8 +384,8 @@ async fn main() -> AnyResult<()> {
                 let mut table = Table::new();
                 table.set_header(vec!["From", "To", "Status"]);
                 for request in account.list_all_request()? {
-                    let from_ident = account.get_identity(Identifier::from(request.from()))?;
-                    let to_ident = account.get_identity(Identifier::from(request.to()))?;
+                    let from_ident = account.get_identity(Identifier::from(request.from())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
+                    let to_ident = account.get_identity(Identifier::from(request.to())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
                     table.add_row(vec![
                         &format!("{}#{}", &from_ident.username(), &from_ident.short_id()),
                         &format!("{}#{}", &to_ident.username(), &to_ident.short_id()),
@@ -398,7 +400,7 @@ async fn main() -> AnyResult<()> {
                 let friends = account
                     .list_friends()?
                     .iter()
-                    .filter_map(|pk| account.get_identity(Identifier::from(pk.clone())).ok())
+                    .filter_map(|pk| account.get_identity(Identifier::from(pk.clone())).ok().and_then(|list| list.get(0).cloned()))
                     .collect::<Vec<_>>();
                 let mut table = Table::new();
                 table.set_header(vec!["Username", "Address"]);
@@ -417,7 +419,7 @@ async fn main() -> AnyResult<()> {
                 let mut table = Table::new();
                 table.set_header(vec!["From", "Address", "Status"]);
                 for request in account.list_incoming_request()? {
-                    let ident = account.get_identity(Identifier::from(request.from()))?;
+                    let ident = account.get_identity(Identifier::from(request.from())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
                     table.add_row(vec![
                         &format!("{}#{}", &ident.username(), &ident.short_id()),
                         &ident.did_key().to_string(),
@@ -433,7 +435,7 @@ async fn main() -> AnyResult<()> {
                 let mut table = Table::new();
                 table.set_header(vec!["To", "Address", "Status"]);
                 for request in account.list_outgoing_request()? {
-                    let ident = account.get_identity(Identifier::from(request.to()))?;
+                    let ident = account.get_identity(Identifier::from(request.to())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
                     table.add_row(vec![
                         &format!("{}#{}", &ident.username(), &ident.short_id()),
                         &ident.did_key().to_string(),
@@ -446,7 +448,7 @@ async fn main() -> AnyResult<()> {
                 let account = manager.get_account()?;
                 let did = DID::try_from(pubkey)?;
                 account.write().send_request(&did)?;
-                let ident = account.read().get_identity(Identifier::from(did))?;
+                let ident = account.read().get_identity(Identifier::from(did)).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
                 println!(
                     "Sent {}#{} A Friend Request",
                     &ident.username(),
@@ -457,7 +459,7 @@ async fn main() -> AnyResult<()> {
                 let account = manager.get_account()?;
                 let did = DID::try_from(pubkey)?;
                 account.write().accept_request(&did)?;
-                let friend = account.read().get_identity(Identifier::from(did))?;
+                let friend = account.read().get_identity(Identifier::from(did)).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
                 println!(
                     "Accepted {}#{} Friend Request",
                     &friend.username(),
@@ -468,7 +470,7 @@ async fn main() -> AnyResult<()> {
                 let account = manager.get_account()?;
                 let did = DID::try_from(pubkey)?;
                 account.write().deny_request(&did)?;
-                let friend = account.read().get_identity(Identifier::from(did))?;
+                let friend = account.read().get_identity(Identifier::from(did)).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
                 println!(
                     "Denied {}#{} Friend Request",
                     &friend.username(),
@@ -479,7 +481,7 @@ async fn main() -> AnyResult<()> {
                 let account = manager.get_account()?;
                 let did = DID::try_from(pubkey)?;
                 account.write().remove_friend(&did)?;
-                let friend = account.read().get_identity(Identifier::from(did))?;
+                let friend = account.read().get_identity(Identifier::from(did)).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
                 println!(
                     "Removed {}#{} from friend list",
                     &friend.username(),

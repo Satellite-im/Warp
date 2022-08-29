@@ -2,6 +2,7 @@
 
 pub mod config;
 mod store;
+mod spam_filter;
 
 use config::RgIpfsConfig;
 use futures::pin_mut;
@@ -36,6 +37,7 @@ use warp::sync::{RwLockReadGuard, RwLockWriteGuard};
 use warp::tesseract::Tesseract;
 use warp::Extension;
 use warp::SingleHandle;
+use crate::spam_filter::SpamFilter;
 
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -112,7 +114,8 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             config.path.map(|p| p.join("messages")),
             account.clone(),
             config.store_setting.discovery,
-            config.store_setting.broadcast_interval
+            config.store_setting.broadcast_interval,
+            config.store_setting.check_spam,
         )
         .await?;
 

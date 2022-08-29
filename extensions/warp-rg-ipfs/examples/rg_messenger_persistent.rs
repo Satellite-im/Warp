@@ -9,6 +9,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use uuid::Uuid;
 use warp::crypto::DID;
+use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
@@ -427,6 +428,8 @@ async fn main() -> anyhow::Result<()> {
 
 fn get_username(account: Arc<RwLock<Box<dyn MultiPass>>>, did: DID) -> anyhow::Result<String> {
     let account = account.read();
-    let identity = account.get_identity(Identifier::did_key(did))?;
+    let identity = account
+        .get_identity(Identifier::did_key(did))
+        .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
     Ok(format!("{}#{}", identity.username(), identity.short_id()))
 }

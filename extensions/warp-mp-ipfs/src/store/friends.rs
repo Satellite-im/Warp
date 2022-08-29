@@ -148,11 +148,22 @@ impl InternalProfile {
     pub fn from_file<P: AsRef<Path>>(path: P, key: &DID) -> anyhow::Result<Self> {
         let mut profile = InternalProfile::default();
         let path = path.as_ref();
-        profile.friends = serde_json::from_reader(&std::fs::File::open(path.join("friends"))?)?;
-        profile.block_list =
-            serde_json::from_reader(&std::fs::File::open(path.join("block_list"))?)?;
-        profile.requests =
-            serde_json::from_reader(&std::fs::File::open(path.join("request_list"))?)?;
+        if let Ok(fs) = std::fs::File::open(path.join("friends")) {
+            if let Ok(data) = serde_json::from_reader(fs) {
+                profile.friends = data;
+            }
+        }
+        if let Ok(fs) = std::fs::File::open(path.join("block_list")) {
+            if let Ok(data) = serde_json::from_reader(fs) {
+                profile.block_list = data;
+            }
+        }
+        if let Ok(fs) = std::fs::File::open(path.join("request_list")) {
+            if let Ok(data) = serde_json::from_reader(fs) {
+                profile.requests = data;
+            }
+        }
+
         Ok(profile)
     }
 
@@ -338,7 +349,7 @@ impl<T: IpfsTypes> Drop for FriendsStore<T> {
             }
             counter
         };
-        
+
         if counter == 0 {
             self.end_event.store(true, Ordering::SeqCst);
             if let Some(path) = self.path.as_ref() {
@@ -506,6 +517,13 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                         if let Err(_e) = store.add_friend(&data.from()).await {
                                             //TODO: Log
                                             continue
+                                        }
+
+                                        if let Some(path) = store.path.as_ref() {
+                                            if let Err(_e) = store.profile.write().request_to_file(path) {
+                                                //TODO: Log,
+                                                continue
+                                            }
                                         }
                                     }
                                     FriendRequestStatus::Pending => {
@@ -777,15 +795,17 @@ impl<T: IpfsTypes> FriendsStore<T> {
             })
             .ok_or(Error::CannotFindFriendRequest)?;
 
+        let mut request = FriendRequest::default();
+        request.set_from(local_public_key);
+        request.set_to(pubkey.clone());
+        request.set_status(FriendRequestStatus::RequestRemoved);
+
+        let signature = sign_serde(&self.tesseract, &request)?;
+        request.set_signature(signature);
+
         self.profile.write().requests_mut().remove(index);
 
-        if let Some(path) = self.path.as_ref() {
-            if let Err(_e) = self.profile.write().request_to_file(path) {
-                //TODO: Log,
-            }
-        }
-
-        Ok(())
+        self.broadcast_request(&request, false).await
     }
 
     pub fn has_request_from(&self, pubkey: &DID) -> bool {
@@ -824,7 +844,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
             }
         }
         // Since we want to broadcast the remove request, banning the peer after would not allow that to happen
-        // Although this may get uncomment in the future to block connections regardless if its sent or not, however
+        // Although this may get uncomment in the future to block connections regardless if its sent or not, or
+        // if we decide to send the request through a relay to broadcast it to the peer, however
         // the moment this extension is reloaded the block list are considered as a "banned peer" in libp2p
 
         // let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
@@ -872,7 +893,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
         Ok(())
     }
 
-    pub async fn remove_friend(&mut self, pubkey: &DID, broadcast: bool, save: bool) -> Result<(), Error> {
+    pub async fn remove_friend(
+        &mut self,
+        pubkey: &DID,
+        broadcast: bool,
+        save: bool,
+    ) -> Result<(), Error> {
         self.is_friend(pubkey).await?;
 
         self.profile.write().remove_friend(pubkey)?;
@@ -949,11 +975,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let mut data = Sata::default();
         data.add_recipient(&request.to().try_into()?)
             .map_err(anyhow::Error::from)?;
-        let kp = did_keypair(&self.tesseract)?;
+        let kp = &*self.did_key;
         let payload = data
             .encrypt(
                 IpldCodec::DagJson,
-                &kp.try_into()?,
+                kp.as_ref(),
                 Kind::Static,
                 request.clone(),
             )
@@ -993,7 +1019,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 Ok(bytes) => bytes,
                 Err(_e) => {
                     //TODO: Log
-
                     return;
                 }
             };
