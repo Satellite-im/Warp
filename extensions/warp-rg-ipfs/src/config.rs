@@ -79,6 +79,7 @@ pub struct StoreSetting {
     pub broadcast_interval: u64,
     pub broadcast_with_connection: bool,
     pub discovery: bool,
+    pub check_spam: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,6 +130,7 @@ impl Default for RgIpfsConfig {
                 broadcast_interval: 100,
                 discovery: true,
                 broadcast_with_connection: false,
+                check_spam: true,
             },
         }
     }
