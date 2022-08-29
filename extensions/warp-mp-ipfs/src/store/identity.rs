@@ -110,6 +110,13 @@ impl<T: IpfsTypes> IdentityStore<T> {
             end_event,
             tesseract,
         };
+        if let Some(path) = store.path.as_ref() {
+            if let Ok(bytes) = tokio::fs::read(path.join(".id_cache")).await {
+                if let Ok(cache) = serde_json::from_slice(&bytes) {
+                    *store.cache.write() = cache;
+                }
+            }
+        }
 
         if let Ok(ident) = store.own_identity().await {
             *store.identity.write() = Some(ident);
@@ -176,8 +183,16 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                     if let Some(index) = index {
                                         store.cache.write().remove(index);
                                     }
-                                    
+
                                     store.cache.write().push(identity);
+                                    if let Some(path) = store.path.as_ref() {
+                                        if let Ok(bytes) = serde_json::to_vec(&store.cache) {
+                                            if let Err(_e) = tokio::fs::write(path.join(".id_cache"), bytes).await {
+                                                //TODO: Log
+                                            }
+                                        }
+
+                                    }
                                 }
                             }
                         }
