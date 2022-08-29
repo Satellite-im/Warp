@@ -451,7 +451,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
             {
                 let cid: Cid = cid_str.parse().map_err(anyhow::Error::from)?;
-                // Note: This is clonded to prevent a deadlock when writing to `ident_cid`
+                // Note: This is cloned to prevent a deadlock when writing to `ident_cid`
                 let ident = self.ident_cid.read().clone();
                 match ident {
                     Some(ident_cid) => {
@@ -484,6 +484,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     pub fn end_event(&mut self) {
         self.end_event.store(true, Ordering::SeqCst);
+    }
+
+    pub fn clear_internal_cache(&mut self) {
+        self.cache.write().clear();
     }
 
     pub fn set_broadcast_with_connection(&mut self, val: bool) {

@@ -795,15 +795,17 @@ impl<T: IpfsTypes> FriendsStore<T> {
             })
             .ok_or(Error::CannotFindFriendRequest)?;
 
+        let mut request = FriendRequest::default();
+        request.set_from(local_public_key);
+        request.set_to(pubkey.clone());
+        request.set_status(FriendRequestStatus::RequestRemoved);
+
+        let signature = sign_serde(&self.tesseract, &request)?;
+        request.set_signature(signature);
+
         self.profile.write().requests_mut().remove(index);
 
-        if let Some(path) = self.path.as_ref() {
-            if let Err(_e) = self.profile.write().request_to_file(path) {
-                //TODO: Log,
-            }
-        }
-
-        Ok(())
+        self.broadcast_request(&request, false).await
     }
 
     pub fn has_request_from(&self, pubkey: &DID) -> bool {
