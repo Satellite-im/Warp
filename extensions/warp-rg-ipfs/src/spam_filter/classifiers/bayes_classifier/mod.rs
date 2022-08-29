@@ -15,7 +15,7 @@ pub struct BayesClassifier {
 }
 #[allow(dead_code)]
 impl BayesClassifier {
-    pub fn new() -> anyhow::Result<Box<Self>> {
+    pub fn new() -> anyhow::Result<Self> {
         let file_name = FILE_NAME.to_string();
 
         let mut file = File::options()
@@ -31,13 +31,13 @@ impl BayesClassifier {
 
         let classifier = bayespam::classifier::Classifier::new_from_pre_trained(&mut file)?;
 
-        Ok(Box::new(Self {
+        Ok(Self {
             classifier,
             file_name,
-        }))
+        })
     }
 
-    pub fn from_config(config: Config) -> anyhow::Result<Box<Self>> {
+    pub fn from_config(config: Config) -> anyhow::Result<Self> {
         let mut file = File::options()
             .read(true)
             .write(true)
@@ -45,10 +45,10 @@ impl BayesClassifier {
 
         let classifier = bayespam::classifier::Classifier::new_from_pre_trained(&mut file)?;
 
-        Ok(Box::new(Self {
+        Ok(Self {
             classifier,
             file_name: config.file_name,
-        }))
+        })
     }
 }
 

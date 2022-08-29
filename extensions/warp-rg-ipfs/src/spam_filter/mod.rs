@@ -35,7 +35,8 @@ impl SpamFilter {
     }
 
     pub fn add_spam(&mut self, str: &str) -> Result<()> {
-        Ok(self.classifier.add_spam(str))
+        self.classifier.add_spam(str);
+        Ok(())
     }
 
     pub fn add_not_spam(&mut self, str: &str) -> Result<()> {
