@@ -340,7 +340,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 _ => return Err(Error::CannotUpdateIdentity),
             }
 
-            if let Ok(cid) = self.identity_store.get_cid() {
+            if let Ok(cid) = self.identity_store.get_cid().await {
                 if self.ipfs.is_pinned(&cid).await? {
                     self.ipfs.remove_pin(&cid, false).await?;
                 }
@@ -351,7 +351,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
 
             self.ipfs.insert_pin(&ident_cid, false).await?;
 
-            self.identity_store.save_cid(ident_cid)?;
+            self.identity_store.save_cid(ident_cid).await?;
 
             if let Ok(mut cache) = self.get_cache_mut() {
                 let mut query = QueryBuilder::default();

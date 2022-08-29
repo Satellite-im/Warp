@@ -285,7 +285,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         // Pin the dag
         self.ipfs.insert_pin(&ident_cid, false).await?;
 
-        self.save_cid(ident_cid)?;
+        self.save_cid(ident_cid).await?;
 
         self.update_identity().await?;
         self.enable_event();
@@ -420,7 +420,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn own_identity(&self) -> Result<Identity, Error> {
-        let ident_cid = self.get_cid()?;
+        let ident_cid = self.get_cid().await?;
         let path = IpfsPath::from(ident_cid);
         let identity = match self.ipfs.get_dag(path).await {
             Ok(ipld) => from_ipld::<Identity>(ipld).map_err(anyhow::Error::from)?,
@@ -436,18 +436,19 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(identity)
     }
 
-    pub fn save_cid(&mut self, cid: Cid) -> Result<(), Error> {
+    pub async fn save_cid(&mut self, cid: Cid) -> Result<(), Error> {
         *self.ident_cid.write() = Some(cid);
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
-            std::fs::write(path.join(".id"), cid)?;
+            tokio::fs::write(path.join(".id"), cid).await?;
         }
         Ok(())
     }
 
-    pub fn get_cid(&self) -> Result<Cid, Error> {
+    pub async fn get_cid(&self) -> Result<Cid, Error> {
         if let Some(path) = self.path.as_ref() {
-            if let Ok(cid_str) = std::fs::read(path.join(".id"))
+            if let Ok(cid_str) = tokio::fs::read(path.join(".id"))
+                .await
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
             {
                 let cid: Cid = cid_str.parse().map_err(anyhow::Error::from)?;
