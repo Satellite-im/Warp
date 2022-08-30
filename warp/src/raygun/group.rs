@@ -1,6 +1,5 @@
 use crate::crypto::{DID};
 use crate::error::Error;
-use crate::raygun::Uid;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -18,96 +17,51 @@ impl Default for GroupStatus {
 }
 
 #[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
-pub struct GroupId(Uid);
-
-impl GroupId {
-    pub fn new_uuid() -> GroupId {
-        Self(Uid::new_uuid())
-    }
-
-    pub fn from_id(id: Uuid) -> GroupId {
-        Self(Uid::Id(id))
-    }
-
-    pub fn from_did_key(pubkey: DID) -> GroupId {
-        Self(Uid::DIDKey(pubkey))
-    }
-
-    pub fn get_id(&self) -> Option<Uuid> {
-        match &self.0 {
-            Uid::Id(id) => Some(*id),
-            Uid::DIDKey(_) => None,
-        }
-    }
-
-    pub fn get_public_key(&self) -> Option<DID> {
-        match &self.0 {
-            Uid::Id(_) => None,
-            Uid::DIDKey(k) => Some(k.clone()),
-        }
-    }
+pub struct Member{
+    member: DID,
+    //permission: Permission
 }
 
-#[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
-pub struct GroupMember(Uid);
-
-impl GroupMember {
-    pub fn new_uuid() -> GroupMember {
-        Self(Uid::new_uuid())
-    }
-
-    pub fn from_id(id: Uuid) -> GroupMember {
-        Self(Uid::Id(id))
-    }
-
-    pub fn from_did_key(pubkey: DID) -> GroupMember {
-        Self(Uid::DIDKey(pubkey))
-    }
-
-    pub fn get_id(&self) -> Option<Uuid> {
-        match &self.0 {
-            Uid::Id(id) => Some(*id),
-            Uid::DIDKey(_) => None,
-        }
-    }
-
-    pub fn get_did_key(&self) -> Option<DID> {
-        match &self.0 {
-            Uid::Id(_) => None,
-            Uid::DIDKey(k) => Some(k.clone()),
-        }
-    }
-}
 
 #[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub struct Group {
-    id: GroupId,
+    id: Uuid,
     name: String,
-    creator: GroupMember,
-    admin: GroupMember,
-    members: u32,
+    owner: DID,
+    admin: Vec<Member>,
+    members: Vec<Member>,
+    banned: Vec<DID>,
+    limit: u64,
     status: GroupStatus,
 }
 
 impl Group {
-    pub fn id(&self) -> GroupId {
-        self.id.clone()
+    pub fn id(&self) -> Uuid {
+        self.id
     }
 
     pub fn name(&self) -> String {
         self.name.clone()
     }
 
-    pub fn creator(&self) -> GroupMember {
-        self.creator.clone()
+    pub fn owner(&self) -> DID {
+        self.owner.clone()
     }
 
-    pub fn admin(&self) -> GroupMember {
+    pub fn admin(&self) -> Vec<Member> {
         self.admin.clone()
     }
 
-    pub fn members(&self) -> u32 {
-        self.members
+    pub fn members(&self) -> Vec<Member> {
+        self.members.clone()
+    }
+
+    pub fn banned(&self) -> Vec<DID> {
+        self.banned.clone()
+    }
+
+    pub fn limit(&self) -> u64 {
+        self.limit
     }
 
     pub fn status(&self) -> GroupStatus {
@@ -116,7 +70,7 @@ impl Group {
 }
 
 impl Group {
-    pub fn set_id(&mut self, id: GroupId) {
+    pub fn set_id(&mut self, id: Uuid) {
         self.id = id;
     }
 
@@ -124,16 +78,20 @@ impl Group {
         self.name = name.to_string();
     }
 
-    pub fn set_creator(&mut self, creator: GroupMember) {
-        self.creator = creator;
+    pub fn set_owner(&mut self, owner: DID) {
+        self.owner = owner;
     }
 
-    pub fn set_admin(&mut self, admin: GroupMember) {
+    pub fn set_admin(&mut self, admin: Vec<Member>) {
         self.admin = admin;
     }
 
-    pub fn set_members(&mut self, members: u32) {
+    pub fn set_members(&mut self, members: Vec<Member>) {
         self.members = members;
+    }
+
+    pub fn set_limit(&mut self, limit: u64) {
+        self.limit = limit;
     }
 
     pub fn set_status(&mut self, status: GroupStatus) {
@@ -144,9 +102,9 @@ impl Group {
 #[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub struct GroupInvitation {
     id: Uuid,
-    group: GroupId,
-    sender: GroupMember,
-    recipient: GroupMember,
+    group: Uuid,
+    sender: DID,
+    recipient: DID,
     #[serde(flatten)]
     metadata: HashMap<String, serde_json::Value>,
 }
@@ -156,15 +114,15 @@ impl GroupInvitation {
         self.id
     }
 
-    pub fn group(&self) -> GroupId {
+    pub fn group(&self) -> Uuid {
         self.group.clone()
     }
 
-    pub fn sender(&self) -> GroupMember {
+    pub fn sender(&self) -> DID {
         self.sender.clone()
     }
 
-    pub fn recipient(&self) -> GroupMember {
+    pub fn recipient(&self) -> DID {
         self.recipient.clone()
     }
 
@@ -178,15 +136,15 @@ impl GroupInvitation {
         self.id = id;
     }
 
-    pub fn set_group(&mut self, group: GroupId) {
+    pub fn set_group(&mut self, group: Uuid) {
         self.group = group;
     }
 
-    pub fn set_sender(&mut self, sender: GroupMember) {
+    pub fn set_sender(&mut self, sender: DID) {
         self.sender = sender;
     }
 
-    pub fn set_recipient(&mut self, recipient: GroupMember) {
+    pub fn set_recipient(&mut self, recipient: DID) {
         self.recipient = recipient;
     }
 
@@ -198,17 +156,17 @@ impl GroupInvitation {
 // General/Base GroupChat Trait
 pub trait GroupChat: GroupInvite + GroupChatManagement {
     /// Join a existing group
-    fn join_group(&mut self, _: GroupId) -> Result<(), Error> {
+    fn join_group(&mut self, _: Uuid) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Leave a group
-    fn leave_group(&mut self, _: GroupId) -> Result<(), Error> {
+    fn leave_group(&mut self, _: Uuid) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// List members of group
-    fn list_members(&self, _: GroupId) -> Result<Vec<GroupMember>, Error> {
+    fn list_members(&self, _: Uuid) -> Result<Vec<Member>, Error> {
         Err(Error::Unimplemented)
     }
 }
@@ -216,22 +174,22 @@ pub trait GroupChat: GroupInvite + GroupChatManagement {
 // Group Invite Management Trait
 pub trait GroupInvite {
     /// Sends a invite to join a group
-    fn send_invite(&mut self, _: GroupId, _: GroupMember) -> Result<(), Error> {
+    fn send_invite(&mut self, _: Uuid, _: DID) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Accepts an invite to a group
-    fn accept_invite(&mut self, _: GroupId) -> Result<(), Error> {
+    fn accept_invite(&mut self, _: Uuid) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Dent an invite to a group
-    fn deny_invite(&mut self, _: GroupId) -> Result<(), Error> {
+    fn deny_invite(&mut self, _: Uuid) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Block invitations to a group
-    fn block_group(&mut self, _: GroupId) -> Result<(), Error> {
+    fn block_group(&mut self, _: Uuid) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 }
@@ -244,37 +202,37 @@ pub trait GroupChatManagement {
     }
 
     /// Change group name
-    fn change_group_name(&mut self, _: GroupId, _: &str) -> Result<(), Error> {
+    fn change_group_name(&mut self, _: Uuid, _: &str) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Open group for invites
-    fn open_group(&mut self, _: GroupId) -> Result<(), Error> {
+    fn open_group(&mut self, _: Uuid) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Close group for invites
-    fn close_group(&mut self, _: GroupId) -> Result<(), Error> {
+    fn close_group(&mut self, _: Uuid) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Change the administrator of the group
-    fn change_admin(&mut self, _: GroupId, _: GroupMember) -> Result<(), Error> {
+    fn change_admin(&mut self, _: Uuid, _: Member) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Assign an administrator to the group
-    fn assign_admin(&mut self, _: GroupId, _: GroupMember) -> Result<(), Error> {
+    fn assign_admin(&mut self, _: Uuid, _: Member) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Kick member from group
-    fn kick_member(&mut self, _: GroupId, _: GroupMember) -> Result<(), Error> {
+    fn kick_member(&mut self, _: Uuid, _: DID) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Ban member from group
-    fn ban_member(&mut self, _: GroupId, _: GroupMember) -> Result<(), Error> {
+    fn ban_member(&mut self, _: Uuid, _: DID) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 }

@@ -10,7 +10,7 @@ use uuid::Uuid;
 use warp::{
     crypto::{did_key::CoreSign, hash::sha256_hash, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
-    raygun::{Message, PinState, ReactionState, SenderId},
+    raygun::{Message, PinState, ReactionState},
     sync::{Arc, Mutex},
 };
 
@@ -28,8 +28,8 @@ pub enum MessagingEvents {
     New(Message),
     Edit(Uuid, Uuid, Vec<String>),
     Delete(Uuid, Uuid),
-    Pin(Uuid, SenderId, Uuid, PinState),
-    React(Uuid, SenderId, Uuid, ReactionState, String),
+    Pin(Uuid, DID, Uuid, PinState),
+    React(Uuid, DID, Uuid, ReactionState, String),
 }
 
 pub fn generate_uuid(generate: &str) -> Uuid {

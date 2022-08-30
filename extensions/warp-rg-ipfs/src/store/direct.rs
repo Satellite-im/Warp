@@ -16,8 +16,7 @@ use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::identity::FriendRequest;
 use warp::multipass::MultiPass;
-use warp::raygun::group::GroupId;
-use warp::raygun::{EmbedState, Message, PinState, Reaction, ReactionState, SenderId};
+use warp::raygun::{EmbedState, Message, PinState, Reaction, ReactionState};
 use warp::sata::Sata;
 use warp::sync::{Arc, Mutex, RwLock};
 
@@ -649,7 +648,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let mut message = Message::default();
         message.set_conversation_id(conversation);
-        message.set_sender(SenderId::from_did_key(own_did.clone()));
+        message.set_sender(own_did.clone());
         message.set_value(messages.clone());
 
         // TODO: Construct the message into a body of bytes that would be used for signing
@@ -741,7 +740,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let mut message = Message::default();
         message.set_conversation_id(conversation);
-        message.set_sender(SenderId::from_did_key(own_did.clone()));
+        message.set_sender(own_did.clone());
         message.set_value(messages);
         message.set_replied(Some(message_id));
 
@@ -800,8 +799,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let own_did = &*self.did;
 
-        let sender = SenderId::from_did_key(own_did.clone());
-
         let index = self
             .direct_conversation
             .read()
@@ -809,7 +806,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .position(|convo| convo.id() == conversation)
             .ok_or(Error::InvalidConversation)?;
 
-        let event = MessagingEvents::Pin(conversation, sender, message_id, state);
+        let event = MessagingEvents::Pin(conversation, own_did.clone(), message_id, state);
         if let Some(conversation) = self.direct_conversation.write().get_mut(index) {
             direct_message_event(conversation.messages_mut(), &event, &self.spam_filter)?;
             if let Some(path) = self.path.as_ref() {
@@ -845,9 +842,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let own_did = &*self.did;
 
-        let sender = SenderId::from_did_key(own_did.clone());
-
-        let event = MessagingEvents::React(conversation, sender, message_id, state, emoji);
+        let event = MessagingEvents::React(conversation, own_did.clone(), message_id, state, emoji);
 
         let index = self
             .direct_conversation

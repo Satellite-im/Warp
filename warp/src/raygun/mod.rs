@@ -16,29 +16,7 @@ use uuid::Uuid;
 
 use self::group::GroupChat;
 
-pub type Callback = Box<dyn Fn() + Sync + Send>;
 
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum Uid {
-    /// UUID Identifier
-    Id(Uuid),
-
-    /// Public Key Identifier
-    DIDKey(DID),
-}
-
-impl Uid {
-    pub fn new_uuid() -> Uid {
-        Uid::Id(Uuid::new_v4())
-    }
-}
-
-impl Default for Uid {
-    fn default() -> Self {
-        Self::new_uuid()
-    }
-}
 
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct MessageOptions {
@@ -82,7 +60,7 @@ pub struct Message {
     conversation_id: Uuid,
 
     /// ID of the sender of the message
-    sender: SenderId,
+    sender: DID,
 
     /// Timestamp of the message
     date: DateTime<Utc>,
@@ -105,40 +83,12 @@ pub struct Message {
     metadata: HashMap<String, String>,
 }
 
-/// Use to identify the sender
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec)]
-pub struct SenderId(Uid);
-
-impl SenderId {
-    pub fn from_id(id: Uuid) -> SenderId {
-        SenderId(Uid::Id(id))
-    }
-
-    pub fn from_did_key(pubkey: DID) -> SenderId {
-        SenderId(Uid::DIDKey(pubkey))
-    }
-
-    pub fn get_id(&self) -> Option<Uuid> {
-        match &self.0 {
-            Uid::Id(id) => Some(*id),
-            Uid::DIDKey(_) => None,
-        }
-    }
-
-    pub fn get_did_key(&self) -> Option<DID> {
-        match &self.0 {
-            Uid::Id(_) => None,
-            Uid::DIDKey(k) => Some(k.clone()),
-        }
-    }
-}
-
 impl Default for Message {
     fn default() -> Self {
         Self {
             id: Uuid::new_v4(),
             conversation_id: Uuid::nil(),
-            sender: SenderId::from_id(Uuid::nil()),
+            sender: Default::default(),
             date: Utc::now(),
             pinned: false,
             reactions: Vec::new(),
@@ -165,7 +115,7 @@ impl Message {
         self.conversation_id
     }
 
-    pub fn sender(&self) -> SenderId {
+    pub fn sender(&self) -> DID {
         self.sender.clone()
     }
 
@@ -203,7 +153,7 @@ impl Message {
         self.conversation_id = id
     }
 
-    pub fn set_sender(&mut self, id: SenderId) {
+    pub fn set_sender(&mut self, id: DID) {
         self.sender = id
     }
 
@@ -257,7 +207,7 @@ pub struct Reaction {
     emoji: String,
 
     /// ID of the user who reacted to `Message`
-    users: Vec<SenderId>,
+    users: Vec<DID>,
 }
 
 impl Reaction {
@@ -265,7 +215,7 @@ impl Reaction {
         self.emoji.clone()
     }
 
-    pub fn users(&self) -> Vec<SenderId> {
+    pub fn users(&self) -> Vec<DID> {
         self.users.clone()
     }
 }
@@ -275,13 +225,13 @@ impl Reaction {
         self.emoji = emoji.to_string()
     }
 
-    pub fn set_users(&mut self, users: Vec<SenderId>) {
+    pub fn set_users(&mut self, users: Vec<DID>) {
         self.users = users
     }
 }
 
 impl Reaction {
-    pub fn users_mut(&mut self) -> &mut Vec<SenderId> {
+    pub fn users_mut(&mut self) -> &mut Vec<DID> {
         &mut self.users
     }
 }
@@ -406,11 +356,11 @@ impl RayGunAdapter {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use crate::crypto::DID;
+    use crate::crypto::{DID, FFIVec_DID};
     use crate::error::Error;
     use crate::ffi::{FFIResult, FFIResult_Null, FFIResult_String, FFIVec_String};
     use crate::raygun::{
-        EmbedState, FFIVec_Message, FFIVec_SenderId, FFIVec_Reaction, Message, MessageOptions, PinState,
+        EmbedState, FFIVec_Message, FFIVec_Reaction, Message, MessageOptions, PinState,
         RayGunAdapter, Reaction, ReactionState,
     };
     use crate::{async_on_block, runtime_handle};
@@ -418,8 +368,6 @@ pub mod ffi {
     use std::os::raw::c_char;
     use std::str::{FromStr, Utf8Error};
     use uuid::Uuid;
-
-    use super::SenderId;
 
     #[allow(clippy::await_holding_lock)]
     #[allow(clippy::missing_safety_doc)]
@@ -849,7 +797,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn message_sender_id(ctx: *const Message) -> *mut SenderId {
+    pub unsafe extern "C" fn message_sender(ctx: *const Message) -> *mut DID {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
@@ -933,76 +881,12 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn reaction_users(ctx: *const Reaction) -> *mut FFIVec_SenderId {
+    pub unsafe extern "C" fn reaction_users(ctx: *const Reaction) -> *mut FFIVec_DID {
         if ctx.is_null() {
             return std::ptr::null_mut();
         }
         let adapter = &*ctx;
         Box::into_raw(Box::new(adapter.users().into()))
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn sender_id_from_id(id: *const c_char) -> *mut SenderId {
-        if id.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let id = CStr::from_ptr(id).to_string_lossy().to_string();
-
-        let uuid = match Uuid::from_str(&id) {
-            Ok(uuid) => uuid,
-            Err(_) => return std::ptr::null_mut(),
-        };
-
-        Box::into_raw(Box::new(SenderId::from_id(uuid)))
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn sender_id_from_did_key(public_key: *const DID) -> *mut SenderId {
-        if public_key.is_null() {
-            return std::ptr::null_mut();
-        }
-        let pkey = &*public_key;
-        Box::into_raw(Box::new(SenderId::from_did_key(pkey.clone())))
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn sender_id_get_id(sender_id: *const SenderId) -> *mut c_char {
-        if sender_id.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let sender_id = &*sender_id;
-
-        let id = match sender_id.get_id() {
-            Some(id) => id.to_string(),
-            None => return std::ptr::null_mut(),
-        };
-
-        match CString::new(id) {
-            Ok(c) => c.into_raw(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn sender_id_get_did_key(sender_id: *const SenderId) -> *mut DID {
-        if sender_id.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let sender_id = &*sender_id;
-
-        let key = match sender_id.get_did_key() {
-            Some(key) => key,
-            None => return std::ptr::null_mut(),
-        };
-
-        Box::into_raw(Box::new(key))
     }
 
     #[allow(clippy::missing_safety_doc)]

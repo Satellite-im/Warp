@@ -1,17 +1,17 @@
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
-use warp::error::Error;
 use std::collections::HashMap;
 use std::io::Write;
 use std::str::FromStr;
 use std::time::Duration;
 use uuid::Uuid;
 use warp::crypto::DID;
+use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, SenderId};
+use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState};
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_mp_solana::config::MpSolanaConfig;
@@ -412,16 +412,10 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn get_username(account: Arc<RwLock<Box<dyn MultiPass>>>, id: SenderId) -> anyhow::Result<String> {
-    if let Some(id) = id.get_id() {
-        //if for some reason uuid is used, we can just return that instead as a string
-        return Ok(id.to_string());
-    }
-
-    if let Some(pubkey) = id.get_did_key() {
-        let account = account.read();
-        let identity = account.get_identity(Identifier::did_key(pubkey)).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
-        return Ok(format!("{}#{}", identity.username(), identity.short_id()));
-    }
-    anyhow::bail!("Invalid SenderId")
+fn get_username(account: Arc<RwLock<Box<dyn MultiPass>>>, did: DID) -> anyhow::Result<String> {
+    let account = account.read();
+    let identity = account
+        .get_identity(Identifier::did_key(did))
+        .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
+    Ok(format!("{}#{}", identity.username(), identity.short_id()))
 }
