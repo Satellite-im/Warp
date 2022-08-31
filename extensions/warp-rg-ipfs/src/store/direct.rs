@@ -374,6 +374,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                 convo.start_task(store.did.clone(), &store.spam_filter, stream);
                                                 if let Some(path) = store.path.as_ref() {
                                                     convo.set_path(path);
+                                                    if let Err(_e) = convo.to_file(&*did).await {
+                                                        //TODO: Log
+                                                    }
                                                 }
                                                 store.direct_conversation.write().push(convo);
                                             }
