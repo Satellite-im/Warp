@@ -291,13 +291,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             if path.is_dir() {
                 for entry in std::fs::read_dir(path)? {
                     let entry = entry?;
-                    let path = entry.path();
-                    if path.is_file() {
+                    let path_inner = entry.path();
+                    if path_inner.is_file() {
                         //TODO: Check filename itself rather than the end of the path
                         if path.ends_with("queue") {
                             continue;
                         }
-                        match DirectConversation::from_file(&path, &*store.did).await {
+                        match DirectConversation::from_file(&path_inner, &*store.did).await {
                             Ok(mut conversation) => {
                                 let stream =
                                     match store.ipfs.pubsub_subscribe(conversation.topic()).await {
