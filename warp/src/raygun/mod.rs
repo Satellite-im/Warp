@@ -68,6 +68,7 @@ impl MessageOptions {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all="lowercase")]
 #[repr(C)]
 pub enum ConversationType {
     Direct,
