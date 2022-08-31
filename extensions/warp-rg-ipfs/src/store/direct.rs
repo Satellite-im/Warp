@@ -378,26 +378,26 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 }
 
 impl<T: IpfsTypes> DirectMessageStore<T> {
-    pub async fn create_conversation(&mut self, did_key: &DID) -> anyhow::Result<Uuid> {
+    pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Uuid, Error> {
         // maybe only start conversation with one we are friends with?
         // self.account.lock().has_friend(did_key)?;
 
         if let Ok(list) = self.account.read().block_list() {
             if list.contains(did_key) {
-                anyhow::bail!(Error::PublicKeyIsBlocked);
+                return Err(Error::PublicKeyIsBlocked);
             }
         }
 
         let own_did = &*self.did;
         for convo in &*self.direct_conversation.read() {
             if convo.recipients.contains(did_key) && convo.recipients.contains(own_did) {
-                anyhow::bail!("Conversation exist with did key");
+                return Err(Error::ConversationExist)
             }
         }
 
         //Temporary limit
         if self.direct_conversation.read().len() == 32 {
-            anyhow::bail!("Conversation limit has been reached")
+            return Err(Error::ConversationLimitReached)
         }
 
         let conversation = DirectConversation::new([own_did.clone(), did_key.clone()]);
@@ -473,7 +473,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         &mut self,
         conversation: Uuid,
         broadcast: bool,
-    ) -> anyhow::Result<DirectConversation> {
+    ) -> Result<DirectConversation, Error> {
         let index = self
             .direct_conversation
             .read()
@@ -489,7 +489,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
             let recipient: &DID = match recipients.iter().filter(|did| own_did.ne(did)).last() {
                 Some(r) => r,
-                None => anyhow::bail!(Error::PublicKeyInvalid),
+                None => return Err(Error::PublicKeyInvalid),
             };
 
             let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
@@ -564,7 +564,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .collect::<Vec<_>>()
     }
 
-    pub fn messages_count(&self, conversation: Uuid) -> anyhow::Result<usize> {
+    pub fn messages_count(&self, conversation: Uuid) -> Result<usize, Error> {
         let index = self
             .direct_conversation
             .read()
@@ -574,16 +574,16 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         if let Some(convo) = self.direct_conversation.read().get(index) {
             return Ok(convo.messages().len());
         }
-        anyhow::bail!(Error::InvalidConversation)
+        return Err(Error::InvalidConversation)
     }
 
     pub async fn get_messages(
         &self,
         conversation: Uuid,
         range: Option<Range<usize>>,
-    ) -> anyhow::Result<Vec<Message>> {
+    ) -> Result<Vec<Message>, Error> {
         if !self.exist(conversation).await? {
-            anyhow::bail!(Error::InvalidConversation);
+            return Err(Error::InvalidConversation);
         }
 
         let index = self
@@ -601,7 +601,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             };
             return Ok(list);
         }
-        anyhow::bail!(Error::InvalidConversation)
+        return Err(Error::InvalidConversation)
     }
 
     pub async fn exist(&self, conversation: Uuid) -> anyhow::Result<bool> {
@@ -626,13 +626,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         &mut self,
         conversation: Uuid,
         messages: Vec<String>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), Error> {
         if !self.exist(conversation).await? {
-            anyhow::bail!(Error::InvalidConversation)
+            return Err(Error::InvalidConversation)
         }
 
         if messages.is_empty() {
-            anyhow::bail!(Error::EmptyMessage);
+            return Err(Error::EmptyMessage);
         }
 
         let index = self
@@ -685,13 +685,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation: Uuid,
         message_id: Uuid,
         messages: Vec<String>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), Error> {
         if !self.exist(conversation).await? {
-            anyhow::bail!(Error::InvalidConversation)
+            return Err(Error::InvalidConversation)
         }
 
         if messages.is_empty() {
-            anyhow::bail!(Error::EmptyMessage);
+            return Err(Error::EmptyMessage);
         }
 
         let index = self
@@ -718,13 +718,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation: Uuid,
         message_id: Uuid,
         messages: Vec<String>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), Error> {
         if !self.exist(conversation).await? {
-            anyhow::bail!(Error::InvalidConversation)
+            return Err(Error::InvalidConversation)
         }
 
         if messages.is_empty() {
-            anyhow::bail!(Error::EmptyMessage);
+            return Err(Error::EmptyMessage);
         }
 
         let index = self
@@ -758,9 +758,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation: Uuid,
         message_id: Uuid,
         broadcast: bool,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), Error> {
         if !self.exist(conversation).await? {
-            anyhow::bail!(Error::InvalidConversation)
+            return Err(Error::InvalidConversation)
         }
 
         let index = self
@@ -790,9 +790,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation: Uuid,
         message_id: Uuid,
         state: PinState,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), Error> {
         if !self.exist(conversation).await? {
-            anyhow::bail!(Error::InvalidConversation)
+            return Err(Error::InvalidConversation)
         }
 
         let own_did = &*self.did;
@@ -833,9 +833,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         message_id: Uuid,
         state: ReactionState,
         emoji: String,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), Error> {
         if !self.exist(conversation).await? {
-            anyhow::bail!(Error::InvalidConversation)
+            return Err(Error::InvalidConversation)
         }
 
         let own_did = &*self.did;
@@ -863,9 +863,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         &mut self,
         conversation: Uuid,
         event: S,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), Error> {
         if !self.exist(conversation).await? {
-            anyhow::bail!(Error::InvalidConversation);
+            return Err(Error::InvalidConversation);
         }
 
         let index = self
@@ -884,7 +884,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let recipient: &DID = match recipients.iter().filter(|did| own_did.ne(did)).last() {
             Some(r) => r,
-            None => anyhow::bail!(Error::PublicKeyInvalid),
+            None => return Err(Error::PublicKeyInvalid),
         };
 
         let mut data = Sata::default();
@@ -926,7 +926,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         Ok(())
     }
 
-    async fn queue_event(&mut self, queue: Queue) -> anyhow::Result<()> {
+    async fn queue_event(&mut self, queue: Queue) -> Result<(), Error> {
         self.queue.write().push(queue);
         if let Some(path) = self.path.as_ref() {
             let bytes = serde_json::to_vec(&*self.queue.read())?;

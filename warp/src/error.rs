@@ -110,6 +110,10 @@ pub enum Error {
     RayGunExtensionUnavailable,
     #[error("Conversation was invalid")]
     InvalidConversation,
+    #[error("Conversation exist with the same user")]
+    ConversationExist,
+    #[error("Maximum conversations has been reached")]
+    ConversationLimitReached,
     #[error("Message is empty")]
     EmptyMessage,
     #[error("Message was invalid")]
