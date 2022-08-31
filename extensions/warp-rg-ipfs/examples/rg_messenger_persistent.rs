@@ -13,7 +13,7 @@ use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState};
+use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, ConversationType};
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::{ipfs_identity_persistent, Persistent};
@@ -129,8 +129,7 @@ async fn main() -> anyhow::Result<()> {
     let mut convo_size: HashMap<Uuid, usize> = HashMap::new();
     let mut convo_list = vec![];
     let mut interval = tokio::time::interval(Duration::from_millis(500));
-
-    loop {
+   loop {
         tokio::select! {
             //TODO: Optimize by clearing terminal and displaying all messages instead of getting last line
             msg = chat.get_messages(topic, MessageOptions::default()) => {
@@ -140,10 +139,17 @@ async fn main() -> anyhow::Result<()> {
                     }
                     convo_size.entry(topic).and_modify(|e| *e = msg.len() ).or_insert(msg.len());
                     let msg = msg.last().unwrap();
-                    if let Ok(username) = get_username(new_account.clone(), msg.sender()) {
-                        //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
-                        writeln!(stdout, "[{}] @> {}", username, msg.value().join("\n"))?;
+                    let username = get_username(new_account.clone(), msg.sender())?;
+                    //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
+                    match msg.metadata().get("is_spam") {
+                        Some(_) => {
+                            writeln!(stdout, "[{}] @> [SPAM!] {}", username, msg.value().join("\n"))?;
+                        }
+                        None => {
+                            writeln!(stdout, "[{}] @> {}", username, msg.value().join("\n"))?;
+                        }
                     }
+
                 }
             }
             line = rl.readline().fuse() => match line {
@@ -173,7 +179,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            topic = id;
+                            topic = id.id();
                             writeln!(stdout, "Conversation created")?;
                         },
                         Some("/remove-conversation") => {
@@ -195,7 +201,7 @@ async fn main() -> anyhow::Result<()> {
                             let conversation_id = match cmd_line.next() {
                                 Some(id) => id.parse()?,
                                 None => {
-                                    writeln!(stdout, "/set-conversation <conversation-id>")?;
+                                    writeln!(stdout, "/set <conversation-id>")?;
                                     continue
                                 }
                             };
@@ -204,10 +210,18 @@ async fn main() -> anyhow::Result<()> {
                         }
                         Some("/list-conversations") => {
                             let mut table = Table::new();
-                            table.set_header(vec!["Conversation ID"]);
+                            table.set_header(vec!["ID", "Recipients"]);
                             let list = chat.list_conversations().await?;
-                            for id in list.iter() {
-                                table.add_row(vec![id.to_string()]);
+                            for convo in list.iter() {
+                                let mut recipients = vec![];
+                                for recipient in convo.recipients() {
+                                    if convo.conversation_type() == ConversationType::Direct && recipient == identity.did_key() {
+                                        continue
+                                    }
+                                    let username = get_username(new_account.clone(), recipient.clone()).unwrap_or_else(|_|recipient.to_string());
+                                    recipients.push(username);
+                                }
+                                table.add_row(vec![convo.id().to_string(), recipients.join("/").to_string()]);
                             }
                             writeln!(stdout, "{}", table)?;
                         },
@@ -414,7 +428,7 @@ async fn main() -> anyhow::Result<()> {
             _ = interval.tick() => {
                 if let Ok(list) = chat.list_conversations().await {
                     if !list.is_empty() && convo_list != list {
-                        topic = *(list.last().unwrap());
+                        topic = list.last().unwrap().id();
                         convo_list = list;
                         writeln!(stdout, "Set conversation to {}", topic)?;
                     }

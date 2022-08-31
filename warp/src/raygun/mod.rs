@@ -10,30 +10,46 @@ use warp_derive::FFIFree;
 use wasm_bindgen::prelude::*;
 
 use chrono::{DateTime, Utc};
+use core::ops::Range;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
 use self::group::GroupChat;
 
-
-
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct MessageOptions {
-    pub smart: Option<bool>,
-    pub date_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
-    pub id_range: Option<(Uuid, Uuid)>,
-    pub limit: Option<i64>,
-    pub skip: Option<i64>,
+    smart: Option<bool>,
+    date_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
+    range: Option<Range<usize>>,
+    limit: Option<i64>,
+    skip: Option<i64>,
 }
 
 impl MessageOptions {
-    pub fn data_range(&self) -> Option<(DateTime<Utc>, DateTime<Utc>)> {
+    pub fn set_date_range(mut self, start: DateTime<Utc>, end: DateTime<Utc>) -> MessageOptions {
+        self.date_range = Some((start, end));
+        self
+    }
+
+    pub fn set_range(mut self, range: Range<usize>) -> MessageOptions {
+        self.range = Some(range);
+        self
+    }
+
+    pub fn set_limit(mut self, limit: i64) -> MessageOptions {
+        self.limit = Some(limit);
+        self
+    }
+}
+
+impl MessageOptions {
+    pub fn date_range(&self) -> Option<(DateTime<Utc>, DateTime<Utc>)> {
         self.date_range
     }
 
-    pub fn id_range(&self) -> Option<(Uuid, Uuid)> {
-        self.id_range
+    pub fn range(&self) -> Option<Range<usize>> {
+        self.range.clone()
     }
 }
 
@@ -48,6 +64,73 @@ impl MessageOptions {
 
     pub fn skip(&self) -> Option<i64> {
         self.skip
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[repr(C)]
+pub enum ConversationType {
+    Direct,
+    Group,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+pub struct Conversation {
+    id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    conversation_type: ConversationType,
+    recipients: Vec<DID>,
+}
+
+impl Default for Conversation {
+    fn default() -> Self {
+        let id = Uuid::new_v4();
+        let name = None;
+        let conversation_type = ConversationType::Direct;
+        let recipients = Vec::new();
+        Self {
+            id,
+            name,
+            conversation_type,
+            recipients,
+        }
+    }
+}
+
+impl Conversation {
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn name(&self) -> Option<String> {
+        self.name.clone()
+    }
+
+    pub fn conversation_type(&self) -> ConversationType {
+        self.conversation_type
+    }
+
+    pub fn recipients(&self) -> Vec<DID> {
+        self.recipients.clone()
+    }
+}
+
+impl Conversation {
+    pub fn set_id(&mut self, id: Uuid) {
+        self.id = id;
+    }
+
+    pub fn set_name(&mut self, name: Option<String>) {
+        self.name = name;
+    }
+
+    pub fn set_conversation_type(&mut self, conversation_type: ConversationType) {
+        self.conversation_type = conversation_type;
+    }
+
+    pub fn set_recipients(&mut self, recipients: Vec<DID>) {
+        self.recipients = recipients;
     }
 }
 
@@ -201,7 +284,9 @@ impl Message {
     }
 }
 
-#[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(
+    Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
+)]
 pub struct Reaction {
     /// Emoji unicode for `Reaction`
     emoji: String,
@@ -259,14 +344,13 @@ pub enum EmbedState {
 
 #[async_trait::async_trait]
 pub trait RayGun: Extension + GroupChat + Sync + Send + SingleHandle {
-
     // Start a new conversation.
-    async fn create_conversation(&mut self, _: &DID) -> Result<Uuid, Error> {
+    async fn create_conversation(&mut self, _: &DID) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
     }
 
     // List all active conversations
-    async fn list_conversations(&self) -> Result<Vec<Uuid>, Error> {
+    async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -356,9 +440,10 @@ impl RayGunAdapter {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use crate::crypto::{DID, FFIVec_DID};
+    use super::{Conversation, ConversationType, FFIVec_Conversation};
+    use crate::crypto::{FFIVec_DID, DID};
     use crate::error::Error;
-    use crate::ffi::{FFIResult, FFIResult_Null, FFIResult_String, FFIVec_String};
+    use crate::ffi::{FFIResult, FFIResult_Null, FFIVec_String};
     use crate::raygun::{
         EmbedState, FFIVec_Message, FFIVec_Reaction, Message, MessageOptions, PinState,
         RayGunAdapter, Reaction, ReactionState,
@@ -375,20 +460,18 @@ pub mod ffi {
     pub unsafe extern "C" fn raygun_create_conversation(
         ctx: *mut RayGunAdapter,
         did_key: *const DID,
-    ) -> FFIResult_String {
+    ) -> FFIResult<Conversation> {
         if ctx.is_null() {
-            return FFIResult_String::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if did_key.is_null() {
-            return FFIResult_String::err(Error::Any(anyhow::anyhow!("did_key cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("did_key cannot be null")));
         }
 
         let adapter = &mut *ctx;
 
-        async_on_block(adapter.write_guard().create_conversation(&*did_key))
-            .map(|s| s.to_string())
-            .into()
+        async_on_block(adapter.write_guard().create_conversation(&*did_key)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -396,18 +479,15 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn raygun_list_conversations(
         ctx: *const RayGunAdapter,
-    ) -> FFIResult<FFIVec_String> {
+    ) -> FFIResult<FFIVec_Conversation> {
         if ctx.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         let adapter = &*ctx;
 
-        match async_on_block(adapter.read_guard().list_conversations())
-            .map(|s| s.iter().map(|id| id.to_string()).collect::<Vec<_>>())
-            .map(FFIVec_String::from)
-        {
-            Ok(list) => FFIResult::ok(list),
+        match async_on_block(adapter.read_guard().list_conversations()) {
+            Ok(list) => FFIResult::ok(list.into()),
             Err(e) => FFIResult::err(e),
         }
     }
@@ -429,8 +509,7 @@ pub mod ffi {
             )));
         }
 
-        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy())
-        {
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
             Ok(uuid) => uuid,
             Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
         };
@@ -480,19 +559,16 @@ pub mod ffi {
             )));
         }
 
-        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy())
-        {
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
             Ok(uuid) => uuid,
             Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
         let msg_id = match message_id.is_null() {
-            false => {
-                match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy()) {
-                    Ok(uuid) => Some(uuid),
-                    Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
-                }
-            }
+            false => match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy()) {
+                Ok(uuid) => Some(uuid),
+                Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
+            },
             true => None,
         };
 
@@ -526,20 +602,17 @@ pub mod ffi {
             )));
         }
 
-        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy())
-        {
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
             Ok(uuid) => uuid,
             Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
         let msg_id = match message_id.is_null() {
             true => None,
-            false => {
-                match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy()) {
-                    Ok(uuid) => Some(uuid),
-                    Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
-                }
-            }
+            false => match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy()) {
+                Ok(uuid) => Some(uuid),
+                Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
+            },
         };
 
         let adapter = &mut *ctx;
@@ -576,14 +649,12 @@ pub mod ffi {
             return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Emoji cannot be null")));
         }
 
-        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy())
-        {
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
             Ok(uuid) => uuid,
             Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
-        let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy())
-        {
+        let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy()) {
             Ok(uuid) => uuid,
             Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
@@ -624,14 +695,12 @@ pub mod ffi {
             return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
         }
 
-        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy())
-        {
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
             Ok(uuid) => uuid,
             Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
-        let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy())
-        {
+        let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy()) {
             Ok(uuid) => uuid,
             Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
@@ -670,14 +739,12 @@ pub mod ffi {
             return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Messages cannot be null")));
         }
 
-        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy())
-        {
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
             Ok(uuid) => uuid,
             Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
-        let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy())
-        {
+        let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy()) {
             Ok(uuid) => uuid,
             Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
@@ -715,8 +782,7 @@ pub mod ffi {
             )));
         }
 
-        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy())
-        {
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
             Ok(uuid) => uuid,
             Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
@@ -750,14 +816,12 @@ pub mod ffi {
             return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Message id cannot be null")));
         }
 
-        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy())
-        {
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
             Ok(uuid) => uuid,
             Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
-        let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy())
-        {
+        let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy()) {
             Ok(uuid) => uuid,
             Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
@@ -850,7 +914,7 @@ pub mod ffi {
                 Ok(c) => c.into_raw(),
                 Err(_) => std::ptr::null_mut(),
             },
-            None => std::ptr::null_mut()
+            None => std::ptr::null_mut(),
         }
     }
 
@@ -887,6 +951,61 @@ pub mod ffi {
         }
         let adapter = &*ctx;
         Box::into_raw(Box::new(adapter.users().into()))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn conversation_id(conversation: *const Conversation) -> *mut c_char {
+        if conversation.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let id = Conversation::id(&*conversation);
+
+        match CString::new(id.to_string()) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn conversation_name(conversation: *const Conversation) -> *mut c_char {
+        if conversation.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        match Conversation::name(&*conversation) {
+            Some(name) => match CString::new(name) {
+                Ok(c) => c.into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            },
+            None => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn conversation_type(
+        conversation: *const Conversation,
+    ) -> ConversationType {
+        if conversation.is_null() {
+            return ConversationType::Direct;
+        }
+
+        Conversation::conversation_type(&*conversation)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn conversation_recipients(
+        conversation: *const Conversation,
+    ) -> *mut FFIVec_DID {
+        if conversation.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        Box::into_raw(Box::new(Conversation::recipients(&*conversation).into()))
     }
 
     #[allow(clippy::missing_safety_doc)]

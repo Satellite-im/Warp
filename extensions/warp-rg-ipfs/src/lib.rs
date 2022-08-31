@@ -1,9 +1,10 @@
 #![allow(unused_imports)]
 
 pub mod config;
-mod store;
 mod spam_filter;
+mod store;
 
+use crate::spam_filter::SpamFilter;
 use config::RgIpfsConfig;
 use futures::pin_mut;
 use futures::StreamExt;
@@ -26,19 +27,14 @@ use warp::error::Error;
 use warp::module::Module;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::group::{
-    Group, GroupChat, GroupChatManagement, GroupInvite, Member,
-};
-use warp::raygun::{
-    EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState,
-};
+use warp::raygun::group::{Group, GroupChat, GroupChatManagement, GroupInvite, Member};
+use warp::raygun::Conversation;
+use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
 use warp::sync::RwLock;
 use warp::sync::{RwLockReadGuard, RwLockWriteGuard};
 use warp::tesseract::Tesseract;
 use warp::Extension;
 use warp::SingleHandle;
-use crate::spam_filter::SpamFilter;
-
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -172,14 +168,11 @@ impl<T: IpfsTypes> SingleHandle for IpfsMessaging<T> {
 
 #[async_trait::async_trait]
 impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
-    async fn create_conversation(&mut self, did_key: &DID) -> Result<Uuid> {
-        self.direct_store
-            .create_conversation(did_key)
-            .await
-            .map_err(Error::from)
+    async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation> {
+        self.direct_store.create_conversation(did_key).await
     }
 
-    async fn list_conversations(&self) -> Result<Vec<Uuid>> {
+    async fn list_conversations(&self) -> Result<Vec<Conversation>> {
         Ok(self.direct_store.list_conversations())
     }
 
@@ -315,7 +308,7 @@ pub mod ffi {
 
         let config = match config.is_null() {
             true => None,
-            false => Some((&*config).clone())
+            false => Some((&*config).clone()),
         };
 
         let account = &*account;
@@ -348,7 +341,7 @@ pub mod ffi {
 
         let config = match config.is_null() {
             true => return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is needed"))),
-            false => Some((&*config).clone())
+            false => Some((&*config).clone()),
         };
 
         let account = &*account;

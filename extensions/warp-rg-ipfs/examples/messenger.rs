@@ -14,7 +14,7 @@ use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState};
+use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, ConversationType};
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::config::{Autonat, Dcutr, IpfsSetting, RelayClient, StoreSetting};
@@ -189,7 +189,15 @@ async fn main() -> anyhow::Result<()> {
                     let msg = msg.last().unwrap();
                     let username = get_username(new_account.clone(), msg.sender())?;
                     //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
-                    writeln!(stdout, "[{}] @> {}", username, msg.value().join("\n"))?;
+                    match msg.metadata().get("is_spam") {
+                        Some(_) => {
+                            writeln!(stdout, "[{}] @> [SPAM!] {}", username, msg.value().join("\n"))?;
+                        }
+                        None => {
+                            writeln!(stdout, "[{}] @> {}", username, msg.value().join("\n"))?;
+                        }
+                    }
+
                 }
             }
             line = rl.readline().fuse() => match line {
@@ -219,11 +227,18 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            topic = id;
+                            topic = id.id();
                             writeln!(stdout, "Conversation created")?;
                         },
                         Some("/remove-conversation") => {
-                            if let Err(e) = chat.delete(topic, None).await {
+                            let conversation_id = match cmd_line.next() {
+                                Some(id) => id.parse()?,
+                                None => {
+                                    writeln!(stdout, "/edit <conversation-id> <message-id> <message>")?;
+                                    continue
+                                }
+                            };
+                            if let Err(e) = chat.delete(conversation_id, None).await {
                                     writeln!(stdout, "Error deleting conversation: {e}")?;
                                     continue
                             }
@@ -234,7 +249,7 @@ async fn main() -> anyhow::Result<()> {
                             let conversation_id = match cmd_line.next() {
                                 Some(id) => id.parse()?,
                                 None => {
-                                    writeln!(stdout, "/set-conversation <conversation-id>")?;
+                                    writeln!(stdout, "/set <conversation-id>")?;
                                     continue
                                 }
                             };
@@ -243,10 +258,18 @@ async fn main() -> anyhow::Result<()> {
                         }
                         Some("/list-conversations") => {
                             let mut table = Table::new();
-                            table.set_header(vec!["Conversation ID"]);
+                            table.set_header(vec!["ID", "Recipients"]);
                             let list = chat.list_conversations().await?;
-                            for id in list.iter() {
-                                table.add_row(vec![id.to_string()]);
+                            for convo in list.iter() {
+                                let mut recipients = vec![];
+                                for recipient in convo.recipients() {
+                                    if convo.conversation_type() == ConversationType::Direct && recipient == identity.did_key() {
+                                        continue
+                                    }
+                                    let username = get_username(new_account.clone(), recipient.clone()).unwrap_or_else(|_|recipient.to_string());
+                                    recipients.push(username);
+                                }
+                                table.add_row(vec![convo.id().to_string(), recipients.join("/").to_string()]);
                             }
                             writeln!(stdout, "{}", table)?;
                         },
@@ -289,6 +312,20 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "{}", table)?;
                         },
                         Some("/edit") => {
+                            let conversation_id = match cmd_line.next() {
+                                Some(id) => match Uuid::from_str(id) {
+                                    Ok(uuid) => uuid,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing ID: {}", e)?;
+                                        continue
+                                    }
+                                },
+                                None => {
+                                    writeln!(stdout, "/edit <conversation-id> <message-id> <message>")?;
+                                    continue
+                                }
+                            };
+
                             let message_id = match cmd_line.next() {
                                 Some(id) => match Uuid::from_str(id) {
                                     Ok(uuid) => uuid,
@@ -298,7 +335,7 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                 },
                                 None => {
-                                    writeln!(stdout, "/edit <message-id> <message>")?;
+                                    writeln!(stdout, "/edit <conversation-id> <message-id> <message>")?;
                                     continue
                                 }
                             };
@@ -311,7 +348,7 @@ async fn main() -> anyhow::Result<()> {
 
                             let message = vec![messages.join(" ").to_string()];
 
-                            if let Err(e) = chat.send(topic, Some(message_id), message).await {
+                            if let Err(e) = chat.send(conversation_id, Some(message_id), message).await {
                                 writeln!(stdout, "Error: {}", e)?;
                                 continue
                             }
@@ -322,7 +359,21 @@ async fn main() -> anyhow::Result<()> {
                                 Some("add") => ReactionState::Add,
                                 Some("remove") => ReactionState::Remove,
                                 _ => {
-                                    writeln!(stdout, "/react <add | remove> <message-id> <emoji_code>")?;
+                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    continue
+                                }
+                            };
+
+                            let conversation_id = match cmd_line.next() {
+                                Some(id) => match Uuid::from_str(id) {
+                                    Ok(uuid) => uuid,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing ID: {}", e)?;
+                                        continue
+                                    }
+                                },
+                                None => {
+                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
                                     continue
                                 }
                             };
@@ -336,7 +387,7 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                 },
                                 None => {
-                                    writeln!(stdout, "/react <add | remove> <message-id> <emoji_code>")?;
+                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
                                     continue
                                 }
                             };
@@ -344,16 +395,16 @@ async fn main() -> anyhow::Result<()> {
                             let code = match cmd_line.next() {
                                 Some(code) => code.to_string(),
                                 None => {
-                                    writeln!(stdout, "/react <add | remove> <message-id> <emoji_code>")?;
+                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
                                     continue
                                 }
                             };
 
-                            if let Err(e) = chat.react(topic, message_id, state, code).await {
+                            if let Err(e) = chat.react(conversation_id, message_id, state, code).await {
                                 writeln!(stdout, "Error: {}", e)?;
                                 continue;
                             }
-                            writeln!(stdout, "Reacted to message")?
+                            writeln!(stdout, "Reacted")?
 
                         }
                         Some("/pin") => {
@@ -425,7 +476,7 @@ async fn main() -> anyhow::Result<()> {
             _ = interval.tick() => {
                 if let Ok(list) = chat.list_conversations().await {
                     if !list.is_empty() && convo_list != list {
-                        topic = *(list.last().unwrap());
+                        topic = list.last().unwrap().id();
                         convo_list = list;
                         writeln!(stdout, "Set conversation to {}", topic)?;
                     }
