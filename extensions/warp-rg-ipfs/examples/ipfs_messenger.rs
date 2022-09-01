@@ -11,7 +11,7 @@ use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState};
+use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, ConversationType};
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::config::{Autonat, Dcutr, IpfsSetting, RelayClient, StoreSetting};
@@ -177,7 +177,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            topic = id;
+                            topic = id.id();
                             writeln!(stdout, "Conversation created")?;
                         },
                         Some("/remove-conversation") => {
@@ -208,10 +208,18 @@ async fn main() -> anyhow::Result<()> {
                         }
                         Some("/list-conversations") => {
                             let mut table = Table::new();
-                            table.set_header(vec!["Conversation ID"]);
+                            table.set_header(vec!["ID", "Recipients"]);
                             let list = chat.list_conversations().await?;
-                            for id in list.iter() {
-                                table.add_row(vec![id.to_string()]);
+                            for convo in list.iter() {
+                                let mut recipients = vec![];
+                                for recipient in convo.recipients() {
+                                    if convo.conversation_type() == ConversationType::Direct && recipient == identity.did_key() {
+                                        continue
+                                    }
+                                    let username = get_username(new_account.clone(), recipient.clone()).unwrap_or_else(|_|recipient.to_string());
+                                    recipients.push(username);
+                                }
+                                table.add_row(vec![convo.id().to_string(), recipients.join("/").to_string()]);
                             }
                             writeln!(stdout, "{}", table)?;
                         },
@@ -418,7 +426,7 @@ async fn main() -> anyhow::Result<()> {
             _ = interval.tick() => {
                 if let Ok(list) = chat.list_conversations().await {
                     if !list.is_empty() && convo_list != list {
-                        topic = *(list.last().unwrap());
+                        topic = list.last().unwrap().id();
                         convo_list = list;
                         writeln!(stdout, "Set conversation to {}", topic)?;
                     }
