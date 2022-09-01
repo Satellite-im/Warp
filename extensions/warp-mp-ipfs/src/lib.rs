@@ -48,10 +48,12 @@ pub type Persistent = Types;
 
 pub struct IpfsIdentity<T: IpfsTypes> {
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
+    config: MpIpfsConfig,
     hooks: Option<Hooks>,
-    ipfs: Ipfs<T>,
-    friend_store: FriendsStore<T>,
-    identity_store: IdentityStore<T>,
+    ipfs: Option<Ipfs<T>>,
+    tesseract: Tesseract,
+    friend_store: Option<FriendsStore<T>>,
+    identity_store: Option<IdentityStore<T>>,
 }
 
 pub async fn ipfs_identity_persistent(
@@ -83,25 +85,46 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         tesseract: Tesseract,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity<T>> {
-        let keypair = match tesseract.retrieve("keypair") {
-            Ok(keypair) => {
-                let kp = bs58::decode(keypair).into_vec()?;
-                let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-                let secret =
-                    libp2p::identity::ed25519::SecretKey::from_bytes(id_kp.secret.to_bytes())?;
-                Keypair::Ed25519(secret.into())
-            }
-            Err(_) => {
-                let mut tesseract = tesseract.clone();
-                if let Keypair::Ed25519(kp) = Keypair::generate_ed25519() {
-                    let encoded_kp = bs58::encode(&kp.encode()).into_string();
-                    tesseract.set("keypair", &encoded_kp)?;
-                    Keypair::Ed25519(kp)
-                } else {
-                    anyhow::bail!("Unreachable")
-                }
-            }
+        let hooks = None;
+
+        let mut identity = IpfsIdentity {
+            cache,
+            config,
+            hooks,
+            tesseract,
+            ipfs: None,
+            friend_store: None,
+            identity_store: None,
         };
+
+        if let Err(_e) = identity.initialize_store(false).await {}
+
+        Ok(identity)
+    }
+
+    async fn initialize_store(&mut self, init: bool) -> anyhow::Result<()> {
+        if init && self.identity_store.is_some() && self.friend_store.is_some() {
+            anyhow::bail!(Error::IdentityExist)
+        }
+
+        let mut tesseract = self.tesseract.clone();
+        let keypair = if init {
+            if let Keypair::Ed25519(kp) = Keypair::generate_ed25519() {
+                let encoded_kp = bs58::encode(&kp.encode()).into_string();
+                tesseract.set("keypair", &encoded_kp)?;
+                Keypair::Ed25519(kp)
+            } else {
+                anyhow::bail!("Unreachable")
+            }
+        } else {
+            let keypair = tesseract.retrieve("keypair")?;
+            let kp = bs58::decode(keypair).into_vec()?;
+            let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
+            let secret = libp2p::identity::ed25519::SecretKey::from_bytes(id_kp.secret.to_bytes())?;
+            Keypair::Ed25519(secret.into())
+        };
+
+        let config = self.config.clone();
 
         let path = config.path.clone().unwrap_or_default();
 
@@ -118,7 +141,8 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
         if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             // Create directory if it doesnt exist
-            let path = config
+            let path = self
+                .config
                 .path
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("\"path\" must be set"))?;
@@ -128,7 +152,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             }
         }
 
-        let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
+        let (ipfs, fut) = UninitializedIpfs::<T>::new(opts).start().await?;
         tokio::spawn(fut);
 
         if config.ipfs_setting.relay_client.enable {
@@ -144,36 +168,62 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             //TODO: Log
         }
 
-        let identity_store = IdentityStore::new(
-            ipfs.clone(),
-            config.path.clone(),
-            tesseract.clone(),
-            config.store_setting.discovery,
-            config.store_setting.broadcast_with_connection,
-            config.store_setting.broadcast_interval,
-        )
-        .await?;
+        self.identity_store = Some(
+            IdentityStore::new(
+                ipfs.clone(),
+                config.path.clone(),
+                tesseract.clone(),
+                config.store_setting.discovery,
+                config.store_setting.broadcast_with_connection,
+                config.store_setting.broadcast_interval,
+            )
+            .await?,
+        );
 
-        let friend_store = FriendsStore::new(
-            ipfs.clone(),
-            config.path.map(|p| p.join("friends")),
-            tesseract.clone(),
-            config.store_setting.discovery,
-            config.store_setting.broadcast_interval,
-        )
-        .await?;
+        self.friend_store = Some(
+            FriendsStore::new(
+                ipfs.clone(),
+                config.path.map(|p| p.join("friends")),
+                tesseract.clone(),
+                config.store_setting.discovery,
+                config.store_setting.broadcast_interval,
+            )
+            .await?,
+        );
+        
+        self.ipfs = Some(ipfs);
 
-        let hooks = None;
+        Ok(())
+    }
 
-        let identity = IpfsIdentity {
-            cache,
-            hooks,
-            ipfs,
-            friend_store,
-            identity_store,
-        };
+    pub fn friend_store(&self) -> Result<&FriendsStore<T>, Error> {
+        self.friend_store
+            .as_ref()
+            .ok_or(Error::MultiPassExtensionUnavailable)
+    }
 
-        Ok(identity)
+    pub fn friend_store_mut(&mut self) -> Result<&mut FriendsStore<T>, Error> {
+        self.friend_store
+            .as_mut()
+            .ok_or(Error::MultiPassExtensionUnavailable)
+    }
+
+    pub fn identity_store(&self) -> Result<&IdentityStore<T>, Error> {
+        self.identity_store
+            .as_ref()
+            .ok_or(Error::MultiPassExtensionUnavailable)
+    }
+
+    pub fn identity_store_mut(&mut self) -> Result<&mut IdentityStore<T>, Error> {
+        self.identity_store
+            .as_mut()
+            .ok_or(Error::MultiPassExtensionUnavailable)
+    }
+
+    pub fn ipfs(&self) -> Result<&Ipfs<T>, Error> {
+        self.ipfs
+            .as_ref()
+            .ok_or(Error::MultiPassExtensionUnavailable)
     }
 
     pub fn get_cache(&self) -> anyhow::Result<RwLockReadGuard<Box<dyn PocketDimension>>> {
@@ -218,7 +268,7 @@ impl<T: IpfsTypes> Extension for IpfsIdentity<T> {
 
 impl<T: IpfsTypes> SingleHandle for IpfsIdentity<T> {
     fn handle(&self) -> Result<Box<dyn Any>, Error> {
-        Ok(Box::new(self.ipfs.clone()))
+        Ok(Box::new(self.ipfs()?.clone()))
     }
 }
 
@@ -228,7 +278,9 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<DID, Error> {
-        let identity = async_block_in_place_uncheck(self.identity_store.create_identity(username))?;
+        async_block_in_place_uncheck(self.initialize_store(true))?;
+        let identity =
+            async_block_in_place_uncheck(self.identity_store_mut()?.create_identity(username))?;
 
         if let Ok(mut cache) = self.get_cache_mut() {
             let object = Sata::default().encode(
@@ -246,6 +298,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
     }
 
     fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
+        let store = self.identity_store()?;
         let idents = match id.get_inner() {
             (Some(pk), None, false) => {
                 if let Ok(cache) = self.get_cache() {
@@ -265,7 +318,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                         }
                     }
                 }
-                self.identity_store.lookup(LookupBy::DidKey(Box::new(pk)))
+                store.lookup(LookupBy::DidKey(Box::new(pk)))
             }
             (None, Some(username), false) => {
                 if let Ok(cache) = self.get_cache() {
@@ -285,11 +338,10 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                         }
                     }
                 }
-                self.identity_store.lookup(LookupBy::Username(username))
+                store.lookup(LookupBy::Username(username))
             }
             (None, None, true) => {
-                return async_block_in_place_uncheck(self.identity_store.own_identity())
-                    .map(|i| vec![i])
+                return async_block_in_place_uncheck(store.own_identity()).map(|i| vec![i])
             }
             _ => Err(Error::InvalidIdentifierCondition),
         }?;
@@ -317,6 +369,8 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
 
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
         async_block_in_place_uncheck(async {
+            let ipfs = self.ipfs()?.clone();
+            let mut store = self.identity_store()?.clone();
             let mut identity = self.get_own_identity()?;
             let old_identity = identity.clone();
             match (
@@ -340,18 +394,18 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 _ => return Err(Error::CannotUpdateIdentity),
             }
 
-            if let Ok(cid) = self.identity_store.get_cid().await {
-                if self.ipfs.is_pinned(&cid).await? {
-                    self.ipfs.remove_pin(&cid, false).await?;
+            if let Ok(cid) = store.get_cid().await {
+                if ipfs.is_pinned(&cid).await? {
+                    ipfs.remove_pin(&cid, false).await?;
                 }
             };
 
             let ipld = to_ipld(&identity).map_err(anyhow::Error::from)?;
-            let ident_cid = self.ipfs.put_dag(ipld).await?;
+            let ident_cid = ipfs.put_dag(ipld).await?;
 
-            self.ipfs.insert_pin(&ident_cid, false).await?;
+            ipfs.insert_pin(&ident_cid, false).await?;
 
-            self.identity_store.save_cid(ident_cid).await?;
+            store.save_cid(ident_cid).await?;
 
             if let Ok(mut cache) = self.get_cache_mut() {
                 let mut query = QueryBuilder::default();
@@ -380,7 +434,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 }
             }
 
-            self.identity_store.update_identity().await?;
+            store.update_identity().await?;
 
             if let Ok(hooks) = self.get_hooks() {
                 let object = DataObject::new(DataType::Accounts, identity.clone())?;
@@ -391,20 +445,24 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
     }
 
     fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<DID, Error> {
-        let kp = self.identity_store.get_raw_keypair()?.encode();
+        let store = self.identity_store()?;
+        let kp = store.get_raw_keypair()?.encode();
         let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
         let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
         Ok(did.into())
     }
 
     fn refresh_cache(&mut self) -> Result<(), Error> {
+        let store = self.identity_store_mut()?;
+        store.clear_internal_cache();
         self.get_cache_mut()?.empty(DataType::from(self.module()))
     }
 }
 
 impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.send_request(pubkey))?;
+        let store = self.friend_store_mut()?;
+        async_block_in_place_uncheck(store.send_request(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if let Some(request) = self
                 .list_outgoing_request()?
@@ -421,7 +479,8 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 
     fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.accept_request(pubkey))?;
+        let store = self.friend_store_mut()?;
+        async_block_in_place_uncheck(store.accept_request(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if let Some(key) = self
                 .list_friends()?
@@ -438,7 +497,8 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 
     fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.reject_request(pubkey))?;
+        let store = self.friend_store_mut()?;
+        async_block_in_place_uncheck(store.reject_request(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if !self
                 .list_all_request()?
@@ -453,7 +513,8 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 
     fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.close_request(pubkey))?;
+        let store = self.friend_store_mut()?;
+        async_block_in_place_uncheck(store.close_request(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if !self
                 .list_all_request()?
@@ -468,19 +529,23 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 
     fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        Ok(self.friend_store.list_incoming_request())
+        let store = self.friend_store()?;
+        Ok(store.list_incoming_request())
     }
 
     fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        Ok(self.friend_store.list_outgoing_request())
+        let store = self.friend_store()?;
+        Ok(store.list_outgoing_request())
     }
 
     fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        Ok(self.friend_store.list_all_request())
+        let store = self.friend_store()?;
+        Ok(store.list_all_request())
     }
 
     fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.remove_friend(pubkey, true, true))?;
+        let store = self.friend_store_mut()?;
+        async_block_in_place_uncheck(store.remove_friend(pubkey, true, true))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
@@ -491,7 +556,8 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 
     fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.block(pubkey))?;
+        let store = self.friend_store_mut()?;
+        async_block_in_place_uncheck(store.block(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
@@ -502,7 +568,8 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 
     fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.unblock(pubkey))?;
+        let store = self.friend_store_mut()?;
+        async_block_in_place_uncheck(store.unblock(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
@@ -513,15 +580,18 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 
     fn block_list(&self) -> Result<Vec<DID>, Error> {
-        async_block_in_place_uncheck(self.friend_store.block_list())
+        let store = self.friend_store()?;
+        async_block_in_place_uncheck(store.block_list())
     }
 
     fn list_friends(&self) -> Result<Vec<DID>, Error> {
-        async_block_in_place_uncheck(self.friend_store.friends_list())
+        let store = self.friend_store()?;
+        async_block_in_place_uncheck(store.friends_list())
     }
 
     fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
-        async_block_in_place_uncheck(self.friend_store.is_friend(pubkey))
+        let store = self.friend_store()?;
+        async_block_in_place_uncheck(store.is_friend(pubkey))
     }
 }
 
