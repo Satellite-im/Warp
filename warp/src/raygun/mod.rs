@@ -455,7 +455,7 @@ pub mod ffi {
         ctx: *mut RayGunAdapter,
         convo_id: *const c_char,
         message_id: *const c_char,
-        messages: *const *const c_char,
+        messages: *const c_char,
         lines: usize,
     ) -> FFIResult_Null {
         if ctx.is_null() {
@@ -496,15 +496,15 @@ pub mod ffi {
             true => None,
         };
 
-        let messages = match pointer_to_vec(messages, lines) {
-            Ok(messages) => messages,
-            Err(e) => return FFIResult_Null::err(Error::Any(anyhow::anyhow!(e))),
-        };
+        let c_str: &str = &CStr::from_ptr(messages).to_string_lossy();
+        let str_buffer: String = c_str.to_owned();
+
+        let messages_vec = str_buffer.split("\n").map(&str::to_string).collect::<Vec<String>>();
 
         let adapter = &mut *ctx;
         let rt = runtime_handle();
 
-        rt.block_on(async { adapter.write_guard().send(convo_id, msg_id, messages).await })
+        rt.block_on(async { adapter.write_guard().send(convo_id, msg_id, messages_vec).await })
             .into()
     }
 
