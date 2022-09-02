@@ -207,7 +207,7 @@ impl DirectConversation {
     ) {
         let mut convo = self.clone();
         let filter = filter.clone();
-        let task = tokio::spawn(async move {
+        let task = warp::async_spawn(async move {
             futures::pin_mut!(stream);
 
             while let Some(stream) = stream.next().await {
@@ -393,7 +393,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
                                                 if let Some(index) = index {
                                                     let conversation = store.direct_conversation.write().remove(index);
-                                                    
+
                                                     conversation.end_task();
 
                                                     let topic = conversation.topic();
