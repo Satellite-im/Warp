@@ -385,15 +385,15 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                     continue;
                                                 }
 
-                                                if let Some(conversation) = store
+                                                let index = store
                                                     .direct_conversation
                                                     .read()
                                                     .iter()
-                                                    .position(|convo| convo.id() == id)
-                                                    .map(|index| {
-                                                        store.direct_conversation.write().remove(index)
-                                                    })
-                                                {
+                                                    .position(|convo| convo.id() == id);
+
+                                                if let Some(index) = index {
+                                                    let conversation = store.direct_conversation.write().remove(index);
+                                                    
                                                     conversation.end_task();
 
                                                     let topic = conversation.topic();
