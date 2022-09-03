@@ -294,7 +294,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub fn lookup(&self, lookup: LookupBy) -> Result<Vec<Identity>, Error> {
-        // Check own identity just in case since we dont store this in the cache
         if let Some(ident) = self.identity.read().clone() {
             match lookup {
                 LookupBy::DidKey(pubkey) if ident.did_key() == *pubkey => return Ok(vec![ident]),
