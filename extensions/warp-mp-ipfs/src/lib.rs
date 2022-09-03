@@ -315,6 +315,12 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<DID, Error> {
+        if let Some(phrase) = passphrase {
+            let mut tesseract = self.tesseract.clone();
+            if !tesseract.exist("keypair") {
+                warp::crypto::keypair::mnemonic_into_tesseract(&mut tesseract, phrase, None)?;
+            }
+        }
         async_block_in_place_uncheck(self.initialize_store(true))?;
         let identity =
             async_block_in_place_uncheck(self.identity_store()?.create_identity(username))?;
