@@ -118,7 +118,9 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         if !identity.tesseract.is_unlock() {
             let mut inner = identity.clone();
             tokio::spawn(async move {
-                while !inner.tesseract.is_unlock() {}
+                while !inner.tesseract.is_unlock() {
+                    tokio::time::sleep(Duration::from_nanos(50)).await
+                }
                 if let Err(_e) = inner.initialize_store(false).await {}
             });
         } else if let Err(_e) = identity.initialize_store(false).await {
@@ -304,7 +306,7 @@ impl<T: IpfsTypes> Extension for IpfsIdentity<T> {
 
 impl<T: IpfsTypes> SingleHandle for IpfsIdentity<T> {
     fn handle(&self) -> Result<Box<dyn Any>, Error> {
-        Ok(Box::new(self.ipfs()?))
+        self.ipfs().map(|ipfs| Box::new(ipfs) as Box<dyn Any>)
     }
 }
 
