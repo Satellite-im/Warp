@@ -146,7 +146,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                     anyhow::bail!("Unreachable")
                 }
             }
-            (false, true) => {
+            (false, true) | (true, true) => {
                 let keypair = tesseract.retrieve("keypair")?;
                 let kp = bs58::decode(keypair).into_vec()?;
                 let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
@@ -154,7 +154,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                     libp2p::identity::ed25519::SecretKey::from_bytes(id_kp.secret.to_bytes())?;
                 Keypair::Ed25519(secret.into())
             }
-            e => anyhow::bail!("Unable to initalize store: {:?}", e),
+            _ => anyhow::bail!("Unable to initalize store"),
         };
 
         let config = self.config.clone();
@@ -314,6 +314,10 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<DID, Error> {
+        if self.is_store_initialized() {
+            return Err(Error::IdentityExist);
+        }
+
         if let Some(phrase) = passphrase {
             let mut tesseract = self.tesseract.clone();
             if !tesseract.exist("keypair") {
