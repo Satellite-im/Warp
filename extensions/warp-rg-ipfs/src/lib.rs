@@ -45,11 +45,11 @@ pub type Temporary = TestTypes;
 pub type Persistent = Types;
 
 pub struct IpfsMessaging<T: IpfsTypes> {
-    pub account: Arc<RwLock<Box<dyn MultiPass>>>,
-    pub cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-    pub ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
-    pub direct_store: Arc<RwLock<Option<DirectMessageStore<T>>>>,
-    pub config: Option<RgIpfsConfig>,
+    account: Arc<RwLock<Box<dyn MultiPass>>>,
+    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
+    ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
+    direct_store: Arc<RwLock<Option<DirectMessageStore<T>>>>,
+    config: Option<RgIpfsConfig>,
     initialize: Arc<AtomicBool>,
     //TODO: GroupManager
     //      * Create, Join, and Leave GroupChats
