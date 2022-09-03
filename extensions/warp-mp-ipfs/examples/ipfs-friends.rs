@@ -5,8 +5,8 @@ use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity};
 use warp::multipass::MultiPass;
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::config::{MpIpfsConfig, IpfsSetting, StoreSetting};
-use warp_mp_ipfs::{ipfs_identity_temporary};
+use warp_mp_ipfs::config::MpIpfsConfig;
+use warp_mp_ipfs::ipfs_identity_temporary;
 
 async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
     let mut tesseract = Tesseract::default();
@@ -15,18 +15,7 @@ async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
 
     //Note: This uses mdns for this example. This example will not work if the system does not support mdns. This will change in the future
     //      The internal store will broadcast at 5ms but ideally it would want to be set to 100ms
-    let config = MpIpfsConfig {
-        store_setting: StoreSetting {
-            broadcast_interval: 5,
-            broadcast_with_connection: false,
-            discovery: false,
-        },
-        ipfs_setting: IpfsSetting {
-            mdns: warp_mp_ipfs::config::Mdns { enable: true },
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let config = MpIpfsConfig::development();
     let mut account = ipfs_identity_temporary(Some(config), tesseract, None).await?;
     account.create_identity(username, None)?;
     Ok(Box::new(account))
@@ -46,17 +35,9 @@ async fn main() -> anyhow::Result<()> {
     let ident_a = account_a.get_own_identity()?;
     let ident_b = account_b.get_own_identity()?;
 
-    println!(
-        "{} with {}",
-        username(&ident_a),
-        ident_a.did_key()
-    );
+    println!("{} with {}", username(&ident_a), ident_a.did_key());
 
-    println!(
-        "{} with {}",
-        username(&ident_b),
-        ident_b.did_key()
-    );
+    println!("{} with {}", username(&ident_b), ident_b.did_key());
     println!();
 
     account_a.send_request(&ident_b.did_key())?;
@@ -66,8 +47,12 @@ async fn main() -> anyhow::Result<()> {
     println!("{} Outgoing request:", username(&ident_a));
 
     for outgoing in account_a.list_outgoing_request()? {
-        let ident_from = account_a.get_identity(Identifier::from(outgoing.from())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
-        let ident_to = account_a.get_identity(Identifier::from(outgoing.to())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
+        let ident_from = account_a
+            .get_identity(Identifier::from(outgoing.from()))
+            .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
+        let ident_to = account_a
+            .get_identity(Identifier::from(outgoing.to()))
+            .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
         println!("From: {}", username(&ident_from));
         println!("To: {}", username(&ident_to));
         println!("Status: {:?}", outgoing.status());
@@ -76,8 +61,12 @@ async fn main() -> anyhow::Result<()> {
 
     println!("{} Incoming request:", username(&ident_b));
     for incoming in account_b.list_incoming_request()? {
-        let ident_from = account_b.get_identity(Identifier::from(incoming.from())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
-        let ident_to = account_b.get_identity(Identifier::from(incoming.to())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
+        let ident_from = account_b
+            .get_identity(Identifier::from(incoming.from()))
+            .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
+        let ident_to = account_b
+            .get_identity(Identifier::from(incoming.to()))
+            .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
         println!("From: {}", username(&ident_from));
         println!("To: {}", username(&ident_to));
         println!("Status: {:?}", incoming.status());
@@ -103,23 +92,21 @@ async fn main() -> anyhow::Result<()> {
 
             println!("{} Friends:", username(&ident_a));
             for friend in account_a.list_friends()? {
-                let friend = account_a.get_identity(Identifier::did_key(friend)).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
+                let friend = account_a
+                    .get_identity(Identifier::did_key(friend))
+                    .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
                 println!("Username: {}", username(&friend));
-                println!(
-                    "Public Key: {}",
-                    friend.did_key()
-                );
+                println!("Public Key: {}", friend.did_key());
                 println!();
             }
 
             println!("{} Friends:", username(&ident_b));
             for friend in account_b.list_friends()? {
-                let friend = account_b.get_identity(Identifier::did_key(friend)).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
+                let friend = account_b
+                    .get_identity(Identifier::did_key(friend))
+                    .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
                 println!("Username: {}", username(&friend));
-                println!(
-                    "Public Key: {}",
-                    friend.did_key()
-                );
+                println!("Public Key: {}", friend.did_key());
                 println!();
             }
 
@@ -157,8 +144,12 @@ async fn main() -> anyhow::Result<()> {
     let requests = account_a.list_all_request()?;
     if !requests.is_empty() {
         for request in requests {
-            let ident_from = account_a.get_identity(Identifier::from(request.from())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
-            let ident_to = account_a.get_identity(Identifier::from(request.to())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
+            let ident_from = account_a
+                .get_identity(Identifier::from(request.from()))
+                .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
+            let ident_to = account_a
+                .get_identity(Identifier::from(request.to()))
+                .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
             println!("From: {}", username(&ident_from));
             println!("To: {}", username(&ident_to));
             println!("Status: {:?}", request.status());

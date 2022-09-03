@@ -37,8 +37,6 @@ pub struct IdentityStore<T: IpfsTypes> {
 
     start_event: Arc<AtomicBool>,
 
-    broadcast_with_connection: Arc<AtomicBool>,
-
     end_event: Arc<AtomicBool>,
 
     tesseract: Tesseract,
@@ -53,17 +51,9 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
             identity: self.identity.clone(),
             cache: self.cache.clone(),
             start_event: self.start_event.clone(),
-            broadcast_with_connection: self.broadcast_with_connection.clone(),
             end_event: self.end_event.clone(),
             tesseract: self.tesseract.clone(),
         }
-    }
-}
-
-impl<T: IpfsTypes> Drop for IdentityStore<T> {
-    fn drop(&mut self) {
-        self.disable_event();
-        self.end_event();
     }
 }
 
@@ -80,7 +70,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
         path: Option<PathBuf>,
         tesseract: Tesseract,
         discovery: bool,
-        broadcast_with_connection: bool,
         interval: u64,
     ) -> Result<Self, Error> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
@@ -97,7 +86,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let identity = Arc::new(Default::default());
         let start_event = Arc::new(Default::default());
         let end_event = Arc::new(Default::default());
-        let broadcast_with_connection = Arc::new(AtomicBool::new(broadcast_with_connection));
         let ident_cid = Arc::new(Default::default());
         let store = Self {
             ipfs,
@@ -106,7 +94,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
             cache,
             identity,
             start_event,
-            broadcast_with_connection,
             end_event,
             tesseract,
         };
@@ -488,9 +475,5 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     pub fn clear_internal_cache(&mut self) {
         self.cache.write().clear();
-    }
-
-    pub fn set_broadcast_with_connection(&mut self, val: bool) {
-        self.broadcast_with_connection.store(val, Ordering::SeqCst)
     }
 }
