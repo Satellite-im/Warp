@@ -346,8 +346,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 tokio::select! {
                     message = stream.next() => {
                         if let Some(message) = message {
-                            if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
-                                if let Ok(data) = data.decrypt::<Vec<u8>>(did.as_ref()) {
+                            if let Ok(sata) = serde_json::from_slice::<Sata>(&message.data) {
+                                if let Ok(data) = sata.decrypt::<Vec<u8>>(did.as_ref()) {
                                     if let Ok(events) = serde_json::from_slice::<ConversationEvents>(&data) {
                                         match events {
                                             ConversationEvents::NewConversation(id, peer) => {
@@ -374,7 +374,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                 convo.start_task(store.did.clone(), &store.spam_filter, stream);
                                                 if let Some(path) = store.path.as_ref() {
                                                     convo.set_path(path);
-                                                    if let Err(_e) = convo.to_file(&*did).await {
+                                                    if let Err(_e) = convo.to_file(did).await {
                                                         //TODO: Log
                                                     }
                                                 }
@@ -384,6 +384,16 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                 if !store.exist(id) {
                                                     continue;
                                                 }
+
+                                                let sender = match sata.sender() {
+                                                    Some(sender) => DID::from(sender),
+                                                    None => continue
+                                                };
+
+                                                match store.get_conversation(id) {
+                                                    Ok(conversation) if conversation.recipients().contains(&sender) => {},
+                                                    _ => continue
+                                                };
 
                                                 let index = store
                                                     .direct_conversation
