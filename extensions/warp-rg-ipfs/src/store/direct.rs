@@ -502,7 +502,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let own_did = &*self.did;
         for convo in &*self.direct_conversation.read() {
             if convo.recipients().contains(did_key) && convo.recipients().contains(own_did) {
-                return Err(Error::ConversationExist { conversation: convo.conversation()});
+                return Err(Error::ConversationExist {
+                    conversation: convo.conversation(),
+                });
             }
         }
 
@@ -521,7 +523,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation.start_task(self.did.clone(), &self.spam_filter, stream);
         if let Some(path) = self.path.as_ref() {
             conversation.set_path(path);
-            conversation.to_file(own_did).await?;
+            warp::async_block_in_place_uncheck(conversation.to_file(own_did))?;
         }
 
         let raw_convo = conversation.conversation();
@@ -771,7 +773,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::New(message);
 
         direct_message_event(&mut *conversation.messages_mut(), &event, &self.spam_filter)?;
-        conversation.to_file(own_did).await?;
+        warp::async_block_in_place_uncheck(conversation.to_file(own_did))?;
 
         self.send_event(conversation.id(), event).await
     }
@@ -791,8 +793,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::Edit(conversation.id(), message_id, messages);
 
         direct_message_event(&mut *conversation.messages_mut(), &event, &self.spam_filter)?;
-        conversation.to_file(&*self.did).await?;
-
+        warp::async_block_in_place_uncheck(conversation.to_file(&*self.did))?;
         self.send_event(conversation.id(), event).await
     }
 
@@ -818,7 +819,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let event = MessagingEvents::New(message);
         direct_message_event(&mut *conversation.messages_mut(), &event, &self.spam_filter)?;
-        conversation.to_file(own_did).await?;
+        warp::async_block_in_place_uncheck(conversation.to_file(own_did))?;
 
         self.send_event(conversation.id(), event).await
     }
@@ -833,7 +834,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let event = MessagingEvents::Delete(conversation.id(), message_id);
         direct_message_event(&mut *conversation.messages_mut(), &event, &self.spam_filter)?;
-        conversation.to_file(&*self.did).await?;
+        warp::async_block_in_place_uncheck(conversation.to_file(&*self.did))?;
 
         if broadcast {
             self.send_event(conversation.id(), event).await?;
@@ -853,7 +854,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let event = MessagingEvents::Pin(conversation.id(), own_did.clone(), message_id, state);
         direct_message_event(&mut *conversation.messages_mut(), &event, &self.spam_filter)?;
-        conversation.to_file(own_did).await?;
+        warp::async_block_in_place_uncheck(conversation.to_file(own_did))?;
 
         self.send_event(conversation.id(), event).await
     }
@@ -882,7 +883,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             MessagingEvents::React(conversation.id(), own_did.clone(), message_id, state, emoji);
 
         direct_message_event(&mut *conversation.messages_mut(), &event, &self.spam_filter)?;
-        conversation.to_file(own_did).await?;
+        warp::async_block_in_place_uncheck(conversation.to_file(own_did))?;
         self.send_event(conversation.id(), event).await
     }
 
