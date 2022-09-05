@@ -18,11 +18,9 @@ pub use x25519_dalek;
 pub use zeroize;
 
 pub mod cipher;
-pub mod exchange;
 pub mod hash;
 pub mod keypair;
 pub mod multihash;
-pub mod signature;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use warp_derive::{FFIFree, FFIVec};
@@ -43,7 +41,7 @@ impl AsRef<DIDKey> for DID {
 
 impl std::fmt::Debug for DID {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("DID").field(&self.0.fingerprint()).finish()
+        f.debug_tuple("DID").field(&self.fingerprint()).finish()
     }
 }
 
@@ -51,7 +49,7 @@ impl Eq for DID {}
 
 impl PartialEq for DID {
     fn eq(&self, other: &Self) -> bool {
-        self.0.fingerprint() == other.0.fingerprint()
+        self.fingerprint() == other.fingerprint()
     }
 }
 
@@ -121,7 +119,7 @@ impl<'d> Deserialize<'d> for DID {
 
 impl Display for DID {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "did:key:{}", self.0.fingerprint())
+        write!(f, "did:key:{}", self.fingerprint())
     }
 }
 
