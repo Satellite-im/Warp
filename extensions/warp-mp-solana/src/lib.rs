@@ -381,7 +381,7 @@ impl<T: IpfsTypes> MultiPass for SolanaAccount<T> {
                     if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
                     {
                         let mut items = vec![];
-                        for object in list { 
+                        for object in list {
                             if let Ok(ident) = object.decode::<Identity>().map_err(Error::from) {
                                 items.push(ident);
                             }
@@ -423,13 +423,15 @@ impl<T: IpfsTypes> MultiPass for SolanaAccount<T> {
                         //get last
                         if !list.is_empty() {
                             let obj = list.last().unwrap();
-                            return obj.decode::<Identity>().map_err(Error::from).map(|i| vec![i]);
+                            return obj
+                                .decode::<Identity>()
+                                .map_err(Error::from)
+                                .map(|i| vec![i]);
                         }
                     }
                 }
-                let did: DIDKey = pkey.try_into()?;
 
-                vec![user_to_identity(&helper, Some(&did.public_key_bytes()))?]
+                vec![user_to_identity(&helper, Some(&pkey.public_key_bytes()))?]
             }
             (None, None, true) => vec![user_to_identity(&helper, None)?],
             _ => return Err(Error::InvalidIdentifierCondition),

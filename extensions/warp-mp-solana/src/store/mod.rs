@@ -14,10 +14,8 @@ use warp::{
 pub const FRIENDS_BROADCAST: &str = "friends/broadcast";
 
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<libp2p::identity::PublicKey> {
-    let did = public_key.clone();
-    let did: DIDKey = did.try_into()?;
     let pk = libp2p::identity::PublicKey::Ed25519(libp2p::identity::ed25519::PublicKey::decode(
-        &did.public_key_bytes(),
+        &public_key.public_key_bytes(),
     )?);
     Ok(pk)
 }

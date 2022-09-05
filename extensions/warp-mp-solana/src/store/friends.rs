@@ -847,9 +847,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
             self.broadcast_request.write().push(request.clone());
         } else {
             let mut data = Sata::default();
-            data.add_recipient(&request.to().try_into()?).map_err(anyhow::Error::from)?;
+            data.add_recipient(&request.to()).map_err(anyhow::Error::from)?;
             let kp = did_keypair(&self.tesseract)?;
-            let payload = data.encrypt(IpldCodec::DagJson, &kp.try_into()?, Kind::Static, request.clone()).map_err(anyhow::Error::from)?;
+            let payload = data.encrypt(IpldCodec::DagJson, &kp, Kind::Static, request.clone()).map_err(anyhow::Error::from)?;
             let bytes = serde_json::to_vec(&payload)?;
             self.ipfs
                 .pubsub_publish(FRIENDS_BROADCAST.into(), bytes)

@@ -974,7 +974,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         }
 
         let mut data = Sata::default();
-        data.add_recipient(&request.to().try_into()?)
+        data.add_recipient(&request.to())
             .map_err(anyhow::Error::from)?;
         let kp = &*self.did_key;
         let payload = data

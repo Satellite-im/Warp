@@ -153,13 +153,6 @@ impl From<ed25519_dalek::SecretKey> for DID {
     }
 }
 
-impl TryFrom<DID> for DIDKey {
-    type Error = Error;
-    fn try_from(value: DID) -> Result<Self, Self::Error> {
-        Ok(value.0)
-    }
-}
-
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn generate(limit: usize) -> Vec<u8> {
     let mut buf = vec![0u8; limit];
