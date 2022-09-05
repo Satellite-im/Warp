@@ -93,6 +93,13 @@ impl Default for DID {
     }
 }
 
+impl core::ops::Deref for DID {
+    type Target = DIDKey;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl Serialize for DID {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
