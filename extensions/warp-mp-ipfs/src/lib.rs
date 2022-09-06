@@ -280,9 +280,9 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         Ok(hooks)
     }
 
-    fn is_store_initialized(&self) -> bool {
+    async fn is_store_initialized(&self) -> bool {
         if !self.initialized.load(Ordering::SeqCst) {
-            async_block_in_place_uncheck(tokio::time::sleep(Duration::from_millis(100)));
+            tokio::time::sleep(Duration::from_millis(100)).await;
             if !self.initialized.load(Ordering::SeqCst) {
                 return false;
             }
@@ -316,7 +316,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<DID, Error> {
-        if self.is_store_initialized() {
+        if async_block_in_place_uncheck(self.is_store_initialized()) {
             return Err(Error::IdentityExist);
         }
 
@@ -346,11 +346,8 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
     }
 
     fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
-        if !self.is_store_initialized() {
-            async_block_in_place_uncheck(tokio::time::sleep(Duration::from_millis(100)));
-            if !self.is_store_initialized() {
-                return Err(Error::MultiPassExtensionUnavailable);
-            }
+        if !async_block_in_place_uncheck(self.is_store_initialized()) {
+            return Err(Error::MultiPassExtensionUnavailable);
         }
         let store = self.identity_store()?;
         let idents = match id.get_inner() {
