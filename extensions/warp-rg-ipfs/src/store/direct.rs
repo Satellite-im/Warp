@@ -957,7 +957,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         self.queue.write().push(queue);
         if let Some(path) = self.path.as_ref() {
             let bytes = serde_json::to_vec(&*self.queue.read())?;
-            tokio::fs::write(path.join("queue"), bytes).await?;
+            warp::async_block_in_place_uncheck(tokio::fs::write(path.join("queue"), bytes))?;
         }
         Ok(())
     }
