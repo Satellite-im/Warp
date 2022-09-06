@@ -77,7 +77,6 @@ pub struct IpfsSetting {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
     pub broadcast_interval: u64,
-    pub broadcast_with_connection: bool,
     pub discovery: bool,
 }
 

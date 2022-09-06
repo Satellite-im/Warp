@@ -14,7 +14,10 @@ use libp2p::identity;
 use std::any::Any;
 use std::ops::Deref;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 use store::direct::DirectMessageStore;
 #[allow(unused_imports)]
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -42,15 +45,30 @@ pub type Temporary = TestTypes;
 pub type Persistent = Types;
 
 pub struct IpfsMessaging<T: IpfsTypes> {
-    pub account: Arc<RwLock<Box<dyn MultiPass>>>,
-    pub cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-    pub ipfs: Ipfs<T>,
-    pub direct_store: DirectMessageStore<T>,
+    account: Arc<RwLock<Box<dyn MultiPass>>>,
+    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
+    ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
+    direct_store: Arc<RwLock<Option<DirectMessageStore<T>>>>,
+    config: Option<RgIpfsConfig>,
+    initialize: Arc<AtomicBool>,
     //TODO: GroupManager
     //      * Create, Join, and Leave GroupChats
     //      * Send message
     //      * Assign permissions to peers
     //      * TBD
+}
+
+impl<T: IpfsTypes> Clone for IpfsMessaging<T> {
+    fn clone(&self) -> Self {
+        Self {
+            account: self.account.clone(),
+            cache: self.cache.clone(),
+            ipfs: self.ipfs.clone(),
+            direct_store: self.direct_store.clone(),
+            config: self.config.clone(),
+            initialize: self.initialize.clone(),
+        }
+    }
 }
 
 impl<T: IpfsTypes> IpfsMessaging<T> {
@@ -59,8 +77,34 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         account: Arc<RwLock<Box<dyn MultiPass>>>,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
-        let config = config.clone().unwrap_or_default();
-        let ipfs_handle = match account.read().handle() {
+        let mut messaging = IpfsMessaging {
+            account,
+            config,
+            cache,
+            ipfs: Default::default(),
+            direct_store: Default::default(),
+            initialize: Default::default(),
+        };
+
+        if messaging.account.read().get_own_identity().is_err() {
+            let mut messaging = messaging.clone();
+            tokio::spawn(async move {
+                while messaging.account.read().get_own_identity().is_err() {
+                    tokio::time::sleep(Duration::from_millis(100)).await
+                }
+                if let Err(_e) = messaging.initialize().await {}
+            });
+        } else {
+            messaging.initialize().await?;
+        }
+
+        Ok(messaging)
+    }
+
+    async fn initialize(&mut self) -> anyhow::Result<()> {
+        let config = self.config.clone().unwrap_or_default();
+
+        let ipfs_handle = match self.account.read().handle() {
             Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
             _ => None,
         };
@@ -69,7 +113,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             Some(ipfs) => ipfs,
             None => {
                 let keypair = {
-                    let prikey = account.read().decrypt_private_key(None)?;
+                    let prikey = self.account.read().decrypt_private_key(None)?;
                     let mut sec_key = prikey.as_ref().private_key_bytes();
                     let id_secret = identity::ed25519::SecretKey::from_bytes(&mut sec_key)?;
                     Keypair::Ed25519(id_secret.into())
@@ -105,23 +149,23 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             }
         };
 
-        let direct_store = DirectMessageStore::new(
-            ipfs.clone(),
-            config.path.map(|p| p.join("messages")),
-            account.clone(),
-            config.store_setting.discovery,
-            config.store_setting.broadcast_interval,
-            config.store_setting.check_spam,
-        )
-        .await?;
+        *self.direct_store.write() = Some(
+            DirectMessageStore::new(
+                ipfs.clone(),
+                config.path.map(|p| p.join("messages")),
+                self.account.clone(),
+                config.store_setting.discovery,
+                config.store_setting.broadcast_interval,
+                config.store_setting.check_spam,
+            )
+            .await?,
+        );
 
-        let messaging = IpfsMessaging {
-            account,
-            cache,
-            ipfs,
-            direct_store,
-        };
-        Ok(messaging)
+        *self.ipfs.write() = Some(ipfs);
+
+        self.initialize.store(true, Ordering::SeqCst);
+
+        Ok(())
     }
 
     pub fn get_cache(&self) -> anyhow::Result<RwLockReadGuard<Box<dyn PocketDimension>>> {
@@ -142,6 +186,13 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
 
         let inner = cache.write();
         Ok(inner)
+    }
+
+    pub fn messaging_store(&self) -> std::result::Result<DirectMessageStore<T>, Error> {
+        self.direct_store
+            .read()
+            .clone()
+            .ok_or(Error::RayGunExtensionUnavailable)
     }
 }
 
@@ -169,15 +220,15 @@ impl<T: IpfsTypes> SingleHandle for IpfsMessaging<T> {
 #[async_trait::async_trait]
 impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
     async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation> {
-        self.direct_store.create_conversation(did_key).await
+        self.messaging_store()?.create_conversation(did_key).await
     }
 
     async fn list_conversations(&self) -> Result<Vec<Conversation>> {
-        Ok(self.direct_store.list_conversations())
+        Ok(self.messaging_store()?.list_conversations())
     }
 
     async fn get_messages(&self, conversation_id: Uuid, _: MessageOptions) -> Result<Vec<Message>> {
-        self.direct_store
+        self.messaging_store()?
             .get_messages(conversation_id, None)
             .await
             .map_err(Error::from)
@@ -189,14 +240,13 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         message_id: Option<Uuid>,
         value: Vec<String>,
     ) -> Result<()> {
+        let mut store = self.messaging_store()?;
         match message_id {
-            Some(id) => self
-                .direct_store
+            Some(id) => store
                 .edit_message(conversation_id, id, value)
                 .await
                 .map_err(Error::from),
-            None => self
-                .direct_store
+            None => store
                 .send_message(conversation_id, value)
                 .await
                 .map_err(Error::from),
@@ -204,14 +254,13 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
     }
 
     async fn delete(&mut self, conversation_id: Uuid, message_id: Option<Uuid>) -> Result<()> {
+        let mut store = self.messaging_store()?;
         match message_id {
-            Some(id) => self
-                .direct_store
+            Some(id) => store
                 .delete_message(conversation_id, id, true)
                 .await
                 .map_err(Error::from),
-            None => self
-                .direct_store
+            None => store
                 .delete_conversation(conversation_id, true)
                 .await
                 .map(|_| ())
@@ -226,7 +275,7 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         state: ReactionState,
         emoji: String,
     ) -> Result<()> {
-        self.direct_store
+        self.messaging_store()?
             .react(conversation_id, message_id, state, emoji)
             .await
             .map_err(Error::from)
@@ -238,7 +287,7 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         message_id: Uuid,
         state: PinState,
     ) -> Result<()> {
-        self.direct_store
+        self.messaging_store()?
             .pin_message(conversation_id, message_id, state)
             .await
             .map_err(Error::from)
@@ -250,7 +299,7 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         message_id: Uuid,
         value: Vec<String>,
     ) -> Result<()> {
-        self.direct_store
+        self.messaging_store()?
             .reply_message(conversation_id, message_id, value)
             .await
             .map_err(Error::from)
@@ -262,7 +311,7 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         message_id: Uuid,
         state: EmbedState,
     ) -> Result<()> {
-        self.direct_store
+        self.messaging_store()?
             .embeds(conversation_id, message_id, state)
             .await
             .map_err(Error::from)
