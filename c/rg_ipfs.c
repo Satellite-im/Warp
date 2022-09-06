@@ -19,7 +19,6 @@ MultiPassAdapter *new_account(const char *pass)
 {
 
     Tesseract *tesseract = tesseract_new();
-    ;
 
     FFIResult_Null result_unlock_t = tesseract_unlock(tesseract, pass);
     if (result_unlock_t.error)
