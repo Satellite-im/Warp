@@ -316,106 +316,112 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<DID, Error> {
-        if async_block_in_place_uncheck(self.is_store_initialized()) {
-            return Err(Error::IdentityExist);
-        }
-
-        if let Some(phrase) = passphrase {
-            let mut tesseract = self.tesseract.clone();
-            if !tesseract.exist("keypair") {
-                warp::crypto::keypair::mnemonic_into_tesseract(&mut tesseract, phrase, None)?;
+        async_block_in_place_uncheck(async {
+            if self.is_store_initialized().await {
+                return Err(Error::IdentityExist);
             }
-        }
-        async_block_in_place_uncheck(self.initialize_store(true))?;
-        let identity =
-            async_block_in_place_uncheck(self.identity_store()?.create_identity(username))?;
 
-        if let Ok(mut cache) = self.get_cache_mut() {
-            let object = Sata::default().encode(
-                warp::sata::libipld::IpldCodec::DagCbor,
-                warp::sata::Kind::Reference,
-                identity.clone(),
-            )?;
-            cache.add_data(DataType::from(Module::Accounts), &object)?;
-        }
-        if let Ok(hooks) = self.get_hooks() {
-            let object = DataObject::new(DataType::Accounts, identity.clone())?;
-            hooks.trigger("accounts::new_identity", &object);
-        }
-        Ok(identity.did_key())
+            if let Some(phrase) = passphrase {
+                let mut tesseract = self.tesseract.clone();
+                if !tesseract.exist("keypair") {
+                    warp::crypto::keypair::mnemonic_into_tesseract(&mut tesseract, phrase, None)?;
+                }
+            }
+
+            self.initialize_store(true).await?;
+            let identity = self.identity_store()?.create_identity(username).await?;
+
+            if let Ok(mut cache) = self.get_cache_mut() {
+                let object = Sata::default().encode(
+                    warp::sata::libipld::IpldCodec::DagCbor,
+                    warp::sata::Kind::Reference,
+                    identity.clone(),
+                )?;
+                cache.add_data(DataType::from(Module::Accounts), &object)?;
+            }
+            if let Ok(hooks) = self.get_hooks() {
+                let object = DataObject::new(DataType::Accounts, identity.clone())?;
+                hooks.trigger("accounts::new_identity", &object);
+            }
+            Ok(identity.did_key())
+        })
     }
 
     fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
-        if !async_block_in_place_uncheck(self.is_store_initialized()) {
-            return Err(Error::MultiPassExtensionUnavailable);
-        }
-        let store = self.identity_store()?;
-        let idents = match id.get_inner() {
-            (Some(pk), None, false) => {
-                if let Ok(cache) = self.get_cache() {
-                    let mut query = QueryBuilder::default();
-                    query.r#where("did_key", &pk)?;
-                    if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
-                    {
-                        if !list.is_empty() {
-                            let mut items = vec![];
-                            for object in list {
-                                if let Ok(ident) = object.decode::<Identity>().map_err(Error::from)
-                                {
-                                    items.push(ident);
+        async_block_in_place_uncheck(async {
+            if !self.is_store_initialized().await {
+                return Err(Error::MultiPassExtensionUnavailable);
+            }
+            let store = self.identity_store()?;
+            let idents = match id.get_inner() {
+                (Some(pk), None, false) => {
+                    if let Ok(cache) = self.get_cache() {
+                        let mut query = QueryBuilder::default();
+                        query.r#where("did_key", &pk)?;
+                        if let Ok(list) =
+                            cache.get_data(DataType::from(Module::Accounts), Some(&query))
+                        {
+                            if !list.is_empty() {
+                                let mut items = vec![];
+                                for object in list {
+                                    if let Ok(ident) =
+                                        object.decode::<Identity>().map_err(Error::from)
+                                    {
+                                        items.push(ident);
+                                    }
                                 }
+                                return Ok(items);
                             }
-                            return Ok(items);
                         }
                     }
+                    store.lookup(LookupBy::DidKey(Box::new(pk)))
                 }
-                store.lookup(LookupBy::DidKey(Box::new(pk)))
-            }
-            (None, Some(username), false) => {
-                if let Ok(cache) = self.get_cache() {
-                    let mut query = QueryBuilder::default();
-                    query.r#where("username", &username)?;
-                    if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
-                    {
-                        if !list.is_empty() {
-                            let mut items = vec![];
-                            for object in list {
-                                if let Ok(ident) = object.decode::<Identity>().map_err(Error::from)
-                                {
-                                    items.push(ident);
+                (None, Some(username), false) => {
+                    if let Ok(cache) = self.get_cache() {
+                        let mut query = QueryBuilder::default();
+                        query.r#where("username", &username)?;
+                        if let Ok(list) =
+                            cache.get_data(DataType::from(Module::Accounts), Some(&query))
+                        {
+                            if !list.is_empty() {
+                                let mut items = vec![];
+                                for object in list {
+                                    if let Ok(ident) =
+                                        object.decode::<Identity>().map_err(Error::from)
+                                    {
+                                        items.push(ident);
+                                    }
                                 }
+                                return Ok(items);
                             }
-                            return Ok(items);
                         }
                     }
+                    store.lookup(LookupBy::Username(username))
                 }
-                store.lookup(LookupBy::Username(username))
-            }
-            (None, None, true) => {
-                return async_block_in_place_uncheck(store.own_identity()).map(|i| vec![i])
-            }
-            _ => Err(Error::InvalidIdentifierCondition),
-        }?;
+                (None, None, true) => return store.own_identity().await.map(|i| vec![i]),
+                _ => Err(Error::InvalidIdentifierCondition),
+            }?;
 
-        for ident in &idents {
-            if let Ok(mut cache) = self.get_cache_mut() {
-                let mut query = QueryBuilder::default();
-                query.r#where("did_key", &ident.did_key())?;
-                if cache
-                    .has_data(DataType::from(Module::Accounts), &query)
-                    .is_err()
-                {
-                    let object = Sata::default().encode(
-                        warp::sata::libipld::IpldCodec::DagJson,
-                        warp::sata::Kind::Reference,
-                        ident.clone(),
-                    )?;
-                    cache.add_data(DataType::from(Module::Accounts), &object)?;
+            for ident in &idents {
+                if let Ok(mut cache) = self.get_cache_mut() {
+                    let mut query = QueryBuilder::default();
+                    query.r#where("did_key", &ident.did_key())?;
+                    if cache
+                        .has_data(DataType::from(Module::Accounts), &query)
+                        .is_err()
+                    {
+                        let object = Sata::default().encode(
+                            warp::sata::libipld::IpldCodec::DagJson,
+                            warp::sata::Kind::Reference,
+                            ident.clone(),
+                        )?;
+                        cache.add_data(DataType::from(Module::Accounts), &object)?;
+                    }
                 }
             }
-        }
 
-        Ok(idents)
+            Ok(idents)
+        })
     }
 
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
