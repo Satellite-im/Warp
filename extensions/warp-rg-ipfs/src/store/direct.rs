@@ -755,7 +755,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             message.id().into_bytes().to_vec(),
             message.conversation_id().into_bytes().to_vec(),
             own_did.to_string().as_bytes().to_vec(),
-            messages
+            message
+                .value()
                 .iter()
                 .map(|s| s.as_bytes())
                 .collect::<Vec<_>>()
