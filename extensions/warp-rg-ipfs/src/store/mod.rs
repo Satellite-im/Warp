@@ -26,7 +26,7 @@ pub enum ConversationEvents {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessagingEvents {
     New(Message),
-    Edit(Uuid, Uuid, Vec<String>),
+    Edit(Uuid, Uuid, Vec<String>, Vec<u8>),
     Delete(Uuid, Uuid),
     Pin(Uuid, DID, Uuid, PinState),
     React(Uuid, DID, Uuid, ReactionState, String),

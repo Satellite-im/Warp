@@ -26,8 +26,8 @@ use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender}
 use crate::{Persistent, SpamFilter};
 
 use super::{
-    did_to_libp2p_pub, libp2p_pub_to_did, topic_discovery, ConversationEvents, MessagingEvents,
-    DIRECT_BROADCAST,
+    did_to_libp2p_pub, libp2p_pub_to_did, topic_discovery, verify_serde_sig, ConversationEvents,
+    MessagingEvents, DIRECT_BROADCAST,
 };
 
 pub struct DirectMessageStore<T: IpfsTypes> {
@@ -693,13 +693,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         &self,
         conversation: Uuid,
         range: Option<Range<usize>>,
-    ) -> anyhow::Result<Vec<Message>> {
+    ) -> Result<Vec<Message>, Error> {
         let conversation = self.get_conversation(conversation)?;
 
         let messages = conversation.messages();
 
         if messages.is_empty() {
-            return Err(anyhow::anyhow!(Error::EmptyMessage));
+            return Err(Error::EmptyMessage);
         }
 
         let list = match range
@@ -751,24 +751,20 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         message.set_sender(own_did.clone());
         message.set_value(messages.clone());
 
-        // TODO: Construct the message into a body of bytes that would be used for signing
-        // Note: Take into account that we only need specific parts of the struct
-        //       that does not mutate along with contents that would in the future (eg value field)
-        // let _construct = vec![
-        //     conversation.into_bytes().to_vec(),
-        //     own_did.to_string().as_bytes().to_vec(),
-        //     messages
-        //         .iter()
-        //         .map(|s| s.as_bytes())
-        //         .collect::<Vec<_>>()
-        //         .concat(),
-        // ]
-        // .concat();
+        let construct = vec![
+            message.id().into_bytes().to_vec(),
+            message.conversation_id().into_bytes().to_vec(),
+            own_did.to_string().as_bytes().to_vec(),
+            messages
+                .iter()
+                .map(|s| s.as_bytes())
+                .collect::<Vec<_>>()
+                .concat(),
+        ]
+        .concat();
 
-        // let signature = sign_serde(&own_did, &message)?;
-        // message
-        //     .metadata_mut()
-        //     .insert("signature".into(), bs58::encode(signature).into_string());
+        let signature = super::sign_serde(own_did, &construct)?;
+        message.set_signature(Some(signature));
 
         let event = MessagingEvents::New(message);
 
@@ -790,7 +786,23 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             return Err(Error::EmptyMessage);
         }
 
-        let event = MessagingEvents::Edit(conversation.id(), message_id, messages);
+        let own_did = &*self.did.clone();
+
+        let construct = vec![
+            message_id.into_bytes().to_vec(),
+            conversation.id().into_bytes().to_vec(),
+            own_did.to_string().as_bytes().to_vec(),
+            messages
+                .iter()
+                .map(|s| s.as_bytes())
+                .collect::<Vec<_>>()
+                .concat(),
+        ]
+        .concat();
+
+        let signature = super::sign_serde(&*self.did, &construct)?;
+
+        let event = MessagingEvents::Edit(conversation.id(), message_id, messages, signature);
 
         direct_message_event(&mut *conversation.messages_mut(), &event, &self.spam_filter)?;
         warp::async_block_in_place_uncheck(conversation.to_file(&*self.did))?;
@@ -816,6 +828,22 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         message.set_sender(own_did.clone());
         message.set_value(messages);
         message.set_replied(Some(message_id));
+
+        let construct = vec![
+            message.id().into_bytes().to_vec(),
+            message.conversation_id().into_bytes().to_vec(),
+            own_did.to_string().as_bytes().to_vec(),
+            message
+                .value()
+                .iter()
+                .map(|s| s.as_bytes())
+                .collect::<Vec<_>>()
+                .concat(),
+        ]
+        .concat();
+
+        let signature = super::sign_serde(own_did, &construct)?;
+        message.set_signature(Some(signature));
 
         let event = MessagingEvents::New(message);
         direct_message_event(&mut *conversation.messages_mut(), &event, &self.spam_filter)?;
@@ -973,18 +1001,68 @@ pub fn direct_message_event(
             if messages.contains(&message) {
                 return Err(Error::MessageFound);
             }
+            {
+                let signature = message.signature();
+                let sender = message.sender();
+                let construct = vec![
+                    message.id().into_bytes().to_vec(),
+                    message.conversation_id().into_bytes().to_vec(),
+                    sender.to_string().as_bytes().to_vec(),
+                    message
+                        .value()
+                        .iter()
+                        .map(|s| s.as_bytes())
+                        .collect::<Vec<_>>()
+                        .concat(),
+                ]
+                .concat();
+                verify_serde_sig(sender, &construct, &signature)?;
+            }
             spam_check(&mut message, filter)?;
             messages.push(message)
         }
-        MessagingEvents::Edit(convo_id, message_id, val) => {
+        MessagingEvents::Edit(convo_id, message_id, val, signature) => {
             let index = messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
                 .ok_or(Error::MessageNotFound)?;
 
             let message = messages.get_mut(index).ok_or(Error::MessageNotFound)?;
+            let sender = message.sender();
+            //Validate the original message
+            {
+                let signature = message.signature();
+                let construct = vec![
+                    message.id().into_bytes().to_vec(),
+                    message.conversation_id().into_bytes().to_vec(),
+                    sender.to_string().as_bytes().to_vec(),
+                    message
+                        .value()
+                        .iter()
+                        .map(|s| s.as_bytes())
+                        .collect::<Vec<_>>()
+                        .concat(),
+                ]
+                .concat();
+                verify_serde_sig(sender.clone(), &construct, &signature)?;
+            }
 
+            //Validate the edit message
+            {
+                let construct = vec![
+                    message.id().into_bytes().to_vec(),
+                    message.conversation_id().into_bytes().to_vec(),
+                    sender.to_string().as_bytes().to_vec(),
+                    val.iter()
+                        .map(|s| s.as_bytes())
+                        .collect::<Vec<_>>()
+                        .concat(),
+                ]
+                .concat();
+                verify_serde_sig(sender, &construct, &signature)?;
+            }
             //TODO: Validate signature.
+            message.set_signature(Some(signature));
             *message.value_mut() = val;
         }
         MessagingEvents::Delete(convo_id, message_id) => {
