@@ -16,7 +16,7 @@ use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::identity::FriendRequest;
 use warp::multipass::MultiPass;
-use warp::raygun::{Conversation, EmbedState, Message, PinState, Reaction, ReactionState};
+use warp::raygun::{Conversation, EmbedState, Message, PinState, Reaction, ReactionState, MessageOptions};
 use warp::sata::Sata;
 use warp::sync::{Arc, Mutex, RwLock};
 
@@ -675,7 +675,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             };
         }
 
-        conversation.delete().await?;
+        warp::async_block_in_place_uncheck(conversation.delete())?;
         Ok(conversation)
     }
 
@@ -695,7 +695,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     pub async fn get_messages(
         &self,
         conversation: Uuid,
-        range: Option<Range<usize>>,
+        opt: MessageOptions,
     ) -> Result<Vec<Message>, Error> {
         let conversation = self.get_conversation(conversation)?;
 
@@ -704,8 +704,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
         }
+        
+        let messages = match opt.date_range() {
+            Some((start, end)) => messages.iter().filter(|message| message.date() >= start && message.date() <= end).cloned().collect::<Vec<_>>(),
+            None => messages
+        };
 
-        let list = match range
+        let list = match opt.range()
             .map(|mut range| {
                 if range.start > messages.len() {
                     range.start = 0;
