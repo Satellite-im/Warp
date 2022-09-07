@@ -162,6 +162,10 @@ pub struct Message {
     /// Message context for `Message`
     value: Vec<String>,
 
+    /// Signature of the message
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signature: Option<Vec<u8>>,
+
     /// Metadata related to the message. Can be used externally, but more internally focused
     #[serde(flatten)]
     metadata: HashMap<String, String>,
@@ -178,6 +182,7 @@ impl Default for Message {
             reactions: Vec::new(),
             replied: None,
             value: Vec::new(),
+            signature: Default::default(),
             metadata: HashMap::new(),
         }
     }
@@ -219,6 +224,10 @@ impl Message {
         self.value.clone()
     }
 
+    pub fn signature(&self) -> Vec<u8> {
+        self.signature.clone().unwrap_or_default()
+    }
+
     pub fn metadata(&self) -> HashMap<String, String> {
         self.metadata.clone()
     }
@@ -255,6 +264,10 @@ impl Message {
 
     pub fn set_value(&mut self, val: Vec<String>) {
         self.value = val
+    }
+
+    pub fn set_signature(&mut self, signature: Option<Vec<u8>>) {
+        self.signature = signature
     }
 
     pub fn set_metadata(&mut self, metadata: HashMap<String, String>) {
@@ -442,6 +455,7 @@ impl RayGunAdapter {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use super::{Conversation, ConversationType, FFIResult_FFIVec_Conversation};
+    use crate::async_on_block;
     use crate::crypto::{FFIVec_DID, DID};
     use crate::error::Error;
     use crate::ffi::{FFIResult, FFIResult_Null, FFIVec_String};
@@ -449,7 +463,6 @@ pub mod ffi {
         EmbedState, FFIResult_FFIVec_Message, FFIVec_Reaction, Message, MessageOptions, PinState,
         RayGunAdapter, Reaction, ReactionState,
     };
-    use crate::{async_on_block};
     use std::ffi::{CStr, CString};
     use std::os::raw::c_char;
     use std::str::{FromStr, Utf8Error};

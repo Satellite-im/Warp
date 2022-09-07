@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use futures::{FutureExt, StreamExt};
@@ -16,7 +16,7 @@ use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::identity::FriendRequest;
 use warp::multipass::MultiPass;
-use warp::raygun::{Conversation, EmbedState, Message, PinState, Reaction, ReactionState};
+use warp::raygun::{Conversation, EmbedState, Message, PinState, Reaction, ReactionState, MessageOptions};
 use warp::sata::Sata;
 use warp::sync::{Arc, Mutex, RwLock};
 
@@ -26,8 +26,8 @@ use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender}
 use crate::{Persistent, SpamFilter};
 
 use super::{
-    did_to_libp2p_pub, libp2p_pub_to_did, topic_discovery, ConversationEvents, MessagingEvents,
-    DIRECT_BROADCAST,
+    did_to_libp2p_pub, libp2p_pub_to_did, topic_discovery, verify_serde_sig, ConversationEvents,
+    MessagingEvents, DIRECT_BROADCAST,
 };
 
 pub struct DirectMessageStore<T: IpfsTypes> {
@@ -214,9 +214,12 @@ impl DirectConversation {
                 if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
                     if let Ok(data) = data.decrypt::<Vec<u8>>((&*did).as_ref()) {
                         if let Ok(event) = serde_json::from_slice::<MessagingEvents>(&data) {
-                            if let Err(_e) =
-                                direct_message_event(&mut *convo.messages_mut(), &event, &filter)
-                            {
+                            if let Err(_e) = direct_message_event(
+                                &mut *convo.messages_mut(),
+                                &event,
+                                &filter,
+                                Default::default(),
+                            ) {
                                 //TODO: Log
                                 continue;
                             }
@@ -672,7 +675,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             };
         }
 
-        conversation.delete().await?;
+        warp::async_block_in_place_uncheck(conversation.delete())?;
         Ok(conversation)
     }
 
@@ -692,17 +695,22 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     pub async fn get_messages(
         &self,
         conversation: Uuid,
-        range: Option<Range<usize>>,
-    ) -> anyhow::Result<Vec<Message>> {
+        opt: MessageOptions,
+    ) -> Result<Vec<Message>, Error> {
         let conversation = self.get_conversation(conversation)?;
 
         let messages = conversation.messages();
 
         if messages.is_empty() {
-            return Err(anyhow::anyhow!(Error::EmptyMessage));
+            return Err(Error::EmptyMessage);
         }
+        
+        let messages = match opt.date_range() {
+            Some((start, end)) => messages.iter().filter(|message| message.date() >= start && message.date() <= end).cloned().collect::<Vec<_>>(),
+            None => messages
+        };
 
-        let list = match range
+        let list = match opt.range()
             .map(|mut range| {
                 if range.start > messages.len() {
                     range.start = 0;
@@ -751,28 +759,30 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         message.set_sender(own_did.clone());
         message.set_value(messages.clone());
 
-        // TODO: Construct the message into a body of bytes that would be used for signing
-        // Note: Take into account that we only need specific parts of the struct
-        //       that does not mutate along with contents that would in the future (eg value field)
-        // let _construct = vec![
-        //     conversation.into_bytes().to_vec(),
-        //     own_did.to_string().as_bytes().to_vec(),
-        //     messages
-        //         .iter()
-        //         .map(|s| s.as_bytes())
-        //         .collect::<Vec<_>>()
-        //         .concat(),
-        // ]
-        // .concat();
+        let construct = vec![
+            message.id().into_bytes().to_vec(),
+            message.conversation_id().into_bytes().to_vec(),
+            own_did.to_string().as_bytes().to_vec(),
+            message
+                .value()
+                .iter()
+                .map(|s| s.as_bytes())
+                .collect::<Vec<_>>()
+                .concat(),
+        ]
+        .concat();
 
-        // let signature = sign_serde(&own_did, &message)?;
-        // message
-        //     .metadata_mut()
-        //     .insert("signature".into(), bs58::encode(signature).into_string());
+        let signature = super::sign_serde(own_did, &construct)?;
+        message.set_signature(Some(signature));
 
         let event = MessagingEvents::New(message);
 
-        direct_message_event(&mut *conversation.messages_mut(), &event, &self.spam_filter)?;
+        direct_message_event(
+            &mut *conversation.messages_mut(),
+            &event,
+            &self.spam_filter,
+            Default::default(),
+        )?;
         warp::async_block_in_place_uncheck(conversation.to_file(own_did))?;
 
         self.send_event(conversation.id(), event).await
@@ -790,9 +800,30 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             return Err(Error::EmptyMessage);
         }
 
-        let event = MessagingEvents::Edit(conversation.id(), message_id, messages);
+        let own_did = &*self.did.clone();
 
-        direct_message_event(&mut *conversation.messages_mut(), &event, &self.spam_filter)?;
+        let construct = vec![
+            message_id.into_bytes().to_vec(),
+            conversation.id().into_bytes().to_vec(),
+            own_did.to_string().as_bytes().to_vec(),
+            messages
+                .iter()
+                .map(|s| s.as_bytes())
+                .collect::<Vec<_>>()
+                .concat(),
+        ]
+        .concat();
+
+        let signature = super::sign_serde(&*self.did, &construct)?;
+
+        let event = MessagingEvents::Edit(conversation.id(), message_id, messages, signature);
+
+        direct_message_event(
+            &mut *conversation.messages_mut(),
+            &event,
+            &self.spam_filter,
+            Default::default(),
+        )?;
         warp::async_block_in_place_uncheck(conversation.to_file(&*self.did))?;
         self.send_event(conversation.id(), event).await
     }
@@ -817,8 +848,29 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         message.set_value(messages);
         message.set_replied(Some(message_id));
 
+        let construct = vec![
+            message.id().into_bytes().to_vec(),
+            message.conversation_id().into_bytes().to_vec(),
+            own_did.to_string().as_bytes().to_vec(),
+            message
+                .value()
+                .iter()
+                .map(|s| s.as_bytes())
+                .collect::<Vec<_>>()
+                .concat(),
+        ]
+        .concat();
+
+        let signature = super::sign_serde(own_did, &construct)?;
+        message.set_signature(Some(signature));
+
         let event = MessagingEvents::New(message);
-        direct_message_event(&mut *conversation.messages_mut(), &event, &self.spam_filter)?;
+        direct_message_event(
+            &mut *conversation.messages_mut(),
+            &event,
+            &self.spam_filter,
+            Default::default(),
+        )?;
         warp::async_block_in_place_uncheck(conversation.to_file(own_did))?;
 
         self.send_event(conversation.id(), event).await
@@ -833,7 +885,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let mut conversation = self.get_conversation(conversation)?;
 
         let event = MessagingEvents::Delete(conversation.id(), message_id);
-        direct_message_event(&mut *conversation.messages_mut(), &event, &self.spam_filter)?;
+        direct_message_event(
+            &mut *conversation.messages_mut(),
+            &event,
+            &self.spam_filter,
+            Default::default(),
+        )?;
         warp::async_block_in_place_uncheck(conversation.to_file(&*self.did))?;
 
         if broadcast {
@@ -853,7 +910,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let own_did = &*self.did;
 
         let event = MessagingEvents::Pin(conversation.id(), own_did.clone(), message_id, state);
-        direct_message_event(&mut *conversation.messages_mut(), &event, &self.spam_filter)?;
+        direct_message_event(
+            &mut *conversation.messages_mut(),
+            &event,
+            &self.spam_filter,
+            Default::default(),
+        )?;
         warp::async_block_in_place_uncheck(conversation.to_file(own_did))?;
 
         self.send_event(conversation.id(), event).await
@@ -882,7 +944,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event =
             MessagingEvents::React(conversation.id(), own_did.clone(), message_id, state, emoji);
 
-        direct_message_event(&mut *conversation.messages_mut(), &event, &self.spam_filter)?;
+        direct_message_event(
+            &mut *conversation.messages_mut(),
+            &event,
+            &self.spam_filter,
+            Default::default(),
+        )?;
         warp::async_block_in_place_uncheck(conversation.to_file(own_did))?;
         self.send_event(conversation.id(), event).await
     }
@@ -963,28 +1030,84 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     }
 }
 
+#[derive(Clone, Default)]
+pub struct EventOpt {
+    pub keep_if_owned: Arc<AtomicBool>,
+}
+
 pub fn direct_message_event(
     messages: &mut Vec<Message>,
     events: &MessagingEvents,
     filter: &Arc<Option<SpamFilter>>,
+    opt: EventOpt,
 ) -> Result<(), Error> {
     match events.clone() {
         MessagingEvents::New(mut message) => {
             if messages.contains(&message) {
                 return Err(Error::MessageFound);
             }
+            {
+                let signature = message.signature();
+                let sender = message.sender();
+                let construct = vec![
+                    message.id().into_bytes().to_vec(),
+                    message.conversation_id().into_bytes().to_vec(),
+                    sender.to_string().as_bytes().to_vec(),
+                    message
+                        .value()
+                        .iter()
+                        .map(|s| s.as_bytes())
+                        .collect::<Vec<_>>()
+                        .concat(),
+                ]
+                .concat();
+                verify_serde_sig(sender, &construct, &signature)?;
+            }
             spam_check(&mut message, filter)?;
             messages.push(message)
         }
-        MessagingEvents::Edit(convo_id, message_id, val) => {
+        MessagingEvents::Edit(convo_id, message_id, val, signature) => {
             let index = messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
                 .ok_or(Error::MessageNotFound)?;
 
             let message = messages.get_mut(index).ok_or(Error::MessageNotFound)?;
+            let sender = message.sender();
+            //Validate the original message
+            {
+                let signature = message.signature();
+                let construct = vec![
+                    message.id().into_bytes().to_vec(),
+                    message.conversation_id().into_bytes().to_vec(),
+                    sender.to_string().as_bytes().to_vec(),
+                    message
+                        .value()
+                        .iter()
+                        .map(|s| s.as_bytes())
+                        .collect::<Vec<_>>()
+                        .concat(),
+                ]
+                .concat();
+                verify_serde_sig(sender.clone(), &construct, &signature)?;
+            }
 
+            //Validate the edit message
+            {
+                let construct = vec![
+                    message.id().into_bytes().to_vec(),
+                    message.conversation_id().into_bytes().to_vec(),
+                    sender.to_string().as_bytes().to_vec(),
+                    val.iter()
+                        .map(|s| s.as_bytes())
+                        .collect::<Vec<_>>()
+                        .concat(),
+                ]
+                .concat();
+                verify_serde_sig(sender, &construct, &signature)?;
+            }
             //TODO: Validate signature.
+            message.set_signature(Some(signature));
             *message.value_mut() = val;
         }
         MessagingEvents::Delete(convo_id, message_id) => {
@@ -992,6 +1115,25 @@ pub fn direct_message_event(
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
                 .ok_or(Error::MessageNotFound)?;
+
+            if opt.keep_if_owned.load(Ordering::SeqCst) {
+                let message = messages.get(index).ok_or(Error::MessageNotFound)?;
+                let signature = message.signature();
+                let sender = message.sender();
+                let construct = vec![
+                    message.id().into_bytes().to_vec(),
+                    message.conversation_id().into_bytes().to_vec(),
+                    sender.to_string().as_bytes().to_vec(),
+                    message
+                        .value()
+                        .iter()
+                        .map(|s| s.as_bytes())
+                        .collect::<Vec<_>>()
+                        .concat(),
+                ]
+                .concat();
+                verify_serde_sig(sender, &construct, &signature)?;
+            }
 
             let _ = messages.remove(index);
         }
@@ -1066,53 +1208,6 @@ pub fn direct_message_event(
     }
     Ok(())
 }
-
-// async fn direct_conversation_process<T: IpfsTypes>(
-//     store: DirectMessageStore<T>,
-//     conversation: Uuid,
-//     stream: SubscriptionStream,
-// ) {
-//     futures::pin_mut!(stream);
-//     let own_did = &*store.did;
-
-//     while let Some(stream) = stream.next().await {
-//         if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
-//             if let Ok(data) = data.decrypt::<Vec<u8>>(own_did.as_ref()) {
-//                 if let Ok(event) = serde_json::from_slice::<MessagingEvents>(&data) {
-//                     let index = match store
-//                         .direct_conversation
-//                         .read()
-//                         .iter()
-//                         .position(|convo| convo.id() == conversation)
-//                     {
-//                         Some(index) => index,
-//                         None => continue,
-//                     };
-
-//                     let mut list = store.direct_conversation.write();
-
-//                     let convo = match list.get_mut(index) {
-//                         Some(convo) => convo,
-//                         None => continue,
-//                     };
-
-//                     if let Err(_e) =
-//                         direct_message_event(convo.messages_mut(), &event, &store.spam_filter)
-//                     {
-//                         //TODO: Log
-//                         continue;
-//                     }
-
-//                     if let Some(path) = store.path.as_ref() {
-//                         if let Err(_e) = convo.to_file(path, own_did).await {
-//                             //TODO: Log
-//                         }
-//                     }
-//                 }
-//             }
-//         }
-//     }
-// }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

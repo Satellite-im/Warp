@@ -68,7 +68,7 @@ pub enum Error {
     CannotUpdateIdentityStatus,
     #[error("Identity could not be updated")]
     CannotUpdateIdentity,
-    #[error("Public Key isnt Blocked")]
+    #[error("Public Key is Blocked")]
     PublicKeyIsBlocked,
     #[error("Public Key isnt Blocked")]
     PublicKeyIsntBlocked,
