@@ -254,21 +254,21 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             .ok_or(Error::MultiPassExtensionUnavailable)
     }
 
-    pub fn get_cache(&self) -> anyhow::Result<RwLockReadGuard<Box<dyn PocketDimension>>> {
+    pub fn get_cache(&self) -> Result<RwLockReadGuard<Box<dyn PocketDimension>>, Error> {
         let cache = self
             .cache
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Pocket Dimension Extension is not set"))?;
+            .ok_or(Error::PocketDimensionExtensionUnavailable)?;
 
         let inner = cache.read();
         Ok(inner)
     }
 
-    pub fn get_cache_mut(&self) -> anyhow::Result<RwLockWriteGuard<Box<dyn PocketDimension>>> {
+    pub fn get_cache_mut(&self) -> Result<RwLockWriteGuard<Box<dyn PocketDimension>>, Error> {
         let cache = self
             .cache
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Pocket Dimension Extension is not set"))?;
+            .ok_or(Error::PocketDimensionExtensionUnavailable)?;
 
         let inner = cache.write();
         Ok(inner)
