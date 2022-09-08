@@ -104,7 +104,7 @@ jobs:
         if: ${{ matrix.platform == 'android' }}
         with:
           command: ndk
-          args: --target ${{ matrix.target }} -p 29 -o ./jniLibs build -p warp -p warp-mp-ipfs -p warp-rg-ipfs -p warp-pd-flatfile -p warp-pd-memory -p warp-pd-stretto -p warp-fs-storj -p warp-fs-memory --release
+          args: --target ${{ matrix.target }} -p 29 -o ./jniLibs build -p warp -p warp-mp-ipfs -p warp-rg-ipfs -p warp-pd-flatfile -p warp-fs-storj -p warp-fs-memory --release
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
       - name: Upload artifact
