@@ -20,8 +20,6 @@ pub enum Error {
     DuplicateName,
     #[error("Directory cannot contain itself")]
     DirParadox,
-    #[error("Directory cannot contain one of its ancestors")]
-    DirParentParadox,
     #[error("Directory cannot be found or is invalid")]
     DirInvalid,
     #[error("File cannot be found or is invalid")]
@@ -111,7 +109,9 @@ pub enum Error {
     #[error("Conversation was invalid")]
     InvalidConversation,
     #[error("Conversation already exist")]
-    ConversationExist { conversation: crate::raygun::Conversation },
+    ConversationExist {
+        conversation: crate::raygun::Conversation,
+    },
     #[error("Maximum conversations has been reached")]
     ConversationLimitReached,
     #[error("Message is empty")]
@@ -248,7 +248,6 @@ impl Error {
             Error::AlreadySubscribed => String::from("AlreadySubscribed"),
             Error::DuplicateName => String::from("DuplicateName"),
             Error::DirParadox => String::from("DirParadox"),
-            Error::DirParentParadox => String::from("DirParentParadox"),
             Error::DirInvalid => String::from("DirInvalid"),
             Error::ItemInvalid => String::from("ItemInvalid"),
             Error::ItemNotFile => String::from("ItemNotFile"),
@@ -271,6 +270,14 @@ impl Error {
             Error::EncryptionStreamError => String::from("EncryptionStreamError"),
             Error::DecryptionStreamError => String::from("DecryptionStreamError"),
             Error::TesseractLocked => String::from("TesseractLocked"),
+            Error::ConstellationExtensionUnavailable => {
+                String::from("ConstellationExtensionUnavailable")
+            }
+            Error::PocketDimensionExtensionUnavailable => {
+                String::from("PocketDimensionExtensionUnavailable")
+            }
+            Error::MultiPassExtensionUnavailable => String::from("MultiPassExtensionUnavailable"),
+            Error::RayGunExtensionUnavailable => String::from("RayGunExtensionUnavailable"),
             Error::SerdeJsonError(_) => String::from("SerdeJsonError"),
             Error::SerdeYamlError(_) => String::from("SerdeYamlError"),
             Error::TomlDeserializeError(_) => String::from("TomlDeserializeError"),
