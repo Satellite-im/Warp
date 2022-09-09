@@ -109,6 +109,5 @@ pub async fn topic_discovery<T: IpfsTypes, S: AsRef<str>>(
             }
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
-        tokio::task::yield_now().await;
     }
 }

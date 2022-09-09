@@ -61,6 +61,8 @@ fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow
 
 // This function stores the topic as a dag in a "gossipsub:<topic>" format and provide the cid over DHT and obtain the providers of the same cid
 // who are providing and connect to them.
+// Note that there is usually a delay in `ipfs.provide`.
+// TODO: Investigate the delay in providing the CID
 pub async fn topic_discovery<T: IpfsTypes, S: AsRef<str>>(
     ipfs: ipfs::Ipfs<T>,
     topic: S,
@@ -100,6 +102,5 @@ pub async fn topic_discovery<T: IpfsTypes, S: AsRef<str>>(
             }
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
-        tokio::task::yield_now().await;
     }
 }
