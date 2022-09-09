@@ -157,6 +157,11 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
                 config.store_setting.discovery,
                 config.store_setting.broadcast_interval,
                 config.store_setting.check_spam,
+                (
+                    config.store_setting.store_decrypted,
+                    config.store_setting.allow_unsigned_message,
+                    config.store_setting.with_friends,
+                ),
             )
             .await?,
         );
@@ -227,7 +232,11 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         Ok(self.messaging_store()?.list_conversations())
     }
 
-    async fn get_messages(&self, conversation_id: Uuid, opt: MessageOptions) -> Result<Vec<Message>> {
+    async fn get_messages(
+        &self,
+        conversation_id: Uuid,
+        opt: MessageOptions,
+    ) -> Result<Vec<Message>> {
         self.messaging_store()?
             .get_messages(conversation_id, opt)
             .await
