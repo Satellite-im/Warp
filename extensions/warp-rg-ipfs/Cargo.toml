@@ -12,7 +12,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 warp = { path = "../../warp" }
 
 ipfs = { git = "https://github.com/Satellite-im/rust-ipfs", branch = "libp2p-next-usable" }
-libp2p = { default-features = false, version = "0.47" }
+libp2p = { default-features = false, version = "0.48" }
 libipld = { version = "0.13", features = ["serde-codec"] }
 
 uuid = { version = "1.0", features = ["serde", "v4"] }
