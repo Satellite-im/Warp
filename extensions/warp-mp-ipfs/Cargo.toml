@@ -8,8 +8,8 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 
 [dependencies]
 warp = { path = "../../warp" }
-# TODO: Point to different repo once additional changes and testing are done
-ipfs = { git = "https://github.com/Satellite-im/rust-ipfs", branch = "libp2p-next-usable" }
+
+ipfs = { git = "https://github.com/Satellite-im/rust-ipfs", branch = "libp2p-next-usable", features = ["external-gossipsub-stream"]}
 libp2p = { default-features = false, version = "0.48" }
 libipld = { version = "0.13", features = ["serde-codec"] }
 uuid = { version = "1.0", features = ["serde", "v4"] }
