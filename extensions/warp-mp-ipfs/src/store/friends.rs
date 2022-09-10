@@ -2,6 +2,7 @@
 use chrono::{DateTime, Utc};
 use futures::{SinkExt, StreamExt, TryFutureExt};
 use ipfs::{Ipfs, IpfsPath, IpfsTypes, Keypair, PeerId, Protocol, Types};
+use tracing::log::error;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -353,8 +354,8 @@ impl<T: IpfsTypes> Drop for FriendsStore<T> {
         if counter == 0 {
             self.end_event.store(true, Ordering::SeqCst);
             if let Some(path) = self.path.as_ref() {
-                if let Err(_e) = self.profile.write().to_file(path, &*self.did_key) {
-                    //TODO: Log,
+                if let Err(e) = self.profile.write().to_file(path, &*self.did_key) {
+                    error!("Error saving profile: {e}");
                 }
             }
         }
@@ -407,8 +408,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
         if discovery {
             let ipfs = store.ipfs.clone();
             tokio::spawn(async {
-                if let Err(_e) = topic_discovery(ipfs, FRIENDS_BROADCAST).await {
-                    //TODO: Log
+                if let Err(e) = topic_discovery(ipfs, FRIENDS_BROADCAST).await {
+                    error!("Error performing topic discovery: {e}");
                 }
             });
         }
@@ -427,13 +428,13 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
                 match InternalProfile::from_file(path, &*store.did_key).await {
                     Ok(mut profile) => {
-                        if let Err(_e) = profile.remove_invalid_request() {
-                            //TODO: Log
+                        if let Err(e) = profile.remove_invalid_request() {
+                           error!("Error removing invalid request: {e}");
                         }
                         *store.profile.write() = profile;
                     }
-                    Err(_e) => {
-                        //TODO: Log Error
+                    Err(e) => {
+                        error!("Error loading profile: {e}");
                     }
                 };
             }
@@ -442,14 +443,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 Ok(list) => {
                     for pubkey in list {
                         if let Ok(peer_id) = did_to_libp2p_pub(&pubkey).map(|p| p.to_peer_id()) {
-                            if let Err(_e) = store.ipfs.ban_peer(peer_id).await {
-                                //TODO: Log
+                            if let Err(e) = store.ipfs.ban_peer(peer_id).await {
+                                error!("Error banning peer: {e}");
                             }
                         }
                     }
                 }
-                Err(_e) => {
-                    //TODO: Log
+                Err(e) => {
+                    error!("Error loading block list: {e}");
                 }
             };
 
@@ -834,13 +835,13 @@ impl<T: IpfsTypes> FriendsStore<T> {
         self.profile.write().block(pubkey)?;
 
         if self.is_friend(pubkey).await.is_ok() {
-            if let Err(_e) = self.remove_friend(pubkey, true, false).await {
-                //TODO: Log error
+            if let Err(e) = self.remove_friend(pubkey, true, false).await {
+                error!("Error removing item from friend list: {e}");
             }
         }
         if let Some(path) = self.path.as_ref() {
-            if let Err(_e) = self.profile.write().friends_to_file(path).await {
-                //TODO: Log,
+            if let Err(e) = self.profile.write().friends_to_file(path).await {
+                error!("Error saving friends list: {e}");
             }
         }
         // Since we want to broadcast the remove request, banning the peer after would not allow that to happen

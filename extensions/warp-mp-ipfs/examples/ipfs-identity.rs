@@ -21,6 +21,7 @@ fn update_status(account: &mut impl MultiPass, status: &str) -> anyhow::Result<(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
     let mut tesseract = Tesseract::default();
     tesseract.unlock(b"super duper pass")?;
 

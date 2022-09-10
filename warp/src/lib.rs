@@ -3,6 +3,11 @@ pub mod sync {
     pub use std::sync::Arc;
 }
 
+pub mod logging {
+    pub use tracing;
+    pub use tracing_futures;
+}
+
 pub mod constellation;
 pub mod crypto;
 pub mod data;

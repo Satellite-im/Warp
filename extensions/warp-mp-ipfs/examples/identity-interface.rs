@@ -78,6 +78,7 @@ async fn account_persistent<P: AsRef<Path>>(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
     let opt = Opt::parse();
 
     let cache = cache_setup(opt.path.clone()).ok();

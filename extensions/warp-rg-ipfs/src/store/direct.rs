@@ -14,6 +14,8 @@ use uuid::Uuid;
 use warp::crypto::curve25519_dalek::traits::Identity;
 use warp::crypto::DID;
 use warp::error::Error;
+use warp::logging::tracing::log::error;
+use warp::logging::tracing::warn;
 use warp::multipass::identity::FriendRequest;
 use warp::multipass::MultiPass;
 use warp::raygun::{
@@ -343,8 +345,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                 let stream =
                                     match store.ipfs.pubsub_subscribe(conversation.topic()).await {
                                         Ok(stream) => stream,
-                                        Err(_e) => {
-                                            //TODO: Log
+                                        Err(e) => {
+                                            error!("Unable to subscribe to conversation: {e}");
                                             continue;
                                         }
                                     };
@@ -358,8 +360,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                 );
                                 store.direct_conversation.write().push(conversation);
                             }
-                            Err(_e) => {
-                                //TODO: Log
+                            Err(e) => {
+                                error!("Unable to load conversation: {e}");
                             }
                         };
                     }
@@ -370,8 +372,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         if discovery {
             let ipfs = store.ipfs.clone();
             tokio::spawn(async {
-                if let Err(_e) = topic_discovery(ipfs, DIRECT_BROADCAST).await {
-                    //TODO: Log
+                if let Err(e) = topic_discovery(ipfs, DIRECT_BROADCAST).await {
+                    error!("Unable to perform topic discovery: {e}");
                 }
             });
         }
@@ -394,11 +396,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                         match events {
                                             ConversationEvents::NewConversation(id, peer) => {
                                                 if store.exist(id) {
+                                                    warn!("Conversation with {id} exist");
                                                     continue;
                                                 }
 
                                                 if let Ok(list) = store.account.read().block_list() {
                                                     if list.contains(&*peer) {
+                                                        warn!("{peer} is blocked");
                                                         continue
                                                     }
                                                 }
@@ -408,22 +412,24 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                 let stream =
                                                     match store.ipfs.pubsub_subscribe(convo.topic()).await {
                                                         Ok(stream) => stream,
-                                                        Err(_e) => {
-                                                            //TODO: Log
+                                                        Err(e) => {
+                                                            error!("Error subscribing to conversation: {e}");
                                                             continue;
                                                         }
                                                     };
                                                 convo.start_task(store.did.clone(), store.store_decrypted.clone(), &store.spam_filter, stream);
                                                 if let Some(path) = store.path.as_ref() {
                                                     convo.set_path(path);
-                                                    if let Err(_e) = convo.to_file((!store.store_decrypted.load(Ordering::SeqCst)).then_some(&*store.did)).await {
+                                                    if let Err(e) = convo.to_file((!store.store_decrypted.load(Ordering::SeqCst)).then_some(&*store.did)).await {
                                                         //TODO: Log
+                                                        error!("Error saving conversation: {e}");
                                                     }
                                                 }
                                                 store.direct_conversation.write().push(convo);
                                             }
                                             ConversationEvents::DeleteConversation(id) => {
                                                 if !store.exist(id) {
+                                                    error!("Conversation {id} doesnt exist");
                                                     continue;
                                                 }
 
@@ -450,14 +456,14 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
                                                     let topic = conversation.topic();
 
-                                                    if let Err(_e) = store.ipfs.pubsub_unsubscribe(&topic).await
+                                                    if let Err(e) = store.ipfs.pubsub_unsubscribe(&topic).await
                                                     {
-                                                        //TODO: Log
+                                                        error!("Error unsubscribing from topic: {e}");
                                                         continue;
                                                     }
 
-                                                    if let Err(_e) = conversation.delete().await {
-                                                        //TODO: Log
+                                                    if let Err(e) = conversation.delete().await {
+                                                        error!("Error deleting conversation: {e}");
                                                     }
                                                     drop(conversation);
                                                 }
@@ -477,14 +483,14 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                 if peers.contains(peer) {
                                     let bytes = match serde_json::to_vec(&data) {
                                         Ok(bytes) => bytes,
-                                        Err(_e) => {
-                                            //TODO: Log
+                                        Err(e) => {
+                                            error!("Error serializing data to bytes: {e}");
                                             continue
                                         }
                                     };
 
-                                    if let Err(_e) = store.ipfs.pubsub_publish(topic.clone(), bytes).await {
-                                        //TODO: Log
+                                    if let Err(e) = store.ipfs.pubsub_publish(topic.clone(), bytes).await {
+                                        error!("Error publishing to topic: {e}");
                                         continue
                                     }
 
@@ -493,7 +499,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                     }) {
                                         Some(index) => index,
                                         //If we somehow ended up here then there is likely a race condition
-                                        None => continue
+                                        None => {
+                                            error!("Unable to remove item from queue. Likely race condition");
+                                            continue
+                                        }
                                     };
 
                                     let _ = store.queue.write().remove(index);
@@ -501,13 +510,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                     if let Some(path) = store.path.as_ref() {
                                         let bytes = match serde_json::to_vec(&*store.queue.read()) {
                                             Ok(bytes) => bytes,
-                                            Err(_) => {
-                                                //TODO: Log
+                                            Err(e) => {
+                                                error!("Error serializing data to bytes: {e}");
                                                 continue;
                                             }
                                         };
-                                        if let Err(_e) = tokio::fs::write(path.join("queue"), bytes).await {
-                                            //TODO: Log
+                                        if let Err(e) = tokio::fs::write(path.join("queue"), bytes).await {
+                                            error!("Error saving queue: {e}");
                                         }
                                     }
                                 }
@@ -609,7 +618,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     .pubsub_publish(DIRECT_BROADCAST.into(), bytes)
                     .await
                 {
-                    if let Err(_e) = self
+                    warn!("Unable to publish to topic. Queuing event");
+                    if let Err(e) = self
                         .queue_event(Queue::direct(
                             convo_id,
                             peer_id,
@@ -618,12 +628,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         ))
                         .await
                     {
-                        //TODO: Log
+                        error!("Error submitting event to queue: {e}");
                     }
                 }
             }
             false => {
-                if let Err(_e) = self
+                if let Err(e) = self
                     .queue_event(Queue::direct(
                         convo_id,
                         peer_id,
@@ -632,7 +642,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     ))
                     .await
                 {
-                    //TODO: Log
+                    error!("Error submitting event to queue: {e}");
                 }
             }
         };
@@ -684,17 +694,18 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             match peers.contains(&peer_id) {
                 true => {
                     let bytes = serde_json::to_vec(&data)?;
-                    if let Err(_e) = self
+                    if let Err(e) = self
                         .ipfs
                         .pubsub_publish(DIRECT_BROADCAST.into(), bytes)
                         .await
                     {
+                        warn!("Unable to publish to topic: {e}. Queuing event");
                         //TODO: Log
                         //Note: If the error is related to peer not available then we should push this to queue but if
                         //      its due to the message limit being reached we should probably break up the message to fix into
                         //      "max_transmit_size" within rust-libp2p gossipsub
                         //      For now we will queue the message if we hit an error
-                        if let Err(_e) = self
+                        if let Err(e) = self
                             .queue_event(Queue::direct(
                                 conversation.id(),
                                 peer_id,
@@ -703,12 +714,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                             ))
                             .await
                         {
-                            //TODO: Log
+                            error!("Error submitting event to queue: {e}");
                         }
                     }
                 }
                 false => {
-                    if let Err(_e) = self
+                    if let Err(e) = self
                         .queue_event(Queue::direct(
                             conversation.id(),
                             peer_id,
@@ -717,7 +728,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         ))
                         .await
                     {
-                        //TODO: Log
+                        error!("Error submitting event to queue: {e}");
                     }
                 }
             };
@@ -836,7 +847,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             &self.spam_filter,
             Default::default(),
         )?;
-        warp::async_block_in_place_uncheck(conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)))?;
+        warp::async_block_in_place_uncheck(
+            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
+        )?;
 
         self.send_event(conversation.id(), event).await
     }
@@ -877,7 +890,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             &self.spam_filter,
             Default::default(),
         )?;
-        warp::async_block_in_place_uncheck(conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(&*self.did)))?;
+        warp::async_block_in_place_uncheck(
+            conversation
+                .to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(&*self.did)),
+        )?;
         self.send_event(conversation.id(), event).await
     }
 
@@ -924,7 +940,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             &self.spam_filter,
             Default::default(),
         )?;
-        warp::async_block_in_place_uncheck(conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)))?;
+        warp::async_block_in_place_uncheck(
+            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
+        )?;
 
         self.send_event(conversation.id(), event).await
     }
@@ -944,7 +962,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             &self.spam_filter,
             Default::default(),
         )?;
-        warp::async_block_in_place_uncheck(conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(&*self.did)))?;
+        warp::async_block_in_place_uncheck(
+            conversation
+                .to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(&*self.did)),
+        )?;
 
         if broadcast {
             self.send_event(conversation.id(), event).await?;
@@ -969,7 +990,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             &self.spam_filter,
             Default::default(),
         )?;
-        warp::async_block_in_place_uncheck(conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)))?;
+        warp::async_block_in_place_uncheck(
+            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
+        )?;
 
         self.send_event(conversation.id(), event).await
     }
@@ -980,6 +1003,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         _message_id: Uuid,
         _state: EmbedState,
     ) -> Result<(), Error> {
+        warn!("Embed function is unavailable");
         Err(Error::Unimplemented)
     }
 
@@ -1003,7 +1027,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             &self.spam_filter,
             Default::default(),
         )?;
-        warp::async_block_in_place_uncheck(conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)))?;
+        warp::async_block_in_place_uncheck(
+            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
+        )?;
         self.send_event(conversation.id(), event).await
     }
 
@@ -1041,8 +1067,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         match peers.contains(&peer_id) {
             true => {
                 let bytes = serde_json::to_vec(&data)?;
-                if let Err(_e) = self.ipfs.pubsub_publish(conversation.topic(), bytes).await {
-                    if let Err(_e) = self
+                if let Err(e) = self.ipfs.pubsub_publish(conversation.topic(), bytes).await {
+                    warn!("Unable to publish to topic due to error: {e}... Queuing event");
+                    if let Err(e) = self
                         .queue_event(Queue::direct(
                             conversation.id(),
                             peer_id,
@@ -1051,12 +1078,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         ))
                         .await
                     {
-                        //TODO: Log
+                        error!("Error submitting event to queue: {e}");
                     }
                 }
             }
             false => {
-                if let Err(_e) = self
+                if let Err(e) = self
                     .queue_event(Queue::direct(
                         conversation.id(),
                         peer_id,
@@ -1065,7 +1092,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     ))
                     .await
                 {
-                    //TODO: Log
+                    error!("Error submitting event to queue: {e}");
                 }
             }
         };

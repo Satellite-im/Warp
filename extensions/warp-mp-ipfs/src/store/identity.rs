@@ -13,6 +13,7 @@ use libipld::{
     Cid, Ipld,
 };
 use sata::Sata;
+use tracing::log::{error, warn};
 use warp::{
     crypto::{rand::Rng, DIDKey, Ed25519KeyPair, Fingerprint, KeyMaterial, DID},
     error::Error,
@@ -118,8 +119,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
         if discovery {
             let ipfs = store.ipfs.clone();
             tokio::spawn(async {
-                if let Err(_e) = topic_discovery(ipfs, IDENTITY_BROADCAST).await {
-                    //TODO: Log
+                if let Err(e) = topic_discovery(ipfs, IDENTITY_BROADCAST).await {
+                    error!("Error performing topic discovery: {e}");
                 }
             });
         }
@@ -145,8 +146,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                     //Validate public key against peer that sent it
                                     let pk = match did_to_libp2p_pub(&identity.did_key()) {
                                         Ok(pk) => pk,
-                                        Err(_e) => {
-                                            //TODO: Log
+                                        Err(e) => {
+                                            error!("Error converting public key to did: {e}");
                                             continue
                                         }
                                     };
@@ -174,8 +175,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                     store.cache.write().push(identity);
                                     if let Some(path) = store.path.as_ref() {
                                         if let Ok(bytes) = serde_json::to_vec(&store.cache) {
-                                            if let Err(_e) = tokio::fs::write(path.join(".id_cache"), bytes).await {
-                                                //TODO: Log
+                                            if let Err(e) = tokio::fs::write(path.join(".id_cache"), bytes).await {
+                                                error!("Error saving cache: {e}");
                                             }
                                         }
 
@@ -188,11 +189,11 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
                         match store.ipfs.pubsub_peers(Some(IDENTITY_BROADCAST.into())).await {
                             Ok(peers) => if peers.is_empty() {
-                                //Dont send out when there is no peers connected
+                                warn!("No peers subscribed to topic");
                                 continue
                             },
-                            Err(_e) => {
-                                //TODO: Log
+                            Err(e) => {
+                                error!("Error obtaining peers from topic: {e}");
                                 continue
                             }
                         };
@@ -207,21 +208,22 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
                         let res = match data.encode(libipld::IpldCodec::DagJson, sata::Kind::Static, ident) {
                             Ok(data) => data,
-                            Err(_e) => {
-                                //TODO: Log
+                            Err(e) => {
+                                error!("Error encoding to sata object: {e}");
                                 continue
                             }
                         };
 
                         let bytes = match serde_json::to_vec(&res) {
                             Ok(bytes) => bytes,
-                            Err(_e) => {
-                                //TODO: Log
+                            Err(e) => {
+                                error!("Error serializing to bytes: {e}");
                                 continue
                             }
                         };
 
-                        if let Err(_e) = store.ipfs.pubsub_publish(IDENTITY_BROADCAST.into(), bytes).await {
+                        if let Err(e) = store.ipfs.pubsub_publish(IDENTITY_BROADCAST.into(), bytes).await {
+                            error!("Error announcing identity: {e}");
                             continue
                         }
 

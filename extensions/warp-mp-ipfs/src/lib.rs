@@ -14,6 +14,7 @@ use libipld::serde::to_ipld;
 use libipld::{ipld, Cid, Ipld};
 use sata::Sata;
 use serde::de::DeserializeOwned;
+use tracing::log::trace;
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -102,6 +103,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         tesseract: Tesseract,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity<T>> {
+        trace!("Initializing Multipass");
         let hooks = None;
 
         let mut identity = IpfsIdentity {
