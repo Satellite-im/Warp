@@ -743,7 +743,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .read()
             .iter()
             .map(|convo| convo.conversation())
-            .collect::<Vec<_>>()
+            .collect()
     }
 
     pub fn messages_count(&self, conversation: Uuid) -> Result<usize, Error> {

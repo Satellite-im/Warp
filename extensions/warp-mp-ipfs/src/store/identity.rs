@@ -1,4 +1,6 @@
 use std::{
+    collections::{HashSet, VecDeque},
+    hash::Hash,
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::Duration,
@@ -6,7 +8,7 @@ use std::{
 
 use crate::{store::did_to_libp2p_pub, Persistent};
 use futures::{SinkExt, StreamExt, TryFutureExt};
-use ipfs::{Ipfs, IpfsPath, IpfsTypes, Keypair};
+use ipfs::{Ipfs, IpfsPath, IpfsTypes, Keypair, PeerId};
 use libipld::{
     ipld,
     serde::{from_ipld, to_ipld},
@@ -36,6 +38,10 @@ pub struct IdentityStore<T: IpfsTypes> {
 
     cache: Arc<RwLock<Vec<Identity>>>,
 
+    seen: Arc<RwLock<Vec<PeerId>>>,
+
+    check_seen: Arc<AtomicBool>,
+
     start_event: Arc<AtomicBool>,
 
     end_event: Arc<AtomicBool>,
@@ -51,8 +57,10 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
             ident_cid: self.ident_cid.clone(),
             identity: self.identity.clone(),
             cache: self.cache.clone(),
+            seen: self.seen.clone(),
             start_event: self.start_event.clone(),
             end_event: self.end_event.clone(),
+            check_seen: self.check_seen.clone(),
             tesseract: self.tesseract.clone(),
         }
     }
@@ -88,14 +96,19 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let start_event = Arc::new(Default::default());
         let end_event = Arc::new(Default::default());
         let ident_cid = Arc::new(Default::default());
+        let seen = Arc::new(Default::default());
+        let check_seen = Arc::new(Default::default());
+
         let store = Self {
             ipfs,
             path,
             ident_cid,
             cache,
             identity,
+            seen,
             start_event,
             end_event,
+            check_seen,
             tesseract,
         };
         if let Some(path) = store.path.as_ref() {
@@ -131,6 +144,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
             futures::pin_mut!(id_broadcast_stream);
 
             let mut tick = tokio::time::interval(Duration::from_millis(interval));
+            //this is used to clear `seen` at a set interval.
+            let mut clear_seen = tokio::time::interval(Duration::from_secs(3 * 60));
             loop {
                 if store.end_event.load(Ordering::SeqCst) {
                     break;
@@ -185,12 +200,37 @@ impl<T: IpfsTypes> IdentityStore<T> {
                             }
                         }
                     }
+                    _ = clear_seen.tick() => {
+                        store.seen.write().clear();
+                    }
                     _ = tick.tick() => {
 
                         match store.ipfs.pubsub_peers(Some(IDENTITY_BROADCAST.into())).await {
-                            Ok(peers) => if peers.is_empty() {
-                                warn!("No peers subscribed to topic");
-                                continue
+                            Ok(peers) => {
+
+                                match store.check_seen.load(Ordering::Relaxed) {
+                                    true => {
+                                        if peers.is_empty() || (!peers.is_empty() && peers == store.seen.read().clone()) {
+                                            // warn!("");
+                                            continue
+                                        }
+                                        let seen_list = store.seen.read().clone();
+
+                                        let mut havent_seen = vec![];
+                                        for peer in peers.iter() {
+                                            if seen_list.contains(peer) {
+                                                continue
+                                            }
+                                            havent_seen.push(peer);
+                                        }
+
+                                        store.seen.write().extend(havent_seen);
+                                    }
+                                    false => if peers.is_empty() {
+                                        continue
+                                    }
+                                }
+
                             },
                             Err(e) => {
                                 error!("Error obtaining peers from topic: {e}");
@@ -230,8 +270,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
                     }
                 }
+                tokio::time::sleep(Duration::from_millis(1)).await;
             }
         });
+        tokio::task::yield_now().await;
         Ok(store)
     }
 
@@ -460,6 +502,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     pub async fn update_identity(&self) -> Result<(), Error> {
         let ident = self.own_identity().await?;
         *self.identity.write() = Some(ident);
+        self.seen.write().clear();
         Ok(())
     }
 

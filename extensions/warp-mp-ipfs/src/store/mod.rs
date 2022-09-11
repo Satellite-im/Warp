@@ -1,14 +1,15 @@
 use std::time::Duration;
 
 use ipfs::IpfsTypes;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
+use tracing::log::error;
 use warp::{
     crypto::{
         did_key::{CoreSign, Generate},
         DIDKey, Ed25519KeyPair, KeyMaterial, DID,
     },
     error::Error,
-    tesseract::Tesseract,
+    tesseract::Tesseract, multipass::identity::Identity,
 };
 
 pub mod friends;
@@ -92,8 +93,8 @@ pub async fn topic_discovery<T: IpfsTypes, S: AsRef<str>>(
                     for addr in addrs {
                         let addr = addr.with(ipfs::Protocol::P2p(peer.into()));
                         if let Ok(addr) = addr.try_into() {
-                            if let Err(_e) = ipfs.connect(addr).await {
-                                //TODO: Log
+                            if let Err(e) = ipfs.connect(addr).await {
+                                error!("Unable to connect to peer {}: {}", peer, e);
                                 continue;
                             }
                         }
@@ -101,6 +102,6 @@ pub async fn topic_discovery<T: IpfsTypes, S: AsRef<str>>(
                 }
             }
         }
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
 }
