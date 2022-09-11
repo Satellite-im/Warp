@@ -27,7 +27,7 @@ fn username(ident: &Identity) -> String {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+
     let mut rng = rand::thread_rng();
 
     let mut account_a = account(None).await?;
