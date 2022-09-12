@@ -65,7 +65,7 @@ pub struct InternalProfile {
     requests: Vec<InternalRequest>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "lowercase", tag = "type")]
 pub enum InternalRequest {
     In(FriendRequest),

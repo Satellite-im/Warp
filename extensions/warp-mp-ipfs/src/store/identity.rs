@@ -201,10 +201,11 @@ impl<T: IpfsTypes> IdentityStore<T> {
                         }
                     }
                     _ = clear_seen.tick() => {
-                        store.seen.write().clear();
+                        if store.check_seen.load(Ordering::Relaxed) {
+                            store.seen.write().clear();
+                        }
                     }
                     _ = tick.tick() => {
-
                         match store.ipfs.pubsub_peers(Some(IDENTITY_BROADCAST.into())).await {
                             Ok(peers) => {
 
