@@ -111,6 +111,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
     async fn initialize(&mut self) -> anyhow::Result<()> {
         trace!("Initializing internal store");
         let config = self.config.clone().unwrap_or_default();
+        let mut discovery = config.store_setting.discovery;
 
         let ipfs_handle = match self.account.read().handle() {
             Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
@@ -118,7 +119,10 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         };
 
         let ipfs = match ipfs_handle {
-            Some(ipfs) => ipfs,
+            Some(ipfs) => {
+                discovery = false;
+                ipfs
+            },
             None => {
                 trace!("Unable to get ipfs handle from multipass");
                 let keypair = {
@@ -163,7 +167,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
                 ipfs.clone(),
                 config.path.map(|p| p.join("messages")),
                 self.account.clone(),
-                config.store_setting.discovery,
+                discovery,
                 config.store_setting.broadcast_interval,
                 config.store_setting.check_spam,
                 (
