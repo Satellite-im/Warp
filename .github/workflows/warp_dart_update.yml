@@ -16,7 +16,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm-dev cmake libudev-dev
+          sudo apt-get install -y llvm-dev cmake libudev-dev protobuf-compiler
       - name: Setup rust
         uses: actions-rs/toolchain@v1
         with:
@@ -25,7 +25,7 @@ jobs:
           override: true
       - run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
       - name: Build headers
-        run: cargo build --features "build-header" -p warp -p warp-mp-ipfs -p warp-rg-ipfs -p warp-pd-flatfile -p warp-pd-memory -p warp-pd-stretto -p warp-fs-storj -p warp-fs-memory
+        run: cargo build --features "build-header" -p warp -p warp-mp-ipfs -p warp-rg-ipfs -p warp-pd-flatfile -p warp-fs-storj -p warp-fs-memory
       - name: Setup the flutter environment.
         uses: subosito/flutter-action@v2
         with:
@@ -99,7 +99,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm-dev cmake libudev-dev
+          sudo apt-get install -y llvm-dev cmake libudev-dev protobuf-compiler
       - uses: actions-rs/cargo@v1
         if: ${{ matrix.platform == 'android' }}
         with:
