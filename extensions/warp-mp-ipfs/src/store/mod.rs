@@ -23,7 +23,7 @@ pub const FRIENDS_BROADCAST: &str = "friends/broadcast";
 pub const SYNC_BROADCAST: &str = "/identity/sync/broadcast";
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "lowercase", tag = "type")]
 pub enum PayloadEvent {
     Received(Payload),
     Sent(Payload),
@@ -60,6 +60,7 @@ pub enum Payload {
     },
     PackageStreamStart,
     PackageStreamData {
+        part: usize,
         data: Vec<u8>,
         signature: Vec<u8>,
     },
