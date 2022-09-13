@@ -159,7 +159,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 let kp = bs58::decode(keypair).into_vec()?;
                 let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
                 let secret =
-                    libp2p::identity::ed25519::SecretKey::from_bytes(id_kp.secret.to_bytes())?;
+                    ipfs::libp2p::identity::ed25519::SecretKey::from_bytes(id_kp.secret.to_bytes())?;
                 Keypair::Ed25519(secret.into())
             }
             _ => anyhow::bail!("Unable to initalize store"),

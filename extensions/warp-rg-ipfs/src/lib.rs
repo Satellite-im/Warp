@@ -10,7 +10,7 @@ use futures::pin_mut;
 use futures::StreamExt;
 use ipfs::IpfsTypes;
 use ipfs::{Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, TestTypes, Types, UninitializedIpfs};
-use libp2p::identity;
+use ipfs::libp2p::identity;
 use warp::logging::tracing::log::error;
 use warp::logging::tracing::log::trace;
 use std::any::Any;

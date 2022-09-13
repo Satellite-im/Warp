@@ -67,16 +67,16 @@ pub enum Payload {
     PackageStreamEnd,
 }
 
-fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<libp2p::identity::PublicKey> {
-    let pk = libp2p::identity::PublicKey::Ed25519(libp2p::identity::ed25519::PublicKey::decode(
+fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity::PublicKey> {
+    let pk = ipfs::libp2p::identity::PublicKey::Ed25519(ipfs::libp2p::identity::ed25519::PublicKey::decode(
         &public_key.public_key_bytes(),
     )?);
     Ok(pk)
 }
 
-fn libp2p_pub_to_did(public_key: &libp2p::identity::PublicKey) -> anyhow::Result<DID> {
+fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::Result<DID> {
     let pk = match public_key {
-        libp2p::identity::PublicKey::Ed25519(pk) => {
+        ipfs::libp2p::identity::PublicKey::Ed25519(pk) => {
             let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.encode()).into();
             did.try_into()?
         }

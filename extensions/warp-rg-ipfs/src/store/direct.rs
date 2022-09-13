@@ -14,8 +14,8 @@ use uuid::Uuid;
 use warp::crypto::curve25519_dalek::traits::Identity;
 use warp::crypto::DID;
 use warp::error::Error;
-use warp::logging::tracing::log::error;
-use warp::logging::tracing::warn;
+use warp::logging::tracing::log::{error, trace};
+use warp::logging::tracing::{warn, Span};
 use warp::multipass::identity::FriendRequest;
 use warp::multipass::MultiPass;
 use warp::raygun::{
@@ -234,23 +234,23 @@ impl DirectConversation {
 
             while let Some(stream) = stream.next().await {
                 if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
-                    if let Ok(data) = data.decrypt::<Vec<u8>>((&*did).as_ref()) {
+                    if let Ok(data) = data.decrypt::<Vec<u8>>(&*did) {
                         if let Ok(event) = serde_json::from_slice::<MessagingEvents>(&data) {
-                            if let Err(_e) = direct_message_event(
+                            if let Err(e) = direct_message_event(
                                 &mut *convo.messages_mut(),
                                 &event,
                                 &filter,
                                 Default::default(),
                             ) {
-                                //TODO: Log
+                                error!("Error processing message: {e}");
                                 continue;
                             }
 
-                            if let Err(_e) = convo
+                            if let Err(e) = convo
                                 .to_file((!decrypted.load(Ordering::SeqCst)).then_some(&*did))
                                 .await
                             {
-                                //TODO: Log
+                                error!("Error saving message: {e}");
                                 continue;
                             }
                         }
@@ -395,6 +395,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                     if let Ok(events) = serde_json::from_slice::<ConversationEvents>(&data) {
                                         match events {
                                             ConversationEvents::NewConversation(id, peer) => {
+                                                trace!("New conversation event received from {peer}");
                                                 if store.exist(id) {
                                                     warn!("Conversation with {id} exist");
                                                     continue;
@@ -428,6 +429,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                 store.direct_conversation.write().push(convo);
                                             }
                                             ConversationEvents::DeleteConversation(id) => {
+                                                trace!("Delete conversation event received for {id}");
                                                 if !store.exist(id) {
                                                     error!("Conversation {id} doesnt exist");
                                                     continue;
@@ -440,7 +442,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
                                                 match store.get_conversation(id) {
                                                     Ok(conversation) if conversation.recipients().contains(&sender) => {},
-                                                    _ => continue
+                                                    _ => {
+                                                        error!("Conversation exist but did not match condition required");
+                                                        continue
+                                                    }
                                                 };
 
                                                 let index = store
@@ -466,6 +471,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                         error!("Error deleting conversation: {e}");
                                                     }
                                                     drop(conversation);
+                                                    trace!("Conversation deleted");
                                                 }
                                             }
                                         }
@@ -529,7 +535,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         Ok(store)
     }
 
-    async fn local(&self) -> anyhow::Result<(libp2p::identity::PublicKey, PeerId)> {
+    async fn local(&self) -> anyhow::Result<(ipfs::libp2p::identity::PublicKey, PeerId)> {
         let (local_ipfs_public_key, local_peer_id) = self
             .ipfs
             .identity()

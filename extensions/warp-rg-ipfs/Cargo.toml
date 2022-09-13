@@ -11,8 +11,9 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 [dependencies]
 warp = { path = "../../warp" }
 
-ipfs = { git = "https://github.com/Satellite-im/rust-ipfs", branch = "libp2p-next-usable", features = ["external-gossipsub-stream"]}
-libp2p = { default-features = false, version = "0.48" }
+ipfs = { git = "https://github.com/Satellite-im/rust-ipfs", branch = "libp2p-next-usable", features = [
+    "external-gossipsub-stream",
+] }
 libipld = { version = "0.13", features = ["serde-codec"] }
 
 uuid = { version = "1.0", features = ["serde", "v4"] }
@@ -36,7 +37,7 @@ warp-mp-ipfs = { path = "../warp-mp-ipfs" }
 warp-mp-solana = { path = "../warp-mp-solana" }
 rustyline-async = "0.2"
 comfy-table = "6.0"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 clap = { version = "3.2", features = ["derive"] }
 rpassword = "7.0"

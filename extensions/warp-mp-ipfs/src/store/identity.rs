@@ -436,14 +436,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 let kp = bs58::decode(keypair).into_vec()?;
                 let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
                 let secret =
-                    libp2p::identity::ed25519::SecretKey::from_bytes(id_kp.secret.to_bytes())?;
+                    ipfs::libp2p::identity::ed25519::SecretKey::from_bytes(id_kp.secret.to_bytes())?;
                 Ok(Keypair::Ed25519(secret.into()))
             }
             Err(_) => anyhow::bail!(Error::PrivateKeyInvalid),
         }
     }
 
-    pub fn get_raw_keypair(&self) -> anyhow::Result<libp2p::identity::ed25519::Keypair> {
+    pub fn get_raw_keypair(&self) -> anyhow::Result<ipfs::libp2p::identity::ed25519::Keypair> {
         match self.get_keypair()? {
             Keypair::Ed25519(kp) => Ok(kp),
             _ => anyhow::bail!("Unsupported keypair"),

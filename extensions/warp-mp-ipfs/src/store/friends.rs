@@ -468,7 +468,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                 let data = match data.decrypt::<FriendRequest>((&*store.did_key).as_ref()) {
                                     Ok(data) => data,
                                     Err(_e) => {
-                                        
+
                                         continue
                                     }
                                 };
@@ -641,7 +641,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         Ok(store)
     }
 
-    async fn local(&self) -> anyhow::Result<(libp2p::identity::PublicKey, PeerId)> {
+    async fn local(&self) -> anyhow::Result<(ipfs::libp2p::identity::PublicKey, PeerId)> {
         let (local_ipfs_public_key, local_peer_id) = self
             .ipfs
             .identity()
