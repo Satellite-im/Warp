@@ -7,6 +7,7 @@ pub mod logging {
     pub use tracing;
     pub use tracing_appender;
     pub use tracing_futures;
+    pub use tracing_subscriber;
 }
 
 pub mod constellation;
