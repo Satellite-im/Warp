@@ -5,13 +5,14 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::str::FromStr;
 use std::time::Duration;
+use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, ConversationType};
+use warp::raygun::{ConversationType, MessageOptions, PinState, RayGun, ReactionState};
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::ipfs_identity_temporary;
@@ -55,6 +56,13 @@ async fn create_rg_direct(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let file_appender = tracing_appender::rolling::hourly(std::env::temp_dir(), "warp_rg_ipfs_messenger.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    tracing_subscriber::fmt()
+        .with_writer(non_blocking)
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
     let cache = cache_setup()?;
 
     println!("Creating or obtaining account...");
