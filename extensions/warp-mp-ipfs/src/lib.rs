@@ -178,15 +178,21 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         let path = config.path.clone().unwrap_or_default();
 
         if config.bootstrap.is_empty() {
-            warn!("Bootstrap list is empty. Will not be able to perform a libp2p bootstrap");
+            warn!("Bootstrap list is empty. Will not be able to perform a bootstrap for DHT");
         }
 
         let swarm_configuration = ipfs::p2p::SwarmConfig {
             dial_concurrency_factor: 8.try_into().expect("8 > 0"),
-            notify_handler_buffer_size: 16.try_into().expect("16 > 0"),
-            connection_event_buffer_size: 32,
-            ..Default::default()
+            notify_handler_buffer_size: 32.try_into().expect("32 > 0"),
+            connection_event_buffer_size: 1024,
+            connection: ConnectionLimits::default()
+                .with_max_pending_incoming(Some(128))
+                .with_max_pending_outgoing(Some(128))
+                .with_max_established_incoming(Some(128))
+                .with_max_established_outgoing(Some(128)),
         };
+
+        trace!("Swarm configuration: {:?}", swarm_configuration.connection);
 
         let mut opts = IpfsOptions {
             keypair,
@@ -200,7 +206,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             ..Default::default()
         };
 
-        info!("Ipfs Opt: {opts:?}");
+        trace!("Ipfs Opt: {opts:?}");
 
         if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             info!("Instance will be persistent");
