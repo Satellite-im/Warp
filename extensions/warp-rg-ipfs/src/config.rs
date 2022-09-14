@@ -84,6 +84,7 @@ pub struct StoreSetting {
     pub discovery: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sync: Vec<Multiaddr>,
+    pub sync_interval: u64,
     pub check_spam: bool,
     pub allow_unsigned_message: bool,
 }
@@ -98,6 +99,7 @@ pub struct RgIpfsConfig {
     pub listen_on: Vec<Multiaddr>,
     pub ipfs_setting: IpfsSetting,
     pub store_setting: StoreSetting,
+    pub debug: bool,
 }
 
 impl Default for RgIpfsConfig {
@@ -140,6 +142,7 @@ impl Default for RgIpfsConfig {
                 allow_unsigned_message: false,
                 ..Default::default()
             },
+            debug: false,
         }
     }
 }
@@ -204,6 +207,72 @@ impl RgIpfsConfig {
                 discovery: true,
                 ..Default::default()
             },
+            ..Default::default()
+        }
+    }
+
+    pub fn development_debug() -> RgIpfsConfig {
+        RgIpfsConfig {
+            ipfs_setting: IpfsSetting {
+                mdns: Mdns { enable: true },
+                ..Default::default()
+            },
+            store_setting: StoreSetting {
+                broadcast_interval: 100,
+                ..Default::default()
+            },
+            debug: true,
+            ..Default::default()
+        }
+    }
+
+    pub fn testing_debug() -> RgIpfsConfig {
+        RgIpfsConfig {
+            ipfs_setting: IpfsSetting {
+                mdns: Mdns { enable: true },
+                relay_client: RelayClient {
+                    enable: true,
+                    ..Default::default()
+                },
+                dcutr: Dcutr { enable: true },
+                autonat: Autonat {
+                    enable: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            store_setting: StoreSetting {
+                discovery: true,
+                broadcast_interval: 100,
+                ..Default::default()
+            },
+            debug: true,
+            ..Default::default()
+        }
+    }
+
+    pub fn production_debug<P: AsRef<std::path::Path>>(path: P) -> RgIpfsConfig {
+        RgIpfsConfig {
+            path: Some(path.as_ref().to_path_buf()),
+            ipfs_setting: IpfsSetting {
+                mdns: Mdns { enable: true },
+                autonat: Autonat {
+                    enable: true,
+                    servers: vec![],
+                },
+                relay_client: RelayClient {
+                    enable: true,
+                    ..Default::default()
+                },
+                dcutr: Dcutr { enable: true },
+                ..Default::default()
+            },
+            store_setting: StoreSetting {
+                broadcast_interval: 100,
+                discovery: true,
+                ..Default::default()
+            },
+            debug: true,
             ..Default::default()
         }
     }

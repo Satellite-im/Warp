@@ -82,6 +82,7 @@ pub struct StoreSetting {
     pub discovery: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sync: Vec<Multiaddr>,
+    pub sync_interval: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +95,7 @@ pub struct MpIpfsConfig {
     pub listen_on: Vec<Multiaddr>,
     pub ipfs_setting: IpfsSetting,
     pub store_setting: StoreSetting,
+    pub debug: bool,
 }
 
 impl Default for MpIpfsConfig {
@@ -121,6 +123,7 @@ impl Default for MpIpfsConfig {
                 broadcast_interval: 100,
                 ..Default::default()
             },
+            debug: false
         }
     }
 }
@@ -131,11 +134,6 @@ impl MpIpfsConfig {
             path: None,
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
-                ..Default::default()
-            },
-            store_setting: StoreSetting {
-                broadcast_interval: 100,
-                discovery: false,
                 ..Default::default()
             },
             ..Default::default()
