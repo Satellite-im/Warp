@@ -186,10 +186,10 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             notify_handler_buffer_size: 32.try_into().expect("32 > 0"),
             connection_event_buffer_size: 1024,
             connection: ConnectionLimits::default()
-                .with_max_pending_incoming(Some(128))
-                .with_max_pending_outgoing(Some(128))
-                .with_max_established_incoming(Some(128))
-                .with_max_established_outgoing(Some(128)),
+                .with_max_pending_incoming(Some(256))
+                .with_max_pending_outgoing(Some(256))
+                .with_max_established_incoming(Some(256))
+                .with_max_established_outgoing(Some(256)),
         };
 
         trace!("Swarm configuration: {:?}", swarm_configuration.connection);
