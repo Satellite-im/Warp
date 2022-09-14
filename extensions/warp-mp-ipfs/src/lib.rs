@@ -10,6 +10,8 @@ pub mod store;
 use anyhow::bail;
 use config::MpIpfsConfig;
 use futures::{Future, TryFutureExt};
+use ipfs::libp2p::swarm::ConnectionLimits;
+use ipfs::libp2p::yamux::YamuxConfig;
 use libipld::serde::to_ipld;
 use libipld::{ipld, Cid, Ipld};
 use sata::Sata;
@@ -158,8 +160,9 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 let keypair = tesseract.retrieve("keypair")?;
                 let kp = bs58::decode(keypair).into_vec()?;
                 let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-                let secret =
-                    ipfs::libp2p::identity::ed25519::SecretKey::from_bytes(id_kp.secret.to_bytes())?;
+                let secret = ipfs::libp2p::identity::ed25519::SecretKey::from_bytes(
+                    id_kp.secret.to_bytes(),
+                )?;
                 Keypair::Ed25519(secret.into())
             }
             _ => anyhow::bail!("Unable to initalize store"),
@@ -178,6 +181,13 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             warn!("Bootstrap list is empty. Will not be able to perform a libp2p bootstrap");
         }
 
+        let swarm_configuration = ipfs::p2p::SwarmConfig {
+            dial_concurrency_factor: 8.try_into().expect("8 > 0"),
+            notify_handler_buffer_size: 16.try_into().expect("16 > 0"),
+            connection_event_buffer_size: 32,
+            ..Default::default()
+        };
+
         let mut opts = IpfsOptions {
             keypair,
             bootstrap: config.bootstrap,
@@ -186,6 +196,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             dcutr: config.ipfs_setting.dcutr.enable,
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
+            swarm_configuration: Some(swarm_configuration),
             ..Default::default()
         };
 
@@ -350,8 +361,9 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 "create_identity with username: {username:?} and containing passphrase: {}",
                 passphrase.is_some()
             );
+
             if self.is_store_initialized().await {
-                info!("Attempting to ");
+                info!("Store is initialized with existing identity");
                 return Err(Error::IdentityExist);
             }
 
@@ -715,7 +727,8 @@ pub mod ffi {
     use std::ffi::CStr;
     use std::os::raw::c_char;
     use warp::error::Error;
-    use warp::ffi::FFIResult;
+    use warp::ffi::{FFIResult, LogRotateInterval};
+    use warp::logging::{tracing, tracing_futures};
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::sync::{Arc, RwLock};
@@ -747,11 +760,11 @@ pub mod ffi {
             false => Some(&*pocketdimension),
         };
 
-        let account = match async_on_block(IpfsIdentity::<Temporary>::new(
-            config,
-            tesseract,
-            cache.map(|c| c.inner()),
-        )) {
+        let future = async move {
+            IpfsIdentity::<Temporary>::new(config, tesseract, cache.map(|c| c.inner())).await
+        };
+
+        let account = match async_on_block(future) {
             Ok(identity) => identity,
             Err(e) => return FFIResult::err(Error::from(e)),
         };
