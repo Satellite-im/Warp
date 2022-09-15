@@ -177,7 +177,9 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
         let path = config.path.clone().unwrap_or_default();
 
-        if config.bootstrap.is_empty() {
+        let empty_bootstrap = config.bootstrap.is_empty();
+
+        if empty_bootstrap {
             warn!("Bootstrap list is empty. Will not be able to perform a bootstrap for DHT");
         }
 
@@ -243,9 +245,10 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                     tokio::time::sleep(Duration::from_millis(400)).await;
                 }
             }
-
-            if let Err(e) = ipfs_clone.direct_bootstrap().await {
-                error!("Error bootstrapping: {e}");
+            if !empty_bootstrap {
+                if let Err(e) = ipfs_clone.direct_bootstrap().await {
+                    error!("Error bootstrapping: {e}");
+                }
             }
         });
 
