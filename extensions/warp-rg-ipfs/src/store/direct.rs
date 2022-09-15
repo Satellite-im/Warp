@@ -258,7 +258,6 @@ impl DirectConversation {
                 }
             }
         });
-
         *self.task.write() = Some(task);
     }
 
@@ -422,7 +421,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                 if let Some(path) = store.path.as_ref() {
                                                     convo.set_path(path);
                                                     if let Err(e) = convo.to_file((!store.store_decrypted.load(Ordering::SeqCst)).then_some(&*store.did)).await {
-                                                        //TODO: Log
                                                         error!("Error saving conversation: {e}");
                                                     }
                                                 }
@@ -530,8 +528,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         }
                     }
                 }
+                tokio::time::sleep(Duration::from_millis(1)).await;
             }
         });
+        tokio::task::yield_now().await;
         Ok(store)
     }
 
