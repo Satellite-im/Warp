@@ -183,7 +183,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             warn!("Bootstrap list is empty. Will not be able to perform a bootstrap for DHT");
         }
 
-        let swarm_config = config.ipfs_setting.swarm.clone().unwrap_or_default();
+        let swarm_config = config.ipfs_setting.swarm.clone();
 
         let mut swarm_configuration = ipfs::p2p::SwarmConfig {
             dial_concurrency_factor: swarm_config

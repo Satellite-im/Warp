@@ -26,7 +26,7 @@ pub struct RelayClient {
     pub relay_address: Vec<Multiaddr>,
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Swarm {
     pub dial_factor: u8,
     pub notify_buffer_size: usize,
@@ -34,7 +34,18 @@ pub struct Swarm {
     pub limit: Option<ConnectionLimit>,
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+impl Default for Swarm {
+    fn default() -> Self {
+        Self {
+            dial_factor: 8, //Same dial factor as default for libp2p
+            notify_buffer_size: 32,
+            connection_buffer_size: 1024,
+            limit: Some(Default::default())
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionLimit {
     pub max_pending_incoming: Option<u32>,
     pub max_pending_outgoing: Option<u32>,
@@ -42,6 +53,19 @@ pub struct ConnectionLimit {
     pub max_established_outgoing: Option<u32>,
     pub max_established: Option<u32>,
     pub max_established_per_peer: Option<u32>,
+}
+
+impl Default for ConnectionLimit {
+    fn default() -> Self {
+        Self {
+            max_pending_incoming: Some(1024),
+            max_pending_outgoing: Some(1024),
+            max_established_incoming: Some(10000),
+            max_established_outgoing: Some(10000),
+            max_established: Some(10000),
+            max_established_per_peer: None
+        }
+    }
 }
 
 impl Default for RelayClient {
@@ -90,8 +114,7 @@ pub struct IpfsSetting {
     pub relay_server: RelayServer,
     pub dcutr: Dcutr,
     pub rendezvous: Rendezvous,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub swarm: Option<Swarm>,
+    pub swarm: Swarm,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
