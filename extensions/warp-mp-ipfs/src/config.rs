@@ -26,6 +26,24 @@ pub struct RelayClient {
     pub relay_address: Vec<Multiaddr>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Swarm {
+    dial_factor: u8,
+    notify_buffer_size: usize,
+    connection_buffer_size: usize,
+    limit: Option<ConnectionLimit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionLimit {
+    max_pending_incoming: u32,
+    max_pending_outgoing: u32,
+    max_established_incoming: u32,
+    max_established_outgoing: u32,
+    max_established: u32,
+    max_established_per_peer: u32,
+}
+
 impl Default for RelayClient {
     fn default() -> Self {
         Self {
@@ -72,6 +90,8 @@ pub struct IpfsSetting {
     pub relay_server: RelayServer,
     pub dcutr: Dcutr,
     pub rendezvous: Rendezvous,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub swarm: Option<Swarm>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -123,7 +143,7 @@ impl Default for MpIpfsConfig {
                 broadcast_interval: 100,
                 ..Default::default()
             },
-            debug: false
+            debug: false,
         }
     }
 }
