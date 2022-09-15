@@ -14,7 +14,7 @@ use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, ConversationType};
+use warp::raygun::{ConversationType, MessageOptions, PinState, RayGun, ReactionState};
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::config::{Autonat, Dcutr, IpfsSetting, RelayClient, StoreSetting};
@@ -122,6 +122,7 @@ async fn create_rg(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if fdlimit::raise_fd_limit().is_none() {}
     let opt = Opt::parse();
 
     let cache = cache_setup(opt.path.as_ref().map(|p| p.join("cache")))?;

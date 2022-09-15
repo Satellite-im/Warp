@@ -13,7 +13,7 @@ use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, ConversationType};
+use warp::raygun::{ConversationType, MessageOptions, PinState, RayGun, ReactionState};
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::{ipfs_identity_persistent, Persistent};
@@ -77,6 +77,8 @@ async fn create_rg_direct(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if fdlimit::raise_fd_limit().is_none() {}
+    
     let opt = Opt::parse();
     let cache = cache_setup(&opt.path.join("cache"), &PathBuf::from("cache-index"))?;
 
@@ -129,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
     let mut convo_size: HashMap<Uuid, usize> = HashMap::new();
     let mut convo_list = vec![];
     let mut interval = tokio::time::interval(Duration::from_millis(500));
-   loop {
+    loop {
         tokio::select! {
             //TODO: Optimize by clearing terminal and displaying all messages instead of getting last line
             msg = chat.get_messages(topic, MessageOptions::default()) => {
