@@ -26,22 +26,22 @@ pub struct RelayClient {
     pub relay_address: Vec<Multiaddr>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Swarm {
-    dial_factor: u8,
-    notify_buffer_size: usize,
-    connection_buffer_size: usize,
-    limit: Option<ConnectionLimit>,
+    pub dial_factor: u8,
+    pub notify_buffer_size: usize,
+    pub connection_buffer_size: usize,
+    pub limit: Option<ConnectionLimit>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionLimit {
-    max_pending_incoming: u32,
-    max_pending_outgoing: u32,
-    max_established_incoming: u32,
-    max_established_outgoing: u32,
-    max_established: u32,
-    max_established_per_peer: u32,
+    pub max_pending_incoming: Option<u32>,
+    pub max_pending_outgoing: Option<u32>,
+    pub max_established_incoming: Option<u32>,
+    pub max_established_outgoing: Option<u32>,
+    pub max_established: Option<u32>,
+    pub max_established_per_peer: Option<u32>,
 }
 
 impl Default for RelayClient {

@@ -183,16 +183,34 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             warn!("Bootstrap list is empty. Will not be able to perform a bootstrap for DHT");
         }
 
-        let swarm_configuration = ipfs::p2p::SwarmConfig {
-            dial_concurrency_factor: 8.try_into().expect("8 > 0"),
-            notify_handler_buffer_size: 32.try_into().expect("32 > 0"),
-            connection_event_buffer_size: 1024,
-            connection: ConnectionLimits::default()
-                .with_max_pending_incoming(Some(256))
-                .with_max_pending_outgoing(Some(256))
-                .with_max_established_incoming(Some(256))
-                .with_max_established_outgoing(Some(256)),
+        let swarm_config = config.ipfs_setting.swarm.clone().unwrap_or_default();
+
+        let mut swarm_configuration = ipfs::p2p::SwarmConfig {
+            dial_concurrency_factor: swarm_config
+                .dial_factor
+                .try_into()
+                .unwrap_or_else(|_| 8.try_into().expect("8 > 0")),
+            notify_handler_buffer_size: swarm_config
+                .notify_buffer_size
+                .try_into()
+                .unwrap_or_else(|_| 32.try_into().expect("32 > 0")),
+            connection_event_buffer_size: if swarm_config.connection_buffer_size > 0 {
+                swarm_config.connection_buffer_size
+            } else {
+                32
+            },
+            connection: ConnectionLimits::default(),
         };
+
+        if let Some(limit) = swarm_config.limit {
+            swarm_configuration.connection = ConnectionLimits::default()
+                .with_max_pending_outgoing(limit.max_pending_outgoing)
+                .with_max_pending_incoming(limit.max_pending_incoming)
+                .with_max_established_incoming(limit.max_established_incoming)
+                .with_max_established_outgoing(limit.max_established_outgoing)
+                .with_max_established(limit.max_established)
+                .with_max_established_per_peer(limit.max_established_per_peer);
+        }
 
         trace!("Swarm configuration: {:?}", swarm_configuration.connection);
 
