@@ -13,10 +13,12 @@ jobs:
     steps:
       - name: Checkout Warp repo
         uses: actions/checkout@v3
+      - name: Install Protobuf
+        uses: arduino/setup-protoc@v1
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm-dev cmake libudev-dev protobuf-compiler
+          sudo apt-get install -y llvm-dev cmake libudev-dev
       - name: Setup rust
         uses: actions-rs/toolchain@v1
         with:
@@ -83,6 +85,8 @@ jobs:
             platform: android
             os: ubuntu-latest
     steps:
+      - name: Install Protobuf
+        uses: arduino/setup-protoc@v1
       - uses: actions/checkout@v2
       - uses: nttld/setup-ndk@v1
         id: setup-ndk
@@ -99,7 +103,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm-dev cmake libudev-dev protobuf-compiler
+          sudo apt-get install -y llvm-dev cmake libudev-dev
       - uses: actions-rs/cargo@v1
         if: ${{ matrix.platform == 'android' }}
         with:
