@@ -5,6 +5,7 @@ use rustyline_async::{Readline, ReadlineError};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use tracing_subscriber::EnvFilter;
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, IdentityUpdate};
 use warp::multipass::MultiPass;
@@ -78,6 +79,16 @@ async fn account_persistent<P: AsRef<Path>>(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if fdlimit::raise_fd_limit().is_none() {}
+
+    let file_appender = tracing_appender::rolling::hourly("./", "warp_mp_identity_interface.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    tracing_subscriber::fmt()
+        .with_writer(non_blocking)
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
     let opt = Opt::parse();
 
     let cache = cache_setup(opt.path.clone()).ok();

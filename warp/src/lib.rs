@@ -3,6 +3,13 @@ pub mod sync {
     pub use std::sync::Arc;
 }
 
+pub mod logging {
+    pub use tracing;
+    pub use tracing_appender;
+    pub use tracing_futures;
+    pub use tracing_subscriber;
+}
+
 pub mod constellation;
 pub mod crypto;
 pub mod data;
@@ -388,7 +395,7 @@ pub mod ffi {
         let _ = FFIError::from_ptr(ptr);
     }
 
-    #[cfg(not(target_arch="wasm32"))]
+    #[cfg(not(target_arch = "wasm32"))]
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn ffivec_string_free(cvec: *mut FFIVec_String) {
@@ -397,4 +404,94 @@ pub mod ffi {
         drop(list)
     }
 
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
+    pub enum LogRotateInterval {
+        Minute,
+        Hourly,
+        Daily,
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn log_to_file(
+        interval: LogRotateInterval,
+        directory: *const std::os::raw::c_char,
+        file: *const std::os::raw::c_char,
+        env: *const std::os::raw::c_char,
+        directive: *const std::os::raw::c_char,
+    ) {
+        if directory.is_null() || file.is_null() {
+            return;
+        }
+
+        let directory = std::ffi::CStr::from_ptr(directory)
+            .to_string_lossy()
+            .to_string();
+
+        let file = std::ffi::CStr::from_ptr(file).to_string_lossy().to_string();
+
+        let file_appender = match interval {
+            LogRotateInterval::Minute => tracing_appender::rolling::minutely(directory, file),
+            LogRotateInterval::Hourly => tracing_appender::rolling::hourly(directory, file),
+            LogRotateInterval::Daily => tracing_appender::rolling::daily(directory, file),
+        };
+
+        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+        // This is to prevent the guard from dropping
+        std::mem::forget(_guard);
+
+        let filter = match !env.is_null() {
+            true => {
+                let env = std::ffi::CStr::from_ptr(env).to_string_lossy().to_string();
+                tracing_subscriber::EnvFilter::from_env(env)
+            }
+            false => tracing_subscriber::EnvFilter::from_default_env(),
+        };
+
+        let filter = match !directive.is_null() {
+            true => {
+                let directive = std::ffi::CStr::from_ptr(directive)
+                    .to_string_lossy()
+                    .to_string();
+                filter.add_directive(directive.parse().expect("Directive is invalid"))
+            }
+            false => filter,
+        };
+
+        tracing_subscriber::fmt()
+            .with_writer(non_blocking)
+            .with_env_filter(filter)
+            .init();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn log_to_stdout(
+        env: *const std::os::raw::c_char,
+        directive: *const std::os::raw::c_char,
+    ) {
+        let filter = match !env.is_null() {
+            true => {
+                let env = std::ffi::CStr::from_ptr(env).to_string_lossy().to_string();
+                tracing_subscriber::EnvFilter::from_env(env)
+            }
+            false => tracing_subscriber::EnvFilter::from_default_env(),
+        };
+
+        let filter = match !directive.is_null() {
+            true => {
+                let directive = std::ffi::CStr::from_ptr(directive)
+                    .to_string_lossy()
+                    .to_string();
+                filter.add_directive(directive.parse().expect("Directive is invalid"))
+            }
+            false => filter,
+        };
+
+        tracing_subscriber::fmt().with_env_filter(filter).init();
+    }
 }

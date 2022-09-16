@@ -10,6 +10,9 @@ pub mod store;
 use anyhow::bail;
 use config::MpIpfsConfig;
 use futures::{Future, TryFutureExt};
+use ipfs::libp2p::swarm::ConnectionLimits;
+use ipfs::libp2p::yamux::YamuxConfig;
+use ipfs::p2p::TransportConfig;
 use libipld::serde::to_ipld;
 use libipld::{ipld, Cid, Ipld};
 use sata::Sata;
@@ -21,6 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
+use tracing::log::{error, info, trace, warn};
 use warp::crypto::did_key::Generate;
 use warp::data::{DataObject, DataType};
 use warp::hooks::Hooks;
@@ -102,6 +106,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         tesseract: Tesseract,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity<T>> {
+        trace!("Initializing Multipass");
         let hooks = None;
 
         let mut identity = IpfsIdentity {
@@ -135,33 +140,80 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         if init && self.identity_store.read().is_some() && self.friend_store.read().is_some()
             || self.initialized.load(Ordering::SeqCst)
         {
+            warn!("Identity is already loaded");
             anyhow::bail!(Error::IdentityExist)
         }
 
         let keypair = match (init, tesseract.exist("keypair")) {
             (true, false) => {
+                info!("Keypair doesnt exist. Generating keypair....");
                 if let Keypair::Ed25519(kp) = Keypair::generate_ed25519() {
                     let encoded_kp = bs58::encode(&kp.encode()).into_string();
                     tesseract.set("keypair", &encoded_kp)?;
                     Keypair::Ed25519(kp)
                 } else {
+                    error!("Unreachable. Report this as a bug");
                     anyhow::bail!("Unreachable")
                 }
             }
             (false, true) | (true, true) => {
+                info!("Fetching keypair from tesseract");
                 let keypair = tesseract.retrieve("keypair")?;
                 let kp = bs58::decode(keypair).into_vec()?;
                 let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-                let secret =
-                    libp2p::identity::ed25519::SecretKey::from_bytes(id_kp.secret.to_bytes())?;
+                let secret = ipfs::libp2p::identity::ed25519::SecretKey::from_bytes(
+                    id_kp.secret.to_bytes(),
+                )?;
                 Keypair::Ed25519(secret.into())
             }
             _ => anyhow::bail!("Unable to initalize store"),
         };
 
+        info!(
+            "Have keypair with peer id: {}",
+            keypair.public().to_peer_id()
+        );
+
         let config = self.config.clone();
 
         let path = config.path.clone().unwrap_or_default();
+
+        let empty_bootstrap = config.bootstrap.is_empty();
+
+        if empty_bootstrap {
+            warn!("Bootstrap list is empty. Will not be able to perform a bootstrap for DHT");
+        }
+
+        let swarm_config = config.ipfs_setting.swarm.clone();
+
+        let mut swarm_configuration = ipfs::p2p::SwarmConfig {
+            dial_concurrency_factor: swarm_config
+                .dial_factor
+                .try_into()
+                .unwrap_or_else(|_| 8.try_into().expect("8 > 0")),
+            notify_handler_buffer_size: swarm_config
+                .notify_buffer_size
+                .try_into()
+                .unwrap_or_else(|_| 32.try_into().expect("32 > 0")),
+            connection_event_buffer_size: if swarm_config.connection_buffer_size > 0 {
+                swarm_config.connection_buffer_size
+            } else {
+                32
+            },
+            connection: ConnectionLimits::default(),
+        };
+
+        if let Some(limit) = swarm_config.limit {
+            swarm_configuration.connection = ConnectionLimits::default()
+                .with_max_pending_outgoing(limit.max_pending_outgoing)
+                .with_max_pending_incoming(limit.max_pending_incoming)
+                .with_max_established_incoming(limit.max_established_incoming)
+                .with_max_established_outgoing(limit.max_established_outgoing)
+                .with_max_established(limit.max_established)
+                .with_max_established_per_peer(limit.max_established_per_peer);
+        }
+
+        trace!("Swarm configuration: {:?}", swarm_configuration.connection);
 
         let mut opts = IpfsOptions {
             keypair,
@@ -171,38 +223,60 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             dcutr: config.ipfs_setting.dcutr.enable,
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
+            swarm_configuration: Some(swarm_configuration),
+            transport_configuration: Some(TransportConfig {
+                yamux_config: {
+                    let mut config = YamuxConfig::default();
+                    config.set_max_buffer_size(16 * 1024 * 1024);
+                    config.set_receive_window_size(16 * 1024 * 1024);
+                    config
+                },
+                ..Default::default()
+            }),
             ..Default::default()
         };
 
+        trace!("Ipfs Opt: {opts:?}");
+
         if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
+            info!("Instance will be persistent");
             // Create directory if it doesnt exist
             let path = self
                 .config
                 .path
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("\"path\" must be set"))?;
+
+            info!("Path set: {}", path.display());
             opts.ipfs_path = path.clone();
             if !opts.ipfs_path.exists() {
+                warn!("Path doesnt exist... creating");
                 tokio::fs::create_dir(path).await?;
             }
         }
 
+        info!("Starting ipfs");
         let (ipfs, fut) = UninitializedIpfs::<T>::new(opts).start().await?;
+
+        info!("passing future into tokio task");
         tokio::spawn(fut);
 
         let ipfs_clone = ipfs.clone();
         tokio::spawn(async move {
             if config.ipfs_setting.relay_client.enable {
+                info!("Relay client enabled. Loading relays");
                 for relay_addr in config.ipfs_setting.relay_client.relay_address {
-                    if let Err(_e) = ipfs_clone.swarm_listen_on(relay_addr).await {
-                        //TODO: Log
+                    if let Err(e) = ipfs_clone.swarm_listen_on(relay_addr).await {
+                        info!("Error listening on relay: {e}");
+                        continue;
                     }
                     tokio::time::sleep(Duration::from_millis(400)).await;
                 }
             }
-
-            if let Err(_e) = ipfs_clone.direct_bootstrap().await {
-                //TODO: Log
+            if !empty_bootstrap {
+                if let Err(e) = ipfs_clone.direct_bootstrap().await {
+                    error!("Error bootstrapping: {e}");
+                }
             }
         });
 
@@ -216,6 +290,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             )
             .await?,
         );
+        info!("Identity store initialized");
 
         *self.friend_store.write() = Some(
             FriendsStore::new(
@@ -227,9 +302,11 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             )
             .await?,
         );
+        info!("friends store initialized");
 
         *self.ipfs.write() = Some(ipfs);
         self.initialized.store(true, Ordering::SeqCst);
+        info!("multipass initialized");
         Ok(())
     }
 
@@ -317,19 +394,30 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
         passphrase: Option<&str>,
     ) -> Result<DID, Error> {
         async_block_in_place_uncheck(async {
+            info!(
+                "create_identity with username: {username:?} and containing passphrase: {}",
+                passphrase.is_some()
+            );
+
             if self.is_store_initialized().await {
+                info!("Store is initialized with existing identity");
                 return Err(Error::IdentityExist);
             }
 
             if let Some(phrase) = passphrase {
+                info!("Passphrase exist");
                 let mut tesseract = self.tesseract.clone();
                 if !tesseract.exist("keypair") {
+                    warn!("Loading keypair generated from mnemonic phrase into tesseract");
                     warp::crypto::keypair::mnemonic_into_tesseract(&mut tesseract, phrase, None)?;
                 }
             }
 
+            info!("Initializing stores");
             self.initialize_store(true).await?;
+            info!("Stores initialized. Creating identity");
             let identity = self.identity_store()?.create_identity(username).await?;
+            info!("Identity with {} has been created", identity.did_key());
 
             if let Ok(mut cache) = self.get_cache_mut() {
                 let object = Sata::default().encode(
@@ -350,6 +438,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
     fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
         async_block_in_place_uncheck(async {
             if !self.is_store_initialized().await {
+                error!("Store is not initialized. Either tesseract is not unlocked or an identity has not been created");
                 return Err(Error::MultiPassExtensionUnavailable);
             }
             let store = self.identity_store()?;
@@ -401,7 +490,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 (None, None, true) => return store.own_identity().await.map(|i| vec![i]),
                 _ => Err(Error::InvalidIdentifierCondition),
             }?;
-
+            trace!("Found {} identities", idents.len());
             for ident in &idents {
                 if let Ok(mut cache) = self.get_cache_mut() {
                     let mut query = QueryBuilder::default();
@@ -451,18 +540,34 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 _ => return Err(Error::CannotUpdateIdentity),
             }
 
+            let mut old_cid = None;
+
             if let Ok(cid) = store.get_cid().await {
+                info!("Current CID for identity: {cid}");
+                info!("Is it pinned?");
                 if ipfs.is_pinned(&cid).await? {
+                    info!("Cid is pinned. Removing pin");
                     ipfs.remove_pin(&cid, false).await?;
                 }
+                old_cid = Some(cid);
             };
 
+            info!("Converting identity to ipld");
             let ipld = to_ipld(&identity).map_err(anyhow::Error::from)?;
+            info!("Storing identity into ipfd");
             let ident_cid = ipfs.put_dag(ipld).await?;
 
-            ipfs.insert_pin(&ident_cid, false).await?;
+            info!("New identity cid is {ident_cid}. Pinning it");
 
+            ipfs.insert_pin(&ident_cid, false).await?;
+            info!("ident_cid is pinned it");
             store.save_cid(ident_cid).await?;
+            if let Some(old_cid) = old_cid {
+                info!("Removing {old_cid}");
+                if let Err(e) = ipfs.remove_block(old_cid).await {
+                    error!("Cannot remove {old_cid}: {e}");
+                }
+            }
 
             if let Ok(mut cache) = self.get_cache_mut() {
                 let mut query = QueryBuilder::default();
@@ -491,6 +596,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 }
             }
 
+            info!("Update identity store");
             store.update_identity().await?;
 
             if let Ok(hooks) = self.get_hooks() {
@@ -658,7 +764,8 @@ pub mod ffi {
     use std::ffi::CStr;
     use std::os::raw::c_char;
     use warp::error::Error;
-    use warp::ffi::FFIResult;
+    use warp::ffi::{FFIResult, LogRotateInterval};
+    use warp::logging::{tracing, tracing_futures};
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::sync::{Arc, RwLock};
@@ -690,11 +797,11 @@ pub mod ffi {
             false => Some(&*pocketdimension),
         };
 
-        let account = match async_on_block(IpfsIdentity::<Temporary>::new(
-            config,
-            tesseract,
-            cache.map(|c| c.inner()),
-        )) {
+        let future = async move {
+            IpfsIdentity::<Temporary>::new(config, tesseract, cache.map(|c| c.inner())).await
+        };
+
+        let account = match async_on_block(future) {
             Ok(identity) => identity,
             Err(e) => return FFIResult::err(Error::from(e)),
         };

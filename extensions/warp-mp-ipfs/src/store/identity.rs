@@ -1,4 +1,6 @@
 use std::{
+    collections::{HashSet, VecDeque},
+    hash::Hash,
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::Duration,
@@ -6,13 +8,14 @@ use std::{
 
 use crate::{store::did_to_libp2p_pub, Persistent};
 use futures::{SinkExt, StreamExt, TryFutureExt};
-use ipfs::{Ipfs, IpfsPath, IpfsTypes, Keypair};
+use ipfs::{Ipfs, IpfsPath, IpfsTypes, Keypair, PeerId};
 use libipld::{
     ipld,
     serde::{from_ipld, to_ipld},
     Cid, Ipld,
 };
 use sata::Sata;
+use tracing::log::{error, warn};
 use warp::{
     crypto::{rand::Rng, DIDKey, Ed25519KeyPair, Fingerprint, KeyMaterial, DID},
     error::Error,
@@ -35,6 +38,10 @@ pub struct IdentityStore<T: IpfsTypes> {
 
     cache: Arc<RwLock<Vec<Identity>>>,
 
+    seen: Arc<RwLock<Vec<PeerId>>>,
+
+    check_seen: Arc<AtomicBool>,
+
     start_event: Arc<AtomicBool>,
 
     end_event: Arc<AtomicBool>,
@@ -50,8 +57,10 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
             ident_cid: self.ident_cid.clone(),
             identity: self.identity.clone(),
             cache: self.cache.clone(),
+            seen: self.seen.clone(),
             start_event: self.start_event.clone(),
             end_event: self.end_event.clone(),
+            check_seen: self.check_seen.clone(),
             tesseract: self.tesseract.clone(),
         }
     }
@@ -87,14 +96,19 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let start_event = Arc::new(Default::default());
         let end_event = Arc::new(Default::default());
         let ident_cid = Arc::new(Default::default());
+        let seen = Arc::new(Default::default());
+        let check_seen = Arc::new(Default::default());
+
         let store = Self {
             ipfs,
             path,
             ident_cid,
             cache,
             identity,
+            seen,
             start_event,
             end_event,
+            check_seen,
             tesseract,
         };
         if let Some(path) = store.path.as_ref() {
@@ -118,8 +132,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
         if discovery {
             let ipfs = store.ipfs.clone();
             tokio::spawn(async {
-                if let Err(_e) = topic_discovery(ipfs, IDENTITY_BROADCAST).await {
-                    //TODO: Log
+                if let Err(e) = topic_discovery(ipfs, IDENTITY_BROADCAST).await {
+                    error!("Error performing topic discovery: {e}");
                 }
             });
         }
@@ -130,6 +144,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
             futures::pin_mut!(id_broadcast_stream);
 
             let mut tick = tokio::time::interval(Duration::from_millis(interval));
+            //this is used to clear `seen` at a set interval.
+            let mut clear_seen = tokio::time::interval(Duration::from_secs(3 * 60));
             loop {
                 if store.end_event.load(Ordering::SeqCst) {
                     break;
@@ -145,8 +161,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                     //Validate public key against peer that sent it
                                     let pk = match did_to_libp2p_pub(&identity.did_key()) {
                                         Ok(pk) => pk,
-                                        Err(_e) => {
-                                            //TODO: Log
+                                        Err(e) => {
+                                            error!("Error converting public key to did: {e}");
                                             continue
                                         }
                                     };
@@ -174,8 +190,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                     store.cache.write().push(identity);
                                     if let Some(path) = store.path.as_ref() {
                                         if let Ok(bytes) = serde_json::to_vec(&store.cache) {
-                                            if let Err(_e) = tokio::fs::write(path.join(".id_cache"), bytes).await {
-                                                //TODO: Log
+                                            if let Err(e) = tokio::fs::write(path.join(".id_cache"), bytes).await {
+                                                error!("Error saving cache: {e}");
                                             }
                                         }
 
@@ -184,15 +200,41 @@ impl<T: IpfsTypes> IdentityStore<T> {
                             }
                         }
                     }
+                    _ = clear_seen.tick() => {
+                        if store.check_seen.load(Ordering::Relaxed) {
+                            store.seen.write().clear();
+                        }
+                    }
                     _ = tick.tick() => {
-
                         match store.ipfs.pubsub_peers(Some(IDENTITY_BROADCAST.into())).await {
-                            Ok(peers) => if peers.is_empty() {
-                                //Dont send out when there is no peers connected
-                                continue
+                            Ok(peers) => {
+
+                                match store.check_seen.load(Ordering::Relaxed) {
+                                    true => {
+                                        if peers.is_empty() || (!peers.is_empty() && peers == store.seen.read().clone()) {
+                                            // warn!("");
+                                            continue
+                                        }
+                                        let seen_list = store.seen.read().clone();
+
+                                        let mut havent_seen = vec![];
+                                        for peer in peers.iter() {
+                                            if seen_list.contains(peer) {
+                                                continue
+                                            }
+                                            havent_seen.push(peer);
+                                        }
+
+                                        store.seen.write().extend(havent_seen);
+                                    }
+                                    false => if peers.is_empty() {
+                                        continue
+                                    }
+                                }
+
                             },
-                            Err(_e) => {
-                                //TODO: Log
+                            Err(e) => {
+                                error!("Error obtaining peers from topic: {e}");
                                 continue
                             }
                         };
@@ -207,29 +249,32 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
                         let res = match data.encode(libipld::IpldCodec::DagJson, sata::Kind::Static, ident) {
                             Ok(data) => data,
-                            Err(_e) => {
-                                //TODO: Log
+                            Err(e) => {
+                                error!("Error encoding to sata object: {e}");
                                 continue
                             }
                         };
 
                         let bytes = match serde_json::to_vec(&res) {
                             Ok(bytes) => bytes,
-                            Err(_e) => {
-                                //TODO: Log
+                            Err(e) => {
+                                error!("Error serializing to bytes: {e}");
                                 continue
                             }
                         };
 
-                        if let Err(_e) = store.ipfs.pubsub_publish(IDENTITY_BROADCAST.into(), bytes).await {
+                        if let Err(e) = store.ipfs.pubsub_publish(IDENTITY_BROADCAST.into(), bytes).await {
+                            error!("Error announcing identity: {e}");
                             continue
                         }
 
 
                     }
                 }
+                tokio::time::sleep(Duration::from_millis(1)).await;
             }
         });
+        tokio::task::yield_now().await;
         Ok(store)
     }
 
@@ -391,14 +436,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 let kp = bs58::decode(keypair).into_vec()?;
                 let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
                 let secret =
-                    libp2p::identity::ed25519::SecretKey::from_bytes(id_kp.secret.to_bytes())?;
+                    ipfs::libp2p::identity::ed25519::SecretKey::from_bytes(id_kp.secret.to_bytes())?;
                 Ok(Keypair::Ed25519(secret.into()))
             }
             Err(_) => anyhow::bail!(Error::PrivateKeyInvalid),
         }
     }
 
-    pub fn get_raw_keypair(&self) -> anyhow::Result<libp2p::identity::ed25519::Keypair> {
+    pub fn get_raw_keypair(&self) -> anyhow::Result<ipfs::libp2p::identity::ed25519::Keypair> {
         match self.get_keypair()? {
             Keypair::Ed25519(kp) => Ok(kp),
             _ => anyhow::bail!("Unsupported keypair"),
@@ -458,6 +503,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     pub async fn update_identity(&self) -> Result<(), Error> {
         let ident = self.own_identity().await?;
         *self.identity.write() = Some(ident);
+        self.seen.write().clear();
         Ok(())
     }
 

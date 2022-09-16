@@ -7,4 +7,4 @@ members = [
   "warp-bin",
   "warp-extensions",
 ]
-exclude = ["extensions/warp-rg-libp2p"]
+exclude = ["deprecated/*"]

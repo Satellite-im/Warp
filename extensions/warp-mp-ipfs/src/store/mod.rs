@@ -1,32 +1,82 @@
 use std::time::Duration;
 
 use ipfs::IpfsTypes;
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use tracing::log::error;
 use warp::{
     crypto::{
         did_key::{CoreSign, Generate},
         DIDKey, Ed25519KeyPair, KeyMaterial, DID,
     },
     error::Error,
+    multipass::identity::Identity,
     tesseract::Tesseract,
 };
+
+use self::friends::InternalRequest;
 
 pub mod friends;
 pub mod identity;
 
 pub const IDENTITY_BROADCAST: &str = "identity/broadcast";
 pub const FRIENDS_BROADCAST: &str = "friends/broadcast";
+pub const SYNC_BROADCAST: &str = "/identity/sync/broadcast";
 
-fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<libp2p::identity::PublicKey> {
-    let pk = libp2p::identity::PublicKey::Ed25519(libp2p::identity::ed25519::PublicKey::decode(
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase", tag = "type")]
+pub enum PayloadEvent {
+    Received(Payload),
+    Sent(Payload),
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase", tag = "type")]
+pub enum Payload {
+    Identity {
+        identity: Identity,
+        signature: Vec<u8>,
+    },
+    Friends {
+        identity_did: DID,
+        list: Vec<DID>,
+        signature: Vec<u8>,
+    },
+    Request {
+        identity_did: DID,
+        list: Vec<InternalRequest>,
+        signature: Vec<u8>,
+    },
+    Block {
+        identity_did: DID,
+        list: Vec<DID>,
+        signature: Vec<u8>,
+    },
+    Package {
+        total_size: usize,
+        parts: usize,
+        parts_size: usize,
+        signature: Vec<u8>,
+    },
+    PackageStreamStart,
+    PackageStreamData {
+        part: usize,
+        data: Vec<u8>,
+        signature: Vec<u8>,
+    },
+    PackageStreamEnd,
+}
+
+fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity::PublicKey> {
+    let pk = ipfs::libp2p::identity::PublicKey::Ed25519(ipfs::libp2p::identity::ed25519::PublicKey::decode(
         &public_key.public_key_bytes(),
     )?);
     Ok(pk)
 }
 
-fn libp2p_pub_to_did(public_key: &libp2p::identity::PublicKey) -> anyhow::Result<DID> {
+fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::Result<DID> {
     let pk = match public_key {
-        libp2p::identity::PublicKey::Ed25519(pk) => {
+        ipfs::libp2p::identity::PublicKey::Ed25519(pk) => {
             let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.encode()).into();
             did.try_into()?
         }
@@ -74,33 +124,10 @@ pub async fn topic_discovery<T: IpfsTypes, S: AsRef<str>>(
     ipfs.provide(cid).await?;
 
     loop {
-        if let Ok(list) = ipfs.get_providers(cid).await {
-            for peer in list {
-                // Check to see if we are already connected to the peer
-                if let Ok(connections) = ipfs.peers().await {
-                    if connections
-                        .iter()
-                        .filter(|connection| connection.addr.peer_id == peer)
-                        .count()
-                        >= 1
-                    {
-                        continue;
-                    }
-                }
-
-                if let Ok(addrs) = ipfs.find_peer(peer).await {
-                    for addr in addrs {
-                        let addr = addr.with(ipfs::Protocol::P2p(peer.into()));
-                        if let Ok(addr) = addr.try_into() {
-                            if let Err(_e) = ipfs.connect(addr).await {
-                                //TODO: Log
-                                continue;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        match ipfs.get_providers(cid).await {
+            Ok(_) => {}
+            Err(e) => error!("Error getting providers: {e}"),
+        };
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
 }

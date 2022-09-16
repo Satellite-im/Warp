@@ -10,7 +10,9 @@ use futures::pin_mut;
 use futures::StreamExt;
 use ipfs::IpfsTypes;
 use ipfs::{Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, TestTypes, Types, UninitializedIpfs};
-use libp2p::identity;
+use ipfs::libp2p::identity;
+use warp::logging::tracing::log::error;
+use warp::logging::tracing::log::trace;
 use std::any::Any;
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -77,6 +79,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         account: Arc<RwLock<Box<dyn MultiPass>>>,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
+        trace!("Initializing Raygun Extension");
         let mut messaging = IpfsMessaging {
             account,
             config,
@@ -87,12 +90,16 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         };
 
         if messaging.account.read().get_own_identity().is_err() {
+            trace!("Identity doesnt exist. Waiting for it to load or to be created");
             let mut messaging = messaging.clone();
             tokio::spawn(async move {
                 while messaging.account.read().get_own_identity().is_err() {
                     tokio::time::sleep(Duration::from_millis(100)).await
                 }
-                if let Err(_e) = messaging.initialize().await {}
+                trace!("Identity found. Initializing store");
+                if let Err(e) = messaging.initialize().await {
+                    error!("Error initializing store: {e}");
+                }
             });
         } else {
             messaging.initialize().await?;
@@ -102,7 +109,9 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
     }
 
     async fn initialize(&mut self) -> anyhow::Result<()> {
+        trace!("Initializing internal store");
         let config = self.config.clone().unwrap_or_default();
+        let mut discovery = config.store_setting.discovery;
 
         let ipfs_handle = match self.account.read().handle() {
             Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
@@ -110,8 +119,12 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         };
 
         let ipfs = match ipfs_handle {
-            Some(ipfs) => ipfs,
+            Some(ipfs) => {
+                discovery = false;
+                ipfs
+            },
             None => {
+                trace!("Unable to get ipfs handle from multipass");
                 let keypair = {
                     let prikey = self.account.read().decrypt_private_key(None)?;
                     let mut sec_key = prikey.as_ref().private_key_bytes();
@@ -154,9 +167,14 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
                 ipfs.clone(),
                 config.path.map(|p| p.join("messages")),
                 self.account.clone(),
-                config.store_setting.discovery,
+                discovery,
                 config.store_setting.broadcast_interval,
                 config.store_setting.check_spam,
+                (
+                    config.store_setting.store_decrypted,
+                    config.store_setting.allow_unsigned_message,
+                    config.store_setting.with_friends,
+                ),
             )
             .await?,
         );
@@ -213,7 +231,7 @@ impl<T: IpfsTypes> Extension for IpfsMessaging<T> {
 
 impl<T: IpfsTypes> SingleHandle for IpfsMessaging<T> {
     fn handle(&self) -> std::result::Result<Box<dyn core::any::Any>, warp::error::Error> {
-        Ok(Box::new(self.ipfs.clone()))
+        Ok(Box::new(self.ipfs.read().clone()))
     }
 }
 
@@ -227,7 +245,11 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         Ok(self.messaging_store()?.list_conversations())
     }
 
-    async fn get_messages(&self, conversation_id: Uuid, opt: MessageOptions) -> Result<Vec<Message>> {
+    async fn get_messages(
+        &self,
+        conversation_id: Uuid,
+        opt: MessageOptions,
+    ) -> Result<Vec<Message>> {
         self.messaging_store()?
             .get_messages(conversation_id, opt)
             .await

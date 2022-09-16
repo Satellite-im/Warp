@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tracing::log::{error, warn};
 
 use libipld::serde::{from_ipld, to_ipld};
 use libipld::{ipld, Cid, Ipld, IpldCodec};
@@ -64,7 +65,7 @@ pub struct InternalProfile {
     requests: Vec<InternalRequest>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "lowercase", tag = "type")]
 pub enum InternalRequest {
     In(FriendRequest),
@@ -353,8 +354,8 @@ impl<T: IpfsTypes> Drop for FriendsStore<T> {
         if counter == 0 {
             self.end_event.store(true, Ordering::SeqCst);
             if let Some(path) = self.path.as_ref() {
-                if let Err(_e) = self.profile.write().to_file(path, &*self.did_key) {
-                    //TODO: Log,
+                if let Err(e) = self.profile.write().to_file(path, &*self.did_key) {
+                    error!("Error saving profile: {e}");
                 }
             }
         }
@@ -407,8 +408,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
         if discovery {
             let ipfs = store.ipfs.clone();
             tokio::spawn(async {
-                if let Err(_e) = topic_discovery(ipfs, FRIENDS_BROADCAST).await {
-                    //TODO: Log
+                if let Err(e) = topic_discovery(ipfs, FRIENDS_BROADCAST).await {
+                    error!("Error performing topic discovery: {e}");
                 }
             });
         }
@@ -427,13 +428,13 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
                 match InternalProfile::from_file(path, &*store.did_key).await {
                     Ok(mut profile) => {
-                        if let Err(_e) = profile.remove_invalid_request() {
-                            //TODO: Log
+                        if let Err(e) = profile.remove_invalid_request() {
+                            error!("Error removing invalid request: {e}");
                         }
                         *store.profile.write() = profile;
                     }
-                    Err(_e) => {
-                        //TODO: Log Error
+                    Err(e) => {
+                        error!("Error loading profile: {e}");
                     }
                 };
             }
@@ -442,14 +443,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 Ok(list) => {
                     for pubkey in list {
                         if let Ok(peer_id) = did_to_libp2p_pub(&pubkey).map(|p| p.to_peer_id()) {
-                            if let Err(_e) = store.ipfs.ban_peer(peer_id).await {
-                                //TODO: Log
+                            if let Err(e) = store.ipfs.ban_peer(peer_id).await {
+                                error!("Error banning peer: {e}");
                             }
                         }
                     }
                 }
-                Err(_e) => {
-                    //TODO: Log
+                Err(e) => {
+                    error!("Error loading block list: {e}");
                 }
             };
 
@@ -467,17 +468,19 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                 let data = match data.decrypt::<FriendRequest>((&*store.did_key).as_ref()) {
                                     Ok(data) => data,
                                     Err(_e) => {
-                                        //TODO: Log
+
                                         continue
                                     }
                                 };
 
                                 if data.to().ne(&local_public_key) {
+                                    warn!("Request is not meant for identity. Skipping");
                                     continue;
                                 }
 
                                 if store.profile.read().outgoing_request().contains(&data) ||
                                    store.profile.read().incoming_request().contains(&data) {
+                                    warn!("Request exist locally. Skipping");
                                     continue;
                                 }
 
@@ -486,16 +489,15 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                 match store.is_blocked(&data.from()).await {
                                     Ok(true) => continue,
                                     Ok(false) => {},
-                                    Err(_e) => {
-                                        //TODO: Log error
-
+                                    Err(e) => {
+                                        error!("Error checking to see if identity is blocked: {e}");
                                         continue
                                     }
                                 };
 
                                 //first verify the request before processing it
-                                if let Err(_e) = validate_request(&data) {
-                                    //TODO: Log
+                                if let Err(e) = validate_request(&data) {
+                                    error!("Incoming request cannot be validated: {e}");
                                     continue
                                 }
 
@@ -508,32 +510,34 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                         }) {
                                             Some(index) => index,
                                             None => {
+                                                error!("Unable to locate pending request. Already been accepted or rejected?");
                                                 continue
                                             },
                                         };
 
                                         store.profile.write().requests_mut().remove(index);
 
-                                        if let Err(_e) = store.add_friend(&data.from()).await {
-                                            //TODO: Log
+                                        if let Err(e) = store.add_friend(&data.from()).await {
+                                            error!("Error adding friend: {e}");
                                             continue
                                         }
 
                                         if let Some(path) = store.path.as_ref() {
-                                            if let Err(_e) = store.profile.write().request_to_file(path).await {
-                                                //TODO: Log,
+                                            if let Err(e) = store.profile.write().request_to_file(path).await {
+                                                error!("Error saving request: {e}");
                                                 continue
                                             }
                                         }
                                     }
                                     FriendRequestStatus::Pending => {
-                                        if let Err(_e) = store.profile.write().set_incoming_request(&data) {
-                                            //TODO: Log,
+                                        if let Err(e) = store.profile.write().set_incoming_request(&data) {
+                                            error!("Error setting incoming request: {e}");
                                             continue
                                         }
 
                                         if let Some(path) = store.path.as_ref() {
-                                            if let Err(_e) = store.profile.write().request_to_file(path).await {
+                                            if let Err(e) = store.profile.write().request_to_file(path).await {
+                                                error!("Error saving request: {e}");
                                                 continue
                                             }
                                         }
@@ -551,21 +555,20 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                         let _ = store.profile.write().requests_mut().remove(index);
 
                                         if let Some(path) = store.path.as_ref() {
-                                            if let Err(_e) = store.profile.write().request_to_file(path).await {
-                                                //TODO: Log,
-
+                                            if let Err(e) = store.profile.write().request_to_file(path).await {
+                                                error!("Error saving request: {e}");
                                                 continue
                                             }
                                         }
                                     },
                                     FriendRequestStatus::FriendRemoved => {
-                                        if let Err(_e) = store.is_friend(&data.from()).await {
-                                            //TODO: Log
+                                        if let Err(e) = store.is_friend(&data.from()).await {
+                                            error!("Unable to remove {e}");
                                             continue;
                                         }
 
-                                        if let Err(_e) = store.remove_friend(&data.from(), false, false).await {
-                                            //TODO: Log
+                                        if let Err(e) = store.remove_friend(&data.from(), false, false).await {
+                                            error!("Error removing friend: {e}");
                                             continue;
                                         }
                                     }
@@ -582,8 +585,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                         store.profile.write().requests_mut().remove(index);
 
                                         if let Some(path) = store.path.as_ref() {
-                                            if let Err(_e) = store.profile.write().request_to_file(path).await {
-                                                //TODO: Log,
+                                            if let Err(e) = store.profile.write().request_to_file(path).await {
+                                                error!("Error saving request: {e}");
                                                 continue
                                             }
                                         }
@@ -601,14 +604,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                 if peers.contains(peer) {
                                     let bytes = match serde_json::to_vec(&data) {
                                         Ok(bytes) => bytes,
-                                        Err(_e) => {
-                                            //TODO: Log
+                                        Err(e) => {
+                                            error!("Error serialzing queue request into bytes: {e}");
                                             continue
                                         }
                                     };
 
-                                    if let Err(_e) = store.ipfs.pubsub_publish(FRIENDS_BROADCAST.into(), bytes).await {
-                                        //TODO: Log
+                                    if let Err(e) = store.ipfs.pubsub_publish(FRIENDS_BROADCAST.into(), bytes).await {
+                                        error!("Error sending request to {}: {}", peer, e);
                                         continue
                                     }
 
@@ -617,7 +620,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                     }) {
                                         Some(index) => index,
                                         //If we somehow ended up here then there is likely a race condition
-                                        None => continue
+                                        None => {
+                                            error!("Item is no longer in queue altough it should be. This is likely a race condition");
+                                            continue
+                                        }
                                     };
 
                                     let _ = store.queue.write().remove(index);
@@ -628,12 +634,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         }
                     }
                 }
+                tokio::time::sleep(Duration::from_millis(1)).await;
             }
         });
+        tokio::task::yield_now().await;
         Ok(store)
     }
 
-    async fn local(&self) -> anyhow::Result<(libp2p::identity::PublicKey, PeerId)> {
+    async fn local(&self) -> anyhow::Result<(ipfs::libp2p::identity::PublicKey, PeerId)> {
         let (local_ipfs_public_key, local_peer_id) = self
             .ipfs
             .identity()
@@ -834,13 +842,13 @@ impl<T: IpfsTypes> FriendsStore<T> {
         self.profile.write().block(pubkey)?;
 
         if self.is_friend(pubkey).await.is_ok() {
-            if let Err(_e) = self.remove_friend(pubkey, true, false).await {
-                //TODO: Log error
+            if let Err(e) = self.remove_friend(pubkey, true, false).await {
+                error!("Error removing item from friend list: {e}");
             }
         }
         if let Some(path) = self.path.as_ref() {
-            if let Err(_e) = self.profile.write().friends_to_file(path).await {
-                //TODO: Log,
+            if let Err(e) = self.profile.write().friends_to_file(path).await {
+                error!("Error saving friends list: {e}");
             }
         }
         // Since we want to broadcast the remove request, banning the peer after would not allow that to happen
@@ -861,8 +869,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         self.ipfs.unban_peer(peer_id).await?;
         if let Some(path) = self.path.as_ref() {
-            if let Err(_e) = self.profile.write().blocks_to_file(path).await {
-                //TODO: Log,
+            if let Err(e) = self.profile.write().blocks_to_file(path).await {
+                error!("Error saving block list: {e}");
             }
         }
         Ok(())
@@ -886,8 +894,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         self.profile.write().add_friend(pubkey)?;
         if let Some(path) = self.path.as_ref() {
-            if let Err(_e) = self.profile.write().friends_to_file(path).await {
-                //TODO: Log,
+            if let Err(e) = self.profile.write().friends_to_file(path).await {
+                error!("Error saving friends list: {e}");
             }
         }
         Ok(())
@@ -917,8 +925,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
             self.broadcast_request(&request, save, save).await?;
         } else if let Some(path) = self.path.as_ref() {
-            if let Err(_e) = self.profile.write().friends_to_file(path).await {
-                //TODO: Log,
+            if let Err(e) = self.profile.write().friends_to_file(path).await {
+                error!("Error saving friends list: {e}");
             }
         }
 
@@ -1005,9 +1013,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
         }
         if save_to_disk {
             if let Some(path) = self.path.as_ref() {
-                if let Err(_e) = self.profile.write().request_to_file(path).await {
-
-                    //TODO: Log,
+                if let Err(e) = self.profile.write().request_to_file(path).await {
+                    error!("Error saving request: {e}");
                 }
             }
         }
@@ -1018,14 +1025,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
         if let Some(path) = self.path.as_ref() {
             let bytes = match serde_json::to_vec(&*self.queue.read()) {
                 Ok(bytes) => bytes,
-                Err(_e) => {
-                    //TODO: Log
+                Err(e) => {
+                    error!("Error serializing queue list into bytes: {e}");
                     return;
                 }
             };
 
-            if let Err(_e) = tokio::fs::write(path.join("queue"), bytes).await {
-                //TODO: Log
+            if let Err(e) = tokio::fs::write(path.join("queue"), bytes).await {
+                error!("Error saving queue: {e}");
             }
         }
     }

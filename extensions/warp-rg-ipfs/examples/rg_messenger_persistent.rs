@@ -7,13 +7,14 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
+use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::{MessageOptions, PinState, RayGun, ReactionState, ConversationType};
+use warp::raygun::{ConversationType, MessageOptions, PinState, RayGun, ReactionState};
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::{ipfs_identity_persistent, Persistent};
@@ -77,6 +78,14 @@ async fn create_rg_direct(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if fdlimit::raise_fd_limit().is_none() {}
+    let file_appender = tracing_appender::rolling::hourly("./", "warp_rg_ipfs_messenger.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    tracing_subscriber::fmt()
+        .with_writer(non_blocking)
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
     let opt = Opt::parse();
     let cache = cache_setup(&opt.path.join("cache"), &PathBuf::from("cache-index"))?;
 
@@ -129,7 +138,7 @@ async fn main() -> anyhow::Result<()> {
     let mut convo_size: HashMap<Uuid, usize> = HashMap::new();
     let mut convo_list = vec![];
     let mut interval = tokio::time::interval(Duration::from_millis(500));
-   loop {
+    loop {
         tokio::select! {
             //TODO: Optimize by clearing terminal and displaying all messages instead of getting last line
             msg = chat.get_messages(topic, MessageOptions::default()) => {
@@ -139,7 +148,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                     convo_size.entry(topic).and_modify(|e| *e = msg.len() ).or_insert(msg.len());
                     let msg = msg.last().unwrap();
-                    let username = get_username(new_account.clone(), msg.sender())?;
+                    let username = get_username(new_account.clone(), msg.sender()).unwrap_or_else(|_| msg.sender().to_string());
                     //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
                     match msg.metadata().get("is_spam") {
                         Some(_) => {
@@ -218,7 +227,7 @@ async fn main() -> anyhow::Result<()> {
                                     if convo.conversation_type() == ConversationType::Direct && recipient == identity.did_key() {
                                         continue
                                     }
-                                    let username = get_username(new_account.clone(), recipient.clone()).unwrap_or_else(|_|recipient.to_string());
+                                    let username = get_username(new_account.clone(), recipient.clone()).unwrap_or_else(|_| recipient.to_string());
                                     recipients.push(username);
                                 }
                                 table.add_row(vec![convo.id().to_string(), recipients.join("/").to_string()]);
@@ -238,7 +247,19 @@ async fn main() -> anyhow::Result<()> {
                                 },
                                 None => topic
                             };
-                            let messages = match chat.get_messages(local_topic, MessageOptions::default()).await {
+
+                            let opt = match cmd_line.next() {
+                                Some(id) => match id.parse() {
+                                    Ok(last) => MessageOptions::default().set_range(0..last),
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing range: {}", e)?;
+                                        continue
+                                    }
+                                },
+                                None => MessageOptions::default()
+                            };
+
+                            let messages = match chat.get_messages(local_topic, opt).await {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error: {e}")?;
@@ -246,7 +267,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for message in messages.iter() {
-                                let username = get_username(new_account.clone(), message.sender())?;
+                                let username = get_username(new_account.clone(), message.sender()).unwrap_or_else(|_| message.sender().to_string());
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
                                     emojis.push(reaction.emoji());

@@ -67,6 +67,10 @@ paste = "1.0"
 libc = "0.2"
 warp-derive = { path = "./warp-derive" }
 sata = { git = "https://github.com/Satellite-im/Sata" }
+tracing = { default-features = false, features = ["log"], version = "0.1" }
+tracing-futures = { default-features = false, features = ["std-future", "std", "futures-03"], version = "0.2" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = { version = "0.2" }
