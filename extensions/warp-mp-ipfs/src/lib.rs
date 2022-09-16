@@ -12,6 +12,7 @@ use config::MpIpfsConfig;
 use futures::{Future, TryFutureExt};
 use ipfs::libp2p::swarm::ConnectionLimits;
 use ipfs::libp2p::yamux::YamuxConfig;
+use ipfs::p2p::TransportConfig;
 use libipld::serde::to_ipld;
 use libipld::{ipld, Cid, Ipld};
 use sata::Sata;
@@ -223,6 +224,15 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
             swarm_configuration: Some(swarm_configuration),
+            transport_configuration: Some(TransportConfig {
+                yamux_config: {
+                    let mut config = YamuxConfig::default();
+                    config.set_max_buffer_size(16 * 1024 * 1024);
+                    config.set_receive_window_size(16 * 1024 * 1024);
+                    config
+                },
+                ..Default::default()
+            }),
             ..Default::default()
         };
 
