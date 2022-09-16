@@ -170,7 +170,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         };
 
         info!(
-            "Have keypair with public key: {}",
+            "Have keypair with peer id: {}",
             keypair.public().to_peer_id()
         );
 
