@@ -80,7 +80,7 @@ async fn account_persistent<P: AsRef<Path>>(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     
-    let file_appender = tracing_appender::rolling::hourly(std::env::temp_dir(), "warp_mp_identity_interface.log");
+    let file_appender = tracing_appender::rolling::hourly("./", "warp_mp_identity_interface.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     tracing_subscriber::fmt()
         .with_writer(non_blocking)
