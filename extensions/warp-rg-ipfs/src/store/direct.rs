@@ -770,10 +770,11 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             return Err(Error::EmptyMessage);
         }
 
+        //TODO: Maybe put checks to make sure the date range is valid
         let messages = match opt.date_range() {
-            Some((start, end)) => messages
+            Some(range) => messages
                 .iter()
-                .filter(|message| message.date() >= start && message.date() <= end)
+                .filter(|message| message.date() >= range.start && message.date() <= range.end)
                 .cloned()
                 .collect::<Vec<_>>(),
             None => messages,

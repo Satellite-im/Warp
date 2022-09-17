@@ -20,15 +20,15 @@ use self::group::GroupChat;
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct MessageOptions {
     smart: Option<bool>,
-    date_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
+    date_range: Option<Range<DateTime<Utc>>>,
     range: Option<Range<usize>>,
     limit: Option<i64>,
     skip: Option<i64>,
 }
 
 impl MessageOptions {
-    pub fn set_date_range(mut self, start: DateTime<Utc>, end: DateTime<Utc>) -> MessageOptions {
-        self.date_range = Some((start, end));
+    pub fn set_date_range(mut self, range: Range<DateTime<Utc>> )-> MessageOptions {
+        self.date_range = Some(range);
         self
     }
 
@@ -44,8 +44,8 @@ impl MessageOptions {
 }
 
 impl MessageOptions {
-    pub fn date_range(&self) -> Option<(DateTime<Utc>, DateTime<Utc>)> {
-        self.date_range
+    pub fn date_range(&self) -> Option<Range<DateTime<Utc>>> {
+        self.date_range.clone()
     }
 
     pub fn range(&self) -> Option<Range<usize>> {
