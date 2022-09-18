@@ -128,6 +128,6 @@ pub async fn topic_discovery<T: IpfsTypes, S: AsRef<str>>(
             Ok(_) => {}
             Err(e) => error!("Error getting providers: {e}"),
         };
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }

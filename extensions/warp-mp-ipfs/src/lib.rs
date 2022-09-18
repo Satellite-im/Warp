@@ -273,7 +273,8 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                     tokio::time::sleep(Duration::from_millis(400)).await;
                 }
             }
-            if !empty_bootstrap {
+            if config.ipfs_setting.bootstrap && !empty_bootstrap {
+                //TODO: run bootstrap in intervals
                 if let Err(e) = ipfs_clone.direct_bootstrap().await {
                     error!("Error bootstrapping: {e}");
                 }

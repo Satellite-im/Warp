@@ -115,6 +115,7 @@ pub struct IpfsSetting {
     pub dcutr: Dcutr,
     pub rendezvous: Rendezvous,
     pub swarm: Swarm,
+    pub bootstrap: bool,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -160,6 +161,7 @@ impl Default for MpIpfsConfig {
                 .collect::<Vec<_>>(),
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
+                bootstrap: true,
                 ..Default::default()
             },
             store_setting: StoreSetting {
