@@ -5,7 +5,7 @@ include_guard = "_WARP_RG_IPFS_H_"
 
 [export]
 
-exclude = ["FFIError"]
+exclude = ["FFIError", "FFIResult_Null"]
 
 [parse]
 parse_deps = true

@@ -109,7 +109,7 @@ void print_messages(const MultiPassAdapter *account, const FFIVec_Message *messa
             {
                 char *line = messages_vec->ptr[x];
                 if (line)
-                    printf("%s: %s\n", username, line);
+                    printf("%lu: %s: %s\n", x, username, line);
             }
         }
     }
@@ -146,6 +146,7 @@ int main()
     }
 
     sleep(1);
+    sleep(1);
     DID *ident_b_did = multipass_identity_did_key(ident_b);
     FFIResult_Conversation result_convo = raygun_create_conversation(chatter_a, ident_b_did);
     if (result_convo.error)
@@ -155,6 +156,7 @@ int main()
     }
 
     char *conversation = conversation_id(result_convo.data);
+    sleep(1);
     sleep(1);
     // Messages are sent to rust via ffi as a array pointer. We would
     const char *chat_a_message[] = {
@@ -178,7 +180,10 @@ int main()
     // Because its async internally, we want to make sure that chatter_b to receive it before attempting to .
     sleep(1);
 
-    FFIResult_FFIVec_Message result_messages_b_t = raygun_get_messages(chatter_b, conversation);
+    MessageOptions *opt = messageoptions_new();
+    opt = messageoptions_set_range(opt, 0, 1);
+
+    FFIResult_FFIVec_Message result_messages_b_t = raygun_get_messages(chatter_b, conversation, opt);
 
     if (result_messages_b_t.error)
     {
@@ -210,8 +215,11 @@ int main()
     // Ditto; We may implement a small "wait" in rust to make sure the peers are synced up in some manner.
     sleep(1);
 
+    MessageOptions *opt2 = messageoptions_new();
+    opt2 = messageoptions_set_range(opt2, 0, 2);
+
     // Note: Because chatter a already had messages stored that was previously sent
-    FFIResult_FFIVec_Message result_messages_t = raygun_get_messages(chatter_a, conversation);
+    FFIResult_FFIVec_Message result_messages_t = raygun_get_messages(chatter_a, conversation, opt2);
 
     if (result_messages_t.error)
     {
@@ -221,10 +229,6 @@ int main()
 
     printf("Chatter A messages\n");
     print_messages(account_a, result_messages_t.data);
-
-    //     const char *message[] = {"Hello, World!!!"};
-
-    // FFIResult_c_void result_chat_t = raygun_send(chatter_a, conversation_id, NULL, message, 1);
 
     return 0;
 }

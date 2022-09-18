@@ -20,15 +20,15 @@ use self::group::GroupChat;
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct MessageOptions {
     smart: Option<bool>,
-    date_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
+    date_range: Option<Range<DateTime<Utc>>>,
     range: Option<Range<usize>>,
     limit: Option<i64>,
     skip: Option<i64>,
 }
 
 impl MessageOptions {
-    pub fn set_date_range(mut self, start: DateTime<Utc>, end: DateTime<Utc>) -> MessageOptions {
-        self.date_range = Some((start, end));
+    pub fn set_date_range(mut self, range: Range<DateTime<Utc>>) -> MessageOptions {
+        self.date_range = Some(range);
         self
     }
 
@@ -44,8 +44,8 @@ impl MessageOptions {
 }
 
 impl MessageOptions {
-    pub fn date_range(&self) -> Option<(DateTime<Utc>, DateTime<Utc>)> {
-        self.date_range
+    pub fn date_range(&self) -> Option<Range<DateTime<Utc>>> {
+        self.date_range.clone()
     }
 
     pub fn range(&self) -> Option<Range<usize>> {
@@ -463,6 +463,7 @@ pub mod ffi {
         EmbedState, FFIResult_FFIVec_Message, FFIVec_Reaction, Message, MessageOptions, PinState,
         RayGunAdapter, Reaction, ReactionState,
     };
+    use chrono::{DateTime, NaiveDateTime, Utc};
     use std::ffi::{CStr, CString};
     use std::os::raw::c_char;
     use std::str::{FromStr, Utf8Error};
@@ -511,6 +512,7 @@ pub mod ffi {
     pub unsafe extern "C" fn raygun_get_messages(
         ctx: *const RayGunAdapter,
         convo_id: *const c_char,
+        option: *const MessageOptions,
     ) -> FFIResult_FFIVec_Message {
         if ctx.is_null() {
             return FFIResult_FFIVec_Message::err(Error::Any(anyhow::anyhow!(
@@ -524,6 +526,11 @@ pub mod ffi {
             )));
         }
 
+        let option = match option.is_null() {
+            true => MessageOptions::default(),
+            false => (&*option).clone()
+        };
+
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
             Ok(uuid) => uuid,
             Err(e) => return FFIResult_FFIVec_Message::err(Error::Any(anyhow::anyhow!(e))),
@@ -533,7 +540,7 @@ pub mod ffi {
         async_on_block(
             adapter
                 .read_guard()
-                .get_messages(convo_id, MessageOptions::default()),
+                .get_messages(convo_id, option),
         )
         .into()
     }
@@ -994,6 +1001,51 @@ pub mod ffi {
     }
 
     #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn messageoptions_new() -> *mut MessageOptions {
+        Box::into_raw(Box::new(MessageOptions::default()))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn messageoptions_set_range(
+        option: *mut MessageOptions,
+        start: usize,
+        end: usize,
+    ) -> *mut MessageOptions {
+        if option.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let opt = Box::from_raw(option);
+
+        let opt = opt.set_range(start..end);
+
+        Box::into_raw(Box::new(opt))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn messageoptions_set_date_range(
+        option: *mut MessageOptions,
+        start: i64,
+        end: i64,
+    ) -> *mut MessageOptions {
+        if option.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let opt = Box::from_raw(option);
+
+        let start = convert_timstamp(start);
+        let end = convert_timstamp(end);
+
+        let opt = opt.set_date_range(start..end);
+
+        Box::into_raw(Box::new(opt))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
     unsafe fn pointer_to_vec(
         data: *const *const c_char,
         len: usize,
@@ -1002,5 +1054,10 @@ pub mod ffi {
             .iter()
             .map(|arg| CStr::from_ptr(*arg).to_str().map(ToString::to_string))
             .collect()
+    }
+
+    fn convert_timstamp(timestamp: i64) -> DateTime<Utc> {
+        let naive = NaiveDateTime::from_timestamp(timestamp, 0);
+        DateTime::<Utc>::from_utc(naive, Utc)
     }
 }
