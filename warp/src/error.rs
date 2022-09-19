@@ -48,10 +48,6 @@ pub enum Error {
     //MultiPass Errors
     #[error("MultiPass extension is unavailable")]
     MultiPassExtensionUnavailable,
-    #[error("Username has to be at least 3 characters long")]
-    UsernameTooShort,
-    #[error("Username cannot be more than 32 characters long")]
-    UsernameTooLong,
     #[error("Identity exist with the same information")]
     IdentityExist,
     #[error("Identity does not exist")]
@@ -192,6 +188,13 @@ pub enum Error {
     InvalidDataType,
 
     //Misc
+    #[error("Length for '{context}' is invalid. Current length: {current}. Minimum Length: {minimum:?}, Maximum: {maximum:?}")]
+    InvalidLength {
+        context: String,
+        current: usize,
+        minimum: Option<usize>,
+        maximum: Option<usize>,
+    },
     #[error("Context \"{pointer}\" cannot be null")]
     NullPointerContext { pointer: String },
     #[error("{0}")]
@@ -286,6 +289,7 @@ impl Error {
             Error::UuidError(_) => String::from("UuidError"),
             Error::Any(_) => String::from("Any"),
             Error::NullPointerContext { .. } => String::from("NullPointerContext"),
+            Error::InvalidLength { .. } => String::from("InvalidLength"),
             Error::OtherWithContext(_) => String::from("OtherWithContext"),
             Error::IoError(_) => String::from("IoError"),
             Error::Unimplemented => String::from("Unimplemented"),

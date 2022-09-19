@@ -177,17 +177,17 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                         continue;
                                     }
 
-                                    let index = store
-                                    .cache
-                                    .read()
-                                    .iter()
-                                    .position(|ident| ident.did_key() == identity.did_key());
+                                    let index = store.cache
+                                        .read()
+                                        .iter()
+                                        .position(|ident| ident.did_key() == identity.did_key());
 
                                     if let Some(index) = index {
                                         store.cache.write().remove(index);
                                     }
 
                                     store.cache.write().push(identity);
+
                                     if let Some(path) = store.path.as_ref() {
                                         if let Ok(bytes) = serde_json::to_vec(&store.cache) {
                                             if let Err(e) = tokio::fs::write(path.join(".id_cache"), bytes).await {
@@ -435,8 +435,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
             Ok(keypair) => {
                 let kp = bs58::decode(keypair).into_vec()?;
                 let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-                let secret =
-                    ipfs::libp2p::identity::ed25519::SecretKey::from_bytes(id_kp.secret.to_bytes())?;
+                let secret = ipfs::libp2p::identity::ed25519::SecretKey::from_bytes(
+                    id_kp.secret.to_bytes(),
+                )?;
                 Ok(Keypair::Ed25519(secret.into()))
             }
             Err(_) => anyhow::bail!(Error::PrivateKeyInvalid),
@@ -476,6 +477,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(())
     }
 
+    #[allow(clippy::clone_on_copy)]
     pub async fn get_cid(&self) -> Result<Cid, Error> {
         if let Some(path) = self.path.as_ref() {
             if let Ok(cid_str) = tokio::fs::read(path.join(".id"))
@@ -484,6 +486,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             {
                 let cid: Cid = cid_str.parse().map_err(anyhow::Error::from)?;
                 // Note: This is cloned to prevent a deadlock when writing to `ident_cid`
+                // TODO: Change this so we dont need to clone
                 let ident = self.ident_cid.read().clone();
                 match ident {
                     Some(ident_cid) => {
@@ -502,8 +505,89 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     pub async fn update_identity(&self) -> Result<(), Error> {
         let ident = self.own_identity().await?;
+        self.validate_identity(&ident)?;
         *self.identity.write() = Some(ident);
         self.seen.write().clear();
+        Ok(())
+    }
+
+    pub fn validate_identity(&self, identity: &Identity) -> Result<(), Error> {
+        {
+            let len = identity.username().chars().count();
+            if len <= 4 || len >= 64 {
+                return Err(Error::InvalidLength {
+                    context: "username".into(),
+                    current: len,
+                    minimum: Some(4),
+                    maximum: Some(64),
+                });
+            }
+        }
+        {
+            //Note: The only reason why this would ever error is if the short id is different. Likely from an update to `SHORT_ID_SIZE`
+            //      but other possibility would be through alteration to the `Identity` being sent in some way
+            let len = identity.short_id().len();
+            if len != SHORT_ID_SIZE {
+                return Err(Error::InvalidLength {
+                    context: "short id".into(),
+                    current: len,
+                    minimum: Some(SHORT_ID_SIZE),
+                    maximum: Some(SHORT_ID_SIZE),
+                });
+            }
+        }
+        {
+            let fingerprint = identity.did_key().fingerprint();
+            let bytes = fingerprint.as_bytes();
+
+            let short_id = String::from_utf8_lossy(
+                bytes[bytes.len() - SHORT_ID_SIZE..]
+                    .try_into()
+                    .map_err(anyhow::Error::from)?,
+            );
+
+            if identity.short_id() != short_id {
+                return Err(Error::PublicKeyInvalid);
+            }
+        }
+        {
+            if let Some(status) = identity.status_message() {
+                let len = status.chars().count();
+                if len >= 512 {
+                    return Err(Error::InvalidLength {
+                        context: "status".into(),
+                        current: len,
+                        minimum: None,
+                        maximum: Some(512),
+                    });
+                }
+            }
+        }
+        {
+            let graphics = identity.graphics();
+            {
+                let len = graphics.profile_banner().len();
+                if len > 2 * 1024 * 1024 {
+                    return Err(Error::InvalidLength {
+                        context: "profile banner".into(),
+                        current: len,
+                        minimum: None,
+                        maximum: Some(2 * 1024 * 1024),
+                    });
+                }
+            }
+            {
+                let len = graphics.profile_picture().len();
+                if len > 2 * 1024 * 1024 {
+                    return Err(Error::InvalidLength {
+                        context: "profile picture".into(),
+                        current: len,
+                        minimum: None,
+                        maximum: Some(2 * 1024 * 1024),
+                    });
+                }
+            }
+        }
         Ok(())
     }
 

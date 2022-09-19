@@ -526,18 +526,43 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 option.graphics_banner(),
                 option.status_message(),
             ) {
-                (Some(username), None, None, None) => identity.set_username(&username),
-                (None, Some(hash), None, None) => {
+                (Some(username), None, None, None) => {
+                    let len = username.chars().count();
+                    if len <= 4 || len >= 64 {
+                        return Err(Error::InvalidLength {
+                            context: "username".into(),
+                            current: len,
+                            minimum: Some(4),
+                            maximum: Some(64),
+                        });
+                    }
+
+                    identity.set_username(&username)
+                }
+                (None, Some(data), None, None) => {
                     let mut graphics = identity.graphics();
-                    graphics.set_profile_picture(&hash);
+                    graphics.set_profile_picture(&data);
                     identity.set_graphics(graphics);
                 }
-                (None, None, Some(hash), None) => {
+                (None, None, Some(data), None) => {
                     let mut graphics = identity.graphics();
-                    graphics.set_profile_banner(&hash);
+                    graphics.set_profile_banner(&data);
                     identity.set_graphics(graphics);
                 }
-                (None, None, None, Some(status)) => identity.set_status_message(status),
+                (None, None, None, Some(status)) => {
+                    if let Some(status) = status.clone() {
+                        let len = status.chars().count();
+                        if len >= 512 {
+                            return Err(Error::InvalidLength {
+                                context: "status".into(),
+                                current: len,
+                                minimum: None,
+                                maximum: Some(512),
+                            });
+                        }
+                    }
+                    identity.set_status_message(status)
+                }
                 _ => return Err(Error::CannotUpdateIdentity),
             }
 
