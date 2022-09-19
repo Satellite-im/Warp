@@ -465,7 +465,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     message = stream.next() => {
                         if let Some(message) = message {
                             if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
-                                let data = match data.decrypt::<FriendRequest>((&*store.did_key).as_ref()) {
+                                let data = match data.decrypt::<FriendRequest>(&*store.did_key) {
                                     Ok(data) => data,
                                     Err(_e) => {
 
