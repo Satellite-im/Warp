@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     hash::Hash,
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
@@ -15,7 +15,7 @@ use libipld::{
     Cid, Ipld,
 };
 use sata::Sata;
-use tracing::log::{error, warn};
+use tracing::log::{error, info, trace, warn};
 use warp::{
     crypto::{rand::Rng, DIDKey, Ed25519KeyPair, Fingerprint, KeyMaterial, DID},
     error::Error,
@@ -139,6 +139,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         }
 
         tokio::spawn(async move {
+            // let mut peer_annoyance = HashMap::<PeerId, usize>::new();
             let store = store_inner;
 
             futures::pin_mut!(id_broadcast_stream);
@@ -153,9 +154,38 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 if !store.start_event.load(Ordering::SeqCst) {
                     continue;
                 }
+                tokio::time::sleep(Duration::from_millis(1)).await;
                 tokio::select! {
                     message = id_broadcast_stream.next() => {
                         if let Some(message) = message {
+                            // //Although this should not be `Option::None`, this is a precaution
+                            // //If this ever comes as None, this may be a misconfiguration in a upstream dependency
+                            // //or a bug
+                            // if message.source.is_none() {
+                            //     warn!("Message source is None. This may be the result of a bug or misconfiguration upstream");
+                            // }
+
+                            // //Note: Although we dont expect a message of this size, if we do get anything of this size at all,
+                            // //      we should reject it. Ideally, it shouldnt be more than 1MB to 2MB, but 3MB is just buffer
+                            // let peer_id = message.source.unwrap();
+                            // if message.data.len() >= 3*1024*1024 {
+                            //     warn!("Peer {peer_id} has sent a message containing 3MB or more of data");
+                            //     match peer_annoyance.entry(peer_id) {
+                            //         Entry::Vacant(entry) => {
+                            //             entry.insert(0);
+                            //         },
+                            //         Entry::Occupied(mut entry) => {
+                            //             if *entry.get() >= 20 {
+                            //                 if let Err(e) = store.ipfs.ban_peer(peer_id).await {
+                            //                     info!("Error banning peer: {e}");
+                            //                 }
+                            //             } else {
+                            //                 *entry.get_mut() += 1;
+                            //             }
+                            //         }
+                            //     }
+                            //     continue;
+                            // }
                             if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
                                 if let Ok(identity) = data.decode::<Identity>() {
                                     //Validate public key against peer that sent it
@@ -271,7 +301,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
                     }
                 }
-                tokio::time::sleep(Duration::from_millis(1)).await;
             }
         });
         tokio::task::yield_now().await;
