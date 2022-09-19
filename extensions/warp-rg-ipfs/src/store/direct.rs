@@ -823,6 +823,21 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             return Err(Error::EmptyMessage);
         }
 
+        let lines_value_length: usize = messages
+            .iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.chars().count())
+            .sum();
+
+        if lines_value_length >= 4096 {
+            return Err(Error::InvalidLength {
+                context: "message".into(),
+                current: lines_value_length,
+                minimum: Some(1),
+                maximum: Some(4096),
+            });
+        }
+
         let own_did = &*self.did.clone();
 
         let mut message = Message::default();
@@ -873,6 +888,21 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             return Err(Error::EmptyMessage);
         }
 
+        let lines_value_length: usize = messages
+            .iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.chars().count())
+            .sum();
+
+        if lines_value_length >= 4096 {
+            return Err(Error::InvalidLength {
+                context: "message".into(),
+                current: lines_value_length,
+                minimum: Some(1),
+                maximum: Some(4096),
+            });
+        }
+
         let own_did = &*self.did.clone();
 
         let construct = vec![
@@ -914,6 +944,21 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
+        }
+
+        let lines_value_length: usize = messages
+            .iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.chars().count())
+            .sum();
+
+        if lines_value_length >= 4096 {
+            return Err(Error::InvalidLength {
+                context: "message".into(),
+                current: lines_value_length,
+                minimum: Some(1),
+                maximum: Some(4096),
+            });
         }
 
         let own_did = &*self.did;
@@ -1133,6 +1178,22 @@ pub fn direct_message_event(
             if messages.contains(&message) {
                 return Err(Error::MessageFound);
             }
+            let lines_value_length: usize = message
+                .value()
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.chars().count())
+                .sum();
+
+            if lines_value_length >= 4096 {
+                return Err(Error::InvalidLength {
+                    context: "message".into(),
+                    current: lines_value_length,
+                    minimum: Some(1),
+                    maximum: Some(4096),
+                });
+            }
+
             {
                 let signature = message.signature();
                 let sender = message.sender();
@@ -1160,6 +1221,22 @@ pub fn direct_message_event(
                 .ok_or(Error::MessageNotFound)?;
 
             let message = messages.get_mut(index).ok_or(Error::MessageNotFound)?;
+
+            let lines_value_length: usize = val
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.chars().count())
+                .sum();
+
+            if lines_value_length >= 4096 {
+                return Err(Error::InvalidLength {
+                    context: "message".into(),
+                    current: lines_value_length,
+                    minimum: Some(1),
+                    maximum: Some(4096),
+                });
+            }
+
             let sender = message.sender();
             //Validate the original message
             {
