@@ -211,9 +211,9 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 .with_max_established_outgoing(limit.max_established_outgoing)
                 .with_max_established(limit.max_established)
                 .with_max_established_per_peer(limit.max_established_per_peer);
-        }
 
-        trace!("Swarm configuration: {:?}", swarm_configuration.connection);
+            info!("Connection configuration: {:?}", swarm_configuration.connection);
+        }
 
         let mut opts = IpfsOptions {
             keypair,
