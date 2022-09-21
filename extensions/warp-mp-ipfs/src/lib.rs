@@ -46,7 +46,7 @@ use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
 use warp::error::Error;
 use warp::multipass::generator::generate_name;
 use warp::multipass::identity::{FriendRequest, Identifier, Identity, IdentityUpdate};
-use warp::multipass::{identity, Friends, MultiPass};
+use warp::multipass::{identity, Friends, IdentityInformation, MultiPass};
 
 pub type Temporary = TestTypes;
 pub type Persistent = Types;
@@ -783,6 +783,8 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         async_block_in_place_uncheck(store.is_friend(pubkey))
     }
 }
+
+impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {}
 
 pub mod ffi {
     use crate::config::MpIpfsConfig;

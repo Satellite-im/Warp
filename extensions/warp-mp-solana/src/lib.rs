@@ -16,7 +16,7 @@ use warp::error::Error;
 use warp::hooks::Hooks;
 use warp::module::Module;
 use warp::multipass::generator::generate_name;
-use warp::multipass::{identity::*, Friends, MultiPass};
+use warp::multipass::{identity::*, Friends, IdentityInformation, MultiPass};
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -650,6 +650,8 @@ impl<T: IpfsTypes> Friends for SolanaAccount<T> {
         async_block_in_place_uncheck(self.friend_store()?.is_friend(&pubkey))
     }
 }
+
+impl<T: IpfsTypes> IdentityInformation for SolanaAccount<T> {}
 
 fn user_to_identity(helper: &UserHelper, pubkey: Option<&[u8]>) -> anyhow::Result<Identity> {
     let (user, pubkey) = match pubkey {

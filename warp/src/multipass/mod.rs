@@ -14,7 +14,11 @@ use identity::Identity;
 use crate::crypto::DID;
 use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate};
 
-pub trait MultiPass: Extension + Friends + Sync + Send + SingleHandle {
+use self::identity::{IdentityStatus, Relationship};
+
+pub trait MultiPass:
+    Extension + IdentityInformation + Friends + Sync + Send + SingleHandle
+{
     /// Create an [`Identity`]
     fn create_identity(
         &mut self,
@@ -117,6 +121,17 @@ pub trait Friends: Sync + Send {
 
     /// Check to see if public key is friend of the account
     fn has_friend(&self, _: &DID) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+}
+
+pub trait IdentityInformation: Send + Sync {
+    /// Identity status to determine if they are online or offline
+    fn identity_status(&self, _: &DID) -> Result<IdentityStatus, Error> {
+        Err(Error::Unimplemented)
+    }
+    /// Find the relationship with an existing identity.
+    fn identity_relationship(&self, _: &DID) -> Result<Relationship, Error> {
         Err(Error::Unimplemented)
     }
 }
