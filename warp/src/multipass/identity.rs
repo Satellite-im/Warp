@@ -108,10 +108,10 @@ pub enum IdentityStatus {
 #[repr(C)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Relationship {
-    friends: bool,
-    received_friend_request: bool,
-    sent_friend_request: bool,
-    blocked: bool
+    pub friends: bool,
+    pub received_friend_request: bool,
+    pub sent_friend_request: bool,
+    pub blocked: bool,
 }
 
 #[derive(

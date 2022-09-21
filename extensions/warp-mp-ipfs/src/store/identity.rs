@@ -20,7 +20,7 @@ use warp::{
     crypto::{rand::Rng, DIDKey, Ed25519KeyPair, Fingerprint, KeyMaterial, DID},
     error::Error,
     module::Module,
-    multipass::identity::{FriendRequest, Identity, SHORT_ID_SIZE},
+    multipass::identity::{FriendRequest, Identity, IdentityStatus, SHORT_ID_SIZE},
     sync::{Arc, Mutex, RwLock},
     tesseract::Tesseract,
 };
@@ -457,6 +457,27 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 .collect::<Vec<_>>(),
         };
         Ok(idents)
+    }
+
+    //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
+    pub async fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
+        self
+            .lookup(LookupBy::DidKey(Box::new(did.clone())))?
+            .first()
+            .cloned()
+            .ok_or(Error::IdentityDoesntExist)?;
+
+        let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
+
+        match self
+            .ipfs
+            .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
+            .await?
+            .contains(&peer_id)
+        {
+            true => Ok(IdentityStatus::Online),
+            false => Ok(IdentityStatus::Offline),
+        }
     }
 
     pub fn get_keypair(&self) -> anyhow::Result<Keypair> {

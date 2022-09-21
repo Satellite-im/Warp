@@ -212,7 +212,10 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 .with_max_established(limit.max_established)
                 .with_max_established_per_peer(limit.max_established_per_peer);
 
-            info!("Connection configuration: {:?}", swarm_configuration.connection);
+            info!(
+                "Connection configuration: {:?}",
+                swarm_configuration.connection
+            );
         }
 
         let mut opts = IpfsOptions {
@@ -727,6 +730,16 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         Ok(store.list_outgoing_request())
     }
 
+    fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
+        let store = self.friend_store()?;
+        Ok(store.received_friend_request_from(did))
+    }
+
+    fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
+        let store = self.friend_store()?;
+        Ok(store.sent_friend_request_to(did))
+    }
+
     fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.friend_store()?;
         Ok(store.list_all_request())
@@ -754,6 +767,11 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
             }
         }
         Ok(())
+    }
+
+    fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
+        let store = self.friend_store()?;
+        Ok(store.is_blocked(did))
     }
 
     fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
@@ -784,7 +802,27 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     }
 }
 
-impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {}
+impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
+    fn identity_status(&self, did: &DID) -> Result<identity::IdentityStatus, Error> {
+        let store = self.identity_store()?;
+        async_block_in_place_uncheck(store.identity_status(did))
+    }
+
+    fn identity_relationship(&self, did: &DID) -> Result<identity::Relationship, Error> {
+        self.get_identity(Identifier::did_key(did.clone()))?.first().ok_or(Error::IdentityDoesntExist)?;
+        let friends = self.has_friend(did).is_ok();
+        let received_friend_request = self.received_friend_request_from(did)?;
+        let sent_friend_request = self.sent_friend_request_to(did)?;
+        let blocked = self.is_blocked(did)?;
+
+        Ok(identity::Relationship {
+            friends,
+            received_friend_request,
+            sent_friend_request,
+            blocked,
+        })
+    }
+}
 
 pub mod ffi {
     use crate::config::MpIpfsConfig;

@@ -160,7 +160,7 @@ impl MultiPassAdapter {
     }
 }
 
-//TODO: Complete when time for multipass implementation
+//TODO: Determine if this should be used for wasm
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl MultiPassAdapter {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
