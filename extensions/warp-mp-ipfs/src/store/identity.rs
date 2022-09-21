@@ -471,9 +471,11 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         match self
             .ipfs
-            .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
+            .peers()
             .await?
-            .contains(&peer_id)
+            .iter()
+            .map(|conn| conn.addr.peer_id)
+            .any(|peer| peer == peer_id)
         {
             true => Ok(IdentityStatus::Online),
             false => Ok(IdentityStatus::Offline),
