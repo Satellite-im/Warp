@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-
 use warp::data::{DataType};
 use warp::error::Error;
 use warp::module::Module;
@@ -26,7 +25,10 @@ fn main() -> anyhow::Result<()> {
         DimensionData::from("Cargo.toml"),
     )?;
 
+    let data_account = Sata::default();
+
     storage.add_data(DataType::from(Module::FileSystem), &data)?;
+    storage.add_data(DataType::from(Module::Accounts), &data_account)?;
 
     let bufdata = Sata::default().encode(
         warp::libipld::IpldCodec::DagCbor,
@@ -58,7 +60,8 @@ fn main() -> anyhow::Result<()> {
     arr.write_from_path(&mut buf)?;
 
     println!("Contents: {}", String::from_utf8_lossy(&buf));
-
+    
     storage.empty(DataType::from(Module::FileSystem))?;
+    storage.empty(DataType::from(Module::Accounts))?;
     Ok(())
 }
