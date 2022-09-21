@@ -617,6 +617,25 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 }
             }
         }
+
+        //This is as a precaution to make sure that the payload would not exceed the max transmit size
+        {
+            let data = Sata::default().encode(
+                libipld::IpldCodec::DagJson,
+                sata::Kind::Static,
+                identity,
+            )?;
+
+            let bytes = serde_json::to_vec(&data)?;
+            if bytes.len() >= 256 * 1024 {
+                return Err(Error::InvalidLength {
+                    context: "identity".into(),
+                    current: bytes.len(),
+                    minimum: Some(1),
+                    maximum: Some(256 * 1024),
+                });
+            }
+        }
         Ok(())
     }
 
