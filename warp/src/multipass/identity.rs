@@ -180,7 +180,7 @@ impl Identity {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn short_id(&self) -> String {
-        String::from_utf8_lossy(&self.short_id).to_uppercase()
+        String::from_utf8_lossy(&self.short_id).to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]

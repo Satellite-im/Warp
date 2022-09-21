@@ -465,7 +465,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     message = stream.next() => {
                         if let Some(message) = message {
                             if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
-                                let data = match data.decrypt::<FriendRequest>((&*store.did_key).as_ref()) {
+                                let data = match data.decrypt::<FriendRequest>(&*store.did_key) {
                                     Ok(data) => data,
                                     Err(_e) => {
 
@@ -994,6 +994,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
             )
             .map_err(anyhow::Error::from)?;
         let bytes = serde_json::to_vec(&payload)?;
+        
+        //Check to make sure the payload itself doesnt exceed 256kb
+        if bytes.len() >= 256 * 1024 {
+            return Err(Error::InvalidLength { context: "payload".into(), current: bytes.len(), minimum: Some(1), maximum: Some(256*1024) })
+        }
 
         let peers = self
             .ipfs
@@ -1023,7 +1028,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
     async fn save_queue(&self) {
         if let Some(path) = self.path.as_ref() {
-            let bytes = match serde_json::to_vec(&*self.queue.read()) {
+            let bytes = match serde_json::to_vec(&self.queue) {
                 Ok(bytes) => bytes,
                 Err(e) => {
                     error!("Error serializing queue list into bytes: {e}");

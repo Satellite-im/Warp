@@ -512,7 +512,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                     let _ = store.queue.write().remove(index);
 
                                     if let Some(path) = store.path.as_ref() {
-                                        let bytes = match serde_json::to_vec(&*store.queue.read()) {
+                                        let bytes = match serde_json::to_vec(&store.queue) {
                                             Ok(bytes) => bytes,
                                             Err(e) => {
                                                 error!("Error serializing data to bytes: {e}");
@@ -823,6 +823,21 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             return Err(Error::EmptyMessage);
         }
 
+        let lines_value_length: usize = messages
+            .iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.chars().count())
+            .sum();
+
+        if lines_value_length >= 4096 {
+            return Err(Error::InvalidLength {
+                context: "message".into(),
+                current: lines_value_length,
+                minimum: Some(1),
+                maximum: Some(4096),
+            });
+        }
+
         let own_did = &*self.did.clone();
 
         let mut message = Message::default();
@@ -873,6 +888,21 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             return Err(Error::EmptyMessage);
         }
 
+        let lines_value_length: usize = messages
+            .iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.chars().count())
+            .sum();
+
+        if lines_value_length >= 4096 {
+            return Err(Error::InvalidLength {
+                context: "message".into(),
+                current: lines_value_length,
+                minimum: Some(1),
+                maximum: Some(4096),
+            });
+        }
+
         let own_did = &*self.did.clone();
 
         let construct = vec![
@@ -914,6 +944,21 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
+        }
+
+        let lines_value_length: usize = messages
+            .iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.chars().count())
+            .sum();
+
+        if lines_value_length >= 4096 {
+            return Err(Error::InvalidLength {
+                context: "message".into(),
+                current: lines_value_length,
+                minimum: Some(1),
+                maximum: Some(4096),
+            });
         }
 
         let own_did = &*self.did;
@@ -1060,12 +1105,23 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let mut data = Sata::default();
         data.add_recipient(recipient.as_ref())?;
 
-        let data = data.encrypt(
+        let payload = data.encrypt(
             libipld::IpldCodec::DagJson,
             own_did.as_ref(),
             warp::sata::Kind::Reference,
             serde_json::to_vec(&event)?,
         )?;
+        
+        let bytes = serde_json::to_vec(&payload)?;
+
+        if bytes.len() >= 256 * 1024 {
+            return Err(Error::InvalidLength {
+                context: "payload".into(),
+                current: bytes.len(),
+                minimum: Some(1),
+                maximum: Some(256 * 1024),
+            });
+        }
 
         let peers = self.ipfs.pubsub_peers(Some(conversation.topic())).await?;
 
@@ -1073,7 +1129,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         match peers.contains(&peer_id) {
             true => {
-                let bytes = serde_json::to_vec(&data)?;
                 if let Err(e) = self.ipfs.pubsub_publish(conversation.topic(), bytes).await {
                     warn!("Unable to publish to topic due to error: {e}... Queuing event");
                     if let Err(e) = self
@@ -1081,7 +1136,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                             conversation.id(),
                             peer_id,
                             conversation.topic(),
-                            data,
+                            payload,
                         ))
                         .await
                     {
@@ -1095,7 +1150,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         conversation.id(),
                         peer_id,
                         conversation.topic(),
-                        data,
+                        payload,
                     ))
                     .await
                 {
@@ -1110,7 +1165,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     async fn queue_event(&mut self, queue: Queue) -> Result<(), Error> {
         self.queue.write().push(queue);
         if let Some(path) = self.path.as_ref() {
-            let bytes = serde_json::to_vec(&*self.queue.read())?;
+            let bytes = serde_json::to_vec(&self.queue)?;
             warp::async_block_in_place_uncheck(tokio::fs::write(path.join("queue"), bytes))?;
         }
         Ok(())
@@ -1133,6 +1188,22 @@ pub fn direct_message_event(
             if messages.contains(&message) {
                 return Err(Error::MessageFound);
             }
+            let lines_value_length: usize = message
+                .value()
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.chars().count())
+                .sum();
+
+            if lines_value_length >= 4096 {
+                return Err(Error::InvalidLength {
+                    context: "message".into(),
+                    current: lines_value_length,
+                    minimum: Some(1),
+                    maximum: Some(4096),
+                });
+            }
+
             {
                 let signature = message.signature();
                 let sender = message.sender();
@@ -1160,6 +1231,22 @@ pub fn direct_message_event(
                 .ok_or(Error::MessageNotFound)?;
 
             let message = messages.get_mut(index).ok_or(Error::MessageNotFound)?;
+
+            let lines_value_length: usize = val
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.chars().count())
+                .sum();
+
+            if lines_value_length >= 4096 {
+                return Err(Error::InvalidLength {
+                    context: "message".into(),
+                    current: lines_value_length,
+                    minimum: Some(1),
+                    maximum: Some(4096),
+                });
+            }
+
             let sender = message.sender();
             //Validate the original message
             {
