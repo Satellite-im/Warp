@@ -369,6 +369,11 @@ pub trait RayGun: Extension + GroupChat + Sync + Send + SingleHandle {
     }
 
     /// Retrieve all messages from a conversation
+    async fn get_message(&self, _: Uuid, _: Uuid) -> Result<Message, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Retrieve all messages from a conversation
     async fn get_messages(
         &self,
         conversation_id: Uuid,
@@ -528,7 +533,7 @@ pub mod ffi {
 
         let option = match option.is_null() {
             true => MessageOptions::default(),
-            false => (&*option).clone()
+            false => (&*option).clone(),
         };
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
@@ -537,12 +542,7 @@ pub mod ffi {
         };
 
         let adapter = &*ctx;
-        async_on_block(
-            adapter
-                .read_guard()
-                .get_messages(convo_id, option),
-        )
-        .into()
+        async_on_block(adapter.read_guard().get_messages(convo_id, option)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
