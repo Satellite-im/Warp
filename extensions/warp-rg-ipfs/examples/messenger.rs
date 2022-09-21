@@ -2,12 +2,12 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
-use tracing_subscriber::EnvFilter;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
+use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 use warp::crypto::zeroize::Zeroizing;
 use warp::crypto::DID;
@@ -18,7 +18,6 @@ use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{ConversationType, MessageOptions, PinState, RayGun, ReactionState};
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::config::{Autonat, Dcutr, IpfsSetting, RelayClient, StoreSetting};
 use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
 use warp_pd_flatfile::FlatfileStorage;
 use warp_pd_stretto::StrettoClient;
@@ -32,6 +31,8 @@ use warp_rg_ipfs::Temporary;
 struct Opt {
     #[clap(long)]
     path: Option<PathBuf>,
+    #[clap(long)]
+    with_key: bool,
 }
 
 fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
@@ -64,27 +65,7 @@ async fn create_account<P: AsRef<Path>>(
 
     let config = match path.as_ref() {
         Some(path) => warp_mp_ipfs::config::MpIpfsConfig::production(path),
-        None => warp_mp_ipfs::config::MpIpfsConfig {
-            ipfs_setting: IpfsSetting {
-                mdns: warp_mp_ipfs::config::Mdns { enable: true },
-                relay_client: RelayClient {
-                    enable: true,
-                    ..Default::default()
-                },
-                dcutr: Dcutr { enable: true },
-                autonat: Autonat {
-                    enable: true,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            store_setting: StoreSetting {
-                discovery: true,
-                broadcast_interval: 100,
-                ..Default::default()
-            },
-            ..Default::default()
-        },
+        None => warp_mp_ipfs::config::MpIpfsConfig::testing(),
     };
 
     let account: Arc<RwLock<Box<dyn MultiPass>>> = match path.is_some() {
@@ -130,11 +111,16 @@ async fn main() -> anyhow::Result<()> {
         .with_writer(non_blocking)
         .with_env_filter(EnvFilter::from_default_env())
         .init();
-        
+
     let opt = Opt::parse();
 
     let cache = cache_setup(opt.path.as_ref().map(|p| p.join("cache")))?;
-    let password = rpassword::prompt_password("Enter A Password: ")?;
+    let password = if opt.with_key {
+        rpassword::prompt_password("Enter A Password: ")?
+    } else {
+        "embedded pass".into()
+    };
+
     println!("Creating or obtaining account...");
     let new_account =
         create_account(opt.path.clone(), cache.clone(), Zeroizing::new(password)).await?;
@@ -306,7 +292,7 @@ async fn main() -> anyhow::Result<()> {
                                 },
                                 None => MessageOptions::default()
                             };
-                            
+
                             let messages = match chat.get_messages(local_topic, opt).await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -505,7 +491,6 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-
 
     Ok(())
 }
