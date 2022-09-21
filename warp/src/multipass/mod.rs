@@ -62,8 +62,16 @@ pub trait Friends: Sync + Send {
         Err(Error::Unimplemented)
     }
 
+    fn received_friend_request_from(&self, _: &DID) -> Result<bool, Error> {
+        Err(Error::Unimplemented)
+    }
+
     /// List the incoming friend request
     fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    fn sent_friend_request_to(&self, _: &DID) -> Result<bool, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -92,13 +100,13 @@ pub trait Friends: Sync + Send {
         Err(Error::Unimplemented)
     }
 
-    // TODO: Remove
-    fn block_key(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.block(pubkey)
-    }
-
     /// List block list
     fn block_list(&self) -> Result<Vec<DID>, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Check to see if public key is blocked
+    fn is_blocked(&self, _: &DID) -> Result<bool, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -137,6 +145,7 @@ impl MultiPassAdapter {
     }
 }
 
+//TODO: Complete when time for multipass implementation
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl MultiPassAdapter {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -197,11 +206,6 @@ impl MultiPassAdapter {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
         self.write_guard().remove_friend(pubkey)
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn block_key(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.write_guard().block_key(pubkey)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
