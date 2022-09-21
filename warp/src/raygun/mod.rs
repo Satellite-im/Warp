@@ -420,10 +420,6 @@ pub trait RayGun: Extension + GroupChat + Sync + Send + SingleHandle {
         message: Vec<String>,
     ) -> Result<(), Error>;
 
-    /// Ping conversation for a response
-    async fn ping(&mut self, _: Uuid) -> Result<(), Error> {
-        Err(Error::Unimplemented)
-    }
 
     async fn embeds(
         &mut self,
@@ -800,32 +796,6 @@ pub mod ffi {
 
         let adapter = &mut *ctx;
         async_on_block(adapter.write_guard().reply(convo_id, msg_id, messages)).into()
-    }
-
-    #[allow(clippy::await_holding_lock)]
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn raygun_ping(
-        ctx: *mut RayGunAdapter,
-        convo_id: *const c_char,
-    ) -> FFIResult_Null {
-        if ctx.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
-        }
-
-        if convo_id.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
-                "Conversation ID cannot be null"
-            )));
-        }
-
-        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
-            Ok(uuid) => uuid,
-            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
-        };
-
-        let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().ping(convo_id)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
