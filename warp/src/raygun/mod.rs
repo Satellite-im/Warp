@@ -514,6 +514,46 @@ pub mod ffi {
     #[allow(clippy::await_holding_lock)]
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
+    pub unsafe extern "C" fn raygun_get_message(
+        ctx: *const RayGunAdapter,
+        convo_id: *const c_char,
+        message_id: *const c_char,
+    ) -> FFIResult<Message> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Context cannot be null"
+            )));
+        }
+
+        if convo_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Conversation id cannot be null"
+            )));
+        }
+
+        if message_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Conversation id cannot be null"
+            )));
+        }
+
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let message_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy()) {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let adapter = &*ctx;
+        async_on_block(adapter.read_guard().get_message(convo_id, message_id)).into()
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
     pub unsafe extern "C" fn raygun_get_messages(
         ctx: *const RayGunAdapter,
         convo_id: *const c_char,
