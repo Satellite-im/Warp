@@ -1227,7 +1227,7 @@ pub fn direct_message_event(
                 verify_serde_sig(sender, &construct, &signature)?;
             }
             spam_check(&mut message, filter)?;
-            messages.push_back(message)
+            messages.push_front(message)
         }
         MessagingEvents::Edit(convo_id, message_id, val, signature) => {
             let index = messages
