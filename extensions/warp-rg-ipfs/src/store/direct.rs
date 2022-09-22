@@ -757,6 +757,15 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .map(|convo| convo.messages().len())
     }
 
+    pub fn get_message(&self, conversation: Uuid, message_id: Uuid) -> Result<Message, Error> {
+        self.get_conversation(conversation)?
+            .messages()
+            .iter()
+            .find(|message| message.id() == message_id)
+            .cloned()
+            .ok_or(Error::MessageNotFound)
+    }
+
     pub async fn get_messages(
         &self,
         conversation: Uuid,
@@ -1111,7 +1120,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             warp::sata::Kind::Reference,
             serde_json::to_vec(&event)?,
         )?;
-        
+
         let bytes = serde_json::to_vec(&payload)?;
 
         if bytes.len() >= 256 * 1024 {

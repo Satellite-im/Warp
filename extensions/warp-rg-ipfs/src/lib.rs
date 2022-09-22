@@ -8,11 +8,9 @@ use crate::spam_filter::SpamFilter;
 use config::RgIpfsConfig;
 use futures::pin_mut;
 use futures::StreamExt;
+use ipfs::libp2p::identity;
 use ipfs::IpfsTypes;
 use ipfs::{Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, TestTypes, Types, UninitializedIpfs};
-use ipfs::libp2p::identity;
-use warp::logging::tracing::log::error;
-use warp::logging::tracing::log::trace;
 use std::any::Any;
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -29,6 +27,8 @@ use warp::crypto::KeyMaterial;
 use warp::crypto::DID;
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
+use warp::logging::tracing::log::error;
+use warp::logging::tracing::log::trace;
 use warp::module::Module;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
@@ -122,7 +122,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             Some(ipfs) => {
                 discovery = false;
                 ipfs
-            },
+            }
             None => {
                 trace!("Unable to get ipfs handle from multipass");
                 let keypair = {
@@ -243,6 +243,11 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
 
     async fn list_conversations(&self) -> Result<Vec<Conversation>> {
         Ok(self.messaging_store()?.list_conversations())
+    }
+
+    async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message> {
+        self.messaging_store()?
+            .get_message(conversation_id, message_id)
     }
 
     async fn get_messages(

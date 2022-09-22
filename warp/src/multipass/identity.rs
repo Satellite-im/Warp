@@ -96,6 +96,27 @@ impl Graphics {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display, FFIFree)]
+#[serde(rename_all = "lowercase")]
+#[repr(C)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub enum IdentityStatus {
+    #[display(fmt = "online")]
+    Online,
+    #[display(fmt = "offline")]
+    Offline,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIFree)]
+#[repr(C)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub struct Relationship {
+    pub friends: bool,
+    pub received_friend_request: bool,
+    pub sent_friend_request: bool,
+    pub blocked: bool,
+}
+
 #[derive(
     Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
 )]

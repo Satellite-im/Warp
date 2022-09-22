@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 use warp::error::Error;
-use warp::multipass::identity::{Identifier, IdentityUpdate};
+use warp::multipass::identity::{Identifier, IdentityUpdate, IdentityStatus};
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, RwLock};
@@ -452,12 +452,13 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             let mut table = Table::new();
-                            table.set_header(vec!["Username", "Public Key", "Status Message"]);
+                            table.set_header(vec!["Username", "Public Key", "Status Message", "Status"]);
                             for identity in idents {
                                 table.add_row(vec![
                                     identity.username(),
                                     identity.did_key().to_string(),
-                                    identity.status_message().unwrap_or_default()
+                                    identity.status_message().unwrap_or_default(),
+                                    format!("{:?}", account.identity_status(&identity.did_key()).unwrap_or(IdentityStatus::Offline)),
                                 ]);
                             }
                             writeln!(stdout, "{}", table)?;
