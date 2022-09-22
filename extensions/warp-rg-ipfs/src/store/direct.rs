@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -84,7 +84,7 @@ pub struct DirectConversation {
     conversation: Arc<Conversation>,
     #[serde(skip)]
     path: Arc<RwLock<Option<PathBuf>>>,
-    messages: Arc<RwLock<Vec<Message>>>,
+    messages: Arc<RwLock<VecDeque<Message>>>,
     #[serde(skip)]
     task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
 }
@@ -209,12 +209,12 @@ impl DirectConversation {
     }
 
     pub fn messages(&self) -> Vec<Message> {
-        self.messages.read().clone()
+        Vec::from(self.messages.read().clone())
     }
 }
 
 impl DirectConversation {
-    pub fn messages_mut(&mut self) -> warp::sync::RwLockWriteGuard<Vec<Message>> {
+    pub fn messages_mut(&mut self) -> warp::sync::RwLockWriteGuard<VecDeque<Message>> {
         self.messages.write()
     }
 }
@@ -775,10 +775,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let messages = conversation.messages();
 
-        if messages.is_empty() {
-            return Err(Error::EmptyMessage);
-        }
-
         //TODO: Maybe put checks to make sure the date range is valid
         let messages = match opt.date_range() {
             Some(range) => messages
@@ -1187,7 +1183,7 @@ pub struct EventOpt {
 }
 
 pub fn direct_message_event(
-    messages: &mut Vec<Message>,
+    messages: &mut VecDeque<Message>,
     events: &MessagingEvents,
     filter: &Arc<Option<SpamFilter>>,
     opt: EventOpt,
@@ -1231,7 +1227,7 @@ pub fn direct_message_event(
                 verify_serde_sig(sender, &construct, &signature)?;
             }
             spam_check(&mut message, filter)?;
-            messages.push(message)
+            messages.push_back(message)
         }
         MessagingEvents::Edit(convo_id, message_id, val, signature) => {
             let index = messages
