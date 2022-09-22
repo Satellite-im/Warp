@@ -107,16 +107,50 @@ pub enum IdentityStatus {
     Offline,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIFree)]
-#[repr(C)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Relationship {
-    pub friends: bool,
-    pub received_friend_request: bool,
-    pub sent_friend_request: bool,
-    pub blocked: bool,
+    friends: bool,
+    received_friend_request: bool,
+    sent_friend_request: bool,
+    blocked: bool,
 }
 
+impl Relationship {
+    pub fn set_friends(&mut self, val: bool) {
+        self.friends = val;
+    }
+
+    pub fn set_received_friend_request(&mut self, val: bool) {
+        self.received_friend_request = val;
+    }
+
+    pub fn set_sent_friend_request(&mut self, val: bool) {
+        self.sent_friend_request = val;
+    }
+
+    pub fn set_blocked(&mut self, val: bool) {
+        self.blocked = val;
+    }
+}
+
+impl Relationship {
+    pub fn friends(&self) -> bool {
+        self.friends
+    }
+
+    pub fn received_friend_request(&self) -> bool {
+        self.received_friend_request
+    }
+
+    pub fn sent_friend_request(&self) -> bool {
+        self.sent_friend_request
+    }
+
+    pub fn blocked(&self) -> bool {
+        self.blocked
+    }
+}
 #[derive(
     Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
 )]
@@ -554,6 +588,8 @@ pub mod ffi {
     use std::ffi::{CStr, CString};
     use std::os::raw::{c_char, c_void};
 
+    use super::Relationship;
+
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn multipass_role_name(role: *const Role) -> *mut c_char {
@@ -980,5 +1016,53 @@ pub mod ffi {
             }
         }
         std::ptr::null_mut()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_relationship_friends(
+        context: *const Relationship,
+    ) -> bool {
+        if context.is_null() {
+            return false;
+        }
+
+        Relationship::friends(&*context)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_relationship_received_friend_request(
+        context: *const Relationship,
+    ) -> bool {
+        if context.is_null() {
+            return false;
+        }
+
+        Relationship::received_friend_request(&*context)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_relationship_sent_friend_request(
+        context: *const Relationship,
+    ) -> bool {
+        if context.is_null() {
+            return false;
+        }
+
+        Relationship::sent_friend_request(&*context)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_relationship_blocked(
+        context: *const Relationship,
+    ) -> bool {
+        if context.is_null() {
+            return false;
+        }
+
+        Relationship::blocked(&*context)
     }
 }

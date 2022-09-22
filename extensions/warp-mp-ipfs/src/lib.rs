@@ -45,7 +45,9 @@ use warp::crypto::rand::Rng;
 use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
 use warp::error::Error;
 use warp::multipass::generator::generate_name;
-use warp::multipass::identity::{FriendRequest, Identifier, Identity, IdentityUpdate};
+use warp::multipass::identity::{
+    FriendRequest, Identifier, Identity, IdentityUpdate, Relationship,
+};
 use warp::multipass::{identity, Friends, IdentityInformation, MultiPass};
 
 pub type Temporary = TestTypes;
@@ -809,18 +811,21 @@ impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
     }
 
     fn identity_relationship(&self, did: &DID) -> Result<identity::Relationship, Error> {
-        self.get_identity(Identifier::did_key(did.clone()))?.first().ok_or(Error::IdentityDoesntExist)?;
+        self.get_identity(Identifier::did_key(did.clone()))?
+            .first()
+            .ok_or(Error::IdentityDoesntExist)?;
         let friends = self.has_friend(did).is_ok();
         let received_friend_request = self.received_friend_request_from(did)?;
         let sent_friend_request = self.sent_friend_request_to(did)?;
         let blocked = self.is_blocked(did)?;
 
-        Ok(identity::Relationship {
-            friends,
-            received_friend_request,
-            sent_friend_request,
-            blocked,
-        })
+        let mut relationship = Relationship::default();
+        relationship.set_friends(friends);
+        relationship.set_received_friend_request(received_friend_request);
+        relationship.set_sent_friend_request(sent_friend_request);
+        relationship.set_blocked(blocked);
+
+        Ok(relationship)
     }
 }
 
