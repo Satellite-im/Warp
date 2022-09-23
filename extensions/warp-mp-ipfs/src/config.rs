@@ -12,6 +12,7 @@ pub enum Bootstrap {
     Ipfs,
     Experimental,
     Custom(Vec<Multiaddr>),
+    None
 }
 
 impl Bootstrap {
@@ -31,6 +32,7 @@ impl Bootstrap {
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),
             Bootstrap::Custom(address) => address.clone(),
+            Bootstrap::None => vec![]
         }
     }
 }
@@ -309,7 +311,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn mp_ipfs_config_production(
         path: *const c_char,
-        experimental: bool
+        experimental: bool,
     ) -> FFIResult<MpIpfsConfig> {
         if path.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
