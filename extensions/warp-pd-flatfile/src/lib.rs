@@ -496,6 +496,31 @@ impl PocketDimension for FlatfileStorage {
                    
                } 
                 
+            },
+            DataType::Http => {
+
+                match self.index.insert(DataType::Http, data.clone()) {
+
+                    Ok(()) => {
+                        let new_path = {
+                            let mut path = self.directory.clone();
+                            path.push("Http");
+                            create_dir_all(&path)?;
+                            path.push(Uuid::new_v4().to_string());
+                            path
+                        };
+
+                        let serialized_data = serde_json::to_string(&data).unwrap();
+                        let mut writer = std::fs::File::create(&new_path)?;
+
+                        let mut reader = std::io::Cursor::new(serialized_data);
+                        std::io::copy(&mut reader, &mut writer)?;
+                        
+                    },
+                    Err(e) => return Err(e),
+                   
+               } 
+                
             }
             _ => self.index.insert(dimension, data)?,
         }
@@ -612,13 +637,19 @@ impl PocketDimension for FlatfileStorage {
                         std::fs::remove_file(path)?;
                     }
                 }
-                if dimension == DataType::Accounts {
+                else {
                         let mut directory = self.directory.clone();
-                        directory.push("Account");
+                        match dimension {
+                            DataType::Accounts => directory.push("Account"),
+                            DataType::Messaging => directory.push("Messaging"),
+                            DataType::DataExport => directory.push("DataExport"),
+                            DataType::Http => directory.push("Http"),
+                            _ => {},
+
+                        }
                        for item in std::fs::read_dir(directory)? {
                             let item = item?;
                             let path = item.path();
-                            println!("{:?}", path);
                             std::fs::remove_file(path)?;
                        }
                    
