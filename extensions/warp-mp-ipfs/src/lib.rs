@@ -50,6 +50,8 @@ use warp::multipass::identity::{
 };
 use warp::multipass::{identity, Friends, IdentityInformation, MultiPass};
 
+use crate::config::Bootstrap;
+
 pub type Temporary = TestTypes;
 pub type Persistent = Types;
 
@@ -180,7 +182,11 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
         let path = config.path.clone().unwrap_or_default();
 
-        let empty_bootstrap = config.bootstrap.is_empty();
+        let empty_bootstrap = match &config.bootstrap {
+            Bootstrap::Ipfs | Bootstrap::Experimental => false,
+            Bootstrap::Custom(addr) => addr.is_empty(),
+            Bootstrap::None => true
+        };
 
         if empty_bootstrap {
             warn!("Bootstrap list is empty. Will not be able to perform a bootstrap for DHT");
@@ -222,10 +228,10 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
         let mut opts = IpfsOptions {
             keypair,
-            bootstrap: config.bootstrap,
+            bootstrap: config.bootstrap.address(),
             mdns: config.ipfs_setting.mdns.enable,
             listening_addrs: config.listen_on,
-            dcutr: config.ipfs_setting.dcutr.enable,
+            dcutr: config.ipfs_setting.relay_client.dcutr,
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
             swarm_configuration: Some(swarm_configuration),
@@ -270,8 +276,11 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         tokio::spawn(async move {
             if config.ipfs_setting.relay_client.enable {
                 info!("Relay client enabled. Loading relays");
-                for relay_addr in config.ipfs_setting.relay_client.relay_address {
-                    if let Err(e) = ipfs_clone.swarm_listen_on(relay_addr).await {
+                for addr in config.bootstrap.address() {
+                    if let Err(e) = ipfs_clone
+                        .swarm_listen_on(addr.with(Protocol::P2pCircuit))
+                        .await
+                    {
                         info!("Error listening on relay: {e}");
                         continue;
                     }
@@ -859,7 +868,7 @@ pub mod ffi {
         };
 
         let config = match config.is_null() {
-            true => MpIpfsConfig::testing(),
+            true => MpIpfsConfig::testing(true),
             false => (&*config).clone(),
         };
 
