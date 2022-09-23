@@ -15,7 +15,7 @@ void print_error(FFIError *error)
 MultiPassAdapter *new_account()
 {
 
-    MpIpfsConfig *config = mp_ipfs_config_testing();
+    MpIpfsConfig *config = mp_ipfs_config_development();
 
     struct Tesseract *tesseract = tesseract_new();
 
