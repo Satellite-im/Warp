@@ -1,10 +1,33 @@
 use ipfs::Multiaddr;
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, str::FromStr};
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct Dcutr {
-    pub enable: bool,
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Bootstrap {
+    #[default]
+    Ipfs,
+    Custom(Vec<Multiaddr>),
+}
+
+impl Bootstrap {
+    pub fn address(&self) -> Vec<Multiaddr> {
+        match self {
+            Bootstrap::Ipfs => vec![
+                "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+                "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
+                "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
+                "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+            ]
+            .iter()
+            .filter_map(|s| Multiaddr::from_str(s).ok())
+            .collect::<Vec<_>>(),
+            Bootstrap::Custom(address) => address.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -12,16 +35,10 @@ pub struct Mdns {
     pub enable: bool,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct Autonat {
-    pub enable: bool,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub servers: Vec<Multiaddr>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct RelayClient {
     pub enable: bool,
+    pub dcutr: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub relay_address: Vec<Multiaddr>,
 }
@@ -40,7 +57,7 @@ impl Default for Swarm {
             dial_factor: 8, //Same dial factor as default for libp2p
             notify_buffer_size: 32,
             connection_buffer_size: 1024,
-            limit: Some(Default::default())
+            limit: None,
         }
     }
 }
@@ -58,29 +75,12 @@ pub struct ConnectionLimit {
 impl Default for ConnectionLimit {
     fn default() -> Self {
         Self {
-            max_pending_incoming: Some(1024),
+            max_pending_incoming: None,
             max_pending_outgoing: Some(1024),
-            max_established_incoming: Some(10000),
+            max_established_incoming: None,
             max_established_outgoing: Some(10000),
-            max_established: Some(10000),
-            max_established_per_peer: None
-        }
-    }
-}
-
-impl Default for RelayClient {
-    fn default() -> Self {
-        Self {
-            enable: false,
-            relay_address: vec![
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN/p2p-circuit",
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa/p2p-circuit",
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb/p2p-circuit",
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt/p2p-circuit",
-            ]
-                    .iter()
-                    .filter_map(|s| Multiaddr::from_str(s).ok())
-                    .collect::<Vec<_>>(),
+            max_established: None,
+            max_established_per_peer: None,
         }
     }
 }
@@ -90,30 +90,11 @@ pub struct RelayServer {
     pub enable: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Rendezvous {
-    pub enable: bool,
-    #[serde(skip_serializing_if = "Multiaddr::is_empty")]
-    pub address: Multiaddr,
-}
-
-impl Default for Rendezvous {
-    fn default() -> Self {
-        Self {
-            enable: false,
-            address: Multiaddr::empty(),
-        }
-    }
-}
-
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct IpfsSetting {
     pub mdns: Mdns,
-    pub autonat: Autonat,
     pub relay_client: RelayClient,
     pub relay_server: RelayServer,
-    pub dcutr: Dcutr,
-    pub rendezvous: Rendezvous,
     pub swarm: Swarm,
     pub bootstrap: bool,
 }
@@ -133,8 +114,7 @@ pub struct StoreSetting {
 pub struct MpIpfsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub bootstrap: Vec<Multiaddr>,
+    pub bootstrap: Bootstrap,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub listen_on: Vec<Multiaddr>,
     pub ipfs_setting: IpfsSetting,
@@ -146,15 +126,7 @@ impl Default for MpIpfsConfig {
     fn default() -> Self {
         MpIpfsConfig {
             path: None,
-            bootstrap: vec![
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-            ]
-            .iter()
-            .filter_map(|s| Multiaddr::from_str(s).ok())
-            .collect::<Vec<_>>(),
+            bootstrap: Bootstrap::Ipfs,
             listen_on: vec!["/ip4/0.0.0.0/tcp/0", "/ip6/::/tcp/0"]
                 .iter()
                 .filter_map(|s| Multiaddr::from_str(s).ok())
@@ -193,11 +165,6 @@ impl MpIpfsConfig {
                     enable: true,
                     ..Default::default()
                 },
-                dcutr: Dcutr { enable: true },
-                autonat: Autonat {
-                    enable: true,
-                    ..Default::default()
-                },
                 ..Default::default()
             },
             store_setting: StoreSetting {
@@ -214,15 +181,11 @@ impl MpIpfsConfig {
             path: Some(path.as_ref().to_path_buf()),
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
-                autonat: Autonat {
-                    enable: true,
-                    ..Default::default()
-                },
                 relay_client: RelayClient {
                     enable: true,
+                    dcutr: true,
                     ..Default::default()
                 },
-                dcutr: Dcutr { enable: true },
                 ..Default::default()
             },
             store_setting: StoreSetting {
@@ -232,6 +195,26 @@ impl MpIpfsConfig {
             },
             ..Default::default()
         }
+    }
+
+    pub fn from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<MpIpfsConfig> {
+        let path = path.as_ref();
+        let bytes = std::fs::read(path)?;
+        let config = serde_json::from_slice(&bytes)?;
+        Ok(config)
+    }
+
+    pub fn to_file<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
+        let path = path.as_ref();
+        let bytes = serde_json::to_vec(self)?;
+        std::fs::write(path, bytes)?;
+        Ok(())
+    }
+
+    pub fn from_string<S: AsRef<str>>(data: S) -> anyhow::Result<MpIpfsConfig> {
+        let data = data.as_ref();
+        let config = serde_json::from_str(data)?;
+        Ok(config)
     }
 }
 
@@ -253,17 +236,7 @@ pub mod ffi {
 
         let file = CStr::from_ptr(file).to_string_lossy().to_string();
 
-        let bytes = match std::fs::read(file) {
-            Ok(bytes) => bytes,
-            Err(e) => return FFIResult::err(Error::from(e)),
-        };
-
-        let config = match serde_json::from_slice(&bytes) {
-            Ok(config) => config,
-            Err(e) => return FFIResult::err(Error::from(e)),
-        };
-
-        FFIResult::ok(config)
+       MpIpfsConfig::from_file(file).map_err(Error::from).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -286,12 +259,7 @@ pub mod ffi {
 
         let file = CStr::from_ptr(file).to_string_lossy().to_string();
 
-        let config = match serde_json::to_vec(&*config) {
-            Ok(config) => config,
-            Err(e) => return FFIResult_Null::err(Error::from(e)),
-        };
-
-        std::fs::write(file, &config).map_err(Error::from).into()
+        MpIpfsConfig::to_file(&*config, file).map_err(Error::from).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -305,12 +273,7 @@ pub mod ffi {
 
         let data = CStr::from_ptr(config).to_string_lossy().to_string();
 
-        let config = match serde_json::from_str(&data) {
-            Ok(config) => config,
-            Err(e) => return FFIResult::err(Error::from(e)),
-        };
-
-        FFIResult::ok(config)
+        MpIpfsConfig::from_string(data).map_err(Error::from).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
