@@ -162,8 +162,12 @@ impl MpIpfsConfig {
         }
     }
 
-    pub fn testing() -> MpIpfsConfig {
+    pub fn testing(experimental: bool) -> MpIpfsConfig {
         MpIpfsConfig {
+            bootstrap: match experimental {
+                true => Bootstrap::Experimental,
+                false => Bootstrap::Ipfs,
+            },
             ipfs_setting: IpfsSetting {
                 bootstrap: true,
                 mdns: Mdns { enable: true },
@@ -182,8 +186,12 @@ impl MpIpfsConfig {
         }
     }
 
-    pub fn production<P: AsRef<std::path::Path>>(path: P) -> MpIpfsConfig {
+    pub fn production<P: AsRef<std::path::Path>>(path: P, experimental: bool) -> MpIpfsConfig {
         MpIpfsConfig {
+            bootstrap: match experimental {
+                true => Bootstrap::Experimental,
+                false => Bootstrap::Ipfs,
+            },
             path: Some(path.as_ref().to_path_buf()),
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
@@ -293,14 +301,15 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn mp_ipfs_config_testing() -> *mut MpIpfsConfig {
-        Box::into_raw(Box::new(MpIpfsConfig::testing()))
+    pub unsafe extern "C" fn mp_ipfs_config_testing(experimental: bool) -> *mut MpIpfsConfig {
+        Box::into_raw(Box::new(MpIpfsConfig::testing(experimental)))
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn mp_ipfs_config_production(
         path: *const c_char,
+        experimental: bool
     ) -> FFIResult<MpIpfsConfig> {
         if path.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
@@ -308,6 +317,6 @@ pub mod ffi {
 
         let path = CStr::from_ptr(path).to_string_lossy().to_string();
 
-        FFIResult::ok(MpIpfsConfig::production(path))
+        FFIResult::ok(MpIpfsConfig::production(path, experimental))
     }
 }

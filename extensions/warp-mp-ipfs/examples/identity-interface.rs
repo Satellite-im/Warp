@@ -44,7 +44,7 @@ async fn account(
 
     //Note: This uses mdns for this example. This example will not work if the system does not support mdns. This will change in the future
     //      The internal store will broadcast at 5ms but ideally it would want to be set to 100ms
-    let config = MpIpfsConfig::testing();
+    let config = MpIpfsConfig::testing(true);
     let mut account = ipfs_identity_temporary(Some(config), tesseract, cache).await?;
     account.create_identity(username, None)?;
     Ok(Box::new(account))
@@ -69,7 +69,7 @@ async fn account_persistent<P: AsRef<Path>>(
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    let config = MpIpfsConfig::production(&path);
+    let config = MpIpfsConfig::production(&path, true);
     let mut account = ipfs_identity_persistent(config, tesseract, cache).await?;
     if account.get_own_identity().is_err() {
         account.create_identity(username, None)?;

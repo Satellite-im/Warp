@@ -864,7 +864,7 @@ pub mod ffi {
         };
 
         let config = match config.is_null() {
-            true => MpIpfsConfig::testing(),
+            true => MpIpfsConfig::testing(true),
             false => (&*config).clone(),
         };
 

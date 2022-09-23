@@ -64,8 +64,8 @@ async fn create_account<P: AsRef<Path>>(
     tesseract.unlock(passphrase.as_bytes())?;
 
     let config = match path.as_ref() {
-        Some(path) => warp_mp_ipfs::config::MpIpfsConfig::production(path),
-        None => warp_mp_ipfs::config::MpIpfsConfig::testing(),
+        Some(path) => warp_mp_ipfs::config::MpIpfsConfig::production(path, true),
+        None => warp_mp_ipfs::config::MpIpfsConfig::testing(true),
     };
 
     let account: Arc<RwLock<Box<dyn MultiPass>>> = match path.is_some() {
