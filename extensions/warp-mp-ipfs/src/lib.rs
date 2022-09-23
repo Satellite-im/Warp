@@ -184,7 +184,8 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
         let empty_bootstrap = match &config.bootstrap {
             Bootstrap::Ipfs | Bootstrap::Experimental => false,
-            Bootstrap::Custom(addr) => addr.is_empty()
+            Bootstrap::Custom(addr) => addr.is_empty(),
+            Bootstrap::None => true
         };
 
         if empty_bootstrap {
@@ -276,7 +277,10 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             if config.ipfs_setting.relay_client.enable {
                 info!("Relay client enabled. Loading relays");
                 for addr in config.bootstrap.address() {
-                    if let Err(e) = ipfs_clone.swarm_listen_on(addr.with(Protocol::P2pCircuit)).await {
+                    if let Err(e) = ipfs_clone
+                        .swarm_listen_on(addr.with(Protocol::P2pCircuit))
+                        .await
+                    {
                         info!("Error listening on relay: {e}");
                         continue;
                     }
