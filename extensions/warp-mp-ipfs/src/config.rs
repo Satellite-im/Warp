@@ -10,6 +10,7 @@ use std::{
 pub enum Bootstrap {
     #[default]
     Ipfs,
+    Experimental,
     Custom(Vec<Multiaddr>),
 }
 
@@ -22,6 +23,10 @@ impl Bootstrap {
                 "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
                 "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
             ]
+            .iter()
+            .filter_map(|s| Multiaddr::from_str(s).ok())
+            .collect::<Vec<_>>(),
+            Bootstrap::Experimental => vec!["/ip4/67.205.175.147/tcp/5000/p2p/12D3KooWDC7igsZ9Yaheip77ejALmjG6AZm2auuVmMDj1AkC2o7B"]
             .iter()
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),
@@ -133,7 +138,7 @@ impl Default for MpIpfsConfig {
                 .collect::<Vec<_>>(),
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
-                bootstrap: true,
+                bootstrap: false,
                 ..Default::default()
             },
             store_setting: StoreSetting {
@@ -160,6 +165,7 @@ impl MpIpfsConfig {
     pub fn testing() -> MpIpfsConfig {
         MpIpfsConfig {
             ipfs_setting: IpfsSetting {
+                bootstrap: true,
                 mdns: Mdns { enable: true },
                 relay_client: RelayClient {
                     enable: true,
@@ -181,6 +187,7 @@ impl MpIpfsConfig {
             path: Some(path.as_ref().to_path_buf()),
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
+                bootstrap: true,
                 relay_client: RelayClient {
                     enable: true,
                     dcutr: true,
@@ -236,7 +243,7 @@ pub mod ffi {
 
         let file = CStr::from_ptr(file).to_string_lossy().to_string();
 
-       MpIpfsConfig::from_file(file).map_err(Error::from).into()
+        MpIpfsConfig::from_file(file).map_err(Error::from).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -259,7 +266,9 @@ pub mod ffi {
 
         let file = CStr::from_ptr(file).to_string_lossy().to_string();
 
-        MpIpfsConfig::to_file(&*config, file).map_err(Error::from).into()
+        MpIpfsConfig::to_file(&*config, file)
+            .map_err(Error::from)
+            .into()
     }
 
     #[allow(clippy::missing_safety_doc)]

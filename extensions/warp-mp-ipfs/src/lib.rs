@@ -183,7 +183,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         let path = config.path.clone().unwrap_or_default();
 
         let empty_bootstrap = match &config.bootstrap {
-            Bootstrap::Ipfs => false,
+            Bootstrap::Ipfs | Bootstrap::Experimental => false,
             Bootstrap::Custom(addr) => addr.is_empty()
         };
 
