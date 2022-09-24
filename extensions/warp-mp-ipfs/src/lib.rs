@@ -10,6 +10,7 @@ pub mod store;
 use anyhow::bail;
 use config::MpIpfsConfig;
 use futures::{Future, TryFutureExt};
+use ipfs::libp2p::kad::protocol::DEFAULT_PROTO_NAME;
 use ipfs::libp2p::swarm::ConnectionLimits;
 use ipfs::libp2p::yamux::YamuxConfig;
 use ipfs::p2p::TransportConfig;
@@ -18,6 +19,7 @@ use libipld::{ipld, Cid, Ipld};
 use sata::Sata;
 use serde::de::DeserializeOwned;
 use std::any::Any;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -185,7 +187,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         let empty_bootstrap = match &config.bootstrap {
             Bootstrap::Ipfs | Bootstrap::Experimental => false,
             Bootstrap::Custom(addr) => addr.is_empty(),
-            Bootstrap::None => true
+            Bootstrap::None => true,
         };
 
         if empty_bootstrap {
@@ -234,6 +236,17 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             dcutr: config.ipfs_setting.relay_client.dcutr,
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
+            kad_configuration: Some({
+                let mut conf = ipfs::libp2p::kad::KademliaConfig::default();
+                conf.disjoint_query_paths(true);
+                conf.set_query_timeout(std::time::Duration::from_secs(60));
+                conf.set_protocol_names(vec![
+                    Cow::Borrowed(DEFAULT_PROTO_NAME),
+                    Cow::Borrowed(b"/warp/sync/0.0.1"),
+                ]);
+
+                conf
+            }),
             swarm_configuration: Some(swarm_configuration),
             transport_configuration: Some(TransportConfig {
                 yamux_config: {
