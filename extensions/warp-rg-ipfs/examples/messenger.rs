@@ -33,6 +33,7 @@ struct Opt {
     path: Option<PathBuf>,
     #[clap(long)]
     with_key: bool,
+    experimental_node: bool,
 }
 
 fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
@@ -48,6 +49,7 @@ async fn create_account<P: AsRef<Path>>(
     path: Option<P>,
     cache: Arc<RwLock<Box<dyn PocketDimension>>>,
     passphrase: Zeroizing<String>,
+    experimental: bool,
 ) -> anyhow::Result<Arc<RwLock<Box<dyn MultiPass>>>> {
     let mut tesseract = match path.as_ref() {
         Some(path) => {
@@ -64,8 +66,8 @@ async fn create_account<P: AsRef<Path>>(
     tesseract.unlock(passphrase.as_bytes())?;
 
     let config = match path.as_ref() {
-        Some(path) => warp_mp_ipfs::config::MpIpfsConfig::production(path, true),
-        None => warp_mp_ipfs::config::MpIpfsConfig::testing(true),
+        Some(path) => warp_mp_ipfs::config::MpIpfsConfig::production(path, experimental),
+        None => warp_mp_ipfs::config::MpIpfsConfig::testing(experimental),
     };
 
     let account: Arc<RwLock<Box<dyn MultiPass>>> = match path.is_some() {
@@ -123,7 +125,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Creating or obtaining account...");
     let new_account =
-        create_account(opt.path.clone(), cache.clone(), Zeroizing::new(password)).await?;
+        create_account(opt.path.clone(), cache.clone(), Zeroizing::new(password), opt.experimental_node).await?;
 
     let mut chat = create_rg(opt.path.clone(), new_account.clone(), cache).await?;
 
