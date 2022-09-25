@@ -619,7 +619,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         }
                     }
                 }
-                tokio::time::sleep(Duration::from_millis(1)).await;
             }
         });
         tokio::task::yield_now().await;

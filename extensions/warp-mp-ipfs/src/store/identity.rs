@@ -144,7 +144,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 if !store.start_event.load(Ordering::SeqCst) {
                     continue;
                 }
-                tokio::time::sleep(Duration::from_millis(1)).await;
                 tokio::select! {
                     message = id_broadcast_stream.next() => {
                         if let Some(message) = message {
