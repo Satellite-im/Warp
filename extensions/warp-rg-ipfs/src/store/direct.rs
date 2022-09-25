@@ -558,6 +558,11 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         }
 
         let own_did = &*self.did;
+
+        if did_key == own_did {
+            return Err(Error::CannotCreateConversation)
+        }
+
         for convo in &*self.direct_conversation.read() {
             if convo.recipients().contains(did_key) && convo.recipients().contains(own_did) {
                 return Err(Error::ConversationExist {
