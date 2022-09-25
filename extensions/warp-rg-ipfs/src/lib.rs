@@ -111,7 +111,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
     async fn initialize(&mut self) -> anyhow::Result<()> {
         trace!("Initializing internal store");
         let config = self.config.clone().unwrap_or_default();
-        let mut discovery = config.store_setting.discovery;
+        let discovery = false;
 
         let ipfs_handle = match self.account.read().handle() {
             Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
@@ -119,46 +119,45 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         };
 
         let ipfs = match ipfs_handle {
-            Some(ipfs) => {
-                discovery = false;
-                ipfs
-            }
+            Some(ipfs) => ipfs,
             None => {
-                trace!("Unable to get ipfs handle from multipass");
-                let keypair = {
-                    let prikey = self.account.read().decrypt_private_key(None)?;
-                    let mut sec_key = prikey.as_ref().private_key_bytes();
-                    let id_secret = identity::ed25519::SecretKey::from_bytes(&mut sec_key)?;
-                    Keypair::Ed25519(id_secret.into())
-                };
+                // discovery = config.store_setting.discovery;
+                anyhow::bail!("Unable to use IPFS Handle");
+                // // trace!("Unable to get ipfs handle from multipass");
+                // let keypair = {
+                //     let prikey = self.account.read().decrypt_private_key(None)?;
+                //     let mut sec_key = prikey.as_ref().private_key_bytes();
+                //     let id_secret = identity::ed25519::SecretKey::from_bytes(&mut sec_key)?;
+                //     Keypair::Ed25519(id_secret.into())
+                // };
 
-                let mut opts = IpfsOptions {
-                    keypair,
-                    bootstrap: config.bootstrap,
-                    mdns: config.ipfs_setting.mdns.enable,
-                    listening_addrs: config.listen_on,
-                    dcutr: config.ipfs_setting.dcutr.enable,
-                    relay: config.ipfs_setting.relay_client.enable,
-                    relay_server: config.ipfs_setting.relay_server.enable,
-                    ..Default::default()
-                };
+                // let mut opts = IpfsOptions {
+                //     keypair,
+                //     bootstrap: config.bootstrap,
+                //     mdns: config.ipfs_setting.mdns.enable,
+                //     listening_addrs: config.listen_on,
+                //     dcutr: config.ipfs_setting.dcutr.enable,
+                //     relay: config.ipfs_setting.relay_client.enable,
+                //     relay_server: config.ipfs_setting.relay_server.enable,
+                //     ..Default::default()
+                // };
 
-                if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
-                    // Create directory if it doesnt exist
-                    let path = config
-                        .path
-                        .as_ref()
-                        .ok_or_else(|| anyhow::anyhow!("\"path\" must be set"))?;
-                    opts.ipfs_path = path.clone();
-                    if !opts.ipfs_path.exists() {
-                        tokio::fs::create_dir(path).await?;
-                    }
-                }
+                // if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
+                //     // Create directory if it doesnt exist
+                //     let path = config
+                //         .path
+                //         .as_ref()
+                //         .ok_or_else(|| anyhow::anyhow!("\"path\" must be set"))?;
+                //     opts.ipfs_path = path.clone();
+                //     if !opts.ipfs_path.exists() {
+                //         tokio::fs::create_dir(path).await?;
+                //     }
+                // }
 
-                let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
-                tokio::task::spawn(fut);
+                // let (ipfs, fut) = UninitializedIpfs::new(opts).start().await?;
+                // tokio::task::spawn(fut);
 
-                ipfs
+                // ipfs
             }
         };
 
