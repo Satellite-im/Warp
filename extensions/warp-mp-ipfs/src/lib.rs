@@ -53,6 +53,7 @@ use warp::multipass::identity::{
 use warp::multipass::{identity, Friends, IdentityInformation, MultiPass};
 
 use crate::config::Bootstrap;
+use crate::store::discovery;
 
 pub type Temporary = TestTypes;
 pub type Persistent = Types;
@@ -316,7 +317,6 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 ipfs.clone(),
                 config.path.clone(),
                 tesseract.clone(),
-                config.store_setting.discovery,
                 config.store_setting.broadcast_interval,
             )
             .await?,
@@ -328,12 +328,26 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 ipfs.clone(),
                 config.path.map(|p| p.join("friends")),
                 tesseract.clone(),
-                config.store_setting.discovery,
                 config.store_setting.broadcast_interval,
             )
             .await?,
         );
         info!("friends store initialized");
+
+        if config.store_setting.discovery {
+            let ipfs = ipfs.clone();
+            let id = self.id();
+            tokio::spawn(async {
+                if let Err(e) = discovery(
+                    ipfs,
+                    config.store_setting.discovery_name.unwrap_or(id),
+                )
+                .await
+                {
+                    error!("Error performing topic discovery: {e}");
+                }
+            });
+        }
 
         *self.ipfs.write() = Some(ipfs);
         self.initialized.store(true, Ordering::SeqCst);

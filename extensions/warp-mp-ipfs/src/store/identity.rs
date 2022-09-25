@@ -25,7 +25,7 @@ use warp::{
     tesseract::Tesseract,
 };
 
-use super::{libp2p_pub_to_did, topic_discovery, IDENTITY_BROADCAST};
+use super::{libp2p_pub_to_did, IDENTITY_BROADCAST};
 
 pub struct IdentityStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
@@ -78,7 +78,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
         ipfs: Ipfs<T>,
         path: Option<PathBuf>,
         tesseract: Tesseract,
-        discovery: bool,
         interval: u64,
     ) -> Result<Self, Error> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
@@ -128,15 +127,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
             .pubsub_subscribe(IDENTITY_BROADCAST.into())
             .await?;
         let store_inner = store.clone();
-
-        if discovery {
-            let ipfs = store.ipfs.clone();
-            tokio::spawn(async {
-                if let Err(e) = topic_discovery(ipfs, IDENTITY_BROADCAST).await {
-                    error!("Error performing topic discovery: {e}");
-                }
-            });
-        }
 
         tokio::spawn(async move {
             // let mut peer_annoyance = HashMap::<PeerId, usize>::new();

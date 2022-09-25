@@ -113,13 +113,13 @@ fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow
 // who are providing and connect to them.
 // Note that there is usually a delay in `ipfs.provide`.
 // TODO: Investigate the delay in providing the CID
-pub async fn topic_discovery<T: IpfsTypes, S: AsRef<str>>(
+pub async fn discovery<T: IpfsTypes, S: AsRef<str>>(
     ipfs: ipfs::Ipfs<T>,
     topic: S,
 ) -> anyhow::Result<()> {
     let topic = topic.as_ref();
     let cid = ipfs
-        .put_dag(libipld::ipld!(format!("gossipsub:{}", topic)))
+        .put_dag(libipld::ipld!(format!("discovery:{}", topic)))
         .await?;
     ipfs.provide(cid).await?;
 
