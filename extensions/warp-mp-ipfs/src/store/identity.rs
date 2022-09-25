@@ -38,7 +38,7 @@ pub struct IdentityStore<T: IpfsTypes> {
 
     cache: Arc<RwLock<Vec<Identity>>>,
 
-    seen: Arc<RwLock<Vec<PeerId>>>,
+    seen: Arc<RwLock<HashSet<PeerId>>>,
 
     check_seen: Arc<AtomicBool>,
 
@@ -225,11 +225,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
                         }
                     }
                     _ = tick.tick() => {
+                        //TODO: Add a condition for sending info to relay
                         match store.ipfs.pubsub_peers(Some(IDENTITY_BROADCAST.into())).await {
                             Ok(peers) => {
-
                                 match store.check_seen.load(Ordering::Relaxed) {
                                     true => {
+                                        let peers = HashSet::from_iter(peers);
                                         if peers.is_empty() || (!peers.is_empty() && peers == store.seen.read().clone()) {
                                             // warn!("");
                                             continue
@@ -244,13 +245,16 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                             havent_seen.push(peer);
                                         }
 
+                                        if havent_seen.is_empty() {
+                                            continue
+                                        }
+
                                         store.seen.write().extend(havent_seen);
                                     }
                                     false => if peers.is_empty() {
                                         continue
                                     }
                                 }
-
                             },
                             Err(e) => {
                                 error!("Error obtaining peers from topic: {e}");
