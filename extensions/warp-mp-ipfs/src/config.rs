@@ -175,6 +175,7 @@ impl MpIpfsConfig {
                 mdns: Mdns { enable: true },
                 relay_client: RelayClient {
                     enable: true,
+                    dcutr: true,
                     ..Default::default()
                 },
                 ..Default::default()
