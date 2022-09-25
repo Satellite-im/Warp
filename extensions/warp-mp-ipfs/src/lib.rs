@@ -298,6 +298,9 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                         continue;
                     }
                     tokio::time::sleep(Duration::from_millis(400)).await;
+                    if config.ipfs_setting.relay_client.single {
+                        break;
+                    }
                 }
             }
             if config.ipfs_setting.bootstrap && !empty_bootstrap {

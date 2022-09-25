@@ -12,7 +12,7 @@ pub enum Bootstrap {
     Ipfs,
     Experimental,
     Custom(Vec<Multiaddr>),
-    None
+    None,
 }
 
 impl Bootstrap {
@@ -46,6 +46,7 @@ pub struct Mdns {
 pub struct RelayClient {
     pub enable: bool,
     pub dcutr: bool,
+    pub single: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub relay_address: Vec<Multiaddr>,
 }
@@ -176,6 +177,7 @@ impl MpIpfsConfig {
                 relay_client: RelayClient {
                     enable: true,
                     dcutr: true,
+                    single: true,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -202,6 +204,7 @@ impl MpIpfsConfig {
                 relay_client: RelayClient {
                     enable: true,
                     dcutr: true,
+                    single: true,
                     ..Default::default()
                 },
                 ..Default::default()
