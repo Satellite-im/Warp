@@ -15,6 +15,23 @@ pub enum Bootstrap {
     None,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Discovery {
+    /// Uses DHT PROVIDER to find and connect to peers using the same context
+    Provider(Option<String>),
+    /// Dials out to peers directly. Using this will only work with the DID til that connection is made
+    Direct,
+    /// Disables Discovery over DHT
+    None,
+}
+
+impl Default for Discovery {
+    fn default() -> Self {
+        Discovery::None
+    }
+}
+
 impl Bootstrap {
     pub fn address(&self) -> Vec<Multiaddr> {
         match self {
@@ -110,9 +127,7 @@ pub struct IpfsSetting {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
     pub broadcast_interval: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub discovery_name: Option<String>,
-    pub discovery: bool,
+    pub discovery: Discovery,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sync: Vec<Multiaddr>,
     pub sync_interval: u64,
@@ -183,7 +198,7 @@ impl MpIpfsConfig {
                 ..Default::default()
             },
             store_setting: StoreSetting {
-                discovery: true,
+                discovery: Discovery::Provider(None),
                 broadcast_interval: 100,
                 ..Default::default()
             },
@@ -211,7 +226,7 @@ impl MpIpfsConfig {
             },
             store_setting: StoreSetting {
                 broadcast_interval: 100,
-                discovery: true,
+                discovery: Discovery::Provider(None),
                 ..Default::default()
             },
             ..Default::default()
