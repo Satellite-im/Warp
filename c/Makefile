@@ -31,3 +31,6 @@ build_shared_pd_flatfile:
 
 build_static_rg_ipfs:
 				mkdir -p bin && clang -Wall -Wextra rg_ipfs.c -o bin/rg_ipfs ../target/debug/libwarp.a ../target/debug/libwarp_rg_ipfs.a ../target/debug/libwarp_mp_ipfs.a -lz -lm
+
+build_shared_rg_ipfs:
+				mkdir -p bin && clang -Wall -Wextra rg_ipfs.c -o bin/rg_ipfs -L ../target/debug -lwarp -lwarp_mp_ipfs -lwarp_rg_ipfs -lz -lm
