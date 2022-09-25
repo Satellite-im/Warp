@@ -100,6 +100,8 @@ pub enum Error {
     InvalidIdentifierCondition,
 
     //RayGun Errors
+    #[error("Unable to create conversation")]
+    CannotCreateConversation,
     #[error("RayGun extension is unavailable")]
     RayGunExtensionUnavailable,
     #[error("Conversation was invalid")]
