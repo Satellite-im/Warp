@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 use warp::error::Error;
-use warp::multipass::identity::{Identifier, IdentityUpdate};
+use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, RwLock};
@@ -22,6 +22,8 @@ use warp_pd_stretto::StrettoClient;
 struct Opt {
     #[clap(long)]
     path: Option<PathBuf>,
+    #[clap(long)]
+    experimental_node: bool,
 }
 
 fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
@@ -37,6 +39,7 @@ fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn Pocke
 async fn account(
     username: Option<&str>,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
+    experimental: bool,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let mut tesseract = Tesseract::default();
     tesseract
@@ -44,7 +47,7 @@ async fn account(
 
     //Note: This uses mdns for this example. This example will not work if the system does not support mdns. This will change in the future
     //      The internal store will broadcast at 5ms but ideally it would want to be set to 100ms
-    let config = MpIpfsConfig::testing();
+    let config = MpIpfsConfig::testing(experimental);
     let mut account = ipfs_identity_temporary(Some(config), tesseract, cache).await?;
     account.create_identity(username, None)?;
     Ok(Box::new(account))
@@ -54,6 +57,7 @@ async fn account_persistent<P: AsRef<Path>>(
     username: Option<&str>,
     path: P,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
+    experimental: bool,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let path = path.as_ref();
     let mut tesseract = match Tesseract::from_file(path.join("tdatastore")) {
@@ -69,7 +73,7 @@ async fn account_persistent<P: AsRef<Path>>(
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    let config = MpIpfsConfig::production(&path);
+    let config = MpIpfsConfig::production(&path, experimental);
     let mut account = ipfs_identity_persistent(config, tesseract, cache).await?;
     if account.get_own_identity().is_err() {
         account.create_identity(username, None)?;
@@ -94,8 +98,8 @@ async fn main() -> anyhow::Result<()> {
     let cache = cache_setup(opt.path.clone()).ok();
 
     let mut account = match opt.path.as_ref() {
-        Some(path) => account_persistent(None, path, cache).await?,
-        None => account(None, cache).await?,
+        Some(path) => account_persistent(None, path, cache, opt.experimental_node).await?,
+        None => account(None, cache, opt.experimental_node).await?,
     };
 
     println!("Obtaining identity....");
@@ -452,12 +456,13 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             let mut table = Table::new();
-                            table.set_header(vec!["Username", "Public Key", "Status Message"]);
+                            table.set_header(vec!["Username", "Public Key", "Status Message", "Status"]);
                             for identity in idents {
                                 table.add_row(vec![
                                     identity.username(),
                                     identity.did_key().to_string(),
-                                    identity.status_message().unwrap_or_default()
+                                    identity.status_message().unwrap_or_default(),
+                                    format!("{:?}", account.identity_status(&identity.did_key()).unwrap_or(IdentityStatus::Offline)),
                                 ]);
                             }
                             writeln!(stdout, "{}", table)?;

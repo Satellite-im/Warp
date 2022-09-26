@@ -465,7 +465,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     message = stream.next() => {
                         if let Some(message) = message {
                             if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
-                                let data = match data.decrypt::<FriendRequest>((&*store.did_key).as_ref()) {
+                                let data = match data.decrypt::<FriendRequest>(&*store.did_key) {
                                     Ok(data) => data,
                                     Err(_e) => {
 
@@ -486,14 +486,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
                                 // Before we validate the request, we should check to see if the key is blocked
                                 // If it is, skip the request so we dont wait resources storing it.
-                                match store.is_blocked(&data.from()).await {
-                                    Ok(true) => continue,
-                                    Ok(false) => {},
-                                    Err(e) => {
-                                        error!("Error checking to see if identity is blocked: {e}");
-                                        continue
-                                    }
-                                };
+                                if store.is_blocked(&data.from()) {
+                                    continue
+                                }
 
                                 //first verify the request before processing it
                                 if let Err(e) = validate_request(&data) {
@@ -834,8 +829,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
         Ok(self.profile.read().block_list())
     }
 
-    pub async fn is_blocked(&self, public_key: &DID) -> Result<bool, Error> {
-        Ok(self.profile.read().block_list().contains(public_key))
+    pub fn is_blocked(&self, public_key: &DID) -> bool {
+        self.profile.read().block_list().contains(public_key)
     }
 
     pub async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
@@ -888,7 +883,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             return Err(Error::FriendExist);
         }
 
-        if self.is_blocked(pubkey).await? {
+        if self.is_blocked(pubkey) {
             return Err(Error::PublicKeyIsBlocked);
         }
 
@@ -950,6 +945,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
         requests
     }
 
+    pub fn received_friend_request_from(&self, did: &DID) -> bool {
+        self.list_incoming_request()
+            .iter()
+            .any(|request| request.from().eq(did))
+    }
+
     pub fn list_incoming_request(&self) -> Vec<FriendRequest> {
         self.profile
             .read()
@@ -958,6 +959,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
             .filter(|request| request.status() == FriendRequestStatus::Pending)
             .cloned()
             .collect::<Vec<_>>()
+    }
+
+    pub fn sent_friend_request_to(&self, did: &DID) -> bool {
+        self.list_outgoing_request()
+            .iter()
+            .any(|request| request.to().eq(did))
     }
 
     pub fn list_outgoing_request(&self) -> Vec<FriendRequest> {
@@ -995,6 +1002,16 @@ impl<T: IpfsTypes> FriendsStore<T> {
             .map_err(anyhow::Error::from)?;
         let bytes = serde_json::to_vec(&payload)?;
 
+        //Check to make sure the payload itself doesnt exceed 256kb
+        if bytes.len() >= 256 * 1024 {
+            return Err(Error::InvalidLength {
+                context: "payload".into(),
+                current: bytes.len(),
+                minimum: Some(1),
+                maximum: Some(256 * 1024),
+            });
+        }
+
         let peers = self
             .ipfs
             .pubsub_peers(Some(FRIENDS_BROADCAST.into()))
@@ -1023,7 +1040,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
     async fn save_queue(&self) {
         if let Some(path) = self.path.as_ref() {
-            let bytes = match serde_json::to_vec(&*self.queue.read()) {
+            let bytes = match serde_json::to_vec(&self.queue) {
                 Ok(bytes) => bytes,
                 Err(e) => {
                     error!("Error serializing queue list into bytes: {e}");

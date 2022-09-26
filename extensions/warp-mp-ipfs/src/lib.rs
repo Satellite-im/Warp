@@ -10,6 +10,7 @@ pub mod store;
 use anyhow::bail;
 use config::MpIpfsConfig;
 use futures::{Future, TryFutureExt};
+use ipfs::libp2p::kad::protocol::DEFAULT_PROTO_NAME;
 use ipfs::libp2p::swarm::ConnectionLimits;
 use ipfs::libp2p::yamux::YamuxConfig;
 use ipfs::p2p::TransportConfig;
@@ -18,6 +19,7 @@ use libipld::{ipld, Cid, Ipld};
 use sata::Sata;
 use serde::de::DeserializeOwned;
 use std::any::Any;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -45,8 +47,12 @@ use warp::crypto::rand::Rng;
 use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
 use warp::error::Error;
 use warp::multipass::generator::generate_name;
-use warp::multipass::identity::{FriendRequest, Identifier, Identity, IdentityUpdate};
-use warp::multipass::{identity, Friends, MultiPass};
+use warp::multipass::identity::{
+    FriendRequest, Identifier, Identity, IdentityUpdate, Relationship,
+};
+use warp::multipass::{identity, Friends, IdentityInformation, MultiPass};
+
+use crate::config::Bootstrap;
 
 pub type Temporary = TestTypes;
 pub type Persistent = Types;
@@ -178,7 +184,11 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
         let path = config.path.clone().unwrap_or_default();
 
-        let empty_bootstrap = config.bootstrap.is_empty();
+        let empty_bootstrap = match &config.bootstrap {
+            Bootstrap::Ipfs | Bootstrap::Experimental => false,
+            Bootstrap::Custom(addr) => addr.is_empty(),
+            Bootstrap::None => true,
+        };
 
         if empty_bootstrap {
             warn!("Bootstrap list is empty. Will not be able to perform a bootstrap for DHT");
@@ -211,18 +221,32 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 .with_max_established_outgoing(limit.max_established_outgoing)
                 .with_max_established(limit.max_established)
                 .with_max_established_per_peer(limit.max_established_per_peer);
-        }
 
-        trace!("Swarm configuration: {:?}", swarm_configuration.connection);
+            info!(
+                "Connection configuration: {:?}",
+                swarm_configuration.connection
+            );
+        }
 
         let mut opts = IpfsOptions {
             keypair,
-            bootstrap: config.bootstrap,
+            bootstrap: config.bootstrap.address(),
             mdns: config.ipfs_setting.mdns.enable,
             listening_addrs: config.listen_on,
-            dcutr: config.ipfs_setting.dcutr.enable,
+            dcutr: config.ipfs_setting.relay_client.dcutr,
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
+            kad_configuration: Some({
+                let mut conf = ipfs::libp2p::kad::KademliaConfig::default();
+                conf.disjoint_query_paths(true);
+                conf.set_query_timeout(std::time::Duration::from_secs(60));
+                conf.set_protocol_names(vec![
+                    Cow::Borrowed(DEFAULT_PROTO_NAME),
+                    Cow::Borrowed(b"/warp/sync/0.0.1"),
+                ]);
+
+                conf
+            }),
             swarm_configuration: Some(swarm_configuration),
             transport_configuration: Some(TransportConfig {
                 yamux_config: {
@@ -265,12 +289,18 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         tokio::spawn(async move {
             if config.ipfs_setting.relay_client.enable {
                 info!("Relay client enabled. Loading relays");
-                for relay_addr in config.ipfs_setting.relay_client.relay_address {
-                    if let Err(e) = ipfs_clone.swarm_listen_on(relay_addr).await {
+                for addr in config.bootstrap.address() {
+                    if let Err(e) = ipfs_clone
+                        .swarm_listen_on(addr.with(Protocol::P2pCircuit))
+                        .await
+                    {
                         info!("Error listening on relay: {e}");
                         continue;
                     }
                     tokio::time::sleep(Duration::from_millis(400)).await;
+                    if config.ipfs_setting.relay_client.single {
+                        break;
+                    }
                 }
             }
             if config.ipfs_setting.bootstrap && !empty_bootstrap {
@@ -526,18 +556,43 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 option.graphics_banner(),
                 option.status_message(),
             ) {
-                (Some(username), None, None, None) => identity.set_username(&username),
-                (None, Some(hash), None, None) => {
+                (Some(username), None, None, None) => {
+                    let len = username.chars().count();
+                    if len <= 4 || len >= 64 {
+                        return Err(Error::InvalidLength {
+                            context: "username".into(),
+                            current: len,
+                            minimum: Some(4),
+                            maximum: Some(64),
+                        });
+                    }
+
+                    identity.set_username(&username)
+                }
+                (None, Some(data), None, None) => {
                     let mut graphics = identity.graphics();
-                    graphics.set_profile_picture(&hash);
+                    graphics.set_profile_picture(&data);
                     identity.set_graphics(graphics);
                 }
-                (None, None, Some(hash), None) => {
+                (None, None, Some(data), None) => {
                     let mut graphics = identity.graphics();
-                    graphics.set_profile_banner(&hash);
+                    graphics.set_profile_banner(&data);
                     identity.set_graphics(graphics);
                 }
-                (None, None, None, Some(status)) => identity.set_status_message(status),
+                (None, None, None, Some(status)) => {
+                    if let Some(status) = status.clone() {
+                        let len = status.chars().count();
+                        if len >= 512 {
+                            return Err(Error::InvalidLength {
+                                context: "status".into(),
+                                current: len,
+                                minimum: None,
+                                maximum: Some(512),
+                            });
+                        }
+                    }
+                    identity.set_status_message(status)
+                }
                 _ => return Err(Error::CannotUpdateIdentity),
             }
 
@@ -702,6 +757,16 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         Ok(store.list_outgoing_request())
     }
 
+    fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
+        let store = self.friend_store()?;
+        Ok(store.received_friend_request_from(did))
+    }
+
+    fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
+        let store = self.friend_store()?;
+        Ok(store.sent_friend_request_to(did))
+    }
+
     fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.friend_store()?;
         Ok(store.list_all_request())
@@ -731,6 +796,11 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         Ok(())
     }
 
+    fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
+        let store = self.friend_store()?;
+        Ok(store.is_blocked(did))
+    }
+
     fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
         async_block_in_place_uncheck(store.unblock(pubkey))?;
@@ -756,6 +826,31 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
         let store = self.friend_store()?;
         async_block_in_place_uncheck(store.is_friend(pubkey))
+    }
+}
+
+impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
+    fn identity_status(&self, did: &DID) -> Result<identity::IdentityStatus, Error> {
+        let store = self.identity_store()?;
+        async_block_in_place_uncheck(store.identity_status(did))
+    }
+
+    fn identity_relationship(&self, did: &DID) -> Result<identity::Relationship, Error> {
+        self.get_identity(Identifier::did_key(did.clone()))?
+            .first()
+            .ok_or(Error::IdentityDoesntExist)?;
+        let friends = self.has_friend(did).is_ok();
+        let received_friend_request = self.received_friend_request_from(did)?;
+        let sent_friend_request = self.sent_friend_request_to(did)?;
+        let blocked = self.is_blocked(did)?;
+
+        let mut relationship = Relationship::default();
+        relationship.set_friends(friends);
+        relationship.set_received_friend_request(received_friend_request);
+        relationship.set_sent_friend_request(sent_friend_request);
+        relationship.set_blocked(blocked);
+
+        Ok(relationship)
     }
 }
 
@@ -789,7 +884,7 @@ pub mod ffi {
         };
 
         let config = match config.is_null() {
-            true => MpIpfsConfig::testing(),
+            true => MpIpfsConfig::testing(true),
             false => (&*config).clone(),
         };
 

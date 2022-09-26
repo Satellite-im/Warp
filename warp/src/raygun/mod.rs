@@ -369,6 +369,11 @@ pub trait RayGun: Extension + GroupChat + Sync + Send + SingleHandle {
     }
 
     /// Retrieve all messages from a conversation
+    async fn get_message(&self, _: Uuid, _: Uuid) -> Result<Message, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Retrieve all messages from a conversation
     async fn get_messages(
         &self,
         conversation_id: Uuid,
@@ -415,10 +420,6 @@ pub trait RayGun: Extension + GroupChat + Sync + Send + SingleHandle {
         message: Vec<String>,
     ) -> Result<(), Error>;
 
-    /// Ping conversation for a response
-    async fn ping(&mut self, _: Uuid) -> Result<(), Error> {
-        Err(Error::Unimplemented)
-    }
 
     async fn embeds(
         &mut self,
@@ -509,6 +510,46 @@ pub mod ffi {
     #[allow(clippy::await_holding_lock)]
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
+    pub unsafe extern "C" fn raygun_get_message(
+        ctx: *const RayGunAdapter,
+        convo_id: *const c_char,
+        message_id: *const c_char,
+    ) -> FFIResult<Message> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Context cannot be null"
+            )));
+        }
+
+        if convo_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Conversation id cannot be null"
+            )));
+        }
+
+        if message_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Conversation id cannot be null"
+            )));
+        }
+
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let message_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy()) {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let adapter = &*ctx;
+        async_on_block(adapter.read_guard().get_message(convo_id, message_id)).into()
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
     pub unsafe extern "C" fn raygun_get_messages(
         ctx: *const RayGunAdapter,
         convo_id: *const c_char,
@@ -528,7 +569,7 @@ pub mod ffi {
 
         let option = match option.is_null() {
             true => MessageOptions::default(),
-            false => (&*option).clone()
+            false => (&*option).clone(),
         };
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
@@ -537,12 +578,7 @@ pub mod ffi {
         };
 
         let adapter = &*ctx;
-        async_on_block(
-            adapter
-                .read_guard()
-                .get_messages(convo_id, option),
-        )
-        .into()
+        async_on_block(adapter.read_guard().get_messages(convo_id, option)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -760,32 +796,6 @@ pub mod ffi {
 
         let adapter = &mut *ctx;
         async_on_block(adapter.write_guard().reply(convo_id, msg_id, messages)).into()
-    }
-
-    #[allow(clippy::await_holding_lock)]
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn raygun_ping(
-        ctx: *mut RayGunAdapter,
-        convo_id: *const c_char,
-    ) -> FFIResult_Null {
-        if ctx.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
-        }
-
-        if convo_id.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
-                "Conversation ID cannot be null"
-            )));
-        }
-
-        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
-            Ok(uuid) => uuid,
-            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
-        };
-
-        let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().ping(convo_id)).into()
     }
 
     #[allow(clippy::await_holding_lock)]

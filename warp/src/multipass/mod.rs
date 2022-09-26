@@ -14,7 +14,11 @@ use identity::Identity;
 use crate::crypto::DID;
 use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate};
 
-pub trait MultiPass: Extension + Friends + Sync + Send + SingleHandle {
+use self::identity::{IdentityStatus, Relationship};
+
+pub trait MultiPass:
+    Extension + IdentityInformation + Friends + Sync + Send + SingleHandle
+{
     /// Create an [`Identity`]
     fn create_identity(
         &mut self,
@@ -62,8 +66,16 @@ pub trait Friends: Sync + Send {
         Err(Error::Unimplemented)
     }
 
+    fn received_friend_request_from(&self, _: &DID) -> Result<bool, Error> {
+        Err(Error::Unimplemented)
+    }
+
     /// List the incoming friend request
     fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    fn sent_friend_request_to(&self, _: &DID) -> Result<bool, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -92,13 +104,13 @@ pub trait Friends: Sync + Send {
         Err(Error::Unimplemented)
     }
 
-    // TODO: Remove
-    fn block_key(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.block(pubkey)
-    }
-
     /// List block list
     fn block_list(&self) -> Result<Vec<DID>, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Check to see if public key is blocked
+    fn is_blocked(&self, _: &DID) -> Result<bool, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -109,6 +121,17 @@ pub trait Friends: Sync + Send {
 
     /// Check to see if public key is friend of the account
     fn has_friend(&self, _: &DID) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+}
+
+pub trait IdentityInformation: Send + Sync {
+    /// Identity status to determine if they are online or offline
+    fn identity_status(&self, _: &DID) -> Result<IdentityStatus, Error> {
+        Err(Error::Unimplemented)
+    }
+    /// Find the relationship with an existing identity.
+    fn identity_relationship(&self, _: &DID) -> Result<Relationship, Error> {
         Err(Error::Unimplemented)
     }
 }
@@ -137,6 +160,7 @@ impl MultiPassAdapter {
     }
 }
 
+//TODO: Determine if this should be used for wasm
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl MultiPassAdapter {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -197,11 +221,6 @@ impl MultiPassAdapter {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
         self.write_guard().remove_friend(pubkey)
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn block_key(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.write_guard().block_key(pubkey)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -296,6 +315,8 @@ pub mod ffi {
     };
     use std::ffi::CStr;
     use std::os::raw::c_char;
+
+    use super::identity::{IdentityStatus, Relationship};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -646,5 +667,105 @@ pub mod ffi {
         let pk = &*pubkey;
 
         async_on_block(async { mp.read_guard().has_friend(pk) }).into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_received_friend_request_from(
+        ctx: *const MultiPassAdapter,
+        pubkey: *const DID,
+    ) -> FFIResult<bool> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        if pubkey.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Public key cannot be null")));
+        }
+
+        let mp = &*(ctx);
+        let pk = &*pubkey;
+
+        async_on_block(async { mp.read_guard().received_friend_request_from(pk) }).into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_sent_friend_request_to(
+        ctx: *const MultiPassAdapter,
+        pubkey: *const DID,
+    ) -> FFIResult<bool> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        if pubkey.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Public key cannot be null")));
+        }
+
+        let mp = &*(ctx);
+        let pk = &*pubkey;
+
+        async_on_block(async { mp.read_guard().sent_friend_request_to(pk) }).into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_is_blocked(
+        ctx: *const MultiPassAdapter,
+        pubkey: *const DID,
+    ) -> FFIResult<bool> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        if pubkey.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Public key cannot be null")));
+        }
+
+        let mp = &*(ctx);
+        let pk = &*pubkey;
+
+        async_on_block(async { mp.read_guard().is_blocked(pk) }).into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_status(
+        ctx: *const MultiPassAdapter,
+        pubkey: *const DID,
+    ) -> FFIResult<IdentityStatus> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        if pubkey.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Public key cannot be null")));
+        }
+
+        let mp = &*(ctx);
+        let pk = &*pubkey;
+
+        async_on_block(async { mp.read_guard().identity_status(pk) }).into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_relationship(
+        ctx: *const MultiPassAdapter,
+        pubkey: *const DID,
+    ) -> FFIResult<Relationship> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        if pubkey.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Public key cannot be null")));
+        }
+
+        let mp = &*(ctx);
+        let pk = &*pubkey;
+
+        async_on_block(async { mp.read_guard().identity_relationship(pk) }).into()
     }
 }

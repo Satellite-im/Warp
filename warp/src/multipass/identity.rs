@@ -96,6 +96,61 @@ impl Graphics {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display, FFIFree)]
+#[serde(rename_all = "lowercase")]
+#[repr(C)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub enum IdentityStatus {
+    #[display(fmt = "online")]
+    Online,
+    #[display(fmt = "offline")]
+    Offline,
+}
+
+#[derive(Default, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, FFIFree)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub struct Relationship {
+    friends: bool,
+    received_friend_request: bool,
+    sent_friend_request: bool,
+    blocked: bool,
+}
+
+impl Relationship {
+    pub fn set_friends(&mut self, val: bool) {
+        self.friends = val;
+    }
+
+    pub fn set_received_friend_request(&mut self, val: bool) {
+        self.received_friend_request = val;
+    }
+
+    pub fn set_sent_friend_request(&mut self, val: bool) {
+        self.sent_friend_request = val;
+    }
+
+    pub fn set_blocked(&mut self, val: bool) {
+        self.blocked = val;
+    }
+}
+
+impl Relationship {
+    pub fn friends(&self) -> bool {
+        self.friends
+    }
+
+    pub fn received_friend_request(&self) -> bool {
+        self.received_friend_request
+    }
+
+    pub fn sent_friend_request(&self) -> bool {
+        self.sent_friend_request
+    }
+
+    pub fn blocked(&self) -> bool {
+        self.blocked
+    }
+}
 #[derive(
     Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
 )]
@@ -180,7 +235,7 @@ impl Identity {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn short_id(&self) -> String {
-        String::from_utf8_lossy(&self.short_id).to_uppercase()
+        String::from_utf8_lossy(&self.short_id).to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
@@ -532,6 +587,8 @@ pub mod ffi {
     };
     use std::ffi::{CStr, CString};
     use std::os::raw::{c_char, c_void};
+
+    use super::Relationship;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -959,5 +1016,53 @@ pub mod ffi {
             }
         }
         std::ptr::null_mut()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_relationship_friends(
+        context: *const Relationship,
+    ) -> bool {
+        if context.is_null() {
+            return false;
+        }
+
+        Relationship::friends(&*context)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_relationship_received_friend_request(
+        context: *const Relationship,
+    ) -> bool {
+        if context.is_null() {
+            return false;
+        }
+
+        Relationship::received_friend_request(&*context)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_relationship_sent_friend_request(
+        context: *const Relationship,
+    ) -> bool {
+        if context.is_null() {
+            return false;
+        }
+
+        Relationship::sent_friend_request(&*context)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_identity_relationship_blocked(
+        context: *const Relationship,
+    ) -> bool {
+        if context.is_null() {
+            return false;
+        }
+
+        Relationship::blocked(&*context)
     }
 }
