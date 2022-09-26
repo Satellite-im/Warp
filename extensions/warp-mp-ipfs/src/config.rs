@@ -124,13 +124,24 @@ pub struct IpfsSetting {
     pub bootstrap: bool,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
     pub broadcast_interval: u64,
     pub discovery: Discovery,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sync: Vec<Multiaddr>,
     pub sync_interval: u64,
+}
+
+impl Default for StoreSetting {
+    fn default() -> Self {
+        Self {
+            broadcast_interval: 100,
+            discovery: Discovery::Provider(None),
+            sync: Vec::new(),
+            sync_interval: 100
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,10 +170,7 @@ impl Default for MpIpfsConfig {
                 bootstrap: false,
                 ..Default::default()
             },
-            store_setting: StoreSetting {
-                broadcast_interval: 100,
-                ..Default::default()
-            },
+            store_setting: Default::default(),
             debug: false,
         }
     }
