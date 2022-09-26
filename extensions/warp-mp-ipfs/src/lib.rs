@@ -312,27 +312,26 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             }
         });
 
-        *self.identity_store.write() = Some(
-            IdentityStore::new(
-                ipfs.clone(),
-                config.path.clone(),
-                tesseract.clone(),
-                config.store_setting.broadcast_interval,
-            )
-            .await?,
-        );
+        let identity_store = IdentityStore::new(
+            ipfs.clone(),
+            config.path.clone(),
+            tesseract.clone(),
+            config.store_setting.broadcast_interval,
+        )
+        .await?;
         info!("Identity store initialized");
 
-        *self.friend_store.write() = Some(
-            FriendsStore::new(
-                ipfs.clone(),
-                config.path.map(|p| p.join("friends")),
-                tesseract.clone(),
-                config.store_setting.broadcast_interval,
-            )
-            .await?,
-        );
+        let friend_store = FriendsStore::new(
+            ipfs.clone(),
+            config.path.map(|p| p.join("friends")),
+            tesseract.clone(),
+            config.store_setting.broadcast_interval,
+        )
+        .await?;
         info!("friends store initialized");
+
+        *self.identity_store.write() = Some(identity_store);
+        *self.friend_store.write() = Some(friend_store);
 
         match &config.store_setting.discovery {
             Discovery::Provider(context) => {
@@ -344,8 +343,8 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                     }
                 });
             }
-            Discovery::Direct => {},
-            Discovery::None => {},
+            Discovery::Direct => {}
+            Discovery::None => {}
         };
 
         *self.ipfs.write() = Some(ipfs);
