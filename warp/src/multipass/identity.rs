@@ -294,7 +294,7 @@ impl Identity {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct FriendRequest {
     /// The account where the request came from
@@ -398,7 +398,7 @@ impl FriendRequest {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
+#[derive(Hash, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
 #[repr(C)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum FriendRequestStatus {
