@@ -312,6 +312,20 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             }
         });
 
+        match &config.store_setting.discovery {
+            Discovery::Provider(context) => {
+                let ipfs = ipfs.clone();
+                let context = context.clone().unwrap_or_else(|| self.id());
+                tokio::spawn(async {
+                    if let Err(e) = discovery(ipfs, context).await {
+                        error!("Error performing topic discovery: {e}");
+                    }
+                });
+            }
+            Discovery::Direct => {}
+            Discovery::None => {}
+        };
+
         let identity_store = IdentityStore::new(
             ipfs.clone(),
             config.path.clone(),
@@ -332,20 +346,6 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
         *self.identity_store.write() = Some(identity_store);
         *self.friend_store.write() = Some(friend_store);
-
-        match &config.store_setting.discovery {
-            Discovery::Provider(context) => {
-                let ipfs = ipfs.clone();
-                let context = context.clone().unwrap_or_else(|| self.id());
-                tokio::spawn(async {
-                    if let Err(e) = discovery(ipfs, context).await {
-                        error!("Error performing topic discovery: {e}");
-                    }
-                });
-            }
-            Discovery::Direct => {}
-            Discovery::None => {}
-        };
 
         *self.ipfs.write() = Some(ipfs);
         self.initialized.store(true, Ordering::SeqCst);
