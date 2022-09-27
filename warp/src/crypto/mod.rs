@@ -33,6 +33,12 @@ use crate::error::Error;
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct DID(DIDKey);
 
+impl core::hash::Hash for DID {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.fingerprint().hash(state);
+    }
+}
+
 impl AsRef<DIDKey> for DID {
     fn as_ref(&self) -> &DIDKey {
         &self.0

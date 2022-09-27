@@ -124,8 +124,13 @@ async fn main() -> anyhow::Result<()> {
     };
 
     println!("Creating or obtaining account...");
-    let new_account =
-        create_account(opt.path.clone(), cache.clone(), Zeroizing::new(password), opt.experimental_node).await?;
+    let new_account = create_account(
+        opt.path.clone(),
+        cache.clone(),
+        Zeroizing::new(password),
+        opt.experimental_node,
+    )
+    .await?;
 
     let mut chat = create_rg(opt.path.clone(), new_account.clone(), cache).await?;
 
@@ -174,29 +179,9 @@ async fn main() -> anyhow::Result<()> {
     let mut convo_size: HashMap<Uuid, usize> = HashMap::new();
     let mut convo_list = vec![];
     let mut interval = tokio::time::interval(Duration::from_millis(500));
+    let mut msg_interval = tokio::time::interval(Duration::from_millis(2));
     loop {
         tokio::select! {
-            //TODO: Optimize by clearing terminal and displaying all messages instead of getting last line
-            msg = chat.get_messages(topic, MessageOptions::default()) => {
-                if let Ok(msg) = msg {
-                    if msg.len() == *convo_size.entry(topic).or_insert(0) {
-                        continue;
-                    }
-                    convo_size.entry(topic).and_modify(|e| *e = msg.len() ).or_insert(msg.len());
-                    let msg = msg.last().unwrap();
-                    let username = get_username(new_account.clone(), msg.sender()).unwrap_or_else(|_| msg.sender().to_string());
-                    //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
-                    match msg.metadata().get("is_spam") {
-                        Some(_) => {
-                            writeln!(stdout, "[{}] @> [SPAM!] {}", username, msg.value().join("\n"))?;
-                        }
-                        None => {
-                            writeln!(stdout, "[{}] @> {}", username, msg.value().join("\n"))?;
-                        }
-                    }
-
-                }
-            }
             line = rl.readline().fuse() => match line {
                 Ok(line) => {
                     let mut cmd_line = line.trim().split(' ');
@@ -482,7 +467,29 @@ async fn main() -> anyhow::Result<()> {
                     writeln!(stdout, "Error: {}", e)?;
                 }
             },
+            //TODO: Optimize by clearing terminal and displaying all messages instead of getting last line
+            _ = msg_interval.tick() => {
+                if let Ok(msg) = chat.get_messages(topic, MessageOptions::default()).await {
+                    if msg.len() == *convo_size.entry(topic).or_insert(0) {
+                        continue;
+                    }
+                    convo_size.entry(topic).and_modify(|e| *e = msg.len() ).or_insert(msg.len());
+                    let msg = msg.last().unwrap();
+                    let username = get_username(new_account.clone(), msg.sender()).unwrap_or_else(|_| msg.sender().to_string());
+                    //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
+                    match msg.metadata().get("is_spam") {
+                        Some(_) => {
+                            writeln!(stdout, "[{}] @> [SPAM!] {}", username, msg.value().join("\n"))?;
+                        }
+                        None => {
+                            writeln!(stdout, "[{}] @> {}", username, msg.value().join("\n"))?;
+                        }
+                    }
+                }
+
+            }
             _ = interval.tick() => {
+
                 if let Ok(list) = chat.list_conversations().await {
                     if !list.is_empty() && convo_list != list {
                         topic = list.last().unwrap().id();

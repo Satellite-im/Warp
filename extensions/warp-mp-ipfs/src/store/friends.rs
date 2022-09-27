@@ -29,7 +29,7 @@ use crate::Persistent;
 
 use super::identity::{IdentityStore, LookupBy};
 use super::{
-    did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, topic_discovery,
+    did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde,
     FRIENDS_BROADCAST,
 };
 
@@ -367,7 +367,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
         ipfs: Ipfs<T>,
         path: Option<PathBuf>,
         tesseract: Tesseract,
-        discovery: bool,
         interval: u64,
     ) -> anyhow::Result<Self> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
@@ -404,15 +403,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
             .ipfs
             .pubsub_subscribe(FRIENDS_BROADCAST.into())
             .await?;
-
-        if discovery {
-            let ipfs = store.ipfs.clone();
-            tokio::spawn(async {
-                if let Err(e) = topic_discovery(ipfs, FRIENDS_BROADCAST).await {
-                    error!("Error performing topic discovery: {e}");
-                }
-            });
-        }
 
         let (local_ipfs_public_key, _) = store.local().await?;
 
@@ -629,7 +619,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         }
                     }
                 }
-                tokio::time::sleep(Duration::from_millis(1)).await;
             }
         });
         tokio::task::yield_now().await;

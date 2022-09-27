@@ -27,7 +27,7 @@ MultiPassAdapter *new_account(const char *pass)
         return NULL;
     }
 
-    MpIpfsConfig *config = mp_ipfs_config_testing();
+    MpIpfsConfig *config = mp_ipfs_config_development();
 
     FFIResult_MultiPassAdapter result_mp = multipass_mp_ipfs_temporary(NULL, tesseract, config);
 
@@ -51,7 +51,7 @@ MultiPassAdapter *new_account(const char *pass)
 
 RayGunAdapter *new_chat(const MultiPassAdapter *mp)
 {
-    RgIpfsConfig *config = rg_ipfs_config_testing();
+    RgIpfsConfig *config = rg_ipfs_config_development();
     FFIResult_RayGunAdapter result_rg_t = warp_rg_ipfs_temporary_new(mp, NULL, config);
     if (result_rg_t.error)
     {

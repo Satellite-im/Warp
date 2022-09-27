@@ -25,7 +25,7 @@ use warp::{
     tesseract::Tesseract,
 };
 
-use super::{libp2p_pub_to_did, topic_discovery, IDENTITY_BROADCAST};
+use super::{libp2p_pub_to_did, IDENTITY_BROADCAST};
 
 pub struct IdentityStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
@@ -38,7 +38,7 @@ pub struct IdentityStore<T: IpfsTypes> {
 
     cache: Arc<RwLock<Vec<Identity>>>,
 
-    seen: Arc<RwLock<Vec<PeerId>>>,
+    seen: Arc<RwLock<HashSet<PeerId>>>,
 
     check_seen: Arc<AtomicBool>,
 
@@ -78,7 +78,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
         ipfs: Ipfs<T>,
         path: Option<PathBuf>,
         tesseract: Tesseract,
-        discovery: bool,
         interval: u64,
     ) -> Result<Self, Error> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
@@ -129,15 +128,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
             .await?;
         let store_inner = store.clone();
 
-        if discovery {
-            let ipfs = store.ipfs.clone();
-            tokio::spawn(async {
-                if let Err(e) = topic_discovery(ipfs, IDENTITY_BROADCAST).await {
-                    error!("Error performing topic discovery: {e}");
-                }
-            });
-        }
-
         tokio::spawn(async move {
             // let mut peer_annoyance = HashMap::<PeerId, usize>::new();
             let store = store_inner;
@@ -154,7 +144,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 if !store.start_event.load(Ordering::SeqCst) {
                     continue;
                 }
-                tokio::time::sleep(Duration::from_millis(1)).await;
                 tokio::select! {
                     message = id_broadcast_stream.next() => {
                         if let Some(message) = message {
@@ -236,11 +225,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
                         }
                     }
                     _ = tick.tick() => {
+                        //TODO: Add a condition for sending info to relay
                         match store.ipfs.pubsub_peers(Some(IDENTITY_BROADCAST.into())).await {
                             Ok(peers) => {
-
                                 match store.check_seen.load(Ordering::Relaxed) {
                                     true => {
+                                        let peers = HashSet::from_iter(peers);
                                         if peers.is_empty() || (!peers.is_empty() && peers == store.seen.read().clone()) {
                                             // warn!("");
                                             continue
@@ -255,13 +245,16 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                             havent_seen.push(peer);
                                         }
 
+                                        if havent_seen.is_empty() {
+                                            continue
+                                        }
+
                                         store.seen.write().extend(havent_seen);
                                     }
                                     false => if peers.is_empty() {
                                         continue
                                     }
                                 }
-
                             },
                             Err(e) => {
                                 error!("Error obtaining peers from topic: {e}");
