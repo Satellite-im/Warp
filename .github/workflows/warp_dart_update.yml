@@ -99,7 +99,7 @@ jobs:
           target: ${{ matrix.target }}
       - name: Install cargo-ndk@2.11.0
         if: ${{ matrix.platform == 'android' }}
-        run: cargo install cargo-ndk
+        run: cargo install cargo-ndk@2.11.0
       - name: Install dependencies
         run: |
           sudo apt-get update
