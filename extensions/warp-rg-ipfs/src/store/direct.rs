@@ -797,12 +797,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let list = match opt
             .range()
             .map(|mut range| {
-                if range.start > messages.len() {
-                    range.start = 0;
-                }
-                if range.end > messages.len() {
-                    range.end = messages.len();
-                }
+                let start = range.start;
+                let end = range.end;
+                range.start = messages.len() - end;
+                range.end = messages.len() - start;
                 range
             })
             .and_then(|range| messages.get(range))
