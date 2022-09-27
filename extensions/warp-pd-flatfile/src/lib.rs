@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
-use warp::{error::Error, libipld::Ipld, SingleHandle, constellation::directory};
+use warp::{error::Error, libipld::Ipld, SingleHandle};
 use warp::{
     libipld::Cid,
     sata::{Sata, State},
