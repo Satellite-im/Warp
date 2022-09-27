@@ -312,18 +312,14 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             }
         });
 
-        match &config.store_setting.discovery {
-            Discovery::Provider(context) => {
-                let ipfs = ipfs.clone();
-                let context = context.clone().unwrap_or_else(|| self.id());
-                tokio::spawn(async {
-                    if let Err(e) = discovery(ipfs, context).await {
-                        error!("Error performing topic discovery: {e}");
-                    }
-                });
-            }
-            Discovery::Direct => {}
-            Discovery::None => {}
+        if let Discovery::Provider(context) = &config.store_setting.discovery {
+            let ipfs = ipfs.clone();
+            let context = context.clone().unwrap_or_else(|| self.id());
+            tokio::spawn(async {
+                if let Err(e) = discovery(ipfs, context).await {
+                    error!("Error performing topic discovery: {e}");
+                }
+            });
         };
 
         let identity_store = IdentityStore::new(
