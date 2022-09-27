@@ -1,7 +1,7 @@
 pub mod config;
 
 use anyhow::anyhow;
-use std::collections::HashMap;
+use std::{collections::HashMap, fs::create_dir_all};
 #[allow(unused_imports)]
 use std::{
     fs::OpenOptions,
@@ -325,6 +325,8 @@ impl PocketDimension for FlatfileStorage {
 
                         let new_path = {
                             let mut path = self.directory.clone();
+                            path.push("FileSystem");
+                            create_dir_all(&path)?;
                             path.push(Uuid::new_v4().to_string());
                             path
                         };
@@ -361,6 +363,8 @@ impl PocketDimension for FlatfileStorage {
 
                         let new_path = {
                             let mut path = self.directory.clone();
+                            path.push("FileSystem");
+                            create_dir_all(&path)?;
                             path.push(Uuid::new_v4().to_string());
                             path
                         };
@@ -389,10 +393,103 @@ impl PocketDimension for FlatfileStorage {
                     DimensionData { .. } => {
                         // let size = internal.len();
                         // data.set_size(size as u64);
-                        self.index.insert(DataType::FileSystem, data)?
+                        //let data_2 = data.clone();
+
+                        match self.index.insert(DataType::FileSystem, data.clone()) {
+                            Ok(()) => {
+                                let new_path = {
+                                    let mut path = self.directory.clone();
+                                    path.push("FileSystem");
+                                    create_dir_all(&path)?;
+                                    path.push(Uuid::new_v4().to_string());
+                                    path
+                                };
+
+                                let serialized_data = serde_json::to_string(&data).unwrap();
+                                let mut writer = std::fs::File::create(&new_path)?;
+
+                                let mut reader = std::io::Cursor::new(serialized_data);
+                                std::io::copy(&mut reader, &mut writer)?;
+                            }
+                            Err(e) => return Err(e),
+                        }
                     }
                 }
             }
+            DataType::Accounts => match self.index.insert(DataType::Accounts, data.clone()) {
+                Ok(()) => {
+                    let new_path = {
+                        let mut path = self.directory.clone();
+                        path.push("Account");
+                        create_dir_all(&path)?;
+                        path.push(Uuid::new_v4().to_string());
+                        path
+                    };
+
+                    let serialized_data = serde_json::to_string(&data).unwrap();
+                    let mut writer = std::fs::File::create(&new_path)?;
+
+                    let mut reader = std::io::Cursor::new(serialized_data);
+                    std::io::copy(&mut reader, &mut writer)?;
+                }
+                Err(e) => return Err(e),
+            },
+
+            DataType::Messaging => match self.index.insert(DataType::Messaging, data.clone()) {
+                Ok(()) => {
+                    let new_path = {
+                        let mut path = self.directory.clone();
+                        path.push("Messaging");
+                        create_dir_all(&path)?;
+                        path.push(Uuid::new_v4().to_string());
+                        path
+                    };
+
+                    let serialized_data = serde_json::to_string(&data).unwrap();
+                    let mut writer = std::fs::File::create(&new_path)?;
+
+                    let mut reader = std::io::Cursor::new(serialized_data);
+                    std::io::copy(&mut reader, &mut writer)?;
+                }
+                Err(e) => return Err(e),
+            },
+
+            DataType::DataExport => match self.index.insert(DataType::DataExport, data.clone()) {
+                Ok(()) => {
+                    let new_path = {
+                        let mut path = self.directory.clone();
+                        path.push("DataExport");
+                        create_dir_all(&path)?;
+                        path.push(Uuid::new_v4().to_string());
+                        path
+                    };
+
+                    let serialized_data = serde_json::to_string(&data).unwrap();
+                    let mut writer = std::fs::File::create(&new_path)?;
+
+                    let mut reader = std::io::Cursor::new(serialized_data);
+                    std::io::copy(&mut reader, &mut writer)?;
+                }
+                Err(e) => return Err(e),
+            },
+            DataType::Http => match self.index.insert(DataType::Http, data.clone()) {
+                Ok(()) => {
+                    let new_path = {
+                        let mut path = self.directory.clone();
+                        path.push("Http");
+                        create_dir_all(&path)?;
+                        path.push(Uuid::new_v4().to_string());
+                        path
+                    };
+
+                    let serialized_data = serde_json::to_string(&data).unwrap();
+                    let mut writer = std::fs::File::create(&new_path)?;
+
+                    let mut reader = std::io::Cursor::new(serialized_data);
+                    std::io::copy(&mut reader, &mut writer)?;
+                }
+                Err(e) => return Err(e),
+            },
             _ => self.index.insert(dimension, data)?,
         }
 
@@ -505,6 +602,20 @@ impl PocketDimension for FlatfileStorage {
                     };
 
                     if let Ok(path) = data.path() {
+                        std::fs::remove_file(path)?;
+                    }
+                } else {
+                    let mut directory = self.directory.clone();
+                    match dimension {
+                        DataType::Accounts => directory.push("Account"),
+                        DataType::Messaging => directory.push("Messaging"),
+                        DataType::DataExport => directory.push("DataExport"),
+                        DataType::Http => directory.push("Http"),
+                        _ => {}
+                    }
+                    for item in std::fs::read_dir(directory)? {
+                        let item = item?;
+                        let path = item.path();
                         std::fs::remove_file(path)?;
                     }
                 }
