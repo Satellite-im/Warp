@@ -68,9 +68,9 @@ pub enum Payload {
 }
 
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity::PublicKey> {
-    let pk = ipfs::libp2p::identity::PublicKey::Ed25519(ipfs::libp2p::identity::ed25519::PublicKey::decode(
-        &public_key.public_key_bytes(),
-    )?);
+    let pk = ipfs::libp2p::identity::PublicKey::Ed25519(
+        ipfs::libp2p::identity::ed25519::PublicKey::decode(&public_key.public_key_bytes())?,
+    );
     Ok(pk)
 }
 
@@ -130,4 +130,33 @@ pub async fn discovery<T: IpfsTypes, S: AsRef<str>>(
         };
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
+}
+
+pub async fn discover_peer<T: IpfsTypes>(ipfs: ipfs::Ipfs<T>, did: &DID) -> anyhow::Result<()> {
+    let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
+
+    match ipfs
+        .peers()
+        .await?
+        .iter()
+        .map(|conn| conn.addr.peer_id)
+        .any(|peer| peer == peer_id)
+    {
+        true => return Ok(()),
+        false => {}
+    };
+
+    loop {
+        match ipfs.find_peer_info(peer_id).await {
+            Ok(_) => {
+                //Maybe wait and check to see if we can connect after?
+                break;
+            }
+            Err(e) => {
+                error!("Error discovering peer: {e}");
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    }
+    Ok(())
 }

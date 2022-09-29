@@ -22,7 +22,7 @@ pub enum Discovery {
     Provider(Option<String>),
     /// Dials out to peers directly. Using this will only work with the DID til that connection is made
     Direct,
-    /// Disables Discovery over DHT
+    /// Disables Discovery over DHT or Directly
     None,
 }
 

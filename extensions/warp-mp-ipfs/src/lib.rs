@@ -312,27 +312,19 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             }
         });
 
-        if let Discovery::Provider(context) = &config.store_setting.discovery {
-            let ipfs = ipfs.clone();
-            let context = context.clone().unwrap_or_else(|| self.id());
-            tokio::spawn(async {
-                if let Err(e) = discovery(ipfs, context).await {
-                    error!("Error performing topic discovery: {e}");
-                }
-            });
-        };
-
         let identity_store = IdentityStore::new(
             ipfs.clone(),
             config.path.clone(),
             tesseract.clone(),
             config.store_setting.broadcast_interval,
+            config.store_setting.discovery,
         )
         .await?;
         info!("Identity store initialized");
 
         let friend_store = FriendsStore::new(
             ipfs.clone(),
+            identity_store.clone(),
             config.path.map(|p| p.join("friends")),
             tesseract.clone(),
             config.store_setting.broadcast_interval,
@@ -502,7 +494,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                             }
                         }
                     }
-                    store.lookup(LookupBy::DidKey(Box::new(pk)))
+                    store.lookup(LookupBy::DidKey(Box::new(pk))).await
                 }
                 (None, Some(username), false) => {
                     if let Ok(cache) = self.get_cache() {
@@ -524,7 +516,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                             }
                         }
                     }
-                    store.lookup(LookupBy::Username(username))
+                    store.lookup(LookupBy::Username(username)).await
                 }
                 (None, None, true) => return store.own_identity().await.map(|i| vec![i]),
                 _ => Err(Error::InvalidIdentifierCondition),

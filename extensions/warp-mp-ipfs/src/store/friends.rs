@@ -24,17 +24,18 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender};
 use warp::tesseract::Tesseract;
 
+use crate::config::Discovery;
 use crate::store::verify_serde_sig;
 use crate::Persistent;
 
 use super::identity::{IdentityStore, LookupBy};
-use super::{
-    did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde,
-    FRIENDS_BROADCAST,
-};
+use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, FRIENDS_BROADCAST};
 
 pub struct FriendsStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
+
+    // Identity Store
+    identity: IdentityStore<T>,
 
     // keypair
     did_key: Arc<DID>,
@@ -329,6 +330,7 @@ impl<T: IpfsTypes> Clone for FriendsStore<T> {
         }
         Self {
             ipfs: self.ipfs.clone(),
+            identity: self.identity.clone(),
             did_key: self.did_key.clone(),
             path: self.path.clone(),
             end_event: self.end_event.clone(),
@@ -365,6 +367,7 @@ impl<T: IpfsTypes> Drop for FriendsStore<T> {
 impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn new(
         ipfs: Ipfs<T>,
+        identity: IdentityStore<T>,
         path: Option<PathBuf>,
         tesseract: Tesseract,
         interval: u64,
@@ -388,6 +391,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let store = Self {
             ipfs,
+            identity,
             did_key,
             path,
             end_event,
@@ -973,6 +977,20 @@ impl<T: IpfsTypes> FriendsStore<T> {
         save_to_disk: bool,
     ) -> Result<(), Error> {
         let remote_peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
+
+        if let Discovery::Direct = self.identity.discovery_type() {
+            if let Err(e) = self.ipfs.find_peer_info(remote_peer_id).await {
+                let ipfs = self.ipfs.clone();
+                let pubkey = request.to();
+                tokio::spawn(async move {
+                    if let Err(e) = super::discover_peer(ipfs, &pubkey).await {
+                        error!("Error discoverying peer: {e}");
+                    }
+                });
+                tokio::task::yield_now().await;
+            }
+        }
+
         if store_request {
             self.profile.write().set_outgoing_request(request)?;
         }
