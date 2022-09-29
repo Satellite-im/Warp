@@ -70,7 +70,7 @@ async fn create_account<P: AsRef<Path>>(
         None => warp_mp_ipfs::config::MpIpfsConfig::testing(experimental),
     };
 
-    let mut account: Arc<RwLock<Box<dyn MultiPass>>> = match path.is_some() {
+    let account: Arc<RwLock<Box<dyn MultiPass>>> = match path.is_some() {
         true => Arc::new(RwLock::new(Box::new(
             ipfs_identity_persistent(config, tesseract, Some(cache)).await?,
         ))),
@@ -79,8 +79,8 @@ async fn create_account<P: AsRef<Path>>(
         ))),
     };
 
-    if account.get_own_identity().await.is_err() {
-        account.create_identity(None, None).await?;
+    if account.read().get_own_identity().is_err() {
+        account.write().create_identity(None, None)?;
     }
     Ok(account)
 }
@@ -135,7 +135,7 @@ async fn main() -> anyhow::Result<()> {
     let mut chat = create_rg(opt.path.clone(), new_account.clone(), cache).await?;
 
     println!("Obtaining identity....");
-    let identity = new_account.get_own_identity().await?;
+    let identity = new_account.read().get_own_identity()?;
     println!(
         "Registered user {}#{}",
         identity.username(),
@@ -248,7 +248,7 @@ async fn main() -> anyhow::Result<()> {
                                     if convo.conversation_type() == ConversationType::Direct && recipient == identity.did_key() {
                                         continue
                                     }
-                                    let username = get_username(new_account.clone(), recipient.clone()).await.unwrap_or_else(|_| recipient.to_string());
+                                    let username = get_username(new_account.clone(), recipient.clone()).unwrap_or_else(|_| recipient.to_string());
                                     recipients.push(username);
                                 }
                                 table.add_row(vec![convo.id().to_string(), recipients.join("/").to_string()]);
@@ -288,7 +288,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for message in messages.iter() {
-                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                let username = get_username(new_account.clone(), message.sender()).unwrap_or_else(|_| message.sender().to_string());
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
                                     emojis.push(reaction.emoji());
@@ -475,7 +475,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                     convo_size.entry(topic).and_modify(|e| *e = msg.len() ).or_insert(msg.len());
                     let msg = msg.last().unwrap();
-                    let username = get_username(new_account.clone(), msg.sender()).await.unwrap_or_else(|_| msg.sender().to_string());
+                    let username = get_username(new_account.clone(), msg.sender()).unwrap_or_else(|_| msg.sender().to_string());
                     //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
                     match msg.metadata().get("is_spam") {
                         Some(_) => {
@@ -504,14 +504,10 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn get_username(
-    account: Arc<RwLock<Box<dyn MultiPass>>>,
-    did: DID,
-) -> anyhow::Result<String> {
+fn get_username(account: Arc<RwLock<Box<dyn MultiPass>>>, did: DID) -> anyhow::Result<String> {
     let account = account.read();
     let identity = account
         .get_identity(Identifier::did_key(did))
-        .await
         .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
     Ok(format!("{}#{}", identity.username(), identity.short_id()))
 }

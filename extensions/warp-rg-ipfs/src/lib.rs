@@ -89,11 +89,11 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             initialize: Default::default(),
         };
 
-        if messaging.account.read().get_own_identity().await.is_err() {
+        if messaging.account.read().get_own_identity().is_err() {
             trace!("Identity doesnt exist. Waiting for it to load or to be created");
             let mut messaging = messaging.clone();
             tokio::spawn(async move {
-                while messaging.account.read().get_own_identity().await.is_err() {
+                while messaging.account.read().get_own_identity().is_err() {
                     tokio::time::sleep(Duration::from_millis(100)).await
                 }
                 trace!("Identity found. Initializing store");

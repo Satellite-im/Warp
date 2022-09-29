@@ -426,240 +426,249 @@ impl<T: IpfsTypes> SingleHandle for IpfsIdentity<T> {
     }
 }
 
-#[async_trait::async_trait]
 impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
-    async fn create_identity(
+    fn create_identity(
         &mut self,
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<DID, Error> {
-        info!(
-            "create_identity with username: {username:?} and containing passphrase: {}",
-            passphrase.is_some()
-        );
+        async_block_in_place_uncheck(async {
+            info!(
+                "create_identity with username: {username:?} and containing passphrase: {}",
+                passphrase.is_some()
+            );
 
-        if self.is_store_initialized().await {
-            info!("Store is initialized with existing identity");
-            return Err(Error::IdentityExist);
-        }
-
-        if let Some(phrase) = passphrase {
-            info!("Passphrase exist");
-            let mut tesseract = self.tesseract.clone();
-            if !tesseract.exist("keypair") {
-                warn!("Loading keypair generated from mnemonic phrase into tesseract");
-                warp::crypto::keypair::mnemonic_into_tesseract(&mut tesseract, phrase, None)?;
+            if self.is_store_initialized().await {
+                info!("Store is initialized with existing identity");
+                return Err(Error::IdentityExist);
             }
-        }
 
-        info!("Initializing stores");
-        self.initialize_store(true).await?;
-        info!("Stores initialized. Creating identity");
-        let identity = self.identity_store()?.create_identity(username).await?;
-        info!("Identity with {} has been created", identity.did_key());
-
-        if let Ok(mut cache) = self.get_cache_mut() {
-            let object = Sata::default().encode(
-                warp::sata::libipld::IpldCodec::DagCbor,
-                warp::sata::Kind::Reference,
-                identity.clone(),
-            )?;
-            cache.add_data(DataType::from(Module::Accounts), &object)?;
-        }
-        if let Ok(hooks) = self.get_hooks() {
-            let object = DataObject::new(DataType::Accounts, identity.clone())?;
-            hooks.trigger("accounts::new_identity", &object);
-        }
-        Ok(identity.did_key())
-    }
-
-    async fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
-        if !self.is_store_initialized().await {
-            error!("Store is not initialized. Either tesseract is not unlocked or an identity has not been created");
-            return Err(Error::MultiPassExtensionUnavailable);
-        }
-        let store = self.identity_store()?;
-        let idents = match id.get_inner() {
-            (Some(pk), None, false) => {
-                if let Ok(cache) = self.get_cache() {
-                    let mut query = QueryBuilder::default();
-                    query.r#where("did_key", &pk)?;
-                    if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
-                    {
-                        if !list.is_empty() {
-                            let mut items = vec![];
-                            for object in list {
-                                if let Ok(ident) = object.decode::<Identity>().map_err(Error::from)
-                                {
-                                    items.push(ident);
-                                }
-                            }
-                            return Ok(items);
-                        }
-                    }
+            if let Some(phrase) = passphrase {
+                info!("Passphrase exist");
+                let mut tesseract = self.tesseract.clone();
+                if !tesseract.exist("keypair") {
+                    warn!("Loading keypair generated from mnemonic phrase into tesseract");
+                    warp::crypto::keypair::mnemonic_into_tesseract(&mut tesseract, phrase, None)?;
                 }
-                store.lookup(LookupBy::DidKey(Box::new(pk)))
             }
-            (None, Some(username), false) => {
-                if let Ok(cache) = self.get_cache() {
-                    let mut query = QueryBuilder::default();
-                    query.r#where("username", &username)?;
-                    if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
-                    {
-                        if !list.is_empty() {
-                            let mut items = vec![];
-                            for object in list {
-                                if let Ok(ident) = object.decode::<Identity>().map_err(Error::from)
-                                {
-                                    items.push(ident);
-                                }
-                            }
-                            return Ok(items);
-                        }
-                    }
-                }
-                store.lookup(LookupBy::Username(username))
-            }
-            (None, None, true) => return store.own_identity().await.map(|i| vec![i]),
-            _ => Err(Error::InvalidIdentifierCondition),
-        }?;
-        trace!("Found {} identities", idents.len());
-        for ident in &idents {
+
+            info!("Initializing stores");
+            self.initialize_store(true).await?;
+            info!("Stores initialized. Creating identity");
+            let identity = self.identity_store()?.create_identity(username).await?;
+            info!("Identity with {} has been created", identity.did_key());
+
             if let Ok(mut cache) = self.get_cache_mut() {
-                let mut query = QueryBuilder::default();
-                query.r#where("did_key", &ident.did_key())?;
-                if cache
-                    .has_data(DataType::from(Module::Accounts), &query)
-                    .is_err()
-                {
-                    let object = Sata::default().encode(
-                        warp::sata::libipld::IpldCodec::DagJson,
-                        warp::sata::Kind::Reference,
-                        ident.clone(),
-                    )?;
-                    cache.add_data(DataType::from(Module::Accounts), &object)?;
-                }
-            }
-        }
-
-        Ok(idents)
-    }
-
-    async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
-        let ipfs = self.ipfs()?.clone();
-        let mut store = self.identity_store()?;
-        let mut identity = self.get_own_identity().await?;
-        let old_identity = identity.clone();
-        match (
-            option.username(),
-            option.graphics_picture(),
-            option.graphics_banner(),
-            option.status_message(),
-        ) {
-            (Some(username), None, None, None) => {
-                let len = username.chars().count();
-                if len <= 4 || len >= 64 {
-                    return Err(Error::InvalidLength {
-                        context: "username".into(),
-                        current: len,
-                        minimum: Some(4),
-                        maximum: Some(64),
-                    });
-                }
-
-                identity.set_username(&username)
-            }
-            (None, Some(data), None, None) => {
-                let mut graphics = identity.graphics();
-                graphics.set_profile_picture(&data);
-                identity.set_graphics(graphics);
-            }
-            (None, None, Some(data), None) => {
-                let mut graphics = identity.graphics();
-                graphics.set_profile_banner(&data);
-                identity.set_graphics(graphics);
-            }
-            (None, None, None, Some(status)) => {
-                if let Some(status) = status.clone() {
-                    let len = status.chars().count();
-                    if len >= 512 {
-                        return Err(Error::InvalidLength {
-                            context: "status".into(),
-                            current: len,
-                            minimum: None,
-                            maximum: Some(512),
-                        });
-                    }
-                }
-                identity.set_status_message(status)
-            }
-            _ => return Err(Error::CannotUpdateIdentity),
-        }
-
-        let mut old_cid = None;
-
-        if let Ok(cid) = store.get_cid().await {
-            info!("Current CID for identity: {cid}");
-            info!("Is it pinned?");
-            if ipfs.is_pinned(&cid).await? {
-                info!("Cid is pinned. Removing pin");
-                ipfs.remove_pin(&cid, false).await?;
-            }
-            old_cid = Some(cid);
-        };
-
-        info!("Converting identity to ipld");
-        let ipld = to_ipld(&identity).map_err(anyhow::Error::from)?;
-        info!("Storing identity into ipfd");
-        let ident_cid = ipfs.put_dag(ipld).await?;
-
-        info!("New identity cid is {ident_cid}. Pinning it");
-
-        ipfs.insert_pin(&ident_cid, false).await?;
-        info!("ident_cid is pinned it");
-        store.save_cid(ident_cid).await?;
-        if let Some(old_cid) = old_cid {
-            info!("Removing {old_cid}");
-            if let Err(e) = ipfs.remove_block(old_cid).await {
-                error!("Cannot remove {old_cid}: {e}");
-            }
-        }
-
-        if let Ok(mut cache) = self.get_cache_mut() {
-            let mut query = QueryBuilder::default();
-            //TODO: Query by public key to tie/assiociate the username to identity in the event of dup
-            query.r#where("username", &old_identity.username())?;
-            if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query)) {
-                //get last
-                if !list.is_empty() {
-                    // let mut obj = list.last().unwrap().clone();
-                    let mut object = Sata::default();
-                    object.set_version(list.len() as _);
-                    let obj = object.encode(
-                        warp::sata::libipld::IpldCodec::DagJson,
-                        warp::sata::Kind::Reference,
-                        identity.clone(),
-                    )?;
-                    cache.add_data(DataType::from(Module::Accounts), &obj)?;
-                }
-            } else {
                 let object = Sata::default().encode(
-                    warp::sata::libipld::IpldCodec::DagJson,
+                    warp::sata::libipld::IpldCodec::DagCbor,
                     warp::sata::Kind::Reference,
                     identity.clone(),
                 )?;
                 cache.add_data(DataType::from(Module::Accounts), &object)?;
             }
-        }
+            if let Ok(hooks) = self.get_hooks() {
+                let object = DataObject::new(DataType::Accounts, identity.clone())?;
+                hooks.trigger("accounts::new_identity", &object);
+            }
+            Ok(identity.did_key())
+        })
+    }
 
-        info!("Update identity store");
-        store.update_identity().await?;
+    fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
+        async_block_in_place_uncheck(async {
+            if !self.is_store_initialized().await {
+                error!("Store is not initialized. Either tesseract is not unlocked or an identity has not been created");
+                return Err(Error::MultiPassExtensionUnavailable);
+            }
+            let store = self.identity_store()?;
+            let idents = match id.get_inner() {
+                (Some(pk), None, false) => {
+                    if let Ok(cache) = self.get_cache() {
+                        let mut query = QueryBuilder::default();
+                        query.r#where("did_key", &pk)?;
+                        if let Ok(list) =
+                            cache.get_data(DataType::from(Module::Accounts), Some(&query))
+                        {
+                            if !list.is_empty() {
+                                let mut items = vec![];
+                                for object in list {
+                                    if let Ok(ident) =
+                                        object.decode::<Identity>().map_err(Error::from)
+                                    {
+                                        items.push(ident);
+                                    }
+                                }
+                                return Ok(items);
+                            }
+                        }
+                    }
+                    store.lookup(LookupBy::DidKey(Box::new(pk)))
+                }
+                (None, Some(username), false) => {
+                    if let Ok(cache) = self.get_cache() {
+                        let mut query = QueryBuilder::default();
+                        query.r#where("username", &username)?;
+                        if let Ok(list) =
+                            cache.get_data(DataType::from(Module::Accounts), Some(&query))
+                        {
+                            if !list.is_empty() {
+                                let mut items = vec![];
+                                for object in list {
+                                    if let Ok(ident) =
+                                        object.decode::<Identity>().map_err(Error::from)
+                                    {
+                                        items.push(ident);
+                                    }
+                                }
+                                return Ok(items);
+                            }
+                        }
+                    }
+                    store.lookup(LookupBy::Username(username))
+                }
+                (None, None, true) => return store.own_identity().await.map(|i| vec![i]),
+                _ => Err(Error::InvalidIdentifierCondition),
+            }?;
+            trace!("Found {} identities", idents.len());
+            for ident in &idents {
+                if let Ok(mut cache) = self.get_cache_mut() {
+                    let mut query = QueryBuilder::default();
+                    query.r#where("did_key", &ident.did_key())?;
+                    if cache
+                        .has_data(DataType::from(Module::Accounts), &query)
+                        .is_err()
+                    {
+                        let object = Sata::default().encode(
+                            warp::sata::libipld::IpldCodec::DagJson,
+                            warp::sata::Kind::Reference,
+                            ident.clone(),
+                        )?;
+                        cache.add_data(DataType::from(Module::Accounts), &object)?;
+                    }
+                }
+            }
 
-        if let Ok(hooks) = self.get_hooks() {
-            let object = DataObject::new(DataType::Accounts, identity.clone())?;
-            hooks.trigger("accounts::update_identity", &object);
-        }
-        Ok(())
+            Ok(idents)
+        })
+    }
+
+    fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
+        async_block_in_place_uncheck(async {
+            let ipfs = self.ipfs()?.clone();
+            let mut store = self.identity_store()?;
+            let mut identity = self.get_own_identity()?;
+            let old_identity = identity.clone();
+            match (
+                option.username(),
+                option.graphics_picture(),
+                option.graphics_banner(),
+                option.status_message(),
+            ) {
+                (Some(username), None, None, None) => {
+                    let len = username.chars().count();
+                    if len <= 4 || len >= 64 {
+                        return Err(Error::InvalidLength {
+                            context: "username".into(),
+                            current: len,
+                            minimum: Some(4),
+                            maximum: Some(64),
+                        });
+                    }
+
+                    identity.set_username(&username)
+                }
+                (None, Some(data), None, None) => {
+                    let mut graphics = identity.graphics();
+                    graphics.set_profile_picture(&data);
+                    identity.set_graphics(graphics);
+                }
+                (None, None, Some(data), None) => {
+                    let mut graphics = identity.graphics();
+                    graphics.set_profile_banner(&data);
+                    identity.set_graphics(graphics);
+                }
+                (None, None, None, Some(status)) => {
+                    if let Some(status) = status.clone() {
+                        let len = status.chars().count();
+                        if len >= 512 {
+                            return Err(Error::InvalidLength {
+                                context: "status".into(),
+                                current: len,
+                                minimum: None,
+                                maximum: Some(512),
+                            });
+                        }
+                    }
+                    identity.set_status_message(status)
+                }
+                _ => return Err(Error::CannotUpdateIdentity),
+            }
+
+            let mut old_cid = None;
+
+            if let Ok(cid) = store.get_cid().await {
+                info!("Current CID for identity: {cid}");
+                info!("Is it pinned?");
+                if ipfs.is_pinned(&cid).await? {
+                    info!("Cid is pinned. Removing pin");
+                    ipfs.remove_pin(&cid, false).await?;
+                }
+                old_cid = Some(cid);
+            };
+
+            info!("Converting identity to ipld");
+            let ipld = to_ipld(&identity).map_err(anyhow::Error::from)?;
+            info!("Storing identity into ipfd");
+            let ident_cid = ipfs.put_dag(ipld).await?;
+
+            info!("New identity cid is {ident_cid}. Pinning it");
+
+            ipfs.insert_pin(&ident_cid, false).await?;
+            info!("ident_cid is pinned it");
+            store.save_cid(ident_cid).await?;
+            if let Some(old_cid) = old_cid {
+                info!("Removing {old_cid}");
+                if let Err(e) = ipfs.remove_block(old_cid).await {
+                    error!("Cannot remove {old_cid}: {e}");
+                }
+            }
+
+            if let Ok(mut cache) = self.get_cache_mut() {
+                let mut query = QueryBuilder::default();
+                //TODO: Query by public key to tie/assiociate the username to identity in the event of dup
+                query.r#where("username", &old_identity.username())?;
+                if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query)) {
+                    //get last
+                    if !list.is_empty() {
+                        // let mut obj = list.last().unwrap().clone();
+                        let mut object = Sata::default();
+                        object.set_version(list.len() as _);
+                        let obj = object.encode(
+                            warp::sata::libipld::IpldCodec::DagJson,
+                            warp::sata::Kind::Reference,
+                            identity.clone(),
+                        )?;
+                        cache.add_data(DataType::from(Module::Accounts), &obj)?;
+                    }
+                } else {
+                    let object = Sata::default().encode(
+                        warp::sata::libipld::IpldCodec::DagJson,
+                        warp::sata::Kind::Reference,
+                        identity.clone(),
+                    )?;
+                    cache.add_data(DataType::from(Module::Accounts), &object)?;
+                }
+            }
+
+            info!("Update identity store");
+            store.update_identity().await?;
+
+            if let Ok(hooks) = self.get_hooks() {
+                let object = DataObject::new(DataType::Accounts, identity.clone())?;
+                hooks.trigger("accounts::update_identity", &object);
+            }
+            Ok(())
+        })
     }
 
     fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<DID, Error> {
@@ -677,14 +686,13 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
     }
 }
 
-#[async_trait::async_trait]
 impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
-    async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+    fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        store.send_request(pubkey).await?;
+        async_block_in_place_uncheck(store.send_request(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if let Some(request) = self
-                .list_outgoing_request().await?
+                .list_outgoing_request()?
                 .iter()
                 .filter(|request| request.to().eq(pubkey))
                 .collect::<Vec<_>>()
@@ -697,12 +705,12 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         Ok(())
     }
 
-    async fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+    fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        store.accept_request(pubkey).await?;
+        async_block_in_place_uncheck(store.accept_request(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if let Some(key) = self
-                .list_friends().await?
+                .list_friends()?
                 .iter()
                 .filter(|pk| *pk == pubkey)
                 .collect::<Vec<_>>()
@@ -715,12 +723,12 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         Ok(())
     }
 
-    async fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+    fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        store.reject_request(pubkey).await?;
+        async_block_in_place_uncheck(store.reject_request(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if !self
-                .list_all_request().await?
+                .list_all_request()?
                 .iter()
                 .any(|request| request.from().eq(pubkey))
             {
@@ -731,12 +739,12 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         Ok(())
     }
 
-    async fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+    fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        store.close_request(pubkey).await?;
+        async_block_in_place_uncheck(store.close_request(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
             if !self
-                .list_all_request().await?
+                .list_all_request()?
                 .iter()
                 .any(|request| request.from().eq(pubkey))
             {
@@ -747,36 +755,36 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         Ok(())
     }
 
-    async fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
+    fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.friend_store()?;
         Ok(store.list_incoming_request())
     }
 
-    async fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
+    fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.friend_store()?;
         Ok(store.list_outgoing_request())
     }
 
-    async fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
+    fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store()?;
         Ok(store.received_friend_request_from(did))
     }
 
-    async fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
+    fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store()?;
         Ok(store.sent_friend_request_to(did))
     }
 
-    async fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
+    fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.friend_store()?;
         Ok(store.list_all_request())
     }
 
-    async fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
+    fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        store.remove_friend(pubkey, true, true).await?;
+        async_block_in_place_uncheck(store.remove_friend(pubkey, true, true))?;
         if let Ok(hooks) = self.get_hooks() {
-            if self.has_friend(pubkey).await.is_err() {
+            if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
                 hooks.trigger("accounts::remove_friend", &object);
             }
@@ -784,11 +792,11 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         Ok(())
     }
 
-    async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
+    fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        store.block(pubkey).await?;
+        async_block_in_place_uncheck(store.block(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
-            if self.has_friend(pubkey).await.is_err() {
+            if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
                 hooks.trigger("accounts::block_key", &object);
             }
@@ -796,16 +804,16 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         Ok(())
     }
 
-    async fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
+    fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store()?;
         Ok(store.is_blocked(did))
     }
 
-    async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
+    fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        store.unblock(pubkey).await?;
+        async_block_in_place_uncheck(store.unblock(pubkey))?;
         if let Ok(hooks) = self.get_hooks() {
-            if self.has_friend(pubkey).await.is_err() {
+            if self.has_friend(pubkey).is_err() {
                 let object = DataObject::new(DataType::Accounts, pubkey)?;
                 hooks.trigger("accounts::unblock_key", &object);
             }
@@ -813,38 +821,36 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         Ok(())
     }
 
-    async fn block_list(&self) -> Result<Vec<DID>, Error> {
+    fn block_list(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store()?;
-        store.block_list().await
+        async_block_in_place_uncheck(store.block_list())
     }
 
-    async fn list_friends(&self) -> Result<Vec<DID>, Error> {
+    fn list_friends(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store()?;
-        store.friends_list().await
+        async_block_in_place_uncheck(store.friends_list())
     }
 
-    async fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
+    fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
         let store = self.friend_store()?;
-        store.is_friend(pubkey).await
+        async_block_in_place_uncheck(store.is_friend(pubkey))
     }
 }
 
-#[async_trait::async_trait]
 impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
-    async fn identity_status(&self, did: &DID) -> Result<identity::IdentityStatus, Error> {
+    fn identity_status(&self, did: &DID) -> Result<identity::IdentityStatus, Error> {
         let store = self.identity_store()?;
-        store.identity_status(did).await
+        async_block_in_place_uncheck(store.identity_status(did))
     }
 
-    async fn identity_relationship(&self, did: &DID) -> Result<identity::Relationship, Error> {
-        self.get_identity(Identifier::did_key(did.clone()))
-            .await?
+    fn identity_relationship(&self, did: &DID) -> Result<identity::Relationship, Error> {
+        self.get_identity(Identifier::did_key(did.clone()))?
             .first()
             .ok_or(Error::IdentityDoesntExist)?;
-        let friends = self.has_friend(did).await.is_ok();
-        let received_friend_request = self.received_friend_request_from(did).await?;
-        let sent_friend_request = self.sent_friend_request_to(did).await?;
-        let blocked = self.is_blocked(did).await?;
+        let friends = self.has_friend(did).is_ok();
+        let received_friend_request = self.received_friend_request_from(did)?;
+        let sent_friend_request = self.sent_friend_request_to(did)?;
+        let blocked = self.is_blocked(did)?;
 
         let mut relationship = Relationship::default();
         relationship.set_friends(friends);
