@@ -400,7 +400,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                     continue;
                                                 }
 
-                                                if let Ok(list) = store.account.read().block_list() {
+                                                if let Ok(list) = store.account.read().block_list().await {
                                                     if list.contains(&*peer) {
                                                         warn!("{peer} is blocked");
                                                         continue
@@ -548,10 +548,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 impl<T: IpfsTypes> DirectMessageStore<T> {
     pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
         if self.with_friends.load(Ordering::SeqCst) {
-            self.account.read().has_friend(did_key)?;
+            self.account.read().has_friend(did_key).await?;
         }
 
-        if let Ok(list) = self.account.read().block_list() {
+        if let Ok(list) = self.account.read().block_list().await {
             if list.contains(did_key) {
                 return Err(Error::PublicKeyIsBlocked);
             }
