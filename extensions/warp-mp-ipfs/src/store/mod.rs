@@ -132,6 +132,33 @@ pub async fn discovery<T: IpfsTypes, S: AsRef<str>>(
     }
 }
 
+pub async fn connected_to_peer<T: IpfsTypes>(
+    ipfs: ipfs::Ipfs<T>,
+    topic: Option<String>,
+    did: &DID,
+) -> anyhow::Result<bool> {
+    let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
+
+    let mut subscribed_peer = false;
+
+    let connected_peer = ipfs
+        .peers()
+        .await?
+        .iter()
+        .map(|conn| conn.addr.peer_id)
+        .any(|peer| peer == peer_id);
+
+    if let Some(topic) = topic {
+        subscribed_peer = ipfs
+            .pubsub_peers(Some(topic))
+            .await?
+            .iter()
+            .any(|p| *p == peer_id);
+    }
+
+    Ok(connected_peer || subscribed_peer)
+}
+
 pub async fn discover_peer<T: IpfsTypes>(ipfs: ipfs::Ipfs<T>, did: &DID) -> anyhow::Result<()> {
     let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
 
