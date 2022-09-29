@@ -416,8 +416,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
             //      B) There is literally 2 identities, which should be impossible because of A
             LookupBy::DidKey(pubkey) => {
                 if let Discovery::Direct = self.discovery {
-                    let peer_id = did_to_libp2p_pub(&*pubkey)?.to_peer_id();
-                    if let Err(e) = self.ipfs.find_peer_info(peer_id).await {
+                    let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
+                    if let Err(e) = self.ipfs.find_peer(peer_id).await {
                         let ipfs = self.ipfs.clone();
                         let pubkey = pubkey.clone();
                         tokio::spawn(async move {
@@ -486,12 +486,13 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
     pub async fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
-        //Maybe comment this out or put behind a condition?
-        self.lookup(LookupBy::DidKey(Box::new(did.clone())))
-            .await?
-            .first()
-            .cloned()
-            .ok_or(Error::IdentityDoesntExist)?;
+        if self.discovery_type() != Discovery::Direct {
+            self.lookup(LookupBy::DidKey(Box::new(did.clone())))
+                .await?
+                .first()
+                .cloned()
+                .ok_or(Error::IdentityDoesntExist)?;
+        }
 
         let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
 

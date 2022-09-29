@@ -147,7 +147,7 @@ pub async fn discover_peer<T: IpfsTypes>(ipfs: ipfs::Ipfs<T>, did: &DID) -> anyh
     };
 
     loop {
-        match ipfs.find_peer_info(peer_id).await {
+        match ipfs.find_peer(peer_id).await {
             Ok(_) => {
                 //Maybe wait and check to see if we can connect after?
                 break;
