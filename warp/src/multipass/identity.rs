@@ -5,13 +5,12 @@ use wasm_bindgen::prelude::*;
 use crate::crypto::DID;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use warp_derive::FFIFree;
 
 pub const SHORT_ID_SIZE: usize = 8;
 
 #[derive(
-    Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
+    Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
 )]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Role {
@@ -36,7 +35,7 @@ impl Role {
 }
 
 #[derive(
-    Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
+    Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
 )]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Badge {
@@ -60,7 +59,7 @@ impl Badge {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIFree)]
+#[derive(Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Graphics {
     /// Hash to profile picture
@@ -152,7 +151,7 @@ impl Relationship {
     }
 }
 #[derive(
-    Default, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
+    Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
 )]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Identity {
@@ -181,7 +180,7 @@ pub struct Identity {
     active_badge: Badge,
 
     /// TBD
-    linked_accounts: HashMap<String, String>,
+    // linked_accounts: HashMap<String, String>,
 
     /// Signature of the identity
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -294,7 +293,9 @@ impl Identity {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(
+    Serialize, Deserialize, Debug, Clone, Hash, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
+)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct FriendRequest {
     /// The account where the request came from
