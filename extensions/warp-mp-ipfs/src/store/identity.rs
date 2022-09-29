@@ -25,7 +25,7 @@ use warp::{
     tesseract::Tesseract,
 };
 
-use super::{libp2p_pub_to_did, IDENTITY_BROADCAST};
+use super::{connected_to_peer, libp2p_pub_to_did, IDENTITY_BROADCAST};
 
 pub struct IdentityStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
@@ -417,15 +417,21 @@ impl<T: IpfsTypes> IdentityStore<T> {
             LookupBy::DidKey(pubkey) => {
                 if let Discovery::Direct = self.discovery {
                     let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
-                    if let Err(e) = self.ipfs.find_peer(peer_id).await {
-                        let ipfs = self.ipfs.clone();
-                        let pubkey = pubkey.clone();
-                        tokio::spawn(async move {
-                            if let Err(e) = super::discover_peer(ipfs, &*pubkey).await {
-                                error!("Error discoverying peer: {e}");
-                            }
-                        });
-                        tokio::task::yield_now().await;
+
+                    let connected =
+                        connected_to_peer(self.ipfs.clone(), Some(IDENTITY_BROADCAST.into()), pubkey)
+                            .await?;
+                    if !connected {
+                        if let Err(e) = self.ipfs.find_peer(peer_id).await {
+                            let ipfs = self.ipfs.clone();
+                            let pubkey = pubkey.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = super::discover_peer(ipfs, &*pubkey).await {
+                                    error!("Error discoverying peer: {e}");
+                                }
+                            });
+                            tokio::task::yield_now().await;
+                        }
                     }
                 }
                 self.cache()
@@ -494,16 +500,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 .ok_or(Error::IdentityDoesntExist)?;
         }
 
-        let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
+        let connected =
+            connected_to_peer(self.ipfs.clone(), Some(IDENTITY_BROADCAST.into()), did).await?;
 
-        match self
-            .ipfs
-            .peers()
-            .await?
-            .iter()
-            .map(|conn| conn.addr.peer_id)
-            .any(|peer| peer == peer_id)
-        {
+        match connected {
             true => Ok(IdentityStatus::Online),
             false => Ok(IdentityStatus::Offline),
         }
