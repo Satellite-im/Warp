@@ -4,7 +4,5 @@ members = [
   "extensions/*",
   "warp",
   "warp/warp-derive",
-  "warp-bin",
-  "warp-extensions",
 ]
-exclude = ["deprecated/*", "warp-bin"]
+exclude = ["deprecated/*"]

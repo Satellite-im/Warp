@@ -9,16 +9,16 @@ warp-fs-memory = { path = "../extensions/warp-fs-memory", optional = true }
 warp-fs-storj = { path = "../extensions/warp-fs-storj", optional = true }
 warp-pd-stretto = { path = "../extensions/warp-pd-stretto", optional = true }
 warp-pd-flatfile = { path = "../extensions/warp-pd-flatfile", optional = true }
-warp-mp-solana = { path = "../extensions/warp-mp-solana", optional = true }
+# warp-mp-solana = { path = "../extensions/warp-mp-solana", optional = true }
 
 cfg-if = "1.0"
 
 [features]
 default = []
-all = ["fs-ipfs", "fs-memory", "fs-storj", "pd-flatfile", "pd-stretto", "mp-solana"]
+all = ["fs-ipfs", "fs-memory", "fs-storj", "pd-flatfile", "pd-stretto"]
 fs-ipfs = ["warp-fs-ipfs"]
 fs-memory = ["warp-fs-memory"]
 fs-storj = ["warp-fs-storj"]
 pd-stretto = ["warp-pd-stretto"]
 pd-flatfile = ["warp-pd-flatfile"]
-mp-solana = ["warp-mp-solana"]
+# mp-solana = ["warp-mp-solana"]
