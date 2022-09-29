@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
-use tracing::log::{error, info, trace, warn};
+use tracing::log::{error, info, trace, warn, Level};
 use warp::crypto::did_key::Generate;
 use warp::data::{DataObject, DataType};
 use warp::hooks::Hooks;
@@ -54,6 +54,7 @@ use warp::multipass::{identity, Friends, IdentityInformation, MultiPass};
 
 use crate::config::{Bootstrap, Discovery};
 use crate::store::discovery;
+use config::DebugLevel;
 
 pub type Temporary = TestTypes;
 pub type Persistent = Types;
@@ -107,15 +108,72 @@ pub async fn ipfs_identity_temporary(
     IpfsIdentity::new(config.unwrap_or_default(), tesseract, cache).await
 }
 
+#[cfg(target_os = "android")]
+fn enaable_logging(level: DebugLevel, directive: Option<String>) {
+    use android_logger::{Config, FilterBuilder};
+
+    android_logger::init_once(
+        Config::default()
+            .with_min_level(match level {
+                DebugLevel::Trace => Level::Trace,
+                DebugLevel::Debug => Level::Debug,
+                DebugLevel::Info => Level::Info,
+                DebugLevel::Error => Level::Error,
+            }) // limit log level
+            .with_tag("warp-mp-ipfs") // logs will show under mytag tag
+            .with_filter({
+                let mut filter = FilterBuilder::new();
+                if let Some(directive) = directive {
+                    filter.parse(&directive);
+                }
+                filter.build()
+            }),
+    );
+}
+
+//TODO: Setup a target for iOS
+#[cfg(not(target_os = "android"))]
+fn enaable_logging(level: DebugLevel, directive: Option<String>) {
+    warp::logging::tracing_subscriber::fmt()
+        .with_env_filter(warp::logging::tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+}
+
+fn enaable_logging_to_file(level: DebugLevel, directive: Option<String>, path: PathBuf) {
+    let file_appender = warp::logging::tracing_appender::rolling::hourly(path, "warp_mp_ipfs.log");
+    let (non_blocking, _guard) = warp::logging::tracing_appender::non_blocking(file_appender);
+
+    warp::logging::tracing_subscriber::fmt()
+        .with_writer(non_blocking)
+        .with_env_filter(warp::logging::tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+}
+
 impl<T: IpfsTypes> IpfsIdentity<T> {
     pub async fn new(
         config: MpIpfsConfig,
         tesseract: Tesseract,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity<T>> {
-        trace!("Initializing Multipass");
         let hooks = None;
-
+        if config.debug.logging {
+            if config.debug.log_to_file
+                && config.path.is_some()
+                && std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>()
+            {
+                if let Some(path) = &config.path {
+                    let path = path.join("logs");
+                    enaable_logging_to_file(
+                        config.debug.level,
+                        config.debug.directive.clone(),
+                        path,
+                    );
+                }
+            } else {
+                enaable_logging(config.debug.level, config.debug.directive.clone())
+            }
+        }
+        trace!("Initializing Multipass");
         let mut identity = IpfsIdentity {
             cache,
             config,
@@ -183,7 +241,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
         let config = self.config.clone();
 
-        let path = config.path.clone().unwrap_or_default();
+        // let path = config.path.clone().unwrap_or_default();
 
         let empty_bootstrap = match &config.bootstrap {
             Bootstrap::Ipfs | Bootstrap::Experimental => false,

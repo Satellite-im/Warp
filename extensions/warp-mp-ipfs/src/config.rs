@@ -144,6 +144,24 @@ impl Default for StoreSetting {
     }
 }
 
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all="lowercase")]
+pub enum DebugLevel {
+    Trace,
+    #[default]
+    Debug,
+    Info,
+    Error
+}
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct Debug {
+    pub logging: bool,
+    pub log_to_file: bool,
+    pub level: DebugLevel,
+    pub directive: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MpIpfsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -153,7 +171,8 @@ pub struct MpIpfsConfig {
     pub listen_on: Vec<Multiaddr>,
     pub ipfs_setting: IpfsSetting,
     pub store_setting: StoreSetting,
-    pub debug: bool,
+    //Note: To be used when not using a logging system externally
+    pub debug: Debug,
 }
 
 impl Default for MpIpfsConfig {
@@ -171,7 +190,7 @@ impl Default for MpIpfsConfig {
                 ..Default::default()
             },
             store_setting: Default::default(),
-            debug: false,
+            debug: Default::default(),
         }
     }
 }
