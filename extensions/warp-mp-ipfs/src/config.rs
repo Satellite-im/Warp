@@ -200,7 +200,6 @@ impl MpIpfsConfig {
                 relay_client: RelayClient {
                     enable: true,
                     dcutr: true,
-                    single: true,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -227,7 +226,6 @@ impl MpIpfsConfig {
                 relay_client: RelayClient {
                     enable: true,
                     dcutr: true,
-                    single: true,
                     ..Default::default()
                 },
                 ..Default::default()
