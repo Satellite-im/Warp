@@ -45,6 +45,35 @@ pub trait MultiPass:
     fn refresh_cache(&mut self) -> Result<(), Error>;
 }
 
+impl<T: ?Sized> MultiPass for Arc<RwLock<Box<T>>>
+where
+    T: MultiPass,
+{
+    fn create_identity(
+        &mut self,
+        username: Option<&str>,
+        passphrase: Option<&str>,
+    ) -> Result<DID, Error> {
+        self.write().create_identity(username, passphrase)
+    }
+
+    fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
+        self.read().get_identity(id)
+    }
+
+    fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
+        self.write().update_identity(option)
+    }
+
+    fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<DID, Error> {
+        self.read().decrypt_private_key(passphrase)
+    }
+
+    fn refresh_cache(&mut self) -> Result<(), Error> {
+        self.write().refresh_cache()
+    }
+}
+
 pub trait Friends: Sync + Send {
     /// Send friend request to corresponding public key
     fn send_request(&mut self, _: &DID) -> Result<(), Error> {
@@ -66,6 +95,7 @@ pub trait Friends: Sync + Send {
         Err(Error::Unimplemented)
     }
 
+    /// Check to determine if a request been received from the DID
     fn received_friend_request_from(&self, _: &DID) -> Result<bool, Error> {
         Err(Error::Unimplemented)
     }
@@ -75,6 +105,7 @@ pub trait Friends: Sync + Send {
         Err(Error::Unimplemented)
     }
 
+    /// Check to determine if a request been sent to the DID
     fn sent_friend_request_to(&self, _: &DID) -> Result<bool, Error> {
         Err(Error::Unimplemented)
     }
@@ -125,6 +156,88 @@ pub trait Friends: Sync + Send {
     }
 }
 
+impl<T: ?Sized> Friends for Arc<RwLock<Box<T>>>
+where
+    T: Friends,
+{
+    fn send_request(&mut self, key: &DID) -> Result<(), Error> {
+        self.write().send_request(key)
+    }
+
+    /// Accept friend request from public key
+    fn accept_request(&mut self, key: &DID) -> Result<(), Error> {
+        self.write().accept_request(key)
+    }
+
+    /// Deny friend request from public key
+    fn deny_request(&mut self, key: &DID) -> Result<(), Error> {
+        self.write().deny_request(key)
+    }
+
+    /// Closing or retracting friend request
+    fn close_request(&mut self, key: &DID) -> Result<(), Error> {
+        self.write().close_request(key)
+    }
+
+    /// List the incoming friend request
+    fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
+        self.read().list_incoming_request()
+    }
+
+    /// Check to determine if a request been received from the DID
+    fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
+        self.read().received_friend_request_from(did)
+    }
+
+    fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
+        self.read().sent_friend_request_to(did)
+    }
+
+    /// List the outgoing friend request
+    fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
+        self.read().list_outgoing_request()
+    }
+
+    /// List all the friend request that been sent or received
+    fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
+        self.read().list_all_request()
+    }
+
+    /// Remove friend from contacts
+    fn remove_friend(&mut self, key: &DID) -> Result<(), Error> {
+        self.write().remove_friend(key)
+    }
+
+    /// Block public key, rather it be a friend or not, from being able to send request to account public address
+    fn block(&mut self, key: &DID) -> Result<(), Error> {
+        self.write().block(key)
+    }
+
+    /// Unblock public key
+    fn unblock(&mut self, key: &DID) -> Result<(), Error> {
+        self.write().unblock(key)
+    }
+
+    /// List block list
+    fn block_list(&self) -> Result<Vec<DID>, Error> {
+        self.read().block_list()
+    }
+
+    /// Check to see if public key is blocked
+    fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
+        self.read().is_blocked(did)
+    }
+    /// List all friends public key
+    fn list_friends(&self) -> Result<Vec<DID>, Error> {
+        self.read().list_friends()
+    }
+
+    /// Check to see if public key is friend of the account
+    fn has_friend(&self, key: &DID) -> Result<(), Error> {
+        self.write().has_friend(key)
+    }
+}
+
 pub trait IdentityInformation: Send + Sync {
     /// Identity status to determine if they are online or offline
     fn identity_status(&self, _: &DID) -> Result<IdentityStatus, Error> {
@@ -133,6 +246,20 @@ pub trait IdentityInformation: Send + Sync {
     /// Find the relationship with an existing identity.
     fn identity_relationship(&self, _: &DID) -> Result<Relationship, Error> {
         Err(Error::Unimplemented)
+    }
+}
+
+impl<T: ?Sized> IdentityInformation for Arc<RwLock<Box<T>>>
+where
+    T: IdentityInformation,
+{
+    /// Identity status to determine if they are online or offline
+    fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
+        self.read().identity_status(did)
+    }
+    /// Find the relationship with an existing identity.
+    fn identity_relationship(&self, did: &DID) -> Result<Relationship, Error> {
+        self.read().identity_relationship(did)
     }
 }
 

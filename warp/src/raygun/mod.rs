@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+#[allow(unused_imports)]
 use self::group::GroupChat;
 
 #[derive(Default, Clone, PartialEq, Eq)]
@@ -357,7 +358,7 @@ pub enum EmbedState {
 }
 
 #[async_trait::async_trait]
-pub trait RayGun: Extension + GroupChat + Sync + Send + SingleHandle {
+pub trait RayGun: Extension + Sync + Send + SingleHandle {
     // Start a new conversation.
     async fn create_conversation(&mut self, _: &DID) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
@@ -427,6 +428,104 @@ pub trait RayGun: Extension + GroupChat + Sync + Send + SingleHandle {
         message_id: Uuid,
         state: EmbedState,
     ) -> Result<(), Error>;
+}
+
+#[allow(clippy::await_holding_lock)]
+#[async_trait::async_trait]
+impl<T: ?Sized> RayGun for Arc<RwLock<Box<T>>>
+where
+    T: RayGun,
+{
+    // Start a new conversation.
+    async fn create_conversation(&mut self, key: &DID) -> Result<Conversation, Error> {
+        self.write().create_conversation(key).await
+    }
+
+    // List all active conversations
+    async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
+        self.read().list_conversations().await
+    }
+
+    /// Retrieve all messages from a conversation
+    async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message, Error> {
+        self.read().get_message(conversation_id, message_id).await
+    }
+
+    /// Retrieve all messages from a conversation
+    async fn get_messages(
+        &self,
+        conversation_id: Uuid,
+        options: MessageOptions,
+    ) -> Result<Vec<Message>, Error> {
+        self.read().get_messages(conversation_id, options).await
+    }
+
+    /// Sends a message to a conversation. If `message_id` is provided, it will override the selected message
+    async fn send(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Option<Uuid>,
+        message: Vec<String>,
+    ) -> Result<(), Error> {
+        self.write()
+            .send(conversation_id, message_id, message)
+            .await
+    }
+
+    /// Delete message from a conversation
+    async fn delete(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Option<Uuid>,
+    ) -> Result<(), Error> {
+        self.write().delete(conversation_id, message_id).await
+    }
+
+    /// React to a message
+    async fn react(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: String,
+    ) -> Result<(), Error> {
+        self.write()
+            .react(conversation_id, message_id, state, emoji)
+            .await
+    }
+
+    /// Pin a message within a conversation
+    async fn pin(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: PinState,
+    ) -> Result<(), Error> {
+        self.write().pin(conversation_id, message_id, state).await
+    }
+
+    /// Reply to a message within a conversation
+    async fn reply(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        message: Vec<String>,
+    ) -> Result<(), Error> {
+        self.write()
+            .reply(conversation_id, message_id, message)
+            .await
+    }
+
+    async fn embeds(
+        &mut self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        state: EmbedState,
+    ) -> Result<(), Error> {
+        self.write()
+            .embeds(conversation_id, message_id, state)
+            .await
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]

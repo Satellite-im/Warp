@@ -163,6 +163,45 @@ pub trait PocketDimension: Extension + Send + Sync + SingleHandle {
     fn empty(&mut self, dimension: DataType) -> Result<(), Error>;
 }
 
+impl<T: ?Sized> PocketDimension for Arc<RwLock<Box<T>>>
+where
+    T: PocketDimension,
+{
+    /// Used to add data to [`PocketDimension`] for [`Module`]
+    fn add_data(&mut self, dimension: DataType, data: &Sata) -> Result<(), Error> {
+        self.write().add_data(dimension, data)
+    }
+
+    /// Used to check to see if data exist within [`PocketDimension`]
+    fn has_data(&mut self, dimension: DataType, query: &QueryBuilder) -> Result<(), Error> {
+        self.write().has_data(dimension, query)
+    }
+
+    /// Used to obtain a list of [`Sata`] for [`Module`]
+    fn get_data(
+        &self,
+        dimension: DataType,
+        query: Option<&QueryBuilder>,
+    ) -> Result<Vec<Sata>, Error> {
+        self.read().get_data(dimension, query)
+    }
+
+    /// Returns the total size within the [`Module`]
+    fn size(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64, Error> {
+        self.read().size(dimension, query)
+    }
+
+    /// Returns an total amount of [`Sata`] for [`Module`]
+    fn count(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<i64, Error> {
+        self.read().count(dimension, query)
+    }
+
+    /// Will flush out the data related to [`Module`].
+    fn empty(&mut self, dimension: DataType) -> Result<(), Error> {
+        self.write().empty(dimension)
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(FFIFree)]
 pub struct PocketDimensionAdapter {
