@@ -31,7 +31,7 @@ use crate::Persistent;
 use super::identity::{IdentityStore, LookupBy};
 use super::{
     did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, FRIENDS_BROADCAST,
-    IDENTITY_BROADCAST,
+    IDENTITY_BROADCAST, PeerConnectionType,
 };
 
 pub struct FriendsStore<T: IpfsTypes> {
@@ -592,7 +592,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         let list = store.queue.read().clone();
                         for item in list.iter() {
                             let Queue(peer, data) = item;
-                            if let Ok(true) = connected_to_peer(store.ipfs.clone(), Some(FRIENDS_BROADCAST.into()), PeerType::PeerId(*peer)).await {
+                            if let Ok(crate::store::PeerConnectionType::SubscribedAndConnected) = connected_to_peer(store.ipfs.clone(), Some(FRIENDS_BROADCAST.into()), PeerType::PeerId(*peer)).await {
                                     let bytes = match serde_json::to_vec(&data) {
                                         Ok(bytes) => bytes,
                                         Err(e) => {
@@ -989,7 +989,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             )
             .await?;
 
-            if !connected {
+            if connected != PeerConnectionType::SubscribedAndConnected {
                 let res = match tokio::time::timeout(
                     Duration::from_secs(2),
                     self.ipfs.find_peer(peer_id),

@@ -25,7 +25,7 @@ use warp::{
     tesseract::Tesseract,
 };
 
-use super::{connected_to_peer, libp2p_pub_to_did, PeerType, IDENTITY_BROADCAST};
+use super::{connected_to_peer, libp2p_pub_to_did, PeerType, IDENTITY_BROADCAST, PeerConnectionType};
 
 pub struct IdentityStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
@@ -393,7 +393,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                         PeerType::PeerId(peer_id),
                     )
                     .await?;
-                    if !connected {
+                    if connected != PeerConnectionType::SubscribedAndConnected {
                         let res = match tokio::time::timeout(
                             Duration::from_secs(2),
                             self.ipfs.find_peer(peer_id),
@@ -491,8 +491,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
         .await?;
 
         match connected {
-            true => Ok(IdentityStatus::Online),
-            false => Ok(IdentityStatus::Offline),
+            PeerConnectionType::SubscribedAndConnected | PeerConnectionType::Connected | PeerConnectionType::Subscribed => Ok(IdentityStatus::Online),
+            PeerConnectionType::NotConnected => Ok(IdentityStatus::Offline),
         }
     }
 

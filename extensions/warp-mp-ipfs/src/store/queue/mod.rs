@@ -10,7 +10,7 @@ use tracing::log::error;
 use warp::error::Error;
 
 use super::friends::InternalRequest;
-use super::FRIENDS_BROADCAST;
+use super::{PeerConnectionType, FRIENDS_BROADCAST};
 
 #[derive(Clone)]
 pub struct Queue {
@@ -124,15 +124,15 @@ impl<T: IpfsTypes> Future for QueueFuture<T> {
 
                     //TODO: Check background task to determine if we should attempt at connecting to them
                     //      by finding them on the DHT.
-                    if let Poll::Ready(Ok(true)) = Box::pin(super::connected_to_peer(
-                        ipfs.clone(),
-                        Some(FRIENDS_BROADCAST.into()),
-                        super::PeerType::PeerId(*peer),
-                    ))
-                    .as_mut()
-                    .poll(cx)
+                    if let Poll::Ready(Ok(PeerConnectionType::SubscribedAndConnected)) =
+                        Box::pin(super::connected_to_peer(
+                            ipfs.clone(),
+                            Some(FRIENDS_BROADCAST.into()),
+                            super::PeerType::PeerId(*peer),
+                        ))
+                        .as_mut()
+                        .poll(cx)
                     {
-
                         let bytes = match serde_json::to_vec(&data) {
                             Ok(bytes) => bytes,
                             Err(e) => {
