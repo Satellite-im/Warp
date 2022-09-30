@@ -18,19 +18,39 @@ pub struct Queue {
 }
 
 impl Queue {
-    pub async fn new<T: IpfsTypes>(ipfs: Ipfs<T>, queue: Vec<QueueItem>) -> (Queue, QueueFuture<T>) {
-        let (tx, rx) = mpsc::channel(10);
+    pub fn new<T: IpfsTypes>(ipfs: Ipfs<T>, queue: Vec<QueueItem>) -> (Queue, QueueFuture<T>) {
+        let (tx, rx) = mpsc::channel(100);
         let future = QueueFuture {
             ipfs,
             rx,
-            _duration: Duration::from_secs(1),
-            queue
+            queue,
         };
 
         let queue = Queue { tx };
 
         (queue, future)
     }
+
+    pub async fn add_list(&self, items: Vec<QueueItem>) -> anyhow::Result<()> {
+        self.tx
+            .clone()
+            .send(QueueEvents::AddList(items))
+            .await
+            .map_err(anyhow::Error::from)?;
+
+        Ok(())
+    }
+
+    pub async fn list(&self) -> anyhow::Result<Vec<QueueItem>> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .clone()
+            .send(QueueEvents::List(tx))
+            .await
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)
+    }
+
     pub async fn add_request(&self, item: QueueItem) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -45,19 +65,19 @@ impl Queue {
 pub struct QueueFuture<T: IpfsTypes> {
     ipfs: Ipfs<T>,
     rx: Receiver<QueueEvents>,
-    _duration: Duration,
     queue: Vec<QueueItem>,
 }
 
 #[derive(Debug)]
 pub enum QueueEvents {
     Add(QueueItem, oneshot::Sender<Result<(), Error>>),
+    AddList(Vec<QueueItem>),
     Remove(QueueItem, oneshot::Sender<Result<(), Error>>),
     List(oneshot::Sender<Vec<QueueItem>>),
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone)]
-pub struct QueueItem(PeerId, Sata, bool);
+pub struct QueueItem(pub PeerId, pub Sata, pub bool);
 
 impl<T: IpfsTypes> Future for QueueFuture<T> {
     type Output = ();
@@ -90,6 +110,9 @@ impl<T: IpfsTypes> Future for QueueFuture<T> {
                                 let _ = ret.send(Ok(()));
                             }
                         }
+                    }
+                    QueueEvents::AddList(list) => {
+                        self.queue.extend(list);
                     }
                     QueueEvents::List(ret) => {
                         let _ = ret.send(self.queue.clone());
