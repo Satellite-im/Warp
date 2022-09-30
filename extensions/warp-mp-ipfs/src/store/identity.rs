@@ -25,7 +25,7 @@ use warp::{
     tesseract::Tesseract,
 };
 
-use super::{connected_to_peer, libp2p_pub_to_did, IDENTITY_BROADCAST};
+use super::{connected_to_peer, libp2p_pub_to_did, PeerType, IDENTITY_BROADCAST};
 
 pub struct IdentityStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
@@ -390,7 +390,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     let connected = connected_to_peer(
                         self.ipfs.clone(),
                         Some(IDENTITY_BROADCAST.into()),
-                        pubkey,
+                        PeerType::PeerId(peer_id),
                     )
                     .await?;
                     if !connected {
@@ -483,8 +483,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 .ok_or(Error::IdentityDoesntExist)?;
         }
 
-        let connected =
-            connected_to_peer(self.ipfs.clone(), Some(IDENTITY_BROADCAST.into()), did).await?;
+        let connected = connected_to_peer(
+            self.ipfs.clone(),
+            Some(IDENTITY_BROADCAST.into()),
+            PeerType::DID(did.clone()),
+        )
+        .await?;
 
         match connected {
             true => Ok(IdentityStatus::Online),

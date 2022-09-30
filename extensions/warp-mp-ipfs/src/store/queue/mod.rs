@@ -119,7 +119,6 @@ impl<T: IpfsTypes> Future for QueueFuture<T> {
                     }
                 }
 
-                //TODO: Poll tokio timer before starting this task and reset it in case duration ever change in the future
                 for item in self.queue.iter_mut().filter(|q| !q.2) {
                     let QueueItem(peer, data, done) = item;
 

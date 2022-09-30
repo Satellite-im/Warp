@@ -25,7 +25,7 @@ use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender}
 use warp::tesseract::Tesseract;
 
 use crate::config::Discovery;
-use crate::store::verify_serde_sig;
+use crate::store::{connected_to_peer, verify_serde_sig, PeerType};
 use crate::Persistent;
 
 use super::identity::{IdentityStore, LookupBy};
@@ -592,8 +592,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         let list = store.queue.read().clone();
                         for item in list.iter() {
                             let Queue(peer, data) = item;
-                            if let Ok(peers) = store.ipfs.pubsub_peers(Some(FRIENDS_BROADCAST.into())).await {
-                                if peers.contains(peer) {
+                            if let Ok(true) = connected_to_peer(store.ipfs.clone(), Some(FRIENDS_BROADCAST.into()), PeerType::PeerId(*peer)).await {
                                     let bytes = match serde_json::to_vec(&data) {
                                         Ok(bytes) => bytes,
                                         Err(e) => {
@@ -621,7 +620,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                     let _ = store.queue.write().remove(index);
 
                                     store.save_queue().await;
-                                }
                             }
                         }
                     }
@@ -987,7 +985,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             let connected = super::connected_to_peer(
                 self.ipfs.clone(),
                 Some(IDENTITY_BROADCAST.into()),
-                &request.to(),
+                PeerType::PeerId(remote_peer_id),
             )
             .await?;
 
@@ -1002,8 +1000,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     Err(e) => Err(anyhow::anyhow!("{}", e.to_string())),
                 };
 
-                if let Err(_e) = res
-                {
+                if let Err(_e) = res {
                     let ipfs = self.ipfs.clone();
                     let pubkey = request.to();
                     let own = (*self.did_key).clone();

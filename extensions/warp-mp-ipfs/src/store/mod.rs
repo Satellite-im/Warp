@@ -2,7 +2,7 @@ pub mod queue;
 
 use std::{sync::Arc, time::Duration};
 
-use ipfs::IpfsTypes;
+use ipfs::{IpfsTypes, PeerId};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::log::error;
 use warp::{
@@ -134,12 +134,20 @@ pub async fn discovery<T: IpfsTypes, S: AsRef<str>>(
     }
 }
 
+pub enum PeerType {
+    PeerId(PeerId),
+    DID(DID)
+}
+
 pub async fn connected_to_peer<T: IpfsTypes>(
     ipfs: ipfs::Ipfs<T>,
     topic: Option<String>,
-    did: &DID,
+    pkey: PeerType,
 ) -> anyhow::Result<bool> {
-    let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
+    let peer_id = match pkey {
+        PeerType::DID(did) => did_to_libp2p_pub(&did)?.to_peer_id(),
+        PeerType::PeerId(peer) => peer
+    };
 
     let mut subscribed_peer = false;
 
