@@ -122,31 +122,35 @@ impl<T: IpfsTypes> Future for QueueFuture<T> {
                 for item in self.queue.iter_mut().filter(|q| !q.2) {
                     let QueueItem(peer, data, done) = item;
 
-                    if let Poll::Ready(Ok(peers)) =
-                        Box::pin(ipfs.pubsub_peers(Some(FRIENDS_BROADCAST.into())))
-                            .as_mut()
-                            .poll(cx)
+                    //TODO: Check background task to determine if we should attempt at connecting to them
+                    //      by finding them on the DHT.
+                    if let Poll::Ready(Ok(true)) = Box::pin(super::connected_to_peer(
+                        ipfs.clone(),
+                        Some(FRIENDS_BROADCAST.into()),
+                        super::PeerType::PeerId(*peer),
+                    ))
+                    .as_mut()
+                    .poll(cx)
                     {
-                        if peers.contains(peer) {
-                            let bytes = match serde_json::to_vec(&data) {
-                                Ok(bytes) => bytes,
-                                Err(e) => {
-                                    error!("Error serialzing queue request into bytes: {e}");
-                                    continue;
-                                }
-                            };
 
-                            if let Poll::Ready(Err(e)) =
-                                Box::pin(ipfs.pubsub_publish(FRIENDS_BROADCAST.into(), bytes))
-                                    .as_mut()
-                                    .poll(cx)
-                            {
-                                error!("Error sending request to {}: {}", peer, e);
+                        let bytes = match serde_json::to_vec(&data) {
+                            Ok(bytes) => bytes,
+                            Err(e) => {
+                                error!("Error serialzing queue request into bytes: {e}");
                                 continue;
                             }
+                        };
 
-                            *done = true;
+                        if let Poll::Ready(Err(e)) =
+                            Box::pin(ipfs.pubsub_publish(FRIENDS_BROADCAST.into(), bytes))
+                                .as_mut()
+                                .poll(cx)
+                        {
+                            error!("Error sending request to {}: {}", peer, e);
+                            continue;
                         }
+
+                        *done = true;
                     }
                 }
 
