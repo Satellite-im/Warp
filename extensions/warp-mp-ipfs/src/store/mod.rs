@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use ipfs::IpfsTypes;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -159,14 +159,20 @@ pub async fn connected_to_peer<T: IpfsTypes>(
     Ok(connected_peer || subscribed_peer)
 }
 
-pub async fn discover_peer<T: IpfsTypes>(ipfs: ipfs::Ipfs<T>, did: &DID) -> anyhow::Result<()> {
+pub async fn discover_peer<T: IpfsTypes>(
+    ipfs: ipfs::Ipfs<T>,
+    own_did: &DID,
+    did: &DID,
+) -> anyhow::Result<()> {
     let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
+    let own_peer_id = did_to_libp2p_pub(&own_did)?.to_peer_id();
 
     match ipfs
         .peers()
         .await?
         .iter()
         .map(|conn| conn.addr.peer_id)
+        .filter(|peer| own_peer_id.ne(peer))
         .any(|peer| peer == peer_id)
     {
         true => return Ok(()),

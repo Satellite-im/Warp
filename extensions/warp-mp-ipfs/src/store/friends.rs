@@ -990,13 +990,25 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 &request.to(),
             )
             .await?;
-            
+
             if !connected {
-                if let Err(e) = self.ipfs.find_peer(peer_id).await {
+                let res = match tokio::time::timeout(
+                    Duration::from_secs(2),
+                    self.ipfs.find_peer(peer_id),
+                )
+                .await
+                {
+                    Ok(res) => res,
+                    Err(e) => Err(anyhow::anyhow!("{}", e.to_string())),
+                };
+
+                if let Err(_e) = res
+                {
                     let ipfs = self.ipfs.clone();
                     let pubkey = request.to();
+                    let own = (*self.did_key).clone();
                     tokio::spawn(async move {
-                        if let Err(e) = super::discover_peer(ipfs, &pubkey).await {
+                        if let Err(e) = super::discover_peer(ipfs, &own, &pubkey).await {
                             error!("Error discoverying peer: {e}");
                         }
                     });

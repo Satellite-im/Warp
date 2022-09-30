@@ -608,6 +608,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 old_cid = Some(cid);
             };
 
+            //TODO: Build out ipld object with extracted data (eg images) and store them directly with the cid
             info!("Converting identity to ipld");
             let ipld = to_ipld(&identity).map_err(anyhow::Error::from)?;
             info!("Storing identity into ipfd");

@@ -180,6 +180,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
                             //     }
                             //     continue;
                             // }
+
+                            //NOTE: Until rust-ipfs is modified to timeout if unable to find blocks, get_dag or get_block may
+                            //      stall due to it sending a package over bitswap and waiting for a response.
+                            //      It would be best to use tokio to timeout the function after 30 to 60 seconds
                             if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
                                 if let Ok(identity) = data.decode::<Identity>() {
                                     //Validate public key against peer that sent it
@@ -366,49 +370,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn lookup(&self, lookup: LookupBy) -> Result<Vec<Identity>, Error> {
-        if let Some(ident) = self.identity.read().clone() {
-            match lookup {
-                LookupBy::DidKey(pubkey) if ident.did_key() == *pubkey => return Ok(vec![ident]),
-                LookupBy::Username(username)
-                    if ident
-                        .username()
-                        .to_lowercase()
-                        .contains(&username.to_lowercase()) =>
-                {
-                    return Ok(vec![ident])
-                }
-                LookupBy::Username(username) if username.contains('#') => {
-                    let split_data = username.split('#').collect::<Vec<&str>>();
-
-                    let ident = if split_data.len() != 2 {
-                        if ident.username().to_lowercase() == username.to_lowercase() {
-                            vec![ident]
-                        } else {
-                            vec![]
-                        }
-                    } else {
-                        match (
-                            split_data.first().map(|s| s.to_lowercase()),
-                            split_data.last().map(|s| s.to_lowercase()),
-                        ) {
-                            (Some(name), Some(code)) => {
-                                if ident.username().to_lowercase().eq(&name)
-                                    && ident.short_id().to_lowercase().eq(&code)
-                                {
-                                    vec![ident]
-                                } else {
-                                    vec![]
-                                }
-                            }
-                            _ => vec![],
-                        }
-                    };
-                    return Ok(ident);
-                }
-                LookupBy::ShortId(id) if ident.short_id().eq(&id) => return Ok(vec![ident]),
-                _ => {}
-            };
-        }
+        let own_did = self
+            .identity
+            .read()
+            .clone()
+            .map(|identity| identity.did_key())
+            .ok_or_else(|| {
+                Error::OtherWithContext("Identity store may not be initialized".into())
+            })?;
 
         let idents = match &lookup {
             //Note: If this returns more than one identity, then either
@@ -418,15 +387,29 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 if let Discovery::Direct = self.discovery {
                     let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
-                    let connected =
-                        connected_to_peer(self.ipfs.clone(), Some(IDENTITY_BROADCAST.into()), pubkey)
-                            .await?;
+                    let connected = connected_to_peer(
+                        self.ipfs.clone(),
+                        Some(IDENTITY_BROADCAST.into()),
+                        pubkey,
+                    )
+                    .await?;
                     if !connected {
-                        if let Err(e) = self.ipfs.find_peer(peer_id).await {
+                        let res = match tokio::time::timeout(
+                            Duration::from_secs(2),
+                            self.ipfs.find_peer(peer_id),
+                        )
+                        .await
+                        {
+                            Ok(res) => res,
+                            Err(e) => Err(anyhow::anyhow!("{}", e.to_string())),
+                        };
+
+                        if let Err(_e) = res {
                             let ipfs = self.ipfs.clone();
                             let pubkey = pubkey.clone();
                             tokio::spawn(async move {
-                                if let Err(e) = super::discover_peer(ipfs, &*pubkey).await {
+                                if let Err(e) = super::discover_peer(ipfs, &own_did, &*pubkey).await
+                                {
                                     error!("Error discoverying peer: {e}");
                                 }
                             });
