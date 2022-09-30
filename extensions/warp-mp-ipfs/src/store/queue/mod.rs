@@ -20,11 +20,7 @@ pub struct Queue {
 impl Queue {
     pub fn new<T: IpfsTypes>(ipfs: Ipfs<T>, queue: Vec<QueueItem>) -> (Queue, QueueFuture<T>) {
         let (tx, rx) = mpsc::channel(100);
-        let future = QueueFuture {
-            ipfs,
-            rx,
-            queue,
-        };
+        let future = QueueFuture { ipfs, rx, queue };
 
         let queue = Queue { tx };
 
@@ -86,74 +82,78 @@ impl<T: IpfsTypes> Future for QueueFuture<T> {
         cx: &mut std::task::Context,
     ) -> std::task::Poll<Self::Output> {
         let ipfs = self.ipfs.clone();
+        let duration = Duration::from_secs(1);
+        let mut interval = tokio::time::interval(duration);
         loop {
-            loop {
-                let task = match Pin::new(&mut self.rx).poll_recv(cx) {
-                    Poll::Ready(Some(task)) => task,
-                    Poll::Ready(None) => return Poll::Ready(()),
-                    Poll::Pending => break,
-                };
+            if Pin::new(&mut interval).poll_tick(cx).is_ready() {
+                loop {
+                    let task = match Pin::new(&mut self.rx).poll_recv(cx) {
+                        Poll::Ready(Some(task)) => task,
+                        Poll::Ready(None) => return Poll::Ready(()),
+                        Poll::Pending => break,
+                    };
 
-                match task {
-                    QueueEvents::Add(item, ret) => {
-                        self.queue.push(item);
-                        let _ = ret.send(Ok(()));
-                    }
-                    QueueEvents::Remove(item, ret) => {
-                        let index = self.queue.iter().position(|i| item.eq(i));
-                        match index {
-                            Some(index) => {
-                                self.queue.remove(index);
-                                let _ = ret.send(Ok(()));
-                            }
-                            None => {
-                                let _ = ret.send(Ok(()));
+                    match task {
+                        QueueEvents::Add(item, ret) => {
+                            self.queue.push(item);
+                            let _ = ret.send(Ok(()));
+                        }
+                        QueueEvents::Remove(item, ret) => {
+                            let index = self.queue.iter().position(|i| item.eq(i));
+                            match index {
+                                Some(index) => {
+                                    self.queue.remove(index);
+                                    let _ = ret.send(Ok(()));
+                                }
+                                None => {
+                                    let _ = ret.send(Ok(()));
+                                }
                             }
                         }
-                    }
-                    QueueEvents::AddList(list) => {
-                        self.queue.extend(list);
-                    }
-                    QueueEvents::List(ret) => {
-                        let _ = ret.send(self.queue.clone());
+                        QueueEvents::AddList(list) => {
+                            self.queue.extend(list);
+                        }
+                        QueueEvents::List(ret) => {
+                            let _ = ret.send(self.queue.clone());
+                        }
                     }
                 }
-            }
 
-            //TODO: Poll tokio timer before starting this task and reset it in case duration ever change in the future
-            for item in self.queue.iter_mut().filter(|q| !q.2) {
-                let QueueItem(peer, data, done) = item;
+                //TODO: Poll tokio timer before starting this task and reset it in case duration ever change in the future
+                for item in self.queue.iter_mut().filter(|q| !q.2) {
+                    let QueueItem(peer, data, done) = item;
 
-                if let Poll::Ready(Ok(peers)) =
-                    Box::pin(ipfs.pubsub_peers(Some(FRIENDS_BROADCAST.into())))
-                        .as_mut()
-                        .poll(cx)
-                {
-                    if peers.contains(peer) {
-                        let bytes = match serde_json::to_vec(&data) {
-                            Ok(bytes) => bytes,
-                            Err(e) => {
-                                error!("Error serialzing queue request into bytes: {e}");
+                    if let Poll::Ready(Ok(peers)) =
+                        Box::pin(ipfs.pubsub_peers(Some(FRIENDS_BROADCAST.into())))
+                            .as_mut()
+                            .poll(cx)
+                    {
+                        if peers.contains(peer) {
+                            let bytes = match serde_json::to_vec(&data) {
+                                Ok(bytes) => bytes,
+                                Err(e) => {
+                                    error!("Error serialzing queue request into bytes: {e}");
+                                    continue;
+                                }
+                            };
+
+                            if let Poll::Ready(Err(e)) =
+                                Box::pin(ipfs.pubsub_publish(FRIENDS_BROADCAST.into(), bytes))
+                                    .as_mut()
+                                    .poll(cx)
+                            {
+                                error!("Error sending request to {}: {}", peer, e);
                                 continue;
                             }
-                        };
 
-                        if let Poll::Ready(Err(e)) =
-                            Box::pin(ipfs.pubsub_publish(FRIENDS_BROADCAST.into(), bytes))
-                                .as_mut()
-                                .poll(cx)
-                        {
-                            error!("Error sending request to {}: {}", peer, e);
-                            continue;
+                            *done = true;
                         }
-
-                        *done = true;
                     }
                 }
-            }
 
-            // Remove any items marked done
-            self.queue.retain(|item| !item.2)
+                // Remove any items marked done
+                self.queue.retain(|item| !item.2)
+            }
         }
     }
 }
