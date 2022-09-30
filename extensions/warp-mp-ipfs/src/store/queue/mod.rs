@@ -18,9 +18,26 @@ pub struct Queue {
 }
 
 impl Queue {
+    pub async fn new<T: IpfsTypes>(ipfs: Ipfs<T>, queue: Vec<QueueItem>) -> (Queue, QueueFuture<T>) {
+        let (tx, rx) = mpsc::channel(10);
+        let future = QueueFuture {
+            ipfs,
+            rx,
+            _duration: Duration::from_secs(1),
+            queue
+        };
+
+        let queue = Queue { tx };
+
+        (queue, future)
+    }
     pub async fn add_request(&self, item: QueueItem) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
-        self.tx.clone().send(QueueEvents::AddRequest(item, tx)).await.map_err(anyhow::Error::from)?;
+        self.tx
+            .clone()
+            .send(QueueEvents::Add(item, tx))
+            .await
+            .map_err(anyhow::Error::from)?;
         rx.await.map_err(anyhow::Error::from)?
     }
 }
@@ -34,11 +51,12 @@ pub struct QueueFuture<T: IpfsTypes> {
 
 #[derive(Debug)]
 pub enum QueueEvents {
-    AddRequest(QueueItem, oneshot::Sender<Result<(), Error>>),
-    RemoveRequest(QueueItem, oneshot::Sender<Result<(), Error>>),
+    Add(QueueItem, oneshot::Sender<Result<(), Error>>),
+    Remove(QueueItem, oneshot::Sender<Result<(), Error>>),
+    List(oneshot::Sender<Vec<QueueItem>>),
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq, Clone)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone)]
 pub struct QueueItem(PeerId, Sata, bool);
 
 impl<T: IpfsTypes> Future for QueueFuture<T> {
@@ -49,6 +67,36 @@ impl<T: IpfsTypes> Future for QueueFuture<T> {
     ) -> std::task::Poll<Self::Output> {
         let ipfs = self.ipfs.clone();
         loop {
+            loop {
+                let task = match Pin::new(&mut self.rx).poll_recv(cx) {
+                    Poll::Ready(Some(task)) => task,
+                    Poll::Ready(None) => return Poll::Ready(()),
+                    Poll::Pending => break,
+                };
+
+                match task {
+                    QueueEvents::Add(item, ret) => {
+                        self.queue.push(item);
+                        let _ = ret.send(Ok(()));
+                    }
+                    QueueEvents::Remove(item, ret) => {
+                        let index = self.queue.iter().position(|i| item.eq(i));
+                        match index {
+                            Some(index) => {
+                                self.queue.remove(index);
+                                let _ = ret.send(Ok(()));
+                            }
+                            None => {
+                                let _ = ret.send(Ok(()));
+                            }
+                        }
+                    }
+                    QueueEvents::List(ret) => {
+                        let _ = ret.send(self.queue.clone());
+                    }
+                }
+            }
+
             //TODO: Poll tokio timer before starting this task and reset it in case duration ever change in the future
             for item in self.queue.iter_mut().filter(|q| !q.2) {
                 let QueueItem(peer, data, done) = item;
@@ -81,22 +129,8 @@ impl<T: IpfsTypes> Future for QueueFuture<T> {
                 }
             }
 
-            loop {
-                let task = match Pin::new(&mut self.rx).poll_recv(cx) {
-                    Poll::Ready(Some(task)) => task,
-                    Poll::Ready(None) => return Poll::Ready(()),
-                    Poll::Pending => break,
-                };
-
-                match task {
-                    QueueEvents::AddRequest(item, ret) => {
-                        let _ = ret.send(Err(Error::Unimplemented));
-                    },
-                    QueueEvents::RemoveRequest(item, ret) => {
-                        let _ = ret.send(Err(Error::Unimplemented));
-                    }
-                }
-            }
+            // Remove any items marked done
+            self.queue.retain(|item| !item.2)
         }
     }
 }
