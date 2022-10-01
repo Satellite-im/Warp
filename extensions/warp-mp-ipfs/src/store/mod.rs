@@ -1,5 +1,3 @@
-pub mod queue;
-
 use std::{sync::Arc, time::Duration};
 
 use ipfs::{IpfsTypes, PeerId};
