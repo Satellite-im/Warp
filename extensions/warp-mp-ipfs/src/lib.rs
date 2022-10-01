@@ -443,6 +443,19 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 return Err(Error::IdentityExist);
             }
 
+            if let Some(u) = username.map(|u| u.trim()) {
+                let username_len = u.len();
+
+                if username_len <= 3 || username_len >= 64 {
+                    return Err(Error::InvalidLength {
+                        context: "username".into(),
+                        current: username_len,
+                        minimum: Some(4),
+                        maximum: Some(64),
+                    });
+                }
+            }
+
             if let Some(phrase) = passphrase {
                 info!("Passphrase exist");
                 let mut tesseract = self.tesseract.clone();
@@ -566,7 +579,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
             ) {
                 (Some(username), None, None, None) => {
                     let len = username.chars().count();
-                    if len <= 4 || len >= 64 {
+                    if len <= 3 || len >= 64 {
                         return Err(Error::InvalidLength {
                             context: "username".into(),
                             current: len,

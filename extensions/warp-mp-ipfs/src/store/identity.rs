@@ -454,8 +454,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
     pub async fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
-        self
-            .lookup(LookupBy::DidKey(Box::new(did.clone())))?
+        self.lookup(LookupBy::DidKey(Box::new(did.clone())))?
             .first()
             .cloned()
             .ok_or(Error::IdentityDoesntExist)?;
@@ -559,7 +558,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     pub fn validate_identity(&self, identity: &Identity) -> Result<(), Error> {
         {
             let len = identity.username().chars().count();
-            if len <= 4 || len >= 64 {
+            if len <= 3 || len >= 64 {
                 return Err(Error::InvalidLength {
                     context: "username".into(),
                     current: len,
