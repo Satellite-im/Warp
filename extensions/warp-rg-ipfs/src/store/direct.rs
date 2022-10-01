@@ -841,7 +841,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .map(|s| s.chars().count())
             .sum();
 
-        if lines_value_length >= 4096 {
+        if lines_value_length == 0 || lines_value_length > 4096 {
             return Err(Error::InvalidLength {
                 context: "message".into(),
                 current: lines_value_length,
@@ -906,7 +906,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .map(|s| s.chars().count())
             .sum();
 
-        if lines_value_length >= 4096 {
+        if lines_value_length == 0 || lines_value_length > 4096 {
             return Err(Error::InvalidLength {
                 context: "message".into(),
                 current: lines_value_length,
@@ -964,7 +964,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .map(|s| s.chars().count())
             .sum();
 
-        if lines_value_length >= 4096 {
+        if lines_value_length == 0 || lines_value_length > 4096 {
             return Err(Error::InvalidLength {
                 context: "message".into(),
                 current: lines_value_length,
