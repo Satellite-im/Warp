@@ -30,8 +30,8 @@ use crate::Persistent;
 
 use super::identity::{IdentityStore, LookupBy};
 use super::{
-    did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, FRIENDS_BROADCAST,
-    IDENTITY_BROADCAST, PeerConnectionType,
+    did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, PeerConnectionType,
+    FRIENDS_BROADCAST, IDENTITY_BROADCAST,
 };
 
 pub struct FriendsStore<T: IpfsTypes> {
@@ -522,17 +522,16 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                         }
                                     }
                                     FriendRequestStatus::Pending => {
-                                        if let Err(e) = store.profile.write().set_incoming_request(&data) {
-                                            error!("Error setting incoming request: {e}");
-                                            continue
-                                        }
+                                                if let Err(e) = store.profile.write().set_incoming_request(&data) {
+                                                    error!("Error setting incoming request: {e}");
+                                                    continue
+                                                }
 
-                                        if let Some(path) = store.path.as_ref() {
-                                            if let Err(e) = store.profile.write().request_to_file(path).await {
-                                                error!("Error saving request: {e}");
-                                                continue
-                                            }
-                                        }
+                                                if let Some(path) = store.path.as_ref() {
+                                                    if let Err(e) = store.profile.write().request_to_file(path).await {
+                                                        error!("Error saving request: {e}");
+                                                    }
+                                                }
                                     },
                                     FriendRequestStatus::Denied => {
                                         let index = match store.profile.read().requests().iter().position(|request| {
