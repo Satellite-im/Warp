@@ -159,11 +159,10 @@ pub async fn connected_to_peer<T: IpfsTypes>(
     let mut subscribed_peer = false;
 
     let connected_peer = ipfs
-        .peers()
+        .connected()
         .await?
         .iter()
-        .map(|conn| conn.addr.peer_id)
-        .any(|peer| peer == peer_id);
+        .any(|peer| *peer == peer_id);
 
     if let Some(topic) = topic {
         subscribed_peer = ipfs
@@ -189,12 +188,11 @@ pub async fn discover_peer<T: IpfsTypes>(
     let own_peer_id = did_to_libp2p_pub(own_did)?.to_peer_id();
 
     match ipfs
-        .peers()
+        .connected()
         .await?
         .iter()
-        .map(|conn| conn.addr.peer_id)
         .filter(|peer| own_peer_id.ne(peer))
-        .any(|peer| peer == peer_id)
+        .any(|peer| *peer == peer_id)
     {
         true => return Ok(()),
         false => {}
