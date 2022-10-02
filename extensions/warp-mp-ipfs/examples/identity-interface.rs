@@ -26,6 +26,8 @@ struct Opt {
     experimental_node: bool,
     #[clap(long)]
     direct: bool,
+    #[clap(long)]
+    mdns: bool,
 }
 
 fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
@@ -43,6 +45,7 @@ async fn account(
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     experimental: bool,
     direct: bool,
+    mdns: bool,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let mut tesseract = Tesseract::default();
     tesseract
@@ -52,7 +55,7 @@ async fn account(
     if direct {
         config.store_setting.discovery = Discovery::Direct;
     }
-
+    config.ipfs_setting.mdns.enable = mdns;
     let mut account = ipfs_identity_temporary(Some(config), tesseract, cache).await?;
     account.create_identity(username, None)?;
     Ok(Box::new(account))
@@ -64,6 +67,7 @@ async fn account_persistent<P: AsRef<Path>>(
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     experimental: bool,
     direct: bool,
+    mdns: bool,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let path = path.as_ref();
     let mut tesseract = match Tesseract::from_file(path.join("tdatastore")) {
@@ -83,6 +87,7 @@ async fn account_persistent<P: AsRef<Path>>(
     if direct {
         config.store_setting.discovery = Discovery::Direct;
     }
+    config.ipfs_setting.mdns.enable = mdns;
     let mut account = ipfs_identity_persistent(config, tesseract, cache).await?;
     if account.get_own_identity().is_err() {
         account.create_identity(username, None)?;
@@ -108,9 +113,9 @@ async fn main() -> anyhow::Result<()> {
 
     let mut account = match opt.path.as_ref() {
         Some(path) => {
-            account_persistent(None, path, cache, opt.experimental_node, opt.direct).await?
+            account_persistent(None, path, cache, opt.experimental_node, opt.direct, opt.mdns).await?
         }
-        None => account(None, cache, opt.experimental_node, opt.direct).await?,
+        None => account(None, cache, opt.experimental_node, opt.direct, opt.mdns).await?,
     };
 
     println!("Obtaining identity....");
