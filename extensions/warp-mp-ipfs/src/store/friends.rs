@@ -991,7 +991,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             if connected != PeerConnectionType::SubscribedAndConnected {
                 let res = match tokio::time::timeout(
                     Duration::from_secs(2),
-                    self.ipfs.find_peer(peer_id),
+                    self.ipfs.find_peer_info(peer_id),
                 )
                 .await
                 {

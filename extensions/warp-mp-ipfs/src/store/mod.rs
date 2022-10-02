@@ -134,7 +134,7 @@ pub async fn discovery<T: IpfsTypes, S: AsRef<str>>(
 
 pub enum PeerType {
     PeerId(PeerId),
-    DID(DID)
+    DID(DID),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -142,9 +142,10 @@ pub enum PeerConnectionType {
     SubscribedAndConnected,
     Subscribed,
     Connected,
-    NotConnected
+    NotConnected,
 }
 
+#[inline]
 pub async fn connected_to_peer<T: IpfsTypes>(
     ipfs: ipfs::Ipfs<T>,
     topic: Option<String>,
@@ -152,7 +153,7 @@ pub async fn connected_to_peer<T: IpfsTypes>(
 ) -> anyhow::Result<PeerConnectionType> {
     let peer_id = match pkey {
         PeerType::DID(did) => did_to_libp2p_pub(&did)?.to_peer_id(),
-        PeerType::PeerId(peer) => peer
+        PeerType::PeerId(peer) => peer,
     };
 
     let mut subscribed_peer = false;
@@ -171,11 +172,11 @@ pub async fn connected_to_peer<T: IpfsTypes>(
             .iter()
             .any(|p| *p == peer_id);
     }
-   Ok(match (connected_peer, subscribed_peer) {
+    Ok(match (connected_peer, subscribed_peer) {
         (true, true) => PeerConnectionType::SubscribedAndConnected,
         (true, false) => PeerConnectionType::Connected,
         (false, true) => PeerConnectionType::Subscribed,
-        (false, false) => PeerConnectionType::NotConnected
+        (false, false) => PeerConnectionType::NotConnected,
     })
 }
 
@@ -200,16 +201,10 @@ pub async fn discover_peer<T: IpfsTypes>(
     };
 
     loop {
-        match ipfs.find_peer(peer_id).await {
-            Ok(_) => {
-                //Maybe wait and check to see if we can connect after?
-                break;
-            }
-            Err(e) => {
-                error!("Error discovering peer: {e}");
-            }
+        if ipfs.find_peer_info(peer_id).await.is_ok() {
+            break;
         }
-        tokio::time::sleep(Duration::from_secs(4)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
     Ok(())
 }
