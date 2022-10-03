@@ -119,34 +119,6 @@ impl InternalRequest {
 
         Ok(())
     }
-
-    pub fn from(&self) -> DID {
-        match self {
-            InternalRequest::In(req) => req.from(),
-            InternalRequest::Out(req) => req.from(),
-        }
-    }
-
-    pub fn to(&self) -> DID {
-        match self {
-            InternalRequest::In(req) => req.to(),
-            InternalRequest::Out(req) => req.to(),
-        }
-    }
-
-    pub fn status(&self) -> FriendRequestStatus {
-        match self {
-            InternalRequest::In(req) => req.status(),
-            InternalRequest::Out(req) => req.status(),
-        }
-    }
-
-    pub fn date(&self) -> DateTime<Utc> {
-        match self {
-            InternalRequest::In(req) => req.date(),
-            InternalRequest::Out(req) => req.date(),
-        }
-    }
 }
 
 impl InternalProfile {
@@ -839,6 +811,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 error!("Error saving friends list: {e}");
             }
         }
+
         // Since we want to broadcast the remove request, banning the peer after would not allow that to happen
         // Although this may get uncomment in the future to block connections regardless if its sent or not, or
         // if we decide to send the request through a relay to broadcast it to the peer, however
