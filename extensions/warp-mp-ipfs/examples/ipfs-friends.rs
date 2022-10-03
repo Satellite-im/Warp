@@ -13,8 +13,6 @@ async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    //Note: This uses mdns for this example. This example will not work if the system does not support mdns. This will change in the future
-    //      The internal store will broadcast at 5ms but ideally it would want to be set to 100ms
     let config = MpIpfsConfig::development();
     let mut account = ipfs_identity_temporary(Some(config), tesseract, None).await?;
     account.create_identity(username, None)?;
