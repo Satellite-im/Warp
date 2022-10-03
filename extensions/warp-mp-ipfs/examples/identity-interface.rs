@@ -12,7 +12,7 @@ use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
-use warp_mp_ipfs::config::MpIpfsConfig;
+use warp_mp_ipfs::config::{Discovery, MpIpfsConfig};
 use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
 use warp_pd_flatfile::FlatfileStorage;
 use warp_pd_stretto::StrettoClient;
@@ -24,6 +24,10 @@ struct Opt {
     path: Option<PathBuf>,
     #[clap(long)]
     experimental_node: bool,
+    #[clap(long)]
+    direct: bool,
+    #[clap(long)]
+    mdns: bool,
 }
 
 fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
@@ -40,14 +44,18 @@ async fn account(
     username: Option<&str>,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     experimental: bool,
+    direct: bool,
+    mdns: bool,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let mut tesseract = Tesseract::default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    //Note: This uses mdns for this example. This example will not work if the system does not support mdns. This will change in the future
-    //      The internal store will broadcast at 5ms but ideally it would want to be set to 100ms
-    let config = MpIpfsConfig::testing(experimental);
+    let mut config = MpIpfsConfig::testing(experimental);
+    if direct {
+        config.store_setting.discovery = Discovery::Direct;
+    }
+    config.ipfs_setting.mdns.enable = mdns;
     let mut account = ipfs_identity_temporary(Some(config), tesseract, cache).await?;
     account.create_identity(username, None)?;
     Ok(Box::new(account))
@@ -58,6 +66,8 @@ async fn account_persistent<P: AsRef<Path>>(
     path: P,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     experimental: bool,
+    direct: bool,
+    mdns: bool,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let path = path.as_ref();
     let mut tesseract = match Tesseract::from_file(path.join("tdatastore")) {
@@ -73,7 +83,11 @@ async fn account_persistent<P: AsRef<Path>>(
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    let config = MpIpfsConfig::production(&path, experimental);
+    let mut config = MpIpfsConfig::production(&path, experimental);
+    if direct {
+        config.store_setting.discovery = Discovery::Direct;
+    }
+    config.ipfs_setting.mdns.enable = mdns;
     let mut account = ipfs_identity_persistent(config, tesseract, cache).await?;
     if account.get_own_identity().is_err() {
         account.create_identity(username, None)?;
@@ -98,8 +112,10 @@ async fn main() -> anyhow::Result<()> {
     let cache = cache_setup(opt.path.clone()).ok();
 
     let mut account = match opt.path.as_ref() {
-        Some(path) => account_persistent(None, path, cache, opt.experimental_node).await?,
-        None => account(None, cache, opt.experimental_node).await?,
+        Some(path) => {
+            account_persistent(None, path, cache, opt.experimental_node, opt.direct, opt.mdns).await?
+        }
+        None => account(None, cache, opt.experimental_node, opt.direct, opt.mdns).await?,
     };
 
     println!("Obtaining identity....");

@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{store::did_to_libp2p_pub, Persistent};
+use crate::{config::Discovery, store::did_to_libp2p_pub, Persistent};
 use futures::{SinkExt, StreamExt, TryFutureExt};
 use ipfs::{Ipfs, IpfsPath, IpfsTypes, Keypair, PeerId};
 use libipld::{
@@ -25,7 +25,7 @@ use warp::{
     tesseract::Tesseract,
 };
 
-use super::{libp2p_pub_to_did, IDENTITY_BROADCAST};
+use super::{connected_to_peer, libp2p_pub_to_did, PeerType, IDENTITY_BROADCAST, PeerConnectionType};
 
 pub struct IdentityStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
@@ -39,6 +39,8 @@ pub struct IdentityStore<T: IpfsTypes> {
     cache: Arc<RwLock<Vec<Identity>>>,
 
     seen: Arc<RwLock<HashSet<PeerId>>>,
+
+    discovery: Discovery,
 
     check_seen: Arc<AtomicBool>,
 
@@ -60,6 +62,7 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
             seen: self.seen.clone(),
             start_event: self.start_event.clone(),
             end_event: self.end_event.clone(),
+            discovery: self.discovery.clone(),
             check_seen: self.check_seen.clone(),
             tesseract: self.tesseract.clone(),
         }
@@ -79,6 +82,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         path: Option<PathBuf>,
         tesseract: Tesseract,
         interval: u64,
+        discovery: Discovery,
     ) -> Result<Self, Error> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -107,6 +111,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             seen,
             start_event,
             end_event,
+            discovery,
             check_seen,
             tesseract,
         };
@@ -175,6 +180,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
                             //     }
                             //     continue;
                             // }
+
+                            //NOTE: Until rust-ipfs is modified to timeout if unable to find blocks, get_dag or get_block may
+                            //      stall due to it sending a package over bitswap and waiting for a response.
+                            //      It would be best to use tokio to timeout the function after 30 to 60 seconds
                             if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
                                 if let Ok(identity) = data.decode::<Identity>() {
                                     //Validate public key against peer that sent it
@@ -296,8 +305,21 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 }
             }
         });
+        if let Discovery::Provider(context) = &store.discovery {
+            let ipfs = store.ipfs.clone();
+            let context = context.clone().unwrap_or_else(|| "warp-mp-ipfs".into());
+            tokio::spawn(async {
+                if let Err(e) = super::discovery(ipfs, context).await {
+                    error!("Error performing topic discovery: {e}");
+                }
+            });
+        };
         tokio::task::yield_now().await;
         Ok(store)
+    }
+
+    pub fn discovery_type(&self) -> Discovery {
+        self.discovery.clone()
     }
 
     fn cache(&self) -> Vec<Identity> {
@@ -347,61 +369,60 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(identity)
     }
 
-    pub fn lookup(&self, lookup: LookupBy) -> Result<Vec<Identity>, Error> {
-        if let Some(ident) = self.identity.read().clone() {
-            match lookup {
-                LookupBy::DidKey(pubkey) if ident.did_key() == *pubkey => return Ok(vec![ident]),
-                LookupBy::Username(username)
-                    if ident
-                        .username()
-                        .to_lowercase()
-                        .contains(&username.to_lowercase()) =>
-                {
-                    return Ok(vec![ident])
-                }
-                LookupBy::Username(username) if username.contains('#') => {
-                    let split_data = username.split('#').collect::<Vec<&str>>();
-
-                    let ident = if split_data.len() != 2 {
-                        if ident.username().to_lowercase() == username.to_lowercase() {
-                            vec![ident]
-                        } else {
-                            vec![]
-                        }
-                    } else {
-                        match (
-                            split_data.first().map(|s| s.to_lowercase()),
-                            split_data.last().map(|s| s.to_lowercase()),
-                        ) {
-                            (Some(name), Some(code)) => {
-                                if ident.username().to_lowercase().eq(&name)
-                                    && ident.short_id().to_lowercase().eq(&code)
-                                {
-                                    vec![ident]
-                                } else {
-                                    vec![]
-                                }
-                            }
-                            _ => vec![],
-                        }
-                    };
-                    return Ok(ident);
-                }
-                LookupBy::ShortId(id) if ident.short_id().eq(&id) => return Ok(vec![ident]),
-                _ => {}
-            };
-        }
+    pub async fn lookup(&self, lookup: LookupBy) -> Result<Vec<Identity>, Error> {
+        let own_did = self
+            .identity
+            .read()
+            .clone()
+            .map(|identity| identity.did_key())
+            .ok_or_else(|| {
+                Error::OtherWithContext("Identity store may not be initialized".into())
+            })?;
 
         let idents = match &lookup {
             //Note: If this returns more than one identity, then either
             //      A) The memory cache never got updated and somehow bypassed the check likely caused from a race condition; or
             //      B) There is literally 2 identities, which should be impossible because of A
-            LookupBy::DidKey(pubkey) => self
-                .cache()
-                .iter()
-                .filter(|ident| ident.did_key() == *pubkey.clone())
-                .cloned()
-                .collect::<Vec<_>>(),
+            LookupBy::DidKey(pubkey) => {
+                if let Discovery::Direct = self.discovery {
+                    let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
+
+                    let connected = connected_to_peer(
+                        self.ipfs.clone(),
+                        Some(IDENTITY_BROADCAST.into()),
+                        PeerType::PeerId(peer_id),
+                    )
+                    .await?;
+                    if connected != PeerConnectionType::SubscribedAndConnected {
+                        let res = match tokio::time::timeout(
+                            Duration::from_secs(2),
+                            self.ipfs.find_peer_info(peer_id),
+                        )
+                        .await
+                        {
+                            Ok(res) => res,
+                            Err(e) => Err(anyhow::anyhow!("{}", e.to_string())),
+                        };
+
+                        if let Err(_e) = res {
+                            let ipfs = self.ipfs.clone();
+                            let pubkey = pubkey.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = super::discover_peer(ipfs, &own_did, &*pubkey).await
+                                {
+                                    error!("Error discoverying peer: {e}");
+                                }
+                            });
+                            tokio::task::yield_now().await;
+                        }
+                    }
+                }
+                self.cache()
+                    .iter()
+                    .filter(|ident| ident.did_key() == *pubkey.clone())
+                    .cloned()
+                    .collect::<Vec<_>>()
+            }
             LookupBy::Username(username) if username.contains('#') => {
                 let split_data = username.split('#').collect::<Vec<&str>>();
 
@@ -454,23 +475,24 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
     pub async fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
-        self.lookup(LookupBy::DidKey(Box::new(did.clone())))?
-            .first()
-            .cloned()
-            .ok_or(Error::IdentityDoesntExist)?;
+        if self.discovery_type() != Discovery::Direct {
+            self.lookup(LookupBy::DidKey(Box::new(did.clone())))
+                .await?
+                .first()
+                .cloned()
+                .ok_or(Error::IdentityDoesntExist)?;
+        }
 
-        let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
+        let connected = connected_to_peer(
+            self.ipfs.clone(),
+            Some(IDENTITY_BROADCAST.into()),
+            PeerType::DID(did.clone()),
+        )
+        .await?;
 
-        match self
-            .ipfs
-            .peers()
-            .await?
-            .iter()
-            .map(|conn| conn.addr.peer_id)
-            .any(|peer| peer == peer_id)
-        {
-            true => Ok(IdentityStatus::Online),
-            false => Ok(IdentityStatus::Offline),
+        match connected {
+            PeerConnectionType::SubscribedAndConnected | PeerConnectionType::Connected | PeerConnectionType::Subscribed => Ok(IdentityStatus::Online),
+            PeerConnectionType::NotConnected => Ok(IdentityStatus::Offline),
         }
     }
 
@@ -558,7 +580,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     pub fn validate_identity(&self, identity: &Identity) -> Result<(), Error> {
         {
             let len = identity.username().chars().count();
-            if len <= 3 || len >= 64 {
+            if len <= 4 || len >= 64 {
                 return Err(Error::InvalidLength {
                     context: "username".into(),
                     current: len,

@@ -24,17 +24,21 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender};
 use warp::tesseract::Tesseract;
 
-use crate::store::verify_serde_sig;
+use crate::config::Discovery;
+use crate::store::{connected_to_peer, verify_serde_sig, PeerType};
 use crate::Persistent;
 
 use super::identity::{IdentityStore, LookupBy};
 use super::{
-    did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde,
-    FRIENDS_BROADCAST,
+    did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, PeerConnectionType,
+    FRIENDS_BROADCAST, IDENTITY_BROADCAST,
 };
 
 pub struct FriendsStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
+
+    // Identity Store
+    identity: IdentityStore<T>,
 
     // keypair
     did_key: Arc<DID>,
@@ -114,34 +118,6 @@ impl InternalRequest {
         verify_serde_sig(self.from(), &request, &signature)?;
 
         Ok(())
-    }
-
-    pub fn from(&self) -> DID {
-        match self {
-            InternalRequest::In(req) => req.from(),
-            InternalRequest::Out(req) => req.from(),
-        }
-    }
-
-    pub fn to(&self) -> DID {
-        match self {
-            InternalRequest::In(req) => req.to(),
-            InternalRequest::Out(req) => req.to(),
-        }
-    }
-
-    pub fn status(&self) -> FriendRequestStatus {
-        match self {
-            InternalRequest::In(req) => req.status(),
-            InternalRequest::Out(req) => req.status(),
-        }
-    }
-
-    pub fn date(&self) -> DateTime<Utc> {
-        match self {
-            InternalRequest::In(req) => req.date(),
-            InternalRequest::Out(req) => req.date(),
-        }
     }
 }
 
@@ -329,6 +305,7 @@ impl<T: IpfsTypes> Clone for FriendsStore<T> {
         }
         Self {
             ipfs: self.ipfs.clone(),
+            identity: self.identity.clone(),
             did_key: self.did_key.clone(),
             path: self.path.clone(),
             end_event: self.end_event.clone(),
@@ -365,6 +342,7 @@ impl<T: IpfsTypes> Drop for FriendsStore<T> {
 impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn new(
         ipfs: Ipfs<T>,
+        identity: IdentityStore<T>,
         path: Option<PathBuf>,
         tesseract: Tesseract,
         interval: u64,
@@ -388,6 +366,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let store = Self {
             ipfs,
+            identity,
             did_key,
             path,
             end_event,
@@ -515,17 +494,16 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                         }
                                     }
                                     FriendRequestStatus::Pending => {
-                                        if let Err(e) = store.profile.write().set_incoming_request(&data) {
-                                            error!("Error setting incoming request: {e}");
-                                            continue
-                                        }
+                                                if let Err(e) = store.profile.write().set_incoming_request(&data) {
+                                                    error!("Error setting incoming request: {e}");
+                                                    continue
+                                                }
 
-                                        if let Some(path) = store.path.as_ref() {
-                                            if let Err(e) = store.profile.write().request_to_file(path).await {
-                                                error!("Error saving request: {e}");
-                                                continue
-                                            }
-                                        }
+                                                if let Some(path) = store.path.as_ref() {
+                                                    if let Err(e) = store.profile.write().request_to_file(path).await {
+                                                        error!("Error saving request: {e}");
+                                                    }
+                                                }
                                     },
                                     FriendRequestStatus::Denied => {
                                         let index = match store.profile.read().requests().iter().position(|request| {
@@ -585,8 +563,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         let list = store.queue.read().clone();
                         for item in list.iter() {
                             let Queue(peer, data) = item;
-                            if let Ok(peers) = store.ipfs.pubsub_peers(Some(FRIENDS_BROADCAST.into())).await {
-                                if peers.contains(peer) {
+                            if let Ok(crate::store::PeerConnectionType::SubscribedAndConnected) = connected_to_peer(store.ipfs.clone(), Some(FRIENDS_BROADCAST.into()), PeerType::PeerId(*peer)).await {
                                     let bytes = match serde_json::to_vec(&data) {
                                         Ok(bytes) => bytes,
                                         Err(e) => {
@@ -614,7 +591,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                     let _ = store.queue.write().remove(index);
 
                                     store.save_queue().await;
-                                }
                             }
                         }
                     }
@@ -835,6 +811,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 error!("Error saving friends list: {e}");
             }
         }
+
         // Since we want to broadcast the remove request, banning the peer after would not allow that to happen
         // Although this may get uncomment in the future to block connections regardless if its sent or not, or
         // if we decide to send the request through a relay to broadcast it to the peer, however
@@ -973,6 +950,42 @@ impl<T: IpfsTypes> FriendsStore<T> {
         save_to_disk: bool,
     ) -> Result<(), Error> {
         let remote_peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
+
+        if let Discovery::Direct = self.identity.discovery_type() {
+            let peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
+
+            let connected = super::connected_to_peer(
+                self.ipfs.clone(),
+                Some(IDENTITY_BROADCAST.into()),
+                PeerType::PeerId(remote_peer_id),
+            )
+            .await?;
+
+            if connected != PeerConnectionType::SubscribedAndConnected {
+                let res = match tokio::time::timeout(
+                    Duration::from_secs(2),
+                    self.ipfs.find_peer_info(peer_id),
+                )
+                .await
+                {
+                    Ok(res) => res,
+                    Err(e) => Err(anyhow::anyhow!("{}", e.to_string())),
+                };
+
+                if let Err(_e) = res {
+                    let ipfs = self.ipfs.clone();
+                    let pubkey = request.to();
+                    let own = (*self.did_key).clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = super::discover_peer(ipfs, &own, &pubkey).await {
+                            error!("Error discoverying peer: {e}");
+                        }
+                    });
+                    tokio::task::yield_now().await;
+                }
+            }
+        }
+
         if store_request {
             self.profile.write().set_outgoing_request(request)?;
         }

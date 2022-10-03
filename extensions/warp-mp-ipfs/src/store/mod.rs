@@ -1,6 +1,6 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use ipfs::IpfsTypes;
+use ipfs::{IpfsTypes, PeerId};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::log::error;
 use warp::{
@@ -68,9 +68,9 @@ pub enum Payload {
 }
 
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity::PublicKey> {
-    let pk = ipfs::libp2p::identity::PublicKey::Ed25519(ipfs::libp2p::identity::ed25519::PublicKey::decode(
-        &public_key.public_key_bytes(),
-    )?);
+    let pk = ipfs::libp2p::identity::PublicKey::Ed25519(
+        ipfs::libp2p::identity::ed25519::PublicKey::decode(&public_key.public_key_bytes())?,
+    );
     Ok(pk)
 }
 
@@ -130,4 +130,79 @@ pub async fn discovery<T: IpfsTypes, S: AsRef<str>>(
         };
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
+}
+
+pub enum PeerType {
+    PeerId(PeerId),
+    DID(DID),
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PeerConnectionType {
+    SubscribedAndConnected,
+    Subscribed,
+    Connected,
+    NotConnected,
+}
+
+#[inline]
+pub async fn connected_to_peer<T: IpfsTypes>(
+    ipfs: ipfs::Ipfs<T>,
+    topic: Option<String>,
+    pkey: PeerType,
+) -> anyhow::Result<PeerConnectionType> {
+    let peer_id = match pkey {
+        PeerType::DID(did) => did_to_libp2p_pub(&did)?.to_peer_id(),
+        PeerType::PeerId(peer) => peer,
+    };
+
+    let mut subscribed_peer = false;
+
+    let connected_peer = ipfs
+        .connected()
+        .await?
+        .iter()
+        .any(|peer| *peer == peer_id);
+
+    if let Some(topic) = topic {
+        subscribed_peer = ipfs
+            .pubsub_peers(Some(topic))
+            .await?
+            .iter()
+            .any(|p| *p == peer_id);
+    }
+    Ok(match (connected_peer, subscribed_peer) {
+        (true, true) => PeerConnectionType::SubscribedAndConnected,
+        (true, false) => PeerConnectionType::Connected,
+        (false, true) => PeerConnectionType::Subscribed,
+        (false, false) => PeerConnectionType::NotConnected,
+    })
+}
+
+pub async fn discover_peer<T: IpfsTypes>(
+    ipfs: ipfs::Ipfs<T>,
+    own_did: &DID,
+    did: &DID,
+) -> anyhow::Result<()> {
+    let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
+    let own_peer_id = did_to_libp2p_pub(own_did)?.to_peer_id();
+
+    match ipfs
+        .connected()
+        .await?
+        .iter()
+        .filter(|peer| own_peer_id.ne(peer))
+        .any(|peer| *peer == peer_id)
+    {
+        true => return Ok(()),
+        false => {}
+    };
+
+    loop {
+        if ipfs.find_peer_info(peer_id).await.is_ok() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    Ok(())
 }
