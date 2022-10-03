@@ -178,14 +178,7 @@ impl Default for MpIpfsConfig {
 
 impl MpIpfsConfig {
     pub fn development() -> MpIpfsConfig {
-        MpIpfsConfig {
-            path: None,
-            ipfs_setting: IpfsSetting {
-                mdns: Mdns { enable: true },
-                ..Default::default()
-            },
-            ..Default::default()
-        }
+        MpIpfsConfig::default()
     }
 
     pub fn testing(experimental: bool) -> MpIpfsConfig {
