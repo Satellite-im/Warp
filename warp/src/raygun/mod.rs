@@ -478,7 +478,7 @@ pub trait RayGun: RayGunEvents + Extension + Sync + Send + SingleHandle {
 
 #[async_trait::async_trait]
 pub trait RayGunEvents: Sync + Send {
-    async fn subscribe(&mut self) -> Result<BoxStream<'_, RayGunEventKind>, Error> {
+    async fn subscribe(&mut self) -> Result<BoxStream<'static, RayGunEventKind>, Error> {
         Err(Error::Unimplemented)
     }
 }
@@ -586,8 +586,8 @@ impl<T: ?Sized> RayGunEvents for Arc<RwLock<Box<T>>>
 where
     T: RayGunEvents,
 {
-    async fn subscribe(&mut self) -> Result<BoxStream<'_, RayGunEventKind>, Error> {
-        Err(Error::Unimplemented)
+    async fn subscribe(&mut self) -> Result<BoxStream<'static, RayGunEventKind>, Error> {
+        self.write().subscribe().await
     }
 }
 

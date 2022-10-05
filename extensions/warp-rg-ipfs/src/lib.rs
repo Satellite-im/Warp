@@ -6,15 +6,16 @@ mod store;
 
 use crate::spam_filter::SpamFilter;
 use config::RgIpfsConfig;
-use futures::pin_mut;
 use futures::stream::BoxStream;
 use futures::StreamExt;
+use futures::{pin_mut, Stream};
 use ipfs::libp2p::identity;
 use ipfs::IpfsTypes;
 use ipfs::{Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, TestTypes, Types, UninitializedIpfs};
 use std::any::Any;
 use std::ops::Deref;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -355,7 +356,7 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
 
 #[async_trait::async_trait]
 impl<T: IpfsTypes> RayGunEvents for IpfsMessaging<T> {
-    async fn subscribe(&mut self) -> Result<BoxStream<'_, RayGunEventKind>> {
+    async fn subscribe(&mut self) -> Result<BoxStream<'static, RayGunEventKind>> {
         let mut rx = self.tx.subscribe();
 
         let stream = async_stream::stream! {

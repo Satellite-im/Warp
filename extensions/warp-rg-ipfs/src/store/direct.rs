@@ -20,7 +20,8 @@ use warp::logging::tracing::{warn, Span};
 use warp::multipass::identity::FriendRequest;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    Conversation, EmbedState, Message, MessageOptions, PinState, Reaction, ReactionState, RayGunEventKind,
+    Conversation, EmbedState, Message, MessageOptions, PinState, RayGunEventKind, Reaction,
+    ReactionState,
 };
 use warp::sata::Sata;
 use warp::sync::{Arc, Mutex, RwLock};
@@ -230,6 +231,7 @@ impl DirectConversation {
         did: Arc<DID>,
         decrypted: Arc<AtomicBool>,
         filter: &Arc<Option<SpamFilter>>,
+        tx: BroardcastSender<RayGunEventKind>,
         stream: SubscriptionStream,
     ) {
         let mut convo = self.clone();
@@ -245,6 +247,8 @@ impl DirectConversation {
                                 &mut *convo.messages_mut(),
                                 &event,
                                 &filter,
+                                tx.clone(),
+                                MessageDirection::In,
                                 Default::default(),
                             ) {
                                 error!("Error processing message: {e}");
@@ -285,7 +289,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         discovery: bool,
         interval_ms: u64,
         event: BroardcastSender<RayGunEventKind>,
-        (check_spam, store_decrypted, allowed_unsigned_message, with_friends): (bool, bool, bool, bool),
+        (check_spam, store_decrypted, allowed_unsigned_message, with_friends): (
+            bool,
+            bool,
+            bool,
+            bool,
+        ),
     ) -> anyhow::Result<Self> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -361,6 +370,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                     store.did.clone(),
                                     store.store_decrypted.clone(),
                                     &store.spam_filter,
+                                    store.event.clone(),
                                     stream,
                                 );
                                 store.direct_conversation.write().push(conversation);
@@ -423,7 +433,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                             continue;
                                                         }
                                                     };
-                                                convo.start_task(store.did.clone(), store.store_decrypted.clone(), &store.spam_filter, stream);
+                                                convo.start_task(store.did.clone(), store.store_decrypted.clone(), &store.spam_filter, store.event.clone(), stream);
                                                 if let Some(path) = store.path.as_ref() {
                                                     convo.set_path(path);
                                                     if let Err(e) = convo.to_file((!store.store_decrypted.load(Ordering::SeqCst)).then_some(&*store.did)).await {
@@ -436,7 +446,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                 }
 
                                                 store.direct_conversation.write().push(convo);
-                                                
+
                                             }
                                             ConversationEvents::DeleteConversation(id) => {
                                                 trace!("Delete conversation event received for {id}");
@@ -481,6 +491,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                         error!("Error deleting conversation: {e}");
                                                     }
                                                     drop(conversation);
+                                                    if let Err(e) = store.event.send(RayGunEventKind::ConversationDeleted { conversation_id: id }) {
+                                                        error!("Error broadcasting event: {e}");
+                                                    }
                                                     trace!("Conversation deleted");
                                                 }
                                             }
@@ -599,6 +612,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             self.did.clone(),
             self.store_decrypted.clone(),
             &self.spam_filter,
+            self.event.clone(),
             stream,
         );
         if let Some(path) = self.path.as_ref() {
@@ -891,6 +905,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             &mut *conversation.messages_mut(),
             &event,
             &self.spam_filter,
+            self.event.clone(),
+            MessageDirection::Out,
             Default::default(),
         )?;
         warp::async_block_in_place_uncheck(
@@ -949,6 +965,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             &mut *conversation.messages_mut(),
             &event,
             &self.spam_filter,
+            self.event.clone(),
+            MessageDirection::Out,
             Default::default(),
         )?;
         warp::async_block_in_place_uncheck(
@@ -1014,6 +1032,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             &mut *conversation.messages_mut(),
             &event,
             &self.spam_filter,
+            self.event.clone(),
+            MessageDirection::Out,
             Default::default(),
         )?;
         warp::async_block_in_place_uncheck(
@@ -1036,6 +1056,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             &mut *conversation.messages_mut(),
             &event,
             &self.spam_filter,
+            self.event.clone(),
+            MessageDirection::Out,
             Default::default(),
         )?;
         warp::async_block_in_place_uncheck(
@@ -1064,6 +1086,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             &mut *conversation.messages_mut(),
             &event,
             &self.spam_filter,
+            self.event.clone(),
+            MessageDirection::Out,
             Default::default(),
         )?;
         warp::async_block_in_place_uncheck(
@@ -1101,6 +1125,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             &mut *conversation.messages_mut(),
             &event,
             &self.spam_filter,
+            self.event.clone(),
+            MessageDirection::Out,
             Default::default(),
         )?;
         warp::async_block_in_place_uncheck(
@@ -1201,10 +1227,17 @@ pub struct EventOpt {
     pub keep_if_owned: Arc<AtomicBool>,
 }
 
+pub enum MessageDirection {
+    In,
+    Out,
+}
+
 pub fn direct_message_event(
     messages: &mut Vec<Message>,
     events: &MessagingEvents,
     filter: &Arc<Option<SpamFilter>>,
+    tx: BroardcastSender<RayGunEventKind>,
+    direction: MessageDirection,
     opt: EventOpt,
 ) -> Result<(), Error> {
     match events.clone() {
@@ -1246,7 +1279,24 @@ pub fn direct_message_event(
                 verify_serde_sig(sender, &construct, &signature)?;
             }
             spam_check(&mut message, filter)?;
-            messages.push(message)
+            let conversation_id = message.conversation_id();
+            // let coid = message.conversation_id();
+            messages.push(message.clone());
+
+            let event = match direction {
+                MessageDirection::In => RayGunEventKind::MessageReceived {
+                    conversation_id,
+                    message,
+                },
+                MessageDirection::Out => RayGunEventKind::MessageSent {
+                    conversation_id,
+                    message,
+                },
+            };
+
+            if let Err(e) = tx.send(event) {
+                error!("Error broadcasting event: {e}");
+            }
         }
         MessagingEvents::Edit(convo_id, message_id, val, signature) => {
             let index = messages
@@ -1307,6 +1357,12 @@ pub fn direct_message_event(
             //TODO: Validate signature.
             message.set_signature(Some(signature));
             *message.value_mut() = val;
+            if let Err(e) = tx.send(RayGunEventKind::MessageEdited {
+                conversation_id: convo_id,
+                message_id,
+            }) {
+                error!("Error broadcasting event: {e}");
+            }
         }
         MessagingEvents::Delete(convo_id, message_id) => {
             let index = messages
@@ -1334,6 +1390,12 @@ pub fn direct_message_event(
             }
 
             let _ = messages.remove(index);
+            if let Err(e) = tx.send(RayGunEventKind::MessageDeleted {
+                conversation_id: convo_id,
+                message_id,
+            }) {
+                error!("Error broadcasting event: {e}");
+            }
         }
         MessagingEvents::Pin(convo_id, _, message_id, state) => {
             let index = messages
@@ -1343,9 +1405,25 @@ pub fn direct_message_event(
 
             let message = messages.get_mut(index).ok_or(Error::MessageNotFound)?;
 
-            match state {
-                PinState::Pin => *message.pinned_mut() = true,
-                PinState::Unpin => *message.pinned_mut() = false,
+            let event = match state {
+                PinState::Pin => {
+                    *message.pinned_mut() = true;
+                    RayGunEventKind::MessagePinned {
+                        conversation_id: convo_id,
+                        message_id,
+                    }
+                }
+                PinState::Unpin => {
+                    *message.pinned_mut() = false;
+                    RayGunEventKind::MessageUnpinned {
+                        conversation_id: convo_id,
+                        message_id,
+                    }
+                }
+            };
+
+            if let Err(e) = tx.send(event) {
+                error!("Error broadcasting event: {e}");
             }
         }
         MessagingEvents::React(convo_id, sender, message_id, state, emoji) => {
@@ -1368,15 +1446,31 @@ pub fn direct_message_event(
                         None => {
                             let mut reaction = Reaction::default();
                             reaction.set_emoji(&emoji);
-                            reaction.set_users(vec![sender]);
+                            reaction.set_users(vec![sender.clone()]);
                             reactions.push(reaction);
+                            if let Err(e) = tx.send(RayGunEventKind::MessageReactionAdded {
+                                conversation_id: convo_id,
+                                message_id,
+                                did_key: sender.clone(),
+                                reaction: emoji,
+                            }) {
+                                error!("Error broadcasting event: {e}");
+                            }
                             return Ok(());
                         }
                     };
 
                     let reaction = reactions.get_mut(index).ok_or(Error::MessageNotFound)?;
 
-                    reaction.users_mut().push(sender);
+                    reaction.users_mut().push(sender.clone());
+                    if let Err(e) = tx.send(RayGunEventKind::MessageReactionAdded {
+                        conversation_id: convo_id,
+                        message_id,
+                        did_key: sender.clone(),
+                        reaction: emoji,
+                    }) {
+                        error!("Error broadcasting event: {e}");
+                    }
                 }
                 ReactionState::Remove => {
                     let index = reactions
@@ -1399,6 +1493,14 @@ pub fn direct_message_event(
                     if reaction.users().is_empty() {
                         //Since there is no users listed under the emoji, the reaction should be removed from the message
                         reactions.remove(index);
+                        if let Err(e) = tx.send(RayGunEventKind::MessageReactionRemoved {
+                            conversation_id: convo_id,
+                            message_id,
+                            did_key: sender,
+                            reaction: emoji,
+                        }) {
+                            error!("Error broadcasting event: {e}");
+                        }
                     }
                 }
             }

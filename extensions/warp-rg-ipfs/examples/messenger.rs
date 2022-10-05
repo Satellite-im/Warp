@@ -2,11 +2,9 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
-use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 use warp::crypto::zeroize::Zeroizing;
@@ -15,7 +13,9 @@ use warp::error::Error;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::{ConversationType, MessageOptions, PinState, RayGun, ReactionState};
+use warp::raygun::{
+    ConversationType, MessageOptions, PinState, RayGun, RayGunEvents, ReactionState,
+};
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
@@ -132,7 +132,9 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
-    let mut chat = create_rg(opt.path.clone(), new_account.clone(), cache).await?;
+    let mut chat = Arc::new(RwLock::new(
+        create_rg(opt.path.clone(), new_account.clone(), cache).await?,
+    ));
 
     println!("Obtaining identity....");
     let identity = new_account.read().get_own_identity()?;
@@ -176,15 +178,69 @@ async fn main() -> anyhow::Result<()> {
 
     writeln!(stdout, "{message}")?;
 
-    let mut convo_size: HashMap<Uuid, usize> = HashMap::new();
-    let mut convo_list = vec![];
-    let mut interval = tokio::time::interval(Duration::from_millis(500));
-    let mut msg_interval = tokio::time::interval(Duration::from_millis(2));
     let mut event_stream = chat.subscribe().await?;
-    
+
     loop {
         tokio::select! {
-            event = event_stream.next() => {}
+            event = event_stream.next() => {
+                if let Some(event) = event {
+                    match event {
+                        warp::raygun::RayGunEventKind::ConversationCreated { conversation } => {
+                            topic = conversation.id();
+                            writeln!(stdout, "Set conversation to {}", topic)?;
+                        },
+                        warp::raygun::RayGunEventKind::ConversationDeleted { conversation_id } => {
+                            writeln!(stdout, "Conversation {conversation_id} has been deleted")?;
+                        },
+                        warp::raygun::RayGunEventKind::MessageReceived { conversation_id, message } | warp::raygun::RayGunEventKind::MessageSent { conversation_id, message }=> {
+                            if topic == conversation_id {
+                                let username = get_username(new_account.clone(), message.sender()).unwrap_or_else(|_| message.sender().to_string());
+                                //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
+                                match message.metadata().get("is_spam") {
+                                    Some(_) => {
+                                        writeln!(stdout, "[{}] @> [SPAM!] {}", username, message.value().join("\n"))?;
+                                    }
+                                    None => {
+                                        writeln!(stdout, "[{}] @> {}", username, message.value().join("\n"))?;
+                                    }
+                                }
+                            }
+                        },
+                        warp::raygun::RayGunEventKind::MessagePinned { conversation_id, message_id } => {
+                            if topic == conversation_id {
+                                writeln!(stdout, "> Message {} has been pinned", message_id)?;
+                            }
+                        },
+                        warp::raygun::RayGunEventKind::MessageUnpinned { conversation_id, message_id } => {
+                            if topic == conversation_id {
+                                writeln!(stdout, "> Message {} has been unpinned", message_id)?;
+                            }
+                        },
+                        warp::raygun::RayGunEventKind::MessageEdited { conversation_id, message_id } => {
+                            if topic == conversation_id {
+                                writeln!(stdout, "> Message {} has been edited", message_id)?;
+                            }
+                        },
+                        warp::raygun::RayGunEventKind::MessageDeleted { conversation_id, message_id } => {
+                            if topic == conversation_id {
+                                writeln!(stdout, "> Message {} has been deleted", message_id)?;
+                            }
+                        },
+                        warp::raygun::RayGunEventKind::MessageReactionAdded { conversation_id, message_id, did_key, reaction } => {
+                            if topic == conversation_id {
+                                let username = get_username(new_account.clone(), did_key.clone()).unwrap_or_else(|_| did_key.to_string());
+                                writeln!(stdout, "> {} has reacted to {} with {}", username, message_id, reaction)?;
+                            }
+                        },
+                        warp::raygun::RayGunEventKind::MessageReactionRemoved { conversation_id, message_id, did_key, reaction } => {
+                            if topic == conversation_id {
+                                let username = get_username(new_account.clone(), did_key.clone()).unwrap_or_else(|_| did_key.to_string());
+                                writeln!(stdout, "> {} has removed reaction {} from {}", username, reaction, message_id)?;
+                            }
+                        },
+                    }
+                }
+            }
             line = rl.readline().fuse() => match line {
                 Ok(line) => {
                     let mut cmd_line = line.trim().split(' ');
@@ -213,7 +269,7 @@ async fn main() -> anyhow::Result<()> {
                             };
 
                             topic = id.id();
-                            writeln!(stdout, "Conversation created")?;
+                            writeln!(stdout, "Set conversation to {}", topic)?;
                         },
                         Some("/remove-conversation") => {
                             let conversation_id = match cmd_line.next() {
@@ -470,37 +526,6 @@ async fn main() -> anyhow::Result<()> {
                     writeln!(stdout, "Error: {}", e)?;
                 }
             },
-            //TODO: Optimize by clearing terminal and displaying all messages instead of getting last line
-            _ = msg_interval.tick() => {
-                if let Ok(msg) = chat.get_messages(topic, MessageOptions::default()).await {
-                    if msg.len() == *convo_size.entry(topic).or_insert(0) {
-                        continue;
-                    }
-                    convo_size.entry(topic).and_modify(|e| *e = msg.len() ).or_insert(msg.len());
-                    let msg = msg.last().unwrap();
-                    let username = get_username(new_account.clone(), msg.sender()).unwrap_or_else(|_| msg.sender().to_string());
-                    //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
-                    match msg.metadata().get("is_spam") {
-                        Some(_) => {
-                            writeln!(stdout, "[{}] @> [SPAM!] {}", username, msg.value().join("\n"))?;
-                        }
-                        None => {
-                            writeln!(stdout, "[{}] @> {}", username, msg.value().join("\n"))?;
-                        }
-                    }
-                }
-
-            }
-            _ = interval.tick() => {
-
-                if let Ok(list) = chat.list_conversations().await {
-                    if !list.is_empty() && convo_list != list {
-                        topic = list.last().unwrap().id();
-                        convo_list = list;
-                        writeln!(stdout, "Set conversation to {}", topic)?;
-                    }
-                }
-            }
         }
     }
 
