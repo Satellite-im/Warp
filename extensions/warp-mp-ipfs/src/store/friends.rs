@@ -291,11 +291,11 @@ impl InternalProfile {
 
 impl InternalProfile {
     pub fn remove_invalid_request(&mut self) -> Result<(), Error> {
+        self.requests.retain(|request| request.valid().is_ok());
         self.requests.retain(|request| {
-            request.valid().is_ok()
-                && ((self.friends.contains(&request.from())
-                    || self.friends.contains(&request.to()))
-                    && request.status() == FriendRequestStatus::Pending)
+            !(self.friends.contains(&request.from())
+                || self.friends.contains(&request.to()))
+                    && request.status() == FriendRequestStatus::Pending
         });
         Ok(())
     }
@@ -405,7 +405,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         if let Err(e) = profile.remove_invalid_request() {
                             error!("Error removing invalid request: {e}");
                         }
+                        if let Err(e) = profile.to_file(path, &*store.did_key) {
+                            error!("Error saving requests after validation: {e}");
+                        }
                         *store.profile.write() = profile;
+                        
                     }
                     Err(e) => {
                         error!("Error loading profile: {e}");
