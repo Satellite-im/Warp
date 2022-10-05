@@ -291,7 +291,12 @@ impl InternalProfile {
 
 impl InternalProfile {
     pub fn remove_invalid_request(&mut self) -> Result<(), Error> {
-        self.requests.retain(|req| req.valid().is_ok());
+        self.requests.retain(|request| {
+            request.valid().is_ok()
+                && ((self.friends.contains(&request.from())
+                    || self.friends.contains(&request.to()))
+                    && request.status() == FriendRequestStatus::Pending)
+        });
         Ok(())
     }
 }
@@ -494,18 +499,27 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                         }
                                     }
                                     FriendRequestStatus::Pending => {
-                                                if let Err(e) = store.profile.write().set_incoming_request(&data) {
-                                                    error!("Error setting incoming request: {e}");
-                                                    continue
-                                                }
+                                        if let Err(_e) = store.is_friend(&data.from()).await {
+                                            continue;
+                                        }
 
-                                                if let Some(path) = store.path.as_ref() {
-                                                    if let Err(e) = store.profile.write().request_to_file(path).await {
-                                                        error!("Error saving request: {e}");
-                                                    }
-                                                }
+                                        if let Err(e) = store.profile.write().set_incoming_request(&data) {
+                                            error!("Error setting incoming request: {e}");
+                                            continue
+                                        }
+
+                                        if let Some(path) = store.path.as_ref() {
+                                            if let Err(e) = store.profile.write().request_to_file(path).await {
+                                                error!("Error saving request: {e}");
+                                            }
+                                        }
                                     },
                                     FriendRequestStatus::Denied => {
+                                        if let Err(_e) = store.is_friend(&data.from()).await {
+                                            //Since we are already friends, the request cannot be denied
+                                            continue;
+                                        }
+
                                         let index = match store.profile.read().requests().iter().position(|request| {
                                             request.request_type() == InternalRequestType::Outgoing &&
                                             request.to() == data.from() &&
@@ -536,6 +550,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                         }
                                     }
                                     FriendRequestStatus::RequestRemoved => {
+                                        if let Err(_e) = store.is_friend(&data.from()).await {
+                                            //Since we are already friends, the request cannot be removed
+                                            continue;
+                                        }
+
                                         let index = match store.profile.read().requests().iter().position(|request|{
                                              request.request_type() == InternalRequestType::Incoming &&
                                              request.to() == data.to() &&
