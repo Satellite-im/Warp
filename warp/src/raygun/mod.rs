@@ -5,6 +5,7 @@ use crate::error::Error;
 use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::{Extension, SingleHandle};
 
+use futures::stream::BoxStream;
 use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -17,6 +18,52 @@ use uuid::Uuid;
 
 #[allow(unused_imports)]
 use self::group::GroupChat;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+pub enum RayGunEventKind {
+    ConversationCreated {
+        conversation: Conversation,
+    },
+    ConversationDeleted {
+        conversation_id: Uuid,
+    },
+    MessageSent {
+        conversation_id: Uuid,
+        message: Message,
+    },
+    MessageReceived {
+        conversation_id: Uuid,
+        message: Message,
+    },
+    MessageEdited {
+        conversation_id: Uuid,
+        message_id: Uuid,
+    },
+    MessageDeleted {
+        conversation_id: Uuid,
+        message_id: Uuid,
+    },
+    MessagePinned {
+        conversation_id: Uuid,
+        message_id: Uuid,
+    },
+    MessageUnpinned {
+        conversation_id: Uuid,
+        message_id: Uuid,
+    },
+    MessageReactionAdded {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        did_key: DID,
+        reaction: String,
+    },
+    MessageReactionRemoved {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        did_key: DID,
+        reaction: String,
+    },
+}
 
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct MessageOptions {
@@ -358,7 +405,7 @@ pub enum EmbedState {
 }
 
 #[async_trait::async_trait]
-pub trait RayGun: Extension + Sync + Send + SingleHandle {
+pub trait RayGun: RayGunEvents + Extension + Sync + Send + SingleHandle {
     // Start a new conversation.
     async fn create_conversation(&mut self, _: &DID) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
@@ -421,13 +468,19 @@ pub trait RayGun: Extension + Sync + Send + SingleHandle {
         message: Vec<String>,
     ) -> Result<(), Error>;
 
-
     async fn embeds(
         &mut self,
         conversation_id: Uuid,
         message_id: Uuid,
         state: EmbedState,
     ) -> Result<(), Error>;
+}
+
+#[async_trait::async_trait]
+pub trait RayGunEvents: Sync + Send {
+    async fn subscribe(&mut self) -> Result<BoxStream<'_, RayGunEventKind>, Error> {
+        Err(Error::Unimplemented)
+    }
 }
 
 #[allow(clippy::await_holding_lock)]
@@ -528,6 +581,16 @@ where
     }
 }
 
+#[async_trait::async_trait]
+impl<T: ?Sized> RayGunEvents for Arc<RwLock<Box<T>>>
+where
+    T: RayGunEvents,
+{
+    async fn subscribe(&mut self) -> Result<BoxStream<'_, RayGunEventKind>, Error> {
+        Err(Error::Unimplemented)
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(FFIFree)]
 pub struct RayGunAdapter {
@@ -615,9 +678,7 @@ pub mod ffi {
         message_id: *const c_char,
     ) -> FFIResult<Message> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!(
-                "Context cannot be null"
-            )));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {

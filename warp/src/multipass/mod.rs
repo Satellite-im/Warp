@@ -1,6 +1,7 @@
 pub mod generator;
 pub mod identity;
 
+use serde::{Serialize, Deserialize};
 use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -15,6 +16,17 @@ use crate::crypto::DID;
 use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate};
 
 use self::identity::{IdentityStatus, Relationship};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[allow(clippy::large_enum_variant)]
+pub enum MultiPassEventKind {
+    FriendRequestReceived { from: DID },
+    FriendRequestSent { to: DID },
+    FriendRequestAccepted { from: DID },
+    FriendRequestRejected { from: DID },
+    FriendRequestClosed { from: Option<DID>, to: Option<DID> },
+    FriendRemoved { did: DID }
+}
 
 pub trait MultiPass:
     Extension + IdentityInformation + Friends + Sync + Send + SingleHandle

@@ -9,6 +9,7 @@ use ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream, Types};
 
 use libipld::IpldCodec;
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast::Sender as BroardcastSender;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 use warp::crypto::curve25519_dalek::traits::Identity;
@@ -19,7 +20,7 @@ use warp::logging::tracing::{warn, Span};
 use warp::multipass::identity::FriendRequest;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    Conversation, EmbedState, Message, MessageOptions, PinState, Reaction, ReactionState,
+    Conversation, EmbedState, Message, MessageOptions, PinState, Reaction, ReactionState, RayGunEventKind,
 };
 use warp::sata::Sata;
 use warp::sync::{Arc, Mutex, RwLock};
@@ -53,6 +54,9 @@ pub struct DirectMessageStore<T: IpfsTypes> {
     // DID
     did: Arc<DID>,
 
+    // Event
+    event: BroardcastSender<RayGunEventKind>,
+
     spam_filter: Arc<Option<SpamFilter>>,
 
     store_decrypted: Arc<AtomicBool>,
@@ -71,6 +75,7 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
             account: self.account.clone(),
             queue: self.queue.clone(),
             did: self.did.clone(),
+            event: self.event.clone(),
             spam_filter: self.spam_filter.clone(),
             with_friends: self.with_friends.clone(),
             allowed_unsigned_message: self.allowed_unsigned_message.clone(),
@@ -279,8 +284,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         account: Arc<RwLock<Box<dyn MultiPass>>>,
         discovery: bool,
         interval_ms: u64,
-        check_spam: bool,
-        (store_decrypted, allowed_unsigned_message, with_friends): (bool, bool, bool),
+        event: BroardcastSender<RayGunEventKind>,
+        (check_spam, store_decrypted, allowed_unsigned_message, with_friends): (bool, bool, bool, bool),
     ) -> anyhow::Result<Self> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -312,6 +317,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             account,
             queue,
             did,
+            event,
             spam_filter,
             store_decrypted,
             allowed_unsigned_message,
@@ -424,7 +430,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                         error!("Error saving conversation: {e}");
                                                     }
                                                 }
+
+                                                if let Err(e) = store.event.send(RayGunEventKind::ConversationCreated { conversation: convo.conversation() }) {
+                                                    error!("Error broadcasting event: {e}");
+                                                }
+
                                                 store.direct_conversation.write().push(convo);
+                                                
                                             }
                                             ConversationEvents::DeleteConversation(id) => {
                                                 trace!("Delete conversation event received for {id}");

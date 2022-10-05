@@ -20,6 +20,7 @@ uuid = { version = "1.0", features = ["serde", "v4"] }
 tokio = { version = "1", features = ["full"] }
 futures = { version = "0.3" }
 async-trait = { version = "0.1" }
+async-stream = "0.3"
 anyhow = { version = "1" }
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive", "rc"] }

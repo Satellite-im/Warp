@@ -180,8 +180,11 @@ async fn main() -> anyhow::Result<()> {
     let mut convo_list = vec![];
     let mut interval = tokio::time::interval(Duration::from_millis(500));
     let mut msg_interval = tokio::time::interval(Duration::from_millis(2));
+    let mut event_stream = chat.subscribe().await?;
+    
     loop {
         tokio::select! {
+            event = event_stream.next() => {}
             line = rl.readline().fuse() => match line {
                 Ok(line) => {
                     let mut cmd_line = line.trim().split(' ');
