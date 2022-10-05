@@ -369,6 +369,11 @@ pub trait RayGun: Extension + Sync + Send + SingleHandle {
         Err(Error::Unimplemented)
     }
 
+    /// Retrieve the count of messages in a conversation
+    async fn messages_count(&self, _: Uuid) -> Result<usize, Error> {
+        Err(Error::Unimplemented)
+    }
+
     /// Retrieve all messages from a conversation
     async fn get_message(&self, _: Uuid, _: Uuid) -> Result<Message, Error> {
         Err(Error::Unimplemented)
@@ -421,13 +426,9 @@ pub trait RayGun: Extension + Sync + Send + SingleHandle {
         message: Vec<String>,
     ) -> Result<(), Error>;
 
-
-    async fn embeds(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: EmbedState,
-    ) -> Result<(), Error>;
+    async fn embeds(&mut self, _: Uuid, _: Uuid, _: EmbedState) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
 }
 
 #[allow(clippy::await_holding_lock)]
@@ -609,15 +610,43 @@ pub mod ffi {
     #[allow(clippy::await_holding_lock)]
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
+    pub unsafe extern "C" fn raygun_messages_count(
+        ctx: *const RayGunAdapter,
+        conversation_id: *const c_char,
+    ) -> FFIResult<usize> {
+
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Context cannot be null"
+            )));
+        }
+
+        if conversation_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Conversation id cannot be null"
+            )));
+        }
+
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(conversation_id).to_string_lossy()) {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let adapter = &*ctx;
+
+        async_on_block(adapter.read_guard().messages_count(convo_id)).into()
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
     pub unsafe extern "C" fn raygun_get_message(
         ctx: *const RayGunAdapter,
         convo_id: *const c_char,
         message_id: *const c_char,
     ) -> FFIResult<Message> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!(
-                "Context cannot be null"
-            )));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {

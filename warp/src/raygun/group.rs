@@ -1,3 +1,4 @@
+//TODO: Refactor overall interface 
 use crate::crypto::{DID};
 use crate::error::Error;
 use serde::{Deserialize, Serialize};
@@ -115,7 +116,7 @@ impl GroupInvitation {
     }
 
     pub fn group(&self) -> Uuid {
-        self.group.clone()
+        self.group
     }
 
     pub fn sender(&self) -> DID {

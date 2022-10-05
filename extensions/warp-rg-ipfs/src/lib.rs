@@ -249,6 +249,11 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
             .get_message(conversation_id, message_id)
     }
 
+    async fn messages_count(&self, conversation_id: Uuid) -> Result<usize> {
+        self.messaging_store()?
+            .messages_count(conversation_id)
+    }
+
     async fn get_messages(
         &self,
         conversation_id: Uuid,
