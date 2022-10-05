@@ -139,7 +139,7 @@ impl Default for StoreSetting {
             broadcast_interval: 100,
             discovery: Discovery::Provider(None),
             sync: Vec::new(),
-            sync_interval: 100
+            sync_interval: 100,
         }
     }
 }
@@ -258,7 +258,7 @@ pub mod ffi {
     use std::ffi::CStr;
     use std::os::raw::c_char;
     use warp::error::Error;
-    use warp::ffi::{FFIResult, FFIResult_Null};
+    use warp::ffi::{FFIResult, FFIResult_Null, FFIResult_String};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -311,6 +311,18 @@ pub mod ffi {
         let data = CStr::from_ptr(config).to_string_lossy().to_string();
 
         MpIpfsConfig::from_string(data).map_err(Error::from).into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn mp_ipfs_config_to_str(
+        config: *const MpIpfsConfig,
+    ) -> FFIResult_String {
+        if config.is_null() {
+            return FFIResult_String::err(Error::Any(anyhow::anyhow!("config cannot be null")));
+        }
+
+        serde_json::to_string(&*config).map_err(Error::from).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
