@@ -26,6 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
+use tokio::sync::broadcast;
 use tracing::log::{error, info, trace, warn};
 use warp::crypto::did_key::Generate;
 use warp::data::{DataObject, DataType};
@@ -50,7 +51,10 @@ use warp::multipass::generator::generate_name;
 use warp::multipass::identity::{
     FriendRequest, Identifier, Identity, IdentityUpdate, Relationship,
 };
-use warp::multipass::{identity, Friends, IdentityInformation, MultiPass};
+use warp::multipass::{
+    identity, Friends, FriendsEvent, IdentityInformation, MultiPass, MultiPassAdapter,
+    MultiPassEventKind,
+};
 
 use crate::config::{Bootstrap, Discovery};
 use crate::store::discovery;
@@ -67,6 +71,7 @@ pub struct IpfsIdentity<T: IpfsTypes> {
     friend_store: Arc<RwLock<Option<FriendsStore<T>>>>,
     identity_store: Arc<RwLock<Option<IdentityStore<T>>>>,
     initialized: Arc<AtomicBool>,
+    tx: broadcast::Sender<MultiPassEventKind>,
 }
 
 impl<T: IpfsTypes> Clone for IpfsIdentity<T> {
@@ -80,6 +85,7 @@ impl<T: IpfsTypes> Clone for IpfsIdentity<T> {
             friend_store: self.friend_store.clone(),
             identity_store: self.identity_store.clone(),
             initialized: self.initialized.clone(),
+            tx: self.tx.clone(),
         }
     }
 }
@@ -113,6 +119,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         tesseract: Tesseract,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity<T>> {
+        let (tx, _) = broadcast::channel(1024);
         trace!("Initializing Multipass");
         let hooks = None;
 
@@ -125,6 +132,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             friend_store: Default::default(),
             identity_store: Default::default(),
             initialized: Default::default(),
+            tx,
         };
 
         if !identity.tesseract.is_unlock() {
@@ -318,6 +326,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             tesseract.clone(),
             config.store_setting.broadcast_interval,
             config.store_setting.discovery,
+            self.tx.clone()
         )
         .await?;
         info!("Identity store initialized");
@@ -328,6 +337,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             config.path.map(|p| p.join("friends")),
             tesseract.clone(),
             config.store_setting.broadcast_interval,
+            self.tx.clone()
         )
         .await?;
         info!("friends store initialized");
@@ -695,70 +705,22 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
 impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.send_request(pubkey))?;
-        if let Ok(hooks) = self.get_hooks() {
-            if let Some(request) = self
-                .list_outgoing_request()?
-                .iter()
-                .filter(|request| request.to().eq(pubkey))
-                .collect::<Vec<_>>()
-                .first()
-            {
-                let object = DataObject::new(DataType::Accounts, request)?;
-                hooks.trigger("accounts::send_friend_request", &object);
-            }
-        }
-        Ok(())
+        async_block_in_place_uncheck(store.send_request(pubkey))
     }
 
     fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.accept_request(pubkey))?;
-        if let Ok(hooks) = self.get_hooks() {
-            if let Some(key) = self
-                .list_friends()?
-                .iter()
-                .filter(|pk| *pk == pubkey)
-                .collect::<Vec<_>>()
-                .first()
-            {
-                let object = DataObject::new(DataType::Accounts, key)?;
-                hooks.trigger("accounts::accept_friend_request", &object);
-            }
-        }
-        Ok(())
+        async_block_in_place_uncheck(store.accept_request(pubkey))
     }
 
     fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.reject_request(pubkey))?;
-        if let Ok(hooks) = self.get_hooks() {
-            if !self
-                .list_all_request()?
-                .iter()
-                .any(|request| request.from().eq(pubkey))
-            {
-                let object = DataObject::new(DataType::Accounts, ())?;
-                hooks.trigger("accounts::deny_friend_request", &object);
-            }
-        }
-        Ok(())
+        async_block_in_place_uncheck(store.reject_request(pubkey))
     }
 
     fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.close_request(pubkey))?;
-        if let Ok(hooks) = self.get_hooks() {
-            if !self
-                .list_all_request()?
-                .iter()
-                .any(|request| request.from().eq(pubkey))
-            {
-                let object = DataObject::new(DataType::Accounts, ())?;
-                hooks.trigger("accounts::closed_friend_request", &object);
-            }
-        }
-        Ok(())
+        async_block_in_place_uncheck(store.close_request(pubkey))
     }
 
     fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
@@ -788,26 +750,12 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
 
     fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.remove_friend(pubkey, true, true))?;
-        if let Ok(hooks) = self.get_hooks() {
-            if self.has_friend(pubkey).is_err() {
-                let object = DataObject::new(DataType::Accounts, pubkey)?;
-                hooks.trigger("accounts::remove_friend", &object);
-            }
-        }
-        Ok(())
+        async_block_in_place_uncheck(store.remove_friend(pubkey, true, true))
     }
 
     fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.block(pubkey))?;
-        if let Ok(hooks) = self.get_hooks() {
-            if self.has_friend(pubkey).is_err() {
-                let object = DataObject::new(DataType::Accounts, pubkey)?;
-                hooks.trigger("accounts::block_key", &object);
-            }
-        }
-        Ok(())
+        async_block_in_place_uncheck(store.block(pubkey))
     }
 
     fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
@@ -817,14 +765,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
 
     fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.unblock(pubkey))?;
-        if let Ok(hooks) = self.get_hooks() {
-            if self.has_friend(pubkey).is_err() {
-                let object = DataObject::new(DataType::Accounts, pubkey)?;
-                hooks.trigger("accounts::unblock_key", &object);
-            }
-        }
-        Ok(())
+        async_block_in_place_uncheck(store.unblock(pubkey))
     }
 
     fn block_list(&self) -> Result<Vec<DID>, Error> {
@@ -840,6 +781,26 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
         let store = self.friend_store()?;
         async_block_in_place_uncheck(store.is_friend(pubkey))
+    }
+}
+
+impl<T: IpfsTypes> FriendsEvent for IpfsIdentity<T> {
+    fn subscribe(
+        &mut self,
+    ) -> Result<futures::stream::BoxStream<'static, warp::multipass::MultiPassEventKind>, Error>
+    {
+        let mut rx = self.tx.subscribe();
+
+        let stream = async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(_) => {}
+                };
+            }
+        };
+
+        Ok(Box::pin(stream))
     }
 }
 

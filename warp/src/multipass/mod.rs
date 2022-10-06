@@ -1,7 +1,8 @@
 pub mod generator;
 pub mod identity;
 
-use serde::{Serialize, Deserialize};
+use futures::stream::BoxStream;
+use serde::{Deserialize, Serialize};
 use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -20,16 +21,18 @@ use self::identity::{IdentityStatus, Relationship};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 #[allow(clippy::large_enum_variant)]
 pub enum MultiPassEventKind {
-    FriendRequestReceived { from: DID },
-    FriendRequestSent { to: DID },
-    FriendRequestAccepted { from: DID },
+    FriendRequestReceived { request: FriendRequest },
+    FriendRequestSent { request: FriendRequest },
     FriendRequestRejected { from: DID },
-    FriendRequestClosed { from: Option<DID>, to: Option<DID> },
-    FriendRemoved { did: DID }
+    FriendRequestClosed { from: DID },
+    FriendAdded { did: DID },
+    FriendRemoved { did: DID },
+    IdentityOnline { did: DID },
+    IdentityOffline { did: DID },
 }
 
 pub trait MultiPass:
-    Extension + IdentityInformation + Friends + Sync + Send + SingleHandle
+    Extension + IdentityInformation + Friends + FriendsEvent + Sync + Send + SingleHandle
 {
     /// Create an [`Identity`]
     fn create_identity(
@@ -168,6 +171,12 @@ pub trait Friends: Sync + Send {
     }
 }
 
+pub trait FriendsEvent: Sync + Send {
+    fn subscribe(&mut self) -> Result<BoxStream<'static, MultiPassEventKind>, Error> {
+        Err(Error::Unimplemented)
+    }
+}
+
 impl<T: ?Sized> Friends for Arc<RwLock<Box<T>>>
 where
     T: Friends,
@@ -247,6 +256,15 @@ where
     /// Check to see if public key is friend of the account
     fn has_friend(&self, key: &DID) -> Result<(), Error> {
         self.write().has_friend(key)
+    }
+}
+
+impl<T: ?Sized> FriendsEvent for Arc<RwLock<Box<T>>>
+where
+    T: FriendsEvent,
+{
+    fn subscribe(&mut self) -> Result<BoxStream<'static, MultiPassEventKind>, Error> {
+        self.write().subscribe()
     }
 }
 

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::sync::broadcast;
 use tracing::log::{error, warn};
 
 use libipld::serde::{from_ipld, to_ipld};
@@ -17,7 +18,7 @@ use warp::async_block_in_place_uncheck;
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::identity::{FriendRequest, FriendRequestStatus, Identity};
-use warp::multipass::MultiPass;
+use warp::multipass::{MultiPass, MultiPassEventKind};
 use warp::sync::{Arc, Mutex, RwLock};
 
 use tokio::sync::mpsc::Sender;
@@ -59,6 +60,8 @@ pub struct FriendsStore<T: IpfsTypes> {
     tesseract: Tesseract,
 
     internal_counter: Arc<AtomicUsize>,
+
+    tx: broadcast::Sender<MultiPassEventKind>,
 }
 
 #[derive(Default, Deserialize, Serialize, Debug, Clone)]
@@ -313,6 +316,7 @@ impl<T: IpfsTypes> Clone for FriendsStore<T> {
             queue: self.queue.clone(),
             tesseract: self.tesseract.clone(),
             internal_counter: self.internal_counter.clone(),
+            tx: self.tx.clone(),
         }
     }
 }
@@ -346,6 +350,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         path: Option<PathBuf>,
         tesseract: Tesseract,
         interval: u64,
+        tx: broadcast::Sender<MultiPassEventKind>,
     ) -> anyhow::Result<Self> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -374,6 +379,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             queue,
             tesseract,
             internal_counter,
+            tx,
         };
 
         let store_inner = store.clone();
@@ -492,18 +498,23 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                                 continue
                                             }
                                         }
+
                                     }
                                     FriendRequestStatus::Pending => {
-                                                if let Err(e) = store.profile.write().set_incoming_request(&data) {
-                                                    error!("Error setting incoming request: {e}");
-                                                    continue
-                                                }
+                                        if let Err(e) = store.profile.write().set_incoming_request(&data) {
+                                            error!("Error setting incoming request: {e}");
+                                            continue
+                                        }
 
-                                                if let Some(path) = store.path.as_ref() {
-                                                    if let Err(e) = store.profile.write().request_to_file(path).await {
-                                                        error!("Error saving request: {e}");
-                                                    }
-                                                }
+                                        if let Err(e) = store.tx.send(MultiPassEventKind::FriendRequestReceived { request: data.clone() }) {
+                                            error!("Error broadcasting event: {e}");
+                                        }
+
+                                        if let Some(path) = store.path.as_ref() {
+                                            if let Err(e) = store.profile.write().request_to_file(path).await {
+                                                error!("Error saving request: {e}");
+                                            }
+                                        }
                                     },
                                     FriendRequestStatus::Denied => {
                                         let index = match store.profile.read().requests().iter().position(|request| {
@@ -516,6 +527,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                         };
 
                                         let _ = store.profile.write().requests_mut().remove(index);
+
+
+                                        if let Err(e) = store.tx.send(MultiPassEventKind::FriendRequestRejected { from: data.from() }) {
+                                            error!("Error broadcasting event: {e}");
+                                        }
 
                                         if let Some(path) = store.path.as_ref() {
                                             if let Err(e) = store.profile.write().request_to_file(path).await {
@@ -534,6 +550,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                             error!("Error removing friend: {e}");
                                             continue;
                                         }
+
+                                        if let Err(e) = store.tx.send(MultiPassEventKind::FriendRemoved { did: data.from() }) {
+                                            error!("Error broadcasting event: {e}");
+                                        }
                                     }
                                     FriendRequestStatus::RequestRemoved => {
                                         let index = match store.profile.read().requests().iter().position(|request|{
@@ -546,6 +566,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                         };
 
                                         store.profile.write().requests_mut().remove(index);
+
+                                        if let Err(e) = store.tx.send(MultiPassEventKind::FriendRequestClosed { from: data.from() }) {
+                                            error!("Error broadcasting event: {e}");
+                                        }
 
                                         if let Some(path) = store.path.as_ref() {
                                             if let Err(e) = store.profile.write().request_to_file(path).await {
@@ -806,6 +830,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 error!("Error removing item from friend list: {e}");
             }
         }
+
         if let Some(path) = self.path.as_ref() {
             if let Err(e) = self.profile.write().friends_to_file(path).await {
                 error!("Error saving friends list: {e}");
@@ -859,6 +884,13 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 error!("Error saving friends list: {e}");
             }
         }
+
+        if let Err(e) = self.tx.send(MultiPassEventKind::FriendAdded {
+            did: pubkey.clone(),
+        }) {
+            error!("Error broadcasting event: {e}");
+        }
+
         Ok(())
     }
 
@@ -889,6 +921,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
             if let Err(e) = self.profile.write().friends_to_file(path).await {
                 error!("Error saving friends list: {e}");
             }
+        }
+
+        if let Err(e) = self.tx.send(MultiPassEventKind::FriendRemoved {
+            did: pubkey.clone(),
+        }) {
+            error!("Error broadcasting event: {e}");
         }
 
         Ok(())

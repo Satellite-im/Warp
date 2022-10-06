@@ -15,17 +15,20 @@ use libipld::{
     Cid, Ipld,
 };
 use sata::Sata;
+use tokio::sync::broadcast;
 use tracing::log::{error, info, trace, warn};
 use warp::{
     crypto::{rand::Rng, DIDKey, Ed25519KeyPair, Fingerprint, KeyMaterial, DID},
     error::Error,
     module::Module,
-    multipass::identity::{FriendRequest, Identity, IdentityStatus, SHORT_ID_SIZE},
+    multipass::{identity::{FriendRequest, Identity, IdentityStatus, SHORT_ID_SIZE}, MultiPassEventKind},
     sync::{Arc, Mutex, RwLock},
     tesseract::Tesseract,
 };
 
-use super::{connected_to_peer, libp2p_pub_to_did, PeerType, IDENTITY_BROADCAST, PeerConnectionType};
+use super::{
+    connected_to_peer, libp2p_pub_to_did, PeerConnectionType, PeerType, IDENTITY_BROADCAST,
+};
 
 pub struct IdentityStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
@@ -83,6 +86,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         tesseract: Tesseract,
         interval: u64,
         discovery: Discovery,
+        tx: broadcast::Sender<MultiPassEventKind>,
     ) -> Result<Self, Error> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -491,7 +495,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
         .await?;
 
         match connected {
-            PeerConnectionType::SubscribedAndConnected | PeerConnectionType::Connected | PeerConnectionType::Subscribed => Ok(IdentityStatus::Online),
+            PeerConnectionType::SubscribedAndConnected
+            | PeerConnectionType::Connected
+            | PeerConnectionType::Subscribed => Ok(IdentityStatus::Online),
             PeerConnectionType::NotConnected => Ok(IdentityStatus::Offline),
         }
     }
