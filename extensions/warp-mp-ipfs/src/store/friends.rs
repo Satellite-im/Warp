@@ -550,10 +550,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                             error!("Error removing friend: {e}");
                                             continue;
                                         }
-
-                                        if let Err(e) = store.tx.send(MultiPassEventKind::FriendRemoved { did: data.from() }) {
-                                            error!("Error broadcasting event: {e}");
-                                        }
                                     }
                                     FriendRequestStatus::RequestRemoved => {
                                         let index = match store.profile.read().requests().iter().position(|request|{
@@ -949,12 +945,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
         requests
     }
 
+    #[inline]
     pub fn received_friend_request_from(&self, did: &DID) -> bool {
         self.list_incoming_request()
             .iter()
             .any(|request| request.from().eq(did))
     }
 
+    #[inline]
     pub fn list_incoming_request(&self) -> Vec<FriendRequest> {
         self.profile
             .read()
@@ -965,12 +963,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
             .collect::<Vec<_>>()
     }
 
+    #[inline]
     pub fn sent_friend_request_to(&self, did: &DID) -> bool {
         self.list_outgoing_request()
             .iter()
             .any(|request| request.to().eq(did))
     }
 
+    #[inline]
     pub fn list_outgoing_request(&self) -> Vec<FriendRequest> {
         self.profile
             .read()
@@ -981,6 +981,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             .collect::<Vec<_>>()
     }
 
+    #[inline]
     pub async fn broadcast_request(
         &mut self,
         request: &FriendRequest,

@@ -795,6 +795,7 @@ impl<T: IpfsTypes> FriendsEvent for IpfsIdentity<T> {
             loop {
                 match rx.recv().await {
                     Ok(event) => yield event,
+                    Err(broadcast::error::RecvError::Closed) => break,
                     Err(_) => {}
                 };
             }

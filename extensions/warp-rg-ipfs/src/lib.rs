@@ -363,6 +363,7 @@ impl<T: IpfsTypes> RayGunEvents for IpfsMessaging<T> {
             loop {
                 match rx.recv().await {
                     Ok(event) => yield event,
+                    Err(broadcast::error::RecvError::Closed) => break,
                     Err(_) => {}
                 };
             }
