@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use ipfs::{IpfsTypes, PeerId};
+use ipfs::{IpfsTypes, Multiaddr, PeerId, Protocol};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::log::error;
 use warp::{
@@ -12,6 +12,8 @@ use warp::{
     multipass::identity::Identity,
     tesseract::Tesseract,
 };
+
+use crate::config::Discovery;
 
 use self::friends::InternalRequest;
 
@@ -158,11 +160,7 @@ pub async fn connected_to_peer<T: IpfsTypes>(
 
     let mut subscribed_peer = false;
 
-    let connected_peer = ipfs
-        .connected()
-        .await?
-        .iter()
-        .any(|peer| *peer == peer_id);
+    let connected_peer = ipfs.connected().await?.iter().any(|peer| *peer == peer_id);
 
     if let Some(topic) = topic {
         subscribed_peer = ipfs
@@ -183,6 +181,8 @@ pub async fn discover_peer<T: IpfsTypes>(
     ipfs: ipfs::Ipfs<T>,
     own_did: &DID,
     did: &DID,
+    discovery: Discovery,
+    relay: Vec<Multiaddr>,
 ) -> anyhow::Result<()> {
     let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
     let own_peer_id = did_to_libp2p_pub(own_did)?.to_peer_id();
@@ -198,11 +198,37 @@ pub async fn discover_peer<T: IpfsTypes>(
         false => {}
     };
 
-    loop {
-        if ipfs.find_peer_info(peer_id).await.is_ok() {
-            break;
+    match discovery {
+        Discovery::Provider(_) => {}
+        Discovery::Direct => loop {
+            if ipfs.find_peer_info(peer_id).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        },
+        Discovery::None => {
+            //Attempt a direct dial via relay
+            loop {
+                for addr in relay.iter() {
+                    let addr = addr.clone().with(Protocol::P2p(peer_id.into()));
+                    if let Err(_e) = ipfs.dial(addr).await {
+                        continue;
+                    }
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    if ipfs
+                        .connected()
+                        .await?
+                        .iter()
+                        .filter(|peer| own_peer_id.ne(peer))
+                        .any(|peer| *peer == peer_id)
+                    {
+                        break;
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
         }
-        tokio::time::sleep(Duration::from_secs(1)).await;
     }
+
     Ok(())
 }

@@ -951,7 +951,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
     ) -> Result<(), Error> {
         let remote_peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
 
-        if let Discovery::Direct = self.identity.discovery_type() {
+        if matches!(self.identity.discovery_type(), Discovery::Direct | Discovery::None) {
             let peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
 
             let connected = super::connected_to_peer(
@@ -976,8 +976,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     let ipfs = self.ipfs.clone();
                     let pubkey = request.to();
                     let own = (*self.did_key).clone();
+                    let relay = self.identity.relays();
+                    let discovery = self.identity.discovery_type();
                     tokio::spawn(async move {
-                        if let Err(e) = super::discover_peer(ipfs, &own, &pubkey).await {
+                        if let Err(e) =
+                            super::discover_peer(ipfs, &own, &pubkey, discovery, relay).await
+                        {
                             error!("Error discoverying peer: {e}");
                         }
                     });

@@ -27,6 +27,8 @@ struct Opt {
     #[clap(long)]
     direct: bool,
     #[clap(long)]
+    no_discovery: bool,
+    #[clap(long)]
     mdns: bool,
 }
 
@@ -45,6 +47,7 @@ async fn account(
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     experimental: bool,
     direct: bool,
+    no_discovery: bool,
     mdns: bool,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let mut tesseract = Tesseract::default();
@@ -54,6 +57,10 @@ async fn account(
     let mut config = MpIpfsConfig::testing(experimental);
     if direct {
         config.store_setting.discovery = Discovery::Direct;
+    }
+    if no_discovery {
+        config.store_setting.discovery = Discovery::None;
+        config.ipfs_setting.bootstrap = false;
     }
     config.ipfs_setting.mdns.enable = mdns;
     let mut account = ipfs_identity_temporary(Some(config), tesseract, cache).await?;
@@ -113,9 +120,17 @@ async fn main() -> anyhow::Result<()> {
 
     let mut account = match opt.path.as_ref() {
         Some(path) => {
-            account_persistent(None, path, cache, opt.experimental_node, opt.direct, opt.mdns).await?
+            account_persistent(
+                None,
+                path,
+                cache,
+                opt.experimental_node,
+                opt.direct,
+                opt.mdns,
+            )
+            .await?
         }
-        None => account(None, cache, opt.experimental_node, opt.direct, opt.mdns).await?,
+        None => account(None, cache, opt.experimental_node, opt.direct, opt.no_discovery, opt.mdns).await?,
     };
 
     println!("Obtaining identity....");
