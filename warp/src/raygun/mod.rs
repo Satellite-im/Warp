@@ -20,13 +20,15 @@ use uuid::Uuid;
 use self::group::GroupChat;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[serde(rename_all = "snake_case")]
 pub enum RayGunEventKind {
-    ConversationCreated {
-        conversation: Conversation,
-    },
-    ConversationDeleted {
-        conversation_id: Uuid,
-    },
+    ConversationCreated { conversation: Conversation },
+    ConversationDeleted { conversation_id: Uuid },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageEventKind {
     MessageSent {
         conversation_id: Uuid,
         message: Message,
@@ -405,7 +407,7 @@ pub enum EmbedState {
 }
 
 #[async_trait::async_trait]
-pub trait RayGun: RayGunEvents + Extension + Sync + Send + SingleHandle {
+pub trait RayGun: RayGunStream + Extension + Sync + Send + SingleHandle {
     // Start a new conversation.
     async fn create_conversation(&mut self, _: &DID) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
@@ -477,7 +479,14 @@ pub trait RayGun: RayGunEvents + Extension + Sync + Send + SingleHandle {
 }
 
 #[async_trait::async_trait]
-pub trait RayGunEvents: Sync + Send {
+pub trait RayGunStream: Sync + Send {
+    async fn get_conversation_stream(
+        &mut self,
+        _: Uuid,
+    ) -> Result<BoxStream<'static, MessageEventKind>, Error> {
+        Err(Error::Unimplemented)
+    }
+
     async fn subscribe(&mut self) -> Result<BoxStream<'static, RayGunEventKind>, Error> {
         Err(Error::Unimplemented)
     }
@@ -582,9 +591,9 @@ where
 }
 
 #[async_trait::async_trait]
-impl<T: ?Sized> RayGunEvents for Arc<RwLock<Box<T>>>
+impl<T: ?Sized> RayGunStream for Arc<RwLock<Box<T>>>
 where
-    T: RayGunEvents,
+    T: RayGunStream,
 {
     async fn subscribe(&mut self) -> Result<BoxStream<'static, RayGunEventKind>, Error> {
         self.write().subscribe().await

@@ -36,10 +36,9 @@ use warp::module::Module;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::group::{Group, GroupChat, GroupChatManagement, GroupInvite, Member};
-use warp::raygun::Conversation;
-use warp::raygun::RayGunEventKind;
-use warp::raygun::RayGunEvents;
+use warp::raygun::{Conversation, RayGunStream};
 use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
+use warp::raygun::{MessageEventKind, RayGunEventKind};
 use warp::sync::RwLock;
 use warp::sync::{RwLockReadGuard, RwLockWriteGuard};
 use warp::tesseract::Tesseract;
@@ -355,7 +354,7 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: IpfsTypes> RayGunEvents for IpfsMessaging<T> {
+impl<T: IpfsTypes> RayGunStream for IpfsMessaging<T> {
     async fn subscribe(&mut self) -> Result<BoxStream<'static, RayGunEventKind>> {
         let mut rx = self.tx.subscribe();
 
@@ -369,6 +368,14 @@ impl<T: IpfsTypes> RayGunEvents for IpfsMessaging<T> {
             }
         };
 
+        Ok(Box::pin(stream))
+    }
+    async fn get_conversation_stream(
+        &mut self,
+        conversation_id: Uuid,
+    ) -> Result<BoxStream<'static, MessageEventKind>> {
+        let store = self.messaging_store()?;
+        let stream = store.get_conversation_stream(conversation_id)?;
         Ok(Box::pin(stream))
     }
 }
