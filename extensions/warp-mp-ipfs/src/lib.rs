@@ -438,7 +438,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
             if let Some(u) = username.map(|u| u.trim()) {
                 let username_len = u.len();
 
-                if username_len <= 3 || username_len >= 64 {
+                if !(4..=64).contains(&username_len) {
                     return Err(Error::InvalidLength {
                         context: "username".into(),
                         current: username_len,
