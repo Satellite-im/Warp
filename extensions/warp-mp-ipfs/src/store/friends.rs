@@ -624,6 +624,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
             return Err(Error::FriendExist);
         }
 
+        if self.is_blocked(pubkey) {
+            return Err(Error::PublicKeyIsBlocked);
+        }
+
         if self.has_request_from(pubkey) {
             return Err(Error::FriendRequestExist);
         }

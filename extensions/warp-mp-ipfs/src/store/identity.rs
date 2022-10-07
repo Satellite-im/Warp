@@ -602,7 +602,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     pub fn validate_identity(&self, identity: &Identity) -> Result<(), Error> {
         {
             let len = identity.username().chars().count();
-            if len <= 4 || len >= 64 {
+            if !(4..=64).contains(&len) {
                 return Err(Error::InvalidLength {
                     context: "username".into(),
                     current: len,
