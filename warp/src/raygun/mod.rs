@@ -598,6 +598,13 @@ where
     async fn subscribe(&mut self) -> Result<BoxStream<'static, RayGunEventKind>, Error> {
         self.write().subscribe().await
     }
+
+    async fn get_conversation_stream(
+        &mut self,
+        conversation_id: Uuid,
+    ) -> Result<BoxStream<'static, MessageEventKind>, Error> {
+        self.write().get_conversation_stream(conversation_id).await
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
