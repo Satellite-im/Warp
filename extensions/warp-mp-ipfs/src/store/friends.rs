@@ -356,6 +356,9 @@ impl<T: IpfsTypes> Drop for FriendsStore<T> {
             counter
         };
 
+        //Note: This is used as an attempt to save to disk after this drops if previous attempts fail
+        //      however this may not be needed in the future.
+        //TODO: Possibly remove in the future
         if counter == 0 {
             self.end_event.store(true, Ordering::SeqCst);
             if let Some(path) = self.path.as_ref() {
