@@ -26,6 +26,22 @@ pub enum RayGunEventKind {
     ConversationDeleted { conversation_id: Uuid },
 }
 
+#[derive(FFIFree)]
+pub struct RayGunEventStream(BoxStream<'static, RayGunEventKind>);
+
+impl core::ops::Deref for RayGunEventStream {
+    type Target = BoxStream<'static, RayGunEventKind>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for RayGunEventStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageEventKind {
@@ -67,8 +83,21 @@ pub enum MessageEventKind {
     },
 }
 
-pub type RayGunEventStream = BoxStream<'static, RayGunEventKind>;
-pub type MessageEventStream = BoxStream<'static, MessageEventKind>;
+#[derive(FFIFree)]
+pub struct MessageEventStream(BoxStream<'static, MessageEventKind>);
+
+impl core::ops::Deref for MessageEventStream {
+    type Target = BoxStream<'static, MessageEventKind>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for MessageEventStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct MessageOptions {
@@ -483,13 +512,12 @@ pub trait RayGun: RayGunStream + Extension + Sync + Send + SingleHandle {
 
 #[async_trait::async_trait]
 pub trait RayGunStream: Sync + Send {
-    async fn get_conversation_stream(
-        &mut self,
-        _: Uuid,
-    ) -> Result<MessageEventStream, Error> {
+    /// Subscribe to an stream of events from the conversation
+    async fn get_conversation_stream(&mut self, _: Uuid) -> Result<MessageEventStream, Error> {
         Err(Error::Unimplemented)
     }
 
+    /// Subscribe to an stream of events
     async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
         Err(Error::Unimplemented)
     }

@@ -19,6 +19,7 @@ use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate};
 use self::identity::{IdentityStatus, Relationship};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[serde(rename_all="snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum MultiPassEventKind {
     FriendRequestReceived { request: FriendRequest },
@@ -31,7 +32,21 @@ pub enum MultiPassEventKind {
     IdentityOffline { did: DID },
 }
 
-pub type MultiPassEventStream = BoxStream<'static, MultiPassEventKind>;
+#[derive(FFIFree)]
+pub struct MultiPassEventStream(BoxStream<'static, MultiPassEventKind>);
+
+impl core::ops::Deref for MultiPassEventStream {
+    type Target = BoxStream<'static, MultiPassEventKind>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for MultiPassEventStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 pub trait MultiPass:
     Extension + IdentityInformation + Friends + FriendsEvent + Sync + Send + SingleHandle
@@ -174,6 +189,7 @@ pub trait Friends: Sync + Send {
 }
 
 pub trait FriendsEvent: Sync + Send {
+    /// Subscribe to an stream of events
     fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
         Err(Error::Unimplemented)
     }
