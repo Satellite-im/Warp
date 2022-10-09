@@ -304,6 +304,26 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                         break;
                     }
                 }
+
+                //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
+                //      anything on this end
+                for addr in config_.ipfs_setting.relay_client.relay_address.iter() {
+                    if let Err(e) = ipfs_clone.dial(addr.clone()).await {
+                        error!("Error dialing relay {}: {e}", addr.clone());
+                    }
+
+                    if let Err(e) = ipfs_clone
+                        .swarm_listen_on(addr.clone().with(Protocol::P2pCircuit))
+                        .await
+                    {
+                        info!("Error listening on relay: {e}");
+                        continue;
+                    }
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                    if config.ipfs_setting.relay_client.single {
+                        break;
+                    }
+                }
             }
             if config_.ipfs_setting.bootstrap && !empty_bootstrap {
                 //TODO: run bootstrap in intervals
