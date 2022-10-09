@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
+
 #include "../warp/warp.h"
 #include "../extensions/warp-mp-ipfs/warp-mp-ipfs.h"
 
@@ -10,6 +12,33 @@ void print_error(FFIError *error)
 {
     printf("Error Type: %s\n", error->error_type);
     printf("Error Message: %s\n", error->error_message);
+}
+
+typedef struct EventStream
+{
+    DID *did;
+    MultiPassEventStream *stream;
+} EventStream;
+
+void *stream_thread(void *arg)
+{
+    EventStream *event_stream = arg;
+    MultiPassEventStream *stream = event_stream->stream;
+    char *did_key = did_to_string(event_stream->did);
+    while (1)
+    {
+        FFIResult_String result_event = multipass_stream_next(stream);
+        if (result_event.error)
+        {
+            print_error(result_event.error);
+            break;
+        }
+        printf("[%s] -> Event: %s\n", did_key, result_event.data);
+        free(result_event.data);
+    }
+    multipasseventstream_free(stream);
+    free(event_stream);
+    return NULL;
 }
 
 MultiPassAdapter *new_account()
@@ -37,12 +66,23 @@ MultiPassAdapter *new_account()
     MultiPassAdapter *mp = result_mp.data;
 
     tesseract_free(tesseract);
-    FFIResult_DID result_ignore_t = multipass_create_identity(mp, NULL, NULL);
-    if (result_ignore_t.error)
+    FFIResult_DID result_t = multipass_create_identity(mp, NULL, NULL);
+    if (result_t.error)
     {
-        print_error(result_ignore_t.error);
+        print_error(result_t.error);
         return NULL;
     }
+
+    FFIResult_MultiPassEventStream result_stream = multipass_subscribe(mp);
+    if (result_stream.error)
+    {
+        print_error(result_stream.error);
+        return NULL;
+    }
+
+    EventStream event_stream = {.did = result_t.data, .stream = result_stream.data};
+    pthread_t acct_thr;
+    pthread_create(&acct_thr, NULL, stream_thread, (void *)&event_stream);
 
     sleep(1);
     return mp;
