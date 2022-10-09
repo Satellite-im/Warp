@@ -19,6 +19,7 @@ use self::friends::InternalRequest;
 
 pub mod friends;
 pub mod identity;
+pub mod phonebook;
 
 pub const IDENTITY_BROADCAST: &str = "identity/broadcast";
 pub const FRIENDS_BROADCAST: &str = "friends/broadcast";
@@ -179,13 +180,14 @@ pub async fn connected_to_peer<T: IpfsTypes>(
 
 pub async fn discover_peer<T: IpfsTypes>(
     ipfs: ipfs::Ipfs<T>,
-    own_did: &DID,
     did: &DID,
     discovery: Discovery,
     relay: Vec<Multiaddr>,
 ) -> anyhow::Result<()> {
     let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
-    let own_peer_id = did_to_libp2p_pub(own_did)?.to_peer_id();
+    let (own_pubkey, _) = ipfs.identity().await?;
+    let own_peer_id = own_pubkey.to_peer_id();
+    let own_did = libp2p_pub_to_did(&own_pubkey)?;
 
     match ipfs
         .connected()
