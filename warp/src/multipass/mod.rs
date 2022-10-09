@@ -19,7 +19,7 @@ use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate};
 use self::identity::{IdentityStatus, Relationship};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
-#[serde(rename_all="snake_case")]
+#[serde(rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum MultiPassEventKind {
     FriendRequestReceived { request: FriendRequest },
@@ -477,10 +477,12 @@ impl MultiPassAdapter {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
+    use futures::StreamExt;
+
     use crate::async_on_block;
     use crate::crypto::{FFIResult_FFIVec_DID, DID};
     use crate::error::Error;
-    use crate::ffi::{FFIResult, FFIResult_Null};
+    use crate::ffi::{FFIResult, FFIResult_Null, FFIResult_String};
     use crate::multipass::{
         identity::{
             FFIResult_FFIVec_FriendRequest, FFIResult_FFIVec_Identity, Identifier, Identity,
@@ -492,6 +494,7 @@ pub mod ffi {
     use std::os::raw::c_char;
 
     use super::identity::{IdentityStatus, Relationship};
+    use super::MultiPassEventStream;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -942,5 +945,38 @@ pub mod ffi {
         let pk = &*pubkey;
 
         async_on_block(async { mp.read_guard().identity_relationship(pk) }).into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_subscribe(
+        ctx: *mut MultiPassAdapter,
+    ) -> FFIResult<MultiPassEventStream> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        let mp = &mut *(ctx);
+
+        async_on_block(async { mp.write_guard().subscribe() }).into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_stream_next(
+        ctx: *mut MultiPassEventStream,
+    ) -> FFIResult_String {
+        if ctx.is_null() {
+            return FFIResult_String::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        let stream = &mut *(ctx);
+
+        match async_on_block(stream.next()) {
+            Some(event) => serde_json::to_string(&event).map_err(Error::from).into(),
+            None => FFIResult_String::err(Error::Any(anyhow::anyhow!(
+                "Error obtaining data from stream"
+            ))),
+        }
     }
 }
