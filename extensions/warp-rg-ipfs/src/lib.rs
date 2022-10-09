@@ -368,7 +368,7 @@ impl<T: IpfsTypes> RayGunStream for IpfsMessaging<T> {
             }
         };
 
-        Ok(Box::pin(stream))
+        Ok(RayGunEventStream(Box::pin(stream)))
     }
     async fn get_conversation_stream(
         &mut self,
@@ -376,7 +376,7 @@ impl<T: IpfsTypes> RayGunStream for IpfsMessaging<T> {
     ) -> Result<MessageEventStream> {
         let store = self.messaging_store()?;
         let stream = store.get_conversation_stream(conversation_id)?;
-        Ok(Box::pin(stream))
+        Ok(MessageEventStream(Box::pin(stream)))
     }
 }
 

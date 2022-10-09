@@ -33,7 +33,7 @@ pub enum MultiPassEventKind {
 }
 
 #[derive(FFIFree)]
-pub struct MultiPassEventStream(BoxStream<'static, MultiPassEventKind>);
+pub struct MultiPassEventStream(pub BoxStream<'static, MultiPassEventKind>);
 
 impl core::ops::Deref for MultiPassEventStream {
     type Target = BoxStream<'static, MultiPassEventKind>;

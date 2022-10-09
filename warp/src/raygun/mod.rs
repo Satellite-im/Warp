@@ -27,7 +27,7 @@ pub enum RayGunEventKind {
 }
 
 #[derive(FFIFree)]
-pub struct RayGunEventStream(BoxStream<'static, RayGunEventKind>);
+pub struct RayGunEventStream(pub BoxStream<'static, RayGunEventKind>);
 
 impl core::ops::Deref for RayGunEventStream {
     type Target = BoxStream<'static, RayGunEventKind>;
@@ -84,7 +84,7 @@ pub enum MessageEventKind {
 }
 
 #[derive(FFIFree)]
-pub struct MessageEventStream(BoxStream<'static, MessageEventKind>);
+pub struct MessageEventStream(pub BoxStream<'static, MessageEventKind>);
 
 impl core::ops::Deref for MessageEventStream {
     type Target = BoxStream<'static, MessageEventKind>;

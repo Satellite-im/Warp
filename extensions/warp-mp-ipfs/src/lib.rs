@@ -798,7 +798,7 @@ impl<T: IpfsTypes> FriendsEvent for IpfsIdentity<T> {
             }
         };
 
-        Ok(Box::pin(stream))
+        Ok(MultiPassEventStream(Box::pin(stream)))
     }
 }
 
