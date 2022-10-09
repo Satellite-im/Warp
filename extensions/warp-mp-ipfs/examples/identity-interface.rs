@@ -151,16 +151,16 @@ async fn main() -> anyhow::Result<()> {
     };
 
     println!("Obtaining identity....");
-    let identity = account.get_own_identity()?;
+    let own_identity = account.get_own_identity()?;
     println!(
         "Registered user {}#{}",
-        identity.username(),
-        identity.short_id()
+        own_identity.username(),
+        own_identity.short_id()
     );
     let (mut rl, mut stdout) = Readline::new(format!(
         "{}#{} >>> ",
-        identity.username(),
-        identity.short_id()
+        own_identity.username(),
+        own_identity.short_id()
     ))?;
     let mut incoming_list = vec![];
     let mut friends_list = account.list_friends()?;
@@ -467,7 +467,7 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     }
                                 },
-                                Some("publickey") | Some("public-key") => {
+                                Some("publickey") | Some("public-key") | Some("didkey") | Some("did-key") | Some("did") => {
                                     let pk = match cmd_line.next() {
                                         Some(pk) => match pk.to_string().try_into() {
                                             Ok(did) => did,
@@ -489,7 +489,7 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     }
                                 },
-                                Some("own") => {
+                                Some("own") | None => {
                                     match account.get_identity(Identifier::own()) {
                                         Ok(identity) => identity,
                                         Err(e) => {
@@ -506,11 +506,15 @@ async fn main() -> anyhow::Result<()> {
                             let mut table = Table::new();
                             table.set_header(vec!["Username", "Public Key", "Status Message", "Status"]);
                             for identity in idents {
+                                let status = match identity.did_key() == own_identity.did_key() {
+                                    true => IdentityStatus::Online,
+                                    false => account.identity_status(&identity.did_key()).unwrap_or(IdentityStatus::Offline)
+                                };
                                 table.add_row(vec![
                                     identity.username(),
                                     identity.did_key().to_string(),
                                     identity.status_message().unwrap_or_default(),
-                                    format!("{:?}", account.identity_status(&identity.did_key()).unwrap_or(IdentityStatus::Offline)),
+                                    format!("{:?}", status),
                                 ]);
                             }
                             writeln!(stdout, "{}", table)?;
