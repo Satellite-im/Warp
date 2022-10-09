@@ -185,20 +185,12 @@ pub async fn discover_peer<T: IpfsTypes>(
     relay: Vec<Multiaddr>,
 ) -> anyhow::Result<()> {
     let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
-    let (own_pubkey, _) = ipfs.identity().await?;
-    let own_peer_id = own_pubkey.to_peer_id();
-    let own_did = libp2p_pub_to_did(&own_pubkey)?;
 
-    match ipfs
-        .connected()
-        .await?
-        .iter()
-        .filter(|peer| own_peer_id.ne(peer))
-        .any(|peer| *peer == peer_id)
+    if connected_to_peer(ipfs.clone(), None, PeerType::PeerId(peer_id)).await?
+        != PeerConnectionType::NotConnected
     {
-        true => return Ok(()),
-        false => {}
-    };
+        return Ok(());
+    }
 
     match discovery {
         Discovery::Provider(_) => {}
@@ -217,12 +209,8 @@ pub async fn discover_peer<T: IpfsTypes>(
                         continue;
                     }
                     tokio::time::sleep(Duration::from_millis(300)).await;
-                    if ipfs
-                        .connected()
-                        .await?
-                        .iter()
-                        .filter(|peer| own_peer_id.ne(peer))
-                        .any(|peer| *peer == peer_id)
+                    if connected_to_peer(ipfs.clone(), None, PeerType::PeerId(peer_id)).await?
+                        != PeerConnectionType::NotConnected
                     {
                         break;
                     }
