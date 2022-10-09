@@ -67,6 +67,9 @@ pub enum MessageEventKind {
     },
 }
 
+pub type RayGunEventStream = BoxStream<'static, RayGunEventKind>;
+pub type MessageEventStream = BoxStream<'static, MessageEventKind>;
+
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct MessageOptions {
     smart: Option<bool>,
@@ -483,11 +486,11 @@ pub trait RayGunStream: Sync + Send {
     async fn get_conversation_stream(
         &mut self,
         _: Uuid,
-    ) -> Result<BoxStream<'static, MessageEventKind>, Error> {
+    ) -> Result<MessageEventStream, Error> {
         Err(Error::Unimplemented)
     }
 
-    async fn subscribe(&mut self) -> Result<BoxStream<'static, RayGunEventKind>, Error> {
+    async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
         Err(Error::Unimplemented)
     }
 }
@@ -595,14 +598,14 @@ impl<T: ?Sized> RayGunStream for Arc<RwLock<Box<T>>>
 where
     T: RayGunStream,
 {
-    async fn subscribe(&mut self) -> Result<BoxStream<'static, RayGunEventKind>, Error> {
+    async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
         self.write().subscribe().await
     }
 
     async fn get_conversation_stream(
         &mut self,
         conversation_id: Uuid,
-    ) -> Result<BoxStream<'static, MessageEventKind>, Error> {
+    ) -> Result<MessageEventStream, Error> {
         self.write().get_conversation_stream(conversation_id).await
     }
 }

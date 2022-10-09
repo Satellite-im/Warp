@@ -31,6 +31,8 @@ pub enum MultiPassEventKind {
     IdentityOffline { did: DID },
 }
 
+pub type MultiPassEventStream = BoxStream<'static, MultiPassEventKind>;
+
 pub trait MultiPass:
     Extension + IdentityInformation + Friends + FriendsEvent + Sync + Send + SingleHandle
 {
@@ -172,7 +174,7 @@ pub trait Friends: Sync + Send {
 }
 
 pub trait FriendsEvent: Sync + Send {
-    fn subscribe(&mut self) -> Result<BoxStream<'static, MultiPassEventKind>, Error> {
+    fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
         Err(Error::Unimplemented)
     }
 }
@@ -263,7 +265,7 @@ impl<T: ?Sized> FriendsEvent for Arc<RwLock<Box<T>>>
 where
     T: FriendsEvent,
 {
-    fn subscribe(&mut self) -> Result<BoxStream<'static, MultiPassEventKind>, Error> {
+    fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
         self.write().subscribe()
     }
 }

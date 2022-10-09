@@ -53,7 +53,7 @@ use warp::multipass::identity::{
 };
 use warp::multipass::{
     identity, Friends, FriendsEvent, IdentityInformation, MultiPass, MultiPassAdapter,
-    MultiPassEventKind,
+    MultiPassEventKind, MultiPassEventStream,
 };
 
 use crate::config::{Bootstrap, Discovery};
@@ -326,7 +326,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             tesseract.clone(),
             config.store_setting.broadcast_interval,
             config.store_setting.discovery,
-            self.tx.clone()
+            self.tx.clone(),
         )
         .await?;
         info!("Identity store initialized");
@@ -337,7 +337,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             config.path.map(|p| p.join("friends")),
             tesseract.clone(),
             config.store_setting.broadcast_interval,
-            self.tx.clone()
+            self.tx.clone(),
         )
         .await?;
         info!("friends store initialized");
@@ -785,10 +785,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
 }
 
 impl<T: IpfsTypes> FriendsEvent for IpfsIdentity<T> {
-    fn subscribe(
-        &mut self,
-    ) -> Result<futures::stream::BoxStream<'static, warp::multipass::MultiPassEventKind>, Error>
-    {
+    fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
         let mut rx = self.tx.subscribe();
 
         let stream = async_stream::stream! {
