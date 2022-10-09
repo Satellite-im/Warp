@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <pthread.h>
+#include <threads.h>
 
 #include "../warp/warp.h"
 #include "../extensions/warp-mp-ipfs/warp-mp-ipfs.h"
@@ -81,8 +81,8 @@ MultiPassAdapter *new_account()
     }
 
     EventStream event_stream = {.did = result_t.data, .stream = result_stream.data};
-    pthread_t acct_thr;
-    pthread_create(&acct_thr, NULL, stream_thread, (void *)&event_stream);
+    thrd_t acct_thr;
+    thrd_create(&acct_thr, (thrd_start_t) stream_thread, (void *)&event_stream);
 
     sleep(1);
     return mp;
