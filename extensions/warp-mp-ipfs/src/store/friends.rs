@@ -149,9 +149,36 @@ impl InternalProfile {
     }
 
     pub fn to_file<P: AsRef<Path>>(&self, path: P, key: &DID) -> anyhow::Result<()> {
-        warp::async_block_in_place_uncheck(self.friends_to_file(&path))?;
-        warp::async_block_in_place_uncheck(self.request_to_file(&path))?;
-        warp::async_block_in_place_uncheck(self.blocks_to_file(&path))?;
+        self.friends_to_file_sync(&path)?;
+        self.request_to_file_sync(&path)?;
+        self.blocks_to_file_sync(&path)?;
+        Ok(())
+    }
+
+    pub fn friends_to_file_sync<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
+        let path = path.as_ref();
+        let bytes = serde_json::to_vec(&self.friends())?;
+        let mut fs = std::fs::File::create(path.join("friends"))?;
+        fs.write_all(&bytes)?;
+        fs.flush()?;
+        Ok(())
+    }
+
+    pub fn blocks_to_file_sync<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
+        let path = path.as_ref();
+        let bytes = serde_json::to_vec(&self.block_list())?;
+        let mut fs = std::fs::File::create(path.join("block_list"))?;
+        fs.write_all(&bytes)?;
+        fs.flush()?;
+        Ok(())
+    }
+
+    pub fn request_to_file_sync<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
+        let path = path.as_ref();
+        let bytes = serde_json::to_vec(&self.requests())?;
+        let mut fs = std::fs::File::create(path.join("request_list"))?;
+        fs.write_all(&bytes)?;
+        fs.flush()?;
         Ok(())
     }
 
@@ -333,6 +360,9 @@ impl<T: IpfsTypes> Drop for FriendsStore<T> {
             counter
         };
 
+        //Note: This is used as an attempt to save to disk after this drops if previous attempts fail
+        //      however this may not be needed in the future.
+        //TODO: Possibly remove in the future
         if counter == 0 {
             self.end_event.store(true, Ordering::SeqCst);
             if let Some(path) = self.path.as_ref() {
