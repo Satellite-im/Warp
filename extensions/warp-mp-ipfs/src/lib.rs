@@ -241,7 +241,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             keypair,
             bootstrap: config.bootstrap.address(),
             mdns: config.ipfs_setting.mdns.enable,
-            listening_addrs: config.listen_on,
+            listening_addrs: config.listen_on.clone(),
             dcutr: config.ipfs_setting.relay_client.dcutr,
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
@@ -295,10 +295,11 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         tokio::spawn(fut);
 
         let ipfs_clone = ipfs.clone();
+        let config_ = config.clone();
         tokio::spawn(async move {
-            if config.ipfs_setting.relay_client.enable {
+            if config_.ipfs_setting.relay_client.enable {
                 info!("Relay client enabled. Loading relays");
-                for addr in config.bootstrap.address() {
+                for addr in config_.bootstrap.address() {
                     if let Err(e) = ipfs_clone
                         .swarm_listen_on(addr.with(Protocol::P2pCircuit))
                         .await
@@ -311,8 +312,28 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                         break;
                     }
                 }
+
+                //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
+                //      anything on this end
+                for addr in config_.ipfs_setting.relay_client.relay_address.iter() {
+                    if let Err(e) = ipfs_clone.dial(addr.clone()).await {
+                        error!("Error dialing relay {}: {e}", addr.clone());
+                    }
+
+                    if let Err(e) = ipfs_clone
+                        .swarm_listen_on(addr.clone().with(Protocol::P2pCircuit))
+                        .await
+                    {
+                        info!("Error listening on relay: {e}");
+                        continue;
+                    }
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                    if config.ipfs_setting.relay_client.single {
+                        break;
+                    }
+                }
             }
-            if config.ipfs_setting.bootstrap && !empty_bootstrap {
+            if config_.ipfs_setting.bootstrap && !empty_bootstrap {
                 //TODO: run bootstrap in intervals
                 if let Err(e) = ipfs_clone.direct_bootstrap().await {
                     error!("Error bootstrapping: {e}");
@@ -320,13 +341,22 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             }
         });
 
+        let relays = (!config.bootstrap.address().is_empty()).then(|| {
+            config
+                .bootstrap
+                .address()
+                .iter()
+                .map(|addr| addr.clone().with(Protocol::P2pCircuit))
+                .collect()
+        });
+
         let identity_store = IdentityStore::new(
             ipfs.clone(),
             config.path.clone(),
             tesseract.clone(),
             config.store_setting.broadcast_interval,
-            config.store_setting.discovery,
             self.tx.clone(),
+            (config.store_setting.discovery, relays),
         )
         .await?;
         info!("Identity store initialized");
