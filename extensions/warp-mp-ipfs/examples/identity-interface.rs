@@ -161,6 +161,7 @@ async fn main() -> anyhow::Result<()> {
         own_identity.username(),
         own_identity.short_id()
     ))?;
+
     let mut event_stream = account.subscribe()?;
     loop {
         tokio::select! {
@@ -172,37 +173,51 @@ async fn main() -> anyhow::Result<()> {
                                 Ok(ident) => ident.username(),
                                 Err(_) => request.from().to_string()
                             };
-                            writeln!(stdout, "Pending request from {}. Do \"request accept {}\" to accept", username, request.from())?;
+                            writeln!(stdout, "> Pending request from {}. Do \"request accept {}\" to accept", username, request.from())?;
                         },
                         warp::multipass::MultiPassEventKind::FriendRequestRejected { from } => {
                             let username = match account.get_identity(Identifier::did_key(from.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
                                 Ok(idents) => idents.username(),
                                 Err(_) => from.to_string()
                             };
-                            writeln!(stdout, "{} has denied requested your request", username)?;
+                            writeln!(stdout, "> {} has denied requested your request", username)?;
                         },
                         warp::multipass::MultiPassEventKind::FriendRequestClosed { from } => {
                             let username = match account.get_identity(Identifier::did_key(from.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
                                 Ok(idents) => idents.username(),
                                 Err(_) => from.to_string()
                             };
-                            writeln!(stdout, "{} has retracted their request", username)?;
+                            writeln!(stdout, "> {} has retracted their request", username)?;
                         },
                         warp::multipass::MultiPassEventKind::FriendAdded { did } => {
                             let username = match account.get_identity(Identifier::did_key(did.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
                                 Ok(idents) => idents.username(),
                                 Err(_) => did.to_string()
                             };
-                            writeln!(stdout, "You are now friends with {}", username)?;
+                            writeln!(stdout, "> You are now friends with {}", username)?;
                         },
                         warp::multipass::MultiPassEventKind::FriendRemoved { did } => {
                             let username = match account.get_identity(Identifier::did_key(did.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
                                 Ok(idents) => idents.username(),
                                 Err(_) => did.to_string()
                             };
-                            writeln!(stdout, "{} has been removed from friends list", username)?;
+                            writeln!(stdout, "> {} has been removed from friends list", username)?;
                         },
-                        _ => {},
+                        warp::multipass::MultiPassEventKind::IdentityOnline { did } => {
+                            let username = match account.get_identity(Identifier::did_key(did.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
+                                Ok(idents) => idents.username(),
+                                Err(_) => did.to_string()
+                            };
+                            writeln!(stdout, "> {} has came online", username)?;
+                        },
+                        warp::multipass::MultiPassEventKind::IdentityOffline { did } => {
+                            let username = match account.get_identity(Identifier::did_key(did.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
+                                Ok(idents) => idents.username(),
+                                Err(_) => did.to_string()
+                            };
+                            writeln!(stdout, "> {} went offline", username)?;
+                        },
+                        _ => {}
                     }
                 }
             }

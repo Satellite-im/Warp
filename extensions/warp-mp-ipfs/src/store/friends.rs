@@ -404,7 +404,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let did_key = Arc::new(did_keypair(&tesseract)?);
         let internal_counter = Arc::new(AtomicUsize::new(1));
 
-        let (phonebook, fut) = PhoneBook::new(ipfs.clone());
+        let (phonebook, fut) = PhoneBook::new(ipfs.clone(), tx.clone());
         tokio::spawn(fut);
 
         let store = Self {
