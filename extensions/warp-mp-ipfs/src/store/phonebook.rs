@@ -272,16 +272,18 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
             }
         }
 
-        let waker = cx.waker().clone();
-        std::thread::spawn(move || {
-            //Although we could use a timer, it might be best for now to sleep in a separate thread then wake up the context
-            //so it would start the future again since it would almost always be pending (except for if the receiver is dropped or returns
-            //`Poll::Ready(None)`)
-            //This might get pushed to be apart of `PhoneBook` and we could just execute a function to awake the future, either in tokio/future/? select or
-            //maybe at a random interval
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            waker.wake();
-        });
+        if !self.friends.is_empty() {
+            let waker = cx.waker().clone();
+            tokio::spawn(async move{
+                //Although we could use a timer from tokio or futures, it might be best for now to sleep in a separate task (or thread if we go that route) then wake up the context
+                //so it would start the future again since it would almost always be pending (except for if the receiver is dropped or returns
+                //`Poll::Ready(None)`)
+                //This might get pushed to be apart of `PhoneBook` and we could just execute a function to awake the future, either in tokio/future/? select or
+                //maybe at a random interval
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                waker.wake();
+            });
+        }
 
         Poll::Pending
     }
