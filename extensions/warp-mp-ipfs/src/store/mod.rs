@@ -140,6 +140,18 @@ pub enum PeerType {
     DID(DID),
 }
 
+impl From<DID> for PeerType {
+    fn from(did: DID) -> Self {
+        PeerType::DID(did)
+    }
+}
+
+impl From<PeerId> for PeerType {
+    fn from(peer_id: PeerId) -> Self {
+        PeerType::PeerId(peer_id)
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PeerConnectionType {
     SubscribedAndConnected,
@@ -149,12 +161,12 @@ pub enum PeerConnectionType {
 }
 
 #[inline]
-pub async fn connected_to_peer<T: IpfsTypes>(
+pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
     ipfs: ipfs::Ipfs<T>,
     topic: Option<String>,
-    pkey: PeerType,
+    pkey: I,
 ) -> anyhow::Result<PeerConnectionType> {
-    let peer_id = match pkey {
+    let peer_id = match pkey.into() {
         PeerType::DID(did) => did_to_libp2p_pub(&did)?.to_peer_id(),
         PeerType::PeerId(peer) => peer,
     };

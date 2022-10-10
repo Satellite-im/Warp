@@ -185,7 +185,7 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
             match warp::async_block_in_place_uncheck(connected_to_peer(
                 ipfs.clone(),
                 None,
-                PeerType::DID(did.clone()),
+                did.clone(),
             )) {
                 Ok(inner_status) => match (inner_status, *discovering) {
                     (PeerConnectionType::NotConnected, false) => {
@@ -202,6 +202,7 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
                             .await
                             {}
                         });
+                        //TODO: Perform check on status before sending event
                         *discovering = true;
                         *status = Some(PeerConnectionType::NotConnected);
                     }

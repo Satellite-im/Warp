@@ -618,7 +618,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         let list = store.queue.read().clone();
                         for item in list.iter() {
                             let Queue(peer, data) = item;
-                            if let Ok(crate::store::PeerConnectionType::SubscribedAndConnected) = connected_to_peer(store.ipfs.clone(), Some(FRIENDS_BROADCAST.into()), PeerType::PeerId(*peer)).await {
+                            if let Ok(crate::store::PeerConnectionType::SubscribedAndConnected) = connected_to_peer(store.ipfs.clone(), Some(FRIENDS_BROADCAST.into()), *peer).await {
                                     let bytes = match serde_json::to_vec(&data) {
                                         Ok(bytes) => bytes,
                                         Err(e) => {
@@ -1028,7 +1028,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             let connected = super::connected_to_peer(
                 self.ipfs.clone(),
                 Some(IDENTITY_BROADCAST.into()),
-                PeerType::PeerId(remote_peer_id),
+                remote_peer_id,
             )
             .await?;
 

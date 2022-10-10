@@ -403,7 +403,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     let connected = connected_to_peer(
                         self.ipfs.clone(),
                         Some(IDENTITY_BROADCAST.into()),
-                        PeerType::PeerId(peer_id),
+                        peer_id,
                     )
                     .await?;
                     if connected != PeerConnectionType::SubscribedAndConnected {
@@ -424,8 +424,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                             let discovery = self.discovery.clone();
                             tokio::spawn(async move {
                                 if let Err(e) =
-                                    super::discover_peer(ipfs, &*pubkey, discovery, relay)
-                                        .await
+                                    super::discover_peer(ipfs, &*pubkey, discovery, relay).await
                                 {
                                     error!("Error discoverying peer: {e}");
                                 }
@@ -503,7 +502,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let connected = connected_to_peer(
             self.ipfs.clone(),
             Some(IDENTITY_BROADCAST.into()),
-            PeerType::DID(did.clone()),
+            did.clone(),
         )
         .await?;
 
