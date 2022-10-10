@@ -30,6 +30,7 @@ use crate::store::{connected_to_peer, verify_serde_sig, PeerType};
 use crate::Persistent;
 
 use super::identity::{IdentityStore, LookupBy};
+use super::phonebook::PhoneBook;
 use super::{
     did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, PeerConnectionType,
     FRIENDS_BROADCAST, IDENTITY_BROADCAST,
@@ -58,6 +59,8 @@ pub struct FriendsStore<T: IpfsTypes> {
 
     // Tesseract
     tesseract: Tesseract,
+
+    phonebook: PhoneBook<T>,
 
     internal_counter: Arc<AtomicUsize>,
 }
@@ -340,6 +343,7 @@ impl<T: IpfsTypes> Clone for FriendsStore<T> {
             profile: self.profile.clone(),
             queue: self.queue.clone(),
             tesseract: self.tesseract.clone(),
+            phonebook: self.phonebook.clone(),
             internal_counter: self.internal_counter.clone(),
         }
     }
@@ -395,6 +399,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let did_key = Arc::new(did_keypair(&tesseract)?);
         let internal_counter = Arc::new(AtomicUsize::new(1));
 
+        let (phonebook, fut) = PhoneBook::new(ipfs.clone());
+        tokio::spawn(fut);
+
         let store = Self {
             ipfs,
             identity,
@@ -404,6 +411,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             profile,
             queue,
             tesseract,
+            phonebook,
             internal_counter,
         };
 
@@ -420,6 +428,15 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         tokio::spawn(async move {
             let mut store = store_inner;
+
+            let discovery = store.identity.discovery_type();
+
+            if let Err(_e) = store.phonebook.set_discovery(discovery).await {}
+
+            for addr in store.identity.relays() {
+                if let Err(_e) = store.phonebook.add_relay(addr).await {}
+            }
+
             if let Some(path) = store.path.as_ref() {
                 if let Ok(queue) = tokio::fs::read(path.join("queue")).await {
                     if let Ok(queue) = serde_json::from_slice(&queue) {
@@ -432,6 +449,13 @@ impl<T: IpfsTypes> FriendsStore<T> {
                             error!("Error removing invalid request: {e}");
                         }
                         *store.profile.write() = profile;
+                        if let Err(_e) = store
+                            .phonebook
+                            .add_friend_list(store.profile.read().friends())
+                            .await
+                        {
+                            error!("Error adding friends in phonebook: {_e}");
+                        }
                     }
                     Err(e) => {
                         error!("Error loading profile: {e}");
@@ -525,16 +549,16 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                         }
                                     }
                                     FriendRequestStatus::Pending => {
-                                                if let Err(e) = store.profile.write().set_incoming_request(&data) {
-                                                    error!("Error setting incoming request: {e}");
-                                                    continue
-                                                }
+                                        if let Err(e) = store.profile.write().set_incoming_request(&data) {
+                                            error!("Error setting incoming request: {e}");
+                                            continue
+                                        }
 
-                                                if let Some(path) = store.path.as_ref() {
-                                                    if let Err(e) = store.profile.write().request_to_file(path).await {
-                                                        error!("Error saving request: {e}");
-                                                    }
-                                                }
+                                        if let Some(path) = store.path.as_ref() {
+                                            if let Err(e) = store.profile.write().request_to_file(path).await {
+                                                error!("Error saving request: {e}");
+                                            }
+                                        }
                                     },
                                     FriendRequestStatus::Denied => {
                                         let index = match store.profile.read().requests().iter().position(|request| {
@@ -594,7 +618,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         let list = store.queue.read().clone();
                         for item in list.iter() {
                             let Queue(peer, data) = item;
-                            if let Ok(crate::store::PeerConnectionType::SubscribedAndConnected) = connected_to_peer(store.ipfs.clone(), Some(FRIENDS_BROADCAST.into()), PeerType::PeerId(*peer)).await {
+                            if let Ok(crate::store::PeerConnectionType::SubscribedAndConnected) = connected_to_peer(store.ipfs.clone(), Some(FRIENDS_BROADCAST.into()), *peer).await {
                                     let bytes = match serde_json::to_vec(&data) {
                                         Ok(bytes) => bytes,
                                         Err(e) => {
@@ -889,6 +913,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
         }
 
         self.profile.write().add_friend(pubkey)?;
+
+        if let Err(_e) = self.phonebook.add_friend(pubkey).await {
+            error!("Error: {_e}");
+        }
+
         if let Some(path) = self.path.as_ref() {
             if let Err(e) = self.profile.write().friends_to_file(path).await {
                 error!("Error saving friends list: {e}");
@@ -906,6 +935,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
         self.is_friend(pubkey).await?;
 
         self.profile.write().remove_friend(pubkey)?;
+
+        if let Err(_e) = self.phonebook.remove_friend(pubkey).await {
+            error!("Error: {_e}");
+        }
 
         if broadcast {
             let (local_ipfs_public_key, _) = self.local().await?;
@@ -986,13 +1019,16 @@ impl<T: IpfsTypes> FriendsStore<T> {
     ) -> Result<(), Error> {
         let remote_peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
 
-        if let Discovery::Direct = self.identity.discovery_type() {
+        if matches!(
+            self.identity.discovery_type(),
+            Discovery::Direct | Discovery::None
+        ) {
             let peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
 
             let connected = super::connected_to_peer(
                 self.ipfs.clone(),
                 Some(IDENTITY_BROADCAST.into()),
-                PeerType::PeerId(remote_peer_id),
+                remote_peer_id,
             )
             .await?;
 
@@ -1011,8 +1047,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     let ipfs = self.ipfs.clone();
                     let pubkey = request.to();
                     let own = (*self.did_key).clone();
+                    let relay = self.identity.relays();
+                    let discovery = self.identity.discovery_type();
                     tokio::spawn(async move {
-                        if let Err(e) = super::discover_peer(ipfs, &own, &pubkey).await {
+                        if let Err(e) = super::discover_peer(ipfs, &pubkey, discovery, relay).await
+                        {
                             error!("Error discoverying peer: {e}");
                         }
                     });

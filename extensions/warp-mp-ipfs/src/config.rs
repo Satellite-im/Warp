@@ -22,7 +22,7 @@ pub enum Discovery {
     Provider(Option<String>),
     /// Dials out to peers directly. Using this will only work with the DID til that connection is made
     Direct,
-    /// Disables Discovery over DHT or Directly
+    /// Disables Discovery over DHT or Directly (which relays on direct connection via multiaddr)
     None,
 }
 
@@ -33,6 +33,7 @@ impl Default for Discovery {
 }
 
 impl Bootstrap {
+    /// List of bootstrap multiaddr
     pub fn address(&self) -> Vec<Multiaddr> {
         match self {
             Bootstrap::Ipfs => vec![
@@ -56,20 +57,26 @@ impl Bootstrap {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Mdns {
+    /// Enables mdns protocol in libp2p
     pub enable: bool,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct RelayClient {
+    /// Enables relay client in libp2p
     pub enable: bool,
+    /// Enables DCUtR (requires relay to be enabled)
     pub dcutr: bool,
+    /// Uses a single relay connection
     pub single: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// List of relays to use
     pub relay_address: Vec<Multiaddr>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Swarm {
+    /// Concurrent dial factor
     pub dial_factor: u8,
     pub notify_buffer_size: usize,
     pub connection_buffer_size: usize,
@@ -112,6 +119,7 @@ impl Default for ConnectionLimit {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct RelayServer {
+    /// Used to enable the node as a relay server. Only should be enabled if the node isnt behind a NAT or could be connected to directly
     pub enable: bool,
 }
 
@@ -126,10 +134,14 @@ pub struct IpfsSetting {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
+    /// Interval for broadcasting out identity or checking queue (queue will be moved into its own system in the future)
     pub broadcast_interval: u64,
+    /// Discovery type
     pub discovery: Discovery,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// Placeholder for a offline agents to obtain information regarding one own identity
     pub sync: Vec<Multiaddr>,
+    /// Interval to push or check node
     pub sync_interval: u64,
 }
 
@@ -177,10 +189,12 @@ impl Default for MpIpfsConfig {
 }
 
 impl MpIpfsConfig {
+    /// Default configuration for local development and writing test
     pub fn development() -> MpIpfsConfig {
         MpIpfsConfig::default()
     }
 
+    /// Test configuration. Used for in-memory
     pub fn testing(experimental: bool) -> MpIpfsConfig {
         MpIpfsConfig {
             bootstrap: match experimental {
@@ -206,6 +220,54 @@ impl MpIpfsConfig {
         }
     }
 
+    /// Minimial production configuration
+    pub fn minimial_testing() -> MpIpfsConfig {
+        MpIpfsConfig {
+            bootstrap: Bootstrap::Ipfs,
+            ipfs_setting: IpfsSetting {
+                mdns: Mdns { enable: true },
+                bootstrap: false,
+                relay_client: RelayClient {
+                    enable: true,
+                    dcutr: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            store_setting: StoreSetting {
+                broadcast_interval: 100,
+                discovery: Discovery::None,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Minimial production configuration
+    pub fn minimial<P: AsRef<std::path::Path>>(path: P) -> MpIpfsConfig {
+        MpIpfsConfig {
+            bootstrap: Bootstrap::Ipfs,
+            path: Some(path.as_ref().to_path_buf()),
+            ipfs_setting: IpfsSetting {
+                mdns: Mdns { enable: true },
+                bootstrap: false,
+                relay_client: RelayClient {
+                    enable: true,
+                    dcutr: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            store_setting: StoreSetting {
+                broadcast_interval: 100,
+                discovery: Discovery::None,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Recommended production configuration
     pub fn production<P: AsRef<std::path::Path>>(path: P, experimental: bool) -> MpIpfsConfig {
         MpIpfsConfig {
             bootstrap: match experimental {
@@ -350,5 +412,19 @@ pub mod ffi {
         let path = CStr::from_ptr(path).to_string_lossy().to_string();
 
         FFIResult::ok(MpIpfsConfig::production(path, experimental))
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn mp_ipfs_config_minimial(
+        path: *const c_char,
+    ) -> FFIResult<MpIpfsConfig> {
+        if path.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
+        }
+
+        let path = CStr::from_ptr(path).to_string_lossy().to_string();
+
+        FFIResult::ok(MpIpfsConfig::minimial(path))
     }
 }

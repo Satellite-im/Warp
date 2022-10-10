@@ -8,7 +8,7 @@ use std::{
 
 use crate::{config::Discovery, store::did_to_libp2p_pub, Persistent};
 use futures::{SinkExt, StreamExt, TryFutureExt};
-use ipfs::{Ipfs, IpfsPath, IpfsTypes, Keypair, PeerId};
+use ipfs::{Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId};
 use libipld::{
     ipld,
     serde::{from_ipld, to_ipld},
@@ -25,7 +25,9 @@ use warp::{
     tesseract::Tesseract,
 };
 
-use super::{connected_to_peer, libp2p_pub_to_did, PeerType, IDENTITY_BROADCAST, PeerConnectionType};
+use super::{
+    connected_to_peer, libp2p_pub_to_did, PeerConnectionType, PeerType, IDENTITY_BROADCAST,
+};
 
 pub struct IdentityStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
@@ -41,6 +43,8 @@ pub struct IdentityStore<T: IpfsTypes> {
     seen: Arc<RwLock<HashSet<PeerId>>>,
 
     discovery: Discovery,
+
+    relay: Option<Vec<Multiaddr>>,
 
     check_seen: Arc<AtomicBool>,
 
@@ -63,6 +67,7 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
             start_event: self.start_event.clone(),
             end_event: self.end_event.clone(),
             discovery: self.discovery.clone(),
+            relay: self.relay.clone(),
             check_seen: self.check_seen.clone(),
             tesseract: self.tesseract.clone(),
         }
@@ -82,7 +87,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         path: Option<PathBuf>,
         tesseract: Tesseract,
         interval: u64,
-        discovery: Discovery,
+        (discovery, relay): (Discovery, Option<Vec<Multiaddr>>),
     ) -> Result<Self, Error> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -112,6 +117,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             start_event,
             end_event,
             discovery,
+            relay,
             check_seen,
             tesseract,
         };
@@ -322,6 +328,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
         self.discovery.clone()
     }
 
+    pub fn relays(&self) -> Vec<Multiaddr> {
+        self.relay.clone().unwrap_or_default()
+    }
+
     fn cache(&self) -> Vec<Identity> {
         self.cache.read().clone()
     }
@@ -384,13 +394,16 @@ impl<T: IpfsTypes> IdentityStore<T> {
             //      A) The memory cache never got updated and somehow bypassed the check likely caused from a race condition; or
             //      B) There is literally 2 identities, which should be impossible because of A
             LookupBy::DidKey(pubkey) => {
-                if let Discovery::Direct = self.discovery {
+                if **pubkey == own_did {
+                    return self.own_identity().await.map(|i| vec![i]);
+                }
+                if matches!(self.discovery_type(), Discovery::Direct | Discovery::None) {
                     let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
                     let connected = connected_to_peer(
                         self.ipfs.clone(),
                         Some(IDENTITY_BROADCAST.into()),
-                        PeerType::PeerId(peer_id),
+                        peer_id,
                     )
                     .await?;
                     if connected != PeerConnectionType::SubscribedAndConnected {
@@ -407,8 +420,11 @@ impl<T: IpfsTypes> IdentityStore<T> {
                         if let Err(_e) = res {
                             let ipfs = self.ipfs.clone();
                             let pubkey = pubkey.clone();
+                            let relay = self.relays();
+                            let discovery = self.discovery.clone();
                             tokio::spawn(async move {
-                                if let Err(e) = super::discover_peer(ipfs, &own_did, &*pubkey).await
+                                if let Err(e) =
+                                    super::discover_peer(ipfs, &*pubkey, discovery, relay).await
                                 {
                                     error!("Error discoverying peer: {e}");
                                 }
@@ -475,7 +491,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
     pub async fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
-        if self.discovery_type() != Discovery::Direct {
+        if !matches!(self.discovery_type(), Discovery::Direct | Discovery::None) {
             self.lookup(LookupBy::DidKey(Box::new(did.clone())))
                 .await?
                 .first()
@@ -486,12 +502,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let connected = connected_to_peer(
             self.ipfs.clone(),
             Some(IDENTITY_BROADCAST.into()),
-            PeerType::DID(did.clone()),
+            did.clone(),
         )
         .await?;
 
         match connected {
-            PeerConnectionType::SubscribedAndConnected | PeerConnectionType::Connected | PeerConnectionType::Subscribed => Ok(IdentityStatus::Online),
+            PeerConnectionType::SubscribedAndConnected
+            | PeerConnectionType::Connected
+            | PeerConnectionType::Subscribed => Ok(IdentityStatus::Online),
             PeerConnectionType::NotConnected => Ok(IdentityStatus::Offline),
         }
     }
