@@ -135,6 +135,7 @@ pub async fn discovery<T: IpfsTypes, S: AsRef<str>>(
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum PeerType {
     PeerId(PeerId),
     DID(DID),

@@ -176,7 +176,7 @@ impl DirectConversation {
     pub fn event_handle(&self) -> anyhow::Result<BroadcastSender<MessageEventKind>> {
         self.tx
             .clone()
-            .ok_or(anyhow::anyhow!("Sender is not available"))
+            .ok_or_else(||anyhow::anyhow!("Sender is not available"))
     }
 
     pub async fn to_file(&self, key: Option<&DID>) -> anyhow::Result<()> {
@@ -1491,7 +1491,7 @@ pub fn direct_message_event(
                             if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
                                 conversation_id: convo_id,
                                 message_id,
-                                did_key: sender.clone(),
+                                did_key: sender,
                                 reaction: emoji,
                             }) {
                                 error!("Error broadcasting event: {e}");
@@ -1506,7 +1506,7 @@ pub fn direct_message_event(
                     if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
                         conversation_id: convo_id,
                         message_id,
-                        did_key: sender.clone(),
+                        did_key: sender,
                         reaction: emoji,
                     }) {
                         error!("Error broadcasting event: {e}");

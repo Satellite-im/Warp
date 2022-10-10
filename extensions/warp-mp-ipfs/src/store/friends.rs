@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![allow(clippy::await_holding_lock)]
 use chrono::{DateTime, Utc};
 use futures::{SinkExt, StreamExt, TryFutureExt};
 use ipfs::{Ipfs, IpfsPath, IpfsTypes, Keypair, PeerId, Protocol, Types};
