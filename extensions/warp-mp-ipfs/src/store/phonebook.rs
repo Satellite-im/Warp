@@ -119,7 +119,6 @@ pub struct PhoneBookFuture<T: IpfsTypes> {
     discovery: Discovery,
     relays: Vec<Multiaddr>,
     rx: mpsc::Receiver<PhoneBookEvents>,
-    //placeholder for sending event of when somebody comes online or goes offline
     event: broadcast::Sender<MultiPassEventKind>,
 }
 
@@ -167,13 +166,23 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
                     let _ = ret.send(Ok(()));
                 }
                 PhoneBookEvents::RemoveFriend(did, ret) => {
-                    // let index = match self.friends.iter().map(|(d, _)| d).position(|inner_did| did.eq(inner_did)) {
-                    //     Some(index) =>
-                    // }
-                    let _ = ret.send(Ok(()));
+                    match self
+                        .friends
+                        .iter()
+                        .map(|(d, _, _)| d)
+                        .position(|inner_did| did.eq(inner_did))
+                    {
+                        Some(index) => {
+                            self.friends.remove(index);
+                            let _ = ret.send(Ok(()));
+                        }
+                        None => {
+                            let _ = ret.send(Err(Error::FriendDoesntExist));
+                        }
+                    }
                 }
-                PhoneBookEvents::SetDiscovery(discovery, ret) => {
-                    self.discovery = discovery;
+                PhoneBookEvents::SetDiscovery(disc, ret) => {
+                    self.discovery = disc;
                     let _ = ret.send(Ok(()));
                 }
                 PhoneBookEvents::AddRelays(addr, ret) => {
@@ -182,8 +191,9 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
                 }
             };
         }
-
+        let discovery = self.discovery.clone();
         for (did, status, discovering) in self.friends.iter_mut() {
+            let discovery = discovery.clone();
             //Note: We are using this to get the results from the function because it continues to show `Poll::Pending`
             //TODO: Switch back to manually polling and loop back over until it doesnt return `Poll::Pending`
             match warp::async_block_in_place_uncheck(connected_to_peer(
@@ -205,14 +215,11 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
                                 }
                             }
                         }
+
                         tokio::spawn(async move {
-                            if let Err(_e) = super::discover_peer(
-                                ipfs.clone(),
-                                &did,
-                                Discovery::None,
-                                relays.clone(),
-                            )
-                            .await
+                            if let Err(_e) =
+                                super::discover_peer(ipfs.clone(), &did, discovery, relays.clone())
+                                    .await
                             {}
                         });
                         *discovering = true;
