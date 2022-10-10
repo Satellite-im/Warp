@@ -496,6 +496,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
     pub async fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
+        //Note: This is checked because we may not be connected to those peers with the 2 options below
+        //      while with `Discovery::Provider`, they at some point should have been connected or discovered
         if !matches!(self.discovery_type(), Discovery::Direct | Discovery::None) {
             self.lookup(LookupBy::DidKey(Box::new(did.clone())))
                 .await?
@@ -512,10 +514,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
         .await?;
 
         match connected {
-            PeerConnectionType::SubscribedAndConnected
-            | PeerConnectionType::Connected
-            | PeerConnectionType::Subscribed => Ok(IdentityStatus::Online),
             PeerConnectionType::NotConnected => Ok(IdentityStatus::Offline),
+            _ => Ok(IdentityStatus::Online)
         }
     }
 

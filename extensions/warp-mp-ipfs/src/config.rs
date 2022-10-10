@@ -94,7 +94,7 @@ impl Default for Swarm {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionLimit {
     pub max_pending_incoming: Option<u32>,
     pub max_pending_outgoing: Option<u32>,
@@ -102,19 +102,6 @@ pub struct ConnectionLimit {
     pub max_established_outgoing: Option<u32>,
     pub max_established: Option<u32>,
     pub max_established_per_peer: Option<u32>,
-}
-
-impl Default for ConnectionLimit {
-    fn default() -> Self {
-        Self {
-            max_pending_incoming: None,
-            max_pending_outgoing: Some(1024),
-            max_established_incoming: None,
-            max_established_outgoing: Some(10000),
-            max_established: None,
-            max_established_per_peer: None,
-        }
-    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
