@@ -22,7 +22,7 @@ use self::group::GroupChat;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 #[serde(rename_all = "snake_case")]
 pub enum RayGunEventKind {
-    ConversationCreated { conversation: Conversation },
+    ConversationCreated { conversation_id: Uuid },
     ConversationDeleted { conversation_id: Uuid },
 }
 

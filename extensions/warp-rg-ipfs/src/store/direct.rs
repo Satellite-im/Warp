@@ -85,7 +85,7 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
     }
 }
 
-//TODO: Replace message storage with either ipld document or sqlite. 
+//TODO: Replace message storage with either ipld document or sqlite.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectConversation {
     conversation: Arc<Conversation>,
@@ -177,7 +177,7 @@ impl DirectConversation {
     pub fn event_handle(&self) -> anyhow::Result<BroadcastSender<MessageEventKind>> {
         self.tx
             .clone()
-            .ok_or_else(||anyhow::anyhow!("Sender is not available"))
+            .ok_or_else(|| anyhow::anyhow!("Sender is not available"))
     }
 
     pub async fn to_file(&self, key: Option<&DID>) -> anyhow::Result<()> {
@@ -475,7 +475,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                     }
                                                 }
 
-                                                if let Err(e) = store.event.send(RayGunEventKind::ConversationCreated { conversation: convo.conversation() }) {
+                                                if let Err(e) = store.event.send(RayGunEventKind::ConversationCreated { conversation_id: convo.conversation().id() }) {
                                                     error!("Error broadcasting event: {e}");
                                                 }
 
@@ -884,7 +884,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .ok_or(Error::InvalidConversation)
     }
 
-    pub fn get_conversation_stream(&self, conversation: Uuid) -> Result<impl Stream<Item = MessageEventKind>, Error> {
+    pub fn get_conversation_stream(
+        &self,
+        conversation: Uuid,
+    ) -> Result<impl Stream<Item = MessageEventKind>, Error> {
         let conversation = self.get_conversation(conversation)?;
         conversation.conversation_stream().map_err(Error::from)
     }

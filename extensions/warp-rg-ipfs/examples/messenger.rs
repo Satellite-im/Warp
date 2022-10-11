@@ -186,8 +186,8 @@ async fn main() -> anyhow::Result<()> {
             event = event_stream.next() => {
                 if let Some(event) = event {
                     match event {
-                        warp::raygun::RayGunEventKind::ConversationCreated { conversation } => {
-                            *topic.write() = conversation.id();
+                        warp::raygun::RayGunEventKind::ConversationCreated { conversation_id } => {
+                            *topic.write() = conversation_id;
                             writeln!(stdout, "Set conversation to {}", *topic.read())?;
                             let stdout = stdout.clone();
                             let account = new_account.clone();
