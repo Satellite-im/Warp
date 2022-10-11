@@ -14,8 +14,8 @@ use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{
-    ConversationType, MessageEventKind, MessageOptions, PinState, RayGun, RayGunStream,
-    ReactionState,
+    ConversationType, MessageEventKind, MessageEventStream, MessageOptions, PinState, RayGun,
+    RayGunStream, ReactionState,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -179,6 +179,33 @@ async fn main() -> anyhow::Result<()> {
 
     writeln!(stdout, "{message}")?;
 
+    // loads all conversations into their own task to process events
+    for conversation in chat.list_conversations().await? {
+        {
+            let topic = topic.clone();
+            let id = conversation.id();
+            *topic.write() = id;
+        }
+        let mut stdout = stdout.clone();
+
+        let topic = topic.clone();
+        let stream = chat.get_conversation_stream(conversation.id()).await?;
+        let account = new_account.clone();
+        let chat = chat.clone();
+        tokio::spawn(async move {
+            if let Err(e) =
+                message_event_handle(stdout.clone(), account, chat, stream, topic.clone()).await
+            {
+                writeln!(stdout, ">> Error processing event task: {e}").unwrap();
+            }
+        });
+    }
+
+    // selects the last conversation
+    if *topic.read() != Uuid::nil() {
+        writeln!(stdout, "Set conversation to {}", *topic.read())?;
+    }
+
     let mut event_stream = chat.subscribe().await?;
 
     loop {
@@ -189,20 +216,27 @@ async fn main() -> anyhow::Result<()> {
                         warp::raygun::RayGunEventKind::ConversationCreated { conversation_id } => {
                             *topic.write() = conversation_id;
                             writeln!(stdout, "Set conversation to {}", *topic.read())?;
-                            let stdout = stdout.clone();
+                            let mut stdout = stdout.clone();
                             let account = new_account.clone();
+                            let stream = chat.get_conversation_stream(conversation_id).await?;
                             let chat = chat.clone();
                             let topic = topic.clone();
+
                             tokio::spawn(async move {
-                                if let Err(_) = message_event_handle(
+
+                                if let Err(e) = message_event_handle(
                                     stdout.clone(),
                                     account.clone(),
                                     chat.clone(),
+                                    stream,
                                     topic.clone(),
-                                ).await {}
+                                ).await {
+                                    writeln!(stdout, ">> Error processing event task: {e}").unwrap();
+                                }
                             });
                         },
                         warp::raygun::RayGunEventKind::ConversationDeleted { conversation_id } => {
+                            //TODO: Maybe store the tokio task in a hashmap and abort it after terminating conversation
                             writeln!(stdout, "Conversation {conversation_id} has been deleted")?;
                         },
                     }
@@ -237,17 +271,22 @@ async fn main() -> anyhow::Result<()> {
 
                             *topic.write() = id.id();
                             writeln!(stdout, "Set conversation to {}", topic.read())?;
-                            let stdout = stdout.clone();
+                            let mut stdout = stdout.clone();
                             let account = new_account.clone();
+                            let stream = chat.get_conversation_stream(id.id()).await?;
                             let chat = chat.clone();
                             let topic = topic.clone();
+
                             tokio::spawn(async move {
-                                if let Err(_) = message_event_handle(
+                                if let Err(e) = message_event_handle(
                                     stdout.clone(),
                                     account.clone(),
                                     chat.clone(),
+                                    stream,
                                     topic.clone(),
-                                ).await {}
+                                ).await {
+                                    writeln!(stdout, ">> Error processing event task: {e}").unwrap();
+                                }
                             });
                         },
                         Some("/remove-conversation") => {
@@ -522,11 +561,10 @@ fn get_username(account: Arc<RwLock<Box<dyn MultiPass>>>, did: DID) -> anyhow::R
 async fn message_event_handle(
     mut stdout: SharedWriter,
     multipass: Arc<RwLock<Box<dyn MultiPass>>>,
-    mut raygun: Arc<RwLock<Box<dyn RayGun>>>,
+    raygun: Arc<RwLock<Box<dyn RayGun>>>,
+    mut stream: MessageEventStream,
     conversation_id: Arc<RwLock<Uuid>>,
 ) -> anyhow::Result<()> {
-    let conversation = *conversation_id.read();
-    let mut stream = raygun.get_conversation_stream(conversation).await?;
     let topic = conversation_id.clone();
     while let Some(event) = stream.next().await {
         match event {
@@ -539,9 +577,7 @@ async fn message_event_handle(
                 message_id,
             } => {
                 if *topic.read() == conversation_id {
-                    if let Ok(message) =
-                        raygun.get_message(*topic.read(), message_id).await
-                    {
+                    if let Ok(message) = raygun.get_message(*topic.read(), message_id).await {
                         let username = get_username(multipass.clone(), message.sender())
                             .unwrap_or_else(|_| message.sender().to_string());
                         //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
