@@ -1,39 +1,31 @@
-use std::collections::HashMap;
-use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use futures::{FutureExt, Stream, StreamExt};
-use ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream, Types};
+use futures::{Stream, StreamExt};
+use ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream};
 
 use libipld::IpldCodec;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{self, Sender as BroadcastSender};
-use tokio::task::JoinHandle;
 use uuid::Uuid;
-use warp::crypto::curve25519_dalek::traits::Identity;
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::logging::tracing::log::{error, trace};
-use warp::logging::tracing::{warn, Span};
-use warp::multipass::identity::FriendRequest;
+use warp::logging::tracing::warn;
 use warp::multipass::MultiPass;
 use warp::raygun::{
     Conversation, EmbedState, Message, MessageEventKind, MessageOptions, PinState, RayGunEventKind,
     Reaction, ReactionState,
 };
 use warp::sata::Sata;
-use warp::sync::{Arc, Mutex, RwLock};
-
-use tokio::sync::mpsc::Sender;
-use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender};
+use warp::sync::{Arc, RwLock};
 
 use crate::{Persistent, SpamFilter};
 
 use super::{
-    did_to_libp2p_pub, libp2p_pub_to_did, topic_discovery, verify_serde_sig, ConversationEvents,
-    MessagingEvents, DIRECT_BROADCAST,
+    did_to_libp2p_pub, topic_discovery, verify_serde_sig, ConversationEvents, MessagingEvents,
+    DIRECT_BROADCAST,
 };
 
 pub struct DirectMessageStore<T: IpfsTypes> {
@@ -596,6 +588,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         Ok(store)
     }
 
+    #[allow(dead_code)]
     async fn local(&self) -> anyhow::Result<(ipfs::libp2p::identity::PublicKey, PeerId)> {
         let (local_ipfs_public_key, local_peer_id) = self
             .ipfs

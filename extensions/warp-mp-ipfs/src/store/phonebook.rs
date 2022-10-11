@@ -1,12 +1,8 @@
-use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 
-use futures::FutureExt;
-use futures::SinkExt;
-use futures::Stream;
 use ipfs::Multiaddr;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
@@ -22,7 +18,6 @@ use crate::config::Discovery;
 
 use super::connected_to_peer;
 use super::PeerConnectionType;
-use super::PeerType;
 
 /// Used to handle friends connectivity status
 pub struct PhoneBook<T: IpfsTypes> {
@@ -82,7 +77,7 @@ impl<T: IpfsTypes> PhoneBook<T> {
         self.tx
             .send(PhoneBookEvents::RemoveFriend(did.clone(), tx))
             .await?;
-        let x = rx.await?;
+        rx.await??;
         Ok(())
     }
 
@@ -274,7 +269,7 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
 
         if !self.friends.is_empty() {
             let waker = cx.waker().clone();
-            tokio::spawn(async move{
+            tokio::spawn(async move {
                 //Although we could use a timer from tokio or futures, it might be best for now to sleep in a separate task (or thread if we go that route) then wake up the context
                 //so it would start the future again since it would almost always be pending (except for if the receiver is dropped or returns
                 //`Poll::Ready(None)`)

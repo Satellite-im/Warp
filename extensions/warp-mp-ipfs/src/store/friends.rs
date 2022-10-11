@@ -1,37 +1,31 @@
-#![allow(dead_code)]
 #![allow(clippy::await_holding_lock)]
-use chrono::{DateTime, Utc};
-use futures::{SinkExt, StreamExt, TryFutureExt};
-use ipfs::{Ipfs, IpfsPath, IpfsTypes, Keypair, PeerId, Protocol, Types};
+use futures::StreamExt;
+use ipfs::{Ipfs, IpfsTypes, PeerId};
 use std::io::Write;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast;
 use tracing::log::{error, warn};
 
-use libipld::serde::{from_ipld, to_ipld};
-use libipld::{ipld, Cid, Ipld, IpldCodec};
+use libipld::IpldCodec;
 use sata::{Kind, Sata};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use warp::async_block_in_place_uncheck;
+use serde::{Deserialize, Serialize};
 use warp::crypto::DID;
 use warp::error::Error;
-use warp::multipass::identity::{FriendRequest, FriendRequestStatus, Identity};
-use warp::multipass::{MultiPass, MultiPassEventKind};
-use warp::sync::{Arc, Mutex, RwLock};
+use warp::multipass::identity::{FriendRequest, FriendRequestStatus};
+use warp::multipass::MultiPassEventKind;
+use warp::sync::{Arc, RwLock};
 
-use tokio::sync::mpsc::Sender;
-use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender};
 use warp::tesseract::Tesseract;
 
 use crate::config::Discovery;
-use crate::store::{connected_to_peer, verify_serde_sig, PeerType};
+use crate::store::{connected_to_peer, verify_serde_sig};
 use crate::Persistent;
 
-use super::identity::{IdentityStore, LookupBy};
+use super::identity::IdentityStore;
 use super::phonebook::PhoneBook;
 use super::{
     did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, PeerConnectionType,
@@ -130,7 +124,7 @@ impl InternalRequest {
 }
 
 impl InternalProfile {
-    pub async fn from_file<P: AsRef<Path>>(path: P, key: &DID) -> anyhow::Result<Self> {
+    pub async fn from_file<P: AsRef<Path>>(path: P, _: &DID) -> anyhow::Result<Self> {
         let mut profile = InternalProfile::default();
         let path = path.as_ref();
         if let Ok(bytes) = tokio::fs::read(path.join("friends")).await {
@@ -152,7 +146,7 @@ impl InternalProfile {
         Ok(profile)
     }
 
-    pub fn to_file<P: AsRef<Path>>(&self, path: P, key: &DID) -> anyhow::Result<()> {
+    pub fn to_file<P: AsRef<Path>>(&self, path: P, _: &DID) -> anyhow::Result<()> {
         self.friends_to_file_sync(&path)?;
         self.request_to_file_sync(&path)?;
         self.blocks_to_file_sync(&path)?;
@@ -709,8 +703,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
             return Err(Error::FriendRequestExist);
         }
 
-        let peer: PeerId = did_to_libp2p_pub(pubkey)?.into();
-
         for request in self.profile.read().requests().iter() {
             // checking the from and status is just a precaution and not required
             if request.request_type() == InternalRequestType::Outgoing
@@ -1087,7 +1079,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 if let Err(_e) = res {
                     let ipfs = self.ipfs.clone();
                     let pubkey = request.to();
-                    let own = (*self.did_key).clone();
                     let relay = self.identity.relays();
                     let discovery = self.identity.discovery_type();
                     tokio::spawn(async move {

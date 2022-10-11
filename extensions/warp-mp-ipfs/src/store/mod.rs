@@ -1,7 +1,7 @@
-use std::{sync::Arc, time::Duration};
+use std::{time::Duration};
 
 use ipfs::{IpfsTypes, Multiaddr, PeerId, Protocol};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use tracing::log::error;
 use warp::{
     crypto::{

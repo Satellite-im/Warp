@@ -1,27 +1,15 @@
-// Used to ignore unused variables, mostly related to ones in the trait functions
-//TODO: Remove
-//TODO: Use rust-ipfs branch with major changes for pubsub, ipld, etc
-#![allow(unused_variables)]
-#![allow(unused_imports)]
-
 pub mod config;
 pub mod store;
 
-use anyhow::bail;
 use config::MpIpfsConfig;
-use futures::{Future, TryFutureExt};
 use ipfs::libp2p::kad::protocol::DEFAULT_PROTO_NAME;
 use ipfs::libp2p::swarm::ConnectionLimits;
 use ipfs::libp2p::yamux::YamuxConfig;
 use ipfs::p2p::TransportConfig;
 use libipld::serde::to_ipld;
-use libipld::{ipld, Cid, Ipld};
 use sata::Sata;
-use serde::de::DeserializeOwned;
 use std::any::Any;
 use std::borrow::Cow;
-use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use store::friends::FriendsStore;
@@ -39,25 +27,18 @@ use warp::pocket_dimension::PocketDimension;
 use warp::tesseract::Tesseract;
 use warp::{async_block_in_place_uncheck, Extension, SingleHandle};
 
-use ipfs::{
-    Block, Ipfs, IpfsOptions, IpfsPath, IpfsTypes, Keypair, PeerId, Protocol, TestTypes, Types,
-    UninitializedIpfs,
-};
-use tokio::sync::mpsc::Sender;
-use warp::crypto::rand::Rng;
+use ipfs::{Ipfs, IpfsOptions, IpfsTypes, Keypair, Protocol, TestTypes, Types, UninitializedIpfs};
 use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
 use warp::error::Error;
-use warp::multipass::generator::generate_name;
 use warp::multipass::identity::{
     FriendRequest, Identifier, Identity, IdentityUpdate, Relationship,
 };
 use warp::multipass::{
-    identity, Friends, FriendsEvent, IdentityInformation, MultiPass, MultiPassAdapter,
-    MultiPassEventKind, MultiPassEventStream,
+    identity, Friends, FriendsEvent, IdentityInformation, MultiPass, MultiPassEventKind,
+    MultiPassEventStream,
 };
 
-use crate::config::{Bootstrap, Discovery};
-use crate::store::discovery;
+use crate::config::Bootstrap;
 
 pub type Temporary = TestTypes;
 pub type Persistent = Types;
@@ -190,8 +171,6 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         );
 
         let config = self.config.clone();
-
-        let path = config.path.clone().unwrap_or_default();
 
         let empty_bootstrap = match &config.bootstrap {
             Bootstrap::Ipfs | Bootstrap::Experimental => false,
@@ -717,7 +696,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
         })
     }
 
-    fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<DID, Error> {
+    fn decrypt_private_key(&self, _: Option<&str>) -> Result<DID, Error> {
         let store = self.identity_store()?;
         let kp = store.get_raw_keypair()?.encode();
         let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
@@ -860,16 +839,13 @@ impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
 pub mod ffi {
     use crate::config::MpIpfsConfig;
     use crate::{IpfsIdentity, Persistent, Temporary};
-    use std::ffi::CStr;
-    use std::os::raw::c_char;
+    use warp::async_on_block;
     use warp::error::Error;
-    use warp::ffi::{FFIResult, LogRotateInterval};
-    use warp::logging::{tracing, tracing_futures};
+    use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::sync::{Arc, RwLock};
     use warp::tesseract::Tesseract;
-    use warp::{async_on_block, runtime_handle};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
