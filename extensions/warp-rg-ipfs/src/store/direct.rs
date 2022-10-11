@@ -162,7 +162,7 @@ impl DirectConversation {
     pub async fn from_file<P: AsRef<Path>>(path: P, key: Option<&DID>) -> anyhow::Result<Self> {
         let bytes = tokio::fs::read(&path).await?;
 
-        let conversation = match key {
+        let mut conversation: DirectConversation = match key {
             Some(key) => {
                 let data: Sata = serde_json::from_slice(&bytes)?;
                 let bytes = data.decrypt::<Vec<u8>>(key.as_ref())?;
@@ -170,6 +170,8 @@ impl DirectConversation {
             }
             None => serde_json::from_slice(&bytes)?,
         };
+        let (tx, _) = broadcast::channel(1024);
+        conversation.tx = Some(tx);
 
         Ok(conversation)
     }
