@@ -17,8 +17,8 @@ build_static_fs_storj:
 build_shared_tesseract:
 				mkdir -p bin && clang -Wall -Wextra tesseract.c -o bin/tesseract -L ../target/debug -lwarp -lpthread -ldl -lssl -lcrypto -lbz2 -lm -ludev
 
-build_static_mp_solana:
-				mkdir -p bin && clang -Wall -Wextra mp_solana.c -o bin/mp_solana ../target/debug/libwarp.a ../target/debug/libwarp_mp_solana.a -lz -lssl -lcrypto -lbz2 -lm -ludev
+build_shared_mp_ipfs:
+				mkdir -p bin && clang -Wall -Wextra mp_ipfs.c -o bin/mp_ipfs -L ../target/debug -lwarp -lwarp_mp_ipfs -lz -lm
 
 build_static_mp_ipfs:
 				mkdir -p bin && clang -Wall -Wextra mp_ipfs.c -o bin/mp_ipfs ../target/debug/libwarp.a ../target/debug/libwarp_mp_ipfs.a -lz -lm

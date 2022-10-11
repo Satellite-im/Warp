@@ -5,6 +5,7 @@ use crate::error::Error;
 use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::{Extension, SingleHandle};
 
+use futures::stream::BoxStream;
 use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -17,6 +18,86 @@ use uuid::Uuid;
 
 #[allow(unused_imports)]
 use self::group::GroupChat;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[serde(rename_all = "snake_case")]
+pub enum RayGunEventKind {
+    ConversationCreated { conversation_id: Uuid },
+    ConversationDeleted { conversation_id: Uuid },
+}
+
+#[derive(FFIFree)]
+pub struct RayGunEventStream(pub BoxStream<'static, RayGunEventKind>);
+
+impl core::ops::Deref for RayGunEventStream {
+    type Target = BoxStream<'static, RayGunEventKind>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for RayGunEventStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageEventKind {
+    MessageSent {
+        conversation_id: Uuid,
+        message_id: Uuid,
+    },
+    MessageReceived {
+        conversation_id: Uuid,
+        message_id: Uuid,
+    },
+    MessageEdited {
+        conversation_id: Uuid,
+        message_id: Uuid,
+    },
+    MessageDeleted {
+        conversation_id: Uuid,
+        message_id: Uuid,
+    },
+    MessagePinned {
+        conversation_id: Uuid,
+        message_id: Uuid,
+    },
+    MessageUnpinned {
+        conversation_id: Uuid,
+        message_id: Uuid,
+    },
+    MessageReactionAdded {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        did_key: DID,
+        reaction: String,
+    },
+    MessageReactionRemoved {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        did_key: DID,
+        reaction: String,
+    },
+}
+
+#[derive(FFIFree)]
+pub struct MessageEventStream(pub BoxStream<'static, MessageEventKind>);
+
+impl core::ops::Deref for MessageEventStream {
+    type Target = BoxStream<'static, MessageEventKind>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for MessageEventStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct MessageOptions {
@@ -358,7 +439,7 @@ pub enum EmbedState {
 }
 
 #[async_trait::async_trait]
-pub trait RayGun: Extension + Sync + Send + SingleHandle {
+pub trait RayGun: RayGunStream + Extension + Sync + Send + SingleHandle {
     // Start a new conversation.
     async fn create_conversation(&mut self, _: &DID) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
@@ -421,13 +502,25 @@ pub trait RayGun: Extension + Sync + Send + SingleHandle {
         message: Vec<String>,
     ) -> Result<(), Error>;
 
-
     async fn embeds(
         &mut self,
         conversation_id: Uuid,
         message_id: Uuid,
         state: EmbedState,
     ) -> Result<(), Error>;
+}
+
+#[async_trait::async_trait]
+pub trait RayGunStream: Sync + Send {
+    /// Subscribe to an stream of events from the conversation
+    async fn get_conversation_stream(&mut self, _: Uuid) -> Result<MessageEventStream, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Subscribe to an stream of events
+    async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
+        Err(Error::Unimplemented)
+    }
 }
 
 #[allow(clippy::await_holding_lock)]
@@ -528,6 +621,23 @@ where
     }
 }
 
+#[async_trait::async_trait]
+impl<T: ?Sized> RayGunStream for Arc<RwLock<Box<T>>>
+where
+    T: RayGunStream,
+{
+    async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
+        self.write().subscribe().await
+    }
+
+    async fn get_conversation_stream(
+        &mut self,
+        conversation_id: Uuid,
+    ) -> Result<MessageEventStream, Error> {
+        self.write().get_conversation_stream(conversation_id).await
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(FFIFree)]
 pub struct RayGunAdapter {
@@ -554,16 +664,20 @@ impl RayGunAdapter {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
-    use super::{Conversation, ConversationType, FFIResult_FFIVec_Conversation};
+    use super::{
+        Conversation, ConversationType, FFIResult_FFIVec_Conversation, MessageEventStream,
+        RayGunEventStream,
+    };
     use crate::async_on_block;
     use crate::crypto::{FFIVec_DID, DID};
     use crate::error::Error;
-    use crate::ffi::{FFIResult, FFIResult_Null, FFIVec_String};
+    use crate::ffi::{FFIResult, FFIResult_Null, FFIResult_String, FFIVec_String};
     use crate::raygun::{
         EmbedState, FFIResult_FFIVec_Message, FFIVec_Reaction, Message, MessageOptions, PinState,
         RayGunAdapter, Reaction, ReactionState,
     };
     use chrono::{DateTime, NaiveDateTime, Utc};
+    use futures::StreamExt;
     use std::ffi::{CStr, CString};
     use std::os::raw::c_char;
     use std::str::{FromStr, Utf8Error};
@@ -615,9 +729,7 @@ pub mod ffi {
         message_id: *const c_char,
     ) -> FFIResult<Message> {
         if ctx.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!(
-                "Context cannot be null"
-            )));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if convo_id.is_null() {
@@ -932,6 +1044,81 @@ pub mod ffi {
 
         let adapter = &mut *ctx;
         async_on_block(adapter.write_guard().embeds(convo_id, msg_id, state)).into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_subscribe(
+        ctx: *mut RayGunAdapter,
+    ) -> FFIResult<RayGunEventStream> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        let rg = &mut *(ctx);
+
+        async_on_block(rg.write_guard().subscribe()).into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_stream_next(ctx: *mut RayGunEventStream) -> FFIResult_String {
+        if ctx.is_null() {
+            return FFIResult_String::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        let stream = &mut *(ctx);
+
+        match async_on_block(stream.next()) {
+            Some(event) => serde_json::to_string(&event).map_err(Error::from).into(),
+            None => FFIResult_String::err(Error::Any(anyhow::anyhow!(
+                "Error obtaining data from stream"
+            ))),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_get_conversation_stream(
+        ctx: *mut RayGunAdapter,
+        conversation_id: *const c_char,
+    ) -> FFIResult<MessageEventStream> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        if conversation_id.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!(
+                "Conversation ID cannot be null"
+            )));
+        }
+
+        let conversation_id =
+            match Uuid::from_str(&CStr::from_ptr(conversation_id).to_string_lossy()) {
+                Ok(uuid) => uuid,
+                Err(e) => return FFIResult::err(Error::UuidError(e)),
+            };
+
+        let rg = &mut *(ctx);
+
+        async_on_block(rg.write_guard().get_conversation_stream(conversation_id)).into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn message_stream_next(ctx: *mut MessageEventStream) -> FFIResult_String {
+        if ctx.is_null() {
+            return FFIResult_String::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        let stream = &mut *(ctx);
+
+        match async_on_block(stream.next()) {
+            Some(event) => serde_json::to_string(&event).map_err(Error::from).into(),
+            None => FFIResult_String::err(Error::Any(anyhow::anyhow!(
+                "Error obtaining data from stream"
+            ))),
+        }
     }
 
     #[allow(clippy::missing_safety_doc)]

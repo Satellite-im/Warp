@@ -1,4 +1,4 @@
-use crate::crypto::{DID};
+use crate::crypto::DID;
 use crate::error::Error;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -17,11 +17,10 @@ impl Default for GroupStatus {
 }
 
 #[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
-pub struct Member{
+pub struct Member {
     member: DID,
     //permission: Permission
 }
-
 
 #[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub struct Group {
@@ -115,7 +114,7 @@ impl GroupInvitation {
     }
 
     pub fn group(&self) -> Uuid {
-        self.group.clone()
+        self.group
     }
 
     pub fn sender(&self) -> DID {
@@ -152,7 +151,7 @@ impl GroupInvitation {
         self.metadata = metadata
     }
 }
- 
+
 // General/Base GroupChat Trait
 pub trait GroupChat: GroupInvite + GroupChatManagement {
     /// Join a existing group

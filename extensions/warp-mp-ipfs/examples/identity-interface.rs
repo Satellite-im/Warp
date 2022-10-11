@@ -4,7 +4,6 @@ use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
@@ -27,6 +26,8 @@ struct Opt {
     #[clap(long)]
     direct: bool,
     #[clap(long)]
+    no_discovery: bool,
+    #[clap(long)]
     mdns: bool,
 }
 
@@ -45,6 +46,7 @@ async fn account(
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     experimental: bool,
     direct: bool,
+    no_discovery: bool,
     mdns: bool,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let mut tesseract = Tesseract::default();
@@ -54,6 +56,10 @@ async fn account(
     let mut config = MpIpfsConfig::testing(experimental);
     if direct {
         config.store_setting.discovery = Discovery::Direct;
+    }
+    if no_discovery {
+        config.store_setting.discovery = Discovery::None;
+        config.ipfs_setting.bootstrap = false;
     }
     config.ipfs_setting.mdns.enable = mdns;
     let mut account = ipfs_identity_temporary(Some(config), tesseract, cache).await?;
@@ -67,6 +73,7 @@ async fn account_persistent<P: AsRef<Path>>(
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     experimental: bool,
     direct: bool,
+    no_discovery: bool,
     mdns: bool,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let path = path.as_ref();
@@ -87,6 +94,11 @@ async fn account_persistent<P: AsRef<Path>>(
     if direct {
         config.store_setting.discovery = Discovery::Direct;
     }
+    if no_discovery {
+        config.store_setting.discovery = Discovery::None;
+        config.ipfs_setting.bootstrap = false;
+    }
+
     config.ipfs_setting.mdns.enable = mdns;
     let mut account = ipfs_identity_persistent(config, tesseract, cache).await?;
     if account.get_own_identity().is_err() {
@@ -113,28 +125,102 @@ async fn main() -> anyhow::Result<()> {
 
     let mut account = match opt.path.as_ref() {
         Some(path) => {
-            account_persistent(None, path, cache, opt.experimental_node, opt.direct, opt.mdns).await?
+            account_persistent(
+                None,
+                path,
+                cache,
+                opt.experimental_node,
+                opt.direct,
+                opt.no_discovery,
+                opt.mdns,
+            )
+            .await?
         }
-        None => account(None, cache, opt.experimental_node, opt.direct, opt.mdns).await?,
+        None => {
+            account(
+                None,
+                cache,
+                opt.experimental_node,
+                opt.direct,
+                opt.no_discovery,
+                opt.mdns,
+            )
+            .await?
+        }
     };
 
     println!("Obtaining identity....");
-    let identity = account.get_own_identity()?;
+    let own_identity = account.get_own_identity()?;
     println!(
         "Registered user {}#{}",
-        identity.username(),
-        identity.short_id()
+        own_identity.username(),
+        own_identity.short_id()
     );
     let (mut rl, mut stdout) = Readline::new(format!(
         "{}#{} >>> ",
-        identity.username(),
-        identity.short_id()
+        own_identity.username(),
+        own_identity.short_id()
     ))?;
-    let mut incoming_list = vec![];
-    let mut friends_list = account.list_friends()?;
-    let mut interval = tokio::time::interval(Duration::from_millis(500));
+
+    let mut event_stream = account.subscribe()?;
     loop {
         tokio::select! {
+            event = event_stream.next() => {
+                if let Some(event) = event {
+                    match event {
+                        warp::multipass::MultiPassEventKind::FriendRequestReceived { from } => {
+                            let username = match account.get_identity(Identifier::did_key(from.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
+                                Ok(ident) => ident.username(),
+                                Err(_) => from.to_string()
+                            };
+                            writeln!(stdout, "> Pending request from {}. Do \"request accept {}\" to accept", username, from)?;
+                        },
+                        warp::multipass::MultiPassEventKind::FriendRequestRejected { from } => {
+                            let username = match account.get_identity(Identifier::did_key(from.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
+                                Ok(idents) => idents.username(),
+                                Err(_) => from.to_string()
+                            };
+                            writeln!(stdout, "> {} has denied requested your request", username)?;
+                        },
+                        warp::multipass::MultiPassEventKind::FriendRequestClosed { from } => {
+                            let username = match account.get_identity(Identifier::did_key(from.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
+                                Ok(idents) => idents.username(),
+                                Err(_) => from.to_string()
+                            };
+                            writeln!(stdout, "> {} has retracted their request", username)?;
+                        },
+                        warp::multipass::MultiPassEventKind::FriendAdded { did } => {
+                            let username = match account.get_identity(Identifier::did_key(did.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
+                                Ok(idents) => idents.username(),
+                                Err(_) => did.to_string()
+                            };
+                            writeln!(stdout, "> You are now friends with {}", username)?;
+                        },
+                        warp::multipass::MultiPassEventKind::FriendRemoved { did } => {
+                            let username = match account.get_identity(Identifier::did_key(did.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
+                                Ok(idents) => idents.username(),
+                                Err(_) => did.to_string()
+                            };
+                            writeln!(stdout, "> {} has been removed from friends list", username)?;
+                        },
+                        warp::multipass::MultiPassEventKind::IdentityOnline { did } => {
+                            let username = match account.get_identity(Identifier::did_key(did.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
+                                Ok(idents) => idents.username(),
+                                Err(_) => did.to_string()
+                            };
+                            writeln!(stdout, "> {} has came online", username)?;
+                        },
+                        warp::multipass::MultiPassEventKind::IdentityOffline { did } => {
+                            let username = match account.get_identity(Identifier::did_key(did.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
+                                Ok(idents) => idents.username(),
+                                Err(_) => did.to_string()
+                            };
+                            writeln!(stdout, "> {} went offline", username)?;
+                        },
+                        _ => {}
+                    }
+                }
+            }
             line = rl.readline().fuse() => match line {
                 Ok(line) => {
                     let mut cmd_line = line.trim().split(' ');
@@ -435,7 +521,7 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     }
                                 },
-                                Some("publickey") | Some("public-key") => {
+                                Some("publickey") | Some("public-key") | Some("didkey") | Some("did-key") | Some("did") => {
                                     let pk = match cmd_line.next() {
                                         Some(pk) => match pk.to_string().try_into() {
                                             Ok(did) => did,
@@ -457,7 +543,7 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     }
                                 },
-                                Some("own") => {
+                                Some("own") | None => {
                                     match account.get_identity(Identifier::own()) {
                                         Ok(identity) => identity,
                                         Err(e) => {
@@ -474,11 +560,15 @@ async fn main() -> anyhow::Result<()> {
                             let mut table = Table::new();
                             table.set_header(vec!["Username", "Public Key", "Status Message", "Status"]);
                             for identity in idents {
+                                let status = match identity.did_key() == own_identity.did_key() {
+                                    true => IdentityStatus::Online,
+                                    false => account.identity_status(&identity.did_key()).unwrap_or(IdentityStatus::Offline)
+                                };
                                 table.add_row(vec![
                                     identity.username(),
                                     identity.did_key().to_string(),
                                     identity.status_message().unwrap_or_default(),
-                                    format!("{:?}", account.identity_status(&identity.did_key()).unwrap_or(IdentityStatus::Offline)),
+                                    format!("{:?}", status),
                                 ]);
                             }
                             writeln!(stdout, "{}", table)?;
@@ -492,36 +582,6 @@ async fn main() -> anyhow::Result<()> {
                     writeln!(stdout, "Error: {}", e)?;
                 }
             },
-            _ = interval.tick() => {
-                if let Ok(list) = account.list_incoming_request() {
-                    if !list.is_empty() && incoming_list != list {
-                        let mut inner_list = list.clone();
-                        inner_list.retain(|item| !incoming_list.contains(item));
-                        for item in &inner_list {
-                            let username = match account.get_identity(Identifier::did_key(item.from())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
-                                Ok(ident) => ident.username(),
-                                Err(_) => item.from().to_string()
-                            };
-                            writeln!(stdout, "Pending request from {}. Do \"request accept {}\" to accept", username, item.from())?;
-                        }
-                        incoming_list = list;
-                    }
-                }
-                if let Ok(list) = account.list_friends() {
-                    if !list.is_empty() && friends_list != list {
-                        let mut inner_list = list.clone();
-                        inner_list.retain(|item| !friends_list.contains(item));
-                        for item in &inner_list {
-                            let username = match account.get_identity(Identifier::did_key(item.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
-                                Ok(idents) => idents.username(),
-                                Err(_) => item.to_string()
-                            };
-                            writeln!(stdout, "You are now friends with {}", username)?;
-                        }
-                        friends_list = list;
-                    }
-                }
-            }
         }
     }
 
