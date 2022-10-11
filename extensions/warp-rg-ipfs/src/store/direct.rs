@@ -85,6 +85,7 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
     }
 }
 
+//TODO: Replace message storage with either ipld document or sqlite. 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectConversation {
     conversation: Arc<Conversation>,
@@ -1326,11 +1327,11 @@ pub fn direct_message_event(
             let event = match direction {
                 MessageDirection::In => MessageEventKind::MessageReceived {
                     conversation_id,
-                    message,
+                    message_id: message.id(),
                 },
                 MessageDirection::Out => MessageEventKind::MessageSent {
                     conversation_id,
-                    message,
+                    message_id: message.id(),
                 },
             };
 

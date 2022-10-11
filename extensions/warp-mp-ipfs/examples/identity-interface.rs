@@ -168,12 +168,12 @@ async fn main() -> anyhow::Result<()> {
             event = event_stream.next() => {
                 if let Some(event) = event {
                     match event {
-                        warp::multipass::MultiPassEventKind::FriendRequestReceived { request } => {
-                            let username = match account.get_identity(Identifier::did_key(request.from())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
+                        warp::multipass::MultiPassEventKind::FriendRequestReceived { from } => {
+                            let username = match account.get_identity(Identifier::did_key(from.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
                                 Ok(ident) => ident.username(),
-                                Err(_) => request.from().to_string()
+                                Err(_) => from.to_string()
                             };
-                            writeln!(stdout, "> Pending request from {}. Do \"request accept {}\" to accept", username, request.from())?;
+                            writeln!(stdout, "> Pending request from {}. Do \"request accept {}\" to accept", username, from)?;
                         },
                         warp::multipass::MultiPassEventKind::FriendRequestRejected { from } => {
                             let username = match account.get_identity(Identifier::did_key(from.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {

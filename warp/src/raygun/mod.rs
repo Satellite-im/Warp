@@ -47,11 +47,11 @@ impl core::ops::DerefMut for RayGunEventStream {
 pub enum MessageEventKind {
     MessageSent {
         conversation_id: Uuid,
-        message: Message,
+        message_id: Uuid,
     },
     MessageReceived {
         conversation_id: Uuid,
-        message: Message,
+        message_id: Uuid,
     },
     MessageEdited {
         conversation_id: Uuid,

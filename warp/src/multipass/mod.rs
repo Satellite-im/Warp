@@ -22,8 +22,8 @@ use self::identity::{IdentityStatus, Relationship};
 #[serde(rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum MultiPassEventKind {
-    FriendRequestReceived { request: FriendRequest },
-    FriendRequestSent { request: FriendRequest },
+    FriendRequestReceived { from: DID },
+    FriendRequestSent { to: DID },
     FriendRequestRejected { from: DID },
     FriendRequestClosed { from: DID },
     FriendAdded { did: DID },

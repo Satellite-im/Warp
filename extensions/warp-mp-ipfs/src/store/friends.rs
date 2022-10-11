@@ -562,7 +562,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                             continue
                                         }
 
-                                        if let Err(e) = store.tx.send(MultiPassEventKind::FriendRequestReceived { request: data.clone() }) {
+                                        if let Err(e) = store.tx.send(MultiPassEventKind::FriendRequestReceived { from: data.from() }) {
                                             error!("Error broadcasting event: {e}");
                                         }
 

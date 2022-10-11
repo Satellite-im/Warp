@@ -532,27 +532,36 @@ async fn message_event_handle(
         match event {
             MessageEventKind::MessageReceived {
                 conversation_id,
-                message,
+                message_id,
             }
             | MessageEventKind::MessageSent {
                 conversation_id,
-                message,
+                message_id,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), message.sender())
-                        .unwrap_or_else(|_| message.sender().to_string());
-                    //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
-                    match message.metadata().get("is_spam") {
-                        Some(_) => {
-                            writeln!(
-                                stdout,
-                                "[{}] @> [SPAM!] {}",
-                                username,
-                                message.value().join("\n")
-                            )?;
-                        }
-                        None => {
-                            writeln!(stdout, "[{}] @> {}", username, message.value().join("\n"))?;
+                    if let Ok(message) =
+                        raygun.get_message(*topic.read(), message_id).await
+                    {
+                        let username = get_username(multipass.clone(), message.sender())
+                            .unwrap_or_else(|_| message.sender().to_string());
+                        //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
+                        match message.metadata().get("is_spam") {
+                            Some(_) => {
+                                writeln!(
+                                    stdout,
+                                    "[{}] @> [SPAM!] {}",
+                                    username,
+                                    message.value().join("\n")
+                                )?;
+                            }
+                            None => {
+                                writeln!(
+                                    stdout,
+                                    "[{}] @> {}",
+                                    username,
+                                    message.value().join("\n")
+                                )?;
+                            }
                         }
                     }
                 }
