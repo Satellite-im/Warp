@@ -4,6 +4,8 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <threads.h>
+
 #include "../warp/warp.h"
 #include "../extensions/warp-mp-ipfs/warp-mp-ipfs.h"
 #include "../extensions/warp-rg-ipfs/warp-rg-ipfs.h"
@@ -13,6 +15,62 @@ void print_error(FFIError *error)
     printf("Error Type: %s\n", error->error_type);
     printf("Error Message: %s\n", error->error_message);
     ffierror_free(error);
+}
+
+typedef struct RGEventStream
+{
+    DID *did;
+    RayGunEventStream *stream;
+} RGEventStream;
+
+typedef struct MsgEventStream
+{
+    DID *did;
+    char *conversation_id;
+    MessageEventStream *stream;
+} MsgEventStream;
+
+void *raygun_stream_thread(void *arg)
+{
+    RGEventStream *event_stream = arg;
+    RayGunEventStream *stream = event_stream->stream;
+    char *did_key = did_to_string(event_stream->did);
+    while (1)
+    {
+        FFIResult_String result_event = raygun_stream_next(stream);
+        if (result_event.error)
+        {
+            print_error(result_event.error);
+            break;
+        }
+        printf("[%s] -> RayGun Event: %s\n", did_key, result_event.data);
+        free(result_event.data);
+    }
+    rayguneventstream_free(stream);
+    free(event_stream);
+    return NULL;
+}
+
+void *message_stream_thread(void *arg)
+{
+    MsgEventStream *event_stream = arg;
+    MessageEventStream *stream = event_stream->stream;
+    char *did_key = did_to_string(event_stream->did);
+    char *conversation_id = event_stream->conversation_id;
+    while (1)
+    {
+        FFIResult_String result_event = message_stream_next(stream);
+        if (result_event.error)
+        {
+            print_error(result_event.error);
+            break;
+        }
+        printf("[CoID:%s][%s] -> Messaging Event: %s\n", conversation_id, did_key, result_event.data);
+        free(result_event.data);
+    }
+    messageeventstream_free(stream);
+    free(event_stream);
+    return NULL;
 }
 
 MultiPassAdapter *new_account(const char *pass)
@@ -64,26 +122,30 @@ RayGunAdapter *new_chat(const MultiPassAdapter *mp)
 
 char *get_username(const MultiPassAdapter *account, const DID *id)
 {
-    if (!id)
+    if (!account || !id)
     {
         return "Null User";
     }
 
     Identifier *ident = multipass_identifier_did_key(id);
-
     if (!ident)
     {
         return "Null User";
     }
 
     FFIResult_FFIVec_Identity result_identity_t = multipass_get_identity(account, ident);
-
     if (result_identity_t.error)
     {
         print_error(result_identity_t.error);
         return "Null User";
     }
-    return multipass_identity_username(result_identity_t.data->ptr[0]);
+
+    if (result_identity_t.data->len == 0)
+    {
+        return did_to_string(id);
+    }
+    Identity *identity = result_identity_t.data->ptr[0];
+    return multipass_identity_username(identity);
 }
 
 void print_messages(const MultiPassAdapter *account, const FFIVec_Message *messages)
@@ -115,6 +177,30 @@ void print_messages(const MultiPassAdapter *account, const FFIVec_Message *messa
     }
 }
 
+void spawn_stream(MultiPassAdapter *mp, RayGunAdapter *rg)
+{
+    FFIResult_Identity result_ident = multipass_get_own_identity(mp);
+    if (result_ident.error)
+    {
+        print_error(result_ident.error);
+        return;
+    }
+
+    DID *did = multipass_identity_did_key(result_ident.data);
+
+    FFIResult_RayGunEventStream result_stream = raygun_subscribe(rg);
+
+    if (result_stream.error)
+    {
+        print_error(result_stream.error);
+        return; // Do we want to return NULL?
+    }
+
+    RGEventStream event_stream = {.did = did, .stream = result_stream.data};
+    thrd_t thr;
+    thrd_create(&thr, (thrd_start_t)raygun_stream_thread, (void *)&event_stream);
+}
+
 int main()
 {
     MultiPassAdapter *account_a = new_account("c_datastore_a");
@@ -125,7 +211,6 @@ int main()
         printf("Error creating account\n");
         return -1;
     }
-
     FFIResult_Identity result_ident_b = multipass_get_own_identity(account_b);
 
     if (result_ident_b.error)
@@ -137,7 +222,9 @@ int main()
     Identity *ident_b = result_ident_b.data;
 
     RayGunAdapter *chatter_a = new_chat(account_a);
+    // spawn_stream(account_a, chatter_a);
     RayGunAdapter *chatter_b = new_chat(account_b);
+    // spawn_stream(account_b, chatter_b);
 
     if (!chatter_a || !chatter_b)
     {
@@ -159,14 +246,7 @@ int main()
     sleep(1);
     sleep(1);
     // Messages are sent to rust via ffi as a array pointer. We would
-    const char *chat_a_message[] = {
-        "Hello, World!!!",
-        "How are you??",
-        "Has your day been good???",
-        "Mine is great",
-        "You there????",
-        "Just tired from dealing with C :D",
-        "Rust rules!!!"};
+    const char *chat_a_message[] = {"How are you??"};
 
     int message_lines_length = sizeof(chat_a_message) / sizeof(chat_a_message[0]);
 
@@ -177,13 +257,10 @@ int main()
         print_error(result_chat_t.error);
         return -1;
     }
-    // Because its async internally, we want to make sure that chatter_b to receive it before attempting to .
+    // Because its async and processing internally, we want to make sure that chatter_b to receive it before attempting to .
     sleep(1);
 
-    MessageOptions *opt = messageoptions_new();
-    opt = messageoptions_set_range(opt, 0, 1);
-
-    FFIResult_FFIVec_Message result_messages_b_t = raygun_get_messages(chatter_b, conversation, opt);
+    FFIResult_FFIVec_Message result_messages_b_t = raygun_get_messages(chatter_b, conversation, NULL);
 
     if (result_messages_b_t.error)
     {
@@ -196,12 +273,7 @@ int main()
     printf("\n");
 
     // Messages are sent to rust via ffi as a array pointer. We would
-    const char *chat_b_message[] = {
-        "Hello from Chatter A :D",
-        "I've grown tired of C",
-        "Rust is life",
-        "Sooooooooooo tired",
-        "Dreamed of being within a dream and waking up from that dream while in a dream :D"};
+    const char *chat_b_message[] = {"Hello from Chatter A :D"};
 
     int message_b_lines_length = sizeof(chat_b_message) / sizeof(chat_b_message[0]);
     FFIResult_Null result_chat_b_t = raygun_send(chatter_b, conversation, NULL, chat_b_message, message_b_lines_length);
@@ -215,11 +287,8 @@ int main()
     // Ditto; We may implement a small "wait" in rust to make sure the peers are synced up in some manner.
     sleep(1);
 
-    MessageOptions *opt2 = messageoptions_new();
-    opt2 = messageoptions_set_range(opt2, 0, 2);
-
     // Note: Because chatter a already had messages stored that was previously sent
-    FFIResult_FFIVec_Message result_messages_t = raygun_get_messages(chatter_a, conversation, opt2);
+    FFIResult_FFIVec_Message result_messages_t = raygun_get_messages(chatter_a, conversation, NULL);
 
     if (result_messages_t.error)
     {

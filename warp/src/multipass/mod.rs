@@ -1,6 +1,8 @@
 pub mod generator;
 pub mod identity;
 
+use futures::stream::BoxStream;
+use serde::{Deserialize, Serialize};
 use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -16,8 +18,38 @@ use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate};
 
 use self::identity::{IdentityStatus, Relationship};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[serde(rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
+pub enum MultiPassEventKind {
+    FriendRequestReceived { from: DID },
+    FriendRequestSent { to: DID },
+    FriendRequestRejected { from: DID },
+    FriendRequestClosed { from: DID },
+    FriendAdded { did: DID },
+    FriendRemoved { did: DID },
+    IdentityOnline { did: DID },
+    IdentityOffline { did: DID },
+}
+
+#[derive(FFIFree)]
+pub struct MultiPassEventStream(pub BoxStream<'static, MultiPassEventKind>);
+
+impl core::ops::Deref for MultiPassEventStream {
+    type Target = BoxStream<'static, MultiPassEventKind>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for MultiPassEventStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 pub trait MultiPass:
-    Extension + IdentityInformation + Friends + Sync + Send + SingleHandle
+    Extension + IdentityInformation + Friends + FriendsEvent + Sync + Send + SingleHandle
 {
     /// Create an [`Identity`]
     fn create_identity(
@@ -156,6 +188,13 @@ pub trait Friends: Sync + Send {
     }
 }
 
+pub trait FriendsEvent: Sync + Send {
+    /// Subscribe to an stream of events
+    fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
+        Err(Error::Unimplemented)
+    }
+}
+
 impl<T: ?Sized> Friends for Arc<RwLock<Box<T>>>
 where
     T: Friends,
@@ -235,6 +274,15 @@ where
     /// Check to see if public key is friend of the account
     fn has_friend(&self, key: &DID) -> Result<(), Error> {
         self.write().has_friend(key)
+    }
+}
+
+impl<T: ?Sized> FriendsEvent for Arc<RwLock<Box<T>>>
+where
+    T: FriendsEvent,
+{
+    fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
+        self.write().subscribe()
     }
 }
 
@@ -429,10 +477,12 @@ impl MultiPassAdapter {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
+    use futures::StreamExt;
+
     use crate::async_on_block;
     use crate::crypto::{FFIResult_FFIVec_DID, DID};
     use crate::error::Error;
-    use crate::ffi::{FFIResult, FFIResult_Null};
+    use crate::ffi::{FFIResult, FFIResult_Null, FFIResult_String};
     use crate::multipass::{
         identity::{
             FFIResult_FFIVec_FriendRequest, FFIResult_FFIVec_Identity, Identifier, Identity,
@@ -444,6 +494,7 @@ pub mod ffi {
     use std::os::raw::c_char;
 
     use super::identity::{IdentityStatus, Relationship};
+    use super::MultiPassEventStream;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -894,5 +945,38 @@ pub mod ffi {
         let pk = &*pubkey;
 
         async_on_block(async { mp.read_guard().identity_relationship(pk) }).into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_subscribe(
+        ctx: *mut MultiPassAdapter,
+    ) -> FFIResult<MultiPassEventStream> {
+        if ctx.is_null() {
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        let mp = &mut *(ctx);
+
+        async_on_block(async { mp.write_guard().subscribe() }).into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn multipass_stream_next(
+        ctx: *mut MultiPassEventStream,
+    ) -> FFIResult_String {
+        if ctx.is_null() {
+            return FFIResult_String::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        let stream = &mut *(ctx);
+
+        match async_on_block(stream.next()) {
+            Some(event) => serde_json::to_string(&event).map_err(Error::from).into(),
+            None => FFIResult_String::err(Error::Any(anyhow::anyhow!(
+                "Error obtaining data from stream"
+            ))),
+        }
     }
 }

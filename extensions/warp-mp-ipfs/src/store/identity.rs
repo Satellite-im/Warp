@@ -15,12 +15,16 @@ use libipld::{
     Cid, Ipld,
 };
 use sata::Sata;
+use tokio::sync::broadcast;
 use tracing::log::{error, info, trace, warn};
 use warp::{
     crypto::{rand::Rng, DIDKey, Ed25519KeyPair, Fingerprint, KeyMaterial, DID},
     error::Error,
     module::Module,
-    multipass::identity::{FriendRequest, Identity, IdentityStatus, SHORT_ID_SIZE},
+    multipass::{
+        identity::{FriendRequest, Identity, IdentityStatus, SHORT_ID_SIZE},
+        MultiPassEventKind,
+    },
     sync::{Arc, Mutex, RwLock},
     tesseract::Tesseract,
 };
@@ -87,6 +91,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         path: Option<PathBuf>,
         tesseract: Tesseract,
         interval: u64,
+        tx: broadcast::Sender<MultiPassEventKind>,
         (discovery, relay): (Discovery, Option<Vec<Multiaddr>>),
     ) -> Result<Self, Error> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
@@ -491,6 +496,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
     pub async fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
+        //Note: This is checked because we may not be connected to those peers with the 2 options below
+        //      while with `Discovery::Provider`, they at some point should have been connected or discovered
         if !matches!(self.discovery_type(), Discovery::Direct | Discovery::None) {
             self.lookup(LookupBy::DidKey(Box::new(did.clone())))
                 .await?
@@ -507,10 +514,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
         .await?;
 
         match connected {
-            PeerConnectionType::SubscribedAndConnected
-            | PeerConnectionType::Connected
-            | PeerConnectionType::Subscribed => Ok(IdentityStatus::Online),
             PeerConnectionType::NotConnected => Ok(IdentityStatus::Offline),
+            _ => Ok(IdentityStatus::Online)
         }
     }
 
