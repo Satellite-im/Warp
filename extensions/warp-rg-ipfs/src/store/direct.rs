@@ -799,7 +799,11 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 }
             };
         }
-
+        if let Err(e) = self.event.send(RayGunEventKind::ConversationDeleted {
+            conversation_id: conversation.id(),
+        }) {
+            error!("Error broadcasting event: {e}");
+        }
         warp::async_block_in_place_uncheck(conversation.delete())?;
         Ok(conversation)
     }
