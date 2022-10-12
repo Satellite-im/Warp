@@ -2,9 +2,11 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError, SharedWriter};
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use tokio::task::JoinHandle;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 use warp::crypto::zeroize::Zeroizing;
@@ -153,6 +155,8 @@ async fn main() -> anyhow::Result<()> {
 
     let topic = Arc::new(RwLock::new(Uuid::nil()));
 
+    let mut stream_map: HashMap<Uuid, JoinHandle<()>> = HashMap::new();
+
     let message = r#"
         Use `/create <did>` to create the conversation
         In the other client do `/list-conversations` to list all active/opened conversations
@@ -192,13 +196,17 @@ async fn main() -> anyhow::Result<()> {
         let stream = chat.get_conversation_stream(conversation.id()).await?;
         let account = new_account.clone();
         let chat = chat.clone();
-        tokio::spawn(async move {
-            if let Err(e) =
-                message_event_handle(stdout.clone(), account, chat, stream, topic.clone()).await
-            {
-                writeln!(stdout, ">> Error processing event task: {e}").unwrap();
-            }
-        });
+        let raw_id = { *topic.read() };
+        stream_map.insert(
+            raw_id,
+            tokio::spawn(async move {
+                if let Err(e) =
+                    message_event_handle(stdout.clone(), account, chat, stream, topic.clone()).await
+                {
+                    writeln!(stdout, ">> Error processing event task: {e}").unwrap();
+                }
+            }),
+        );
     }
 
     // selects the last conversation
@@ -221,8 +229,8 @@ async fn main() -> anyhow::Result<()> {
                             let stream = chat.get_conversation_stream(conversation_id).await?;
                             let chat = chat.clone();
                             let topic = topic.clone();
-
-                            tokio::spawn(async move {
+                            let raw_id = { *topic.read() };
+                            stream_map.insert(raw_id, tokio::spawn(async move {
 
                                 if let Err(e) = message_event_handle(
                                     stdout.clone(),
@@ -233,11 +241,16 @@ async fn main() -> anyhow::Result<()> {
                                 ).await {
                                     writeln!(stdout, ">> Error processing event task: {e}").unwrap();
                                 }
-                            });
+                            }));
                         },
                         warp::raygun::RayGunEventKind::ConversationDeleted { conversation_id } => {
-                            //TODO: Maybe store the tokio task in a hashmap and abort it after terminating conversation
-                            writeln!(stdout, "Conversation {conversation_id} has been deleted")?;
+                            if let std::collections::hash_map::Entry::Occupied(entry) = stream_map.entry(conversation_id) {
+                                entry.get().abort();
+                            }
+
+                            if *topic.read() == conversation_id {
+                                writeln!(stdout, "Conversation {conversation_id} has been deleted")?;
+                            }
                         },
                     }
                 }
