@@ -25,7 +25,7 @@ pub enum MultiPassEventKind {
     FriendRequestReceived { from: DID },
     FriendRequestSent { to: DID },
     FriendRequestRejected { from: DID },
-    FriendRequestClosed { from: DID },
+    FriendRequestClosed { from: DID, to: DID },
     FriendAdded { did: DID },
     FriendRemoved { did: DID },
     IdentityOnline { did: DID },
