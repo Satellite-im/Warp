@@ -1,20 +1,19 @@
-//TODO: Remove
-#![allow(dead_code)]
 pub mod direct;
 
 use std::time::Duration;
 
 use ipfs::IpfsTypes;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp::{
     crypto::{did_key::CoreSign, hash::sha256_hash, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
+    logging::tracing::log::{error, trace},
     raygun::{Message, PinState, ReactionState},
-    sync::{Arc, Mutex}, logging::tracing::log::{error, trace},
 };
 
 pub const DIRECT_BROADCAST: &str = "direct/broadcast";
+#[allow(dead_code)]
 pub const GROUP_BROADCAST: &str = "group/broadcast";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -32,6 +31,7 @@ pub enum MessagingEvents {
     React(Uuid, DID, Uuid, ReactionState, String),
 }
 
+#[allow(dead_code)]
 pub fn generate_uuid(generate: &str) -> Uuid {
     let topic_hash = sha256_hash(generate.as_bytes(), None);
     Uuid::from_slice(&topic_hash[..topic_hash.len() / 2]).unwrap_or_default()
@@ -44,6 +44,7 @@ fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity:
     Ok(pk)
 }
 
+#[allow(dead_code)]
 fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::Result<DID> {
     let pk = match public_key {
         ipfs::libp2p::identity::PublicKey::Ed25519(pk) => {

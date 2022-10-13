@@ -1,37 +1,31 @@
-#![allow(dead_code)]
 #![allow(clippy::await_holding_lock)]
-use chrono::{DateTime, Utc};
-use futures::{SinkExt, StreamExt, TryFutureExt};
-use ipfs::{Ipfs, IpfsPath, IpfsTypes, Keypair, PeerId, Protocol, Types};
+use futures::StreamExt;
+use ipfs::{Ipfs, IpfsTypes, PeerId};
 use std::io::Write;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast;
 use tracing::log::{error, warn};
 
-use libipld::serde::{from_ipld, to_ipld};
-use libipld::{ipld, Cid, Ipld, IpldCodec};
+use libipld::IpldCodec;
 use sata::{Kind, Sata};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use warp::async_block_in_place_uncheck;
+use serde::{Deserialize, Serialize};
 use warp::crypto::DID;
 use warp::error::Error;
-use warp::multipass::identity::{FriendRequest, FriendRequestStatus, Identity};
-use warp::multipass::{MultiPass, MultiPassEventKind};
-use warp::sync::{Arc, Mutex, RwLock};
+use warp::multipass::identity::{FriendRequest, FriendRequestStatus};
+use warp::multipass::MultiPassEventKind;
+use warp::sync::{Arc, RwLock};
 
-use tokio::sync::mpsc::Sender;
-use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender};
 use warp::tesseract::Tesseract;
 
 use crate::config::Discovery;
-use crate::store::{connected_to_peer, verify_serde_sig, PeerType};
+use crate::store::{connected_to_peer, verify_serde_sig};
 use crate::Persistent;
 
-use super::identity::{IdentityStore, LookupBy};
+use super::identity::IdentityStore;
 use super::phonebook::PhoneBook;
 use super::{
     did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, PeerConnectionType,
@@ -130,7 +124,7 @@ impl InternalRequest {
 }
 
 impl InternalProfile {
-    pub async fn from_file<P: AsRef<Path>>(path: P, key: &DID) -> anyhow::Result<Self> {
+    pub async fn from_file<P: AsRef<Path>>(path: P, _: &DID) -> anyhow::Result<Self> {
         let mut profile = InternalProfile::default();
         let path = path.as_ref();
         if let Ok(bytes) = tokio::fs::read(path.join("friends")).await {
@@ -152,7 +146,7 @@ impl InternalProfile {
         Ok(profile)
     }
 
-    pub fn to_file<P: AsRef<Path>>(&self, path: P, key: &DID) -> anyhow::Result<()> {
+    pub fn to_file<P: AsRef<Path>>(&self, path: P, _: &DID) -> anyhow::Result<()> {
         self.friends_to_file_sync(&path)?;
         self.request_to_file_sync(&path)?;
         self.blocks_to_file_sync(&path)?;
@@ -664,7 +658,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
                                         store.profile.write().requests_mut().remove(index);
 
-                                        if let Err(e) = store.tx.send(MultiPassEventKind::FriendRequestClosed { from: data.from() }) {
+                                        if let Err(e) = store.tx.send(MultiPassEventKind::FriendRequestClosed { from: data.from(), to: data.to() }) {
                                             error!("Error broadcasting event: {e}");
                                         }
 
@@ -752,8 +746,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
         if self.has_request_from(pubkey) {
             return Err(Error::FriendRequestExist);
         }
-
-        let peer: PeerId = did_to_libp2p_pub(pubkey)?.into();
 
         for request in self.profile.read().requests().iter() {
             // checking the from and status is just a precaution and not required
@@ -1131,7 +1123,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 if let Err(_e) = res {
                     let ipfs = self.ipfs.clone();
                     let pubkey = request.to();
-                    let own = (*self.did_key).clone();
                     let relay = self.identity.relays();
                     let discovery = self.identity.discovery_type();
                     tokio::spawn(async move {
@@ -1189,6 +1180,35 @@ impl<T: IpfsTypes> FriendsStore<T> {
             self.queue.write().push(Queue(remote_peer_id, payload));
             self.save_queue().await;
         }
+
+        match request.status() {
+            FriendRequestStatus::Pending => {
+                if let Err(e) = self
+                    .tx
+                    .send(MultiPassEventKind::FriendRequestSent { to: request.to() })
+                {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            FriendRequestStatus::FriendRemoved => {
+                if let Err(e) = self
+                    .tx
+                    .send(MultiPassEventKind::FriendRemoved { did: request.to() })
+                {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            FriendRequestStatus::RequestRemoved => {
+                if let Err(e) = self
+                    .tx
+                    .send(MultiPassEventKind::FriendRequestClosed { from: request.from(), to: request.to() })
+                {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            _ => {}
+        };
+
         if save_to_disk {
             if let Some(path) = self.path.as_ref() {
                 if let Err(e) = self.profile.write().request_to_file(path).await {

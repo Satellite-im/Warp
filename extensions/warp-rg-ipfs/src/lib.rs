@@ -1,21 +1,11 @@
-#![allow(unused_imports)]
-
 pub mod config;
 mod spam_filter;
 mod store;
 
 use crate::spam_filter::SpamFilter;
 use config::RgIpfsConfig;
-use futures::stream::BoxStream;
-use futures::StreamExt;
-use futures::{pin_mut, Stream};
-use ipfs::libp2p::identity;
 use ipfs::IpfsTypes;
-use ipfs::{Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, TestTypes, Types, UninitializedIpfs};
-use std::any::Any;
-use std::ops::Deref;
-use std::path::PathBuf;
-use std::pin::Pin;
+use ipfs::{Ipfs, TestTypes, Types};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -25,23 +15,19 @@ use tokio::sync::broadcast;
 #[allow(unused_imports)]
 use tokio::sync::broadcast::{Receiver, Sender};
 use uuid::Uuid;
-use warp::crypto::rand::Rng;
-use warp::crypto::KeyMaterial;
 use warp::crypto::DID;
-use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::logging::tracing::log::error;
 use warp::logging::tracing::log::trace;
 use warp::module::Module;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::group::{Group, GroupChat, GroupChatManagement, GroupInvite, Member};
-use warp::raygun::{Conversation, RayGunStream, RayGunEventStream, MessageEventStream};
+use warp::raygun::group::{GroupChat, GroupChatManagement, GroupInvite};
+use warp::raygun::RayGunEventKind;
+use warp::raygun::{Conversation, MessageEventStream, RayGunEventStream, RayGunStream};
 use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
-use warp::raygun::{MessageEventKind, RayGunEventKind};
 use warp::sync::RwLock;
 use warp::sync::{RwLockReadGuard, RwLockWriteGuard};
-use warp::tesseract::Tesseract;
 use warp::Extension;
 use warp::SingleHandle;
 
@@ -390,16 +376,13 @@ impl<T: IpfsTypes> GroupInvite for IpfsMessaging<T> {}
 pub mod ffi {
     use crate::{IpfsMessaging, RgIpfsConfig};
     use crate::{Persistent, Temporary};
-    use std::ffi::CStr;
-    use std::os::raw::c_char;
-    use std::path::PathBuf;
+    use warp::async_on_block;
     use warp::error::Error;
     use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::raygun::RayGunAdapter;
     use warp::sync::{Arc, RwLock};
-    use warp::{async_on_block, runtime_handle};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]

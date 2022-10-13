@@ -1,37 +1,32 @@
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
-    hash::Hash,
-    path::{Path, PathBuf},
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    collections::HashSet,
+    path::PathBuf,
+    sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 
 use crate::{config::Discovery, store::did_to_libp2p_pub, Persistent};
-use futures::{SinkExt, StreamExt, TryFutureExt};
+use futures::StreamExt;
 use ipfs::{Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId};
 use libipld::{
-    ipld,
     serde::{from_ipld, to_ipld},
-    Cid, Ipld,
+    Cid,
 };
 use sata::Sata;
 use tokio::sync::broadcast;
-use tracing::log::{error, info, trace, warn};
+use tracing::log::error;
 use warp::{
-    crypto::{rand::Rng, DIDKey, Ed25519KeyPair, Fingerprint, KeyMaterial, DID},
+    crypto::{DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
-    module::Module,
     multipass::{
-        identity::{FriendRequest, Identity, IdentityStatus, SHORT_ID_SIZE},
+        identity::{Identity, IdentityStatus, SHORT_ID_SIZE},
         MultiPassEventKind,
     },
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, RwLock},
     tesseract::Tesseract,
 };
 
-use super::{
-    connected_to_peer, libp2p_pub_to_did, PeerConnectionType, PeerType, IDENTITY_BROADCAST,
-};
+use super::{connected_to_peer, libp2p_pub_to_did, PeerConnectionType, IDENTITY_BROADCAST};
 
 pub struct IdentityStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
@@ -91,7 +86,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         path: Option<PathBuf>,
         tesseract: Tesseract,
         interval: u64,
-        tx: broadcast::Sender<MultiPassEventKind>,
+        _tx: broadcast::Sender<MultiPassEventKind>,
         (discovery, relay): (Discovery, Option<Vec<Multiaddr>>),
     ) -> Result<Self, Error> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
@@ -198,7 +193,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                             if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
                                 if let Ok(identity) = data.decode::<Identity>() {
                                     //Validate public key against peer that sent it
-                                    let pk = match did_to_libp2p_pub(&identity.did_key()) {
+                                    let _pk = match did_to_libp2p_pub(&identity.did_key()) {
                                         Ok(pk) => pk,
                                         Err(e) => {
                                             error!("Error converting public key to did: {e}");
@@ -515,7 +510,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         match connected {
             PeerConnectionType::NotConnected => Ok(IdentityStatus::Offline),
-            _ => Ok(IdentityStatus::Online)
+            _ => Ok(IdentityStatus::Online),
         }
     }
 
