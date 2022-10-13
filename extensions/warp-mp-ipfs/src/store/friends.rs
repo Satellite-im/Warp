@@ -614,7 +614,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
                                         store.profile.write().requests_mut().remove(index);
 
-                                        if let Err(e) = store.tx.send(MultiPassEventKind::FriendRequestClosed { from: data.from() }) {
+                                        if let Err(e) = store.tx.send(MultiPassEventKind::FriendRequestClosed { from: data.from(), to: data.to() }) {
                                             error!("Error broadcasting event: {e}");
                                         }
 
@@ -1136,6 +1136,35 @@ impl<T: IpfsTypes> FriendsStore<T> {
             self.queue.write().push(Queue(remote_peer_id, payload));
             self.save_queue().await;
         }
+
+        match request.status() {
+            FriendRequestStatus::Pending => {
+                if let Err(e) = self
+                    .tx
+                    .send(MultiPassEventKind::FriendRequestSent { to: request.to() })
+                {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            FriendRequestStatus::FriendRemoved => {
+                if let Err(e) = self
+                    .tx
+                    .send(MultiPassEventKind::FriendRemoved { did: request.to() })
+                {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            FriendRequestStatus::RequestRemoved => {
+                if let Err(e) = self
+                    .tx
+                    .send(MultiPassEventKind::FriendRequestClosed { from: request.from(), to: request.to() })
+                {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            _ => {}
+        };
+
         if save_to_disk {
             if let Some(path) = self.path.as_ref() {
                 if let Err(e) = self.profile.write().request_to_file(path).await {
