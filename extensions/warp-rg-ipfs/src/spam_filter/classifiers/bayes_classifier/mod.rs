@@ -4,8 +4,7 @@ use super::Classifier;
 use bayespam;
 use config::Config;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::io::{Seek, Write};
 
 const FILE_NAME: &str = "filter_model.json";
 

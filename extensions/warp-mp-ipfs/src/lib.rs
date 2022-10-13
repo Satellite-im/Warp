@@ -1,31 +1,20 @@
-// Used to ignore unused variables, mostly related to ones in the trait functions
-//TODO: Remove
-//TODO: Use rust-ipfs branch with major changes for pubsub, ipld, etc
-#![allow(unused_variables)]
-#![allow(unused_imports)]
-
 pub mod config;
 pub mod store;
 
-use anyhow::bail;
 use config::MpIpfsConfig;
-use futures::{Future, TryFutureExt};
 use ipfs::libp2p::kad::protocol::DEFAULT_PROTO_NAME;
 use ipfs::libp2p::swarm::ConnectionLimits;
 use ipfs::libp2p::yamux::YamuxConfig;
 use ipfs::p2p::TransportConfig;
 use libipld::serde::to_ipld;
-use libipld::{ipld, Cid, Ipld};
 use sata::Sata;
-use serde::de::DeserializeOwned;
 use std::any::Any;
 use std::borrow::Cow;
-use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
+use tokio::sync::broadcast;
 use tracing::log::{error, info, trace, warn};
 use warp::crypto::did_key::Generate;
 use warp::data::{DataObject, DataType};
@@ -38,22 +27,18 @@ use warp::pocket_dimension::PocketDimension;
 use warp::tesseract::Tesseract;
 use warp::{async_block_in_place_uncheck, Extension, SingleHandle};
 
-use ipfs::{
-    Block, Ipfs, IpfsOptions, IpfsPath, IpfsTypes, Keypair, PeerId, Protocol, TestTypes, Types,
-    UninitializedIpfs,
-};
-use tokio::sync::mpsc::Sender;
-use warp::crypto::rand::Rng;
+use ipfs::{Ipfs, IpfsOptions, IpfsTypes, Keypair, Protocol, TestTypes, Types, UninitializedIpfs};
 use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
 use warp::error::Error;
-use warp::multipass::generator::generate_name;
 use warp::multipass::identity::{
     FriendRequest, Identifier, Identity, IdentityUpdate, Relationship,
 };
-use warp::multipass::{identity, Friends, IdentityInformation, MultiPass};
+use warp::multipass::{
+    identity, Friends, FriendsEvent, IdentityInformation, MultiPass, MultiPassEventKind,
+    MultiPassEventStream,
+};
 
-use crate::config::{Bootstrap, Discovery};
-use crate::store::discovery;
+use crate::config::Bootstrap;
 
 pub type Temporary = TestTypes;
 pub type Persistent = Types;
@@ -67,6 +52,7 @@ pub struct IpfsIdentity<T: IpfsTypes> {
     friend_store: Arc<RwLock<Option<FriendsStore<T>>>>,
     identity_store: Arc<RwLock<Option<IdentityStore<T>>>>,
     initialized: Arc<AtomicBool>,
+    tx: broadcast::Sender<MultiPassEventKind>,
 }
 
 impl<T: IpfsTypes> Clone for IpfsIdentity<T> {
@@ -80,6 +66,7 @@ impl<T: IpfsTypes> Clone for IpfsIdentity<T> {
             friend_store: self.friend_store.clone(),
             identity_store: self.identity_store.clone(),
             initialized: self.initialized.clone(),
+            tx: self.tx.clone(),
         }
     }
 }
@@ -113,6 +100,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         tesseract: Tesseract,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity<T>> {
+        let (tx, _) = broadcast::channel(1024);
         trace!("Initializing Multipass");
         let hooks = None;
 
@@ -125,6 +113,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             friend_store: Default::default(),
             identity_store: Default::default(),
             initialized: Default::default(),
+            tx,
         };
 
         if !identity.tesseract.is_unlock() {
@@ -183,8 +172,6 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
         let config = self.config.clone();
 
-        let path = config.path.clone().unwrap_or_default();
-
         let empty_bootstrap = match &config.bootstrap {
             Bootstrap::Ipfs | Bootstrap::Experimental => false,
             Bootstrap::Custom(addr) => addr.is_empty(),
@@ -233,7 +220,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             keypair,
             bootstrap: config.bootstrap.address(),
             mdns: config.ipfs_setting.mdns.enable,
-            listening_addrs: config.listen_on,
+            listening_addrs: config.listen_on.clone(),
             dcutr: config.ipfs_setting.relay_client.dcutr,
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
@@ -287,10 +274,11 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         tokio::spawn(fut);
 
         let ipfs_clone = ipfs.clone();
+        let config_ = config.clone();
         tokio::spawn(async move {
-            if config.ipfs_setting.relay_client.enable {
+            if config_.ipfs_setting.relay_client.enable {
                 info!("Relay client enabled. Loading relays");
-                for addr in config.bootstrap.address() {
+                for addr in config_.bootstrap.address() {
                     if let Err(e) = ipfs_clone
                         .swarm_listen_on(addr.with(Protocol::P2pCircuit))
                         .await
@@ -303,8 +291,28 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                         break;
                     }
                 }
+
+                //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
+                //      anything on this end
+                for addr in config_.ipfs_setting.relay_client.relay_address.iter() {
+                    if let Err(e) = ipfs_clone.dial(addr.clone()).await {
+                        error!("Error dialing relay {}: {e}", addr.clone());
+                    }
+
+                    if let Err(e) = ipfs_clone
+                        .swarm_listen_on(addr.clone().with(Protocol::P2pCircuit))
+                        .await
+                    {
+                        info!("Error listening on relay: {e}");
+                        continue;
+                    }
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                    if config.ipfs_setting.relay_client.single {
+                        break;
+                    }
+                }
             }
-            if config.ipfs_setting.bootstrap && !empty_bootstrap {
+            if config_.ipfs_setting.bootstrap && !empty_bootstrap {
                 //TODO: run bootstrap in intervals
                 if let Err(e) = ipfs_clone.direct_bootstrap().await {
                     error!("Error bootstrapping: {e}");
@@ -312,12 +320,22 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             }
         });
 
+        let relays = (!config.bootstrap.address().is_empty()).then(|| {
+            config
+                .bootstrap
+                .address()
+                .iter()
+                .map(|addr| addr.clone().with(Protocol::P2pCircuit))
+                .collect()
+        });
+
         let identity_store = IdentityStore::new(
             ipfs.clone(),
             config.path.clone(),
             tesseract.clone(),
             config.store_setting.broadcast_interval,
-            config.store_setting.discovery,
+            self.tx.clone(),
+            (config.store_setting.discovery, relays),
         )
         .await?;
         info!("Identity store initialized");
@@ -328,6 +346,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             config.path.map(|p| p.join("friends")),
             tesseract.clone(),
             config.store_setting.broadcast_interval,
+            self.tx.clone(),
         )
         .await?;
         info!("friends store initialized");
@@ -438,7 +457,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
             if let Some(u) = username.map(|u| u.trim()) {
                 let username_len = u.len();
 
-                if username_len <= 3 || username_len >= 64 {
+                if !(4..=64).contains(&username_len) {
                     return Err(Error::InvalidLength {
                         context: "username".into(),
                         current: username_len,
@@ -677,7 +696,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
         })
     }
 
-    fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<DID, Error> {
+    fn decrypt_private_key(&self, _: Option<&str>) -> Result<DID, Error> {
         let store = self.identity_store()?;
         let kp = store.get_raw_keypair()?.encode();
         let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
@@ -695,70 +714,22 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
 impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.send_request(pubkey))?;
-        if let Ok(hooks) = self.get_hooks() {
-            if let Some(request) = self
-                .list_outgoing_request()?
-                .iter()
-                .filter(|request| request.to().eq(pubkey))
-                .collect::<Vec<_>>()
-                .first()
-            {
-                let object = DataObject::new(DataType::Accounts, request)?;
-                hooks.trigger("accounts::send_friend_request", &object);
-            }
-        }
-        Ok(())
+        async_block_in_place_uncheck(store.send_request(pubkey))
     }
 
     fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.accept_request(pubkey))?;
-        if let Ok(hooks) = self.get_hooks() {
-            if let Some(key) = self
-                .list_friends()?
-                .iter()
-                .filter(|pk| *pk == pubkey)
-                .collect::<Vec<_>>()
-                .first()
-            {
-                let object = DataObject::new(DataType::Accounts, key)?;
-                hooks.trigger("accounts::accept_friend_request", &object);
-            }
-        }
-        Ok(())
+        async_block_in_place_uncheck(store.accept_request(pubkey))
     }
 
     fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.reject_request(pubkey))?;
-        if let Ok(hooks) = self.get_hooks() {
-            if !self
-                .list_all_request()?
-                .iter()
-                .any(|request| request.from().eq(pubkey))
-            {
-                let object = DataObject::new(DataType::Accounts, ())?;
-                hooks.trigger("accounts::deny_friend_request", &object);
-            }
-        }
-        Ok(())
+        async_block_in_place_uncheck(store.reject_request(pubkey))
     }
 
     fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.close_request(pubkey))?;
-        if let Ok(hooks) = self.get_hooks() {
-            if !self
-                .list_all_request()?
-                .iter()
-                .any(|request| request.from().eq(pubkey))
-            {
-                let object = DataObject::new(DataType::Accounts, ())?;
-                hooks.trigger("accounts::closed_friend_request", &object);
-            }
-        }
-        Ok(())
+        async_block_in_place_uncheck(store.close_request(pubkey))
     }
 
     fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
@@ -788,26 +759,12 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
 
     fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.remove_friend(pubkey, true, true))?;
-        if let Ok(hooks) = self.get_hooks() {
-            if self.has_friend(pubkey).is_err() {
-                let object = DataObject::new(DataType::Accounts, pubkey)?;
-                hooks.trigger("accounts::remove_friend", &object);
-            }
-        }
-        Ok(())
+        async_block_in_place_uncheck(store.remove_friend(pubkey, true, true))
     }
 
     fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.block(pubkey))?;
-        if let Ok(hooks) = self.get_hooks() {
-            if self.has_friend(pubkey).is_err() {
-                let object = DataObject::new(DataType::Accounts, pubkey)?;
-                hooks.trigger("accounts::block_key", &object);
-            }
-        }
-        Ok(())
+        async_block_in_place_uncheck(store.block(pubkey))
     }
 
     fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
@@ -817,14 +774,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
 
     fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.unblock(pubkey))?;
-        if let Ok(hooks) = self.get_hooks() {
-            if self.has_friend(pubkey).is_err() {
-                let object = DataObject::new(DataType::Accounts, pubkey)?;
-                hooks.trigger("accounts::unblock_key", &object);
-            }
-        }
-        Ok(())
+        async_block_in_place_uncheck(store.unblock(pubkey))
     }
 
     fn block_list(&self) -> Result<Vec<DID>, Error> {
@@ -840,6 +790,24 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
         let store = self.friend_store()?;
         async_block_in_place_uncheck(store.is_friend(pubkey))
+    }
+}
+
+impl<T: IpfsTypes> FriendsEvent for IpfsIdentity<T> {
+    fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
+        let mut rx = self.tx.subscribe();
+
+        let stream = async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        };
+
+        Ok(MultiPassEventStream(Box::pin(stream)))
     }
 }
 
@@ -871,16 +839,13 @@ impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
 pub mod ffi {
     use crate::config::MpIpfsConfig;
     use crate::{IpfsIdentity, Persistent, Temporary};
-    use std::ffi::CStr;
-    use std::os::raw::c_char;
+    use warp::async_on_block;
     use warp::error::Error;
-    use warp::ffi::{FFIResult, LogRotateInterval};
-    use warp::logging::{tracing, tracing_futures};
+    use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::sync::{Arc, RwLock};
     use warp::tesseract::Tesseract;
-    use warp::{async_on_block, runtime_handle};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -899,7 +864,7 @@ pub mod ffi {
 
         let config = match config.is_null() {
             true => MpIpfsConfig::testing(true),
-            false => (&*config).clone(),
+            false => (*config).clone(),
         };
 
         let cache = match pocketdimension.is_null() {
@@ -940,7 +905,7 @@ pub mod ffi {
             true => {
                 return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is invalid")))
             }
-            false => (&*config).clone(),
+            false => (*config).clone(),
         };
 
         let cache = match pocketdimension.is_null() {

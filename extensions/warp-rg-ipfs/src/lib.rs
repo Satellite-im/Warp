@@ -1,43 +1,33 @@
-#![allow(unused_imports)]
-
 pub mod config;
 mod spam_filter;
 mod store;
 
 use crate::spam_filter::SpamFilter;
 use config::RgIpfsConfig;
-use futures::pin_mut;
-use futures::StreamExt;
-use ipfs::libp2p::identity;
 use ipfs::IpfsTypes;
-use ipfs::{Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, TestTypes, Types, UninitializedIpfs};
-use std::any::Any;
-use std::ops::Deref;
-use std::path::PathBuf;
+use ipfs::{Ipfs, TestTypes, Types};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use store::direct::DirectMessageStore;
+use tokio::sync::broadcast;
 #[allow(unused_imports)]
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::broadcast::{Receiver, Sender};
 use uuid::Uuid;
-use warp::crypto::rand::Rng;
-use warp::crypto::KeyMaterial;
 use warp::crypto::DID;
-use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::logging::tracing::log::error;
 use warp::logging::tracing::log::trace;
 use warp::module::Module;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::group::{Group, GroupChat, GroupChatManagement, GroupInvite, Member};
-use warp::raygun::Conversation;
+use warp::raygun::group::{GroupChat, GroupChatManagement, GroupInvite};
+use warp::raygun::RayGunEventKind;
+use warp::raygun::{Conversation, MessageEventStream, RayGunEventStream, RayGunStream};
 use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
 use warp::sync::RwLock;
 use warp::sync::{RwLockReadGuard, RwLockWriteGuard};
-use warp::tesseract::Tesseract;
 use warp::Extension;
 use warp::SingleHandle;
 
@@ -53,6 +43,7 @@ pub struct IpfsMessaging<T: IpfsTypes> {
     direct_store: Arc<RwLock<Option<DirectMessageStore<T>>>>,
     config: Option<RgIpfsConfig>,
     initialize: Arc<AtomicBool>,
+    tx: Sender<RayGunEventKind>,
     //TODO: GroupManager
     //      * Create, Join, and Leave GroupChats
     //      * Send message
@@ -69,6 +60,7 @@ impl<T: IpfsTypes> Clone for IpfsMessaging<T> {
             direct_store: self.direct_store.clone(),
             config: self.config.clone(),
             initialize: self.initialize.clone(),
+            tx: self.tx.clone(),
         }
     }
 }
@@ -79,6 +71,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         account: Arc<RwLock<Box<dyn MultiPass>>>,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
+        let (tx, _) = broadcast::channel(1024);
         trace!("Initializing Raygun Extension");
         let mut messaging = IpfsMessaging {
             account,
@@ -87,6 +80,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             ipfs: Default::default(),
             direct_store: Default::default(),
             initialize: Default::default(),
+            tx,
         };
 
         if messaging.account.read().get_own_identity().is_err() {
@@ -168,8 +162,9 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
                 self.account.clone(),
                 discovery,
                 config.store_setting.broadcast_interval,
-                config.store_setting.check_spam,
+                self.tx.clone(),
                 (
+                    config.store_setting.check_spam,
                     config.store_setting.store_decrypted,
                     config.store_setting.allow_unsigned_message,
                     config.store_setting.with_friends,
@@ -349,6 +344,33 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
     }
 }
 
+#[async_trait::async_trait]
+impl<T: IpfsTypes> RayGunStream for IpfsMessaging<T> {
+    async fn subscribe(&mut self) -> Result<RayGunEventStream> {
+        let mut rx = self.tx.subscribe();
+
+        let stream = async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        };
+
+        Ok(RayGunEventStream(Box::pin(stream)))
+    }
+    async fn get_conversation_stream(
+        &mut self,
+        conversation_id: Uuid,
+    ) -> Result<MessageEventStream> {
+        let store = self.messaging_store()?;
+        let stream = store.get_conversation_stream(conversation_id)?;
+        Ok(MessageEventStream(Box::pin(stream)))
+    }
+}
+
 impl<T: IpfsTypes> GroupChat for IpfsMessaging<T> {}
 
 impl<T: IpfsTypes> GroupChatManagement for IpfsMessaging<T> {}
@@ -359,16 +381,13 @@ impl<T: IpfsTypes> GroupInvite for IpfsMessaging<T> {}
 pub mod ffi {
     use crate::{IpfsMessaging, RgIpfsConfig};
     use crate::{Persistent, Temporary};
-    use std::ffi::CStr;
-    use std::os::raw::c_char;
-    use std::path::PathBuf;
+    use warp::async_on_block;
     use warp::error::Error;
     use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::raygun::RayGunAdapter;
     use warp::sync::{Arc, RwLock};
-    use warp::{async_on_block, runtime_handle};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]

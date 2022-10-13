@@ -1,14 +1,6 @@
 pub mod classifiers;
 
-use std::{
-    fs::File,
-    fs::OpenOptions,
-    io::{ErrorKind, Read, Write},
-    path::{Path, PathBuf},
-};
 use warp::error::Error;
-use warp::module::Module;
-use warp::Extension;
 
 #[allow(unused_imports)]
 use classifiers::{BayesClassifier, Classifier, SimpleClassifier};
