@@ -6,7 +6,7 @@ use ipfs::IpfsTypes;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp::{
-    crypto::{did_key::CoreSign, hash::sha256_hash, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
+    crypto::{did_key::{CoreSign, Generate, ECDH}, hash::sha256_hash, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
     logging::tracing::log::{error, trace},
     raygun::{Message, PinState, ReactionState},
@@ -18,7 +18,7 @@ pub const GROUP_BROADCAST: &str = "group/broadcast";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConversationEvents {
-    NewConversation(Uuid, Box<DID>),
+    NewConversation(DID),
     DeleteConversation(Uuid),
 }
 
@@ -31,10 +31,13 @@ pub enum MessagingEvents {
     React(Uuid, DID, Uuid, ReactionState, String),
 }
 
-#[allow(dead_code)]
-pub fn generate_uuid(generate: &str) -> Uuid {
-    let topic_hash = sha256_hash(generate.as_bytes(), None);
-    Uuid::from_slice(&topic_hash[..topic_hash.len() / 2]).unwrap_or_default()
+pub fn generate_shared_topic(did_a: &DID, did_b: &DID, seed: Option<&str>) -> anyhow::Result<Uuid> {
+    let x25519_a = Ed25519KeyPair::from_secret_key(&did_a.private_key_bytes()).get_x25519();
+    let x25519_b = Ed25519KeyPair::from_public_key(&did_b.public_key_bytes()).get_x25519();
+    let shared_key = x25519_a.key_exchange(&x25519_b);
+    let topic_hash = sha256_hash(&shared_key, seed.map(|s| s.as_bytes().to_vec()));
+    //Note: Do we want to use the upper half or lower half of the hash for the uuid?
+    Uuid::from_slice(&topic_hash[..topic_hash.len() / 2]).map_err(anyhow::Error::from)
 }
 
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity::PublicKey> {
