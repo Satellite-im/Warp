@@ -98,12 +98,22 @@ impl PartialEq for DirectConversation {
 }
 
 impl DirectConversation {
-    pub fn new(recipients: [DID; 2]) -> Self {
+    pub fn new(did: &DID, recipients: [DID; 2]) -> Result<Self, Error> {
         let (tx, _) = broadcast::channel(1024);
         let tx = Some(tx);
-
+        let conversation_id = super::generate_shared_topic(
+            did,
+            recipients
+                .iter()
+                .filter(|peer| did.ne(peer))
+                .collect::<Vec<_>>()
+                .first()
+                .ok_or(Error::Other)?,
+            Some("direct-conversation"),
+        )?;
         let conversation = Arc::new({
             let mut conversation = Conversation::default();
+            conversation.set_id(conversation_id);
             conversation.set_recipients(recipients.to_vec());
             conversation
         });
@@ -111,13 +121,13 @@ impl DirectConversation {
         let messages = Arc::new(Default::default());
         let task = Arc::new(Default::default());
         let path = Arc::new(Default::default());
-        Self {
+        Ok(Self {
             conversation,
             path,
             messages,
             task,
             tx,
-        }
+        })
     }
 
     pub fn new_with_id(id: Uuid, recipients: [DID; 2]) -> Self {
@@ -437,21 +447,28 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                 if let Ok(data) = sata.decrypt::<Vec<u8>>(did.as_ref()) {
                                     if let Ok(events) = serde_json::from_slice::<ConversationEvents>(&data) {
                                         match events {
-                                            ConversationEvents::NewConversation(id, peer) => {
+                                            ConversationEvents::NewConversation(peer) => {
                                                 trace!("New conversation event received from {peer}");
+                                                let id = match super::generate_shared_topic(did, &peer, Some("direct-conversation")) {
+                                                    Ok(id) => id,
+                                                    Err(e) => {
+                                                        error!("Error generating topic id: {e}");
+                                                        continue
+                                                    }
+                                                };
                                                 if store.exist(id) {
                                                     warn!("Conversation with {id} exist");
                                                     continue;
                                                 }
 
                                                 if let Ok(list) = store.account.read().block_list() {
-                                                    if list.contains(&*peer) {
+                                                    if list.contains(&peer) {
                                                         warn!("{peer} is blocked");
                                                         continue
                                                     }
                                                 }
 
-                                                let list = [did.clone(), *peer];
+                                                let list = [did.clone(), peer];
                                                 let mut convo = DirectConversation::new_with_id(id, list);
                                                 let stream =
                                                     match store.ipfs.pubsub_subscribe(convo.topic()).await {
@@ -631,13 +648,14 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             return Err(Error::ConversationLimitReached);
         }
 
+
         if let Ok(list) = self.account.get_identity(did_key.clone().into()) {
             if list.is_empty() {
                 warn!("Unable to find identity. Creating conversation anyway");
             }
         }
 
-        let mut conversation = DirectConversation::new([own_did.clone(), did_key.clone()]);
+        let mut conversation = DirectConversation::new(own_did, [own_did.clone(), did_key.clone()])?;
 
         let convo_id = conversation.id();
         let topic = conversation.topic();
@@ -676,10 +694,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             libipld::IpldCodec::DagJson,
             own_did.as_ref(),
             warp::sata::Kind::Reference,
-            serde_json::to_vec(&ConversationEvents::NewConversation(
-                convo_id,
-                Box::new(own_did.clone()),
-            ))?,
+            serde_json::to_vec(&ConversationEvents::NewConversation(own_did.clone()))?,
         )?;
 
         match peers.contains(&peer_id) {
