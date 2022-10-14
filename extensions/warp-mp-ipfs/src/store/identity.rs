@@ -409,30 +409,18 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     .await?;
 
                     if connected == PeerConnectionType::NotConnected {
-                        let res = match tokio::time::timeout(
-                            Duration::from_millis(100),
-                            self.ipfs.find_peer_info(peer_id),
-                        )
-                        .await
-                        {
-                            Ok(res) => res,
-                            Err(e) => Err(anyhow::anyhow!("{}", e.to_string())),
-                        };
-
-                        if res.is_err() {
-                            let ipfs = self.ipfs.clone();
-                            let pubkey = pubkey.clone();
-                            let relay = self.relays();
-                            let discovery = self.discovery.clone();
-                            tokio::spawn(async move {
-                                if let Err(e) =
-                                    super::discover_peer(ipfs, &*pubkey, discovery, relay).await
-                                {
-                                    error!("Error discoverying peer: {e}");
-                                }
-                            });
-                            tokio::task::yield_now().await;
-                        }
+                        let ipfs = self.ipfs.clone();
+                        let pubkey = pubkey.clone();
+                        let relay = self.relays();
+                        let discovery = self.discovery.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) =
+                                super::discover_peer(ipfs, &*pubkey, discovery, relay).await
+                            {
+                                error!("Error discoverying peer: {e}");
+                            }
+                        });
+                        tokio::task::yield_now().await;
                     }
                 }
                 self.cache()
