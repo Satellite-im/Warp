@@ -206,13 +206,19 @@ pub async fn discover_peer<T: IpfsTypes>(
     }
 
     match discovery {
+        // Because we are using the DHT provider, there would be nothing to be done here
         Discovery::Provider(_) => {}
+        // This would use DHT to find the peer by peer_id
+        // TODO: Do we really want to continue to loop here?
         Discovery::Direct => loop {
             if ipfs.find_peer_info(peer_id).await.is_ok() {
                 break;
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         },
+        // Dials through the relay
+        // TODO: We could use DialOpt to dial them and let libp2p backend
+        //       handle it in the back and skip the loop
         Discovery::None => {
             //Attempt a direct dial via relay
             loop {

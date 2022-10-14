@@ -384,7 +384,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             .identity
             .read()
             .clone()
-            .map(|identity| identity.did_key())
+            .map(|identity| identity.did_key()) //Maybe use identity directly and return it?
             .ok_or_else(|| {
                 Error::OtherWithContext("Identity store may not be initialized".into())
             })?;
@@ -397,6 +397,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 if **pubkey == own_did {
                     return self.own_identity().await.map(|i| vec![i]);
                 }
+
                 if matches!(self.discovery_type(), Discovery::Direct | Discovery::None) {
                     let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
@@ -406,9 +407,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
                         peer_id,
                     )
                     .await?;
-                    if connected != PeerConnectionType::SubscribedAndConnected {
+
+                    if connected == PeerConnectionType::NotConnected {
                         let res = match tokio::time::timeout(
-                            Duration::from_secs(2),
+                            Duration::from_millis(100),
                             self.ipfs.find_peer_info(peer_id),
                         )
                         .await
@@ -417,7 +419,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                             Err(e) => Err(anyhow::anyhow!("{}", e.to_string())),
                         };
 
-                        if let Err(_e) = res {
+                        if res.is_err() {
                             let ipfs = self.ipfs.clone();
                             let pubkey = pubkey.clone();
                             let relay = self.relays();
