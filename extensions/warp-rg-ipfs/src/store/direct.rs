@@ -526,10 +526,11 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
                                                     let topic = conversation.topic();
 
-                                                    if let Err(e) = store.ipfs.pubsub_unsubscribe(&topic).await
+                                                    //Note needed as we ran `conversation.end_task();` which would unsubscribe from the topic
+                                                    //after dropping the stream, but this serves as a secondary precaution
+                                                    if store.ipfs.pubsub_unsubscribe(&topic).await.is_ok()
                                                     {
-                                                        error!("Error unsubscribing from topic: {e}");
-                                                        continue;
+                                                        warn!("topic should have been unsubscribed after dropping conversation.");
                                                     }
 
                                                     if let Err(e) = conversation.delete().await {
@@ -643,8 +644,15 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         }
 
         //Temporary limit
-        if self.direct_conversation.read().len() == 32 {
+        if self.direct_conversation.read().len() >= 32 {
             return Err(Error::ConversationLimitReached);
+        }
+
+
+        if let Ok(list) = self.account.get_identity(did_key.clone().into()) {
+            if list.is_empty() {
+                warn!("Unable to find identity. Creating conversation anyway");
+            }
         }
 
         let mut conversation = DirectConversation::new(own_did, [own_did.clone(), did_key.clone()])?;
@@ -742,6 +750,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .ok_or(Error::InvalidConversation)?;
 
         let conversation = self.direct_conversation.write().remove(index);
+        conversation.end_task();
         if broadcast {
             let recipients = conversation.recipients();
 
@@ -779,7 +788,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         .await
                     {
                         warn!("Unable to publish to topic: {e}. Queuing event");
-                        //TODO: Log
                         //Note: If the error is related to peer not available then we should push this to queue but if
                         //      its due to the message limit being reached we should probably break up the message to fix into
                         //      "max_transmit_size" within rust-libp2p gossipsub
@@ -812,7 +820,11 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 }
             };
         }
-
+        if let Err(e) = self.event.send(RayGunEventKind::ConversationDeleted {
+            conversation_id: conversation.id(),
+        }) {
+            error!("Error broadcasting event: {e}");
+        }
         warp::async_block_in_place_uncheck(conversation.delete())?;
         Ok(conversation)
     }

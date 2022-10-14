@@ -864,7 +864,7 @@ pub mod ffi {
 
         let config = match config.is_null() {
             true => MpIpfsConfig::testing(true),
-            false => (&*config).clone(),
+            false => (*config).clone(),
         };
 
         let cache = match pocketdimension.is_null() {
@@ -905,7 +905,7 @@ pub mod ffi {
             true => {
                 return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is invalid")))
             }
-            false => (&*config).clone(),
+            false => (*config).clone(),
         };
 
         let cache = match pocketdimension.is_null() {
