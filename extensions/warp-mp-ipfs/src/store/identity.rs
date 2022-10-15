@@ -5,14 +5,20 @@ use std::{
     time::Duration,
 };
 
-use crate::{config::Discovery, store::did_to_libp2p_pub, Persistent};
+use crate::{
+    config::Discovery,
+    store::{did_to_libp2p_pub, IdentityPayload},
+    Persistent,
+};
 use futures::StreamExt;
 use ipfs::{Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId};
 use libipld::{
+    ipld,
     serde::{from_ipld, to_ipld},
     Cid,
 };
 use sata::Sata;
+use serde::de::DeserializeOwned;
 use tokio::sync::broadcast;
 use tracing::log::error;
 use warp::{
@@ -26,7 +32,10 @@ use warp::{
     tesseract::Tesseract,
 };
 
-use super::{connected_to_peer, libp2p_pub_to_did, PeerConnectionType, IDENTITY_BROADCAST};
+use super::{
+    connected_to_peer, document::RootDocument, libp2p_pub_to_did, PeerConnectionType,
+    IDENTITY_BROADCAST,
+};
 
 pub struct IdentityStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
@@ -37,6 +46,7 @@ pub struct IdentityStore<T: IpfsTypes> {
 
     identity: Arc<RwLock<Option<Identity>>>,
 
+    //TODO: Move this to a local ipld cache instead
     cache: Arc<RwLock<Vec<Identity>>>,
 
     seen: Arc<RwLock<HashSet<PeerId>>>,
@@ -158,42 +168,15 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 tokio::select! {
                     message = id_broadcast_stream.next() => {
                         if let Some(message) = message {
-                            // //Although this should not be `Option::None`, this is a precaution
-                            // //If this ever comes as None, this may be a misconfiguration in a upstream dependency
-                            // //or a bug
-                            // if message.source.is_none() {
-                            //     warn!("Message source is None. This may be the result of a bug or misconfiguration upstream");
-                            // }
-
-                            // //Note: Although we dont expect a message of this size, if we do get anything of this size at all,
-                            // //      we should reject it. Ideally, it shouldnt be more than 1MB to 2MB, but 3MB is just buffer
-                            // let peer_id = message.source.unwrap();
-                            // if message.data.len() >= 3*1024*1024 {
-                            //     warn!("Peer {peer_id} has sent a message containing 3MB or more of data");
-                            //     match peer_annoyance.entry(peer_id) {
-                            //         Entry::Vacant(entry) => {
-                            //             entry.insert(0);
-                            //         },
-                            //         Entry::Occupied(mut entry) => {
-                            //             if *entry.get() >= 20 {
-                            //                 if let Err(e) = store.ipfs.ban_peer(peer_id).await {
-                            //                     info!("Error banning peer: {e}");
-                            //                 }
-                            //             } else {
-                            //                 *entry.get_mut() += 1;
-                            //             }
-                            //         }
-                            //     }
-                            //     continue;
-                            // }
 
                             //NOTE: Until rust-ipfs is modified to timeout if unable to find blocks, get_dag or get_block may
                             //      stall due to it sending a package over bitswap and waiting for a response.
                             //      It would be best to use tokio to timeout the function after 30 to 60 seconds
                             if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
-                                if let Ok(identity) = data.decode::<Identity>() {
-                                    //Validate public key against peer that sent it
-                                    let _pk = match did_to_libp2p_pub(&identity.did_key()) {
+                                if let Ok(payload) = data.decode::<IdentityPayload>() {
+
+                                    //TODO: Validate public key against peer that sent it
+                                    let _pk = match did_to_libp2p_pub(&payload.did) {
                                         Ok(pk) => pk,
                                         Err(e) => {
                                             error!("Error converting public key to did: {e}");
@@ -201,16 +184,27 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                         }
                                     };
 
+                                    let cid = match payload.cid {
+                                        Some(cid) => cid,
+                                        None => continue
+                                    };
+
+                                    let identity = match store.get_dag::<Identity>(IpfsPath::from(cid)).await {
+                                        Ok(ident) => ident,
+                                        Err(_) => continue
+                                    };
+
+                                    if payload.did != identity.did_key() {
+                                        continue
+                                    }
                                     if let Some(own_id) = store.identity.read().clone() {
                                         if own_id == identity {
                                             continue
                                         }
                                     }
-
                                     if store.cache.read().contains(&identity) {
                                         continue;
                                     }
-
                                     let index = store.cache
                                         .read()
                                         .iter()
@@ -279,16 +273,31 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
                         let data = Sata::default();
 
-                        let ident = match store.identity.read().clone() {
-                            Some(ident) => ident,
+                        let did = match store.identity.read().clone() {
+                            Some(ident) => ident.did_key(),
                             //TODO: Log?
                             None => continue
                         };
 
-                        let res = match data.encode(libipld::IpldCodec::DagJson, sata::Kind::Static, ident) {
+                        let root_cid = store.ident_cid.read().clone();
+
+                        let cid = match root_cid {
+                            Some(cid) => match store.get_dag::<RootDocument>(IpfsPath::from(cid)).await {
+                                Ok(doc) => Some(doc.identity),
+                                Err(_) => continue
+                            },
+                            None => continue
+                        };
+
+                        let payload = IdentityPayload {
+                            did,
+                            cid
+                        };
+
+                        let res = match data.encode(libipld::IpldCodec::DagJson, sata::Kind::Static, payload) {
                             Ok(data) => data,
                             Err(e) => {
-                                error!("Error encoding to sata object: {e}");
+                                println!("Error encoding to sata object: {e}");
                                 continue
                             }
                         };
@@ -296,7 +305,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                         let bytes = match serde_json::to_vec(&res) {
                             Ok(bytes) => bytes,
                             Err(e) => {
-                                error!("Error serializing to bytes: {e}");
+                                println!("Error serializing to bytes: {e}");
                                 continue
                             }
                         };
@@ -363,19 +372,21 @@ impl<T: IpfsTypes> IdentityStore<T> {
         );
         identity.set_did_key(public_key.into());
 
-        let ipld = to_ipld(identity.clone()).map_err(anyhow::Error::from)?;
-
+        let identity_ipld = to_ipld(identity.clone()).map_err(anyhow::Error::from)?;
         // TODO: Create a single root dag for the Cids
-        let ident_cid = self.ipfs.put_dag(ipld).await?;
-
+        let ident_cid = self.ipfs.put_dag(identity_ipld).await?;
+        let root_document = RootDocument {
+            identity: ident_cid,
+            ..Default::default()
+        };
+        let root_ipld = to_ipld(root_document).map_err(anyhow::Error::from)?;
+        let root_cid = self.ipfs.put_dag(root_ipld).await?;
         // Pin the dag
-        self.ipfs.insert_pin(&ident_cid, false).await?;
+        self.ipfs.insert_pin(&root_cid, true).await?;
 
-        self.save_cid(ident_cid).await?;
-
+        self.save_cid(root_cid).await?;
         self.update_identity().await?;
         self.enable_event();
-
         Ok(identity)
     }
 
@@ -489,6 +500,25 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(idents)
     }
 
+    pub async fn identity_update(&mut self, identity: Identity) -> Result<(), Error> {
+        let rcid = self.get_cid().await?;
+        let path = IpfsPath::from(rcid);
+        let identity_ipld = to_ipld(identity).map_err(anyhow::Error::from)?;
+        // TODO: Create a single root dag for the Cids
+        let ident_cid = self.ipfs.put_dag(identity_ipld).await?;
+        let mut root_document: RootDocument = self.get_dag(path).await?;
+        let old_identity_cid = root_document.identity;
+        root_document.identity = ident_cid;
+
+        let root_ipld = to_ipld(root_document).map_err(anyhow::Error::from)?;
+        let root_cid = self.ipfs.put_dag(root_ipld).await?;
+        self.ipfs.remove_pin(&rcid, true).await?;
+        self.ipfs.insert_pin(&root_cid, true).await?;
+        self.ipfs.remove_block(old_identity_cid).await?;
+        self.save_cid(root_cid).await?;
+        Ok(())
+    }
+
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
     pub async fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
         //Note: This is checked because we may not be connected to those peers with the 2 options below
@@ -535,13 +565,26 @@ impl<T: IpfsTypes> IdentityStore<T> {
         }
     }
 
+    pub async fn get_dag<D: DeserializeOwned>(&self, path: IpfsPath) -> Result<D, Error> {
+        //Because it utilizes DHT requesting other nodes for the cid, it will stall so here we would need to timeout
+        //the request.
+        let identity =
+            match tokio::time::timeout(std::time::Duration::from_secs(10), self.ipfs.get_dag(path))
+                .await
+            {
+                Ok(Ok(ipld)) => from_ipld::<D>(ipld).map_err(anyhow::Error::from)?,
+                Ok(Err(e)) => return Err(Error::Any(e)),
+                Err(e) => return Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
+            };
+        Ok(identity)
+    }
+
     pub async fn own_identity(&self) -> Result<Identity, Error> {
         let ident_cid = self.get_cid().await?;
-        let path = IpfsPath::from(ident_cid);
-        let identity = match self.ipfs.get_dag(path).await {
-            Ok(ipld) => from_ipld::<Identity>(ipld).map_err(anyhow::Error::from)?,
-            Err(e) => return Err(Error::Any(e)), //Note: It should not hit here unless the repo is corrupted
-        };
+        let path = IpfsPath::from(ident_cid)
+            .sub_path("identity")
+            .map_err(anyhow::Error::from)?;
+        let identity = self.get_dag::<Identity>(path).await?;
         let public_key = identity.did_key();
         let kp_public_key = libp2p_pub_to_did(&self.get_keypair()?.public())?;
         if public_key != kp_public_key {
@@ -559,6 +602,29 @@ impl<T: IpfsTypes> IdentityStore<T> {
             tokio::fs::write(path.join(".id"), cid).await?;
         }
         Ok(())
+    }
+
+    pub async fn save_cache_cid(&mut self, cid: Cid) -> Result<(), Error> {
+        if let Some(path) = self.path.as_ref() {
+            let cid = cid.to_string();
+            tokio::fs::write(path.join(".cache_id"), cid).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn get_cache_cid(&self) -> Result<Cid, Error> {
+        if let Some(path) = self.path.as_ref() {
+            if let Ok(cid_str) = tokio::fs::read(path.join(".cache_id"))
+                .await
+                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            {
+                return cid_str
+                    .parse()
+                    .map_err(anyhow::Error::from)
+                    .map_err(Error::from);
+            }
+        }
+        Err(Error::ObjectNotFound)
     }
 
     #[allow(clippy::clone_on_copy)]

@@ -6,7 +6,6 @@ use ipfs::libp2p::kad::protocol::DEFAULT_PROTO_NAME;
 use ipfs::libp2p::swarm::ConnectionLimits;
 use ipfs::libp2p::yamux::YamuxConfig;
 use ipfs::p2p::TransportConfig;
-use libipld::serde::to_ipld;
 use sata::Sata;
 use std::any::Any;
 use std::borrow::Cow;
@@ -578,7 +577,6 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
 
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
         async_block_in_place_uncheck(async {
-            let ipfs = self.ipfs()?.clone();
             let mut store = self.identity_store()?;
             let mut identity = self.get_own_identity()?;
             let old_identity = identity.clone();
@@ -628,35 +626,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 _ => return Err(Error::CannotUpdateIdentity),
             }
 
-            let mut old_cid = None;
-
-            if let Ok(cid) = store.get_cid().await {
-                info!("Current CID for identity: {cid}");
-                info!("Is it pinned?");
-                if ipfs.is_pinned(&cid).await? {
-                    info!("Cid is pinned. Removing pin");
-                    ipfs.remove_pin(&cid, false).await?;
-                }
-                old_cid = Some(cid);
-            };
-
-            //TODO: Build out ipld object with extracted data (eg images) and store them directly with the cid
-            info!("Converting identity to ipld");
-            let ipld = to_ipld(&identity).map_err(anyhow::Error::from)?;
-            info!("Storing identity into ipfd");
-            let ident_cid = ipfs.put_dag(ipld).await?;
-
-            info!("New identity cid is {ident_cid}. Pinning it");
-
-            ipfs.insert_pin(&ident_cid, false).await?;
-            info!("ident_cid is pinned it");
-            store.save_cid(ident_cid).await?;
-            if let Some(old_cid) = old_cid {
-                info!("Removing {old_cid}");
-                if let Err(e) = ipfs.remove_block(old_cid).await {
-                    error!("Cannot remove {old_cid}: {e}");
-                }
-            }
+            store.identity_update(identity.clone()).await?;
 
             if let Ok(mut cache) = self.get_cache_mut() {
                 let mut query = QueryBuilder::default();

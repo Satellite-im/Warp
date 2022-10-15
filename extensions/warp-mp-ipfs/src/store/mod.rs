@@ -1,6 +1,7 @@
 use std::{time::Duration};
 
 use ipfs::{IpfsTypes, Multiaddr, PeerId, Protocol};
+use libipld::Cid;
 use serde::{Deserialize, Serialize};
 use tracing::log::error;
 use warp::{
@@ -20,6 +21,7 @@ use self::friends::InternalRequest;
 pub mod friends;
 pub mod identity;
 pub mod phonebook;
+pub mod document;
 
 pub const IDENTITY_BROADCAST: &str = "identity/broadcast";
 pub const FRIENDS_BROADCAST: &str = "friends/broadcast";
@@ -69,6 +71,17 @@ pub enum Payload {
     },
     PackageStreamEnd,
 }
+
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IdentityPayload {
+    /// Not required but would be used to cross check the identity did, sender (if sent directly)
+    pub did: DID,
+    /// Cid to the ipld document representing the identity
+    pub cid: Option<Cid>,
+}
+
+
 
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity::PublicKey> {
     let pk = ipfs::libp2p::identity::PublicKey::Ed25519(
