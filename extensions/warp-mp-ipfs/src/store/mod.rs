@@ -169,7 +169,6 @@ pub enum PeerConnectionType {
     NotConnected,
 }
 
-#[inline]
 pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
     ipfs: ipfs::Ipfs<T>,
     pkey: I,

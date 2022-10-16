@@ -135,9 +135,8 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
                     let mut online = vec![];
                     for (friend, status, _) in self.friends.iter() {
                         if let Some(status) = status {
-                            match *status {
-                                PeerConnectionType::Connected => online.push(friend.clone()),
-                                _ => {}
+                            if *status == PeerConnectionType::Connected {
+                                online.push(friend.clone())
                             }
                         }
                     }
@@ -189,10 +188,7 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
             let discovery = discovery.clone();
             //Note: We are using this to get the results from the function because it continues to show `Poll::Pending`
             //TODO: Switch back to manually polling and loop back over until it doesnt return `Poll::Pending`
-            match warp::async_block_in_place_uncheck(connected_to_peer(
-                ipfs.clone(),
-                did.clone(),
-            )) {
+            match warp::async_block_in_place_uncheck(connected_to_peer(ipfs.clone(), did.clone())) {
                 Ok(inner_status) => match (inner_status, *discovering) {
                     (PeerConnectionType::NotConnected, false) => {
                         let ipfs = ipfs.clone();

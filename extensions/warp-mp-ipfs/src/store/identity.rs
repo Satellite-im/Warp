@@ -116,7 +116,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let end_event = Arc::new(Default::default());
         let ident_cid = Arc::new(Default::default());
         let seen = Arc::new(Default::default());
-        let check_seen = Arc::new(AtomicBool::new(true));
+        let check_seen = Arc::new(Default::default());
 
         let store = Self {
             ipfs,
@@ -397,11 +397,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 if matches!(self.discovery_type(), Discovery::Direct | Discovery::None) {
                     let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
-                    let connected = connected_to_peer(
-                        self.ipfs.clone(),
-                        peer_id,
-                    )
-                    .await?;
+                    let connected = connected_to_peer(self.ipfs.clone(), peer_id).await?;
                     if connected == PeerConnectionType::NotConnected {
                         let res = match tokio::time::timeout(
                             Duration::from_secs(2),
@@ -516,11 +512,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 .ok_or(Error::IdentityDoesntExist)?;
         }
 
-        let connected = connected_to_peer(
-            self.ipfs.clone(),
-            did.clone(),
-        )
-        .await?;
+        let connected = connected_to_peer(self.ipfs.clone(), did.clone()).await?;
 
         match connected {
             PeerConnectionType::NotConnected => Ok(IdentityStatus::Offline),
