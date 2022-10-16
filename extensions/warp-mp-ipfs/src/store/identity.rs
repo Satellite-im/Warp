@@ -201,12 +201,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(store)
     }
 
-    pub async fn broadcast_identity(&self) -> anyhow::Result<()> {
+    async fn broadcast_identity(&self) -> anyhow::Result<()> {
         let peers = self
             .ipfs
             .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
             .await?;
-
+        
         match self.check_seen.load(Ordering::Relaxed) {
             true => {
                 let peers = HashSet::from_iter(peers);
@@ -250,7 +250,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let root_cid = self
             .ident_cid
             .read()
-            .ok_or(Error::OtherWithContext("Cid is invalid".into()))?;
+            .ok_or(Error::OtherWithContext("Cid is unavailable".into()))?;
 
         let cid = self
             .get_dag::<RootDocument>(IpfsPath::from(root_cid))
@@ -265,18 +265,15 @@ impl<T: IpfsTypes> IdentityStore<T> {
         //TODO: Maybe use bincode instead
         let bytes = serde_json::to_vec(&res)?;
 
-        if let Err(e) = self
+        self
             .ipfs
             .pubsub_publish(IDENTITY_BROADCAST.into(), bytes)
-            .await
-        {
-            error!("Error announcing identity: {e}");
-        }
+            .await?;
 
         Ok(())
     }
 
-    pub async fn process_message(&self, message: Arc<GossipsubMessage>) -> anyhow::Result<()> {
+    async fn process_message(&self, message: Arc<GossipsubMessage>) -> anyhow::Result<()> {
         let data = serde_json::from_slice::<Sata>(&message.data)?;
 
         let payload = data.decode::<IdentityPayload>()?;
