@@ -2,6 +2,7 @@
 use futures::StreamExt;
 use ipfs::libp2p::gossipsub::GossipsubMessage;
 use ipfs::{Ipfs, IpfsTypes, PeerId};
+use libipld::cbor::DagCbor;
 use std::io::Write;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -1140,14 +1141,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 if let Err(e) = self
                     .tx
                     .send(MultiPassEventKind::FriendRequestSent { to: request.to() })
-                {
-                    error!("Error broadcasting event: {e}");
-                }
-            }
-            FriendRequestStatus::FriendRemoved => {
-                if let Err(e) = self
-                    .tx
-                    .send(MultiPassEventKind::FriendRemoved { did: request.to() })
                 {
                     error!("Error broadcasting event: {e}");
                 }
