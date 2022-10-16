@@ -1,5 +1,6 @@
 #![allow(clippy::await_holding_lock)]
 use futures::StreamExt;
+use ipfs::libp2p::gossipsub::GossipsubMessage;
 use ipfs::{Ipfs, IpfsTypes, PeerId};
 use std::io::Write;
 use std::ops::Deref;
@@ -29,7 +30,7 @@ use super::identity::IdentityStore;
 use super::phonebook::PhoneBook;
 use super::{
     did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, PeerConnectionType,
-    FRIENDS_BROADCAST, IDENTITY_BROADCAST,
+    FRIENDS_BROADCAST,
 };
 
 pub struct FriendsStore<T: IpfsTypes> {
@@ -489,180 +490,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 tokio::select! {
                     message = stream.next() => {
                         if let Some(message) = message {
-                            if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
-                                let data = match data.decrypt::<FriendRequest>(&*store.did_key) {
-                                    Ok(data) => data,
-                                    Err(_e) => {
-
-                                        continue
-                                    }
-                                };
-
-                                if data.to().ne(&local_public_key) {
-                                    warn!("Request is not meant for identity. Skipping");
-                                    continue;
-                                }
-
-                                if store.profile.read().outgoing_request().contains(&data) ||
-                                   store.profile.read().incoming_request().contains(&data) {
-                                    warn!("Request exist locally. Skipping");
-                                    continue;
-                                }
-
-                                // Before we validate the request, we should check to see if the key is blocked
-                                // If it is, skip the request so we dont wait resources storing it.
-                                if store.is_blocked(&data.from()) {
-                                    continue
-                                }
-
-                                //first verify the request before processing it
-                                if let Err(e) = validate_request(&data) {
-                                    error!("Incoming request cannot be validated: {e}");
-                                    continue
-                                }
-
-                                match data.status() {
-                                    FriendRequestStatus::Accepted => {
-                                        let index = match store.profile.read().requests().iter().position(|request| {
-                                            request.request_type() == InternalRequestType::Outgoing &&
-                                            request.to() == data.from() &&
-                                            request.status() == FriendRequestStatus::Pending
-                                        }) {
-                                            Some(index) => index,
-                                            None => {
-                                                error!("Unable to locate pending request. Already been accepted or rejected?");
-                                                continue
-                                            },
-                                        };
-
-                                        store.profile.write().requests_mut().remove(index);
-
-                                        if let Err(e) = store.add_friend(&data.from()).await {
-                                            error!("Error adding friend: {e}");
-                                            continue
-                                        }
-
-                                        if let Some(path) = store.path.as_ref() {
-                                            if let Err(e) = store.profile.write().request_to_file(path).await {
-                                                error!("Error saving request: {e}");
-                                                continue
-                                            }
-                                        }
-
-                                    }
-                                    FriendRequestStatus::Pending => {
-                                        if let Err(e) = store.profile.write().set_incoming_request(&data) {
-                                            error!("Error setting incoming request: {e}");
-                                            continue
-                                        }
-
-                                        if let Err(e) = store.tx.send(MultiPassEventKind::FriendRequestReceived { from: data.from() }) {
-                                            error!("Error broadcasting event: {e}");
-                                        }
-
-
-                                        if let Some(path) = store.path.as_ref() {
-                                            if let Err(e) = store.profile.write().request_to_file(path).await {
-                                                error!("Error saving request: {e}");
-                                            }
-                                        }
-                                    },
-                                    FriendRequestStatus::Denied => {
-                                        let index = match store.profile.read().requests().iter().position(|request| {
-                                            request.request_type() == InternalRequestType::Outgoing &&
-                                            request.to() == data.from() &&
-                                            request.status() == FriendRequestStatus::Pending
-                                        }) {
-                                            Some(index) => index,
-                                            None => continue,
-                                        };
-
-                                        let _ = store.profile.write().requests_mut().remove(index);
-
-
-                                        if let Err(e) = store.tx.send(MultiPassEventKind::FriendRequestRejected { from: data.from() }) {
-                                            error!("Error broadcasting event: {e}");
-                                        }
-
-                                        if let Some(path) = store.path.as_ref() {
-                                            if let Err(e) = store.profile.write().request_to_file(path).await {
-                                                error!("Error saving request: {e}");
-                                                continue
-                                            }
-                                        }
-                                    },
-                                    FriendRequestStatus::FriendRemoved => {
-                                        if let Err(e) = store.is_friend(&data.from()).await {
-                                            error!("Unable to remove {e}");
-                                            continue;
-                                        }
-
-                                        if let Err(e) = store.remove_friend(&data.from(), false, false).await {
-                                            error!("Error removing friend: {e}");
-                                            continue;
-                                        }
-                                    }
-                                    FriendRequestStatus::RequestRemoved => {
-                                        let index = match store.profile.read().requests().iter().position(|request|{
-                                             request.request_type() == InternalRequestType::Incoming &&
-                                             request.to() == data.to() &&
-                                             request.status() == FriendRequestStatus::Pending
-                                        }) {
-                                            Some(index) => index,
-                                            None => continue,
-                                        };
-
-                                        store.profile.write().requests_mut().remove(index);
-
-                                        if let Err(e) = store.tx.send(MultiPassEventKind::FriendRequestClosed { from: data.from(), to: data.to() }) {
-                                            error!("Error broadcasting event: {e}");
-                                        }
-
-                                        if let Some(path) = store.path.as_ref() {
-                                            if let Err(e) = store.profile.write().request_to_file(path).await {
-                                                error!("Error saving request: {e}");
-                                                continue
-                                            }
-                                        }
-                                    }
-                                    _ => {}
-                                };
+                            if let Err(e) = store.check_request_message(&local_public_key, message).await {
+                                error!("Error: {e}");
                             }
                         }
                     }
                     _ = broadcast_interval.tick() => {
-                        let list = store.queue.read().clone();
-                        for item in list.iter() {
-                            let Queue(peer, data) = item;
-                            if let Ok(crate::store::PeerConnectionType::SubscribedAndConnected) = connected_to_peer(store.ipfs.clone(), Some(FRIENDS_BROADCAST.into()), *peer).await {
-                                    let bytes = match serde_json::to_vec(&data) {
-                                        Ok(bytes) => bytes,
-                                        Err(e) => {
-                                            error!("Error serialzing queue request into bytes: {e}");
-                                            continue
-                                        }
-                                    };
-
-                                    if let Err(e) = store.ipfs.pubsub_publish(FRIENDS_BROADCAST.into(), bytes).await {
-                                        error!("Error sending request to {}: {}", peer, e);
-                                        continue
-                                    }
-
-                                    let index = match store.queue.read().iter().position(|q| {
-                                        Queue(*peer, data.clone()).eq(q)
-                                    }) {
-                                        Some(index) => index,
-                                        //If we somehow ended up here then there is likely a race condition
-                                        None => {
-                                            error!("Item is no longer in queue altough it should be. This is likely a race condition");
-                                            continue
-                                        }
-                                    };
-
-                                    let _ = store.queue.write().remove(index);
-
-                                    store.save_queue().await;
-                            }
+                        if let Err(e) = store.check_queue().await {
+                            error!("Error: {e}");
                         }
                     }
                 }
@@ -670,6 +505,179 @@ impl<T: IpfsTypes> FriendsStore<T> {
         });
         tokio::task::yield_now().await;
         Ok(store)
+    }
+
+    //TODO: Implement Errors
+    async fn check_request_message(&mut self, local_public_key: &DID, message: Arc<GossipsubMessage>) -> anyhow::Result<()> {
+        if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
+            let data = data.decrypt::<FriendRequest>(&*self.did_key)?;
+
+            if data.to().ne(local_public_key) {
+                warn!("Request is not meant for identity. Skipping");
+                return Ok(())
+            }
+
+            if self.profile.read().outgoing_request().contains(&data)
+                || self.profile.read().incoming_request().contains(&data)
+            {
+                warn!("Request exist locally. Skipping");
+                return Ok(())
+            }
+
+            // Before we validate the request, we should check to see if the key is blocked
+            // If it is, skip the request so we dont wait resources storing it.
+            if self.is_blocked(&data.from()) {
+                return Ok(())
+            }
+
+            //first verify the request before processing it
+            if let Err(e) = validate_request(&data) {
+                error!("Incoming request cannot be validated: {e}");
+                return Ok(())
+            }
+
+            match data.status() {
+                FriendRequestStatus::Accepted => {
+                    let index = match self.profile.read().requests().iter().position(|request| {
+                        request.request_type() == InternalRequestType::Outgoing
+                            && request.to() == data.from()
+                            && request.status() == FriendRequestStatus::Pending
+                    }) {
+                        Some(index) => index,
+                        None => {
+                            error!("Unable to locate pending request. Already been accepted or rejected?");
+                            return Ok(())
+                        }
+                    };
+
+                    self.profile.write().requests_mut().remove(index);
+
+                    if let Err(e) = self.add_friend(&data.from()).await {
+                        error!("Error adding friend: {e}");
+                        return Ok(())
+                    }
+
+                    if let Some(path) = self.path.as_ref() {
+                        if let Err(e) = self.profile.write().request_to_file(path).await {
+                            error!("Error saving request: {e}");
+                            return Ok(())
+                        }
+                    }
+                }
+                FriendRequestStatus::Pending => {
+                    if let Err(e) = self.profile.write().set_incoming_request(&data) {
+                        error!("Error setting incoming request: {e}");
+                        return Ok(())
+                    }
+
+                    if let Err(e) = self
+                        .tx
+                        .send(MultiPassEventKind::FriendRequestReceived { from: data.from() })
+                    {
+                        error!("Error broadcasting event: {e}");
+                    }
+
+                    if let Some(path) = self.path.as_ref() {
+                        if let Err(e) = self.profile.write().request_to_file(path).await {
+                            error!("Error saving request: {e}");
+                        }
+                    }
+                }
+                FriendRequestStatus::Denied => {
+                    let index = match self.profile.read().requests().iter().position(|request| {
+                        request.request_type() == InternalRequestType::Outgoing
+                            && request.to() == data.from()
+                            && request.status() == FriendRequestStatus::Pending
+                    }) {
+                        Some(index) => index,
+                        None => return Ok(())
+                    };
+
+                    let _ = self.profile.write().requests_mut().remove(index);
+
+                    if let Err(e) = self
+                        .tx
+                        .send(MultiPassEventKind::FriendRequestRejected { from: data.from() })
+                    {
+                        error!("Error broadcasting event: {e}");
+                    }
+
+                    if let Some(path) = self.path.as_ref() {
+                        if let Err(e) = self.profile.write().request_to_file(path).await {
+                            error!("Error saving request: {e}");
+                            return Ok(())
+                        }
+                    }
+                }
+                FriendRequestStatus::FriendRemoved => {
+                    if let Err(e) = self.is_friend(&data.from()).await {
+                        error!("Unable to remove {e}");
+                        return Ok(())
+                    }
+
+                    if let Err(e) = self.remove_friend(&data.from(), false, false).await {
+                        error!("Error removing friend: {e}");
+                        return Ok(())
+                    }
+                }
+                FriendRequestStatus::RequestRemoved => {
+                    let index = match self.profile.read().requests().iter().position(|request| {
+                        request.request_type() == InternalRequestType::Incoming
+                            && request.to() == data.to()
+                            && request.status() == FriendRequestStatus::Pending
+                    }) {
+                        Some(index) => index,
+                        None => return Ok(())
+                    };
+
+                    self.profile.write().requests_mut().remove(index);
+
+                    if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestClosed {
+                        from: data.from(),
+                        to: data.to(),
+                    }) {
+                        error!("Error broadcasting event: {e}");
+                    }
+
+                    if let Some(path) = self.path.as_ref() {
+                        if let Err(e) = self.profile.write().request_to_file(path).await {
+                            error!("Error saving request: {e}");
+                            return Ok(())
+                        }
+                    }
+                }
+                _ => {}
+            };
+        }
+        Ok(())
+    }
+
+    async fn check_queue(&self) -> anyhow::Result<()> {
+        let list = self.queue.read().clone();
+        for item in list.iter() {
+            let Queue(peer, data) = item;
+            if let Ok(crate::store::PeerConnectionType::Connected) =
+                connected_to_peer(self.ipfs.clone(), *peer).await
+            {
+                let bytes = serde_json::to_vec(&data)?;
+
+                self.ipfs
+                    .pubsub_publish(FRIENDS_BROADCAST.into(), bytes)
+                    .await?;
+
+                let index = self
+                    .queue
+                    .read()
+                    .iter()
+                    .position(|q| Queue(*peer, data.clone()).eq(q))
+                    .ok_or_else(|| Error::OtherWithContext("Cannot find item in queue".into()))?;
+
+                let _ = self.queue.write().remove(index);
+
+                self.save_queue().await;
+            }
+        }
+        Ok(())
     }
 
     async fn local(&self) -> anyhow::Result<(ipfs::libp2p::identity::PublicKey, PeerId)> {
@@ -1058,14 +1066,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
         ) {
             let peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
 
-            let connected = super::connected_to_peer(
-                self.ipfs.clone(),
-                Some(IDENTITY_BROADCAST.into()),
-                remote_peer_id,
-            )
-            .await?;
+            let connected = super::connected_to_peer(self.ipfs.clone(), remote_peer_id).await?;
 
-            if connected != PeerConnectionType::SubscribedAndConnected {
+            if connected != PeerConnectionType::Connected {
                 let res = match tokio::time::timeout(
                     Duration::from_secs(2),
                     self.ipfs.find_peer_info(peer_id),
@@ -1155,10 +1158,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
             }
             FriendRequestStatus::RequestRemoved => {
-                if let Err(e) = self
-                    .tx
-                    .send(MultiPassEventKind::FriendRequestClosed { from: request.from(), to: request.to() })
-                {
+                if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestClosed {
+                    from: request.from(),
+                    to: request.to(),
+                }) {
                     error!("Error broadcasting event: {e}");
                 }
             }

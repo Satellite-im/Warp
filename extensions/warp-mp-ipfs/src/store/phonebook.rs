@@ -136,9 +136,7 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
                     for (friend, status, _) in self.friends.iter() {
                         if let Some(status) = status {
                             match *status {
-                                PeerConnectionType::Connected
-                                | PeerConnectionType::SubscribedAndConnected
-                                | PeerConnectionType::Subscribed => online.push(friend.clone()),
+                                PeerConnectionType::Connected => online.push(friend.clone()),
                                 _ => {}
                             }
                         }
@@ -193,7 +191,6 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
             //TODO: Switch back to manually polling and loop back over until it doesnt return `Poll::Pending`
             match warp::async_block_in_place_uncheck(connected_to_peer(
                 ipfs.clone(),
-                None,
                 did.clone(),
             )) {
                 Ok(inner_status) => match (inner_status, *discovering) {
@@ -229,9 +226,7 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
                         }
                         *status = Some(PeerConnectionType::NotConnected);
                     }
-                    (PeerConnectionType::Connected, true)
-                    | (PeerConnectionType::SubscribedAndConnected, true)
-                    | (PeerConnectionType::Subscribed, true) => {
+                    (PeerConnectionType::Connected, true) => {
                         if let Err(e) =
                             event.send(MultiPassEventKind::IdentityOnline { did: did.clone() })
                         {
@@ -240,9 +235,7 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
                         *discovering = false;
                         *status = Some(inner_status)
                     }
-                    (PeerConnectionType::SubscribedAndConnected, false)
-                    | (PeerConnectionType::Subscribed, false)
-                    | (PeerConnectionType::Connected, false) => {
+                    (PeerConnectionType::Connected, false) => {
                         if let Some(inner_status2) = *status {
                             if inner_status2 == PeerConnectionType::NotConnected {
                                 if let Err(e) = event

@@ -206,7 +206,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             .ipfs
             .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
             .await?;
-        
+
         match self.check_seen.load(Ordering::Relaxed) {
             true => {
                 let peers = HashSet::from_iter(peers);
@@ -265,8 +265,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         //TODO: Maybe use bincode instead
         let bytes = serde_json::to_vec(&res)?;
 
-        self
-            .ipfs
+        self.ipfs
             .pubsub_publish(IDENTITY_BROADCAST.into(), bytes)
             .await?;
 
@@ -400,11 +399,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
                     let connected = connected_to_peer(
                         self.ipfs.clone(),
-                        Some(IDENTITY_BROADCAST.into()),
                         peer_id,
                     )
                     .await?;
-                    if connected != PeerConnectionType::SubscribedAndConnected {
+                    if connected == PeerConnectionType::NotConnected {
                         let res = match tokio::time::timeout(
                             Duration::from_secs(2),
                             self.ipfs.find_peer_info(peer_id),
@@ -424,7 +422,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                 if let Err(e) =
                                     super::discover_peer(ipfs, &*pubkey, discovery, relay).await
                                 {
-                                    error!("Error discoverying peer: {e}");
+                                    error!("Error discovering peer: {e}");
                                 }
                             });
                             tokio::task::yield_now().await;
@@ -491,7 +489,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let rcid = self.get_cid().await?;
         let path = IpfsPath::from(rcid);
         let identity_ipld = to_ipld(identity).map_err(anyhow::Error::from)?;
-        // TODO: Create a single root dag for the Cids
+
         let ident_cid = self.ipfs.put_dag(identity_ipld).await?;
         let mut root_document: RootDocument = self.get_dag(path).await?;
         let old_identity_cid = root_document.identity;
@@ -520,7 +518,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         let connected = connected_to_peer(
             self.ipfs.clone(),
-            Some(IDENTITY_BROADCAST.into()),
             did.clone(),
         )
         .await?;
@@ -614,27 +611,16 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Err(Error::ObjectNotFound)
     }
 
-    #[allow(clippy::clone_on_copy)]
     pub async fn get_cid(&self) -> Result<Cid, Error> {
         if let Some(path) = self.path.as_ref() {
             if let Ok(cid_str) = tokio::fs::read(path.join(".id"))
                 .await
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
             {
-                let cid: Cid = cid_str.parse().map_err(anyhow::Error::from)?;
-                // Note: This is cloned to prevent a deadlock when writing to `ident_cid`
-                // TODO: Change this so we dont need to clone
-                let ident = self.ident_cid.read().clone();
-                match ident {
-                    Some(ident_cid) => {
-                        if cid != ident_cid {
-                            *self.ident_cid.write() = Some(cid);
-                        }
-                    }
-                    None => {
-                        *self.ident_cid.write() = Some(cid);
-                    }
-                }
+                return cid_str
+                    .parse()
+                    .map_err(anyhow::Error::from)
+                    .map_err(Error::from);
             }
         }
         (*self.ident_cid.read()).ok_or(Error::IdentityDoesntExist)
