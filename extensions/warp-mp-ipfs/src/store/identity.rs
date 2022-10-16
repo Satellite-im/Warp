@@ -219,7 +219,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 let mut havent_seen = vec![];
                 for peer in peers.iter() {
                     if seen_list.contains(peer) {
-                        return Ok(());
+                        continue;
                     }
                     havent_seen.push(peer);
                 }
