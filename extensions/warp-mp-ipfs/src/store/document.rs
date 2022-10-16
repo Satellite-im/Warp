@@ -9,8 +9,6 @@ pub struct RootDocument {
     pub friends: Option<Cid>,
     pub blocks: Option<Cid>,
     pub request: Option<Cid>,
-    // pub cache: Vec<CacheDocument>,
-    pub prev_cid: Option<Cid>,
 }
 
 /// Used to lookup identities found and their corresponding cid
