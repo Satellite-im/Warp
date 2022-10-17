@@ -34,8 +34,9 @@ use warp::{
 };
 
 use super::{
-    connected_to_peer, document::RootDocument, libp2p_pub_to_did, PeerConnectionType,
-    IDENTITY_BROADCAST,
+    connected_to_peer,
+    document::{CacheDocument, RootDocument},
+    libp2p_pub_to_did, PeerConnectionType, IDENTITY_BROADCAST,
 };
 
 pub struct IdentityStore<T: IpfsTypes> {
@@ -43,12 +44,14 @@ pub struct IdentityStore<T: IpfsTypes> {
 
     path: Option<PathBuf>,
 
-    ident_cid: Arc<RwLock<Option<Cid>>>,
+    root_cid: Arc<RwLock<Option<Cid>>>,
+
+    cache_cid: Arc<RwLock<Option<Cid>>>,
 
     identity: Arc<RwLock<Option<Identity>>>,
 
     //TODO: Move this to a local ipld cache instead
-    cache: Arc<RwLock<Vec<Identity>>>,
+    cache: Arc<RwLock<HashSet<Identity>>>,
 
     seen: Arc<RwLock<HashSet<PeerId>>>,
 
@@ -70,7 +73,8 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
         Self {
             ipfs: self.ipfs.clone(),
             path: self.path.clone(),
-            ident_cid: self.ident_cid.clone(),
+            root_cid: self.root_cid.clone(),
+            cache_cid: self.cache_cid.clone(),
             identity: self.identity.clone(),
             cache: self.cache.clone(),
             seen: self.seen.clone(),
@@ -114,14 +118,16 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let identity = Arc::new(Default::default());
         let start_event = Arc::new(Default::default());
         let end_event = Arc::new(Default::default());
-        let ident_cid = Arc::new(Default::default());
+        let root_cid = Arc::new(Default::default());
+        let cache_cid = Arc::new(Default::default());
         let seen = Arc::new(Default::default());
         let check_seen = Arc::new(Default::default());
 
         let store = Self {
             ipfs,
             path,
-            ident_cid,
+            root_cid,
+            cache_cid,
             cache,
             identity,
             seen,
@@ -132,11 +138,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
             check_seen,
             tesseract,
         };
-        if let Some(path) = store.path.as_ref() {
-            if let Ok(bytes) = tokio::fs::read(path.join(".id_cache")).await {
-                if let Ok(cache) = serde_json::from_slice(&bytes) {
-                    *store.cache.write() = cache;
-                }
+        if store.path.is_some() {
+            if let Ok(root_cid) = store.get_cid().await {
+                *store.root_cid.write() = Some(root_cid);
+            }
+            if let Ok(cache_cid) = store.get_cache_cid().await {
+                *store.cache_cid.write() = Some(cache_cid);
             }
         }
 
@@ -152,7 +159,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         tokio::spawn(async move {
             // let mut peer_annoyance = HashMap::<PeerId, usize>::new();
-            let store = store_inner;
+            let mut store = store_inner;
 
             futures::pin_mut!(id_broadcast_stream);
 
@@ -248,12 +255,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
             .ok_or(Error::IdentityDoesntExist)?;
 
         let root_cid = self
-            .ident_cid
+            .root_cid
             .read()
             .ok_or(Error::OtherWithContext("Cid is unavailable".into()))?;
 
         let cid = self
-            .get_dag::<RootDocument>(IpfsPath::from(root_cid))
+            .get_dag::<RootDocument>(IpfsPath::from(root_cid), None)
             .await
             .map(|document| document.identity)
             .ok();
@@ -272,20 +279,30 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(())
     }
 
-    async fn process_message(&self, message: Arc<GossipsubMessage>) -> anyhow::Result<()> {
+    async fn process_message(&mut self, message: Arc<GossipsubMessage>) -> anyhow::Result<()> {
         let data = serde_json::from_slice::<Sata>(&message.data)?;
 
         let payload = data.decode::<IdentityPayload>()?;
 
+        let payload_cid = payload
+            .cid
+            .ok_or_else(|| anyhow::anyhow!("Cid doesnt exist"))?;
+
         //TODO: Validate public key against peer that sent it
         let _pk = did_to_libp2p_pub(&payload.did)?;
 
-        let cid = match payload.cid {
-            Some(cid) => cid,
-            None => anyhow::bail!("Cid doesnt exist"),
+        let (old_cid, mut cache_documents) = match self.get_cache_cid().await {
+            Ok(cid) => match self
+                .get_dag::<HashSet<CacheDocument>>(IpfsPath::from(cid), None)
+                .await
+            {
+                Ok(doc) => (Some(cid), doc),
+                _ => (Some(cid), Default::default()),
+            },
+            _ => (None, Default::default()),
         };
 
-        let identity = self.get_dag::<Identity>(IpfsPath::from(cid)).await?;
+        let identity = self.get_dag::<Identity>(payload_cid.into(), None).await?;
 
         if payload.did != identity.did_key() {
             anyhow::bail!("Payload doesnt match identity")
@@ -295,24 +312,52 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 anyhow::bail!("Cannot send own identity")
             }
         }
-        if self.cache.read().contains(&identity) {
-            anyhow::bail!("Identity already exist in cache");
+
+        let mut found = false;
+
+        let mut document = match cache_documents.iter().find(|document| {
+            document.did == identity.did_key() && document.short_id == identity.short_id()
+        }) {
+            Some(document) => {
+                found = true;
+                document.clone()
+            }
+            None => {
+                let username = identity.username();
+                let short_id = identity.short_id();
+                let did = identity.did_key();
+                let identity = payload_cid;
+
+                CacheDocument {
+                    username,
+                    did,
+                    short_id,
+                    identity,
+                }
+            }
+        };
+
+        if found && document.identity != payload_cid {
+            if document.username != identity.username() {
+                document.username = identity.username();
+            }
+            document.identity = payload_cid;
         }
-        let index = self
-            .cache
-            .read()
-            .iter()
-            .position(|ident| ident.did_key() == identity.did_key());
 
-        if let Some(index) = index {
-            self.cache.write().remove(index);
-        }
+        cache_documents.replace(document);
 
-        self.cache.write().push(identity);
+        let cache_ipld = to_ipld(cache_documents)?;
 
-        if let Some(path) = self.path.as_ref() {
-            let bytes = serde_json::to_vec(&self.cache)?;
-            tokio::fs::write(path.join(".id_cache"), bytes).await?;
+        let new_cid = self.ipfs.put_dag(cache_ipld).await?;
+        //Do we want to [recursively] pin the cache?
+        self.ipfs.insert_pin(&new_cid, false).await?;
+        self.save_cache_cid(new_cid).await?;
+        if let Some(old_cid) = old_cid {
+            if self.ipfs.is_pinned(&old_cid).await? {
+                self.ipfs.remove_pin(&old_cid, false).await?;
+            }
+            // Do we want to remove the old block?
+            self.ipfs.remove_block(old_cid).await?;
         }
 
         Ok(())
@@ -326,8 +371,15 @@ impl<T: IpfsTypes> IdentityStore<T> {
         self.relay.clone().unwrap_or_default()
     }
 
-    fn cache(&self) -> Vec<Identity> {
-        self.cache.read().clone()
+    async fn cache(&self) -> HashSet<CacheDocument> {
+        let cache_cid = match *self.cache_cid.read() {
+            Some(cid) => cid,
+            None => return Default::default(),
+        };
+
+        self.get_dag::<HashSet<CacheDocument>>(IpfsPath::from(cache_cid), None)
+            .await
+            .unwrap_or_default()
     }
 
     pub async fn create_identity(&mut self, username: Option<&str>) -> Result<Identity, Error> {
@@ -386,7 +438,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 Error::OtherWithContext("Identity store may not be initialized".into())
             })?;
 
-        let idents = match &lookup {
+        let cache = self.cache().await;
+
+        let idents_docs = match &lookup {
             //Note: If this returns more than one identity, then either
             //      A) The memory cache never got updated and somehow bypassed the check likely caused from a race condition; or
             //      B) There is literally 2 identities, which should be impossible because of A
@@ -425,9 +479,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
                         }
                     }
                 }
-                self.cache()
+                cache
                     .iter()
-                    .filter(|ident| ident.did_key() == *pubkey.clone())
+                    .filter(|ident| ident.did == *pubkey.clone())
                     .cloned()
                     .collect::<Vec<_>>()
             }
@@ -435,11 +489,11 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 let split_data = username.split('#').collect::<Vec<&str>>();
 
                 if split_data.len() != 2 {
-                    self.cache()
+                    cache
                         .iter()
                         .filter(|ident| {
                             ident
-                                .username()
+                                .username
                                 .to_lowercase()
                                 .contains(&username.to_lowercase())
                         })
@@ -450,12 +504,11 @@ impl<T: IpfsTypes> IdentityStore<T> {
                         split_data.first().map(|s| s.to_lowercase()),
                         split_data.last().map(|s| s.to_lowercase()),
                     ) {
-                        (Some(name), Some(code)) => self
-                            .cache()
+                        (Some(name), Some(code)) => cache
                             .iter()
                             .filter(|ident| {
-                                ident.username().to_lowercase().eq(&name)
-                                    && ident.short_id().to_lowercase().eq(&code)
+                                ident.username.to_lowercase().eq(&name)
+                                    && ident.short_id.to_lowercase().eq(&code)
                             })
                             .cloned()
                             .collect::<Vec<_>>(),
@@ -465,20 +518,36 @@ impl<T: IpfsTypes> IdentityStore<T> {
             }
             LookupBy::Username(username) => {
                 let username = username.to_lowercase();
-                self.cache()
+                cache
                     .iter()
-                    .filter(|ident| ident.username().to_lowercase().contains(&username))
+                    .filter(|ident| ident.username.to_lowercase().contains(&username))
                     .cloned()
                     .collect::<Vec<_>>()
             }
-            LookupBy::ShortId(id) => self
-                .cache()
+            LookupBy::ShortId(id) => cache
                 .iter()
-                .filter(|ident| ident.short_id().eq(id))
+                .filter(|ident| ident.short_id.eq(id))
                 .cloned()
                 .collect::<Vec<_>>(),
         };
-        Ok(idents)
+
+        let mut future_list = futures::stream::FuturesOrdered::new();
+
+        for doc in idents_docs {
+            future_list.push_back(self.get_dag::<Identity>(IpfsPath::from(doc.identity), None));
+        }
+
+        let list = future_list
+            .collect::<Vec<_>>()
+            .await
+            .iter()
+            .filter_map(|res| match res {
+                Ok(ident) => Some(ident.clone()),
+                _ => None,
+            })
+            .collect();
+
+        Ok(list)
     }
 
     pub async fn identity_update(&mut self, identity: Identity) -> Result<(), Error> {
@@ -487,7 +556,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let identity_ipld = to_ipld(identity).map_err(anyhow::Error::from)?;
 
         let ident_cid = self.ipfs.put_dag(identity_ipld).await?;
-        let mut root_document: RootDocument = self.get_dag(path).await?;
+        let mut root_document: RootDocument = self.get_dag(path, None).await?;
         let old_identity_cid = root_document.identity;
         root_document.identity = ident_cid;
 
@@ -541,17 +610,19 @@ impl<T: IpfsTypes> IdentityStore<T> {
         }
     }
 
-    pub async fn get_dag<D: DeserializeOwned>(&self, path: IpfsPath) -> Result<D, Error> {
+    pub async fn get_dag<D: DeserializeOwned>(
+        &self,
+        path: IpfsPath,
+        timeout: Option<Duration>,
+    ) -> Result<D, Error> {
         //Because it utilizes DHT requesting other nodes for the cid, it will stall so here we would need to timeout
         //the request.
-        let identity =
-            match tokio::time::timeout(std::time::Duration::from_secs(10), self.ipfs.get_dag(path))
-                .await
-            {
-                Ok(Ok(ipld)) => from_ipld::<D>(ipld).map_err(anyhow::Error::from)?,
-                Ok(Err(e)) => return Err(Error::Any(e)),
-                Err(e) => return Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
-            };
+        let timeout = timeout.unwrap_or(std::time::Duration::from_secs(10));
+        let identity = match tokio::time::timeout(timeout, self.ipfs.get_dag(path)).await {
+            Ok(Ok(ipld)) => from_ipld::<D>(ipld).map_err(anyhow::Error::from)?,
+            Ok(Err(e)) => return Err(Error::Any(e)),
+            Err(e) => return Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
+        };
         Ok(identity)
     }
 
@@ -560,7 +631,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let path = IpfsPath::from(ident_cid)
             .sub_path("identity")
             .map_err(anyhow::Error::from)?;
-        let identity = self.get_dag::<Identity>(path).await?;
+        let identity = self.get_dag::<Identity>(path, None).await?;
         let public_key = identity.did_key();
         let kp_public_key = libp2p_pub_to_did(&self.get_keypair()?.public())?;
         if public_key != kp_public_key {
@@ -572,7 +643,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn save_cid(&mut self, cid: Cid) -> Result<(), Error> {
-        *self.ident_cid.write() = Some(cid);
+        *self.root_cid.write() = Some(cid);
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
             tokio::fs::write(path.join(".id"), cid).await?;
@@ -581,6 +652,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn save_cache_cid(&mut self, cid: Cid) -> Result<(), Error> {
+        *self.cache_cid.write() = Some(cid);
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
             tokio::fs::write(path.join(".cache_id"), cid).await?;
@@ -600,7 +672,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     .map_err(Error::from);
             }
         }
-        Err(Error::ObjectNotFound)
+        (*self.cache_cid.read()).ok_or(Error::OtherWithContext("Cache cannot be found".into()))
     }
 
     pub async fn get_cid(&self) -> Result<Cid, Error> {
@@ -615,7 +687,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     .map_err(Error::from);
             }
         }
-        (*self.ident_cid.read()).ok_or(Error::IdentityDoesntExist)
+        (*self.root_cid.read()).ok_or(Error::IdentityDoesntExist)
     }
 
     pub async fn update_identity(&self) -> Result<(), Error> {
