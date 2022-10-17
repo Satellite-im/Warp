@@ -57,7 +57,7 @@ serde_yaml = "0.8"
 toml = "0.5"
 bs58 = "0.4"
 hex = "0.4"
-libipld = { version = "0.13", features = ["serde-codec"] }
+libipld = { version = "0.14", features = ["serde-codec"] }
 
 # Misc
 uuid = { version = "1.0", features = ["serde", "v4"] }

@@ -12,7 +12,7 @@ warp = { path = "../../warp" }
 ipfs = { git = "https://github.com/Satellite-im/rust-ipfs", branch = "libp2p-next-usable", features = [
     "external-gossipsub-stream",
 ] }
-libipld = { version = "0.13", features = ["serde-codec"] }
+libipld = { version = "0.14", features = ["serde-codec"] }
 uuid = { version = "1.0", features = ["serde", "v4"] }
 tokio = { version = "1", features = ["full"] }
 futures = { version = "0.3" }
