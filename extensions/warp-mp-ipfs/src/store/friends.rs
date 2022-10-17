@@ -2,7 +2,6 @@
 use futures::StreamExt;
 use ipfs::libp2p::gossipsub::GossipsubMessage;
 use ipfs::{Ipfs, IpfsTypes, PeerId};
-use libipld::cbor::DagCbor;
 use std::io::Write;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
