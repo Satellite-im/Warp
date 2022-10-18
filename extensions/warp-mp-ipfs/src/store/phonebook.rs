@@ -3,7 +3,6 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 
-use ipfs::Multiaddr;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -13,8 +12,6 @@ use tracing::log::error;
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::MultiPassEventKind;
-
-use crate::config::Discovery;
 
 use super::connected_to_peer;
 use super::PeerConnectionType;
@@ -46,9 +43,7 @@ impl<T: IpfsTypes> PhoneBook<T> {
         };
         let fut = PhoneBookFuture {
             ipfs,
-            friends: Default::default(),
-            discovery: Discovery::None,
-            relays: Vec::new(),
+            peers: Default::default(),
             rx,
             event,
         };
@@ -56,43 +51,27 @@ impl<T: IpfsTypes> PhoneBook<T> {
         (book, fut)
     }
 
-    pub async fn add_friend_list(&self, list: Vec<DID>) -> anyhow::Result<()> {
+    pub async fn add_list(&self, list: Vec<DID>) -> anyhow::Result<()> {
         for friend in list.iter() {
-            self.add_friend(friend).await?;
+            self.add_did(friend).await?;
         }
         Ok(())
     }
 
-    pub async fn add_friend(&self, did: &DID) -> anyhow::Result<()> {
+    pub async fn add_did(&self, did: &DID) -> anyhow::Result<()> {
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(PhoneBookEvents::AddFriend(did.clone(), tx))
+            .send(PhoneBookEvents::AddDid(did.clone(), tx))
             .await?;
         rx.await??;
         Ok(())
     }
 
-    pub async fn remove_friend(&self, did: &DID) -> anyhow::Result<()> {
+    pub async fn remove_did(&self, did: &DID) -> anyhow::Result<()> {
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(PhoneBookEvents::RemoveFriend(did.clone(), tx))
+            .send(PhoneBookEvents::RemoveDid(did.clone(), tx))
             .await?;
-        rx.await??;
-        Ok(())
-    }
-
-    pub async fn set_discovery(&self, discovery: Discovery) -> anyhow::Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(PhoneBookEvents::SetDiscovery(discovery, tx))
-            .await?;
-        rx.await??;
-        Ok(())
-    }
-
-    pub async fn add_relay(&self, addr: Multiaddr) -> anyhow::Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx.send(PhoneBookEvents::AddRelays(addr, tx)).await?;
         rx.await??;
         Ok(())
     }
@@ -102,17 +81,13 @@ impl<T: IpfsTypes> PhoneBook<T> {
 pub enum PhoneBookEvents {
     Online(oneshot::Sender<Vec<DID>>),
     Offline(oneshot::Sender<Vec<DID>>),
-    AddFriend(DID, oneshot::Sender<Result<(), Error>>),
-    SetDiscovery(Discovery, oneshot::Sender<Result<(), Error>>),
-    AddRelays(Multiaddr, oneshot::Sender<Result<(), Error>>),
-    RemoveFriend(DID, oneshot::Sender<Result<(), Error>>),
+    AddDid(DID, oneshot::Sender<Result<(), Error>>),
+    RemoveDid(DID, oneshot::Sender<Result<(), Error>>),
 }
 
 pub struct PhoneBookFuture<T: IpfsTypes> {
     ipfs: Ipfs<T>,
-    friends: Vec<(DID, Option<PeerConnectionType>, bool)>,
-    discovery: Discovery,
-    relays: Vec<Multiaddr>,
+    peers: Vec<(DID, Option<PeerConnectionType>)>,
     rx: mpsc::Receiver<PhoneBookEvents>,
     event: broadcast::Sender<MultiPassEventKind>,
 }
@@ -122,7 +97,6 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let ipfs = self.ipfs.clone();
-        let relays = self.relays.clone();
         let event = self.event.clone();
         loop {
             let event = match Pin::new(&mut self.rx).poll_recv(cx) {
@@ -133,7 +107,7 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
             match event {
                 PhoneBookEvents::Online(ret) => {
                     let mut online = vec![];
-                    for (friend, status, _) in self.friends.iter() {
+                    for (friend, status) in self.peers.iter() {
                         if let Some(status) = status {
                             match *status {
                                 PeerConnectionType::Connected
@@ -147,7 +121,7 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
                 }
                 PhoneBookEvents::Offline(ret) => {
                     let mut offline = vec![];
-                    for (friend, status, _) in self.friends.iter() {
+                    for (friend, status) in self.peers.iter() {
                         if let Some(status) = status {
                             if *status == PeerConnectionType::NotConnected {
                                 offline.push(friend.clone());
@@ -156,19 +130,19 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
                     }
                     let _ = ret.send(offline);
                 }
-                PhoneBookEvents::AddFriend(did, ret) => {
-                    self.friends.push((did, None, false));
+                PhoneBookEvents::AddDid(did, ret) => {
+                    self.peers.push((did, None));
                     let _ = ret.send(Ok(()));
                 }
-                PhoneBookEvents::RemoveFriend(did, ret) => {
+                PhoneBookEvents::RemoveDid(did, ret) => {
                     match self
-                        .friends
+                        .peers
                         .iter()
-                        .map(|(d, _, _)| d)
+                        .map(|(d, _)| d)
                         .position(|inner_did| did.eq(inner_did))
                     {
                         Some(index) => {
-                            self.friends.remove(index);
+                            self.peers.remove(index);
                             let _ = ret.send(Ok(()));
                         }
                         None => {
@@ -176,19 +150,9 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
                         }
                     }
                 }
-                PhoneBookEvents::SetDiscovery(disc, ret) => {
-                    self.discovery = disc;
-                    let _ = ret.send(Ok(()));
-                }
-                PhoneBookEvents::AddRelays(addr, ret) => {
-                    self.relays.push(addr);
-                    let _ = ret.send(Ok(()));
-                }
             };
         }
-        let discovery = self.discovery.clone();
-        for (did, status, discovering) in self.friends.iter_mut() {
-            let discovery = discovery.clone();
+        for (did, status) in self.peers.iter_mut() {
             //Note: We are using this to get the results from the function because it continues to show `Poll::Pending`
             //TODO: Switch back to manually polling and loop back over until it doesnt return `Poll::Pending`
             match warp::async_block_in_place_uncheck(connected_to_peer(
@@ -196,10 +160,8 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
                 None,
                 did.clone(),
             )) {
-                Ok(inner_status) => match (inner_status, *discovering) {
-                    (PeerConnectionType::NotConnected, false) => {
-                        let ipfs = ipfs.clone();
-                        let relays = relays.clone();
+                Ok(inner_status) => match (inner_status) {
+                    PeerConnectionType::NotConnected => {
                         let did = did.clone();
                         if let Some(status) = status {
                             if *status != PeerConnectionType::NotConnected {
@@ -210,39 +172,11 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
                                 }
                             }
                         }
-
-                        tokio::spawn(async move {
-                            if let Err(_e) =
-                                super::discover_peer(ipfs.clone(), &did, discovery, relays.clone())
-                                    .await
-                            {}
-                        });
-                        *discovering = true;
                         *status = Some(PeerConnectionType::NotConnected);
                     }
-                    (PeerConnectionType::NotConnected, true) if (*status).is_none() => {
-                        *status = Some(PeerConnectionType::NotConnected);
-                    }
-                    (PeerConnectionType::NotConnected, true) if (*status).is_some() => {
-                        if let Some(PeerConnectionType::NotConnected) = *status {
-                            continue;
-                        }
-                        *status = Some(PeerConnectionType::NotConnected);
-                    }
-                    (PeerConnectionType::Connected, true)
-                    | (PeerConnectionType::SubscribedAndConnected, true)
-                    | (PeerConnectionType::Subscribed, true) => {
-                        if let Err(e) =
-                            event.send(MultiPassEventKind::IdentityOnline { did: did.clone() })
-                        {
-                            error!("Error broadcasting event: {e}");
-                        }
-                        *discovering = false;
-                        *status = Some(inner_status)
-                    }
-                    (PeerConnectionType::SubscribedAndConnected, false)
-                    | (PeerConnectionType::Subscribed, false)
-                    | (PeerConnectionType::Connected, false) => {
+                    PeerConnectionType::SubscribedAndConnected
+                    | PeerConnectionType::Subscribed
+                    | PeerConnectionType::Connected => {
                         if let Some(inner_status2) = *status {
                             if inner_status2 == PeerConnectionType::NotConnected {
                                 if let Err(e) = event
@@ -267,7 +201,7 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
             }
         }
 
-        if !self.friends.is_empty() {
+        if !self.peers.is_empty() {
             let waker = cx.waker().clone();
             tokio::spawn(async move {
                 //Although we could use a timer from tokio or futures, it might be best for now to sleep in a separate task (or thread if we go that route) then wake up the context

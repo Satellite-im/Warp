@@ -430,14 +430,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
         tokio::spawn(async move {
             let mut store = store_inner;
 
-            let discovery = store.identity.discovery_type();
-
-            if let Err(_e) = store.phonebook.set_discovery(discovery).await {}
-
-            for addr in store.identity.relays() {
-                if let Err(_e) = store.phonebook.add_relay(addr).await {}
-            }
-
             if let Some(path) = store.path.as_ref() {
                 if let Ok(queue) = tokio::fs::read(path.join("queue")).await {
                     if let Ok(queue) = serde_json::from_slice(&queue) {
@@ -452,7 +444,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         *store.profile.write() = profile;
                         if let Err(_e) = store
                             .phonebook
-                            .add_friend_list(store.profile.read().friends())
+                            .add_list(store.profile.read().friends())
                             .await
                         {
                             error!("Error adding friends in phonebook: {_e}");
@@ -929,7 +921,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         self.profile.write().add_friend(pubkey)?;
 
-        if let Err(_e) = self.phonebook.add_friend(pubkey).await {
+        if let Err(_e) = self.phonebook.add_did(pubkey).await {
             error!("Error: {_e}");
         }
 
@@ -958,7 +950,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         self.profile.write().remove_friend(pubkey)?;
 
-        if let Err(_e) = self.phonebook.remove_friend(pubkey).await {
+        if let Err(_e) = self.phonebook.remove_did(pubkey).await {
             error!("Error: {_e}");
         }
 
@@ -1155,10 +1147,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
             }
             FriendRequestStatus::RequestRemoved => {
-                if let Err(e) = self
-                    .tx
-                    .send(MultiPassEventKind::FriendRequestClosed { from: request.from(), to: request.to() })
-                {
+                if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestClosed {
+                    from: request.from(),
+                    to: request.to(),
+                }) {
                     error!("Error broadcasting event: {e}");
                 }
             }
