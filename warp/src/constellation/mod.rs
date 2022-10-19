@@ -104,6 +104,24 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
         }
     }
 
+    fn update_item(&mut self, path: &str, item: Item) -> Result<(), Error> {
+        let directory = self.current_directory_mut()?;
+        let inner_item = directory.get_item_mut_by_path(path)?;
+        if inner_item.id() != item.id() && inner_item.item_type() != item.item_type() {
+            return Err(Error::ItemInvalid);
+        }
+        *inner_item = item;
+        Ok(())
+    }
+
+    fn update_file(&mut self, path: &str, file: file::File) -> Result<(), Error> {
+        self.update_item(path, file.into())
+    }
+
+    fn update_directory(&mut self, path: &str, directory: directory::Directory) -> Result<(), Error> {
+        self.update_item(path, directory.into())
+    }
+
     /// Used to upload file to the filesystem
     async fn put(&mut self, _: &str, _: &str) -> Result<(), Error> {
         Err(Error::Unimplemented)
@@ -292,7 +310,6 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
 //     }
 // }
 
-
 /// Types that would be used for import and export
 /// Currently only support `Json`, `Yaml`, and `Toml`.
 /// Implementation can override these functions for their own
@@ -388,7 +405,8 @@ impl ConstellationAdapter {
     pub fn put(&mut self, remote: String, local: String) -> Promise {
         let inner = self.object.clone();
         future_to_promise(async move {
-            let mut inner = inner.write()
+            let mut inner = inner
+                .write()
                 .put(&remote, &local)
                 .await
                 .map_err(crate::error::into_error)
@@ -402,7 +420,8 @@ impl ConstellationAdapter {
     pub fn get(&self, remote: String, local: String) -> Promise {
         let inner = self.object.clone();
         future_to_promise(async move {
-            let inner = inner.read()
+            let inner = inner
+                .read()
                 .get(&remote, &local)
                 .await
                 .map_err(crate::error::into_error)
@@ -416,7 +435,8 @@ impl ConstellationAdapter {
     pub fn put_buffer(&mut self, remote: String, data: Vec<u8>) -> Promise {
         let inner = self.object.clone();
         future_to_promise(async move {
-            let mut inner = inner.write()
+            let mut inner = inner
+                .write()
                 .put_buffer(&remote, &data)
                 .await
                 .map_err(crate::error::into_error)
@@ -459,7 +479,8 @@ impl ConstellationAdapter {
     pub fn move_item(&mut self, from: String, to: String) -> Promise {
         let inner = self.object.clone();
         future_to_promise(async move {
-            let mut inner = inner.write()
+            let mut inner = inner
+                .write()
                 .move_item(&from, &to)
                 .await
                 .map_err(crate::error::into_error)
