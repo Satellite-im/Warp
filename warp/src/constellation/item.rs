@@ -211,6 +211,14 @@ impl Item {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn thumbnail(&self) -> String {
+        match &self.0 {
+            ItemInner::File(file) => file.thumbnail(),
+            ItemInner::Directory(directory) => directory.thumbnail(),
+        }
+    }
+
     /// Rename the name of `Item`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn rename(&mut self, name: &str) -> Result<(), Error> {
@@ -254,6 +262,15 @@ impl Item {
         match self.as_mut() {
             ItemInner::File(file) => file.set_description(desc),
             ItemInner::Directory(directory) => directory.set_description(desc),
+        }
+    }
+
+    /// Set thumbnail of `Item`
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_thumbnail(&mut self, data: &str) {
+        match self.as_mut() {
+            ItemInner::File(file) => file.set_thumbnail(data),
+            ItemInner::Directory(directory) => directory.set_thumbnail(data),
         }
     }
 

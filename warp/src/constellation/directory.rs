@@ -51,12 +51,13 @@ pub struct Directory {
     /// TODO: Make this optional
     description: String,
 
+    /// Thumbnail of the `Directory`
+    thumbnail: String,
+
     /// Timestamp of the creation of the directory
-    #[serde(with = "chrono::serde::ts_seconds")]
     creation: DateTime<Utc>,
 
     /// Timestamp of the `Directory` when it is modified
-    #[serde(with = "chrono::serde::ts_seconds")]
     modified: DateTime<Utc>,
 
     /// Type of `Directory`
@@ -73,6 +74,7 @@ impl Default for Directory {
             id: Uuid::new_v4(),
             name: String::from("un-named directory"),
             description: String::new(),
+            thumbnail: String::new(),
             creation: timestamp,
             modified: timestamp,
             directory_type: DirectoryType::Default,
@@ -576,6 +578,16 @@ impl Directory {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_name(&mut self, name: &str) {
         self.name = name.to_string()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_thumbnail(&mut self, desc: &str) {
+        self.thumbnail = desc.to_string()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn thumbnail(&self) -> String {
+        self.thumbnail.to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]

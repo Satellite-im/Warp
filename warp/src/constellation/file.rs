@@ -14,7 +14,7 @@ use wasm_bindgen::prelude::*;
 /// if we don't have a supported file type, we can just default to generic.
 ///
 /// TODO: Use mime to define the filetype
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display)]
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display, Default)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -25,19 +25,9 @@ pub enum FileType {
     ImagePng,
     #[display(fmt = "archive")]
     Archive,
-}
-
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug, Display)]
-#[serde(rename_all = "lowercase")]
-pub enum FileHookType {
-    #[display(fmt = "create")]
-    Create,
-    #[display(fmt = "delete")]
-    Delete,
-    #[display(fmt = "rename")]
-    Rename,
-    #[display(fmt = "move")]
-    Move,
+    #[display(fmt = "other")]
+    #[default]
+    Other,
 }
 
 /// `File` represents the files uploaded to the FileSystem (`Constellation`).
@@ -53,15 +43,18 @@ pub struct File {
     /// Size of the `File`.
     size: i64,
 
+    /// Thumbnail of the `File`
+    /// Note: This should be set if the file is an image, unless
+    ///       one plans to add a generic thumbnail for the file
+    thumbnail: String,
+
     /// Description of the `File`. TODO: Make this optional
     description: String,
 
     /// Timestamp of the creation of the `File`
-    #[serde(with = "chrono::serde::ts_seconds")]
     creation: DateTime<Utc>,
 
     /// Timestamp of the `File` when it is modified
-    #[serde(with = "chrono::serde::ts_seconds")]
     modified: DateTime<Utc>,
 
     /// Type of the `File`.
@@ -70,7 +63,7 @@ pub struct File {
     /// Hash of the `File`
     hash: Hash,
 
-    /// External reference
+    /// External reference pointing to the source of the file
     #[serde(skip_serializing_if = "Option::is_none")]
     reference: Option<String>,
 }
@@ -83,6 +76,7 @@ impl Default for File {
             name: String::from("un-named file"),
             description: String::new(),
             size: 0,
+            thumbnail: String::new(),
             creation: timestamp,
             modified: timestamp,
             file_type: FileType::Generic,
@@ -146,6 +140,19 @@ impl File {
     pub fn set_description(&mut self, desc: &str) {
         self.description = desc.to_string();
         self.modified = Utc::now()
+    }
+
+    /// Set the thumbnail to the file
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_thumbnail(&mut self, data: &str) {
+        self.thumbnail = data.to_string();
+        self.modified = Utc::now()
+    }
+
+    /// Get the thumbnail from the file
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn thumbnail(&self) -> String{
+        self.thumbnail.clone()
     }
 
     /// Set the reference of the file
