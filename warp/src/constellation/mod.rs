@@ -124,7 +124,7 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
     fn update_directory(
         &mut self,
         path: &str,
-        directory: directory::Directory,
+        directory: Directory,
     ) -> Result<(), Error> {
         self.update_item(path, directory.into())
     }
@@ -322,7 +322,7 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
 /// Currently only support `Json`, `Yaml`, and `Toml`.
 /// Implementation can override these functions for their own
 /// types to be use for import and export.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[repr(C)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum ConstellationDataType {
@@ -560,6 +560,9 @@ pub mod ffi {
     use std::ffi::CStr;
     use std::os::raw::c_char;
 
+    use super::file::File;
+    use super::item::Item;
+
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_select(
@@ -663,6 +666,111 @@ pub mod ffi {
         }
     }
 
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_update_item(
+        ctx: *mut ConstellationAdapter,
+        path: *const c_char,
+        item: *const Item,
+    ) -> FFIResult_Null {
+        if ctx.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "ctx".into(),
+            });
+        }
+
+        if path.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "path".into(),
+            });
+        }
+
+        if item.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "item".into(),
+            });
+        }
+
+        let constellation = &mut *(ctx);
+
+        let path = CStr::from_ptr(path).to_string_lossy().to_string();
+        let item = &*item;
+
+        ConstellationAdapter::write_guard(constellation)
+            .update_item(&path, item.clone())
+            .into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_update_file(
+        ctx: *mut ConstellationAdapter,
+        path: *const c_char,
+        file: *const File,
+    ) -> FFIResult_Null {
+        if ctx.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "ctx".into(),
+            });
+        }
+
+        if path.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "path".into(),
+            });
+        }
+
+        if file.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "item".into(),
+            });
+        }
+
+        let constellation = &mut *(ctx);
+
+        let path = CStr::from_ptr(path).to_string_lossy().to_string();
+        let file = &*file;
+
+        ConstellationAdapter::write_guard(constellation)
+            .update_file(&path, file.clone())
+            .into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_update_directory(
+        ctx: *mut ConstellationAdapter,
+        path: *const c_char,
+        directory: *const Directory,
+    ) -> FFIResult_Null {
+        if ctx.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "ctx".into(),
+            });
+        }
+
+        if path.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "path".into(),
+            });
+        }
+
+        if directory.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "directory".into(),
+            });
+        }
+
+        let constellation = &mut *(ctx);
+
+        let path = CStr::from_ptr(path).to_string_lossy().to_string();
+        let directory = &*directory;
+
+        ConstellationAdapter::write_guard(constellation)
+            .update_directory(&path, directory.clone())
+            .into()
+    }
+
     #[allow(clippy::await_holding_lock)]
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -721,7 +829,7 @@ pub mod ffi {
         rt.block_on(async move {
             constellation
                 .write_guard()
-                .put_buffer(&remote.to_string_lossy().to_string(), &slice.to_vec())
+                .put_buffer(&remote.to_string_lossy(), &slice.to_vec())
                 .await
         })
         .into()
