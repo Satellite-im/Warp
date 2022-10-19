@@ -219,6 +219,22 @@ impl Item {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn favorite(&self) -> bool {
+        match &self.0 {
+            ItemInner::File(file) => file.favorite(),
+            ItemInner::Directory(directory) => directory.favorite(),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_favorite(&mut self, fav: bool) {
+        match self.as_mut() {
+            ItemInner::File(file) => file.set_favorite(fav),
+            ItemInner::Directory(directory) => directory.set_favorite(fav),
+        }
+    }
+
     /// Rename the name of `Item`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn rename(&mut self, name: &str) -> Result<(), Error> {
@@ -444,6 +460,24 @@ pub mod ffi {
         }
         let item = &*(item);
         item.size()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_favorite(item: *const Item) -> bool {
+        if item.is_null() {
+            return false;
+        }
+        Item::favorite(&*item)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_set_favorite(item: *mut Item, fav: bool) {
+        if item.is_null() {
+            return;
+        }
+        Item::set_favorite(&mut *item, fav)
     }
 
     #[allow(clippy::missing_safety_doc)]

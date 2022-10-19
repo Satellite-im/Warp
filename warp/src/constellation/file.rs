@@ -48,6 +48,9 @@ pub struct File {
     ///       one plans to add a generic thumbnail for the file
     thumbnail: String,
 
+    /// Favorite File
+    favorite: bool,
+
     /// Description of the `File`. TODO: Make this optional
     description: String,
 
@@ -77,6 +80,7 @@ impl Default for File {
             description: String::new(),
             size: 0,
             thumbnail: String::new(),
+            favorite: false,
             creation: timestamp,
             modified: timestamp,
             file_type: FileType::Generic,
@@ -150,9 +154,20 @@ impl File {
     }
 
     /// Get the thumbnail from the file
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn thumbnail(&self) -> String{
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn thumbnail(&self) -> String {
         self.thumbnail.clone()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_favorite(&mut self, fav: bool) {
+        self.favorite = fav;
+        self.modified = Utc::now()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn favorite(&self) -> bool {
+        self.favorite
     }
 
     /// Set the reference of the file

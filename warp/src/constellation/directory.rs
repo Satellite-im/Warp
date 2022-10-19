@@ -54,6 +54,9 @@ pub struct Directory {
     /// Thumbnail of the `Directory`
     thumbnail: String,
 
+    /// Favorite Directory
+    favorite: bool,
+
     /// Timestamp of the creation of the directory
     creation: DateTime<Utc>,
 
@@ -75,6 +78,7 @@ impl Default for Directory {
             name: String::from("un-named directory"),
             description: String::new(),
             thumbnail: String::new(),
+            favorite: false,
             creation: timestamp,
             modified: timestamp,
             directory_type: DirectoryType::Default,
@@ -588,6 +592,17 @@ impl Directory {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn thumbnail(&self) -> String {
         self.thumbnail.to_string()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_favorite(&mut self, fav: bool) {
+        self.favorite = fav;
+        self.modified = Utc::now()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn favorite(&self) -> bool {
+        self.favorite
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
