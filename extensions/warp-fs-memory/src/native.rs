@@ -1,12 +1,13 @@
 use chrono::{DateTime, Utc};
-use warp::sata::Sata;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::pocket_dimension::DimensionData;
+use warp::sata::Sata;
 
+use crate::item::Item;
 use crate::{item, MemorySystem, Result};
 use warp::constellation::directory::Directory;
 use warp::constellation::Constellation;
@@ -44,7 +45,7 @@ impl Constellation for MemorySystem {
         self.internal
             .0
             .insert(internal_file.clone())
-            .map_err(|_| Error::Other)?;
+            .map_err(anyhow::Error::from)?;
 
         let mut file = warp::constellation::file::File::new(name);
         file.set_size(bytes as i64);
@@ -52,7 +53,11 @@ impl Constellation for MemorySystem {
 
         self.current_directory_mut()?.add_item(file.clone())?;
         if let Ok(mut cache) = self.get_cache_mut() {
-            let data = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from(PathBuf::from(path)))?;
+            let data = Sata::default().encode(
+                warp::sata::libipld::IpldCodec::DagCbor,
+                warp::sata::Kind::Reference,
+                DimensionData::from(PathBuf::from(path)),
+            )?;
             cache.add_data(DataType::from(Module::FileSystem), &data)?;
         }
 
@@ -84,7 +89,7 @@ impl Constellation for MemorySystem {
             .internal
             .as_ref()
             .get_item_from_path(String::from(name))
-            .map_err(|_| Error::Other)?;
+            .map_err(anyhow::Error::from)?;
 
         let mut file = std::fs::File::create(path)?;
 
@@ -111,7 +116,11 @@ impl Constellation for MemorySystem {
 
         self.current_directory_mut()?.add_item(file.clone())?;
         if let Ok(mut cache) = self.get_cache_mut() {
-            let data = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from_buffer(name, buf))?;
+            let data = Sata::default().encode(
+                warp::sata::libipld::IpldCodec::DagCbor,
+                warp::sata::Kind::Reference,
+                DimensionData::from_buffer(name, buf),
+            )?;
             cache.add_data(DataType::from(Module::FileSystem), &data)?;
         }
 
@@ -174,6 +183,25 @@ impl Constellation for MemorySystem {
         Ok(())
     }
 
+    async fn rename(&mut self, path: &str, name: &str) -> Result<()> {
+        if !self.current_directory().has_item(path) {
+            return Err(Error::Other);
+        }
+
+        if !self.internal.as_ref().exist(path) {
+            return Err(Error::ObjectNotFound);
+        }
+
+        self.internal
+            .as_mut()
+            .to_directory_mut()?
+            .get_item_mut_from_path(path)?
+            .rename(name);
+
+        self.current_directory_mut()?.get_item_mut_by_path(path)?.rename(name)?;
+        Ok(())
+    }
+
     async fn move_item(&mut self, _: &str, _: &str) -> Result<()> {
         Err(Error::Unimplemented)
     }
@@ -193,10 +221,7 @@ impl Constellation for MemorySystem {
 
         let directory = Directory::new(path);
 
-        if let Err(err) = self.current_directory_mut()?.add_item(directory) {
-            //TODO
-            return Err(err);
-        }
+        self.current_directory_mut()?.add_item(directory)?;
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), ())?;

@@ -22,6 +22,8 @@ pub trait Item: DynClone + Debug + Sync + Send {
 
     fn size(&self) -> usize;
 
+    fn rename(&mut self, name: &str);
+
     fn to_directory(&self) -> crate::Result<&Directory>;
 
     fn hash(&self) -> Vec<u8> {

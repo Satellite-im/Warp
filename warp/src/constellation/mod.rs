@@ -121,11 +121,7 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
     }
 
     /// Used to update an [`Directory`] within the current [`Directory`]
-    fn update_directory(
-        &mut self,
-        path: &str,
-        directory: Directory,
-    ) -> Result<(), Error> {
+    fn update_directory(&mut self, path: &str, directory: Directory) -> Result<(), Error> {
         self.update_item(path, directory.into())
     }
 
@@ -147,6 +143,11 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
 
     /// Used to download data from the filesystem into a buffer
     async fn get_buffer(&self, _: &str) -> Result<Vec<u8>, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Used to rename a file or directory in the filesystem
+    async fn rename(&mut self, _: &str, _: &str) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
@@ -966,6 +967,34 @@ pub mod ffi {
         let dst = CStr::from_ptr(dst).to_string_lossy().to_string();
         let rt = runtime_handle();
         rt.block_on(async move { constellation.write_guard().move_item(&src, &dst).await })
+            .into()
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_rename(
+        ctx: *mut ConstellationAdapter,
+        path: *const c_char,
+        name: *const c_char,
+    ) -> FFIResult_Null {
+        if ctx.is_null() {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        if path.is_null() {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Path cannot be null")));
+        }
+
+        if name.is_null() {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Name cannot be null")));
+        }
+
+        let constellation = &mut *(ctx);
+        let path = CStr::from_ptr(path).to_string_lossy().to_string();
+        let name = CStr::from_ptr(name).to_string_lossy().to_string();
+        let rt = runtime_handle();
+        rt.block_on(constellation.write_guard().rename(&path, &name))
             .into()
     }
 
