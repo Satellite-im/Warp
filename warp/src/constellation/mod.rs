@@ -104,6 +104,7 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
         }
     }
 
+    /// Used to update an [`Item`] within the current [`Directory`]
     fn update_item(&mut self, path: &str, item: Item) -> Result<(), Error> {
         let directory = self.current_directory_mut()?;
         let inner_item = directory.get_item_mut_by_path(path)?;
@@ -114,11 +115,17 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
         Ok(())
     }
 
+    /// Used to update an [`File`] within the current [`Directory`]
     fn update_file(&mut self, path: &str, file: file::File) -> Result<(), Error> {
         self.update_item(path, file.into())
     }
 
-    fn update_directory(&mut self, path: &str, directory: directory::Directory) -> Result<(), Error> {
+    /// Used to update an [`Directory`] within the current [`Directory`]
+    fn update_directory(
+        &mut self,
+        path: &str,
+        directory: directory::Directory,
+    ) -> Result<(), Error> {
         self.update_item(path, directory.into())
     }
 
@@ -193,6 +200,7 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
     }
 }
 
+//TODO: This would require a refactor to remove returned references
 // #[async_trait::async_trait]
 // impl<T: ?Sized> Constellation for Arc<RwLock<Box<T>>>
 // where
