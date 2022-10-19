@@ -34,13 +34,13 @@ impl AsMut<ItemInner> for Item {
 
 /// The type that `Item` represents
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 #[repr(C)]
 pub enum ItemType {
-    File,
-    Directory,
+    FileItem,
+    DirectoryItem,
     /// Would be invalid or undetermined
-    Invalid,
+    InvalidItem,
 }
 
 /// Used to convert `File` to `Item`
@@ -251,8 +251,8 @@ impl Item {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn item_type(&self) -> ItemType {
         match self.0 {
-            ItemInner::Directory(_) => ItemType::Directory,
-            ItemInner::File(_) => ItemType::File,
+            ItemInner::Directory(_) => ItemType::DirectoryItem,
+            ItemInner::File(_) => ItemType::FileItem,
         }
     }
 
@@ -431,7 +431,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn item_type(item: *const Item) -> ItemType {
         if item.is_null() {
-            return ItemType::Invalid;
+            return ItemType::InvalidItem;
         }
         Item::item_type(&*item)
     }
