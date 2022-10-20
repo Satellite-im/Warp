@@ -57,8 +57,7 @@ async fn create_account<P: AsRef<Path>>(
     let tesseract = match path.as_ref() {
         Some(path) => {
             let path = path.as_ref();
-            let mut tesseract =
-                Tesseract::from_file(path.join("tesseract_store")).unwrap_or_default();
+            let tesseract = Tesseract::from_file(path.join("tesseract_store")).unwrap_or_default();
             tesseract.set_file(path.join("tesseract_store"));
             tesseract.set_autosave();
             tesseract

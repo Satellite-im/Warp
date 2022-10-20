@@ -6,7 +6,11 @@ use ipfs::IpfsTypes;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp::{
-    crypto::{did_key::{CoreSign, Generate, ECDH}, hash::sha256_hash, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
+    crypto::{
+        did_key::{CoreSign, Generate, ECDH},
+        hash::sha256_hash,
+        DIDKey, Ed25519KeyPair, KeyMaterial, DID,
+    },
     error::Error,
     logging::tracing::log::{error, trace},
     raygun::{Message, PinState, ReactionState},
@@ -16,6 +20,7 @@ pub const DIRECT_BROADCAST: &str = "direct/broadcast";
 #[allow(dead_code)]
 pub const GROUP_BROADCAST: &str = "group/broadcast";
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConversationEvents {
     NewConversation(DID),

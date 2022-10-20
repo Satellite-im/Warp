@@ -47,7 +47,7 @@ impl Constellation for MemorySystem {
         .map_err(anyhow::Error::from)?;
         self.internal
             .0
-            .insert(internal_file.clone())
+            .insert(internal_file)
             .map_err(anyhow::Error::from)?;
 
         let file = warp::constellation::file::File::new(name);

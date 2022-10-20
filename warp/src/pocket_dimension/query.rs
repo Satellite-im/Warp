@@ -1,4 +1,4 @@
-use libipld::{Ipld, serde::to_ipld};
+use libipld::{serde::to_ipld, Ipld};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -79,8 +79,10 @@ impl QueryBuilder {
     where
         I: Serialize,
     {
-        self.r#where
-            .push((key.to_string(), to_ipld(value).map_err(anyhow::Error::from)?));
+        self.r#where.push((
+            key.to_string(),
+            to_ipld(value).map_err(anyhow::Error::from)?,
+        ));
         Ok(self)
     }
 

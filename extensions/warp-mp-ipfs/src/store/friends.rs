@@ -1147,10 +1147,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
             }
             FriendRequestStatus::RequestRemoved => {
-                if let Err(e) = self
-                    .tx
-                    .send(MultiPassEventKind::FriendRequestClosed { from: request.from(), to: request.to() })
-                {
+                if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestClosed {
+                    from: request.from(),
+                    to: request.to(),
+                }) {
                     error!("Error broadcasting event: {e}");
                 }
             }

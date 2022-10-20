@@ -1,4 +1,4 @@
-use std::{time::Duration};
+use std::time::Duration;
 
 use ipfs::{IpfsTypes, Multiaddr, PeerId, Protocol};
 use serde::{Deserialize, Serialize};

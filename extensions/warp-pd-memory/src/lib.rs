@@ -1,13 +1,14 @@
 use std::collections::HashMap;
-use warp::{
-    data::{DataType},
-    module::Module,
-    Extension, SingleHandle, sata::{Sata, State},
-};
-use warp::libipld::Ipld;
 use warp::error::Error;
+use warp::libipld::Ipld;
 use warp::pocket_dimension::query::{ComparatorFilter, QueryBuilder};
 use warp::pocket_dimension::PocketDimension;
+use warp::{
+    data::DataType,
+    module::Module,
+    sata::{Sata, State},
+    Extension, SingleHandle,
+};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -66,11 +67,7 @@ impl PocketDimension for MemoryClient {
             .and_then(|data| execute(data, query).map(|_| ()))
     }
 
-    fn get_data(
-        &self,
-        dimension: DataType,
-        query: Option<&QueryBuilder>,
-    ) -> Result<Vec<Sata>> {
+    fn get_data(&self, dimension: DataType, query: Option<&QueryBuilder>) -> Result<Vec<Sata>> {
         let data = self
             .client
             .get(&dimension)
@@ -110,27 +107,26 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
     for data in data.iter() {
         let object = match data.state() {
             State::Encoded => data.decode::<Ipld>()?,
-            State::Encrypted | _ => continue,
+            _ => continue,
         };
 
         match object {
-            Ipld::Map(_) => {},
-            _ => continue
+            Ipld::Map(_) => {}
+            _ => continue,
         };
 
         for (key, val) in query.get_where().iter() {
-            if let Some(result) = object.get(key.as_str()).ok() {
+            if let Ok(result) = object.get(key.as_str()) {
                 if *val == *result {
                     list.push(data.clone());
                 }
             }
         }
-        
 
         for comp in query.get_comparator().iter() {
             match comp {
                 ComparatorFilter::Eq(key, val) => {
-                    if let Some(result) = object.get(key.as_str()).ok() {
+                    if let Ok(result) = object.get(key.as_str()) {
                         if *result == *val {
                             if list.contains(data) {
                                 continue;
@@ -140,7 +136,7 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
                     }
                 }
                 ComparatorFilter::Ne(key, val) => {
-                    if let Some(result) = object.get(key.as_str()).ok() {
+                    if let Ok(result) = object.get(key.as_str()) {
                         if *result != *val {
                             if list.contains(data) {
                                 continue;
@@ -150,11 +146,11 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
                     }
                 }
                 ComparatorFilter::Gte(key, val) => {
-                    if let Some(result) = object.get(key.as_str()).ok() {
+                    if let Ok(result) = object.get(key.as_str()) {
                         match (result, val) {
-                            (Ipld::Integer(res), Ipld::Integer(v)) if *res >= *v => {},
-                            (Ipld::Float(res), Ipld::Float(v)) if *res >= *v => {},
-                            _ => continue
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res >= *v => {}
+                            (Ipld::Float(res), Ipld::Float(v)) if *res >= *v => {}
+                            _ => continue,
                         };
                         if list.contains(data) {
                             continue;
@@ -163,11 +159,11 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
                     }
                 }
                 ComparatorFilter::Gt(key, val) => {
-                    if let Some(result) = object.get(key.as_str()).ok(){
+                    if let Ok(result) = object.get(key.as_str()) {
                         match (result, val) {
-                            (Ipld::Integer(res), Ipld::Integer(v)) if *res > *v => {},
-                            (Ipld::Float(res), Ipld::Float(v)) if *res > *v => {},
-                            _ => continue
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res > *v => {}
+                            (Ipld::Float(res), Ipld::Float(v)) if *res > *v => {}
+                            _ => continue,
                         };
                         if list.contains(data) {
                             continue;
@@ -176,11 +172,11 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
                     }
                 }
                 ComparatorFilter::Lte(key, val) => {
-                    if let Some(result) = object.get(key.as_str()).ok() {
+                    if let Ok(result) = object.get(key.as_str()) {
                         match (result, val) {
-                            (Ipld::Integer(res), Ipld::Integer(v)) if *res <= *v => {},
-                            (Ipld::Float(res), Ipld::Float(v)) if *res <= *v => {},
-                            _ => continue
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res <= *v => {}
+                            (Ipld::Float(res), Ipld::Float(v)) if *res <= *v => {}
+                            _ => continue,
                         };
                         if list.contains(data) {
                             continue;
@@ -189,11 +185,11 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
                     }
                 }
                 ComparatorFilter::Lt(key, val) => {
-                    if let Some(result) = object.get(key.as_str()).ok() {
+                    if let Ok(result) = object.get(key.as_str()) {
                         match (result, val) {
-                            (Ipld::Integer(res), Ipld::Integer(v)) if *res < *v => {},
-                            (Ipld::Float(res), Ipld::Float(v)) if *res < *v => {},
-                            _ => continue
+                            (Ipld::Integer(res), Ipld::Integer(v)) if *res < *v => {}
+                            (Ipld::Float(res), Ipld::Float(v)) if *res < *v => {}
+                            _ => continue,
                         };
                         if list.contains(data) {
                             continue;
@@ -230,9 +226,9 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocketdimension_memory_new() -> *mut PocketDimensionAdapter {
-        let obj = Box::new(PocketDimensionAdapter::new(Arc::new(RwLock::new(Box::new(
-            MemoryClient::new(),
-        )))));
+        let obj = Box::new(PocketDimensionAdapter::new(Arc::new(RwLock::new(
+            Box::new(MemoryClient::new()),
+        ))));
         Box::into_raw(obj) as *mut PocketDimensionAdapter
     }
 }

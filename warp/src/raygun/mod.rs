@@ -621,6 +621,7 @@ where
     }
 }
 
+#[allow(clippy::await_holding_lock)]
 #[async_trait::async_trait]
 impl<T: ?Sized> RayGunStream for Arc<RwLock<Box<T>>>
 where
@@ -780,7 +781,7 @@ pub mod ffi {
 
         let option = match option.is_null() {
             true => MessageOptions::default(),
-            false => (&*option).clone(),
+            false => (*option).clone(),
         };
 
         let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {

@@ -2,7 +2,7 @@ use crate::{error::Error, tesseract::Tesseract};
 use bip39::{Language, Mnemonic, MnemonicType, Seed};
 use derive_more::Display;
 use did_key::KeyMaterial;
-use ed25519_dalek::{SecretKey, Keypair, PublicKey, KEYPAIR_LENGTH, SECRET_KEY_LENGTH};
+use ed25519_dalek::{Keypair, PublicKey, SecretKey, KEYPAIR_LENGTH, SECRET_KEY_LENGTH};
 use hmac::{Hmac, Mac};
 use sha2::Sha512;
 use zeroize::Zeroizing;
@@ -36,7 +36,10 @@ pub fn generate_mnemonic_phrase(phrase: PhraseType) -> Mnemonic {
     Mnemonic::new(m_type, Language::English)
 }
 
-pub fn generate_keypair(phrase: PhraseType, passphrase: Option<&str>) -> Result<(String, DID), Error> {
+pub fn generate_keypair(
+    phrase: PhraseType,
+    passphrase: Option<&str>,
+) -> Result<(String, DID), Error> {
     let mnemonic = generate_mnemonic_phrase(phrase);
     let did = did_from_mnemonic(mnemonic.phrase(), passphrase)?;
     Ok((mnemonic.into_phrase(), did))
@@ -52,7 +55,11 @@ pub fn did_from_mnemonic(mnemonic: &str, passphrase: Option<&str>) -> Result<DID
     Ok(secret.into())
 }
 
-pub fn mnemonic_into_tesseract(tesseract: &mut Tesseract, mnemonic: &str, passphrase: Option<&str>) -> Result<(), Error> {
+pub fn mnemonic_into_tesseract(
+    tesseract: &mut Tesseract,
+    mnemonic: &str,
+    passphrase: Option<&str>,
+) -> Result<(), Error> {
     if !tesseract.is_unlock() {
         return Err(Error::TesseractLocked);
     }
@@ -62,7 +69,7 @@ pub fn mnemonic_into_tesseract(tesseract: &mut Tesseract, mnemonic: &str, passph
     }
 
     let did = did_from_mnemonic(mnemonic, passphrase)?;
-    
+
     let bytes = Zeroizing::new(did.as_ref().private_key_bytes());
     let secret_key = SecretKey::from_bytes(&bytes)?;
     let public_key: PublicKey = (&secret_key).into();
@@ -87,14 +94,17 @@ pub mod ffi {
         os::raw::c_char,
     };
 
-    use crate::{error::Error, ffi::{FFIResult, FFIResult_Null}, tesseract::Tesseract};
+    use crate::{
+        error::Error,
+        ffi::{FFIResult, FFIResult_Null},
+        tesseract::Tesseract,
+    };
 
-    use super::{DID, PhraseType};
+    use super::{PhraseType, DID};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn generate_mnemonic_phrase(phrase_type: PhraseType) -> *mut c_char {
-
         let mnemonic = super::generate_mnemonic_phrase(phrase_type);
         match CString::new(mnemonic.into_phrase()) {
             Ok(cstr) => cstr.into_raw(),
@@ -115,7 +125,10 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn mnemonic_into_tesseract(tesseract: *mut Tesseract, phrase: *const c_char) -> FFIResult_Null {
+    pub unsafe extern "C" fn mnemonic_into_tesseract(
+        tesseract: *mut Tesseract,
+        phrase: *const c_char,
+    ) -> FFIResult_Null {
         if tesseract.is_null() {
             return FFIResult_Null::err(Error::from(anyhow::anyhow!("Tesseract cannot be null")));
         }
@@ -126,16 +139,16 @@ pub mod ffi {
 
         let phrase = CStr::from_ptr(phrase).to_string_lossy().to_string();
 
-        super::mnemonic_into_tesseract(&mut *tesseract,&phrase, None).into()
+        super::mnemonic_into_tesseract(&mut *tesseract, &phrase, None).into()
     }
 }
-
 
 #[cfg(test)]
 mod test {
     use super::did_from_mnemonic;
 
-    const PHRASE: &str = "morning caution dose lab six actress pond humble pause enact virtual train";
+    const PHRASE: &str =
+        "morning caution dose lab six actress pond humble pause enact virtual train";
 
     #[test]
     fn generate_did_from_phrase() -> anyhow::Result<()> {

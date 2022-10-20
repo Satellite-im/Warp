@@ -25,7 +25,6 @@ fn username(ident: &Identity) -> String {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-
     let mut rng = rand::thread_rng();
 
     let mut account_a = account(None).await?;

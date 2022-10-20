@@ -95,7 +95,7 @@ impl StorjClient {
     pub async fn get_or_create_bucket<S: AsRef<str>>(&self, bucket: S) -> anyhow::Result<Bucket> {
         match self.bucket(&bucket, false).await {
             Ok(bucket) => Ok(bucket),
-            Err(_) => self.bucket(&bucket, true).await
+            Err(_) => self.bucket(&bucket, true).await,
         }
     }
 }

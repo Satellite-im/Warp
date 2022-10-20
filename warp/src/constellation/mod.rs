@@ -43,7 +43,9 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
             return Err(Error::Any(anyhow!("Path has not change")));
         }
 
-        let item = self.current_directory()?.get_item(&path.to_string_lossy())?;
+        let item = self
+            .current_directory()?
+            .get_item(&path.to_string_lossy())?;
 
         if !item.is_directory() {
             return Err(Error::DirectoryNotFound);
@@ -622,7 +624,9 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
     ) -> FFIResult<Directory> {
         if ctx.is_null() {
-            return FFIResult::err(Error::NullPointerContext { pointer: "ctx".into() })
+            return FFIResult::err(Error::NullPointerContext {
+                pointer: "ctx".into(),
+            });
         }
         let constellation = &*(ctx);
         constellation.read_guard().current_directory().into()
