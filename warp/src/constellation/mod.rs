@@ -37,36 +37,33 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
     fn modified(&self) -> DateTime<Utc>;
 
     /// Get root directory
-    fn root_directory(&self) -> &Directory;
-
-    /// Get a mutable root directory
-    fn root_directory_mut(&mut self) -> &mut Directory;
+    fn root_directory(&self) -> Directory;
 
     /// Get current directory
-    fn current_directory(&self) -> &Directory {
-        let current_pathbuf = self.get_path().to_string_lossy().to_string();
-        self.root_directory()
-            .get_item_by_path(&current_pathbuf)
-            .and_then(Item::get_directory)
-            .unwrap_or_else(|_| self.root_directory())
-    }
+    // fn current_directory(&self) -> Directory {
+    //     let current_pathbuf = self.get_path().to_string_lossy().to_string();
+    //     self.root_directory()
+    //         .get_item_by_path(&current_pathbuf)
+    //         .and_then(|item| item.get_directory())
+    //         .unwrap_or_else(|_| self.root_directory())
+    // }
 
     /// Select a directory within the filesystem
     fn select(&mut self, path: &str) -> Result<(), Error> {
         let path = Path::new(path).to_path_buf();
         let current_pathbuf = self.get_path();
 
-        if current_pathbuf == &path {
+        if current_pathbuf == path {
             return Err(Error::Any(anyhow!("Path has not change")));
         }
 
-        let item = self.current_directory().get_item(&path.to_string_lossy())?;
+        let item = self.current_directory()?.get_item(&path.to_string_lossy())?;
 
         if !item.is_directory() {
             return Err(Error::DirectoryNotFound);
         }
 
-        let new_path = Path::new(current_pathbuf).join(path);
+        let new_path = Path::new(&current_pathbuf).join(path);
         self.set_path(new_path);
         Ok(())
     }
@@ -75,7 +72,7 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
     fn set_path(&mut self, _: PathBuf);
 
     /// Get path of current directory
-    fn get_path(&self) -> &PathBuf;
+    fn get_path(&self) -> PathBuf;
 
     /// Go back to the previous directory
     fn go_back(&mut self) -> Result<(), Error> {
@@ -89,25 +86,25 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
     fn get_path_mut(&mut self) -> &mut PathBuf;
 
     /// Get the current directory that is mutable.
-    fn current_directory_mut(&mut self) -> Result<&mut Directory, Error> {
-        self.open_directory(&self.get_path().clone().to_string_lossy())
+    fn current_directory(&self) -> Result<Directory, Error> {
+        self.open_directory(&self.get_path().to_string_lossy())
     }
 
     /// Returns a mutable directory from the filesystem
-    fn open_directory(&mut self, path: &str) -> Result<&mut Directory, Error> {
+    fn open_directory(&self, path: &str) -> Result<Directory, Error> {
         match path.trim().is_empty() {
-            true => Ok(self.root_directory_mut()),
+            true => Ok(self.root_directory()),
             false => self
-                .root_directory_mut()
-                .get_item_mut_by_path(path)
-                .and_then(Item::get_directory_mut),
+                .root_directory()
+                .get_item_by_path(path)
+                .and_then(|item| item.get_directory()),
         }
     }
 
     /// Used to update an [`Item`] within the current [`Directory`]
     fn update_item(&mut self, path: &str, item: Item) -> Result<(), Error> {
-        let directory = self.current_directory_mut()?;
-        let inner_item = directory.get_item_mut_by_path(path)?;
+        let directory = self.current_directory()?;
+        let inner_item = &mut directory.get_item_by_path(path)?;
         if inner_item.id() != item.id() && inner_item.item_type() != item.item_type() {
             return Err(Error::ItemInvalid);
         }
@@ -175,13 +172,13 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
     fn export(&self, r#type: ConstellationDataType) -> Result<String, Error> {
         match r#type {
             ConstellationDataType::Json => {
-                serde_json::to_string(self.root_directory()).map_err(Error::from)
+                serde_json::to_string(&self.root_directory()).map_err(Error::from)
             }
             ConstellationDataType::Yaml => {
-                serde_yaml::to_string(self.root_directory()).map_err(Error::from)
+                serde_yaml::to_string(&self.root_directory()).map_err(Error::from)
             }
             ConstellationDataType::Toml => {
-                toml::to_string(self.root_directory()).map_err(Error::from)
+                toml::to_string(&self.root_directory()).map_err(Error::from)
             }
         }
     }
@@ -195,7 +192,7 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
             ConstellationDataType::Toml => toml::from_str(data.as_str())?,
         };
         //TODO: create a function to override directory items.
-        *self.root_directory_mut().get_items_mut() = directory.get_items().clone();
+        self.root_directory().set_items(directory.get_items());
 
         Ok(())
     }
@@ -614,8 +611,8 @@ pub mod ffi {
         let cname = CStr::from_ptr(name).to_string_lossy().to_string();
 
         let constellation = &mut *(ctx);
-        match constellation.write_guard().open_directory(&cname) {
-            Ok(directory) => FFIResult::ok(directory.clone()),
+        match constellation.read_guard().open_directory(&cname) {
+            Ok(directory) => FFIResult::ok(directory),
             Err(e) => FFIResult::err(e),
         }
     }
@@ -629,43 +626,40 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
         let constellation = &*(ctx);
-        let constellation = constellation.read_guard();
-        let directory = constellation.root_directory();
-        Box::into_raw(Box::new(directory.clone())) as *mut Directory
+        let directory = constellation.read_guard().root_directory();
+        Box::into_raw(Box::new(directory)) as *mut Directory
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_current_directory(
-        ctx: *const ConstellationAdapter,
-    ) -> *mut Directory {
+        ctx: *mut ConstellationAdapter,
+    ) -> FFIResult<Directory> {
         if ctx.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::NullPointerContext { pointer: "ctx".into() })
         }
         let constellation = &*(ctx);
-        let constellation = constellation.read_guard();
-        let current_directory = constellation.current_directory();
-        Box::into_raw(Box::new(current_directory.clone())) as *mut Directory
+        constellation.read_guard().current_directory().into()
     }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn constellation_current_directory_mut(
-        ctx: *mut ConstellationAdapter,
-    ) -> *mut Directory {
-        if ctx.is_null() {
-            return std::ptr::null_mut();
-        }
+    // #[allow(clippy::missing_safety_doc)]
+    // #[no_mangle]
+    // pub unsafe extern "C" fn constellation_current_directory_mut(
+    //     ctx: *mut ConstellationAdapter,
+    // ) -> *mut Directory {
+    //     if ctx.is_null() {
+    //         return std::ptr::null_mut();
+    //     }
 
-        let constellation = &mut *(ctx);
-        match constellation.write_guard().current_directory_mut() {
-            Ok(directory) => {
-                let directory = std::mem::ManuallyDrop::new(directory);
-                Box::into_raw(Box::new(directory)) as *mut Directory
-            }
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
+    //     let constellation = &mut *(ctx);
+    //     match constellation.write_guard().current_directory_mut() {
+    //         Ok(directory) => {
+    //             let directory = std::mem::ManuallyDrop::new(directory);
+    //             Box::into_raw(Box::new(directory)) as *mut Directory
+    //         }
+    //         Err(_) => std::ptr::null_mut(),
+    //     }
+    // }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]

@@ -1,6 +1,9 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use super::file::File;
 use super::item::Item;
 use crate::error::Error;
+use crate::sync::{Arc, RwLock};
 use chrono::{DateTime, Utc};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -11,78 +14,66 @@ use warp_derive::FFIFree;
 use wasm_bindgen::prelude::*;
 
 /// `DirectoryType` handles the supported types for the directory.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug, Display)]
+#[derive(Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Debug, Display)]
 #[serde(rename_all = "lowercase")]
 pub enum DirectoryType {
     #[display(fmt = "default")]
+    #[default]
     Default,
 }
 
-impl Default for DirectoryType {
-    fn default() -> Self {
-        Self::Default
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug, Display)]
-#[serde(rename_all = "lowercase")]
-pub enum DirectoryHookType {
-    #[display(fmt = "create")]
-    Create,
-    #[display(fmt = "delete")]
-    Delete,
-    #[display(fmt = "rename")]
-    Rename,
-    #[display(fmt = "move")]
-    Move,
-}
-
 /// `Directory` handles folders and its contents.
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(Clone, Serialize, Deserialize, Debug, Eq, warp_derive::FFIVec, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Directory {
     /// ID of the `Directory`
-    id: Uuid,
+    id: Arc<Uuid>,
 
     /// Name of the `Directory`
-    name: String,
+    name: Arc<RwLock<String>>,
 
     /// Description of the `Directory`
     /// TODO: Make this optional
-    description: String,
+    description: Arc<RwLock<String>>,
 
     /// Thumbnail of the `Directory`
-    thumbnail: String,
+    thumbnail: Arc<RwLock<String>>,
 
     /// Favorite Directory
-    favorite: bool,
+    favorite: Arc<AtomicBool>,
 
     /// Timestamp of the creation of the directory
-    creation: DateTime<Utc>,
+    creation: Arc<RwLock<DateTime<Utc>>>,
 
     /// Timestamp of the `Directory` when it is modified
-    modified: DateTime<Utc>,
+    modified: Arc<RwLock<DateTime<Utc>>>,
 
     /// Type of `Directory`
-    directory_type: DirectoryType,
+    directory_type: Arc<RwLock<DirectoryType>>,
 
     /// List of `Item`, which would represents either `File` or `Directory`
-    items: Vec<Item>,
+    items: Arc<RwLock<Vec<Item>>>,
+}
+
+impl PartialEq for Directory {
+    fn eq(&self, other: &Self) -> bool {
+        self.id() == other.id()
+    }
 }
 
 impl Default for Directory {
     fn default() -> Self {
         let timestamp = Utc::now();
         Self {
-            id: Uuid::new_v4(),
-            name: String::from("un-named directory"),
-            description: String::new(),
-            thumbnail: String::new(),
-            favorite: false,
-            creation: timestamp,
-            modified: timestamp,
-            directory_type: DirectoryType::Default,
-            items: Vec::new(),
+            id: Arc::new(Uuid::new_v4()),
+            name: Arc::new(RwLock::new(String::from("un-named directory"))),
+            description: Default::default(),
+            thumbnail: Default::default(),
+            favorite: Default::default(),
+            creation: Arc::new(RwLock::new(timestamp)),
+            modified: Arc::new(RwLock::new(timestamp)),
+            directory_type: Default::default(),
+            items: Default::default(),
         }
     }
 }
@@ -124,7 +115,7 @@ impl Directory {
         }
 
         let name = path.remove(0);
-        directory.name = name.to_string();
+        *directory.name.write() = name.to_string();
         if !path.is_empty() {
             let sub = Self::new(path.join("/").as_str());
             if directory.add_item(sub).is_ok() {};
@@ -160,7 +151,7 @@ impl Directory {
         if self.has_item(&file.name()) {
             return Err(Error::DuplicateName);
         }
-        self.items.push(Item::new_file(file));
+        self.items.write().push(Item::new_file(file));
         self.set_modified();
         Ok(())
     }
@@ -176,7 +167,7 @@ impl Directory {
             return Err(Error::DirParadox);
         }
 
-        self.items.push(Item::new_directory(directory));
+        self.items.write().push(Item::new_directory(directory));
         self.set_modified();
         Ok(())
     }
@@ -201,6 +192,7 @@ impl Directory {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn get_item_index(&self, item_name: &str) -> Result<usize, Error> {
         self.items
+            .read()
             .iter()
             .position(|item| item.name() == item_name)
             .ok_or(Error::ArrayPositionNotFound)
@@ -226,7 +218,7 @@ impl Directory {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn rename_item(&mut self, current_name: &str, new_name: &str) -> Result<(), Error> {
-        self.get_item_mut_by_path(current_name)?.rename(new_name)
+        self.get_item_by_path(current_name)?.rename(new_name)
     }
 
     /// Used to remove the child within a `Directory`
@@ -250,8 +242,8 @@ impl Directory {
             return Err(Error::ItemInvalid);
         }
         let index = self.get_item_index(item_name)?;
-        let item = self.items.remove(index);
-        self.modified = Utc::now();
+        let item = self.items.write().remove(index);
+        self.set_modified();
         Ok(item)
     }
 
@@ -288,8 +280,8 @@ impl Directory {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn remove_item_from_path(&mut self, directory: &str, item: &str) -> Result<Item, Error> {
-        self.get_item_mut_by_path(directory)?
-            .get_directory_mut()?
+        self.get_item_by_path(directory)?
+            .get_directory()?
             .remove_item(item)
     }
 
@@ -329,10 +321,10 @@ impl Directory {
 
         // If there is an error, place the item back into the current directory
         match self
-            .get_item_mut_by_path(dst)
-            .and_then(Item::get_directory_mut)
+            .get_item_by_path(dst)
+            .and_then(|item| item.get_directory())
         {
-            Ok(directory) => {
+            Ok(mut directory) => {
                 if let Err(e) = directory.add_item(item.clone()) {
                     self.add_item(item)?;
                     return Err(e);
@@ -349,13 +341,12 @@ impl Directory {
 
 impl Directory {
     /// List all the `Item` within the `Directory`
-    pub fn get_items(&self) -> &Vec<Item> {
-        &self.items
+    pub fn get_items(&self) -> Vec<Item> {
+        self.items.read().clone()
     }
 
-    /// List all mutable `Item` within the `Directory`
-    pub fn get_items_mut(&mut self) -> &mut Vec<Item> {
-        &mut self.items
+    pub fn set_items(&mut self, items: Vec<Item>) {
+        *self.items.write() = items;
     }
 
     /// Add an item to the `Directory`
@@ -374,7 +365,7 @@ impl Directory {
         if self.has_item(&item.name()) {
             return Err(Error::DuplicateName);
         }
-        self.items.push(item);
+        self.items.write().push(item);
         Ok(())
     }
 
@@ -392,44 +383,16 @@ impl Directory {
     ///     let item = root.get_item("Sub Directory").unwrap();
     ///     assert_eq!(item.name(), "Sub Directory");
     /// ```
-    pub fn get_item(&self, item_name: &str) -> Result<&Item, Error> {
+    pub fn get_item(&self, item_name: &str) -> Result<Item, Error> {
         if !self.has_item(item_name) {
             return Err(Error::ItemInvalid);
         }
         let index = self.get_item_index(item_name)?;
-        self.items.get(index).ok_or(Error::ItemInvalid)
-    }
-
-    /// Used to get the mutable child within a `Directory`
-    ///
-    /// # Examples
-    ///
-    /// ```
-    ///     use warp::constellation::{directory::{Directory},file::File};
-    ///
-    ///     let mut root = Directory::new("Test Directory");
-    ///     let sub = Directory::new("Sub Directory");
-    ///     root.add_item(sub).unwrap();
-    ///     assert_eq!(root.has_item("Sub Directory"), true);
-    ///     let child = root.get_item("Sub Directory").unwrap();
-    ///     assert_eq!(child.name(), "Sub Directory");
-    ///     let mut file = File::new("testFile.jpg");
-    ///     root.get_item_mut("Sub Directory").unwrap()
-    ///         .get_directory_mut().unwrap()
-    ///         .add_item(file).unwrap();
-    ///
-    ///     let dir = root.get_item("Sub Directory").unwrap().get_directory().unwrap();
-    ///
-    ///     assert_eq!(dir.has_item("testFile.jpg"), true);
-    ///     assert_eq!(dir.has_item("testFile.png"), false);
-    ///
-    /// ```
-    pub fn get_item_mut(&mut self, item_name: &str) -> Result<&mut Item, Error> {
-        if !self.has_item(item_name) {
-            return Err(Error::ItemInvalid);
-        }
-        let index = self.get_item_index(item_name)?;
-        self.items.get_mut(index).ok_or(Error::ItemInvalid)
+        self.items
+            .read()
+            .get(index)
+            .cloned()
+            .ok_or(Error::ItemInvalid)
     }
 
     /// Used to find an item throughout the `Directory` and its children
@@ -450,10 +413,10 @@ impl Directory {
     ///     let item = root.find_item("Sub Directory 2").unwrap();
     ///     assert_eq!(item.name(), "Sub Directory 2");
     /// ```
-    pub fn find_item(&self, item_name: &str) -> Result<&Item, Error> {
-        for item in self.items.iter() {
+    pub fn find_item(&self, item_name: &str) -> Result<Item, Error> {
+        for item in self.items.read().iter() {
             if item.name().eq(item_name) {
-                return Ok(item);
+                return Ok(item.clone());
             }
             if let Ok(directory) = item.get_directory() {
                 match directory.find_item(item_name) {
@@ -471,12 +434,12 @@ impl Directory {
     /// # Examples
     ///
     /// TODO
-    pub fn find_all_items<S: AsRef<str> + Clone>(&self, item_names: Vec<S>) -> Vec<&Item> {
+    pub fn find_all_items<S: AsRef<str> + Clone>(&self, item_names: Vec<S>) -> Vec<Item> {
         let mut list = Vec::new();
-        for item in self.items.iter() {
+        for item in self.items.read().clone().iter() {
             for name in item_names.iter().map(|name| name.as_ref()) {
                 if item.name().contains(name) {
-                    list.push(item);
+                    list.push(item.clone());
                 }
             }
 
@@ -506,7 +469,7 @@ impl Directory {
     ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory 3").is_ok(), true);
     ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory3/Another Dir").is_ok(), false);
     /// ```
-    pub fn get_item_by_path(&self, path: &str) -> Result<&Item, Error> {
+    pub fn get_item_by_path(&self, path: &str) -> Result<Item, Error> {
         let mut path = path
             .split('/')
             .filter(|&s| !s.is_empty())
@@ -527,92 +490,49 @@ impl Directory {
         };
     }
 
-    /// Get a mutable `Item` from a path
-    ///
-    /// # Examples
-    ///
-    /// ```
-    ///     use warp::constellation::{directory::Directory};
-    ///     let mut root = Directory::new("Test Directory");
-    ///     let mut sub0 = Directory::new("Sub Directory 1");
-    ///     let mut sub1 = Directory::new("Sub Directory 2");
-    ///     let sub2 = Directory::new("Sub Directory 3");
-    ///     sub1.add_item(sub2).unwrap();
-    ///     sub0.add_item(sub1).unwrap();
-    ///     root.add_item(sub0).unwrap();
-    ///     
-    ///     root.get_item_mut_by_path("/Sub Directory 1/Sub Directory 2").unwrap()
-    ///         .get_directory_mut().unwrap()
-    ///         .add_item(Directory::new("Another Directory")).unwrap();    
-    ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/").is_ok(), true);
-    ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/Sub Directory 2/").is_ok(), true);
-    ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/Sub Directory 2/Sub Directory 3").is_ok(), true);
-    ///     assert_eq!(root.get_item_by_path("/Sub Directory 1/Sub Directory 2/Another Directory").is_ok(), true);
-    /// ```
-    pub fn get_item_mut_by_path(&mut self, path: &str) -> Result<&mut Item, Error> {
-        let mut path = path
-            .split('/')
-            .filter(|&s| !s.is_empty())
-            .collect::<Vec<_>>();
-        if path.is_empty() {
-            return Err(Error::InvalidPath);
-        }
-        let name = path.remove(0);
-        let item = self.get_item_mut(name)?;
-        return if !path.is_empty() {
-            if item.is_directory() {
-                item.get_directory_mut()?
-                    .get_item_mut_by_path(path.join("/").as_str())
-            } else {
-                Ok(item)
-            }
-        } else {
-            Ok(item)
-        };
-    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Directory {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn name(&self) -> String {
-        self.name.to_owned()
+        self.name.read().to_owned()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_name(&mut self, name: &str) {
-        self.name = name.to_string()
+        *self.name.write() = name.to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_thumbnail(&mut self, desc: &str) {
-        self.thumbnail = desc.to_string()
+        *self.thumbnail.write() = desc.to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn thumbnail(&self) -> String {
-        self.thumbnail.to_string()
+        self.thumbnail.read().to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_favorite(&mut self, fav: bool) {
-        self.favorite = fav;
-        self.modified = Utc::now()
+        self.favorite.store(fav, Ordering::Relaxed);
+        self.set_modified();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn favorite(&self) -> bool {
-        self.favorite
+        self.favorite.load(Ordering::Relaxed)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn description(&self) -> String {
-        self.description.to_owned()
+        self.description.read().to_owned()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_description(&mut self, desc: &str) {
-        self.description = desc.to_string()
+        *self.description.write() = desc.to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
@@ -622,22 +542,22 @@ impl Directory {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_modified(&mut self) {
-        self.modified = Utc::now()
+        *self.modified.write() = Utc::now()
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Directory {
     pub fn id(&self) -> Uuid {
-        self.id
+        *self.id
     }
 
     pub fn creation(&self) -> DateTime<Utc> {
-        self.creation
+        *self.creation.read()
     }
 
     pub fn modified(&self) -> DateTime<Utc> {
-        self.modified
+        *self.modified.read()
     }
 }
 
@@ -873,7 +793,7 @@ pub mod ffi {
         let item = CStr::from_ptr(item).to_string_lossy().to_string();
 
         match directory.get_item(&item) {
-            Ok(item) => FFIResult::ok(item.clone()),
+            Ok(item) => FFIResult::ok(item),
             Err(e) => FFIResult::err(e),
         }
     }

@@ -170,12 +170,8 @@ impl Constellation for IpfsFileSystem {
         self.modified
     }
 
-    fn root_directory(&self) -> &Directory {
-        &self.index
-    }
-
-    fn root_directory_mut(&mut self) -> &mut Directory {
-        &mut self.index
+    fn root_directory(&self) -> Directory {
+        self.index.clone()
     }
 
     fn get_path_mut(&mut self) -> &mut PathBuf {
@@ -259,7 +255,7 @@ impl Constellation for IpfsFileSystem {
 
         file.set_reference(&hash);
 
-        self.current_directory_mut()?.add_item(file.clone())?;
+        self.current_directory()?.add_item(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -312,9 +308,9 @@ impl Constellation for IpfsFileSystem {
         }
 
         let _file = self
-            .current_directory()
+            .current_directory()?
             .get_item_by_path(&name)
-            .and_then(Item::get_file)?;
+            .and_then(|item| item.get_file())?;
 
         let mut fs = tokio::fs::File::create(path).await?;
 
@@ -395,7 +391,7 @@ impl Constellation for IpfsFileSystem {
         file.hash_mut().hash_from_slice(buffer)?;
         file.set_reference(&hash);
 
-        self.current_directory_mut()?.add_item(file.clone())?;
+        self.current_directory()?.add_item(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -444,9 +440,9 @@ impl Constellation for IpfsFileSystem {
         }
 
         let _file = self
-            .current_directory()
+            .current_directory()?
             .get_item(&name[1..])
-            .and_then(Item::get_file)?;
+            .and_then(|item| item.get_file())?;
 
         let client = self.client.as_ref();
         match self.client.option {
@@ -471,7 +467,7 @@ impl Constellation for IpfsFileSystem {
         let name = affix_root(name);
 
         //TODO: Resolve to full directory
-        if !self.current_directory().has_item(&name[1..]) {
+        if !self.current_directory()?.has_item(&name[1..]) {
             return Err(warp::error::Error::IoError(std::io::Error::from(
                 ErrorKind::NotFound,
             )));
@@ -484,7 +480,7 @@ impl Constellation for IpfsFileSystem {
                     .await
                     .map_err(|e| anyhow!(e))?;
 
-                self.current_directory_mut()?.remove_item(&name[1..])?
+                self.current_directory()?.remove_item(&name[1..])?
             }
             _ => return Err(Error::Unimplemented),
         };
@@ -517,7 +513,7 @@ impl Constellation for IpfsFileSystem {
 
         let directory = Directory::new(&path);
 
-        if let Err(err) = self.current_directory_mut()?.add_item(directory.clone()) {
+        if let Err(err) = self.current_directory()?.add_item(directory.clone()) {
             let client = self.client.as_ref();
             if let IpfsOption::Mfs = self.client.option {
                 client.files_rm(&path, true).await.map_err(|e| anyhow!(e))?;
@@ -537,8 +533,8 @@ impl Constellation for IpfsFileSystem {
         self.path = path;
     }
 
-    fn get_path(&self) -> &PathBuf {
-        &self.path
+    fn get_path(&self) -> PathBuf {
+        self.path.clone()
     }
 }
 

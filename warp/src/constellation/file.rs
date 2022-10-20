@@ -1,9 +1,11 @@
 use crate::error::Error;
+use crate::sync::{Arc, RwLock};
 use chrono::{DateTime, Utc};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Seek, SeekFrom};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use uuid::Uuid;
 use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
@@ -20,72 +22,77 @@ use wasm_bindgen::prelude::*;
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum FileType {
     #[display(fmt = "generic")]
+    #[default]
     Generic,
     #[display(fmt = "image/png")]
     ImagePng,
     #[display(fmt = "archive")]
     Archive,
     #[display(fmt = "other")]
-    #[default]
     Other,
 }
 
 /// `File` represents the files uploaded to the FileSystem (`Constellation`).
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(Clone, Deserialize, Serialize, Debug, Eq, warp_derive::FFIVec, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct File {
     /// ID of the `File`
-    id: Uuid,
+    id: Arc<Uuid>,
 
     /// Name of the `File`
-    name: String,
+    name: Arc<RwLock<String>>,
 
     /// Size of the `File`.
-    size: i64,
+    size: Arc<AtomicUsize>,
 
     /// Thumbnail of the `File`
     /// Note: This should be set if the file is an image, unless
     ///       one plans to add a generic thumbnail for the file
-    thumbnail: String,
+    thumbnail: Arc<RwLock<String>>,
 
     /// Favorite File
-    favorite: bool,
+    favorite: Arc<AtomicBool>,
 
     /// Description of the `File`. TODO: Make this optional
-    description: String,
+    description: Arc<RwLock<String>>,
 
     /// Timestamp of the creation of the `File`
-    creation: DateTime<Utc>,
+    creation: Arc<RwLock<DateTime<Utc>>>,
 
     /// Timestamp of the `File` when it is modified
-    modified: DateTime<Utc>,
+    modified: Arc<RwLock<DateTime<Utc>>>,
 
     /// Type of the `File`.
-    file_type: FileType,
+    file_type: Arc<RwLock<FileType>>,
 
     /// Hash of the `File`
-    hash: Hash,
+    hash: Arc<RwLock<Hash>>,
 
     /// External reference pointing to the source of the file
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reference: Option<String>,
+    reference: Arc<RwLock<Option<String>>>,
+}
+
+impl PartialEq for File {
+    fn eq(&self, other: &Self) -> bool {
+        self.id() == other.id()
+    }
 }
 
 impl Default for File {
     fn default() -> Self {
         let timestamp = Utc::now();
         Self {
-            id: Uuid::new_v4(),
-            name: String::from("un-named file"),
-            description: String::new(),
-            size: 0,
-            thumbnail: String::new(),
-            favorite: false,
-            creation: timestamp,
-            modified: timestamp,
-            file_type: FileType::Generic,
-            hash: Hash::default(),
-            reference: None,
+            id: Arc::new(Uuid::new_v4()),
+            name: Arc::new(RwLock::new(String::from("un-named file"))),
+            description: Default::default(),
+            size: Default::default(),
+            thumbnail: Default::default(),
+            favorite: Default::default(),
+            creation: Arc::new(RwLock::new(timestamp)),
+            modified: Arc::new(RwLock::new(timestamp)),
+            file_type: Default::default(),
+            hash: Default::default(),
+            reference: Default::default(),
         }
     }
 }
@@ -105,27 +112,27 @@ impl File {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new(name: &str) -> File {
-        let mut file = File::default();
+        let file = File::default();
         let name = name.trim();
         if !name.is_empty() {
-            file.name = name.to_string();
+            *file.name.write() = name.to_string();
         }
         file
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn name(&self) -> String {
-        self.name.to_owned()
+        self.name.read().to_owned()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_name(&mut self, name: &str) {
-        self.name = name.to_string()
+        *self.name.write() = name.to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn description(&self) -> String {
-        self.description.to_owned()
+        self.description.read().to_owned()
     }
 
     /// Set the description of the file
@@ -142,32 +149,32 @@ impl File {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_description(&mut self, desc: &str) {
-        self.description = desc.to_string();
-        self.modified = Utc::now()
+        *self.description.write() = desc.to_string();
+        *self.modified.write() = Utc::now()
     }
 
     /// Set the thumbnail to the file
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_thumbnail(&mut self, data: &str) {
-        self.thumbnail = data.to_string();
-        self.modified = Utc::now()
+        *self.thumbnail.write() = data.to_string();
+        *self.modified.write() = Utc::now()
     }
 
     /// Get the thumbnail from the file
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn thumbnail(&self) -> String {
-        self.thumbnail.clone()
+        self.thumbnail.read().clone()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_favorite(&mut self, fav: bool) {
-        self.favorite = fav;
-        self.modified = Utc::now()
+        self.favorite.store(fav, Ordering::SeqCst);
+        *self.modified.write() = Utc::now()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn favorite(&self) -> bool {
-        self.favorite
+        self.favorite.load(Ordering::SeqCst)
     }
 
     /// Set the reference of the file
@@ -185,18 +192,18 @@ impl File {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_reference(&mut self, reference: &str) {
-        self.reference = Some(reference.to_string());
-        self.modified = Utc::now();
+        *self.reference.write() = Some(reference.to_string());
+        *self.modified.write() = Utc::now();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn reference(&self) -> Option<String> {
-        self.reference.clone()
+        self.reference.read().clone()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn size(&self) -> i64 {
-        self.size
+        self.size.load(Ordering::Relaxed) as i64
     }
 
     /// Set the size the file
@@ -213,44 +220,44 @@ impl File {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_size(&mut self, size: i64) {
-        self.size = size;
-        self.modified = Utc::now();
+        self.size.store(size as usize, Ordering::Relaxed);
+        *self.modified.write() = Utc::now();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_modified(&mut self) {
-        self.modified = Utc::now()
+        *self.modified.write() = Utc::now()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn hash(&self) -> Hash {
-        self.hash.clone()
+        self.hash.read().clone()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_hash(&mut self, hash: Hash) {
-        self.hash = hash;
+        *self.hash.write() = hash;
     }
 }
 
 impl File {
-    pub fn hash_mut(&mut self) -> &mut Hash {
-        &mut self.hash
+    pub fn hash_mut(&mut self) -> crate::sync::RwLockWriteGuard<Hash> {
+        self.hash.write()
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl File {
     pub fn id(&self) -> Uuid {
-        self.id
+        *self.id
     }
 
     pub fn creation(&self) -> DateTime<Utc> {
-        self.creation
+        *self.creation.read()
     }
 
     pub fn modified(&self) -> DateTime<Utc> {
-        self.modified
+        *self.modified.read()
     }
 }
 

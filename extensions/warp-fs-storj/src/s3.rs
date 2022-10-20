@@ -184,20 +184,16 @@ impl Constellation for StorjFilesystem {
         self.modified
     }
 
-    fn root_directory(&self) -> &Directory {
-        &self.index
-    }
-
-    fn root_directory_mut(&mut self) -> &mut Directory {
-        &mut self.index
+    fn root_directory(&self) -> Directory {
+        self.index.clone()
     }
 
     fn set_path(&mut self, path: PathBuf) {
         self.path = path;
     }
 
-    fn get_path(&self) -> &PathBuf {
-        &self.path
+    fn get_path(&self) -> PathBuf {
+        self.path.clone()
     }
 
     fn get_path_mut(&mut self) -> &mut PathBuf {
@@ -242,7 +238,7 @@ impl Constellation for StorjFilesystem {
         file.set_reference(&url);
         file.hash_mut().hash_from_file(&path)?;
 
-        self.current_directory_mut()?.add_item(file.clone())?;
+        self.current_directory()?.add_item(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -351,7 +347,7 @@ impl Constellation for StorjFilesystem {
         file.hash_mut().hash_from_slice(buffer)?;
         file.set_reference(&url);
 
-        self.current_directory_mut()?.add_item(file.clone())?;
+        self.current_directory()?.add_item(file.clone())?;
 
         self.modified = Utc::now();
 
@@ -419,7 +415,7 @@ impl Constellation for StorjFilesystem {
             )));
         }
 
-        let item = self.current_directory_mut()?.remove_item(&name)?;
+        let item = self.current_directory()?.remove_item(&name)?;
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), &item)?;
             //TODO: Add a proper check
@@ -447,8 +443,8 @@ impl Constellation for StorjFilesystem {
         .await
         .unwrap_or_default();
 
-        let dir = self.current_directory_mut()?;
-        let file = dir.get_item_mut(&name).and_then(Item::get_file_mut)?;
+        let dir = self.current_directory()?;
+        let file = &mut dir.get_item(&name).and_then(|item| item.get_file())?;
         file.set_reference(&url);
         self.modified = Utc::now();
         Ok(())

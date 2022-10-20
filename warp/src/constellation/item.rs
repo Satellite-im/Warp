@@ -89,30 +89,16 @@ impl Item {
 }
 
 impl Item {
-    pub fn file(&self) -> Option<&File> {
+    pub fn file(&self) -> Option<File> {
         match &self.0 {
-            ItemInner::File(item) => Some(item),
+            ItemInner::File(item) => Some(item.clone()),
             _ => None,
         }
     }
 
-    pub fn directory(&self) -> Option<&Directory> {
+    pub fn directory(&self) -> Option<Directory> {
         match &self.0 {
-            ItemInner::Directory(item) => Some(item),
-            _ => None,
-        }
-    }
-
-    pub fn file_mut(&mut self) -> Option<&mut File> {
-        match self.as_mut() {
-            ItemInner::File(item) => Some(item),
-            _ => None,
-        }
-    }
-
-    pub fn directory_mut(&mut self) -> Option<&mut Directory> {
-        match self.as_mut() {
-            ItemInner::Directory(item) => Some(item),
+            ItemInner::Directory(item) => Some(item.clone()),
             _ => None,
         }
     }
@@ -152,30 +138,27 @@ impl Item {
     /// Get id of `Item`
     #[wasm_bindgen(getter)]
     pub fn id(&self) -> String {
-        match (self.file(), self.directory()) {
-            (Some(file), None) => file.id(),
-            (None, Some(directory)) => directory.id(),
-            _ => Uuid::nil().to_string(),
+        match &self.0 {
+            ItemInner::File(file) => file.id(),
+            ItemInner::Directory(directory) => directory.id(),
         }
     }
 
     /// Get the creation date of `Item`
     #[wasm_bindgen(getter)]
     pub fn creation(&self) -> i64 {
-        match (self.file(), self.directory()) {
-            (Some(file), None) => file.creation(),
-            (None, Some(directory)) => directory.creation(),
-            _ => 0,
+        match &self.0 {
+            ItemInner::File(file) => file.creation(),
+            ItemInner::Directory(directory) => directory.creation(),
         }
     }
 
     /// Get the modified date of `Item`
     #[wasm_bindgen(getter)]
     pub fn modified(&self) -> i64 {
-        match (self.file(), self.directory()) {
-            (Some(file), None) => file.modified(),
-            (None, Some(directory)) => directory.modified(),
-            _ => 0,
+        match &self.0 {
+            ItemInner::File(file) => file.modified(),
+            ItemInner::Directory(directory) => directory.modified(),
         }
     }
 }
@@ -293,33 +276,23 @@ impl Item {
     /// Set size of `Item` if its a `File`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_size(&mut self, size: i64) -> Result<(), Error> {
-        if let Some(file) = self.file_mut() {
-            file.set_size(size);
-            return Ok(());
+        match self.as_mut() {
+            ItemInner::File(file) => file.set_size(size),
+            ItemInner::Directory(_) => return Err(Error::ItemNotFile),
         }
-        Err(Error::ItemNotFile)
+        Ok(())
     }
 }
 
 impl Item {
     /// Convert `Item` to `Directory`
-    pub fn get_directory(&self) -> Result<&Directory, Error> {
+    pub fn get_directory(&self) -> Result<Directory, Error> {
         self.directory().ok_or(Error::InvalidConversion)
     }
 
     /// Convert `Item` to `File`
-    pub fn get_file(&self) -> Result<&File, Error> {
+    pub fn get_file(&self) -> Result<File, Error> {
         self.file().ok_or(Error::InvalidConversion)
-    }
-
-    /// Convert `Item` to `Directory`
-    pub fn get_directory_mut(&mut self) -> Result<&mut Directory, Error> {
-        self.directory_mut().ok_or(Error::InvalidConversion)
-    }
-
-    /// Convert `Item` to `File`
-    pub fn get_file_mut(&mut self) -> Result<&mut File, Error> {
-        self.file_mut().ok_or(Error::InvalidConversion)
     }
 }
 
@@ -365,7 +338,7 @@ pub mod ffi {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
         let item = &*(item);
-        FFIResult::import(item.get_directory().map(|d| d.clone()))
+        FFIResult::import(item.get_directory())
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -375,7 +348,7 @@ pub mod ffi {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
         let item = &*(item);
-        FFIResult::import(item.get_file().map(|f| f.clone()))
+        FFIResult::import(item.get_file())
     }
 
     #[allow(clippy::missing_safety_doc)]

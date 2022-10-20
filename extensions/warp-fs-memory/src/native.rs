@@ -19,20 +19,16 @@ impl Constellation for MemorySystem {
         self.modified
     }
 
-    fn root_directory(&self) -> &Directory {
-        &self.index
-    }
-
-    fn root_directory_mut(&mut self) -> &mut Directory {
-        &mut self.index
+    fn root_directory(&self) -> Directory {
+        self.index.clone()
     }
 
     fn set_path(&mut self, path: PathBuf) {
         self.path = path;
     }
 
-    fn get_path(&self) -> &PathBuf {
-        &self.path
+    fn get_path(&self) -> PathBuf {
+        self.path.clone()
     }
 
     fn get_path_mut(&mut self) -> &mut PathBuf {
@@ -51,7 +47,7 @@ impl Constellation for MemorySystem {
         file.set_size(bytes as i64);
         file.hash_mut().hash_from_file(path)?;
 
-        self.current_directory_mut()?.add_item(file.clone())?;
+        self.current_directory()?.add_item(file.clone())?;
         if let Ok(mut cache) = self.get_cache_mut() {
             let data = Sata::default().encode(
                 warp::sata::libipld::IpldCodec::DagCbor,
@@ -114,7 +110,7 @@ impl Constellation for MemorySystem {
         file.set_size(bytes as i64);
         file.hash_mut().hash_from_slice(buf)?;
 
-        self.current_directory_mut()?.add_item(file.clone())?;
+        self.current_directory()?.add_item(file.clone())?;
         if let Ok(mut cache) = self.get_cache_mut() {
             let data = Sata::default().encode(
                 warp::sata::libipld::IpldCodec::DagCbor,
@@ -133,7 +129,7 @@ impl Constellation for MemorySystem {
 
     /// Use to download a file from the filesystem
     async fn get_buffer(&self, name: &str) -> std::result::Result<Vec<u8>, warp::error::Error> {
-        if !self.current_directory().has_item(name) {
+        if !self.current_directory()?.has_item(name) {
             return Err(warp::error::Error::IoError(std::io::Error::from(
                 ErrorKind::InvalidData,
             )));
@@ -166,7 +162,7 @@ impl Constellation for MemorySystem {
     }
 
     async fn remove(&mut self, path: &str, _: bool) -> Result<()> {
-        if !self.current_directory().has_item(path) {
+        if !self.current_directory()?.has_item(path) {
             return Err(Error::Other);
         }
 
@@ -179,12 +175,12 @@ impl Constellation for MemorySystem {
             .remove(path)
             .map_err(|_| Error::ObjectNotFound)?;
 
-        self.current_directory_mut()?.remove_item(path)?;
+        self.current_directory()?.remove_item(path)?;
         Ok(())
     }
 
     async fn rename(&mut self, path: &str, name: &str) -> Result<()> {
-        if !self.current_directory().has_item(path) {
+        if !self.current_directory()?.has_item(path) {
             return Err(Error::Other);
         }
 
@@ -198,7 +194,7 @@ impl Constellation for MemorySystem {
             .get_item_mut_from_path(path)?
             .rename(name);
 
-        self.current_directory_mut()?.get_item_mut_by_path(path)?.rename(name)?;
+        self.current_directory()?.get_item_by_path(path)?.rename(name)?;
         Ok(())
     }
 
@@ -221,7 +217,7 @@ impl Constellation for MemorySystem {
 
         let directory = Directory::new(path);
 
-        self.current_directory_mut()?.add_item(directory)?;
+        self.current_directory()?.add_item(directory)?;
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), ())?;
