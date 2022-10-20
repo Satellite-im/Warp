@@ -43,7 +43,7 @@ pub struct File {
     name: Arc<RwLock<String>>,
 
     /// Size of the `File`.
-    size: Arc<AtomicUsize>,
+    size: Arc<RwLock<usize>>,
 
     /// Thumbnail of the `File`
     /// Note: This should be set if the file is an image, unless
@@ -51,7 +51,7 @@ pub struct File {
     thumbnail: Arc<RwLock<String>>,
 
     /// Favorite File
-    favorite: Arc<AtomicBool>,
+    favorite: Arc<RwLock<bool>>,
 
     /// Description of the `File`. TODO: Make this optional
     description: Arc<RwLock<String>>,
@@ -170,13 +170,13 @@ impl File {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_favorite(&self, fav: bool) {
-        self.favorite.store(fav, Ordering::Relaxed);
+        *self.favorite.write() = fav;
         *self.modified.write() = Utc::now()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn favorite(&self) -> bool {
-        self.favorite.load(Ordering::Relaxed)
+        *self.favorite.read()
     }
 
     /// Set the reference of the file
@@ -205,7 +205,7 @@ impl File {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn size(&self) -> usize {
-        self.size.load(Ordering::Relaxed)
+        *self.size.read()
     }
 
     /// Set the size the file
@@ -222,7 +222,7 @@ impl File {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_size(&self, size: usize) {
-        self.size.store(size as usize, Ordering::Relaxed);
+        *self.size.write() = size;
         *self.modified.write() = Utc::now();
     }
 

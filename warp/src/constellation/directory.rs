@@ -40,7 +40,7 @@ pub struct Directory {
     thumbnail: Arc<RwLock<String>>,
 
     /// Favorite Directory
-    favorite: Arc<AtomicBool>,
+    favorite: Arc<RwLock<bool>>,
 
     /// Timestamp of the creation of the directory
     creation: Arc<RwLock<DateTime<Utc>>>,
@@ -517,13 +517,13 @@ impl Directory {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_favorite(&self, fav: bool) {
-        self.favorite.store(fav, Ordering::Relaxed);
+        *self.favorite.write() = fav;
         self.set_modified();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn favorite(&self) -> bool {
-        self.favorite.load(Ordering::Relaxed)
+        *self.favorite.read()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
