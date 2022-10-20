@@ -2,8 +2,8 @@ use anyhow::{anyhow, bail};
 use aws_endpoint::partition::endpoint;
 use aws_endpoint::{CredentialScope, Partition, PartitionResolver};
 use aws_sdk_s3::presigning::config::PresigningConfig;
-use warp::sata::Sata;
 use std::path::PathBuf;
+use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::module::Module;
@@ -213,7 +213,8 @@ impl Constellation for StorjFilesystem {
             .bucket(&bucket, true)
             .await?
             .put_object_stream(&mut fs, &name)
-            .await.map_err(anyhow::Error::from)?;
+            .await
+            .map_err(anyhow::Error::from)?;
 
         if code != 200 {
             //TODO: Do a range check against the code
@@ -232,7 +233,7 @@ impl Constellation for StorjFilesystem {
         .await
         .unwrap_or_default();
 
-        let mut file = warp::constellation::file::File::new(&name);
+        let file = warp::constellation::file::File::new(&name);
         file.set_size(size as usize);
         file.set_reference(&url);
         file.hash_mut().hash_from_file(&path)?;
@@ -242,7 +243,11 @@ impl Constellation for StorjFilesystem {
         self.modified = Utc::now();
 
         if let Ok(mut cache) = self.get_cache_mut() {
-            let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from(path))?;
+            let object = Sata::default().encode(
+                warp::sata::libipld::IpldCodec::DagCbor,
+                warp::sata::Kind::Reference,
+                DimensionData::from(path),
+            )?;
             cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
 
@@ -287,7 +292,8 @@ impl Constellation for StorjFilesystem {
             .bucket(bucket, false)
             .await?
             .get_object_stream(&name, &mut fs)
-            .await.map_err(anyhow::Error::from)?;
+            .await
+            .map_err(anyhow::Error::from)?;
 
         if code != 200 {
             return match tokio::fs::remove_file(path).await {
@@ -322,7 +328,8 @@ impl Constellation for StorjFilesystem {
             .bucket(&bucket, true)
             .await?
             .put_object(&name, buffer)
-            .await.map_err(anyhow::Error::from)?;
+            .await
+            .map_err(anyhow::Error::from)?;
 
         if code.1 != 200 {
             return Err(Error::Any(anyhow!(
@@ -341,7 +348,7 @@ impl Constellation for StorjFilesystem {
         .unwrap_or_default();
 
         self.modified = Utc::now();
-        let mut file = warp::constellation::file::File::new(&name);
+        let file = warp::constellation::file::File::new(&name);
         file.set_size(buffer.len());
         file.hash_mut().hash_from_slice(buffer)?;
         file.set_reference(&url);
@@ -351,7 +358,11 @@ impl Constellation for StorjFilesystem {
         self.modified = Utc::now();
 
         if let Ok(mut cache) = self.get_cache_mut() {
-            let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from_buffer(&name, buffer))?;
+            let object = Sata::default().encode(
+                warp::sata::libipld::IpldCodec::DagCbor,
+                warp::sata::Kind::Reference,
+                DimensionData::from_buffer(&name, buffer),
+            )?;
             cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
 
@@ -385,7 +396,8 @@ impl Constellation for StorjFilesystem {
             .bucket(bucket, false)
             .await?
             .get_object(&name)
-            .await.map_err(anyhow::Error::from)?;
+            .await
+            .map_err(anyhow::Error::from)?;
 
         if code != 200 {
             return Err(Error::Any(anyhow!(
@@ -405,7 +417,8 @@ impl Constellation for StorjFilesystem {
             .bucket(bucket, false)
             .await?
             .delete_object(&name)
-            .await.map_err(anyhow::Error::from)?;
+            .await
+            .map_err(anyhow::Error::from)?;
 
         if code != 204 {
             return Err(Error::Any(anyhow!(

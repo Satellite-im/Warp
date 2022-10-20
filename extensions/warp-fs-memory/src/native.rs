@@ -50,7 +50,7 @@ impl Constellation for MemorySystem {
             .insert(internal_file.clone())
             .map_err(anyhow::Error::from)?;
 
-        let mut file = warp::constellation::file::File::new(name);
+        let file = warp::constellation::file::File::new(name);
         file.set_size(bytes);
         file.hash_mut().hash_from_file(path)?;
 
@@ -111,7 +111,7 @@ impl Constellation for MemorySystem {
             .insert(internal_file.clone())
             .map_err(|_| Error::Other)?;
 
-        let mut file = warp::constellation::file::File::new(name);
+        let file = warp::constellation::file::File::new(name);
         file.set_size(bytes);
         file.hash_mut().hash_from_slice(buf)?;
 

@@ -100,7 +100,7 @@ impl Directory {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new(name: &str) -> Self {
-        let mut directory = Directory::default();
+        let directory = Directory::default();
         // let name = name.trim();
         if name.is_empty() {
             return directory;
@@ -149,7 +149,7 @@ impl Directory {
 
     /// Add a file to the `Directory`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn add_file(&mut self, file: File) -> Result<(), Error> {
+    pub fn add_file(&self, file: File) -> Result<(), Error> {
         if self.has_item(&file.name()) {
             return Err(Error::DuplicateName);
         }
@@ -160,7 +160,7 @@ impl Directory {
 
     /// Add a directory to the `Directory`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn add_directory(&mut self, directory: Directory) -> Result<(), Error> {
+    pub fn add_directory(&self, directory: Directory) -> Result<(), Error> {
         if self.has_item(&directory.name()) {
             return Err(Error::DuplicateName);
         }
@@ -219,7 +219,7 @@ impl Directory {
     ///
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn rename_item(&mut self, current_name: &str, new_name: &str) -> Result<(), Error> {
+    pub fn rename_item(&self, current_name: &str, new_name: &str) -> Result<(), Error> {
         self.get_item_by_path(current_name)?.rename(new_name)
     }
 
@@ -239,7 +239,7 @@ impl Directory {
     ///     assert_eq!(root.has_item("Sub Directory"), false);
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn remove_item(&mut self, item_name: &str) -> Result<Item, Error> {
+    pub fn remove_item(&self, item_name: &str) -> Result<Item, Error> {
         if !self.has_item(item_name) {
             return Err(Error::ItemInvalid);
         }
@@ -281,7 +281,7 @@ impl Directory {
     ///         assert_eq!(root.get_item_by_path("Sub Directory 1/Sub Directory 2/Sub Directory 3").is_err(), true);
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn remove_item_from_path(&mut self, directory: &str, item: &str) -> Result<Item, Error> {
+    pub fn remove_item_from_path(&self, directory: &str, item: &str) -> Result<Item, Error> {
         self.get_item_by_path(directory)?
             .get_directory()?
             .remove_item(item)
@@ -308,7 +308,7 @@ impl Directory {
     ///     assert_ne!(root.has_item("Sub Directory 2"), true);
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn move_item_to(&mut self, child: &str, dst: &str) -> Result<(), Error> {
+    pub fn move_item_to(&self, child: &str, dst: &str) -> Result<(), Error> {
         let (child, dst) = (child.trim(), dst.trim());
 
         if self.get_item_by_path(dst)?.is_file() {
@@ -326,7 +326,7 @@ impl Directory {
             .get_item_by_path(dst)
             .and_then(|item| item.get_directory())
         {
-            Ok(mut directory) => {
+            Ok(directory) => {
                 if let Err(e) = directory.add_item(item.clone()) {
                     self.add_item(item)?;
                     return Err(e);
@@ -347,7 +347,7 @@ impl Directory {
         self.items.read().clone()
     }
 
-    pub fn set_items(&mut self, items: Vec<Item>) {
+    pub fn set_items(&self, items: Vec<Item>) {
         *self.items.write() = items;
     }
 
@@ -362,7 +362,7 @@ impl Directory {
     ///     let sub = Directory::new("Sub Directory");
     ///     root.add_item(sub).unwrap();
     /// ```
-    pub fn add_item<I: Into<Item>>(&mut self, item: I) -> Result<(), Error> {
+    pub fn add_item<I: Into<Item>>(&self, item: I) -> Result<(), Error> {
         let item = item.into();
         if self.has_item(&item.name()) {
             return Err(Error::DuplicateName);
@@ -501,12 +501,12 @@ impl Directory {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_name(&mut self, name: &str) {
+    pub fn set_name(&self, name: &str) {
         *self.name.write() = name.to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_thumbnail(&mut self, desc: &str) {
+    pub fn set_thumbnail(&self, desc: &str) {
         *self.thumbnail.write() = desc.to_string()
     }
 
@@ -516,7 +516,7 @@ impl Directory {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_favorite(&mut self, fav: bool) {
+    pub fn set_favorite(&self, fav: bool) {
         self.favorite.store(fav, Ordering::Relaxed);
         self.set_modified();
     }
@@ -532,7 +532,7 @@ impl Directory {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_description(&mut self, desc: &str) {
+    pub fn set_description(&self, desc: &str) {
         *self.description.write() = desc.to_string()
     }
 
@@ -542,7 +542,7 @@ impl Directory {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn set_modified(&mut self) {
+    pub fn set_modified(&self) {
         *self.modified.write() = Utc::now()
     }
 }
@@ -882,13 +882,13 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_set_name(dir: *mut Directory, desc: *const c_char) {
+    pub unsafe extern "C" fn directory_set_name(dir: *const Directory, desc: *const c_char) {
         if dir.is_null() {
             return;
         }
 
         let data = CStr::from_ptr(desc).to_string_lossy().to_string();
-        Directory::set_name(&mut *dir, &data)
+        Directory::set_name(&*dir, &data)
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -908,13 +908,13 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_set_description(dir: *mut Directory, desc: *const c_char) {
+    pub unsafe extern "C" fn directory_set_description(dir: *const Directory, desc: *const c_char) {
         if dir.is_null() {
             return;
         }
 
         let data = CStr::from_ptr(desc).to_string_lossy().to_string();
-        Directory::set_description(&mut *dir, &data)
+        Directory::set_description(&*dir, &data)
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -969,7 +969,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn directory_set_thumbnail(
-        dir: *mut Directory,
+        dir: *const Directory,
         thumbnail: *const c_char,
     ) {
         if dir.is_null() {
@@ -982,7 +982,7 @@ pub mod ffi {
 
         let thumbnail = CStr::from_ptr(thumbnail).to_string_lossy().to_string();
 
-        Directory::set_thumbnail(&mut *dir, &thumbnail)
+        Directory::set_thumbnail(&*dir, &thumbnail)
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -997,11 +997,11 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_set_favorite(dir: *mut Directory, fav: bool) {
+    pub unsafe extern "C" fn directory_set_favorite(dir: *const Directory, fav: bool) {
         if dir.is_null() {
             return;
         }
 
-        Directory::set_favorite(&mut *dir, fav)
+        Directory::set_favorite(&*dir, fav)
     }
 }

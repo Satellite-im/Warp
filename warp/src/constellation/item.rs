@@ -26,12 +26,6 @@ pub enum ItemInner {
     Directory(Directory),
 }
 
-impl AsMut<ItemInner> for Item {
-    fn as_mut(&mut self) -> &mut ItemInner {
-        &mut self.0
-    }
-}
-
 /// The type that `Item` represents
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -211,8 +205,8 @@ impl Item {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_favorite(&mut self, fav: bool) {
-        match self.as_mut() {
+    pub fn set_favorite(&self, fav: bool) {
+        match &self.0 {
             ItemInner::File(file) => file.set_favorite(fav),
             ItemInner::Directory(directory) => directory.set_favorite(fav),
         }
@@ -220,13 +214,13 @@ impl Item {
 
     /// Rename the name of `Item`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn rename(&mut self, name: &str) -> Result<(), Error> {
+    pub fn rename(&self, name: &str) -> Result<(), Error> {
         let name = name.trim();
         if self.name() == name {
             return Err(Error::DuplicateName);
         }
 
-        match self.as_mut() {
+        match &self.0 {
             ItemInner::File(file) => file.set_name(name),
             ItemInner::Directory(directory) => directory.set_name(name),
         }
@@ -257,8 +251,8 @@ impl Item {
 
     /// Set description of `Item`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_description(&mut self, desc: &str) {
-        match self.as_mut() {
+    pub fn set_description(&self, desc: &str) {
+        match &self.0 {
             ItemInner::File(file) => file.set_description(desc),
             ItemInner::Directory(directory) => directory.set_description(desc),
         }
@@ -266,8 +260,8 @@ impl Item {
 
     /// Set thumbnail of `Item`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_thumbnail(&mut self, data: &str) {
-        match self.as_mut() {
+    pub fn set_thumbnail(&self, data: &str) {
+        match &self.0 {
             ItemInner::File(file) => file.set_thumbnail(data),
             ItemInner::Directory(directory) => directory.set_thumbnail(data),
         }
@@ -275,8 +269,8 @@ impl Item {
 
     /// Set size of `Item` if its a `File`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_size(&mut self, size: usize) -> Result<(), Error> {
-        match self.as_mut() {
+    pub fn set_size(&self, size: usize) -> Result<(), Error> {
+        match &self.0 {
             ItemInner::File(file) => file.set_size(size),
             ItemInner::Directory(_) => return Err(Error::ItemNotFile),
         }
@@ -446,11 +440,11 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_set_favorite(item: *mut Item, fav: bool) {
+    pub unsafe extern "C" fn item_set_favorite(item: *const Item, fav: bool) {
         if item.is_null() {
             return;
         }
-        Item::set_favorite(&mut *item, fav)
+        Item::set_favorite(&*item, fav)
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -468,13 +462,13 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_set_thumbnail(item: *mut Item, data: *const c_char) {
+    pub unsafe extern "C" fn item_set_thumbnail(item: *const Item, data: *const c_char) {
         if item.is_null() {
             return;
         }
 
         let thumbnail = CStr::from_ptr(data).to_string_lossy().to_string();
-        Item::set_thumbnail(&mut *item, &thumbnail)
+        Item::set_thumbnail(&*item, &thumbnail)
     }
 
     #[allow(clippy::missing_safety_doc)]

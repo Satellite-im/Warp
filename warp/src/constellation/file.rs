@@ -128,7 +128,7 @@ impl File {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_name(&mut self, name: &str) {
+    pub fn set_name(&self, name: &str) {
         *self.name.write() = name.to_string()
     }
 
@@ -150,14 +150,14 @@ impl File {
     /// assert_eq!(file.description().as_str(), "test file");
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_description(&mut self, desc: &str) {
+    pub fn set_description(&self, desc: &str) {
         *self.description.write() = desc.to_string();
         *self.modified.write() = Utc::now()
     }
 
     /// Set the thumbnail to the file
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_thumbnail(&mut self, data: &str) {
+    pub fn set_thumbnail(&self, data: &str) {
         *self.thumbnail.write() = data.to_string();
         *self.modified.write() = Utc::now()
     }
@@ -169,7 +169,7 @@ impl File {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_favorite(&mut self, fav: bool) {
+    pub fn set_favorite(&self, fav: bool) {
         self.favorite.store(fav, Ordering::Relaxed);
         *self.modified.write() = Utc::now()
     }
@@ -193,7 +193,7 @@ impl File {
     /// assert_eq!(file.reference().unwrap().as_str(), "test_file.txt");
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn set_reference(&mut self, reference: &str) {
+    pub fn set_reference(&self, reference: &str) {
         *self.reference.write() = Some(reference.to_string());
         *self.modified.write() = Utc::now();
     }
@@ -221,13 +221,13 @@ impl File {
     /// assert_eq!(Item::from(file).size(), 100000);
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_size(&mut self, size: usize) {
+    pub fn set_size(&self, size: usize) {
         self.size.store(size as usize, Ordering::Relaxed);
         *self.modified.write() = Utc::now();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn set_modified(&mut self) {
+    pub fn set_modified(&self) {
         *self.modified.write() = Utc::now()
     }
 
@@ -237,13 +237,13 @@ impl File {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_hash(&mut self, hash: Hash) {
+    pub fn set_hash(&self, hash: Hash) {
         *self.hash.write() = hash;
     }
 }
 
 impl File {
-    pub fn hash_mut(&mut self) -> crate::sync::RwLockWriteGuard<Hash> {
+    pub fn hash_mut(&self) -> crate::sync::RwLockWriteGuard<Hash> {
         self.hash.write()
     }
 }

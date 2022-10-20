@@ -249,7 +249,7 @@ impl Constellation for IpfsFileSystem {
             }
         };
 
-        let mut file = warp::constellation::file::File::new(&name[1..]);
+        let file = warp::constellation::file::File::new(&name[1..]);
         file.set_size(size as usize);
 
         file.hash_mut().hash_from_file(path)?;
@@ -356,7 +356,7 @@ impl Constellation for IpfsFileSystem {
         let fs = std::io::Cursor::new(buffer.clone());
         let client = self.client.as_ref();
 
-        let mut file = warp::constellation::file::File::new(&name[1..]);
+        let file = warp::constellation::file::File::new(&name[1..]);
 
         let hash = match self.client.option {
             IpfsOption::Mfs => {
