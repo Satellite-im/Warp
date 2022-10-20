@@ -23,7 +23,7 @@ pub enum DirectoryType {
 }
 
 /// `Directory` handles folders and its contents.
-#[derive(Clone, Serialize, Deserialize, Debug, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(Clone, Serialize, Deserialize, Debug, warp_derive::FFIVec, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Directory {
     /// ID of the `Directory`
@@ -61,6 +61,8 @@ impl PartialEq for Directory {
     }
 }
 
+impl Eq for Directory {}
+
 impl Default for Directory {
     fn default() -> Self {
         let timestamp = Utc::now();
@@ -93,7 +95,7 @@ impl Directory {
     ///
     ///     let root = Directory::new("/root/test/test2");
     ///     assert_eq!(root.has_item("test"), true);
-    ///     let test = root.get_item("test").and_then(Item::get_directory).unwrap();
+    ///     let test = root.get_item("test").and_then(|item| item.get_directory()).unwrap();
     ///     assert_eq!(test.has_item("test2"), true);
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]

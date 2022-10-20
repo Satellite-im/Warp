@@ -33,7 +33,7 @@ pub enum FileType {
 }
 
 /// `File` represents the files uploaded to the FileSystem (`Constellation`).
-#[derive(Clone, Deserialize, Serialize, Debug, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(Clone, Deserialize, Serialize, Debug, warp_derive::FFIVec, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct File {
     /// ID of the `File`
@@ -77,6 +77,8 @@ impl PartialEq for File {
         self.id() == other.id()
     }
 }
+
+impl Eq for File {}
 
 impl Default for File {
     fn default() -> Self {
