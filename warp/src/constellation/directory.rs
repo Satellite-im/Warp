@@ -491,7 +491,6 @@ impl Directory {
             Ok(item)
         };
     }
-
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -686,10 +685,7 @@ pub mod ffi {
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        match dir_ptr.get_item_index(&name) {
-            Ok(size) => FFIResult::ok(size),
-            Err(e) => FFIResult::err(e),
-        }
+        dir_ptr.get_item_index(&name).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -737,10 +733,7 @@ pub mod ffi {
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        match dir_ptr.remove_item(&name) {
-            Ok(item) => FFIResult::ok(item),
-            Err(e) => FFIResult::err(e),
-        }
+        dir_ptr.remove_item(&name).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -773,7 +766,7 @@ pub mod ffi {
 
         let directory = &*ptr;
 
-        Box::into_raw(Box::new(directory.get_items().into())) as *mut _
+        Box::into_raw(Box::new(directory.get_items().into()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -794,10 +787,7 @@ pub mod ffi {
 
         let item = CStr::from_ptr(item).to_string_lossy().to_string();
 
-        match directory.get_item(&item) {
-            Ok(item) => FFIResult::ok(item),
-            Err(e) => FFIResult::err(e),
-        }
+        directory.get_item(&item).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -824,7 +814,7 @@ pub mod ffi {
         let directory = CStr::from_ptr(directory).to_string_lossy().to_string();
         let item = CStr::from_ptr(item).to_string_lossy().to_string();
 
-        FFIResult::import(dir.remove_item_from_path(&directory, &item))
+        dir.remove_item_from_path(&directory, &item).into()
     }
 
     #[allow(clippy::missing_safety_doc)]

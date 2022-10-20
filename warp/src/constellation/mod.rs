@@ -28,25 +28,11 @@ use wasm_bindgen_futures::future_to_promise;
 /// Interface that would provide functionality around the filesystem.
 #[async_trait::async_trait]
 pub trait Constellation: Extension + Sync + Send + SingleHandle {
-    /// Returns the version for `Constellation`
-    fn version(&self) -> &str {
-        "0.1.0"
-    }
-
     /// Provides the timestamp of when the file system was modified
     fn modified(&self) -> DateTime<Utc>;
 
     /// Get root directory
     fn root_directory(&self) -> Directory;
-
-    /// Get current directory
-    // fn current_directory(&self) -> Directory {
-    //     let current_pathbuf = self.get_path().to_string_lossy().to_string();
-    //     self.root_directory()
-    //         .get_item_by_path(&current_pathbuf)
-    //         .and_then(|item| item.get_directory())
-    //         .unwrap_or_else(|_| self.root_directory())
-    // }
 
     /// Select a directory within the filesystem
     fn select(&mut self, path: &str) -> Result<(), Error> {
