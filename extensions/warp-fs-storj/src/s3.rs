@@ -91,6 +91,13 @@ impl StorjClient {
             }
         }
     }
+
+    pub async fn get_or_create_bucket<S: AsRef<str>>(&self, bucket: S) -> anyhow::Result<Bucket> {
+        match self.bucket(&bucket, false).await {
+            Ok(bucket) => Ok(bucket),
+            Err(_) => self.bucket(&bucket, true).await
+        }
+    }
 }
 
 impl Extension for StorjFilesystem {
@@ -210,7 +217,7 @@ impl Constellation for StorjFilesystem {
 
         let code = self
             .client
-            .bucket(&bucket, true)
+            .get_or_create_bucket(&bucket)
             .await?
             .put_object_stream(&mut fs, &name)
             .await
@@ -325,7 +332,7 @@ impl Constellation for StorjFilesystem {
         //TODO: Allow for custom bucket name
         let code = self
             .client
-            .bucket(&bucket, true)
+            .get_or_create_bucket(&bucket)
             .await?
             .put_object(&name, buffer)
             .await
