@@ -22,7 +22,7 @@ fn update_status(account: &mut impl MultiPass, status: &str) -> anyhow::Result<(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     
-    let mut tesseract = Tesseract::default();
+    let tesseract = Tesseract::default();
     tesseract.unlock(b"super duper pass")?;
 
     let mut identity = ipfs_identity_temporary(Default::default(), tesseract, None).await?;

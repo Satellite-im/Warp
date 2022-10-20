@@ -54,7 +54,7 @@ async fn create_account<P: AsRef<Path>>(
     passphrase: Zeroizing<String>,
     experimental: bool,
 ) -> anyhow::Result<Arc<RwLock<Box<dyn MultiPass>>>> {
-    let mut tesseract = match path.as_ref() {
+    let tesseract = match path.as_ref() {
         Some(path) => {
             let path = path.as_ref();
             let mut tesseract =
