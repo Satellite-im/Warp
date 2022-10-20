@@ -1,12 +1,13 @@
 use chrono::{DateTime, Utc};
-use warp::sata::Sata;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::pocket_dimension::DimensionData;
+use warp::sata::Sata;
 
+use crate::item::Item;
 use crate::{item, MemorySystem, Result};
 use warp::constellation::directory::Directory;
 use warp::constellation::Constellation;
@@ -18,20 +19,16 @@ impl Constellation for MemorySystem {
         self.modified
     }
 
-    fn root_directory(&self) -> &Directory {
-        &self.index
-    }
-
-    fn root_directory_mut(&mut self) -> &mut Directory {
-        &mut self.index
+    fn root_directory(&self) -> Directory {
+        self.index.clone()
     }
 
     fn set_path(&mut self, path: PathBuf) {
         self.path = path;
     }
 
-    fn get_path(&self) -> &PathBuf {
-        &self.path
+    fn get_path(&self) -> PathBuf {
+        self.path.clone()
     }
 
     fn get_path_mut(&mut self) -> &mut PathBuf {
@@ -40,19 +37,30 @@ impl Constellation for MemorySystem {
 
     async fn put(&mut self, name: &str, path: &str) -> Result<()> {
         let mut internal_file = item::file::File::new(name);
-        let bytes = internal_file.insert_from_path(path).unwrap_or_default();
+
+        let fs_path = path.to_string();
+        let (internal_file, bytes) = tokio::task::spawn_blocking(move || {
+            let bytes = internal_file.insert_from_path(fs_path).unwrap_or_default();
+            (internal_file, bytes)
+        })
+        .await
+        .map_err(anyhow::Error::from)?;
         self.internal
             .0
             .insert(internal_file.clone())
-            .map_err(|_| Error::Other)?;
+            .map_err(anyhow::Error::from)?;
 
-        let mut file = warp::constellation::file::File::new(name);
-        file.set_size(bytes as i64);
+        let file = warp::constellation::file::File::new(name);
+        file.set_size(bytes);
         file.hash_mut().hash_from_file(path)?;
 
-        self.current_directory_mut()?.add_item(file.clone())?;
+        self.current_directory()?.add_item(file.clone())?;
         if let Ok(mut cache) = self.get_cache_mut() {
-            let data = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from(PathBuf::from(path)))?;
+            let data = Sata::default().encode(
+                warp::sata::libipld::IpldCodec::DagCbor,
+                warp::sata::Kind::Reference,
+                DimensionData::from(PathBuf::from(path)),
+            )?;
             cache.add_data(DataType::from(Module::FileSystem), &data)?;
         }
 
@@ -84,11 +92,9 @@ impl Constellation for MemorySystem {
             .internal
             .as_ref()
             .get_item_from_path(String::from(name))
-            .map_err(|_| Error::Other)?;
+            .map_err(anyhow::Error::from)?;
 
-        let mut file = std::fs::File::create(path)?;
-
-        std::io::copy(&mut internal_file.data().as_slice(), &mut file)?;
+        tokio::fs::write(path, internal_file.data().as_slice()).await?;
 
         Ok(())
     }
@@ -105,13 +111,17 @@ impl Constellation for MemorySystem {
             .insert(internal_file.clone())
             .map_err(|_| Error::Other)?;
 
-        let mut file = warp::constellation::file::File::new(name);
-        file.set_size(bytes as i64);
+        let file = warp::constellation::file::File::new(name);
+        file.set_size(bytes);
         file.hash_mut().hash_from_slice(buf)?;
 
-        self.current_directory_mut()?.add_item(file.clone())?;
+        self.current_directory()?.add_item(file.clone())?;
         if let Ok(mut cache) = self.get_cache_mut() {
-            let data = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from_buffer(name, buf))?;
+            let data = Sata::default().encode(
+                warp::sata::libipld::IpldCodec::DagCbor,
+                warp::sata::Kind::Reference,
+                DimensionData::from_buffer(name, buf),
+            )?;
             cache.add_data(DataType::from(Module::FileSystem), &data)?;
         }
 
@@ -124,7 +134,7 @@ impl Constellation for MemorySystem {
 
     /// Use to download a file from the filesystem
     async fn get_buffer(&self, name: &str) -> std::result::Result<Vec<u8>, warp::error::Error> {
-        if !self.current_directory().has_item(name) {
+        if !self.current_directory()?.has_item(name) {
             return Err(warp::error::Error::IoError(std::io::Error::from(
                 ErrorKind::InvalidData,
             )));
@@ -157,7 +167,7 @@ impl Constellation for MemorySystem {
     }
 
     async fn remove(&mut self, path: &str, _: bool) -> Result<()> {
-        if !self.current_directory().has_item(path) {
+        if !self.current_directory()?.has_item(path) {
             return Err(Error::Other);
         }
 
@@ -170,7 +180,28 @@ impl Constellation for MemorySystem {
             .remove(path)
             .map_err(|_| Error::ObjectNotFound)?;
 
-        self.current_directory_mut()?.remove_item(path)?;
+        self.current_directory()?.remove_item(path)?;
+        Ok(())
+    }
+
+    async fn rename(&mut self, path: &str, name: &str) -> Result<()> {
+        if !self.current_directory()?.has_item(path) {
+            return Err(Error::Other);
+        }
+
+        if !self.internal.as_ref().exist(path) {
+            return Err(Error::ObjectNotFound);
+        }
+
+        self.internal
+            .as_mut()
+            .to_directory_mut()?
+            .get_item_mut_from_path(path)?
+            .rename(name);
+
+        self.current_directory()?
+            .get_item_by_path(path)?
+            .rename(name)?;
         Ok(())
     }
 
@@ -193,10 +224,7 @@ impl Constellation for MemorySystem {
 
         let directory = Directory::new(path);
 
-        if let Err(err) = self.current_directory_mut()?.add_item(directory) {
-            //TODO
-            return Err(err);
-        }
+        self.current_directory()?.add_item(directory)?;
 
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), ())?;

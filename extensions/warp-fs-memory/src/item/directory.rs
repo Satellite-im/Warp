@@ -27,6 +27,13 @@ impl Item for Directory {
         self.create
     }
 
+    fn rename(&mut self, name: &str) {
+        if self.name == name {
+            return;
+        }
+        self.name = name.to_string();
+    }
+
     fn size(&self) -> usize {
         self.content.iter().map(|i| i.size()).sum()
     }

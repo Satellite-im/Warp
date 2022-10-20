@@ -35,6 +35,13 @@ impl Item for File {
         self.create
     }
 
+    fn rename(&mut self, name: &str) {
+        if self.name == name {
+            return;
+        }
+        self.name = name.to_string();
+    }
+
     fn hash(&self) -> Vec<u8> {
         self.hash.to_vec()
     }

@@ -18,6 +18,17 @@ pub fn ffi_vec(item: TokenStream) -> TokenStream {
             }
 
             #[cfg(not(target_arch="wasm32"))]
+            impl [<FFIVec_ #name>] {
+                pub fn null() -> Self {
+                    [<FFIVec_ #name>] {
+                        ptr: core::ptr::null_mut(),
+                        len: 0,
+                        cap: 0
+                    }
+                }
+            }
+
+            #[cfg(not(target_arch="wasm32"))]
             impl From<Vec<#name>> for [<FFIVec_ #name>] {
                 fn from(item: Vec<#name>) -> [<FFIVec_ #name>] {
                     let list = item.iter().cloned().map(|item| Box::into_raw(Box::new(item))).collect::<Vec<_>>();
@@ -28,7 +39,6 @@ pub fn ffi_vec(item: TokenStream) -> TokenStream {
                     [<FFIVec_ #name>] { ptr, len, cap }
                 }
             }
-
 
             #[cfg(not(target_arch="wasm32"))]
             impl From<&Vec<#name>> for [<FFIVec_ #name>] {
