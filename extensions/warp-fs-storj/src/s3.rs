@@ -17,7 +17,6 @@ use s3::region::Region;
 use s3::BucketConfiguration;
 
 use serde::{Deserialize, Serialize};
-use warp::constellation::item::Item;
 use warp::data::{DataObject, DataType};
 use warp::hooks::Hooks;
 use warp::{Extension, SingleHandle};
@@ -234,7 +233,7 @@ impl Constellation for StorjFilesystem {
         .unwrap_or_default();
 
         let mut file = warp::constellation::file::File::new(&name);
-        file.set_size(size as i64);
+        file.set_size(size as usize);
         file.set_reference(&url);
         file.hash_mut().hash_from_file(&path)?;
 
@@ -343,7 +342,7 @@ impl Constellation for StorjFilesystem {
 
         self.modified = Utc::now();
         let mut file = warp::constellation::file::File::new(&name);
-        file.set_size(buffer.len() as i64);
+        file.set_size(buffer.len());
         file.hash_mut().hash_from_slice(buffer)?;
         file.set_reference(&url);
 
@@ -461,10 +460,10 @@ fn split_for<S: AsRef<str>>(name: S) -> anyhow::Result<(String, String)> {
         }
 
         (
-            name.get(0)
+            name.first()
                 .ok_or(Error::InvalidConversion)
                 .map(|s| s.to_string())?,
-            name.get(1)
+            name.last()
                 .ok_or(Error::InvalidConversion)
                 .map(|s| s.to_string())?,
         )

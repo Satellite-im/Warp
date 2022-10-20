@@ -1,10 +1,10 @@
 pub mod config;
 
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
-use warp::sata::Sata;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use warp::sync::{Arc, RwLock, RwLockWriteGuard, RwLockReadGuard};
+use warp::sata::Sata;
+use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 // use warp_common::futures::TryStreamExt;
 use warp::module::Module;
 
@@ -13,7 +13,6 @@ use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use tokio_util::io::StreamReader;
-use warp::constellation::item::Item;
 use warp::constellation::{directory::Directory, Constellation};
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
@@ -75,7 +74,9 @@ impl AsRef<IpfsClient<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>
 impl From<IpfsClient<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>>
     for IpfsInternalClient
 {
-    fn from(client: IpfsClient<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>) -> Self {
+    fn from(
+        client: IpfsClient<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>,
+    ) -> Self {
         Self {
             client,
             ..Default::default()
@@ -249,7 +250,7 @@ impl Constellation for IpfsFileSystem {
         };
 
         let mut file = warp::constellation::file::File::new(&name[1..]);
-        file.set_size(size as i64);
+        file.set_size(size as usize);
 
         file.hash_mut().hash_from_file(path)?;
 
@@ -260,7 +261,11 @@ impl Constellation for IpfsFileSystem {
         self.modified = Utc::now();
 
         if let Ok(mut cache) = self.get_cache_mut() {
-            let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from(path))?;
+            let object = Sata::default().encode(
+                warp::sata::libipld::IpldCodec::DagCbor,
+                warp::sata::Kind::Reference,
+                DimensionData::from(path),
+            )?;
             cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
 
@@ -374,7 +379,7 @@ impl Constellation for IpfsFileSystem {
 
                     return Err(Error::Any(anyhow!("File downloaded was invalid")));
                 }
-                file.set_size(size as i64);
+                file.set_size(size as usize);
 
                 let hash = stat.hash;
 
@@ -402,7 +407,11 @@ impl Constellation for IpfsFileSystem {
                 .to_string_lossy()
                 .to_string();
 
-            let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from_buffer(&name, buffer))?;
+            let object = Sata::default().encode(
+                warp::sata::libipld::IpldCodec::DagCbor,
+                warp::sata::Kind::Reference,
+                DimensionData::from_buffer(&name, buffer),
+            )?;
             cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
 
@@ -540,12 +549,10 @@ impl Constellation for IpfsFileSystem {
 
 fn affix_root<S: AsRef<str>>(name: S) -> String {
     let name = String::from(name.as_ref());
-    let name = match name.starts_with('/') {
+    match name.starts_with('/') {
         true => name,
         false => format!("/{}", name),
-    };
-
-    name
+    }
 }
 
 #[cfg(test)]

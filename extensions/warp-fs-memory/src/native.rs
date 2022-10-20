@@ -37,14 +37,21 @@ impl Constellation for MemorySystem {
 
     async fn put(&mut self, name: &str, path: &str) -> Result<()> {
         let mut internal_file = item::file::File::new(name);
-        let bytes = internal_file.insert_from_path(path).unwrap_or_default();
+
+        let fs_path = path.to_string();
+        let (internal_file, bytes) = tokio::task::spawn_blocking(move || {
+            let bytes = internal_file.insert_from_path(fs_path).unwrap_or_default();
+            (internal_file, bytes)
+        })
+        .await
+        .map_err(anyhow::Error::from)?;
         self.internal
             .0
             .insert(internal_file.clone())
             .map_err(anyhow::Error::from)?;
 
         let mut file = warp::constellation::file::File::new(name);
-        file.set_size(bytes as i64);
+        file.set_size(bytes);
         file.hash_mut().hash_from_file(path)?;
 
         self.current_directory()?.add_item(file.clone())?;
@@ -87,9 +94,7 @@ impl Constellation for MemorySystem {
             .get_item_from_path(String::from(name))
             .map_err(anyhow::Error::from)?;
 
-        let mut file = std::fs::File::create(path)?;
-
-        std::io::copy(&mut internal_file.data().as_slice(), &mut file)?;
+        tokio::fs::write(path, internal_file.data().as_slice()).await?;
 
         Ok(())
     }
@@ -107,7 +112,7 @@ impl Constellation for MemorySystem {
             .map_err(|_| Error::Other)?;
 
         let mut file = warp::constellation::file::File::new(name);
-        file.set_size(bytes as i64);
+        file.set_size(bytes);
         file.hash_mut().hash_from_slice(buf)?;
 
         self.current_directory()?.add_item(file.clone())?;
@@ -194,7 +199,9 @@ impl Constellation for MemorySystem {
             .get_item_mut_from_path(path)?
             .rename(name);
 
-        self.current_directory()?.get_item_by_path(path)?.rename(name)?;
+        self.current_directory()?
+            .get_item_by_path(path)?
+            .rename(name)?;
         Ok(())
     }
 

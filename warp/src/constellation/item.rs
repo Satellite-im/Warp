@@ -187,7 +187,7 @@ impl Item {
     /// If `Item` is a `File` it will return the size of the `File`.
     /// If `Item` is a `Directory` it will return the size of all files within the `Directory`, including files located within a sub directory
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn size(&self) -> i64 {
+    pub fn size(&self) -> usize {
         match &self.0 {
             ItemInner::File(file) => file.size(),
             ItemInner::Directory(directory) => directory.get_items().iter().map(Item::size).sum(),
@@ -275,7 +275,7 @@ impl Item {
 
     /// Set size of `Item` if its a `File`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_size(&mut self, size: i64) -> Result<(), Error> {
+    pub fn set_size(&mut self, size: usize) -> Result<(), Error> {
         match self.as_mut() {
             ItemInner::File(file) => file.set_size(size),
             ItemInner::Directory(_) => return Err(Error::ItemNotFile),
@@ -427,7 +427,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_size(item: *const Item) -> i64 {
+    pub unsafe extern "C" fn item_size(item: *const Item) -> usize {
         if item.is_null() {
             return 0;
         }
@@ -511,7 +511,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_set_size(item: *mut Item, size: i64) -> FFIResult_Null {
+    pub unsafe extern "C" fn item_set_size(item: *mut Item, size: usize) -> FFIResult_Null {
         if item.is_null() {
             return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }

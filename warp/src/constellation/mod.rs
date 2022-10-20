@@ -642,25 +642,6 @@ pub mod ffi {
         constellation.read_guard().current_directory().into()
     }
 
-    // #[allow(clippy::missing_safety_doc)]
-    // #[no_mangle]
-    // pub unsafe extern "C" fn constellation_current_directory_mut(
-    //     ctx: *mut ConstellationAdapter,
-    // ) -> *mut Directory {
-    //     if ctx.is_null() {
-    //         return std::ptr::null_mut();
-    //     }
-
-    //     let constellation = &mut *(ctx);
-    //     match constellation.write_guard().current_directory_mut() {
-    //         Ok(directory) => {
-    //             let directory = std::mem::ManuallyDrop::new(directory);
-    //             Box::into_raw(Box::new(directory)) as *mut Directory
-    //         }
-    //         Err(_) => std::ptr::null_mut(),
-    //     }
-    // }
-
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_update_item(

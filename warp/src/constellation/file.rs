@@ -168,13 +168,13 @@ impl File {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
     pub fn set_favorite(&mut self, fav: bool) {
-        self.favorite.store(fav, Ordering::SeqCst);
+        self.favorite.store(fav, Ordering::Relaxed);
         *self.modified.write() = Utc::now()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn favorite(&self) -> bool {
-        self.favorite.load(Ordering::SeqCst)
+        self.favorite.load(Ordering::Relaxed)
     }
 
     /// Set the reference of the file
@@ -202,8 +202,8 @@ impl File {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn size(&self) -> i64 {
-        self.size.load(Ordering::Relaxed) as i64
+    pub fn size(&self) -> usize {
+        self.size.load(Ordering::Relaxed)
     }
 
     /// Set the size the file
@@ -219,7 +219,7 @@ impl File {
     /// assert_eq!(Item::from(file).size(), 100000);
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_size(&mut self, size: i64) {
+    pub fn set_size(&mut self, size: usize) {
         self.size.store(size as usize, Ordering::Relaxed);
         *self.modified.write() = Utc::now();
     }
@@ -258,6 +258,11 @@ impl File {
 
     pub fn modified(&self) -> DateTime<Utc> {
         *self.modified.read()
+    }
+
+    pub fn update<F: Fn(File)>(&self, f: F) {
+        f(self.clone());
+        *self.modified.write() = Utc::now()
     }
 }
 

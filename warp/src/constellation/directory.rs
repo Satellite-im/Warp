@@ -536,7 +536,7 @@ impl Directory {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn size(&self) -> i64 {
+    pub fn size(&self) -> usize {
         self.get_items().iter().map(Item::size).sum()
     }
 
@@ -899,7 +899,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn directory_size(dir: *const Directory) -> i64 {
+    pub unsafe extern "C" fn directory_size(dir: *const Directory) -> usize {
         if dir.is_null() {
             return 0;
         }
