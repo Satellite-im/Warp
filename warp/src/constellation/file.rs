@@ -5,7 +5,6 @@ use derive_more::Display;
 use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Seek, SeekFrom};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use uuid::Uuid;
 use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]

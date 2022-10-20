@@ -1,5 +1,3 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use super::file::File;
 use super::item::Item;
 use crate::error::Error;
