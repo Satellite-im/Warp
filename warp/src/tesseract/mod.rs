@@ -198,7 +198,7 @@ impl Tesseract {
     /// tesseract.set_file("my_file");
     /// assert!(tesseract.file().is_some());
     /// ```
-    pub fn set_file<P: AsRef<Path>>(&mut self, file: P) {
+    pub fn set_file<P: AsRef<Path>>(&self, file: P) {
         *self.file.lock() = Some(file.as_ref().to_path_buf())
     }
 
@@ -226,7 +226,7 @@ impl Tesseract {
     ///       regardless of success or error but would eventually log the error.
     ///
     /// TODO: Handle error without subjecting function to `Result::Err`
-    pub fn save(&mut self) -> Result<()> {
+    pub fn save(&self) -> Result<()> {
         if self.autosave_enabled() {
             if let Some(path) = &self.file() {
                 if let Err(_e) = self.to_file(path) {
@@ -250,7 +250,7 @@ impl Tesseract {
     /// assert_eq!(tesseract.retrieve("API").unwrap(), String::from("MYKEY"))
     /// ```
     pub fn import(passphrase: &[u8], map: HashMap<String, String>) -> Result<Self> {
-        let mut tesseract = Tesseract::default();
+        let tesseract = Tesseract::default();
         tesseract.unlock(passphrase)?;
         for (key, val) in map {
             tesseract.set(key.as_str(), val.as_str())?;
@@ -309,7 +309,7 @@ impl Tesseract {
     /// assert!(tesseract.autosave_enabled());
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn set_autosave(&mut self) {
+    pub fn set_autosave(&self) {
         let autosave = self.autosave_enabled();
         self.autosave.store(!autosave, Ordering::Relaxed);
     }
@@ -346,7 +346,7 @@ impl Tesseract {
     /// assert!(!tesseract.is_key_check_enabled());
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn disable_key_check(&mut self) {
+    pub fn disable_key_check(&self) {
         self.check.store(false, Ordering::Relaxed);
     }
 
@@ -365,7 +365,7 @@ impl Tesseract {
     /// assert!(tesseract.is_key_check_enabled())
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn enable_key_check(&mut self) {
+    pub fn enable_key_check(&self) {
         self.check.store(true, Ordering::Relaxed);
     }
 
@@ -396,7 +396,7 @@ impl Tesseract {
     ///  assert_eq!(tesseract.exist("API"), true);
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn set(&mut self, key: &str, value: &str) -> Result<()> {
+    pub fn set(&self, key: &str, value: &str) -> Result<()> {
         if !self.is_unlock() {
             return Err(Error::TesseractLocked);
         }
@@ -465,7 +465,7 @@ impl Tesseract {
     ///  assert_eq!(tesseract.exist("API"), false);
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn delete(&mut self, key: &str) -> Result<()> {
+    pub fn delete(&self, key: &str) -> Result<()> {
         self.internal
             .write()
             .remove(key)
@@ -486,7 +486,7 @@ impl Tesseract {
     ///  assert_eq!(tesseract.exist("API"), false);
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn clear(&mut self) {
+    pub fn clear(&self) {
         self.internal.write().clear();
 
         if self.save().is_ok() {}
@@ -520,7 +520,7 @@ impl Tesseract {
     ///  assert!(tesseract.is_unlock());
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn unlock(&mut self, passphrase: &[u8]) -> Result<()> {
+    pub fn unlock(&self, passphrase: &[u8]) -> Result<()> {
         *self.enc_pass.write() = Cipher::self_encrypt(CipherType::Aes256Gcm, passphrase)?;
         self.unlock.store(true, Ordering::Relaxed);
 
@@ -548,7 +548,7 @@ impl Tesseract {
     ///  assert!(!tesseract.is_unlock());
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn lock(&mut self) {
+    pub fn lock(&self) {
         if self.save().is_ok() {}
         self.enc_pass.write().zeroize();
         self.unlock.store(false, Ordering::Relaxed);
@@ -596,7 +596,7 @@ impl Tesseract {
 
     /// Used to save contents to local storage
     #[wasm_bindgen]
-    pub fn save(&mut self) -> Result<()> {
+    pub fn save(&self) -> Result<()> {
         use gloo::storage::{LocalStorage, Storage};
 
         if self.autosave_enabled() {
@@ -610,7 +610,7 @@ impl Tesseract {
 
     /// Used to load contents from local storage
     #[wasm_bindgen]
-    pub fn load_from_storage(&mut self) -> Result<()> {
+    pub fn load_from_storage(&self) -> Result<()> {
         use gloo::storage::{LocalStorage, Storage};
 
         let local_storage = LocalStorage::raw();
@@ -633,7 +633,7 @@ mod test {
 
     #[test]
     pub fn test_default() -> anyhow::Result<()> {
-        let mut tesseract = Tesseract::default();
+        let tesseract = Tesseract::default();
         let key = generate(32);
         tesseract.unlock(&key)?;
         assert!(tesseract.is_unlock());
@@ -647,7 +647,7 @@ mod test {
 
     #[test]
     pub fn test_with_256bit_passphase() -> anyhow::Result<()> {
-        let mut tesseract = Tesseract::default();
+        let tesseract = Tesseract::default();
         tesseract.unlock(b"an example very very secret key.")?;
         tesseract.set("API", "MYKEY")?;
         let data = tesseract.retrieve("API")?;
@@ -657,7 +657,7 @@ mod test {
 
     #[test]
     pub fn test_with_non_256bit_passphase() -> anyhow::Result<()> {
-        let mut tesseract = Tesseract::default();
+        let tesseract = Tesseract::default();
         tesseract.unlock(
             b"This is a secret key that will be used for encryption. Totally not 256bit key",
         )?;
@@ -669,7 +669,7 @@ mod test {
 
     #[test]
     pub fn test_with_invalid_passphrase() -> anyhow::Result<()> {
-        let mut tesseract = Tesseract::default();
+        let tesseract = Tesseract::default();
         tesseract.unlock(
             b"This is a secret key that will be used for encryption. Totally not 256bit key",
         )?;
@@ -684,15 +684,15 @@ mod test {
 
     #[test]
     pub fn test_with_lock_store_default() -> anyhow::Result<()> {
-        let mut tesseract = Tesseract::default();
+        let tesseract = Tesseract::default();
         assert!(tesseract.set("API", "MYKEY").is_err());
         Ok(())
     }
 
     #[test]
     pub fn test_with_shared_store() -> anyhow::Result<()> {
-        let mut tesseract = Tesseract::default();
-        let mut tesseract_dup = tesseract.clone();
+        let tesseract = Tesseract::default();
+        let tesseract_dup = tesseract.clone();
         let tesseract_dup_2 = tesseract.clone();
 
         tesseract.unlock(
@@ -725,7 +725,7 @@ mod test {
 
     #[test]
     pub fn tesseract_eq() -> anyhow::Result<()> {
-        let mut tesseract = Tesseract::default();
+        let tesseract = Tesseract::default();
         let key = generate(32);
         tesseract.unlock(&key)?;
         assert!(tesseract.is_unlock());

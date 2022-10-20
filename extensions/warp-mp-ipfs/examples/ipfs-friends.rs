@@ -9,7 +9,7 @@ use warp_mp_ipfs::config::MpIpfsConfig;
 use warp_mp_ipfs::ipfs_identity_temporary;
 
 async fn account(username: Option<&str>) -> anyhow::Result<Box<dyn MultiPass>> {
-    let mut tesseract = Tesseract::default();
+    let tesseract = Tesseract::default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
