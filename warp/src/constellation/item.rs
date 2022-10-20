@@ -455,6 +455,30 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
+    pub unsafe extern "C" fn item_thumbnail(item: *const Item) -> *mut c_char {
+        if item.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        match CString::new(Item::thumbnail(&*item)) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_set_thumbnail(item: *mut Item, data: *const c_char) {
+        if item.is_null() {
+            return;
+        }
+
+        let thumbnail = CStr::from_ptr(data).to_string_lossy().to_string();
+        Item::set_thumbnail(&mut *item, &thumbnail)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
     pub unsafe extern "C" fn item_rename(item: *mut Item, name: *const c_char) -> FFIResult_Null {
         if item.is_null() {
             return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Argument is null")));
@@ -491,13 +515,13 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_set_description(item: *mut Item, desc: *const c_char) -> bool {
+    pub unsafe extern "C" fn item_set_description(item: *mut Item, desc: *const c_char) {
         if item.is_null() {
-            return false;
+            return;
         }
 
         if desc.is_null() {
-            return false;
+            return;
         }
 
         let item = &mut *(item);
@@ -505,8 +529,6 @@ pub mod ffi {
         let desc = CStr::from_ptr(desc).to_string_lossy().to_string();
 
         item.set_description(&desc);
-
-        true
     }
 
     #[allow(clippy::missing_safety_doc)]

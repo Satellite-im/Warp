@@ -823,17 +823,23 @@ pub mod ffi {
         ptr: *mut Directory,
         src: *const c_char,
         dst: *const c_char,
-    ) -> bool {
+    ) -> FFIResult_Null {
         if ptr.is_null() {
-            return false;
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "ptr".into(),
+            });
         }
 
         if src.is_null() {
-            return false;
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "src".into(),
+            });
         }
 
         if dst.is_null() {
-            return false;
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "dst".into(),
+            });
         }
 
         let dir = &mut *ptr;
@@ -841,7 +847,7 @@ pub mod ffi {
         let src = CStr::from_ptr(src).to_string_lossy().to_string();
         let dst = CStr::from_ptr(dst).to_string_lossy().to_string();
 
-        dir.move_item_to(&src, &dst).is_ok()
+        dir.move_item_to(&src, &dst).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -876,6 +882,17 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
+    pub unsafe extern "C" fn directory_set_name(dir: *mut Directory, desc: *const c_char) {
+        if dir.is_null() {
+            return;
+        }
+
+        let data = CStr::from_ptr(desc).to_string_lossy().to_string();
+        Directory::set_name(&mut *dir, &data)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
     pub unsafe extern "C" fn directory_description(dir: *const Directory) -> *mut c_char {
         if dir.is_null() {
             return std::ptr::null_mut();
@@ -887,6 +904,17 @@ pub mod ffi {
             Ok(c) => c.into_raw(),
             Err(_) => std::ptr::null_mut(),
         }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_set_description(dir: *mut Directory, desc: *const c_char) {
+        if dir.is_null() {
+            return;
+        }
+
+        let data = CStr::from_ptr(desc).to_string_lossy().to_string();
+        Directory::set_description(&mut *dir, &data)
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -923,5 +951,57 @@ pub mod ffi {
         let dir: &Directory = &*dir;
 
         dir.modified().timestamp()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_thumbnail(dir: *const Directory) -> *mut c_char {
+        if dir.is_null() {
+            return core::ptr::null_mut();
+        }
+
+        match CString::new(Directory::thumbnail(&*dir)) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_set_thumbnail(
+        dir: *mut Directory,
+        thumbnail: *const c_char,
+    ) {
+        if dir.is_null() {
+            return;
+        }
+
+        if thumbnail.is_null() {
+            return;
+        }
+
+        let thumbnail = CStr::from_ptr(thumbnail).to_string_lossy().to_string();
+
+        Directory::set_thumbnail(&mut *dir, &thumbnail)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_favorite(dir: *const Directory) -> bool {
+        if dir.is_null() {
+            return false;
+        }
+
+        Directory::favorite(&*dir)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn directory_set_favorite(dir: *mut Directory, fav: bool) {
+        if dir.is_null() {
+            return;
+        }
+
+        Directory::set_favorite(&mut *dir, fav)
     }
 }
