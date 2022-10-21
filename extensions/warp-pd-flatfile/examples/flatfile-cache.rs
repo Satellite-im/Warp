@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use warp::data::{DataType};
+use warp::data::DataType;
 use warp::error::Error;
 use warp::module::Module;
 use warp::pocket_dimension::query::{Comparator, QueryBuilder};
@@ -25,11 +25,26 @@ fn main() -> anyhow::Result<()> {
         DimensionData::from("Cargo.toml"),
     )?;
 
-    let data_account = Sata::default().encode(warp::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, b"Hi Account");
-    let data_messaging = Sata::default().encode(warp::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, b"Hi Messaging");
-    let data_http = Sata::default().encode(warp::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, b"Hi Http");
-    let data_export = Sata::default().encode(warp::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, b"Hi Data Export");
-    
+    let data_account = Sata::default().encode(
+        warp::libipld::IpldCodec::DagJson,
+        warp::sata::Kind::Reference,
+        b"Hi Account",
+    );
+    let data_messaging = Sata::default().encode(
+        warp::libipld::IpldCodec::DagJson,
+        warp::sata::Kind::Reference,
+        b"Hi Messaging",
+    );
+    let data_http = Sata::default().encode(
+        warp::libipld::IpldCodec::DagJson,
+        warp::sata::Kind::Reference,
+        b"Hi Http",
+    );
+    let data_export = Sata::default().encode(
+        warp::libipld::IpldCodec::DagJson,
+        warp::sata::Kind::Reference,
+        b"Hi Data Export",
+    );
 
     storage.add_data(DataType::from(Module::FileSystem), &data)?;
     storage.add_data(DataType::from(Module::Accounts), &data_account.unwrap())?;
@@ -62,24 +77,37 @@ fn main() -> anyhow::Result<()> {
         .ok_or(Error::InvalidDataType)?
         .decode::<DimensionData>()?;
 
+    let arr_account = storage
+        .get_data(DataType::Accounts, None)?
+        .last()
+        .ok_or(Error::InvalidDataType)
+        .unwrap()
+        .decode::<Vec<u8>>()
+        .unwrap();
 
-    let arr_account = storage.get_data(DataType::Accounts, None)?
-    .last()
-    .ok_or(Error::InvalidDataType).unwrap().decode::<Vec<u8>>().unwrap();
+    let arr_messaging = storage
+        .get_data(DataType::Messaging, None)?
+        .last()
+        .ok_or(Error::InvalidDataType)
+        .unwrap()
+        .decode::<Vec<u8>>()
+        .unwrap();
 
-    let arr_messaging = storage.get_data(DataType::Messaging, None)?
-    .last()
-    .ok_or(Error::InvalidDataType).unwrap().decode::<Vec<u8>>().unwrap();
+    let arr_http = storage
+        .get_data(DataType::Http, None)?
+        .last()
+        .ok_or(Error::InvalidDataType)
+        .unwrap()
+        .decode::<Vec<u8>>()
+        .unwrap();
 
-    let arr_http = storage.get_data(DataType::Http, None)?
-    .last()
-    .ok_or(Error::InvalidDataType).unwrap().decode::<Vec<u8>>().unwrap();
-
-    let arr_data_export = storage.get_data(DataType::DataExport, None)?
-    .last()
-    .ok_or(Error::InvalidDataType).unwrap().decode::<Vec<u8>>().unwrap();
-
-    
+    let arr_data_export = storage
+        .get_data(DataType::DataExport, None)?
+        .last()
+        .ok_or(Error::InvalidDataType)
+        .unwrap()
+        .decode::<Vec<u8>>()
+        .unwrap();
 
     let mut buf: Vec<u8> = vec![];
 
@@ -90,7 +118,7 @@ fn main() -> anyhow::Result<()> {
     println!("Contents: {}", String::from_utf8_lossy(&arr_messaging));
     println!("Contents: {}", String::from_utf8_lossy(&arr_http));
     println!("Contents: {}", String::from_utf8_lossy(&arr_data_export));
-    
+
     storage.empty(DataType::from(Module::FileSystem))?;
     storage.empty(DataType::from(Module::Accounts))?;
     storage.empty(DataType::from(Module::Messaging))?;

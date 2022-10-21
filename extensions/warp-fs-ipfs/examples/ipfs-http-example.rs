@@ -21,7 +21,7 @@ async fn main() -> anyhow::Result<()> {
 
     let buffer: Vec<u8> = system.get_buffer("testfile").await?;
 
-    println!("Output: {}", String::from_utf8_lossy(&buffer).to_string());
+    println!("Output: {}", String::from_utf8_lossy(&buffer));
 
     system.remove("testfile", false).await?;
 

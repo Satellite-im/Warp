@@ -7,8 +7,6 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         let keywords: Keywords = serde_json::from_str(include_str!("def_keywords.json")).unwrap();
-        Self {
-            keywords
-        }
+        Self { keywords }
     }
 }

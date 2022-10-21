@@ -1,4 +1,4 @@
-use warp::data::{DataType};
+use warp::data::DataType;
 use warp::module::Module;
 use warp::pocket_dimension::query::{Comparator, QueryBuilder};
 use warp::pocket_dimension::PocketDimension;
@@ -30,10 +30,14 @@ fn main() -> anyhow::Result<()> {
     let mut cache = MemoryClient::new();
 
     for item in items {
-        let data = Sata::default().encode(warp::sata::libipld::IpldCodec::DagJson, warp::sata::Kind::Reference, item)?;
+        let data = Sata::default().encode(
+            warp::sata::libipld::IpldCodec::DagJson,
+            warp::sata::Kind::Reference,
+            item,
+        )?;
         cache.add_data(DataType::from(Module::Unknown), &data)?;
     }
-    
+
     let mut query = QueryBuilder::default();
     query.filter(Comparator::Eq, "port", 10001)?;
 

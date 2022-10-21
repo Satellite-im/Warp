@@ -26,10 +26,15 @@ pub enum ItemInner {
     Directory(Directory),
 }
 
-impl AsMut<ItemInner> for Item {
-    fn as_mut(&mut self) -> &mut ItemInner {
-        &mut self.0
-    }
+/// The type that `Item` represents
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[repr(C)]
+pub enum ItemType {
+    FileItem,
+    DirectoryItem,
+    /// Would be invalid or undetermined
+    InvalidItem,
 }
 
 /// Used to convert `File` to `Item`
@@ -78,30 +83,16 @@ impl Item {
 }
 
 impl Item {
-    pub fn file(&self) -> Option<&File> {
+    pub fn file(&self) -> Option<File> {
         match &self.0 {
-            ItemInner::File(item) => Some(item),
+            ItemInner::File(item) => Some(item.clone()),
             _ => None,
         }
     }
 
-    pub fn directory(&self) -> Option<&Directory> {
+    pub fn directory(&self) -> Option<Directory> {
         match &self.0 {
-            ItemInner::Directory(item) => Some(item),
-            _ => None,
-        }
-    }
-
-    pub fn file_mut(&mut self) -> Option<&mut File> {
-        match self.as_mut() {
-            ItemInner::File(item) => Some(item),
-            _ => None,
-        }
-    }
-
-    pub fn directory_mut(&mut self) -> Option<&mut Directory> {
-        match self.as_mut() {
-            ItemInner::Directory(item) => Some(item),
+            ItemInner::Directory(item) => Some(item.clone()),
             _ => None,
         }
     }
@@ -111,62 +102,57 @@ impl Item {
 impl Item {
     /// Get id of `Item`
     pub fn id(&self) -> Uuid {
-        match (self.file(), self.directory()) {
-            (Some(file), None) => file.id(),
-            (None, Some(directory)) => directory.id(),
-            _ => Uuid::nil(),
+        match &self.0 {
+            ItemInner::File(file) => file.id(),
+            ItemInner::Directory(directory) => directory.id(),
         }
     }
 
     /// Get the creation date of `Item`
     pub fn creation(&self) -> DateTime<Utc> {
-        match (self.file(), self.directory()) {
-            (Some(file), None) => file.creation(),
-            (None, Some(directory)) => directory.creation(),
-            _ => Utc::now(),
+        match &self.0 {
+            ItemInner::File(file) => file.creation(),
+            ItemInner::Directory(directory) => directory.creation(),
         }
     }
 
     /// Get the modified date of `Item`
     pub fn modified(&self) -> DateTime<Utc> {
-        match (self.file(), self.directory()) {
-            (Some(file), None) => file.modified(),
-            (None, Some(directory)) => directory.modified(),
-            _ => Utc::now(),
+        match &self.0 {
+            ItemInner::File(file) => file.modified(),
+            ItemInner::Directory(directory) => directory.modified(),
         }
     }
 }
 
+//TODO: Possibly remove depending on how we proceed with wasm compatibility
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 impl Item {
     /// Get id of `Item`
     #[wasm_bindgen(getter)]
     pub fn id(&self) -> String {
-        match (self.file(), self.directory()) {
-            (Some(file), None) => file.id(),
-            (None, Some(directory)) => directory.id(),
-            _ => Uuid::nil().to_string(),
+        match &self.0 {
+            ItemInner::File(file) => file.id(),
+            ItemInner::Directory(directory) => directory.id(),
         }
     }
 
     /// Get the creation date of `Item`
     #[wasm_bindgen(getter)]
     pub fn creation(&self) -> i64 {
-        match (self.file(), self.directory()) {
-            (Some(file), None) => file.creation(),
-            (None, Some(directory)) => directory.creation(),
-            _ => 0,
+        match &self.0 {
+            ItemInner::File(file) => file.creation(),
+            ItemInner::Directory(directory) => directory.creation(),
         }
     }
 
     /// Get the modified date of `Item`
     #[wasm_bindgen(getter)]
     pub fn modified(&self) -> i64 {
-        match (self.file(), self.directory()) {
-            (Some(file), None) => file.modified(),
-            (None, Some(directory)) => directory.modified(),
-            _ => 0,
+        match &self.0 {
+            ItemInner::File(file) => file.modified(),
+            ItemInner::Directory(directory) => directory.modified(),
         }
     }
 }
@@ -176,20 +162,18 @@ impl Item {
     /// Get string of `Item`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn name(&self) -> String {
-        match (self.file(), self.directory()) {
-            (Some(file), None) => file.name(),
-            (None, Some(directory)) => directory.name(),
-            _ => String::new(),
+        match &self.0 {
+            ItemInner::File(file) => file.name(),
+            ItemInner::Directory(directory) => directory.name(),
         }
     }
 
     /// Get description of `Item`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn description(&self) -> String {
-        match (self.file(), self.directory()) {
-            (Some(file), None) => file.description(),
-            (None, Some(directory)) => directory.description(),
-            _ => String::new(),
+        match &self.0 {
+            ItemInner::File(file) => file.description(),
+            ItemInner::Directory(directory) => directory.description(),
         }
     }
 
@@ -197,88 +181,112 @@ impl Item {
     /// If `Item` is a `File` it will return the size of the `File`.
     /// If `Item` is a `Directory` it will return the size of all files within the `Directory`, including files located within a sub directory
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn size(&self) -> i64 {
-        match (self.file(), self.directory()) {
-            (Some(file), None) => file.size(),
-            (None, Some(directory)) => directory.get_items().iter().map(Item::size).sum(),
-            _ => 0,
+    pub fn size(&self) -> usize {
+        match &self.0 {
+            ItemInner::File(file) => file.size(),
+            ItemInner::Directory(directory) => directory.get_items().iter().map(Item::size).sum(),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn thumbnail(&self) -> String {
+        match &self.0 {
+            ItemInner::File(file) => file.thumbnail(),
+            ItemInner::Directory(directory) => directory.thumbnail(),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn favorite(&self) -> bool {
+        match &self.0 {
+            ItemInner::File(file) => file.favorite(),
+            ItemInner::Directory(directory) => directory.favorite(),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_favorite(&self, fav: bool) {
+        match &self.0 {
+            ItemInner::File(file) => file.set_favorite(fav),
+            ItemInner::Directory(directory) => directory.set_favorite(fav),
         }
     }
 
     /// Rename the name of `Item`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn rename(&mut self, name: &str) -> Result<(), Error> {
+    pub fn rename(&self, name: &str) -> Result<(), Error> {
         let name = name.trim();
         if self.name() == name {
             return Err(Error::DuplicateName);
         }
 
-        if let Some(file) = self.file_mut() {
-            file.set_name(name);
-            return Ok(());
+        match &self.0 {
+            ItemInner::File(file) => file.set_name(name),
+            ItemInner::Directory(directory) => directory.set_name(name),
         }
 
-        if let Some(directory) = self.directory_mut() {
-            directory.set_name(name);
-            return Ok(());
-        }
-        Err(Error::Other)
+        Ok(())
     }
 
     /// Check to see if `Item` is `Directory`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn is_directory(&self) -> bool {
-        self.directory().is_some() && self.file().is_none()
+        matches!(&self.0, ItemInner::Directory(_))
     }
 
     /// Check to see if `Item` is `File`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn is_file(&self) -> bool {
-        self.directory().is_none() && self.file().is_some()
+        matches!(&self.0, ItemInner::File(_))
+    }
+
+    /// Returns the type that `Item` represents
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn item_type(&self) -> ItemType {
+        match self.0 {
+            ItemInner::Directory(_) => ItemType::DirectoryItem,
+            ItemInner::File(_) => ItemType::FileItem,
+        }
     }
 
     /// Set description of `Item`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_description(&mut self, desc: &str) {
-        if let Some(file) = self.file_mut() {
-            file.set_description(desc);
+    pub fn set_description(&self, desc: &str) {
+        match &self.0 {
+            ItemInner::File(file) => file.set_description(desc),
+            ItemInner::Directory(directory) => directory.set_description(desc),
         }
+    }
 
-        if let Some(directory) = self.directory_mut() {
-            directory.set_description(desc);
+    /// Set thumbnail of `Item`
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_thumbnail(&self, data: &str) {
+        match &self.0 {
+            ItemInner::File(file) => file.set_thumbnail(data),
+            ItemInner::Directory(directory) => directory.set_thumbnail(data),
         }
     }
 
     /// Set size of `Item` if its a `File`
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_size(&mut self, size: i64) -> Result<(), Error> {
-        if let Some(file) = self.file_mut() {
-            file.set_size(size);
-            return Ok(());
+    pub fn set_size(&self, size: usize) -> Result<(), Error> {
+        match &self.0 {
+            ItemInner::File(file) => file.set_size(size),
+            ItemInner::Directory(_) => return Err(Error::ItemNotFile),
         }
-        Err(Error::ItemNotFile)
+        Ok(())
     }
 }
 
 impl Item {
     /// Convert `Item` to `Directory`
-    pub fn get_directory(&self) -> Result<&Directory, Error> {
+    pub fn get_directory(&self) -> Result<Directory, Error> {
         self.directory().ok_or(Error::InvalidConversion)
     }
 
     /// Convert `Item` to `File`
-    pub fn get_file(&self) -> Result<&File, Error> {
+    pub fn get_file(&self) -> Result<File, Error> {
         self.file().ok_or(Error::InvalidConversion)
-    }
-
-    /// Convert `Item` to `Directory`
-    pub fn get_directory_mut(&mut self) -> Result<&mut Directory, Error> {
-        self.directory_mut().ok_or(Error::InvalidConversion)
-    }
-
-    /// Convert `Item` to `File`
-    pub fn get_file_mut(&mut self) -> Result<&mut File, Error> {
-        self.file_mut().ok_or(Error::InvalidConversion)
     }
 }
 
@@ -292,6 +300,8 @@ pub mod ffi {
     use crate::ffi::{FFIResult, FFIResult_Null};
     use std::ffi::{CStr, CString};
     use std::os::raw::c_char;
+
+    use super::ItemType;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -322,7 +332,7 @@ pub mod ffi {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
         let item = &*(item);
-        FFIResult::import(item.get_directory().map(|d| d.clone()))
+        FFIResult::import(item.get_directory())
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -332,7 +342,7 @@ pub mod ffi {
             return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
         let item = &*(item);
-        FFIResult::import(item.get_file().map(|f| f.clone()))
+        FFIResult::import(item.get_file())
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -402,12 +412,63 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_size(item: *const Item) -> i64 {
+    pub unsafe extern "C" fn item_type(item: *const Item) -> ItemType {
+        if item.is_null() {
+            return ItemType::InvalidItem;
+        }
+        Item::item_type(&*item)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_size(item: *const Item) -> usize {
         if item.is_null() {
             return 0;
         }
         let item = &*(item);
         item.size()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_favorite(item: *const Item) -> bool {
+        if item.is_null() {
+            return false;
+        }
+        Item::favorite(&*item)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_set_favorite(item: *const Item, fav: bool) {
+        if item.is_null() {
+            return;
+        }
+        Item::set_favorite(&*item, fav)
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_thumbnail(item: *const Item) -> *mut c_char {
+        if item.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        match CString::new(Item::thumbnail(&*item)) {
+            Ok(c) => c.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn item_set_thumbnail(item: *const Item, data: *const c_char) {
+        if item.is_null() {
+            return;
+        }
+
+        let thumbnail = CStr::from_ptr(data).to_string_lossy().to_string();
+        Item::set_thumbnail(&*item, &thumbnail)
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -448,13 +509,13 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_set_description(item: *mut Item, desc: *const c_char) -> bool {
+    pub unsafe extern "C" fn item_set_description(item: *mut Item, desc: *const c_char) {
         if item.is_null() {
-            return false;
+            return;
         }
 
         if desc.is_null() {
-            return false;
+            return;
         }
 
         let item = &mut *(item);
@@ -462,13 +523,11 @@ pub mod ffi {
         let desc = CStr::from_ptr(desc).to_string_lossy().to_string();
 
         item.set_description(&desc);
-
-        true
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn item_set_size(item: *mut Item, size: i64) -> FFIResult_Null {
+    pub unsafe extern "C" fn item_set_size(item: *mut Item, size: usize) -> FFIResult_Null {
         if item.is_null() {
             return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Argument is null")));
         }

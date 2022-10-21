@@ -648,14 +648,14 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             return Err(Error::ConversationLimitReached);
         }
 
-
         if let Ok(list) = self.account.get_identity(did_key.clone().into()) {
             if list.is_empty() {
                 warn!("Unable to find identity. Creating conversation anyway");
             }
         }
 
-        let mut conversation = DirectConversation::new(own_did, [own_did.clone(), did_key.clone()])?;
+        let mut conversation =
+            DirectConversation::new(own_did, [own_did.clone(), did_key.clone()])?;
 
         let convo_id = conversation.id();
         let topic = conversation.topic();

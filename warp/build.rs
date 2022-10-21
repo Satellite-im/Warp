@@ -51,7 +51,7 @@ fn main() {
         .stdout(std::process::Stdio::inherit())
         .output()
         .unwrap();
-    
+
     println!(
         "cargo:warning=Status Success:{}",
         run_cbindgen_results.status.success()
@@ -62,7 +62,7 @@ fn main() {
 fn main() {
     // let lines = r#"
     // If you wish to generate a `warp.h` header file for warp crate, please install cbindgen by using the following
-    
+
     //     rustup install nightly
     //     cargo install cbindgen
     //     cargo build --features "build-header"
@@ -70,7 +70,7 @@ fn main() {
     // Alternatively, you can run the following
 
     //     cargo build --features "build-header force-install"
-    
+
     // which will attempt to run and install the commands mentioned aboved but with no guarantee of success.
 
     // This may change in the future to where this is not needed.

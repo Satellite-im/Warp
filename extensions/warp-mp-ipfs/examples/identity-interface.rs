@@ -49,7 +49,7 @@ async fn account(
     no_discovery: bool,
     mdns: bool,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
-    let mut tesseract = Tesseract::default();
+    let tesseract = Tesseract::default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
@@ -77,10 +77,10 @@ async fn account_persistent<P: AsRef<Path>>(
     mdns: bool,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let path = path.as_ref();
-    let mut tesseract = match Tesseract::from_file(path.join("tdatastore")) {
+    let tesseract = match Tesseract::from_file(path.join("tdatastore")) {
         Ok(tess) => tess,
         Err(_) => {
-            let mut tess = Tesseract::default();
+            let tess = Tesseract::default();
             tess.set_file(path.join("tdatastore"));
             tess.set_autosave();
             tess

@@ -8,7 +8,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn create_identity() -> anyhow::Result<()> {
-        let mut tesseract = Tesseract::default();
+        let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
 
         let mut account = ipfs_identity_temporary(None, tesseract, None).await?;
@@ -27,7 +27,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_own_identity() -> anyhow::Result<()> {
-        let mut tesseract = Tesseract::default();
+        let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
 
         let mut account = ipfs_identity_temporary(None, tesseract, None).await?;
@@ -49,7 +49,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_identity() -> anyhow::Result<()> {
-        let mut tesseract_a = Tesseract::default();
+        let tesseract_a = Tesseract::default();
         tesseract_a.unlock(b"internal pass").unwrap();
         let mut account_a = ipfs_identity_temporary(None, tesseract_a, None).await?;
         account_a.create_identity(
@@ -57,7 +57,7 @@ mod test {
             Some("morning caution dose lab six actress pond humble pause enact virtual train"),
         )?;
 
-        let mut tesseract_b = Tesseract::default();
+        let tesseract_b = Tesseract::default();
         tesseract_b.unlock(b"internal pass").unwrap();
         let mut account_b = ipfs_identity_temporary(None, tesseract_b, None).await?;
         let did_b = account_b.create_identity(Some("JaneDoe"), None)?;
@@ -81,7 +81,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "Will re-evaluate"]
     async fn get_identity_by_username() -> anyhow::Result<()> {
-        let mut tesseract_a = Tesseract::default();
+        let tesseract_a = Tesseract::default();
         tesseract_a.unlock(b"internal pass").unwrap();
         let mut account_a = ipfs_identity_temporary(None, tesseract_a, None).await?;
         account_a.create_identity(
@@ -89,7 +89,7 @@ mod test {
             Some("morning caution dose lab six actress pond humble pause enact virtual train"),
         )?;
 
-        let mut tesseract_b = Tesseract::default();
+        let tesseract_b = Tesseract::default();
         tesseract_b.unlock(b"internal pass").unwrap();
         let mut account_b = ipfs_identity_temporary(None, tesseract_b, None).await?;
         account_b.create_identity(Some("JaneDoe"), None)?;
@@ -112,7 +112,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn update_identity_username() -> anyhow::Result<()> {
-        let mut tesseract = Tesseract::default();
+        let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
 
         let mut account = ipfs_identity_temporary(None, tesseract, None).await?;
@@ -134,7 +134,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn update_identity_status() -> anyhow::Result<()> {
-        let mut tesseract = Tesseract::default();
+        let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
 
         let mut account = ipfs_identity_temporary(None, tesseract, None).await?;

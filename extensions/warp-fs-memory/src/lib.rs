@@ -107,7 +107,6 @@ impl MemorySystem {
     }
 }
 
-
 impl MemorySystemInternal {
     pub fn new() -> Self {
         MemorySystemInternal::default()

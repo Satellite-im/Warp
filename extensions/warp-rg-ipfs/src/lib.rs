@@ -402,7 +402,7 @@ pub mod ffi {
 
         let config = match config.is_null() {
             true => None,
-            false => Some((&*config).clone()),
+            false => Some((*config).clone()),
         };
 
         let account = &*account;
@@ -435,7 +435,7 @@ pub mod ffi {
 
         let config = match config.is_null() {
             true => return FFIResult::err(Error::from(anyhow::anyhow!("Configuration is needed"))),
-            false => Some((&*config).clone()),
+            false => Some((*config).clone()),
         };
 
         let account = &*account;

@@ -2,8 +2,8 @@ use anyhow::{anyhow, bail};
 use aws_endpoint::partition::endpoint;
 use aws_endpoint::{CredentialScope, Partition, PartitionResolver};
 use aws_sdk_s3::presigning::config::PresigningConfig;
-use warp::sata::Sata;
 use std::path::PathBuf;
+use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::module::Module;
@@ -17,7 +17,6 @@ use s3::region::Region;
 use s3::BucketConfiguration;
 
 use serde::{Deserialize, Serialize};
-use warp::constellation::item::Item;
 use warp::data::{DataObject, DataType};
 use warp::hooks::Hooks;
 use warp::{Extension, SingleHandle};
@@ -90,6 +89,13 @@ impl StorjClient {
                 let bucket = Bucket::new(bucket.as_ref(), region, self.creds.clone())?;
                 Ok(bucket)
             }
+        }
+    }
+
+    pub async fn get_or_create_bucket<S: AsRef<str>>(&self, bucket: S) -> anyhow::Result<Bucket> {
+        match self.bucket(&bucket, false).await {
+            Ok(bucket) => Ok(bucket),
+            Err(_) => self.bucket(&bucket, true).await,
         }
     }
 }
@@ -184,20 +190,16 @@ impl Constellation for StorjFilesystem {
         self.modified
     }
 
-    fn root_directory(&self) -> &Directory {
-        &self.index
-    }
-
-    fn root_directory_mut(&mut self) -> &mut Directory {
-        &mut self.index
+    fn root_directory(&self) -> Directory {
+        self.index.clone()
     }
 
     fn set_path(&mut self, path: PathBuf) {
         self.path = path;
     }
 
-    fn get_path(&self) -> &PathBuf {
-        &self.path
+    fn get_path(&self) -> PathBuf {
+        self.path.clone()
     }
 
     fn get_path_mut(&mut self) -> &mut PathBuf {
@@ -215,10 +217,11 @@ impl Constellation for StorjFilesystem {
 
         let code = self
             .client
-            .bucket(&bucket, true)
+            .get_or_create_bucket(&bucket)
             .await?
             .put_object_stream(&mut fs, &name)
-            .await.map_err(anyhow::Error::from)?;
+            .await
+            .map_err(anyhow::Error::from)?;
 
         if code != 200 {
             //TODO: Do a range check against the code
@@ -237,17 +240,21 @@ impl Constellation for StorjFilesystem {
         .await
         .unwrap_or_default();
 
-        let mut file = warp::constellation::file::File::new(&name);
-        file.set_size(size as i64);
+        let file = warp::constellation::file::File::new(&name);
+        file.set_size(size as usize);
         file.set_reference(&url);
         file.hash_mut().hash_from_file(&path)?;
 
-        self.current_directory_mut()?.add_item(file.clone())?;
+        self.current_directory()?.add_item(file.clone())?;
 
         self.modified = Utc::now();
 
         if let Ok(mut cache) = self.get_cache_mut() {
-            let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from(path))?;
+            let object = Sata::default().encode(
+                warp::sata::libipld::IpldCodec::DagCbor,
+                warp::sata::Kind::Reference,
+                DimensionData::from(path),
+            )?;
             cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
 
@@ -292,7 +299,8 @@ impl Constellation for StorjFilesystem {
             .bucket(bucket, false)
             .await?
             .get_object_stream(&name, &mut fs)
-            .await.map_err(anyhow::Error::from)?;
+            .await
+            .map_err(anyhow::Error::from)?;
 
         if code != 200 {
             return match tokio::fs::remove_file(path).await {
@@ -324,10 +332,11 @@ impl Constellation for StorjFilesystem {
         //TODO: Allow for custom bucket name
         let code = self
             .client
-            .bucket(&bucket, true)
+            .get_or_create_bucket(&bucket)
             .await?
             .put_object(&name, buffer)
-            .await.map_err(anyhow::Error::from)?;
+            .await
+            .map_err(anyhow::Error::from)?;
 
         if code.1 != 200 {
             return Err(Error::Any(anyhow!(
@@ -346,17 +355,21 @@ impl Constellation for StorjFilesystem {
         .unwrap_or_default();
 
         self.modified = Utc::now();
-        let mut file = warp::constellation::file::File::new(&name);
-        file.set_size(buffer.len() as i64);
+        let file = warp::constellation::file::File::new(&name);
+        file.set_size(buffer.len());
         file.hash_mut().hash_from_slice(buffer)?;
         file.set_reference(&url);
 
-        self.current_directory_mut()?.add_item(file.clone())?;
+        self.current_directory()?.add_item(file.clone())?;
 
         self.modified = Utc::now();
 
         if let Ok(mut cache) = self.get_cache_mut() {
-            let object = Sata::default().encode(warp::sata::libipld::IpldCodec::DagCbor, warp::sata::Kind::Reference, DimensionData::from_buffer(&name, buffer))?;
+            let object = Sata::default().encode(
+                warp::sata::libipld::IpldCodec::DagCbor,
+                warp::sata::Kind::Reference,
+                DimensionData::from_buffer(&name, buffer),
+            )?;
             cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
 
@@ -390,7 +403,8 @@ impl Constellation for StorjFilesystem {
             .bucket(bucket, false)
             .await?
             .get_object(&name)
-            .await.map_err(anyhow::Error::from)?;
+            .await
+            .map_err(anyhow::Error::from)?;
 
         if code != 200 {
             return Err(Error::Any(anyhow!(
@@ -410,7 +424,8 @@ impl Constellation for StorjFilesystem {
             .bucket(bucket, false)
             .await?
             .delete_object(&name)
-            .await.map_err(anyhow::Error::from)?;
+            .await
+            .map_err(anyhow::Error::from)?;
 
         if code != 204 {
             return Err(Error::Any(anyhow!(
@@ -419,7 +434,7 @@ impl Constellation for StorjFilesystem {
             )));
         }
 
-        let item = self.current_directory_mut()?.remove_item(&name)?;
+        let item = self.current_directory()?.remove_item(&name)?;
         if let Some(hook) = &self.hooks {
             let object = DataObject::new(DataType::from(Module::FileSystem), &item)?;
             //TODO: Add a proper check
@@ -447,8 +462,8 @@ impl Constellation for StorjFilesystem {
         .await
         .unwrap_or_default();
 
-        let dir = self.current_directory_mut()?;
-        let file = dir.get_item_mut(&name).and_then(Item::get_file_mut)?;
+        let dir = self.current_directory()?;
+        let file = &mut dir.get_item(&name).and_then(|item| item.get_file())?;
         file.set_reference(&url);
         self.modified = Utc::now();
         Ok(())
@@ -465,10 +480,10 @@ fn split_for<S: AsRef<str>>(name: S) -> anyhow::Result<(String, String)> {
         }
 
         (
-            name.get(0)
+            name.first()
                 .ok_or(Error::InvalidConversion)
                 .map(|s| s.to_string())?,
-            name.get(1)
+            name.last()
                 .ok_or(Error::InvalidConversion)
                 .map(|s| s.to_string())?,
         )

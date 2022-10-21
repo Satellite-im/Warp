@@ -28,45 +28,30 @@ use wasm_bindgen_futures::future_to_promise;
 /// Interface that would provide functionality around the filesystem.
 #[async_trait::async_trait]
 pub trait Constellation: Extension + Sync + Send + SingleHandle {
-    /// Returns the version for `Constellation`
-    fn version(&self) -> &str {
-        "0.1.0"
-    }
-
     /// Provides the timestamp of when the file system was modified
     fn modified(&self) -> DateTime<Utc>;
 
     /// Get root directory
-    fn root_directory(&self) -> &Directory;
-
-    /// Get a mutable root directory
-    fn root_directory_mut(&mut self) -> &mut Directory;
-
-    /// Get current directory
-    fn current_directory(&self) -> &Directory {
-        let current_pathbuf = self.get_path().to_string_lossy().to_string();
-        self.root_directory()
-            .get_item_by_path(&current_pathbuf)
-            .and_then(Item::get_directory)
-            .unwrap_or_else(|_| self.root_directory())
-    }
+    fn root_directory(&self) -> Directory;
 
     /// Select a directory within the filesystem
     fn select(&mut self, path: &str) -> Result<(), Error> {
         let path = Path::new(path).to_path_buf();
         let current_pathbuf = self.get_path();
 
-        if current_pathbuf == &path {
+        if current_pathbuf == path {
             return Err(Error::Any(anyhow!("Path has not change")));
         }
 
-        let item = self.current_directory().get_item(&path.to_string_lossy())?;
+        let item = self
+            .current_directory()?
+            .get_item(&path.to_string_lossy())?;
 
         if !item.is_directory() {
             return Err(Error::DirectoryNotFound);
         }
 
-        let new_path = Path::new(current_pathbuf).join(path);
+        let new_path = Path::new(&current_pathbuf).join(path);
         self.set_path(new_path);
         Ok(())
     }
@@ -75,7 +60,7 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
     fn set_path(&mut self, _: PathBuf);
 
     /// Get path of current directory
-    fn get_path(&self) -> &PathBuf;
+    fn get_path(&self) -> PathBuf;
 
     /// Go back to the previous directory
     fn go_back(&mut self) -> Result<(), Error> {
@@ -89,19 +74,40 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
     fn get_path_mut(&mut self) -> &mut PathBuf;
 
     /// Get the current directory that is mutable.
-    fn current_directory_mut(&mut self) -> Result<&mut Directory, Error> {
-        self.open_directory(&self.get_path().clone().to_string_lossy())
+    fn current_directory(&self) -> Result<Directory, Error> {
+        self.open_directory(&self.get_path().to_string_lossy())
     }
 
     /// Returns a mutable directory from the filesystem
-    fn open_directory(&mut self, path: &str) -> Result<&mut Directory, Error> {
+    fn open_directory(&self, path: &str) -> Result<Directory, Error> {
         match path.trim().is_empty() {
-            true => Ok(self.root_directory_mut()),
+            true => Ok(self.root_directory()),
             false => self
-                .root_directory_mut()
-                .get_item_mut_by_path(path)
-                .and_then(Item::get_directory_mut),
+                .root_directory()
+                .get_item_by_path(path)
+                .and_then(|item| item.get_directory()),
         }
+    }
+
+    /// Used to update an [`Item`] within the current [`Directory`]
+    fn update_item(&mut self, path: &str, item: Item) -> Result<(), Error> {
+        let directory = self.current_directory()?;
+        let inner_item = &mut directory.get_item_by_path(path)?;
+        if inner_item.id() != item.id() && inner_item.item_type() != item.item_type() {
+            return Err(Error::ItemInvalid);
+        }
+        *inner_item = item;
+        Ok(())
+    }
+
+    /// Used to update an [`File`] within the current [`Directory`]
+    fn update_file(&mut self, path: &str, file: file::File) -> Result<(), Error> {
+        self.update_item(path, file.into())
+    }
+
+    /// Used to update an [`Directory`] within the current [`Directory`]
+    fn update_directory(&mut self, path: &str, directory: Directory) -> Result<(), Error> {
+        self.update_item(path, directory.into())
     }
 
     /// Used to upload file to the filesystem
@@ -122,6 +128,11 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
 
     /// Used to download data from the filesystem into a buffer
     async fn get_buffer(&self, _: &str) -> Result<Vec<u8>, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Used to rename a file or directory in the filesystem
+    async fn rename(&mut self, _: &str, _: &str) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
@@ -149,13 +160,13 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
     fn export(&self, r#type: ConstellationDataType) -> Result<String, Error> {
         match r#type {
             ConstellationDataType::Json => {
-                serde_json::to_string(self.root_directory()).map_err(Error::from)
+                serde_json::to_string(&self.root_directory()).map_err(Error::from)
             }
             ConstellationDataType::Yaml => {
-                serde_yaml::to_string(self.root_directory()).map_err(Error::from)
+                serde_yaml::to_string(&self.root_directory()).map_err(Error::from)
             }
             ConstellationDataType::Toml => {
-                toml::to_string(self.root_directory()).map_err(Error::from)
+                toml::to_string(&self.root_directory()).map_err(Error::from)
             }
         }
     }
@@ -169,12 +180,13 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
             ConstellationDataType::Toml => toml::from_str(data.as_str())?,
         };
         //TODO: create a function to override directory items.
-        *self.root_directory_mut().get_items_mut() = directory.get_items().clone();
+        self.root_directory().set_items(directory.get_items());
 
         Ok(())
     }
 }
 
+//TODO: This would require a refactor to remove returned references
 // #[async_trait::async_trait]
 // impl<T: ?Sized> Constellation for Arc<RwLock<Box<T>>>
 // where
@@ -292,12 +304,11 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
 //     }
 // }
 
-
 /// Types that would be used for import and export
 /// Currently only support `Json`, `Yaml`, and `Toml`.
 /// Implementation can override these functions for their own
 /// types to be use for import and export.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[repr(C)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum ConstellationDataType {
@@ -388,7 +399,8 @@ impl ConstellationAdapter {
     pub fn put(&mut self, remote: String, local: String) -> Promise {
         let inner = self.object.clone();
         future_to_promise(async move {
-            let mut inner = inner.write()
+            let mut inner = inner
+                .write()
                 .put(&remote, &local)
                 .await
                 .map_err(crate::error::into_error)
@@ -402,7 +414,8 @@ impl ConstellationAdapter {
     pub fn get(&self, remote: String, local: String) -> Promise {
         let inner = self.object.clone();
         future_to_promise(async move {
-            let inner = inner.read()
+            let inner = inner
+                .read()
                 .get(&remote, &local)
                 .await
                 .map_err(crate::error::into_error)
@@ -416,7 +429,8 @@ impl ConstellationAdapter {
     pub fn put_buffer(&mut self, remote: String, data: Vec<u8>) -> Promise {
         let inner = self.object.clone();
         future_to_promise(async move {
-            let mut inner = inner.write()
+            let mut inner = inner
+                .write()
                 .put_buffer(&remote, &data)
                 .await
                 .map_err(crate::error::into_error)
@@ -459,7 +473,8 @@ impl ConstellationAdapter {
     pub fn move_item(&mut self, from: String, to: String) -> Promise {
         let inner = self.object.clone();
         future_to_promise(async move {
-            let mut inner = inner.write()
+            let mut inner = inner
+                .write()
                 .move_item(&from, &to)
                 .await
                 .map_err(crate::error::into_error)
@@ -531,6 +546,9 @@ pub mod ffi {
     use std::ffi::CStr;
     use std::os::raw::c_char;
 
+    use super::file::File;
+    use super::item::Item;
+
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_select(
@@ -581,8 +599,8 @@ pub mod ffi {
         let cname = CStr::from_ptr(name).to_string_lossy().to_string();
 
         let constellation = &mut *(ctx);
-        match constellation.write_guard().open_directory(&cname) {
-            Ok(directory) => FFIResult::ok(directory.clone()),
+        match constellation.read_guard().open_directory(&cname) {
+            Ok(directory) => FFIResult::ok(directory),
             Err(e) => FFIResult::err(e),
         }
     }
@@ -596,42 +614,127 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
         let constellation = &*(ctx);
-        let constellation = constellation.read_guard();
-        let directory = constellation.root_directory();
-        Box::into_raw(Box::new(directory.clone())) as *mut Directory
+        let directory = constellation.read_guard().root_directory();
+        Box::into_raw(Box::new(directory)) as *mut Directory
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_current_directory(
-        ctx: *const ConstellationAdapter,
-    ) -> *mut Directory {
+        ctx: *mut ConstellationAdapter,
+    ) -> FFIResult<Directory> {
         if ctx.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult::err(Error::NullPointerContext {
+                pointer: "ctx".into(),
+            });
         }
         let constellation = &*(ctx);
-        let constellation = constellation.read_guard();
-        let current_directory = constellation.current_directory();
-        Box::into_raw(Box::new(current_directory.clone())) as *mut Directory
+        constellation.read_guard().current_directory().into()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn constellation_current_directory_mut(
+    pub unsafe extern "C" fn constellation_update_item(
         ctx: *mut ConstellationAdapter,
-    ) -> *mut Directory {
+        path: *const c_char,
+        item: *const Item,
+    ) -> FFIResult_Null {
         if ctx.is_null() {
-            return std::ptr::null_mut();
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "ctx".into(),
+            });
+        }
+
+        if path.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "path".into(),
+            });
+        }
+
+        if item.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "item".into(),
+            });
         }
 
         let constellation = &mut *(ctx);
-        match constellation.write_guard().current_directory_mut() {
-            Ok(directory) => {
-                let directory = std::mem::ManuallyDrop::new(directory);
-                Box::into_raw(Box::new(directory)) as *mut Directory
-            }
-            Err(_) => std::ptr::null_mut(),
+
+        let path = CStr::from_ptr(path).to_string_lossy().to_string();
+        let item = &*item;
+
+        ConstellationAdapter::write_guard(constellation)
+            .update_item(&path, item.clone())
+            .into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_update_file(
+        ctx: *mut ConstellationAdapter,
+        path: *const c_char,
+        file: *const File,
+    ) -> FFIResult_Null {
+        if ctx.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "ctx".into(),
+            });
         }
+
+        if path.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "path".into(),
+            });
+        }
+
+        if file.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "item".into(),
+            });
+        }
+
+        let constellation = &mut *(ctx);
+
+        let path = CStr::from_ptr(path).to_string_lossy().to_string();
+        let file = &*file;
+
+        ConstellationAdapter::write_guard(constellation)
+            .update_file(&path, file.clone())
+            .into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_update_directory(
+        ctx: *mut ConstellationAdapter,
+        path: *const c_char,
+        directory: *const Directory,
+    ) -> FFIResult_Null {
+        if ctx.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "ctx".into(),
+            });
+        }
+
+        if path.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "path".into(),
+            });
+        }
+
+        if directory.is_null() {
+            return FFIResult_Null::err(Error::NullPointerContext {
+                pointer: "directory".into(),
+            });
+        }
+
+        let constellation = &mut *(ctx);
+
+        let path = CStr::from_ptr(path).to_string_lossy().to_string();
+        let directory = &*directory;
+
+        ConstellationAdapter::write_guard(constellation)
+            .update_directory(&path, directory.clone())
+            .into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -692,7 +795,7 @@ pub mod ffi {
         rt.block_on(async move {
             constellation
                 .write_guard()
-                .put_buffer(&remote.to_string_lossy().to_string(), &slice.to_vec())
+                .put_buffer(&remote.to_string_lossy(), &slice.to_vec())
                 .await
         })
         .into()
@@ -829,6 +932,34 @@ pub mod ffi {
         let dst = CStr::from_ptr(dst).to_string_lossy().to_string();
         let rt = runtime_handle();
         rt.block_on(async move { constellation.write_guard().move_item(&src, &dst).await })
+            .into()
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_rename(
+        ctx: *mut ConstellationAdapter,
+        path: *const c_char,
+        name: *const c_char,
+    ) -> FFIResult_Null {
+        if ctx.is_null() {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        if path.is_null() {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Path cannot be null")));
+        }
+
+        if name.is_null() {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Name cannot be null")));
+        }
+
+        let constellation = &mut *(ctx);
+        let path = CStr::from_ptr(path).to_string_lossy().to_string();
+        let name = CStr::from_ptr(name).to_string_lossy().to_string();
+        let rt = runtime_handle();
+        rt.block_on(constellation.write_guard().rename(&path, &name))
             .into()
     }
 

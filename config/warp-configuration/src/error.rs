@@ -1,6 +1,5 @@
 use thiserror::Error;
 
-
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Cannot deserialize configuration: {0}")]
@@ -10,5 +9,5 @@ pub enum Error {
     #[error("{0}")]
     IoError(#[from] std::io::Error),
     #[error("Configuration cannot be found or does not exist")]
-    ConfigNotFound
+    ConfigNotFound,
 }

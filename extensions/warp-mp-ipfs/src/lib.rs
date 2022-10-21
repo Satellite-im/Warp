@@ -130,7 +130,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
     }
 
     async fn initialize_store(&mut self, init: bool) -> anyhow::Result<()> {
-        let mut tesseract = self.tesseract.clone();
+        let tesseract = self.tesseract.clone();
 
         if init && self.identity_store.read().is_some() && self.friend_store.read().is_some()
             || self.initialized.load(Ordering::SeqCst)

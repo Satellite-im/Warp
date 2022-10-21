@@ -154,7 +154,7 @@ impl FlatfileIndex {
             let item = list.remove(index);
             return Ok(item);
         }
-        return Err(Error::DataObjectNotFound);
+        Err(Error::DataObjectNotFound)
     }
 
     pub fn build_index(&mut self) -> Result<()> {
@@ -373,7 +373,7 @@ impl PocketDimension for FlatfileStorage {
                             warp::libipld::IpldCodec::DagCbor,
                             warp::sata::Kind::Reference,
                             DimensionData {
-                                name: Some(name.clone()),
+                                name: Some(name),
                                 path: Some(new_path.clone()),
                                 ..Default::default()
                             },
@@ -598,7 +598,7 @@ impl PocketDimension for FlatfileStorage {
                             Ok(data) => data,
                             Err(_) => continue,
                         },
-                        State::Encrypted | _ => continue,
+                        _ => continue,
                     };
 
                     if let Ok(path) = data.path() {
@@ -631,7 +631,7 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
     for data in data.iter() {
         let object = match data.state() {
             State::Encoded => data.decode::<Ipld>()?,
-            State::Encrypted | _ => continue,
+            _ => continue,
         };
 
         match object {
@@ -640,7 +640,7 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
         };
 
         for (key, val) in query.get_where().iter() {
-            if let Some(result) = object.get(key.as_str()).ok() {
+            if let Ok(result) = object.get(key.as_str()) {
                 if *val == *result {
                     list.push(data.clone());
                 }
@@ -650,7 +650,7 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
         for comp in query.get_comparator().iter() {
             match comp {
                 ComparatorFilter::Eq(key, val) => {
-                    if let Some(result) = object.get(key.as_str()).ok() {
+                    if let Ok(result) = object.get(key.as_str()) {
                         if *result == *val {
                             if list.contains(data) {
                                 continue;
@@ -660,7 +660,7 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
                     }
                 }
                 ComparatorFilter::Ne(key, val) => {
-                    if let Some(result) = object.get(key.as_str()).ok() {
+                    if let Ok(result) = object.get(key.as_str()) {
                         if *result != *val {
                             if list.contains(data) {
                                 continue;
@@ -670,7 +670,7 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
                     }
                 }
                 ComparatorFilter::Gte(key, val) => {
-                    if let Some(result) = object.get(key.as_str()).ok() {
+                    if let Ok(result) = object.get(key.as_str()) {
                         match (result, val) {
                             (Ipld::Integer(res), Ipld::Integer(v)) if *res >= *v => {}
                             (Ipld::Float(res), Ipld::Float(v)) if *res >= *v => {}
@@ -683,7 +683,7 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
                     }
                 }
                 ComparatorFilter::Gt(key, val) => {
-                    if let Some(result) = object.get(key.as_str()).ok() {
+                    if let Ok(result) = object.get(key.as_str()) {
                         match (result, val) {
                             (Ipld::Integer(res), Ipld::Integer(v)) if *res > *v => {}
                             (Ipld::Float(res), Ipld::Float(v)) if *res > *v => {}
@@ -696,7 +696,7 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
                     }
                 }
                 ComparatorFilter::Lte(key, val) => {
-                    if let Some(result) = object.get(key.as_str()).ok() {
+                    if let Ok(result) = object.get(key.as_str()) {
                         match (result, val) {
                             (Ipld::Integer(res), Ipld::Integer(v)) if *res <= *v => {}
                             (Ipld::Float(res), Ipld::Float(v)) if *res <= *v => {}
@@ -709,7 +709,7 @@ pub(crate) fn execute(data: &[Sata], query: &QueryBuilder) -> Result<Vec<Sata>> 
                     }
                 }
                 ComparatorFilter::Lt(key, val) => {
-                    if let Some(result) = object.get(key.as_str()).ok() {
+                    if let Ok(result) = object.get(key.as_str()) {
                         match (result, val) {
                             (Ipld::Integer(res), Ipld::Integer(v)) if *res < *v => {}
                             (Ipld::Float(res), Ipld::Float(v)) if *res < *v => {}
