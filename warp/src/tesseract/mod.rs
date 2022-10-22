@@ -41,6 +41,7 @@ pub struct Tesseract {
     autosave: Arc<AtomicBool>,
     check: Arc<AtomicBool>,
     unlock: Arc<AtomicBool>,
+    soft_unlock: Arc<AtomicBool>,
     internal_counter: Arc<AtomicUsize>,
 }
 
@@ -53,6 +54,7 @@ impl Default for Tesseract {
             autosave: Arc::new(Default::default()),
             check: Arc::new(Default::default()),
             unlock: Arc::new(Default::default()),
+            soft_unlock: Arc::new(Default::default()),
             internal_counter: Arc::new(AtomicUsize::new(1)),
         }
     }
@@ -72,6 +74,7 @@ impl Clone for Tesseract {
             autosave: self.autosave.clone(),
             check: self.check.clone(),
             unlock: self.unlock.clone(),
+            soft_unlock: self.soft_unlock.clone(),
             internal_counter: self.internal_counter.clone(),
         }
     }
@@ -445,11 +448,26 @@ impl Tesseract {
         }
 
         let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &*self.enc_pass.read())?;
-        let internal = self.internal.read();
-        let data = internal.get(key).ok_or(Error::ObjectNotFound)?;
-        let slice = Cipher::direct_decrypt(CipherType::Aes256Gcm, data, &pkey)?;
+        let data = self.internal.read().get(key).cloned().ok_or(Error::ObjectNotFound)?;
+        let slice = Cipher::direct_decrypt(CipherType::Aes256Gcm, &data, &pkey)?;
         let plain_text = String::from_utf8_lossy(&slice[..]).to_string();
         Ok(plain_text)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    fn dry_retrieve(&self, key: &str) -> Result<()> {
+        if !self.is_soft_unlock() {
+            return Err(Error::TesseractLocked);
+        }
+
+        if !self.exist(key) {
+            return Err(Error::ObjectNotFound);
+        }
+
+        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &*self.enc_pass.read())?;
+        let data = self.internal.read().get(key).cloned().ok_or(Error::ObjectNotFound)?;
+        Cipher::direct_decrypt(CipherType::Aes256Gcm, &data, &pkey)?;
+        Ok(())
     }
 
     /// Used to delete the value from the keystore
@@ -507,7 +525,16 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn is_unlock(&self) -> bool {
-        !self.enc_pass.read().is_empty() && self.unlock.load(Ordering::Relaxed)
+        !self.enc_pass.read().is_empty()
+            && self.unlock.load(Ordering::Relaxed)
+            && !self.soft_unlock.load(Ordering::Relaxed)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    fn is_soft_unlock(&self) -> bool {
+        !self.enc_pass.read().is_empty()
+            && !self.unlock.load(Ordering::Relaxed)
+            && self.soft_unlock.load(Ordering::Relaxed)
     }
 
     /// Store password in memory to be used to decrypt contents.
@@ -522,17 +549,18 @@ impl Tesseract {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn unlock(&self, passphrase: &[u8]) -> Result<()> {
         *self.enc_pass.write() = Cipher::self_encrypt(CipherType::Aes256Gcm, passphrase)?;
-        self.unlock.store(true, Ordering::Relaxed);
-
+        self.soft_unlock.store(true, Ordering::Relaxed);
         if self.is_key_check_enabled() {
             let keys = self.internal_keys();
             for key in keys {
-                if let Err(e) = self.retrieve(&key) {
+                if let Err(e) = self.dry_retrieve(&key) {
                     self.lock();
                     return Err(e);
                 }
             }
         }
+        self.soft_unlock.store(false, Ordering::Relaxed);
+        self.unlock.store(true, Ordering::Relaxed);
         Ok(())
     }
 
@@ -552,6 +580,7 @@ impl Tesseract {
         if self.save().is_ok() {}
         self.enc_pass.write().zeroize();
         self.unlock.store(false, Ordering::Relaxed);
+        self.soft_unlock.store(false, Ordering::Relaxed);
     }
 }
 
