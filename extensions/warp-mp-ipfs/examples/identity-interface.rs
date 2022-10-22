@@ -114,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
 
     let file_appender = match &opt.path {
         Some(path) => tracing_appender::rolling::hourly(path, "warp_mp_identity_interface.log"),
-        None => tracing_appender::rolling::hourly("./", "warp_mp_identity_interface.log"),
+        None => tracing_appender::rolling::hourly(std::env::temp_dir(), "warp_mp_identity_interface.log"),
     };
 
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
