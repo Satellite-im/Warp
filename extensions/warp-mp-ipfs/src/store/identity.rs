@@ -19,7 +19,7 @@ use libipld::{
     Cid,
 };
 use sata::Sata;
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::broadcast;
 use tracing::log::{debug, error};
 use warp::{
@@ -315,7 +315,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 let username = identity.username();
                 let short_id = identity.short_id();
                 let did = identity.did_key();
-                let identity = payload_cid;
+                let local_cid = self.put_dag(identity.clone()).await?;
+
+                let identity = local_cid;
 
                 CacheDocument {
                     username,
@@ -331,22 +333,35 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 document.username = identity.username();
             }
             document.identity = payload_cid;
-        }
 
-        cache_documents.replace(document);
+            cache_documents.replace(document);
 
-        let cache_ipld = to_ipld(cache_documents)?;
+            let new_cid = self.put_dag(cache_documents).await?;
 
-        let new_cid = self.ipfs.put_dag(cache_ipld).await?;
-        //Do we want to [recursively] pin the cache?
-        self.ipfs.insert_pin(&new_cid, false).await?;
-        self.save_cache_cid(new_cid).await?;
-        if let Some(old_cid) = old_cid {
-            if self.ipfs.is_pinned(&old_cid).await? {
-                self.ipfs.remove_pin(&old_cid, false).await?;
+            //Do we want to [recursively] pin the cache?
+            self.ipfs.insert_pin(&new_cid, false).await?;
+            self.save_cache_cid(new_cid).await?;
+            if let Some(old_cid) = old_cid {
+                if self.ipfs.is_pinned(&old_cid).await? {
+                    self.ipfs.remove_pin(&old_cid, false).await?;
+                }
+                // Do we want to remove the old block?
+                self.ipfs.remove_block(old_cid).await?;
             }
-            // Do we want to remove the old block?
-            self.ipfs.remove_block(old_cid).await?;
+        } else if !found {
+            cache_documents.insert(document);
+            let new_cid = self.put_dag(cache_documents).await?;
+
+            //Do we want to [recursively] pin the cache?
+            self.ipfs.insert_pin(&new_cid, false).await?;
+            self.save_cache_cid(new_cid).await?;
+            if let Some(old_cid) = old_cid {
+                if self.ipfs.is_pinned(&old_cid).await? {
+                    self.ipfs.remove_pin(&old_cid, false).await?;
+                }
+                // Do we want to remove the old block?
+                self.ipfs.remove_block(old_cid).await?;
+            }
         }
 
         Ok(())
@@ -398,15 +413,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
         );
         identity.set_did_key(public_key.into());
 
-        let identity_ipld = to_ipld(identity.clone()).map_err(anyhow::Error::from)?;
-        // TODO: Create a single root dag for the Cids
-        let ident_cid = self.ipfs.put_dag(identity_ipld).await?;
+        let ident_cid = self.put_dag(identity.clone()).await?;
+
         let root_document = RootDocument {
             identity: ident_cid,
             ..Default::default()
         };
-        let root_ipld = to_ipld(root_document).map_err(anyhow::Error::from)?;
-        let root_cid = self.ipfs.put_dag(root_ipld).await?;
+
+        let root_cid = self.put_dag(root_document).await?;
 
         // Pin the dag
         self.ipfs.insert_pin(&root_cid, true).await?;
@@ -523,7 +537,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let mut future_list = futures::stream::FuturesOrdered::new();
 
         for doc in idents_docs {
-            future_list.push_back(self.get_dag::<Identity>(IpfsPath::from(doc.identity), None));
+            future_list.push_back(
+                self.get_dag::<Identity>(
+                    IpfsPath::from(doc.identity),
+                    Some(Duration::from_secs(10)),
+                ),
+            );
         }
 
         let list = future_list
@@ -542,15 +561,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
     pub async fn identity_update(&mut self, identity: Identity) -> Result<(), Error> {
         let rcid = self.get_cid()?;
         let path = IpfsPath::from(rcid);
-        let identity_ipld = to_ipld(identity).map_err(anyhow::Error::from)?;
-
-        let ident_cid = self.ipfs.put_dag(identity_ipld).await?;
+        let ident_cid = self.put_dag(identity).await?;
         let mut root_document: RootDocument = self.get_dag(path, None).await?;
         let old_identity_cid = root_document.identity;
         root_document.identity = ident_cid;
 
-        let root_ipld = to_ipld(root_document).map_err(anyhow::Error::from)?;
-        let root_cid = self.ipfs.put_dag(root_ipld).await?;
+        let root_cid = self.put_dag(root_document).await?;
         self.ipfs.remove_pin(&rcid, true).await?;
         self.ipfs.insert_pin(&root_cid, true).await?;
         self.ipfs.remove_block(old_identity_cid).await?;
@@ -606,13 +622,21 @@ impl<T: IpfsTypes> IdentityStore<T> {
     ) -> Result<D, Error> {
         //Because it utilizes DHT requesting other nodes for the cid, it will stall so here we would need to timeout
         //the request.
-        let timeout = timeout.unwrap_or(std::time::Duration::from_secs(10));
+        let timeout = timeout.unwrap_or(std::time::Duration::from_secs(30));
         let identity = match tokio::time::timeout(timeout, self.ipfs.get_dag(path)).await {
             Ok(Ok(ipld)) => from_ipld::<D>(ipld).map_err(anyhow::Error::from)?,
             Ok(Err(e)) => return Err(Error::Any(e)),
             Err(e) => return Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
         };
         Ok(identity)
+    }
+
+    pub async fn put_dag<S: Serialize>(&self, data: S) -> Result<Cid, Error> {
+        //Because it utilizes DHT requesting other nodes for the cid, it will stall so here we would need to timeout
+        //the request.
+        let ipld = to_ipld(data).map_err(anyhow::Error::from)?;
+        let cid = self.ipfs.put_dag(ipld).await?;
+        Ok(cid)
     }
 
     pub async fn own_identity(&self) -> Result<Identity, Error> {
