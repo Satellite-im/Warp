@@ -3,6 +3,7 @@ pub mod store;
 
 use config::MpIpfsConfig;
 use ipfs::libp2p::kad::protocol::DEFAULT_PROTO_NAME;
+use ipfs::libp2p::mplex::MplexConfig;
 use ipfs::libp2p::swarm::ConnectionLimits;
 use ipfs::libp2p::yamux::YamuxConfig;
 use ipfs::p2p::TransportConfig;
@@ -240,6 +241,11 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                     let mut config = YamuxConfig::default();
                     config.set_max_buffer_size(16 * 1024 * 1024);
                     config.set_receive_window_size(16 * 1024 * 1024);
+                    config
+                },
+                mplex_config: {
+                    let mut config = MplexConfig::default();
+                    config.set_max_buffer_size(usize::MAX);
                     config
                 },
                 ..Default::default()

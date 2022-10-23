@@ -327,7 +327,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 }
             }
         };
-
         if found && document.identity != payload_cid {
             if document.username != identity.username() {
                 document.username = identity.username();
@@ -820,7 +819,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
         self.end_event.store(true, Ordering::SeqCst);
     }
 
-    pub fn clear_internal_cache(&mut self) -> anyhow::Result<()> {
-        Ok(())
+    pub fn clear_internal_cache(&mut self) {
     }
 }
