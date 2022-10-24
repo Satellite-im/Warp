@@ -15,7 +15,7 @@ use warp::{
 
 use crate::config::Discovery;
 
-use self::{friends::InternalRequest, document::IdentityType};
+use self::{friends::InternalRequest, document::DocumentType};
 
 pub mod document;
 pub mod friends;
@@ -76,7 +76,7 @@ pub struct IdentityPayload {
     /// Not required but would be used to cross check the identity did, sender (if sent directly)
     pub did: DID,
     /// Type that represents identity or cid
-    pub payload: IdentityType,
+    pub payload: DocumentType<Identity>,
 }
 
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity::PublicKey> {

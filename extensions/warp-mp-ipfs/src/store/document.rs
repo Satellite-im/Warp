@@ -3,6 +3,13 @@ use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 use warp::{crypto::DID, multipass::identity::Identity};
 
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DocumentType<T> {
+    Object(T),
+    Cid(Cid),
+}
+
 /// node root document for their identity, friends, blocks, etc, along with previous cid (if we wish to track that)
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct RootDocument {
@@ -12,20 +19,13 @@ pub struct RootDocument {
     pub request: Option<Cid>,
 }
 
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum IdentityType {
-    Object(Identity),
-    Cid(Cid)
-}
-
 /// Used to lookup identities found and their corresponding cid
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct CacheDocument {
     pub username: String,
     pub did: DID,
     pub short_id: String,
-    pub identity: IdentityType,
+    pub identity: DocumentType<Identity>,
 }
 
 impl Hash for CacheDocument {

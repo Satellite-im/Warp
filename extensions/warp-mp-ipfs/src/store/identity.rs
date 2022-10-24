@@ -10,7 +10,7 @@ use std::{
 
 use crate::{
     config::Discovery,
-    store::{did_to_libp2p_pub, document::IdentityType, IdentityPayload},
+    store::{did_to_libp2p_pub, IdentityPayload},
     Persistent,
 };
 use futures::{FutureExt, StreamExt};
@@ -38,7 +38,7 @@ use warp::{
 
 use super::{
     connected_to_peer,
-    document::{CacheDocument, RootDocument},
+    document::{CacheDocument, RootDocument, DocumentType},
     libp2p_pub_to_did, PeerConnectionType, IDENTITY_BROADCAST,
 };
 
@@ -242,10 +242,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         let root = self.get_root_document().await?;
         let identity = self.get_dag::<Identity>(IpfsPath::from(root.identity), None).await?;
-        
+
         let did = identity.did_key();
 
-        let payload = IdentityType::Object(identity);
+        let payload = DocumentType::<Identity>::Object(identity);
 
         let payload = IdentityPayload { did, payload };
 
@@ -272,8 +272,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let _pk = did_to_libp2p_pub(&object.did)?;
 
         let identity = match &payload {
-            IdentityType::Object(identity) => identity.clone(),
-            IdentityType::Cid(cid) => {
+            DocumentType::Object(identity) => identity.clone(),
+            DocumentType::Cid(cid) => {
                 self.get_dag((*cid).into(), Some(Duration::from_secs(60)))
                     .await?
             }
@@ -544,10 +544,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         for doc in idents_docs {
             let fut = match doc.identity {
-                IdentityType::Cid(cid) => self
+                DocumentType::Cid(cid) => self
                     .get_dag::<Identity>(IpfsPath::from(cid), Some(Duration::from_secs(20)))
                     .boxed(),
-                IdentityType::Object(identity) => futures::future::ready(Ok(identity)).boxed(),
+                DocumentType::Object(identity) => futures::future::ready(Ok(identity)).boxed(),
             };
 
             future_list.push_back(fut);
