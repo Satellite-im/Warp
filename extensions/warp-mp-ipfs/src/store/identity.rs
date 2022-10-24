@@ -281,6 +281,19 @@ impl<T: IpfsTypes> IdentityStore<T> {
         //TODO: Validate public key against peer that sent it
         let _pk = did_to_libp2p_pub(&payload.did)?;
 
+        let identity = self
+            .get_dag::<Identity>(payload_cid.into(), Some(Duration::from_secs(60)))
+            .await?;
+
+        anyhow::ensure!(
+            payload.did == identity.did_key(),
+            "Payload doesnt match identity"
+        );
+
+        if let Some(own_id) = self.identity.read().clone() {
+            anyhow::ensure!(own_id != identity, "Cannot accept own identity");
+        }
+
         let (old_cid, mut cache_documents) = match self.get_cache_cid() {
             Ok(cid) => match self
                 .get_dag::<HashSet<CacheDocument>>(IpfsPath::from(cid), None)
@@ -292,32 +305,24 @@ impl<T: IpfsTypes> IdentityStore<T> {
             _ => (None, Default::default()),
         };
 
-        let identity = self.get_dag::<Identity>(payload_cid.into(), None).await?;
-        if payload.did != identity.did_key() {
-            anyhow::bail!("Payload doesnt match identity")
-        }
-        if let Some(own_id) = self.identity.read().clone() {
-            if own_id == identity {
-                anyhow::bail!("Cannot send own identity")
-            }
-        }
-
         let mut found = false;
 
-        let mut document = match cache_documents.iter().find(|document| {
-            document.did == identity.did_key() && document.short_id == identity.short_id()
-        }) {
+        let mut document = match cache_documents
+            .iter()
+            .find(|document| {
+                document.did == identity.did_key() && document.short_id == identity.short_id()
+            })
+            .cloned()
+        {
             Some(document) => {
                 found = true;
-                document.clone()
+                document
             }
             None => {
                 let username = identity.username();
                 let short_id = identity.short_id();
                 let did = identity.did_key();
-                let local_cid = self.put_dag(identity.clone()).await?;
-
-                let identity = local_cid;
+                let identity = self.put_dag(identity.clone()).await?;
 
                 CacheDocument {
                     username,
@@ -327,6 +332,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 }
             }
         };
+
         if found && document.identity != payload_cid {
             if document.username != identity.username() {
                 document.username = identity.username();
@@ -375,7 +381,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     async fn cache(&self) -> HashSet<CacheDocument> {
-        let cache_cid = match *self.cache_cid.read() {
+        let cache_cid = match self.cache_cid.read().clone() {
             Some(cid) => cid,
             None => return Default::default(),
         };
@@ -440,7 +446,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 Error::OtherWithContext("Identity store may not be initialized".into())
             })?;
 
-        let cache = self.cache().await;
+        // let cache = self.cache().await;
 
         let idents_docs = match &lookup {
             //Note: If this returns more than one identity, then either
@@ -481,7 +487,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
                         }
                     }
                 }
-                cache
+                self.cache()
+                    .await
                     .iter()
                     .filter(|ident| ident.did == *pubkey.clone())
                     .cloned()
@@ -491,7 +498,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 let split_data = username.split('#').collect::<Vec<&str>>();
 
                 if split_data.len() != 2 {
-                    cache
+                    self.cache()
+                        .await
                         .iter()
                         .filter(|ident| {
                             ident
@@ -506,7 +514,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
                         split_data.first().map(|s| s.to_lowercase()),
                         split_data.last().map(|s| s.to_lowercase()),
                     ) {
-                        (Some(name), Some(code)) => cache
+                        (Some(name), Some(code)) => self
+                            .cache()
+                            .await
                             .iter()
                             .filter(|ident| {
                                 ident.username.to_lowercase().eq(&name)
@@ -520,13 +530,16 @@ impl<T: IpfsTypes> IdentityStore<T> {
             }
             LookupBy::Username(username) => {
                 let username = username.to_lowercase();
-                cache
+                self.cache()
+                    .await
                     .iter()
                     .filter(|ident| ident.username.to_lowercase().contains(&username))
                     .cloned()
                     .collect::<Vec<_>>()
             }
-            LookupBy::ShortId(id) => cache
+            LookupBy::ShortId(id) => self
+                .cache()
+                .await
                 .iter()
                 .filter(|ident| ident.short_id.eq(id))
                 .cloned()
@@ -819,6 +832,5 @@ impl<T: IpfsTypes> IdentityStore<T> {
         self.end_event.store(true, Ordering::SeqCst);
     }
 
-    pub fn clear_internal_cache(&mut self) {
-    }
+    pub fn clear_internal_cache(&mut self) {}
 }
