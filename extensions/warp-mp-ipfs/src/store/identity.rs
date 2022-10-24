@@ -1,3 +1,6 @@
+//We are cloning the Cid rather than dereferencing to be sure that we are not holding
+//onto the lock.
+#![allow(clippy::clone_on_copy)]
 use std::{
     collections::HashSet,
     path::PathBuf,
@@ -446,8 +449,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 Error::OtherWithContext("Identity store may not be initialized".into())
             })?;
 
-        // let cache = self.cache().await;
-
         let idents_docs = match &lookup {
             //Note: If this returns more than one identity, then either
             //      A) The memory cache never got updated and somehow bypassed the check likely caused from a race condition; or
@@ -705,12 +706,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub fn get_cache_cid(&self) -> Result<Cid, Error> {
-        (*self.cache_cid.read())
+        (self.cache_cid.read().clone())
             .ok_or_else(|| Error::OtherWithContext("Cache cannot be found".into()))
     }
 
     pub fn get_cid(&self) -> Result<Cid, Error> {
-        (*self.root_cid.read()).ok_or(Error::IdentityDoesntExist)
+        (self.root_cid.read().clone()).ok_or(Error::IdentityDoesntExist)
     }
 
     pub async fn update_identity(&self) -> Result<(), Error> {
