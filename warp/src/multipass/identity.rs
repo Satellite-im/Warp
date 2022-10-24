@@ -184,7 +184,7 @@ pub struct Identity {
 
     /// Signature of the identity
     #[serde(skip_serializing_if = "Option::is_none")]
-    signature: Option<Vec<u8>>,
+    signature: Option<String>,
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -215,7 +215,7 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_signature(&mut self, signature: Option<Vec<u8>>) {
+    pub fn set_signature(&mut self, signature: Option<String>) {
         self.signature = signature;
     }
 
@@ -258,7 +258,7 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn signature(&self) -> Option<Vec<u8>> {
+    pub fn signature(&self) -> Option<String> {
         self.signature.clone()
     }
 
@@ -312,7 +312,7 @@ pub struct FriendRequest {
 
     /// Signature of request
     #[serde(skip_serializing_if = "Option::is_none")]
-    signature: Option<Vec<u8>>,
+    signature: Option<String>,
 }
 
 impl Default for FriendRequest {
@@ -345,7 +345,7 @@ impl FriendRequest {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_signature(&mut self, signature: Vec<u8>) {
+    pub fn set_signature(&mut self, signature: String) {
         self.signature = Some(signature);
     }
 }
@@ -368,7 +368,7 @@ impl FriendRequest {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn signature(&self) -> Option<Vec<u8>> {
+    pub fn signature(&self) -> Option<String> {
         self.signature.clone()
     }
 }

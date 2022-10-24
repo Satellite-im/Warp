@@ -100,7 +100,7 @@ impl InternalRequest {
         request.set_date(self.date());
 
         let signature = match self.signature() {
-            Some(s) => s,
+            Some(s) => bs58::decode(s).into_vec()?,
             None => return Err(Error::InvalidSignature),
         };
 
@@ -428,7 +428,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         request.set_from(local_public_key);
         request.set_to(pubkey.clone());
         request.set_status(FriendRequestStatus::Pending);
-        let signature = sign_serde(&self.tesseract, &request)?;
+        let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
 
         request.set_signature(signature);
 
@@ -471,7 +471,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         request.set_to(pubkey.clone());
         request.set_status(FriendRequestStatus::Accepted);
 
-        let signature = sign_serde(&self.tesseract, &request)?;
+        let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
         request.set_signature(signature);
 
         self.add_friend(pubkey).await?;
@@ -519,7 +519,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         request.set_to(pubkey.clone());
         request.set_status(FriendRequestStatus::Denied);
 
-        let signature = sign_serde(&self.tesseract, &request)?;
+        let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
         request.set_signature(signature);
 
         list.remove(index);
@@ -551,7 +551,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         request.set_to(pubkey.clone());
         request.set_status(FriendRequestStatus::RequestRemoved);
 
-        let signature = sign_serde(&self.tesseract, &request)?;
+        let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
         request.set_signature(signature);
 
         list.remove(index);
@@ -721,7 +721,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             request.set_from(local_public_key);
             request.set_to(pubkey.clone());
             request.set_status(FriendRequestStatus::FriendRemoved);
-            let signature = sign_serde(&self.tesseract, &request)?;
+            let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
 
             request.set_signature(signature);
 
@@ -956,7 +956,7 @@ fn validate_request(real_request: &FriendRequest) -> Result<(), Error> {
     request.set_date(real_request.date());
 
     let signature = match real_request.signature() {
-        Some(s) => s,
+        Some(s) => bs58::decode(s).into_vec()?,
         None => return Err(Error::InvalidSignature),
     };
 
