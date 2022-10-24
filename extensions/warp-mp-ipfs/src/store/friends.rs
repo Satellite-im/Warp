@@ -589,6 +589,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
         root_document.blocks = Some(new_cid);
         self.identity.set_root_document(root_document).await?;
         if let Some(cid) = old_cid {
+            if self.ipfs.is_pinned(&cid).await? {
+                self.ipfs.remove_pin(&cid, false).await?;
+            }
             self.ipfs.remove_block(cid).await?;
         }
         Ok(())
@@ -661,6 +664,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
         root_document.friends = Some(new_cid);
         self.identity.set_root_document(root_document).await?;
         if let Some(cid) = old_cid {
+            if self.ipfs.is_pinned(&cid).await? {
+                self.ipfs.remove_pin(&cid, false).await?;
+            }
             self.ipfs.remove_block(cid).await?;
         }
         Ok(())
@@ -762,6 +768,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
         root_document.request = Some(new_cid);
         self.identity.set_root_document(root_document).await?;
         if let Some(cid) = old_cid {
+            if self.ipfs.is_pinned(&cid).await? {
+                self.ipfs.remove_pin(&cid, false).await?;
+            }
             self.ipfs.remove_block(cid).await?;
         }
         Ok(())
