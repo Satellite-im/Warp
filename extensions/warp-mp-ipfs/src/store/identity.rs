@@ -575,16 +575,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let rcid = self.get_cid()?;
         let path = IpfsPath::from(rcid);
         let ident_cid = self.put_dag(identity).await?;
-        let mut root_document: RootDocument = self.get_dag(path, None).await?;
-        let old_identity_cid = root_document.identity;
-        root_document.identity = ident_cid;
 
-        let root_cid = self.put_dag(root_document).await?;
-        self.ipfs.remove_pin(&rcid, true).await?;
-        self.ipfs.insert_pin(&root_cid, true).await?;
-        self.ipfs.remove_block(old_identity_cid).await?;
-        self.save_cid(root_cid).await?;
-        Ok(())
+        let mut root_document: RootDocument = self.get_dag(path, None).await?;
+        root_document.identity = ident_cid;
+        self.set_root_document(root_document).await
     }
 
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
@@ -626,6 +620,21 @@ impl<T: IpfsTypes> IdentityStore<T> {
             Keypair::Ed25519(kp) => Ok(kp),
             _ => anyhow::bail!("Unsupported keypair"),
         }
+    }
+
+    pub async fn get_root_document(&self) -> Result<RootDocument, Error> {
+        let root_cid = self.get_cid()?;
+        let path = IpfsPath::from(root_cid);
+        self.get_dag(path, None).await
+    }
+
+    pub async fn set_root_document(&mut self, document: RootDocument) -> Result<(), Error> {
+        let old_cid = self.get_cid()?;
+        let root_cid = self.put_dag(document).await?;
+        self.ipfs.remove_pin(&old_cid, true).await?;
+        self.ipfs.insert_pin(&root_cid, true).await?;
+        self.save_cid(root_cid).await?;
+        Ok(())
     }
 
     pub async fn get_dag<D: DeserializeOwned>(
