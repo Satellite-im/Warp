@@ -1,7 +1,9 @@
 use libipld::Cid;
 use serde::{Deserialize, Serialize};
-use std::hash::Hash;
+use std::{collections::HashSet, hash::Hash};
 use warp::{crypto::DID, multipass::identity::Identity};
+
+use super::friends::InternalRequest;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -10,13 +12,19 @@ pub enum DocumentType<T> {
     Cid(Cid),
 }
 
+impl<T> From<Cid> for DocumentType<T> {
+    fn from(cid: Cid) -> Self {
+        DocumentType::Cid(cid)
+    }
+}
+
 /// node root document for their identity, friends, blocks, etc, along with previous cid (if we wish to track that)
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct RootDocument {
     pub identity: Cid,
-    pub friends: Option<Cid>,
-    pub blocks: Option<Cid>,
-    pub request: Option<Cid>,
+    pub friends: Option<DocumentType<HashSet<DID>>>,
+    pub blocks: Option<DocumentType<HashSet<DID>>>,
+    pub request: Option<DocumentType<Vec<InternalRequest>>>,
 }
 
 /// Used to lookup identities found and their corresponding cid

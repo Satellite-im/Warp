@@ -25,6 +25,7 @@ use crate::config::Discovery;
 use crate::store::{connected_to_peer, verify_serde_sig};
 use crate::Persistent;
 
+use super::document::DocumentType;
 use super::identity::IdentityStore;
 use super::phonebook::PhoneBook;
 use super::{
@@ -577,18 +578,24 @@ impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn block_list(&self) -> Result<HashSet<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.blocks {
-            Some(cid) => self.identity.get_dag(IpfsPath::from(cid), None).await,
+            Some(DocumentType::Cid(cid)) => self.identity.get_dag(IpfsPath::from(cid), None).await,
+            Some(DocumentType::Object(list)) => Ok(list),
             None => Ok(HashSet::new()),
         }
     }
 
     pub async fn set_block_list(&mut self, list: HashSet<DID>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
-        let old_cid = root_document.blocks;
-        let new_cid = self.identity.put_dag(list).await?;
-        root_document.blocks = Some(new_cid);
+        let old_document = root_document.blocks.clone();
+        if matches!(old_document, Some(DocumentType::Object(_)) | None) {
+            root_document.blocks = Some(DocumentType::Object(list));
+        } else if matches!(old_document, Some(DocumentType::Cid(_))) {
+            let new_cid = self.identity.put_dag(list).await?;
+            root_document.blocks = Some(new_cid.into());
+        }
+
         self.identity.set_root_document(root_document).await?;
-        if let Some(cid) = old_cid {
+        if let Some(DocumentType::Cid(cid)) = old_document {
             if self.ipfs.is_pinned(&cid).await? {
                 self.ipfs.remove_pin(&cid, false).await?;
             }
@@ -652,18 +659,24 @@ impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn friends_list(&self) -> Result<HashSet<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.friends {
-            Some(cid) => self.identity.get_dag(IpfsPath::from(cid), None).await,
+            Some(DocumentType::Cid(cid)) => self.identity.get_dag(IpfsPath::from(cid), None).await,
+            Some(DocumentType::Object(list)) => Ok(list),
             None => Ok(HashSet::new()),
         }
     }
 
     pub async fn set_friends_list(&mut self, list: HashSet<DID>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
-        let old_cid = root_document.friends;
-        let new_cid = self.identity.put_dag(list).await?;
-        root_document.friends = Some(new_cid);
+        let old_document = root_document.friends.clone();
+        if matches!(old_document, Some(DocumentType::Object(_)) | None) {
+            root_document.friends = Some(DocumentType::Object(list));
+        } else if matches!(old_document, Some(DocumentType::Cid(_))) {
+            let new_cid = self.identity.put_dag(list).await?;
+            root_document.friends = Some(new_cid.into());
+        }
+
         self.identity.set_root_document(root_document).await?;
-        if let Some(cid) = old_cid {
+        if let Some(DocumentType::Cid(cid)) = old_document {
             if self.ipfs.is_pinned(&cid).await? {
                 self.ipfs.remove_pin(&cid, false).await?;
             }
@@ -756,18 +769,25 @@ impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn list_all_raw_request(&self) -> Result<Vec<InternalRequest>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.request {
-            Some(cid) => self.identity.get_dag(IpfsPath::from(cid), None).await,
-            None => Ok(vec![]),
+            Some(DocumentType::Cid(cid)) => self.identity.get_dag(IpfsPath::from(cid), None).await,
+            Some(DocumentType::Object(list)) => Ok(list),
+            None => Ok(Vec::new()),
         }
     }
 
     pub async fn set_request_list(&mut self, list: Vec<InternalRequest>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
-        let old_cid = root_document.request;
-        let new_cid = self.identity.put_dag(list).await?;
-        root_document.request = Some(new_cid);
+        let old_document = root_document.request.clone();
+        if matches!(old_document, Some(DocumentType::Object(_)) | None) {
+            root_document.request = Some(DocumentType::Object(list));
+        } else if matches!(old_document, Some(DocumentType::Cid(_))) {
+            let new_cid = self.identity.put_dag(list).await?;
+            root_document.request = Some(new_cid.into());
+        }
+
         self.identity.set_root_document(root_document).await?;
-        if let Some(cid) = old_cid {
+
+        if let Some(DocumentType::Cid(cid)) = old_document {
             if self.ipfs.is_pinned(&cid).await? {
                 self.ipfs.remove_pin(&cid, false).await?;
             }
