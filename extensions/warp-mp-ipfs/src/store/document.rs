@@ -12,6 +12,7 @@ pub struct RootDocument {
     pub request: Option<Cid>,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum IdentityType {
     Object(Identity),
