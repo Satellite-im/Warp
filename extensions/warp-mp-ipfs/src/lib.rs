@@ -710,27 +710,27 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
 
     fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.friend_store()?;
-        Ok(store.list_incoming_request())
+        async_block_in_place_uncheck(store.list_incoming_request())
     }
 
     fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.friend_store()?;
-        Ok(store.list_outgoing_request())
+        async_block_in_place_uncheck(store.list_outgoing_request())
     }
 
     fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store()?;
-        Ok(store.received_friend_request_from(did))
+        async_block_in_place_uncheck(store.received_friend_request_from(did))
     }
 
     fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store()?;
-        Ok(store.sent_friend_request_to(did))
+        async_block_in_place_uncheck(store.sent_friend_request_to(did))
     }
 
     fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.friend_store()?;
-        Ok(store.list_all_request())
+        async_block_in_place_uncheck(store.list_all_request())
     }
 
     fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
@@ -745,7 +745,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
 
     fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store()?;
-        Ok(store.is_blocked(did))
+        async_block_in_place_uncheck(store.is_blocked(did))
     }
 
     fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
@@ -755,12 +755,12 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
 
     fn block_list(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store()?;
-        async_block_in_place_uncheck(store.block_list())
+        async_block_in_place_uncheck(store.block_list()).map(Vec::from_iter)
     }
 
     fn list_friends(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store()?;
-        async_block_in_place_uncheck(store.friends_list())
+        async_block_in_place_uncheck(store.friends_list()).map(Vec::from_iter)
     }
 
     fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {

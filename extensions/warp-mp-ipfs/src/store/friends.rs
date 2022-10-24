@@ -1,13 +1,12 @@
 #![allow(clippy::await_holding_lock)]
 use futures::StreamExt;
 use ipfs::libp2p::gossipsub::GossipsubMessage;
-use ipfs::{Ipfs, IpfsTypes, PeerId};
-use std::io::Write;
+use ipfs::{Ipfs, IpfsPath, IpfsTypes, PeerId};
+use std::collections::HashSet;
 use std::ops::Deref;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast;
 use tracing::log::{error, warn};
 
@@ -48,9 +47,6 @@ pub struct FriendsStore<T: IpfsTypes> {
     // Would be used to stop the look in the tokio task
     end_event: Arc<AtomicBool>,
 
-    // Profile containing friends, block, and request list
-    profile: Arc<RwLock<InternalProfile>>,
-
     // Used to broadcast request
     queue: Arc<RwLock<Vec<Queue>>>,
 
@@ -59,20 +55,10 @@ pub struct FriendsStore<T: IpfsTypes> {
 
     phonebook: PhoneBook<T>,
 
-    internal_counter: Arc<AtomicUsize>,
-
     tx: broadcast::Sender<MultiPassEventKind>,
 }
 
-#[derive(Default, Deserialize, Serialize, Debug, Clone)]
-pub struct InternalProfile {
-    friends: Vec<DID>,
-    block_list: Vec<DID>,
-    #[serde(skip)]
-    requests: Vec<InternalRequest>,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Eq)]
 #[serde(rename_all = "lowercase", tag = "type")]
 pub enum InternalRequest {
     In(FriendRequest),
@@ -124,252 +110,18 @@ impl InternalRequest {
     }
 }
 
-impl InternalProfile {
-    pub async fn from_file<P: AsRef<Path>>(path: P, _: &DID) -> anyhow::Result<Self> {
-        let mut profile = InternalProfile::default();
-        let path = path.as_ref();
-        if let Ok(bytes) = tokio::fs::read(path.join("friends")).await {
-            if let Ok(data) = serde_json::from_slice(&bytes) {
-                profile.friends = data;
-            }
-        }
-        if let Ok(bytes) = tokio::fs::read(path.join("block_list")).await {
-            if let Ok(data) = serde_json::from_slice(&bytes) {
-                profile.block_list = data;
-            }
-        }
-        if let Ok(bytes) = tokio::fs::read(path.join("request_list")).await {
-            if let Ok(data) = serde_json::from_slice(&bytes) {
-                profile.requests = data;
-            }
-        }
-
-        Ok(profile)
-    }
-
-    pub fn to_file<P: AsRef<Path>>(&self, path: P, _: &DID) -> anyhow::Result<()> {
-        self.friends_to_file_sync(&path)?;
-        self.request_to_file_sync(&path)?;
-        self.blocks_to_file_sync(&path)?;
-        Ok(())
-    }
-
-    pub fn friends_to_file_sync<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
-        let path = path.as_ref();
-        let bytes = serde_json::to_vec(&self.friends())?;
-        let mut fs = std::fs::File::create(path.join("friends"))?;
-        fs.write_all(&bytes)?;
-        fs.flush()?;
-        Ok(())
-    }
-
-    pub fn blocks_to_file_sync<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
-        let path = path.as_ref();
-        let bytes = serde_json::to_vec(&self.block_list())?;
-        let mut fs = std::fs::File::create(path.join("block_list"))?;
-        fs.write_all(&bytes)?;
-        fs.flush()?;
-        Ok(())
-    }
-
-    pub fn request_to_file_sync<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
-        let path = path.as_ref();
-        let bytes = serde_json::to_vec(&self.requests())?;
-        let mut fs = std::fs::File::create(path.join("request_list"))?;
-        fs.write_all(&bytes)?;
-        fs.flush()?;
-        Ok(())
-    }
-
-    pub async fn friends_to_file<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
-        let path = path.as_ref();
-        let bytes = serde_json::to_vec(&self.friends())?;
-        let mut fs = tokio::fs::File::create(path.join("friends")).await?;
-        fs.write_all(&bytes).await?;
-        fs.flush().await?;
-        Ok(())
-    }
-
-    pub async fn blocks_to_file<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
-        let path = path.as_ref();
-        let bytes = serde_json::to_vec(&self.block_list())?;
-        let mut fs = tokio::fs::File::create(path.join("block_list")).await?;
-        fs.write_all(&bytes).await?;
-        fs.flush().await?;
-        Ok(())
-    }
-
-    pub async fn request_to_file<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
-        let path = path.as_ref();
-        let bytes = serde_json::to_vec(&self.requests())?;
-        let mut fs = tokio::fs::File::create(path.join("request_list")).await?;
-        fs.write_all(&bytes).await?;
-        fs.flush().await?;
-        Ok(())
-    }
-}
-
-impl InternalProfile {
-    pub fn add_request(&mut self, request: InternalRequest) -> Result<(), Error> {
-        if self.requests.contains(&request) {
-            return Err(Error::FriendRequestExist);
-        }
-
-        self.requests.push(request);
-        Ok(())
-    }
-
-    pub fn remove_request(&mut self, request: InternalRequest) -> Result<(), Error> {
-        let index = self
-            .requests
-            .iter()
-            .position(|req| req == &request)
-            .ok_or(Error::FriendRequestDoesntExist)?;
-
-        let _ = self.requests.remove(index);
-        Ok(())
-    }
-
-    pub fn add_friend(&mut self, did: &DID) -> Result<(), Error> {
-        if self.friends.contains(did) {
-            return Err(Error::FriendExist);
-        }
-        if self.block_list.contains(did) {
-            return Err(Error::PublicKeyIsBlocked);
-        }
-        self.friends.push(did.clone());
-        Ok(())
-    }
-
-    pub fn remove_friend(&mut self, did: &DID) -> Result<(), Error> {
-        let index = self
-            .friends
-            .iter()
-            .position(|key| key == did)
-            .ok_or(Error::FriendDoesntExist)?;
-        self.friends.remove(index);
-        Ok(())
-    }
-
-    pub fn block(&mut self, did: &DID) -> Result<(), Error> {
-        if self.block_list.contains(did) {
-            return Err(Error::PublicKeyIsBlocked);
-        }
-        // Maybe check friends list here too?
-        self.block_list.push(did.clone());
-        Ok(())
-    }
-
-    pub fn unblock(&mut self, did: &DID) -> Result<(), Error> {
-        let index = self
-            .block_list
-            .iter()
-            .position(|key| key == did)
-            .ok_or(Error::PublicKeyIsntBlocked)?;
-        self.block_list.remove(index);
-        Ok(())
-    }
-}
-
-impl InternalProfile {
-    pub fn friends(&self) -> Vec<DID> {
-        self.friends.clone()
-    }
-
-    pub fn block_list(&self) -> Vec<DID> {
-        self.block_list.clone()
-    }
-
-    pub fn requests(&self) -> Vec<InternalRequest> {
-        self.requests.clone()
-    }
-
-    pub fn requests_mut(&mut self) -> &mut Vec<InternalRequest> {
-        &mut self.requests
-    }
-
-    pub fn set_outgoing_request(&mut self, request: &FriendRequest) -> Result<(), Error> {
-        self.add_request(InternalRequest::Out(request.clone()))
-    }
-
-    pub fn set_incoming_request(&mut self, request: &FriendRequest) -> Result<(), Error> {
-        self.add_request(InternalRequest::In(request.clone()))
-    }
-
-    pub fn incoming_request(&self) -> Vec<FriendRequest> {
-        self.requests
-            .iter()
-            .filter_map(|request| match request {
-                InternalRequest::In(request) => Some(request),
-                _ => None,
-            })
-            .cloned()
-            .collect::<Vec<_>>()
-    }
-
-    pub fn outgoing_request(&self) -> Vec<FriendRequest> {
-        self.requests
-            .iter()
-            .filter_map(|request| match request {
-                InternalRequest::Out(request) => Some(request),
-                _ => None,
-            })
-            .cloned()
-            .collect::<Vec<_>>()
-    }
-}
-
-impl InternalProfile {
-    pub fn remove_invalid_request(&mut self) -> Result<(), Error> {
-        self.requests.retain(|req| req.valid().is_ok());
-        Ok(())
-    }
-}
-
 impl<T: IpfsTypes> Clone for FriendsStore<T> {
     fn clone(&self) -> Self {
-        {
-            let mut counter = self.internal_counter.load(Ordering::SeqCst);
-            counter += 1;
-            self.internal_counter.store(counter, Ordering::SeqCst);
-        }
         Self {
             ipfs: self.ipfs.clone(),
             identity: self.identity.clone(),
             did_key: self.did_key.clone(),
             path: self.path.clone(),
             end_event: self.end_event.clone(),
-            profile: self.profile.clone(),
             queue: self.queue.clone(),
             tesseract: self.tesseract.clone(),
             phonebook: self.phonebook.clone(),
-            internal_counter: self.internal_counter.clone(),
             tx: self.tx.clone(),
-        }
-    }
-}
-
-impl<T: IpfsTypes> Drop for FriendsStore<T> {
-    fn drop(&mut self) {
-        let counter = {
-            let mut counter = self.internal_counter.load(Ordering::SeqCst);
-            if counter != 0 {
-                counter -= 1;
-                self.internal_counter.store(counter, Ordering::SeqCst)
-            }
-            counter
-        };
-
-        //Note: This is used as an attempt to save to disk after this drops if previous attempts fail
-        //      however this may not be needed in the future.
-        //TODO: Possibly remove in the future
-        if counter == 0 {
-            self.end_event.store(true, Ordering::SeqCst);
-            if let Some(path) = self.path.as_ref() {
-                if let Err(e) = self.profile.write().to_file(path, &*self.did_key) {
-                    error!("Error saving profile: {e}");
-                }
-            }
         }
     }
 }
@@ -388,17 +140,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
             false => None,
         };
 
-        if let Some(path) = path.as_ref() {
-            if !path.exists() {
-                tokio::fs::create_dir_all(path).await?;
-            }
-        }
-
         let end_event = Arc::new(AtomicBool::new(false));
-        let profile = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
         let did_key = Arc::new(did_keypair(&tesseract)?);
-        let internal_counter = Arc::new(AtomicUsize::new(1));
 
         let (phonebook, fut) = PhoneBook::new(ipfs.clone(), tx.clone());
         tokio::spawn(fut);
@@ -409,11 +153,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
             did_key,
             path,
             end_event,
-            profile,
             queue,
             tesseract,
             phonebook,
-            internal_counter,
             tx,
         };
 
@@ -440,29 +182,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
             }
 
             if let Some(path) = store.path.as_ref() {
-                if let Ok(queue) = tokio::fs::read(path.join("queue")).await {
+                if let Ok(queue) = tokio::fs::read(path.join(".request_queue")).await {
                     if let Ok(queue) = serde_json::from_slice(&queue) {
                         *store.queue.write() = queue;
                     }
                 }
-                match InternalProfile::from_file(path, &*store.did_key).await {
-                    Ok(mut profile) => {
-                        if let Err(e) = profile.remove_invalid_request() {
-                            error!("Error removing invalid request: {e}");
-                        }
-                        *store.profile.write() = profile;
-                        if let Err(_e) = store
-                            .phonebook
-                            .add_friend_list(store.profile.read().friends())
-                            .await
-                        {
-                            error!("Error adding friends in phonebook: {_e}");
-                        }
-                    }
-                    Err(e) => {
-                        error!("Error loading profile: {e}");
-                    }
-                };
             }
             // autoban the blocklist
             match store.block_list().await {
@@ -508,37 +232,42 @@ impl<T: IpfsTypes> FriendsStore<T> {
     }
 
     //TODO: Implement Errors
-    async fn check_request_message(&mut self, local_public_key: &DID, message: Arc<GossipsubMessage>) -> anyhow::Result<()> {
+    async fn check_request_message(
+        &mut self,
+        local_public_key: &DID,
+        message: Arc<GossipsubMessage>,
+    ) -> anyhow::Result<()> {
         if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
             let data = data.decrypt::<FriendRequest>(&*self.did_key)?;
 
             if data.to().ne(local_public_key) {
                 warn!("Request is not meant for identity. Skipping");
-                return Ok(())
+                return Ok(());
             }
-
-            if self.profile.read().outgoing_request().contains(&data)
-                || self.profile.read().incoming_request().contains(&data)
-            {
-                warn!("Request exist locally. Skipping");
-                return Ok(())
-            }
+            //TODO:
+            // if self.profile.read().outgoing_request().contains(&data)
+            //     || self.profile.read().incoming_request().contains(&data)
+            // {
+            //     warn!("Request exist locally. Skipping");
+            //     return Ok(());
+            // }
 
             // Before we validate the request, we should check to see if the key is blocked
             // If it is, skip the request so we dont wait resources storing it.
-            if self.is_blocked(&data.from()) {
-                return Ok(())
+            if self.is_blocked(&data.from()).await? {
+                return Ok(());
             }
 
             //first verify the request before processing it
             if let Err(e) = validate_request(&data) {
                 error!("Incoming request cannot be validated: {e}");
-                return Ok(())
+                return Ok(());
             }
 
             match data.status() {
                 FriendRequestStatus::Accepted => {
-                    let index = match self.profile.read().requests().iter().position(|request| {
+                    let mut list = self.list_all_raw_request().await?;
+                    let index = match list.iter().position(|request| {
                         request.request_type() == InternalRequestType::Outgoing
                             && request.to() == data.from()
                             && request.status() == FriendRequestStatus::Pending
@@ -546,29 +275,20 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         Some(index) => index,
                         None => {
                             error!("Unable to locate pending request. Already been accepted or rejected?");
-                            return Ok(())
+                            return Ok(());
                         }
                     };
 
-                    self.profile.write().requests_mut().remove(index);
+                    list.remove(index);
+                    self.set_request_list(list).await?;
 
-                    if let Err(e) = self.add_friend(&data.from()).await {
-                        error!("Error adding friend: {e}");
-                        return Ok(())
-                    }
-
-                    if let Some(path) = self.path.as_ref() {
-                        if let Err(e) = self.profile.write().request_to_file(path).await {
-                            error!("Error saving request: {e}");
-                            return Ok(())
-                        }
-                    }
+                    self.add_friend(&data.from()).await?;
                 }
                 FriendRequestStatus::Pending => {
-                    if let Err(e) = self.profile.write().set_incoming_request(&data) {
-                        error!("Error setting incoming request: {e}");
-                        return Ok(())
-                    }
+                    let mut list = self.list_all_raw_request().await?;
+                    list.push(InternalRequest::In(data.clone()));
+
+                    self.set_request_list(list).await?;
 
                     if let Err(e) = self
                         .tx
@@ -576,24 +296,20 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     {
                         error!("Error broadcasting event: {e}");
                     }
-
-                    if let Some(path) = self.path.as_ref() {
-                        if let Err(e) = self.profile.write().request_to_file(path).await {
-                            error!("Error saving request: {e}");
-                        }
-                    }
                 }
                 FriendRequestStatus::Denied => {
-                    let index = match self.profile.read().requests().iter().position(|request| {
+                    let mut list = self.list_all_raw_request().await?;
+                    let index = match list.iter().position(|request| {
                         request.request_type() == InternalRequestType::Outgoing
                             && request.to() == data.from()
                             && request.status() == FriendRequestStatus::Pending
                     }) {
                         Some(index) => index,
-                        None => return Ok(())
+                        None => return Ok(()),
                     };
 
-                    let _ = self.profile.write().requests_mut().remove(index);
+                    list.remove(index);
+                    self.set_request_list(list).await?;
 
                     if let Err(e) = self
                         .tx
@@ -601,49 +317,32 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     {
                         error!("Error broadcasting event: {e}");
                     }
-
-                    if let Some(path) = self.path.as_ref() {
-                        if let Err(e) = self.profile.write().request_to_file(path).await {
-                            error!("Error saving request: {e}");
-                            return Ok(())
-                        }
-                    }
                 }
                 FriendRequestStatus::FriendRemoved => {
-                    if let Err(e) = self.is_friend(&data.from()).await {
-                        error!("Unable to remove {e}");
-                        return Ok(())
-                    }
+                    self.is_friend(&data.from()).await?;
 
-                    if let Err(e) = self.remove_friend(&data.from(), false, false).await {
-                        error!("Error removing friend: {e}");
-                        return Ok(())
-                    }
+                    self.remove_friend(&data.from(), false, false).await?;
                 }
                 FriendRequestStatus::RequestRemoved => {
-                    let index = match self.profile.read().requests().iter().position(|request| {
+                    let mut list = self.list_all_raw_request().await?;
+                    let index = match list.iter().position(|request| {
                         request.request_type() == InternalRequestType::Incoming
                             && request.to() == data.to()
                             && request.status() == FriendRequestStatus::Pending
                     }) {
                         Some(index) => index,
-                        None => return Ok(())
+                        None => return Ok(()),
                     };
 
-                    self.profile.write().requests_mut().remove(index);
+                    list.remove(index);
+
+                    self.set_request_list(list).await?;
 
                     if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestClosed {
                         from: data.from(),
                         to: data.to(),
                     }) {
                         error!("Error broadcasting event: {e}");
-                    }
-
-                    if let Some(path) = self.path.as_ref() {
-                        if let Err(e) = self.profile.write().request_to_file(path).await {
-                            error!("Error saving request: {e}");
-                            return Ok(())
-                        }
                     }
                 }
                 _ => {}
@@ -703,15 +402,17 @@ impl<T: IpfsTypes> FriendsStore<T> {
             return Err(Error::FriendExist);
         }
 
-        if self.is_blocked(pubkey) {
+        if self.is_blocked(pubkey).await? {
             return Err(Error::PublicKeyIsBlocked);
         }
 
-        if self.has_request_from(pubkey) {
+        if self.has_request_from(pubkey).await? {
             return Err(Error::FriendRequestExist);
         }
 
-        for request in self.profile.read().requests().iter() {
+        let list = self.list_all_raw_request().await?;
+
+        for request in list.iter() {
             // checking the from and status is just a precaution and not required
             if request.request_type() == InternalRequestType::Outgoing
                 && request.from() == local_public_key
@@ -743,15 +444,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
             return Err(Error::CannotAcceptSelfAsFriend);
         }
 
-        if !self.has_request_from(pubkey) {
+        if !self.has_request_from(pubkey).await? {
             return Err(Error::FriendRequestDoesntExist);
         }
 
+        let mut list = self.list_all_raw_request().await?;
+
         // Although the request been validated before storing, we should validate again just to be safe
-        let index = self
-            .profile
-            .read()
-            .requests()
+        let index = list
             .iter()
             .position(|request| {
                 request.request_type() == InternalRequestType::Incoming
@@ -761,7 +461,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             })
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        match self.profile.read().requests().get(index) {
+        match list.get(index) {
             Some(req) => req.valid()?,
             None => return Err(Error::CannotFindFriendRequest),
         };
@@ -776,7 +476,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         self.add_friend(pubkey).await?;
 
-        self.profile.write().requests_mut().remove(index);
+        list.remove(index);
+
+        self.set_request_list(list).await?;
 
         self.broadcast_request(&request, false, true).await
     }
@@ -790,15 +492,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
             return Err(Error::CannotDenySelfAsFriend);
         }
 
-        if !self.has_request_from(pubkey) {
+        if !self.has_request_from(pubkey).await? {
             return Err(Error::FriendRequestDoesntExist);
         }
 
+        let mut list = self.list_all_raw_request().await?;
+
         // Although the request been validated before storing, we should validate again just to be safe
-        let index = self
-            .profile
-            .read()
-            .requests()
+        let index = list
             .iter()
             .position(|request| {
                 request.request_type() == InternalRequestType::Incoming
@@ -808,7 +509,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             })
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        match self.profile.read().requests().get(index) {
+        match list.get(index) {
             Some(req) => req.valid()?,
             None => return Err(Error::CannotFindFriendRequest),
         };
@@ -821,7 +522,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let signature = sign_serde(&self.tesseract, &request)?;
         request.set_signature(signature);
 
-        self.profile.write().requests_mut().remove(index);
+        list.remove(index);
+
+        self.set_request_list(list).await?;
 
         self.broadcast_request(&request, false, true).await
     }
@@ -831,10 +534,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
 
-        let index = self
-            .profile
-            .read()
-            .requests()
+        let mut list = self.list_all_raw_request().await?;
+
+        let index = list
             .iter()
             .position(|request| {
                 request.request_type() == InternalRequestType::Outgoing
@@ -852,45 +554,66 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let signature = sign_serde(&self.tesseract, &request)?;
         request.set_signature(signature);
 
-        self.profile.write().requests_mut().remove(index);
+        list.remove(index);
+
+        self.set_request_list(list).await?;
 
         self.broadcast_request(&request, false, true).await
     }
 
-    pub fn has_request_from(&self, pubkey: &DID) -> bool {
-        self.profile
-            .read()
-            .incoming_request()
-            .iter()
-            .filter(|request| {
-                request.from().eq(pubkey) && request.status() == FriendRequestStatus::Pending
-            })
-            .count()
-            != 0
+    pub async fn has_request_from(&self, pubkey: &DID) -> Result<bool, Error> {
+        self.list_incoming_request().await.map(|list| {
+            list.iter()
+                .filter(|request| {
+                    request.from().eq(pubkey) && request.status() == FriendRequestStatus::Pending
+                })
+                .count()
+                != 0
+        })
     }
 }
 
 impl<T: IpfsTypes> FriendsStore<T> {
-    pub async fn block_list(&self) -> Result<Vec<DID>, Error> {
-        Ok(self.profile.read().block_list())
+    pub async fn block_list(&self) -> Result<HashSet<DID>, Error> {
+        let root_document = self.identity.get_root_document().await?;
+        match root_document.blocks {
+            Some(cid) => self.identity.get_dag(IpfsPath::from(cid), None).await,
+            None => Ok(HashSet::new()),
+        }
     }
 
-    pub fn is_blocked(&self, public_key: &DID) -> bool {
-        self.profile.read().block_list().contains(public_key)
+    pub async fn set_block_list(&mut self, list: HashSet<DID>) -> Result<(), Error> {
+        let mut root_document = self.identity.get_root_document().await?;
+        let old_cid = root_document.blocks;
+        let new_cid = self.identity.put_dag(list).await?;
+        root_document.blocks = Some(new_cid);
+        self.identity.set_root_document(root_document).await?;
+        if let Some(cid) = old_cid {
+            self.ipfs.remove_block(cid).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn is_blocked(&self, public_key: &DID) -> Result<bool, Error> {
+        self.block_list()
+            .await
+            .map(|list| list.contains(public_key))
     }
 
     pub async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.profile.write().block(pubkey)?;
+        if self.is_blocked(pubkey).await? {
+            return Err(Error::PublicKeyIsBlocked);
+        }
+
+        let mut list = self.block_list().await?;
+
+        if list.insert(pubkey.clone()) {
+            self.set_block_list(list).await?;
+        }
 
         if self.is_friend(pubkey).await.is_ok() {
             if let Err(e) = self.remove_friend(pubkey, true, false).await {
                 error!("Error removing item from friend list: {e}");
-            }
-        }
-
-        if let Some(path) = self.path.as_ref() {
-            if let Err(e) = self.profile.write().friends_to_file(path).await {
-                error!("Error saving friends list: {e}");
             }
         }
 
@@ -906,23 +629,41 @@ impl<T: IpfsTypes> FriendsStore<T> {
     }
 
     pub async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.profile.write().unblock(pubkey)?;
+        if !self.is_blocked(pubkey).await? {
+            return Err(Error::PublicKeyIsntBlocked);
+        }
+
+        let mut list = self.block_list().await?;
+
+        if list.remove(pubkey) {
+            self.set_block_list(list).await?;
+        }
 
         let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
-
         self.ipfs.unban_peer(peer_id).await?;
-        if let Some(path) = self.path.as_ref() {
-            if let Err(e) = self.profile.write().blocks_to_file(path).await {
-                error!("Error saving block list: {e}");
-            }
-        }
         Ok(())
     }
 }
 
 impl<T: IpfsTypes> FriendsStore<T> {
-    pub async fn friends_list(&self) -> Result<Vec<DID>, Error> {
-        Ok(self.profile.read().friends())
+    pub async fn friends_list(&self) -> Result<HashSet<DID>, Error> {
+        let root_document = self.identity.get_root_document().await?;
+        match root_document.friends {
+            Some(cid) => self.identity.get_dag(IpfsPath::from(cid), None).await,
+            None => Ok(HashSet::new()),
+        }
+    }
+
+    pub async fn set_friends_list(&mut self, list: HashSet<DID>) -> Result<(), Error> {
+        let mut root_document = self.identity.get_root_document().await?;
+        let old_cid = root_document.friends;
+        let new_cid = self.identity.put_dag(list).await?;
+        root_document.friends = Some(new_cid);
+        self.identity.set_root_document(root_document).await?;
+        if let Some(cid) = old_cid {
+            self.ipfs.remove_block(cid).await?;
+        }
+        Ok(())
     }
 
     // Should not be called directly but only after a request is accepted
@@ -931,20 +672,18 @@ impl<T: IpfsTypes> FriendsStore<T> {
             return Err(Error::FriendExist);
         }
 
-        if self.is_blocked(pubkey) {
+        if self.is_blocked(pubkey).await? {
             return Err(Error::PublicKeyIsBlocked);
         }
 
-        self.profile.write().add_friend(pubkey)?;
+        let mut list = self.friends_list().await?;
+
+        if list.insert(pubkey.clone()) {
+            self.set_friends_list(list).await?;
+        }
 
         if let Err(_e) = self.phonebook.add_friend(pubkey).await {
             error!("Error: {_e}");
-        }
-
-        if let Some(path) = self.path.as_ref() {
-            if let Err(e) = self.profile.write().friends_to_file(path).await {
-                error!("Error saving friends list: {e}");
-            }
         }
 
         if let Err(e) = self.tx.send(MultiPassEventKind::FriendAdded {
@@ -964,7 +703,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
     ) -> Result<(), Error> {
         self.is_friend(pubkey).await?;
 
-        self.profile.write().remove_friend(pubkey)?;
+        let mut list = self.friends_list().await?;
+
+        if list.remove(pubkey) {
+            self.set_friends_list(list).await?;
+        }
 
         if let Err(_e) = self.phonebook.remove_friend(pubkey).await {
             error!("Error: {_e}");
@@ -983,10 +726,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
             request.set_signature(signature);
 
             self.broadcast_request(&request, save, save).await?;
-        } else if let Some(path) = self.path.as_ref() {
-            if let Err(e) = self.profile.write().friends_to_file(path).await {
-                error!("Error saving friends list: {e}");
-            }
         }
 
         if let Err(e) = self.tx.send(MultiPassEventKind::FriendRemoved {
@@ -1008,50 +747,80 @@ impl<T: IpfsTypes> FriendsStore<T> {
 }
 
 impl<T: IpfsTypes> FriendsStore<T> {
-    pub fn list_all_request(&self) -> Vec<FriendRequest> {
-        let mut requests = vec![];
-        requests.extend(self.list_incoming_request());
-        requests.extend(self.list_outgoing_request());
-        requests
+    pub async fn list_all_raw_request(&self) -> Result<Vec<InternalRequest>, Error> {
+        let root_document = self.identity.get_root_document().await?;
+        match root_document.request {
+            Some(cid) => self.identity.get_dag(IpfsPath::from(cid), None).await,
+            None => Ok(vec![]),
+        }
     }
 
-    pub fn received_friend_request_from(&self, did: &DID) -> bool {
+    pub async fn set_request_list(&mut self, list: Vec<InternalRequest>) -> Result<(), Error> {
+        let mut root_document = self.identity.get_root_document().await?;
+        let old_cid = root_document.request;
+        let new_cid = self.identity.put_dag(list).await?;
+        root_document.request = Some(new_cid);
+        self.identity.set_root_document(root_document).await?;
+        if let Some(cid) = old_cid {
+            self.ipfs.remove_block(cid).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
+        self.list_all_raw_request().await.map(|list| {
+            list.iter()
+                .map(|request| match request {
+                    InternalRequest::In(request) | InternalRequest::Out(request) => request,
+                })
+                .cloned()
+                .collect()
+        })
+    }
+
+    pub async fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
         self.list_incoming_request()
-            .iter()
-            .any(|request| request.from().eq(did))
+            .await
+            .map(|list| list.iter().any(|request| request.from().eq(did)))
     }
 
-    pub fn list_incoming_request(&self) -> Vec<FriendRequest> {
-        self.profile
-            .read()
-            .incoming_request()
-            .iter()
-            .filter(|request| request.status() == FriendRequestStatus::Pending)
-            .cloned()
-            .collect::<Vec<_>>()
+    pub async fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
+        self.list_all_raw_request().await.map(|list| {
+            list.iter()
+                .filter_map(|request| match request {
+                    InternalRequest::In(request) => Some(request),
+                    _ => None,
+                })
+                .filter(|request| request.status() == FriendRequestStatus::Pending)
+                .cloned()
+                .collect::<Vec<_>>()
+        })
     }
 
-    pub fn sent_friend_request_to(&self, did: &DID) -> bool {
+    pub async fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
         self.list_outgoing_request()
-            .iter()
-            .any(|request| request.to().eq(did))
+            .await
+            .map(|list| list.iter().any(|request| request.to().eq(did)))
     }
 
-    pub fn list_outgoing_request(&self) -> Vec<FriendRequest> {
-        self.profile
-            .read()
-            .outgoing_request()
-            .iter()
-            .filter(|request| request.status() == FriendRequestStatus::Pending)
-            .cloned()
-            .collect::<Vec<_>>()
+    pub async fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
+        self.list_all_raw_request().await.map(|list| {
+            list.iter()
+                .filter_map(|request| match request {
+                    InternalRequest::Out(request) => Some(request),
+                    _ => None,
+                })
+                .filter(|request| request.status() == FriendRequestStatus::Pending)
+                .cloned()
+                .collect::<Vec<_>>()
+        })
     }
 
     pub async fn broadcast_request(
         &mut self,
         request: &FriendRequest,
         store_request: bool,
-        save_to_disk: bool,
+        _save_to_disk: bool,
     ) -> Result<(), Error> {
         let remote_peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
 
@@ -1091,7 +860,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
         }
 
         if store_request {
-            self.profile.write().set_outgoing_request(request)?;
+            let outgoing_request = InternalRequest::Out(request.clone());
+            let mut list = self.list_all_raw_request().await?;
+            if !list.contains(&outgoing_request) {
+                list.push(outgoing_request);
+                self.set_request_list(list).await?;
+            }
         }
 
         let mut data = Sata::default();
@@ -1154,14 +928,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
             }
             _ => {}
         };
-
-        if save_to_disk {
-            if let Some(path) = self.path.as_ref() {
-                if let Err(e) = self.profile.write().request_to_file(path).await {
-                    error!("Error saving request: {e}");
-                }
-            }
-        }
         Ok(())
     }
 
