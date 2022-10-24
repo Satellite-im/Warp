@@ -10,10 +10,10 @@ use std::{
 
 use crate::{
     config::Discovery,
-    store::{did_to_libp2p_pub, IdentityPayload},
+    store::{did_to_libp2p_pub, document::IdentityType, IdentityPayload},
     Persistent,
 };
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use ipfs::{
     libp2p::gossipsub::GossipsubMessage, Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId,
 };
@@ -240,25 +240,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         let data = Sata::default();
 
-        let did = self
-            .identity
-            .read()
-            .clone()
-            .map(|identity| identity.did_key())
-            .ok_or(Error::IdentityDoesntExist)?;
+        let root = self.get_root_document().await?;
+        let identity = self.get_dag::<Identity>(IpfsPath::from(root.identity), None).await?;
+        
+        let did = identity.did_key();
 
-        let root_cid = self
-            .root_cid
-            .read()
-            .ok_or(Error::OtherWithContext("Cid is unavailable".into()))?;
+        let payload = IdentityType::Object(identity);
 
-        let cid = self
-            .get_dag::<RootDocument>(IpfsPath::from(root_cid), None)
-            .await
-            .map(|document| document.identity)
-            .ok();
-
-        let payload = IdentityPayload { did, cid };
+        let payload = IdentityPayload { did, payload };
 
         let res = data.encode(libipld::IpldCodec::DagJson, sata::Kind::Static, payload)?;
 
@@ -275,21 +264,23 @@ impl<T: IpfsTypes> IdentityStore<T> {
     async fn process_message(&mut self, message: Arc<GossipsubMessage>) -> anyhow::Result<()> {
         let data = serde_json::from_slice::<Sata>(&message.data)?;
 
-        let payload = data.decode::<IdentityPayload>()?;
+        let object = data.decode::<IdentityPayload>()?;
 
-        let payload_cid = payload
-            .cid
-            .ok_or_else(|| anyhow::anyhow!("Cid doesnt exist"))?;
+        let payload = object.payload;
 
         //TODO: Validate public key against peer that sent it
-        let _pk = did_to_libp2p_pub(&payload.did)?;
+        let _pk = did_to_libp2p_pub(&object.did)?;
 
-        let identity = self
-            .get_dag::<Identity>(payload_cid.into(), Some(Duration::from_secs(60)))
-            .await?;
+        let identity = match &payload {
+            IdentityType::Object(identity) => identity.clone(),
+            IdentityType::Cid(cid) => {
+                self.get_dag((*cid).into(), Some(Duration::from_secs(60)))
+                    .await?
+            }
+        };
 
         anyhow::ensure!(
-            payload.did == identity.did_key(),
+            object.did == identity.did_key(),
             "Payload doesnt match identity"
         );
 
@@ -325,8 +316,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 let username = identity.username();
                 let short_id = identity.short_id();
                 let did = identity.did_key();
-                let identity = self.put_dag(identity.clone()).await?;
-
+                let identity = payload.clone();
                 CacheDocument {
                     username,
                     did,
@@ -336,42 +326,45 @@ impl<T: IpfsTypes> IdentityStore<T> {
             }
         };
 
-        if found && document.identity != payload_cid {
-            if document.username != identity.username() {
-                document.username = identity.username();
-            }
-            document.identity = payload_cid;
-
-            cache_documents.replace(document);
-
-            let new_cid = self.put_dag(cache_documents).await?;
-
-            //Do we want to [recursively] pin the cache?
-            self.ipfs.insert_pin(&new_cid, false).await?;
-            self.save_cache_cid(new_cid).await?;
-            if let Some(old_cid) = old_cid {
-                if self.ipfs.is_pinned(&old_cid).await? {
-                    self.ipfs.remove_pin(&old_cid, false).await?;
+        match (found, &document.identity) {
+            (true, object) if object != &payload => {
+                if document.username != identity.username() {
+                    document.username = identity.username();
                 }
-                // Do we want to remove the old block?
-                self.ipfs.remove_block(old_cid).await?;
-            }
-        } else if !found {
-            cache_documents.insert(document);
-            let new_cid = self.put_dag(cache_documents).await?;
 
-            //Do we want to [recursively] pin the cache?
-            self.ipfs.insert_pin(&new_cid, false).await?;
-            self.save_cache_cid(new_cid).await?;
-            if let Some(old_cid) = old_cid {
-                if self.ipfs.is_pinned(&old_cid).await? {
-                    self.ipfs.remove_pin(&old_cid, false).await?;
+                document.identity = payload;
+                cache_documents.replace(document);
+
+                let new_cid = self.put_dag(cache_documents).await?;
+
+                self.ipfs.insert_pin(&new_cid, false).await?;
+                self.save_cache_cid(new_cid).await?;
+                if let Some(old_cid) = old_cid {
+                    if self.ipfs.is_pinned(&old_cid).await? {
+                        self.ipfs.remove_pin(&old_cid, false).await?;
+                    }
+                    // Do we want to remove the old block?
+                    self.ipfs.remove_block(old_cid).await?;
                 }
-                // Do we want to remove the old block?
-                self.ipfs.remove_block(old_cid).await?;
             }
-        }
+            (true, object) if object == &payload => {}
+            (false, _object) => {
+                cache_documents.insert(document);
 
+                let new_cid = self.put_dag(cache_documents).await?;
+
+                self.ipfs.insert_pin(&new_cid, false).await?;
+                self.save_cache_cid(new_cid).await?;
+                if let Some(old_cid) = old_cid {
+                    if self.ipfs.is_pinned(&old_cid).await? {
+                        self.ipfs.remove_pin(&old_cid, false).await?;
+                    }
+                    // Do we want to remove the old block?
+                    self.ipfs.remove_block(old_cid).await?;
+                }
+            }
+            _ => {}
+        };
         Ok(())
     }
 
@@ -550,12 +543,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let mut future_list = futures::stream::FuturesOrdered::new();
 
         for doc in idents_docs {
-            future_list.push_back(
-                self.get_dag::<Identity>(
-                    IpfsPath::from(doc.identity),
-                    Some(Duration::from_secs(10)),
-                ),
-            );
+            let fut = match doc.identity {
+                IdentityType::Cid(cid) => self
+                    .get_dag::<Identity>(IpfsPath::from(cid), Some(Duration::from_secs(20)))
+                    .boxed(),
+                IdentityType::Object(identity) => futures::future::ready(Ok(identity)).boxed(),
+            };
+
+            future_list.push_back(fut);
         }
 
         let list = future_list

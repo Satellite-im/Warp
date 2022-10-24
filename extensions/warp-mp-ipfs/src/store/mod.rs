@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use ipfs::{IpfsTypes, Multiaddr, PeerId, Protocol};
-use libipld::Cid;
 use serde::{Deserialize, Serialize};
 use tracing::log::error;
 use warp::{
@@ -16,7 +15,7 @@ use warp::{
 
 use crate::config::Discovery;
 
-use self::friends::InternalRequest;
+use self::{friends::InternalRequest, document::IdentityType};
 
 pub mod document;
 pub mod friends;
@@ -76,8 +75,8 @@ pub enum Payload {
 pub struct IdentityPayload {
     /// Not required but would be used to cross check the identity did, sender (if sent directly)
     pub did: DID,
-    /// Cid to the ipld document representing the identity
-    pub cid: Option<Cid>,
+    /// Type that represents identity or cid
+    pub payload: IdentityType,
 }
 
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity::PublicKey> {

@@ -1,7 +1,7 @@
 use libipld::Cid;
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
-use warp::crypto::DID;
+use warp::{crypto::DID, multipass::identity::Identity};
 
 /// node root document for their identity, friends, blocks, etc, along with previous cid (if we wish to track that)
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -12,13 +12,19 @@ pub struct RootDocument {
     pub request: Option<Cid>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum IdentityType {
+    Object(Identity),
+    Cid(Cid)
+}
+
 /// Used to lookup identities found and their corresponding cid
-#[derive(Default, Debug, Clone, Serialize, Deserialize, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct CacheDocument {
     pub username: String,
     pub did: DID,
     pub short_id: String,
-    pub identity: Cid,
+    pub identity: IdentityType,
 }
 
 impl Hash for CacheDocument {
