@@ -1,7 +1,8 @@
-use libipld::Cid;
-use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, hash::Hash};
-use warp::{crypto::DID, multipass::identity::Identity};
+use ipfs::{Ipfs, IpfsPath, IpfsTypes};
+use libipld::{serde::from_ipld, Cid};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::{collections::HashSet, hash::Hash, time::Duration};
+use warp::{crypto::DID, error::Error, multipass::identity::Identity};
 
 use super::friends::InternalRequest;
 
@@ -10,6 +11,32 @@ use super::friends::InternalRequest;
 pub enum DocumentType<T> {
     Object(T),
     Cid(Cid),
+}
+
+impl<T> DocumentType<T> {
+    pub async fn resolve<P: IpfsTypes>(
+        &self,
+        ipfs: Ipfs<P>,
+        timeout: Option<Duration>,
+    ) -> Result<T, Error>
+    where
+        T: Clone,
+        T: DeserializeOwned,
+    {
+        match self {
+            DocumentType::Object(object) => Ok(object.clone()),
+            DocumentType::Cid(cid) => {
+                let timeout = timeout.unwrap_or(std::time::Duration::from_secs(30));
+                match tokio::time::timeout(timeout, ipfs.get_dag(IpfsPath::from(*cid))).await {
+                    Ok(Ok(ipld)) => from_ipld::<T>(ipld)
+                        .map_err(anyhow::Error::from)
+                        .map_err(Error::from),
+                    Ok(Err(e)) => Err(Error::Any(e)),
+                    Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
+                }
+            }
+        }
+    }
 }
 
 impl<T> From<Cid> for DocumentType<T> {
