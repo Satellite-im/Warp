@@ -247,6 +247,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         let did = identity.did_key();
 
+        //Note: Sending Cid and using bitswap with direct or no discovery
+        //      may not exchange blocks as expected. For now, we will send the identity
+        //      directly as the payload but may change in the future to using cid
+        //      once bitswap is sorted out upstream
         let payload = DocumentType::<Identity>::Object(identity);
 
         let payload = IdentityPayload { did, payload };
