@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::Context;
@@ -56,7 +57,7 @@ impl<T: IpfsTypes> PhoneBook<T> {
         (book, fut)
     }
 
-    pub async fn add_friend_list(&self, list: Vec<DID>) -> anyhow::Result<()> {
+    pub async fn add_friend_list(&self, list: HashSet<DID>) -> anyhow::Result<()> {
         for friend in list.iter() {
             self.add_friend(friend).await?;
         }

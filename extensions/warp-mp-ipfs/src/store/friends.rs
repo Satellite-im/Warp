@@ -189,6 +189,17 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     }
                 }
             }
+
+            if let Ok(friends) = store.friends_list().await {
+                if let Err(_e) = store
+                    .phonebook
+                    .add_friend_list(friends)
+                    .await
+                {
+                    error!("Error adding friends in phonebook: {_e}");
+                }
+            }
+
             // autoban the blocklist
             match store.block_list().await {
                 Ok(list) => {
@@ -246,8 +257,16 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 return Ok(());
             }
 
-            if self.list_outgoing_request().await.unwrap_or_default().contains(&data)
-                || self.list_incoming_request().await.unwrap_or_default().contains(&data)
+            if self
+                .list_outgoing_request()
+                .await
+                .unwrap_or_default()
+                .contains(&data)
+                || self
+                    .list_incoming_request()
+                    .await
+                    .unwrap_or_default()
+                    .contains(&data)
             {
                 warn!("Request exist locally. Skipping");
                 return Ok(());
