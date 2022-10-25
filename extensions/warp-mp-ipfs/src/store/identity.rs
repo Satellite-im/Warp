@@ -38,7 +38,7 @@ use warp::{
 
 use super::{
     connected_to_peer,
-    document::{CacheDocument, RootDocument, DocumentType},
+    document::{CacheDocument, DocumentType, RootDocument},
     libp2p_pub_to_did, PeerConnectionType, IDENTITY_BROADCAST,
 };
 
@@ -241,7 +241,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let data = Sata::default();
 
         let root = self.get_root_document().await?;
-        let identity = self.get_dag::<Identity>(IpfsPath::from(root.identity), None).await?;
+        let identity = self
+            .get_dag::<Identity>(IpfsPath::from(root.identity), None)
+            .await?;
 
         let did = identity.did_key();
 
@@ -540,18 +542,15 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 .collect::<Vec<_>>(),
         };
 
-        let mut future_list = futures::stream::FuturesOrdered::new();
-
-        for doc in idents_docs {
-            let fut = match doc.identity {
-                DocumentType::Cid(cid) => self
-                    .get_dag::<Identity>(IpfsPath::from(cid), Some(Duration::from_secs(20)))
-                    .boxed(),
-                DocumentType::Object(identity) => futures::future::ready(Ok(identity)).boxed(),
-            };
-
-            future_list.push_back(fut);
-        }
+        let future_list =
+            futures::stream::FuturesOrdered::from_iter(idents_docs.iter().map(|doc| {
+                match &doc.identity {
+                    DocumentType::Cid(cid) => self
+                        .get_dag::<Identity>(IpfsPath::from(*cid), Some(Duration::from_secs(20)))
+                        .boxed(),
+                    DocumentType::Object(identity) => futures::future::ready(Ok(identity.clone())).boxed(),
+                }
+            }));
 
         let list = future_list
             .collect::<Vec<_>>()
