@@ -24,7 +24,7 @@ pub struct RootDocument {
     pub identity: Cid,
     pub friends: Option<DocumentType<HashSet<DID>>>,
     pub blocks: Option<DocumentType<HashSet<DID>>>,
-    pub request: Option<DocumentType<Vec<InternalRequest>>>,
+    pub request: Option<DocumentType<HashSet<InternalRequest>>>,
 }
 
 /// Used to lookup identities found and their corresponding cid

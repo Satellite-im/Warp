@@ -191,11 +191,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             }
 
             if let Ok(friends) = store.friends_list().await {
-                if let Err(_e) = store
-                    .phonebook
-                    .add_friend_list(friends)
-                    .await
-                {
+                if let Err(_e) = store.phonebook.add_friend_list(friends).await {
                     error!("Error adding friends in phonebook: {_e}");
                 }
             }
@@ -284,11 +280,15 @@ impl<T: IpfsTypes> FriendsStore<T> {
             match data.status() {
                 FriendRequestStatus::Accepted => {
                     let mut list = self.list_all_raw_request().await?;
-                    let index = match list.iter().position(|request| {
-                        request.request_type() == InternalRequestType::Outgoing
-                            && request.to() == data.from()
-                            && request.status() == FriendRequestStatus::Pending
-                    }) {
+                    let internal_request = match list
+                        .iter()
+                        .find(|request| {
+                            request.request_type() == InternalRequestType::Outgoing
+                                && request.to() == data.from()
+                                && request.status() == FriendRequestStatus::Pending
+                        })
+                        .cloned()
+                    {
                         Some(index) => index,
                         None => {
                             error!("Unable to locate pending request. Already been accepted or rejected?");
@@ -296,7 +296,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         }
                     };
 
-                    list.remove(index);
+                    list.remove(&internal_request);
                     self.set_request_list(list).await?;
 
                     self.add_friend(&data.from()).await?;
@@ -304,7 +304,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 FriendRequestStatus::Pending => {
                     let mut list = self.list_all_raw_request().await?;
                     //TODO: Perform check to see if request already exist
-                    list.push(InternalRequest::In(data.clone()));
+                    list.insert(InternalRequest::In(data.clone()));
 
                     self.set_request_list(list).await?;
 
@@ -317,16 +317,20 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
                 FriendRequestStatus::Denied => {
                     let mut list = self.list_all_raw_request().await?;
-                    let index = match list.iter().position(|request| {
-                        request.request_type() == InternalRequestType::Outgoing
-                            && request.to() == data.from()
-                            && request.status() == FriendRequestStatus::Pending
-                    }) {
+                    let internal_request = match list
+                        .iter()
+                        .find(|request| {
+                            request.request_type() == InternalRequestType::Outgoing
+                                && request.to() == data.from()
+                                && request.status() == FriendRequestStatus::Pending
+                        })
+                        .cloned()
+                    {
                         Some(index) => index,
                         None => return Ok(()),
                     };
 
-                    list.remove(index);
+                    list.remove(&internal_request);
                     self.set_request_list(list).await?;
 
                     if let Err(e) = self
@@ -342,16 +346,20 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
                 FriendRequestStatus::RequestRemoved => {
                     let mut list = self.list_all_raw_request().await?;
-                    let index = match list.iter().position(|request| {
-                        request.request_type() == InternalRequestType::Incoming
-                            && request.to() == data.to()
-                            && request.status() == FriendRequestStatus::Pending
-                    }) {
+                    let internal_request = match list
+                        .iter()
+                        .find(|request| {
+                            request.request_type() == InternalRequestType::Incoming
+                                && request.to() == data.to()
+                                && request.status() == FriendRequestStatus::Pending
+                        })
+                        .cloned()
+                    {
                         Some(index) => index,
                         None => return Ok(()),
                     };
 
-                    list.remove(index);
+                    list.remove(&internal_request);
 
                     self.set_request_list(list).await?;
 
@@ -468,20 +476,18 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let mut list = self.list_all_raw_request().await?;
 
         // Although the request been validated before storing, we should validate again just to be safe
-        let index = list
+        let internal_request = list
             .iter()
-            .position(|request| {
+            .find(|request| {
                 request.request_type() == InternalRequestType::Incoming
                     && request.from().eq(pubkey)
                     && request.to() == local_public_key
                     && request.status() == FriendRequestStatus::Pending
             })
+            .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        match list.get(index) {
-            Some(req) => req.valid()?,
-            None => return Err(Error::CannotFindFriendRequest),
-        };
+        internal_request.valid()?;
 
         let mut request = FriendRequest::default();
         request.set_from(local_public_key);
@@ -493,7 +499,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         self.add_friend(pubkey).await?;
 
-        list.remove(index);
+        list.remove(&internal_request);
 
         self.set_request_list(list).await?;
 
@@ -516,20 +522,18 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let mut list = self.list_all_raw_request().await?;
 
         // Although the request been validated before storing, we should validate again just to be safe
-        let index = list
+        let internal_request = list
             .iter()
-            .position(|request| {
+            .find(|request| {
                 request.request_type() == InternalRequestType::Incoming
                     && request.from().eq(pubkey)
                     && request.to() == local_public_key
                     && request.status() == FriendRequestStatus::Pending
             })
+            .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        match list.get(index) {
-            Some(req) => req.valid()?,
-            None => return Err(Error::CannotFindFriendRequest),
-        };
+        internal_request.valid()?;
 
         let mut request = FriendRequest::default();
         request.set_from(local_public_key);
@@ -539,7 +543,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
         request.set_signature(signature);
 
-        list.remove(index);
+        list.remove(&internal_request);
 
         self.set_request_list(list).await?;
 
@@ -553,14 +557,15 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let mut list = self.list_all_raw_request().await?;
 
-        let index = list
+        let internal_request = list
             .iter()
-            .position(|request| {
+            .find(|request| {
                 request.request_type() == InternalRequestType::Outgoing
                     && request.to().eq(pubkey)
                     && request.from().eq(&local_public_key)
                     && request.status() == FriendRequestStatus::Pending
             })
+            .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
         let mut request = FriendRequest::default();
@@ -571,7 +576,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
         request.set_signature(signature);
 
-        list.remove(index);
+        list.remove(&internal_request);
 
         self.set_request_list(list).await?;
 
@@ -782,16 +787,16 @@ impl<T: IpfsTypes> FriendsStore<T> {
 }
 
 impl<T: IpfsTypes> FriendsStore<T> {
-    pub async fn list_all_raw_request(&self) -> Result<Vec<InternalRequest>, Error> {
+    pub async fn list_all_raw_request(&self) -> Result<HashSet<InternalRequest>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.request {
             Some(DocumentType::Cid(cid)) => self.identity.get_dag(IpfsPath::from(cid), None).await,
             Some(DocumentType::Object(list)) => Ok(list),
-            None => Ok(Vec::new()),
+            None => Ok(HashSet::new()),
         }
     }
 
-    pub async fn set_request_list(&mut self, list: Vec<InternalRequest>) -> Result<(), Error> {
+    pub async fn set_request_list(&mut self, list: HashSet<InternalRequest>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
         let old_document = root_document.request.clone();
         if matches!(old_document, Some(DocumentType::Object(_)) | None) {
@@ -908,7 +913,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             let outgoing_request = InternalRequest::Out(request.clone());
             let mut list = self.list_all_raw_request().await?;
             if !list.contains(&outgoing_request) {
-                list.push(outgoing_request);
+                list.insert(outgoing_request);
                 self.set_request_list(list).await?;
             }
         }
