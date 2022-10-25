@@ -245,13 +245,13 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 warn!("Request is not meant for identity. Skipping");
                 return Ok(());
             }
-            //TODO:
-            // if self.profile.read().outgoing_request().contains(&data)
-            //     || self.profile.read().incoming_request().contains(&data)
-            // {
-            //     warn!("Request exist locally. Skipping");
-            //     return Ok(());
-            // }
+
+            if self.list_outgoing_request().await.unwrap_or_default().contains(&data)
+                || self.list_incoming_request().await.unwrap_or_default().contains(&data)
+            {
+                warn!("Request exist locally. Skipping");
+                return Ok(());
+            }
 
             // Before we validate the request, we should check to see if the key is blocked
             // If it is, skip the request so we dont wait resources storing it.
@@ -260,10 +260,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             }
 
             //first verify the request before processing it
-            if let Err(e) = validate_request(&data) {
-                error!("Incoming request cannot be validated: {e}");
-                return Ok(());
-            }
+            validate_request(&data)?;
 
             match data.status() {
                 FriendRequestStatus::Accepted => {
@@ -287,6 +284,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
                 FriendRequestStatus::Pending => {
                     let mut list = self.list_all_raw_request().await?;
+                    //TODO: Perform check to see if request already exist
                     list.push(InternalRequest::In(data.clone()));
 
                     self.set_request_list(list).await?;
@@ -321,7 +319,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
                 FriendRequestStatus::FriendRemoved => {
                     self.is_friend(&data.from()).await?;
-
                     self.remove_friend(&data.from(), false, false).await?;
                 }
                 FriendRequestStatus::RequestRemoved => {
@@ -970,7 +967,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
             };
 
-            if let Err(e) = tokio::fs::write(path.join("queue"), bytes).await {
+            if let Err(e) = tokio::fs::write(path.join(".request_queue"), bytes).await {
                 error!("Error saving queue: {e}");
             }
         }
