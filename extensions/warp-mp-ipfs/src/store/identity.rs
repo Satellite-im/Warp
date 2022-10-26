@@ -551,7 +551,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         };
 
         let future_list =
-            futures::stream::FuturesOrdered::from_iter(idents_docs.iter().map(|doc| {
+            futures::stream::FuturesUnordered::from_iter(idents_docs.iter().map(|doc| {
                 doc.identity
                     .resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
                     .boxed()
