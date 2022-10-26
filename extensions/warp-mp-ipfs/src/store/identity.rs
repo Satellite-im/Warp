@@ -277,13 +277,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
         //TODO: Validate public key against peer that sent it
         let _pk = did_to_libp2p_pub(&object.did)?;
 
-        let identity = match &payload {
-            DocumentType::Object(identity) => identity.clone(),
-            DocumentType::Cid(cid) => {
-                self.get_dag((*cid).into(), Some(Duration::from_secs(60)))
-                    .await?
-            }
-        };
+        let identity = payload
+            .resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
+            .await?;
 
         anyhow::ensure!(
             object.did == identity.did_key(),
@@ -548,12 +544,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         let future_list =
             futures::stream::FuturesOrdered::from_iter(idents_docs.iter().map(|doc| {
-                match &doc.identity {
-                    DocumentType::Cid(cid) => self
-                        .get_dag::<Identity>(IpfsPath::from(*cid), Some(Duration::from_secs(20)))
-                        .boxed(),
-                    DocumentType::Object(identity) => futures::future::ready(Ok(identity.clone())).boxed(),
-                }
+                doc.identity
+                    .resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
+                    .boxed()
             }));
 
         let list = future_list
