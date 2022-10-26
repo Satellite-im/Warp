@@ -31,6 +31,8 @@ struct Opt {
     mdns: bool,
 }
 
+//Note: Cache can be enabled but the internals may need a little rework but since extension handles caching itself, this isnt needed for now
+#[allow(dead_code)]
 fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
     if let Some(root) = root {
         let storage =
@@ -114,7 +116,10 @@ async fn main() -> anyhow::Result<()> {
 
     let file_appender = match &opt.path {
         Some(path) => tracing_appender::rolling::hourly(path, "warp_mp_identity_interface.log"),
-        None => tracing_appender::rolling::hourly(std::env::temp_dir(), "warp_mp_identity_interface.log"),
+        None => tracing_appender::rolling::hourly(
+            std::env::temp_dir(),
+            "warp_mp_identity_interface.log",
+        ),
     };
 
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
@@ -124,7 +129,7 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let cache = cache_setup(opt.path.clone()).ok();
+    let cache = None; //cache_setup(opt.path.clone()).ok();
 
     let mut account = match opt.path.as_ref() {
         Some(path) => {
