@@ -1,7 +1,7 @@
 #![allow(clippy::await_holding_lock)]
 use futures::StreamExt;
 use ipfs::libp2p::gossipsub::GossipsubMessage;
-use ipfs::{Ipfs, IpfsPath, IpfsTypes, PeerId};
+use ipfs::{Ipfs, IpfsTypes, PeerId};
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -599,8 +599,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn block_list(&self) -> Result<HashSet<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.blocks {
-            Some(DocumentType::Cid(cid)) => self.identity.get_dag(IpfsPath::from(cid), None).await,
-            Some(DocumentType::Object(list)) => Ok(list),
+            Some(object) => object.resolve(self.ipfs.clone(), None).await,
             None => Ok(HashSet::new()),
         }
     }
@@ -680,8 +679,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn friends_list(&self) -> Result<HashSet<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.friends {
-            Some(DocumentType::Cid(cid)) => self.identity.get_dag(IpfsPath::from(cid), None).await,
-            Some(DocumentType::Object(list)) => Ok(list),
+            Some(object) => object.resolve(self.ipfs.clone(), None).await,
             None => Ok(HashSet::new()),
         }
     }
@@ -790,8 +788,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn list_all_raw_request(&self) -> Result<HashSet<InternalRequest>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.request {
-            Some(DocumentType::Cid(cid)) => self.identity.get_dag(IpfsPath::from(cid), None).await,
-            Some(DocumentType::Object(list)) => Ok(list),
+            Some(object) => object.resolve(self.ipfs.clone(), None).await,
             None => Ok(HashSet::new()),
         }
     }
