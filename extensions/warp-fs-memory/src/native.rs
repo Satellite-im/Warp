@@ -39,12 +39,11 @@ impl Constellation for MemorySystem {
         let mut internal_file = item::file::File::new(name);
 
         let fs_path = path.to_string();
-        let (internal_file, bytes) = tokio::task::spawn_blocking(move || {
+        let (internal_file, bytes) =  {
             let bytes = internal_file.insert_from_path(fs_path).unwrap_or_default();
             (internal_file, bytes)
-        })
-        .await
-        .map_err(anyhow::Error::from)?;
+        };
+
         self.internal
             .0
             .insert(internal_file)
