@@ -61,6 +61,8 @@ pub struct IdentityStore<T: IpfsTypes> {
 
     check_seen: Arc<AtomicBool>,
 
+    override_ipld: Arc<AtomicBool>,
+
     start_event: Arc<AtomicBool>,
 
     end_event: Arc<AtomicBool>,
@@ -82,6 +84,7 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
             discovery: self.discovery.clone(),
             relay: self.relay.clone(),
             check_seen: self.check_seen.clone(),
+            override_ipld: self.override_ipld.clone(),
             tesseract: self.tesseract.clone(),
         }
     }
@@ -101,7 +104,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         tesseract: Tesseract,
         interval: u64,
         _tx: broadcast::Sender<MultiPassEventKind>,
-        (discovery, relay): (Discovery, Option<Vec<Multiaddr>>),
+        (discovery, relay, override_ipld): (Discovery, Option<Vec<Multiaddr>>, bool),
     ) -> Result<Self, Error> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -120,6 +123,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let cache_cid = Arc::new(Default::default());
         let seen = Arc::new(Default::default());
         let check_seen = Arc::new(Default::default());
+        let override_ipld = Arc::new(AtomicBool::new(override_ipld));
 
         let store = Self {
             ipfs,
@@ -134,6 +138,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             relay,
             check_seen,
             tesseract,
+            override_ipld,
         };
         if store.path.is_some() {
             if let Err(_e) = store.load_cid().await {
@@ -251,7 +256,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
         //      may not exchange blocks as expected. For now, we will send the identity
         //      directly as the payload but may change in the future to using cid
         //      once bitswap is sorted out upstream
-        let payload = DocumentType::<Identity>::Object(identity);
+        let payload = match self.override_ipld.load(Ordering::Relaxed) {
+            true => DocumentType::Object(identity),
+            false => DocumentType::Cid(root.identity),
+        };
 
         let payload = IdentityPayload { did, payload };
 

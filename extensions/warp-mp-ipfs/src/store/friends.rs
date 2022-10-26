@@ -48,6 +48,8 @@ pub struct FriendsStore<T: IpfsTypes> {
     // Would be used to stop the look in the tokio task
     end_event: Arc<AtomicBool>,
 
+    override_ipld: Arc<AtomicBool>,
+
     // Used to broadcast request
     queue: Arc<RwLock<Vec<Queue>>>,
 
@@ -118,6 +120,7 @@ impl<T: IpfsTypes> Clone for FriendsStore<T> {
             identity: self.identity.clone(),
             did_key: self.did_key.clone(),
             path: self.path.clone(),
+            override_ipld: self.override_ipld.clone(),
             end_event: self.end_event.clone(),
             queue: self.queue.clone(),
             tesseract: self.tesseract.clone(),
@@ -134,7 +137,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         path: Option<PathBuf>,
         tesseract: Tesseract,
         interval: u64,
-        tx: broadcast::Sender<MultiPassEventKind>,
+        (tx, override_ipld): (broadcast::Sender<MultiPassEventKind>, bool),
     ) -> anyhow::Result<Self> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -144,6 +147,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let end_event = Arc::new(AtomicBool::new(false));
         let queue = Arc::new(Default::default());
         let did_key = Arc::new(did_keypair(&tesseract)?);
+        let override_ipld = Arc::new(AtomicBool::new(override_ipld));
 
         let (phonebook, fut) = PhoneBook::new(ipfs.clone(), tx.clone());
         tokio::spawn(fut);
@@ -158,6 +162,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             tesseract,
             phonebook,
             tx,
+            override_ipld,
         };
 
         let store_inner = store.clone();

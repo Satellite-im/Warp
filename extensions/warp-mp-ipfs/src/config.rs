@@ -130,6 +130,8 @@ pub struct StoreSetting {
     pub sync: Vec<Multiaddr>,
     /// Interval to push or check node
     pub sync_interval: u64,
+    /// Use objects directly rather than a cid
+    pub override_ipld: bool,
 }
 
 impl Default for StoreSetting {
@@ -139,6 +141,7 @@ impl Default for StoreSetting {
             discovery: Discovery::Provider(None),
             sync: Vec::new(),
             sync_interval: 100,
+            override_ipld: false,
         }
     }
 }

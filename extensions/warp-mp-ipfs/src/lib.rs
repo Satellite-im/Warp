@@ -341,7 +341,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             tesseract.clone(),
             config.store_setting.broadcast_interval,
             self.tx.clone(),
-            (config.store_setting.discovery, relays),
+            (config.store_setting.discovery, relays, config.store_setting.override_ipld),
         )
         .await?;
         info!("Identity store initialized");
@@ -352,7 +352,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             config.path,
             tesseract.clone(),
             config.store_setting.broadcast_interval,
-            self.tx.clone(),
+            (self.tx.clone(), config.store_setting.override_ipld)
         )
         .await?;
         info!("friends store initialized");

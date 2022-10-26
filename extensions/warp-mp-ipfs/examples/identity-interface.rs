@@ -29,6 +29,8 @@ struct Opt {
     no_discovery: bool,
     #[clap(long)]
     mdns: bool,
+    #[clap(long)]
+    r#override: bool,
 }
 
 //Note: Cache can be enabled but the internals may need a little rework but since extension handles caching itself, this isnt needed for now
@@ -50,6 +52,7 @@ async fn account(
     direct: bool,
     no_discovery: bool,
     mdns: bool,
+    r#override: bool,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let tesseract = Tesseract::default();
     tesseract
@@ -62,6 +65,9 @@ async fn account(
     if no_discovery {
         config.store_setting.discovery = Discovery::None;
         config.ipfs_setting.bootstrap = false;
+    }
+    if r#override {
+        config.store_setting.override_ipld = true;
     }
     config.ipfs_setting.mdns.enable = mdns;
     let mut account = ipfs_identity_temporary(Some(config), tesseract, cache).await?;
@@ -77,6 +83,7 @@ async fn account_persistent<P: AsRef<Path>>(
     direct: bool,
     no_discovery: bool,
     mdns: bool,
+    r#override: bool,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let path = path.as_ref();
     let tesseract = match Tesseract::from_file(path.join("tdatastore")) {
@@ -100,7 +107,9 @@ async fn account_persistent<P: AsRef<Path>>(
         config.store_setting.discovery = Discovery::None;
         config.ipfs_setting.bootstrap = false;
     }
-
+    if r#override {
+        config.store_setting.override_ipld = true;
+    }
     config.ipfs_setting.mdns.enable = mdns;
     let mut account = ipfs_identity_persistent(config, tesseract, cache).await?;
     if account.get_own_identity().is_err() {
@@ -141,6 +150,7 @@ async fn main() -> anyhow::Result<()> {
                 opt.direct,
                 opt.no_discovery,
                 opt.mdns,
+                opt.r#override
             )
             .await?
         }
@@ -152,6 +162,7 @@ async fn main() -> anyhow::Result<()> {
                 opt.direct,
                 opt.no_discovery,
                 opt.mdns,
+                opt.r#override
             )
             .await?
         }
