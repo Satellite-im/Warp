@@ -37,6 +37,19 @@ impl<T> DocumentType<T> {
             }
         }
     }
+
+    pub async fn resolve_or_default<P: IpfsTypes>(
+        &self,
+        ipfs: Ipfs<P>,
+        timeout: Option<Duration>,
+    ) -> T
+    where
+        T: Clone,
+        T: DeserializeOwned,
+        T: Default,
+    {
+        self.resolve(ipfs, timeout).await.unwrap_or_default()
+    }
 }
 
 impl<T> From<Cid> for DocumentType<T> {
@@ -52,6 +65,55 @@ pub struct RootDocument {
     pub friends: Option<DocumentType<HashSet<DID>>>,
     pub blocks: Option<DocumentType<HashSet<DID>>>,
     pub request: Option<DocumentType<HashSet<InternalRequest>>>,
+}
+
+impl RootDocument {
+    pub async fn resolve<P: IpfsTypes>(
+        &self,
+        ipfs: Ipfs<P>,
+        timeout: Option<Duration>,
+    ) -> Result<
+        (
+            Identity,
+            HashSet<DID>,
+            HashSet<DID>,
+            HashSet<InternalRequest>,
+        ),
+        Error,
+    > {
+        let identity = {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                ipfs.get_dag(IpfsPath::from(self.identity)),
+            )
+            .await
+            {
+                Ok(Ok(ipld)) => from_ipld::<Identity>(ipld)
+                    .map_err(anyhow::Error::from)
+                    .map_err(Error::from)?,
+                Ok(Err(e)) => return Err(Error::Any(e)),
+                Err(e) => return Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
+            }
+        };
+
+        let mut friends = Default::default();
+        let mut block_list = Default::default();
+        let mut request = Default::default();
+
+        if let Some(document) = &self.friends {
+            friends = document.resolve_or_default(ipfs.clone(), timeout).await
+        }
+
+        if let Some(document) = &self.blocks {
+            block_list = document.resolve_or_default(ipfs.clone(), timeout).await
+        }
+
+        if let Some(document) = &self.request {
+            request = document.resolve_or_default(ipfs.clone(), timeout).await
+        }
+
+        Ok((identity, friends, block_list, request))
+    }
 }
 
 /// Used to lookup identities found and their corresponding cid
