@@ -141,7 +141,7 @@ impl Default for StoreSetting {
             discovery: Discovery::Provider(None),
             sync: Vec::new(),
             sync_interval: 100,
-            override_ipld: false,
+            override_ipld: true,
         }
     }
 }

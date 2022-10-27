@@ -32,7 +32,7 @@ struct Opt {
     #[clap(long)]
     mdns: bool,
     #[clap(long)]
-    r#override: bool,
+    r#override: Option<bool>,
 }
 
 //Note: Cache can be enabled but the internals may need a little rework but since extension handles caching itself, this isnt needed for now
@@ -69,8 +69,8 @@ async fn account(
         config.store_setting.discovery = Discovery::None;
         config.ipfs_setting.bootstrap = false;
     }
-    if opt.r#override {
-        config.store_setting.override_ipld = true;
+    if let Some(oride) = opt.r#override {
+        config.store_setting.override_ipld = oride;
     }
 
     config.ipfs_setting.mdns.enable = opt.mdns;
@@ -110,9 +110,11 @@ async fn account_persistent<P: AsRef<Path>>(
         config.store_setting.discovery = Discovery::None;
         config.ipfs_setting.bootstrap = false;
     }
-    if opt.r#override {
-        config.store_setting.override_ipld = true;
+
+    if let Some(oride) = opt.r#override {
+        config.store_setting.override_ipld = oride;
     }
+
     config.ipfs_setting.mdns.enable = opt.mdns;
     let mut account = ipfs_identity_persistent(config, tesseract, cache).await?;
     if account.get_own_identity().is_err() {

@@ -387,7 +387,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     async fn cache(&self) -> HashSet<CacheDocument> {
-        let cache_cid = match self.cache_cid.read().clone() {
+        let cache_cid = match self.get_cache_cid().ok() {
             Some(cid) => cid,
             None => return Default::default(),
         };
@@ -661,8 +661,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn own_identity(&self) -> Result<Identity, Error> {
-        let ident_cid = self.get_cid()?;
-        let path = IpfsPath::from(ident_cid)
+        let root_cid = self.get_cid()?;
+        let path = IpfsPath::from(root_cid)
             .sub_path("identity")
             .map_err(anyhow::Error::from)?;
         let identity = self.get_dag::<Identity>(path, None).await?;

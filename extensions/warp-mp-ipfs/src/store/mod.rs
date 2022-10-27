@@ -15,7 +15,7 @@ use warp::{
 
 use crate::config::Discovery;
 
-use self::{friends::InternalRequest, document::DocumentType};
+use self::{document::DocumentType, friends::InternalRequest};
 
 pub mod document;
 pub mod friends;
