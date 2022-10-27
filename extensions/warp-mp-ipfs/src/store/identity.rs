@@ -24,7 +24,7 @@ use libipld::{
 use sata::Sata;
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::broadcast;
-use tracing::log::{debug, error};
+use tracing::log::error;
 use warp::{
     crypto::{DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
@@ -59,8 +59,6 @@ pub struct IdentityStore<T: IpfsTypes> {
 
     relay: Option<Vec<Multiaddr>>,
 
-    check_seen: Arc<AtomicBool>,
-
     override_ipld: Arc<AtomicBool>,
 
     start_event: Arc<AtomicBool>,
@@ -83,7 +81,6 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
             end_event: self.end_event.clone(),
             discovery: self.discovery.clone(),
             relay: self.relay.clone(),
-            check_seen: self.check_seen.clone(),
             override_ipld: self.override_ipld.clone(),
             tesseract: self.tesseract.clone(),
         }
@@ -122,7 +119,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let root_cid = Arc::new(Default::default());
         let cache_cid = Arc::new(Default::default());
         let seen = Arc::new(Default::default());
-        let check_seen = Arc::new(Default::default());
         let override_ipld = Arc::new(AtomicBool::new(override_ipld));
 
         let store = Self {
@@ -136,7 +132,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
             end_event,
             discovery,
             relay,
-            check_seen,
             tesseract,
             override_ipld,
         };
@@ -163,8 +158,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
             futures::pin_mut!(id_broadcast_stream);
 
             let mut tick = tokio::time::interval(Duration::from_millis(interval));
-            //this is used to clear `seen` at a set interval.
-            let mut clear_seen = tokio::time::interval(Duration::from_secs(3 * 60));
+            //Use to update the seen list
+            let mut update_seen = tokio::time::interval(Duration::from_secs(10));
             loop {
                 if store.end_event.load(Ordering::SeqCst) {
                     break;
@@ -181,9 +176,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
                             }
                         }
                     }
-                    _ = clear_seen.tick() => {
-                        if store.check_seen.load(Ordering::Relaxed) {
-                            store.seen.write().clear();
+                    _ = update_seen.tick() => {
+                        if let Err(e) = store.update_pubsub_peers_list().await {
+                            error!("Error: {e}");
                         }
                     }
                     _ = tick.tick() => {
@@ -207,55 +202,59 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(store)
     }
 
+    async fn update_pubsub_peers_list(&self) -> anyhow::Result<()> {
+        let peers = self
+            .ipfs
+            .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
+            .await?;
+        *self.seen.write() = HashSet::from_iter(peers);
+        Ok(())
+    }
+
+    //TODO: Replace with a request/resposne style broadcast
     async fn broadcast_identity(&self) -> anyhow::Result<()> {
         let peers = self
             .ipfs
             .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
             .await?;
 
-        match self.check_seen.load(Ordering::Relaxed) {
-            true => {
-                let peers = HashSet::from_iter(peers);
-                if peers.is_empty() || (!peers.is_empty() && peers == self.seen.read().clone()) {
-                    return Ok(());
-                }
-                let seen_list = self.seen.read().clone();
+        //TODO: Maybe use write lock and drop it once no longer needed to be sure that
+        //      the list isnt updated while checking and updating
 
-                let mut havent_seen = vec![];
-                for peer in peers.iter() {
-                    if seen_list.contains(peer) {
-                        continue;
-                    }
-                    havent_seen.push(peer);
-                }
+        let peers = HashSet::from_iter(peers);
+        if peers.is_empty() || (!peers.is_empty() && self.seen.read().eq(&peers)) {
+            return Ok(());
+        }
+        let seen_list = self.seen.read().clone();
 
-                if havent_seen.is_empty() {
-                    return Ok(());
-                }
-
-                self.seen.write().extend(havent_seen);
-            }
-            false => {
-                if peers.is_empty() {
-                    debug!("No peers available");
-                    return Ok(());
-                }
+        let mut havent_seen = vec![];
+        for peer in peers.iter() {
+            if !seen_list.contains(peer) {
+                havent_seen.push(peer);
             }
         }
+
+        if havent_seen.is_empty() {
+            return Ok(());
+        }
+
+        self.seen.write().extend(havent_seen);
 
         let data = Sata::default();
 
         let root = self.get_root_document().await?;
+
         let identity = self
             .get_dag::<Identity>(IpfsPath::from(root.identity), None)
             .await?;
 
         let did = identity.did_key();
 
-        //Note: Sending Cid and using bitswap with direct or no discovery
-        //      may not exchange blocks as expected. For now, we will send the identity
-        //      directly as the payload but may change in the future to using cid
-        //      once bitswap is sorted out upstream
+        //Note: Sending Cid and using bitswap with normal discovery works, however
+        //      with direct or no discovery may not exchange blocks as expected
+        //      For now, we will send the identity directly as the payload but
+        //      may change in the future to using cid once bitswap is sorted
+        //      out upstream
         let payload = match self.override_ipld.load(Ordering::Relaxed) {
             true => DocumentType::Object(identity),
             false => DocumentType::Cid(root.identity),
