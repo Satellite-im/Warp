@@ -381,7 +381,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         Ok(())
     }
 
-    //TODO: Implement checks to determine
+    //TODO: Implement checks to determine if request been accepted, etc.
     async fn check_queue(&self) -> anyhow::Result<()> {
         let list = self.queue.read().clone();
         for item in list.iter() {
