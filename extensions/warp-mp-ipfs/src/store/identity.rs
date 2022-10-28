@@ -87,9 +87,10 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
     }
 }
 
+
 #[derive(Debug, Clone)]
 pub enum LookupBy {
-    DidKey(Box<DID>),
+    DidKey(DID),
     Username(String),
     ShortId(String),
 }
@@ -441,6 +442,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(identity)
     }
 
+    //Note: We are calling `IdentityStore::cache` multiple times instead of a single call in the event of
     pub async fn lookup(&self, lookup: LookupBy) -> Result<Vec<Identity>, Error> {
         let own_did = self
             .identity
@@ -452,57 +454,62 @@ impl<T: IpfsTypes> IdentityStore<T> {
             })?;
 
         let idents_docs = match &lookup {
-            //Note: If this returns more than one identity, then either
-            //      A) The memory cache never got updated and somehow bypassed the check likely caused from a race condition; or
-            //      B) There is literally 2 identities, which should be impossible because of A
+            //Note: If this returns more than one identity, then its likely due to frontend cache not clearing out.
+            //TODO: Maybe move cache into the backend to serve as a secondary cache
             LookupBy::DidKey(pubkey) => {
-                if **pubkey == own_did {
+                //Maybe we should omit our own key here?
+                if *pubkey == own_did {
                     return self.own_identity().await.map(|i| vec![i]);
                 }
-                if matches!(self.discovery_type(), Discovery::Direct | Discovery::None) {
+                //First check to see if the identity is atleast cached
+                if !self
+                    .cache()
+                    .await
+                    .iter()
+                    .any(|ident| ident.did == pubkey.clone())
+                {
                     let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
                     let connected = connected_to_peer(self.ipfs.clone(), peer_id).await?;
                     if connected == PeerConnectionType::NotConnected {
-                        let res = match tokio::time::timeout(
-                            Duration::from_secs(2),
-                            self.ipfs.find_peer_info(peer_id),
-                        )
-                        .await
-                        {
-                            Ok(res) => res,
-                            Err(e) => Err(anyhow::anyhow!("{}", e.to_string())),
-                        };
-
-                        if let Err(_e) = res {
-                            let ipfs = self.ipfs.clone();
-                            let pubkey = pubkey.clone();
-                            let relay = self.relays();
-                            let discovery = self.discovery.clone();
-                            tokio::spawn(async move {
-                                if let Err(e) =
-                                    super::discover_peer(ipfs, &*pubkey, discovery, relay).await
-                                {
-                                    error!("Error discovering peer: {e}");
+                        //TODO: Have separate functionality (or refactor phonebook) to perform checks on peers
+                        //      to prevent recurring tokio spawning
+                        let ipfs = self.ipfs.clone();
+                        let pubkey = pubkey.clone();
+                        let relay = self.relays();
+                        let discovery = self.discovery.clone();
+                        tokio::spawn(async move {
+                            //Note: This is done since connect doesnt support dialing out to the peerid directly yet
+                            //      so instead we will check if we can find them over DHT before passing the discovery
+                            //      a separate function 
+                            match ipfs.find_peer(peer_id).await {
+                                Ok(_) => {}
+                                Err(_) => {
+                                    if let Err(e) =
+                                        super::discover_peer(ipfs, &pubkey, discovery, relay).await
+                                    {
+                                        error!("Error discovering peer: {e}");
+                                    }
                                 }
-                            });
-                            tokio::task::yield_now().await;
-                        }
+                            };
+                        });
+                        tokio::task::yield_now().await;
                     }
                 }
+
                 self.cache()
                     .await
                     .iter()
-                    .filter(|ident| ident.did == *pubkey.clone())
+                    .filter(|ident| ident.did == *pubkey)
                     .cloned()
                     .collect::<Vec<_>>()
             }
             LookupBy::Username(username) if username.contains('#') => {
+                let cache = self.cache().await;
                 let split_data = username.split('#').collect::<Vec<&str>>();
 
                 if split_data.len() != 2 {
-                    self.cache()
-                        .await
+                    cache
                         .iter()
                         .filter(|ident| {
                             ident
@@ -517,9 +524,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                         split_data.first().map(|s| s.to_lowercase()),
                         split_data.last().map(|s| s.to_lowercase()),
                     ) {
-                        (Some(name), Some(code)) => self
-                            .cache()
-                            .await
+                        (Some(name), Some(code)) => cache
                             .iter()
                             .filter(|ident| {
                                 ident.username.to_lowercase().eq(&name)
@@ -584,7 +589,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         //Note: This is checked because we may not be connected to those peers with the 2 options below
         //      while with `Discovery::Provider`, they at some point should have been connected or discovered
         if !matches!(self.discovery_type(), Discovery::Direct | Discovery::None) {
-            self.lookup(LookupBy::DidKey(Box::new(did.clone())))
+            self.lookup(LookupBy::DidKey(did.clone()))
                 .await?
                 .first()
                 .cloned()

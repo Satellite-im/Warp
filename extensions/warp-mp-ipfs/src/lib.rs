@@ -528,7 +528,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                             }
                         }
                     }
-                    store.lookup(LookupBy::DidKey(Box::new(pk))).await
+                    store.lookup(LookupBy::DidKey(pk)).await
                 }
                 (None, Some(username), false) => {
                     if let Ok(cache) = self.get_cache() {
