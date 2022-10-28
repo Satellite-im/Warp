@@ -466,62 +466,54 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 if *pubkey == own_did {
                     return self.own_identity().await.map(|i| vec![i]);
                 }
-                //First check to see if the identity is atleast cached
-                if !self
-                    .cache()
-                    .await
-                    .iter()
-                    .any(|ident| ident.did == pubkey.clone())
+
+                let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
+
+                let connected = connected_to_peer(self.ipfs.clone(), peer_id).await?;
+                if connected == PeerConnectionType::NotConnected
+                    && self.discovering.write().insert(pubkey.clone())
                 {
-                    let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
+                    let discovering = self.discovering.clone();
+                    //TODO: Have separate functionality (or refactor phonebook) to perform checks on peers
+                    //      to prevent recurring tokio spawning
 
-                    let connected = connected_to_peer(self.ipfs.clone(), peer_id).await?;
-                    if connected == PeerConnectionType::NotConnected
-                        && self.discovering.write().insert(pubkey.clone())
-                    {
-                        let discovering = self.discovering.clone();
-                        //TODO: Have separate functionality (or refactor phonebook) to perform checks on peers
-                        //      to prevent recurring tokio spawning
-
-                        let relay = self.relays();
-                        let discovery = self.discovery.clone();
-                        tokio::spawn({
-                            let ipfs = self.ipfs.clone();
-                            let pubkey = pubkey.clone();
-                            async move {
-                                //Note: This is done since connect doesnt support dialing out to the peerid directly yet
-                                //      so instead we will check if we can find them over DHT before passing the discovery
-                                //      a separate function
-                                match ipfs.find_peer(peer_id).await {
-                                    Ok(_) => {}
-                                    Err(_) => {
-                                        if let Err(e) =
-                                            super::discover_peer(ipfs, &pubkey, discovery, relay)
-                                                .await
-                                        {
-                                            error!("Error discovering peer: {e}");
-                                        }
-                                    }
-                                };
-                            }
-                        });
-                        tokio::spawn({
-                            let ipfs = self.ipfs.clone();
-                            let pubkey = pubkey.clone();
-                            async move {
-                                loop {
-                                    if let Ok(PeerConnectionType::Connected) =
-                                        connected_to_peer(ipfs.clone(), peer_id).await
+                    let relay = self.relays();
+                    let discovery = self.discovery.clone();
+                    tokio::spawn({
+                        let ipfs = self.ipfs.clone();
+                        let pubkey = pubkey.clone();
+                        async move {
+                            //Note: This is done since connect doesnt support dialing out to the peerid directly yet
+                            //      so instead we will check if we can find them over DHT before passing the discovery
+                            //      a separate function
+                            match ipfs.find_peer(peer_id).await {
+                                Ok(_) => {}
+                                Err(_) => {
+                                    if let Err(e) =
+                                        super::discover_peer(ipfs, &pubkey, discovery, relay).await
                                     {
-                                        discovering.write().remove(&pubkey);
-                                        break;
+                                        error!("Error discovering peer: {e}");
                                     }
-                                    tokio::time::sleep(Duration::from_secs(1)).await;
                                 }
+                            };
+                        }
+                    });
+                    tokio::spawn({
+                        let ipfs = self.ipfs.clone();
+                        let pubkey = pubkey.clone();
+                        async move {
+                            loop {
+                                if let Ok(PeerConnectionType::Connected) =
+                                    connected_to_peer(ipfs.clone(), peer_id).await
+                                {
+                                    discovering.write().remove(&pubkey);
+                                    break;
+                                }
+                                tokio::time::sleep(Duration::from_secs(1)).await;
                             }
-                        });
-                        tokio::task::yield_now().await;
-                    }
+                        }
+                    });
+                    tokio::task::yield_now().await;
                 }
 
                 self.cache()
