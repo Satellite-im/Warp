@@ -9,7 +9,7 @@ use warp::{
         DIDKey, Ed25519KeyPair, KeyMaterial, DID,
     },
     error::Error,
-    multipass::identity::Identity,
+    multipass::identity::{Identity, IdentityStatus},
     tesseract::Tesseract,
 };
 
@@ -168,6 +168,15 @@ pub enum PeerConnectionType {
     NotConnected,
 }
 
+impl From<PeerConnectionType> for IdentityStatus {
+    fn from(status: PeerConnectionType) -> Self {
+        match status {
+            PeerConnectionType::Connected => IdentityStatus::Online,
+            PeerConnectionType::NotConnected => IdentityStatus::Offline,
+        }
+    }
+}
+
 pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
     ipfs: ipfs::Ipfs<T>,
     pkey: I,
@@ -202,7 +211,7 @@ pub async fn discover_peer<T: IpfsTypes>(
     match discovery {
         //Since we are using PROVIDER, there is no need to do anything here
         Discovery::Provider(_) => {}
-        //We are checking DHT for the peerid 
+        //We are checking DHT for the peerid
         Discovery::Direct => loop {
             if ipfs.find_peer_info(peer_id).await.is_ok() {
                 break;

@@ -17,7 +17,7 @@ use store::identity::{IdentityStore, LookupBy};
 use tokio::sync::broadcast;
 use tracing::log::{error, info, trace, warn};
 use warp::crypto::did_key::Generate;
-use warp::data::{DataObject, DataType};
+use warp::data::DataType;
 use warp::hooks::Hooks;
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -341,7 +341,11 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             tesseract.clone(),
             config.store_setting.broadcast_interval,
             self.tx.clone(),
-            (config.store_setting.discovery, relays, config.store_setting.override_ipld),
+            (
+                config.store_setting.discovery,
+                relays,
+                config.store_setting.override_ipld,
+            ),
         )
         .await?;
         info!("Identity store initialized");
@@ -352,7 +356,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             config.path,
             tesseract.clone(),
             config.store_setting.broadcast_interval,
-            (self.tx.clone(), config.store_setting.override_ipld)
+            (self.tx.clone(), config.store_setting.override_ipld),
         )
         .await?;
         info!("friends store initialized");

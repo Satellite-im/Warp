@@ -55,6 +55,8 @@ pub struct IdentityStore<T: IpfsTypes> {
 
     seen: Arc<RwLock<HashSet<PeerId>>>,
 
+    discovering: Arc<RwLock<HashSet<DID>>>,
+
     discovery: Discovery,
 
     relay: Option<Vec<Multiaddr>>,
@@ -79,6 +81,7 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
             seen: self.seen.clone(),
             start_event: self.start_event.clone(),
             end_event: self.end_event.clone(),
+            discovering: self.discovering.clone(),
             discovery: self.discovery.clone(),
             relay: self.relay.clone(),
             override_ipld: self.override_ipld.clone(),
@@ -87,7 +90,7 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
     }
 }
 
-
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum LookupBy {
     DidKey(DID),
@@ -121,6 +124,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let cache_cid = Arc::new(Default::default());
         let seen = Arc::new(Default::default());
         let override_ipld = Arc::new(AtomicBool::new(override_ipld));
+        let discovering = Arc::new(Default::default());
 
         let store = Self {
             ipfs,
@@ -131,6 +135,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             seen,
             start_event,
             end_event,
+            discovering,
             discovery,
             relay,
             tesseract,
@@ -471,27 +476,49 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
                     let connected = connected_to_peer(self.ipfs.clone(), peer_id).await?;
-                    if connected == PeerConnectionType::NotConnected {
+                    if connected == PeerConnectionType::NotConnected
+                        && self.discovering.write().insert(pubkey.clone())
+                    {
+                        let discovering = self.discovering.clone();
                         //TODO: Have separate functionality (or refactor phonebook) to perform checks on peers
                         //      to prevent recurring tokio spawning
-                        let ipfs = self.ipfs.clone();
-                        let pubkey = pubkey.clone();
+
                         let relay = self.relays();
                         let discovery = self.discovery.clone();
-                        tokio::spawn(async move {
-                            //Note: This is done since connect doesnt support dialing out to the peerid directly yet
-                            //      so instead we will check if we can find them over DHT before passing the discovery
-                            //      a separate function 
-                            match ipfs.find_peer(peer_id).await {
-                                Ok(_) => {}
-                                Err(_) => {
-                                    if let Err(e) =
-                                        super::discover_peer(ipfs, &pubkey, discovery, relay).await
-                                    {
-                                        error!("Error discovering peer: {e}");
+                        tokio::spawn({
+                            let ipfs = self.ipfs.clone();
+                            let pubkey = pubkey.clone();
+                            async move {
+                                //Note: This is done since connect doesnt support dialing out to the peerid directly yet
+                                //      so instead we will check if we can find them over DHT before passing the discovery
+                                //      a separate function
+                                match ipfs.find_peer(peer_id).await {
+                                    Ok(_) => {}
+                                    Err(_) => {
+                                        if let Err(e) =
+                                            super::discover_peer(ipfs, &pubkey, discovery, relay)
+                                                .await
+                                        {
+                                            error!("Error discovering peer: {e}");
+                                        }
                                     }
+                                };
+                            }
+                        });
+                        tokio::spawn({
+                            let ipfs = self.ipfs.clone();
+                            let pubkey = pubkey.clone();
+                            async move {
+                                loop {
+                                    if let Ok(PeerConnectionType::Connected) =
+                                        connected_to_peer(ipfs.clone(), peer_id).await
+                                    {
+                                        discovering.write().remove(&pubkey);
+                                        break;
+                                    }
+                                    tokio::time::sleep(Duration::from_secs(1)).await;
                                 }
-                            };
+                            }
                         });
                         tokio::task::yield_now().await;
                     }
@@ -596,12 +623,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 .ok_or(Error::IdentityDoesntExist)?;
         }
 
-        let connected = connected_to_peer(self.ipfs.clone(), did.clone()).await?;
-
-        match connected {
-            PeerConnectionType::NotConnected => Ok(IdentityStatus::Offline),
-            _ => Ok(IdentityStatus::Online),
-        }
+        connected_to_peer(self.ipfs.clone(), did.clone())
+            .await
+            .map(|ctype| ctype.into())
+            .map_err(Error::from)
     }
 
     pub fn get_keypair(&self) -> anyhow::Result<Keypair> {

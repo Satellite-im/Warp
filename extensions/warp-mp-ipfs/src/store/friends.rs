@@ -443,6 +443,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let list = self.list_all_raw_request().await?;
 
+        //TODO: Use the iterator instead 
         for request in list.iter() {
             // checking the from and status is just a precaution and not required
             if request.request_type() == InternalRequestType::Outgoing
