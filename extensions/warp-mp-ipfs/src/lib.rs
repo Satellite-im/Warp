@@ -496,10 +496,6 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 )?;
                 cache.add_data(DataType::from(Module::Accounts), &object)?;
             }
-            if let Ok(hooks) = self.get_hooks() {
-                let object = DataObject::new(DataType::Accounts, identity.clone())?;
-                hooks.trigger("accounts::new_identity", &object);
-            }
             Ok(identity.did_key())
         })
     }
@@ -665,10 +661,6 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
             info!("Update identity store");
             store.update_identity().await?;
 
-            if let Ok(hooks) = self.get_hooks() {
-                let object = DataObject::new(DataType::Accounts, identity.clone())?;
-                hooks.trigger("accounts::update_identity", &object);
-            }
             Ok(())
         })
     }
