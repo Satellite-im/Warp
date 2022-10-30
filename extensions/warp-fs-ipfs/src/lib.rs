@@ -12,12 +12,15 @@ use ipfs::{unixfs::ll::file::adder::FileAdder, Block};
 
 use anyhow::anyhow;
 use chrono::{DateTime, Utc};
-use ipfs::{Ipfs, IpfsPath, IpfsTypes};
+use ipfs::{Ipfs, IpfsPath, IpfsTypes, TestTypes, Types};
 
 use warp::constellation::{directory::Directory, Constellation};
 use warp::error::Error;
 use warp::pocket_dimension::PocketDimension;
 use warp::{Extension, SingleHandle};
+
+pub type Temporary = TestTypes;
+pub type Persistent = Types;
 
 type Result<T> = std::result::Result<T, Error>;
 
