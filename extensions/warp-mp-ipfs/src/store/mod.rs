@@ -9,14 +9,15 @@ use warp::{
         DIDKey, Ed25519KeyPair, KeyMaterial, DID,
     },
     error::Error,
-    multipass::identity::Identity,
+    multipass::identity::{Identity, IdentityStatus},
     tesseract::Tesseract,
 };
 
 use crate::config::Discovery;
 
-use self::friends::InternalRequest;
+use self::{document::DocumentType, friends::InternalRequest};
 
+pub mod document;
 pub mod friends;
 pub mod identity;
 pub mod phonebook;
@@ -68,6 +69,14 @@ pub enum Payload {
         signature: Vec<u8>,
     },
     PackageStreamEnd,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IdentityPayload {
+    /// Not required but would be used to cross check the identity did, sender (if sent directly)
+    pub did: DID,
+    /// Type that represents identity or cid
+    pub payload: DocumentType<Identity>,
 }
 
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity::PublicKey> {
@@ -155,16 +164,21 @@ impl From<PeerId> for PeerType {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PeerConnectionType {
-    SubscribedAndConnected,
-    Subscribed,
     Connected,
     NotConnected,
 }
 
-#[inline]
+impl From<PeerConnectionType> for IdentityStatus {
+    fn from(status: PeerConnectionType) -> Self {
+        match status {
+            PeerConnectionType::Connected => IdentityStatus::Online,
+            PeerConnectionType::NotConnected => IdentityStatus::Offline,
+        }
+    }
+}
+
 pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
     ipfs: ipfs::Ipfs<T>,
-    topic: Option<String>,
     pkey: I,
 ) -> anyhow::Result<PeerConnectionType> {
     let peer_id = match pkey.into() {
@@ -172,22 +186,11 @@ pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
         PeerType::PeerId(peer) => peer,
     };
 
-    let mut subscribed_peer = false;
-
     let connected_peer = ipfs.connected().await?.iter().any(|peer| *peer == peer_id);
 
-    if let Some(topic) = topic {
-        subscribed_peer = ipfs
-            .pubsub_peers(Some(topic))
-            .await?
-            .iter()
-            .any(|p| *p == peer_id);
-    }
-    Ok(match (connected_peer, subscribed_peer) {
-        (true, true) => PeerConnectionType::SubscribedAndConnected,
-        (true, false) => PeerConnectionType::Connected,
-        (false, true) => PeerConnectionType::Subscribed,
-        (false, false) => PeerConnectionType::NotConnected,
+    Ok(match connected_peer {
+        true => PeerConnectionType::Connected,
+        false => PeerConnectionType::NotConnected,
     })
 }
 
@@ -199,14 +202,16 @@ pub async fn discover_peer<T: IpfsTypes>(
 ) -> anyhow::Result<()> {
     let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
 
-    if connected_to_peer(ipfs.clone(), None, PeerType::PeerId(peer_id)).await?
+    if connected_to_peer(ipfs.clone(), PeerType::PeerId(peer_id)).await?
         != PeerConnectionType::NotConnected
     {
         return Ok(());
     }
 
     match discovery {
+        //Since we are using PROVIDER, there is no need to do anything here
         Discovery::Provider(_) => {}
+        //We are checking DHT for the peerid
         Discovery::Direct => loop {
             if ipfs.find_peer_info(peer_id).await.is_ok() {
                 break;
@@ -215,18 +220,18 @@ pub async fn discover_peer<T: IpfsTypes>(
         },
         Discovery::None => {
             //Attempt a direct dial via relay
+            for addr in relay.iter() {
+                let addr = addr.clone().with(Protocol::P2p(peer_id.into()));
+                if let Err(_e) = ipfs.dial(addr).await {
+                    continue;
+                }
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
             loop {
-                for addr in relay.iter() {
-                    let addr = addr.clone().with(Protocol::P2p(peer_id.into()));
-                    if let Err(_e) = ipfs.dial(addr).await {
-                        continue;
-                    }
-                    tokio::time::sleep(Duration::from_millis(300)).await;
-                    if connected_to_peer(ipfs.clone(), None, PeerType::PeerId(peer_id)).await?
-                        != PeerConnectionType::NotConnected
-                    {
-                        break;
-                    }
+                if connected_to_peer(ipfs.clone(), PeerType::PeerId(peer_id)).await?
+                    == PeerConnectionType::Connected
+                {
+                    break;
                 }
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }

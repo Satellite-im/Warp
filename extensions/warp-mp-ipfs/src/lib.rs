@@ -3,10 +3,10 @@ pub mod store;
 
 use config::MpIpfsConfig;
 use ipfs::libp2p::kad::protocol::DEFAULT_PROTO_NAME;
+use ipfs::libp2p::mplex::MplexConfig;
 use ipfs::libp2p::swarm::ConnectionLimits;
 use ipfs::libp2p::yamux::YamuxConfig;
 use ipfs::p2p::TransportConfig;
-use libipld::serde::to_ipld;
 use sata::Sata;
 use std::any::Any;
 use std::borrow::Cow;
@@ -17,7 +17,7 @@ use store::identity::{IdentityStore, LookupBy};
 use tokio::sync::broadcast;
 use tracing::log::{error, info, trace, warn};
 use warp::crypto::did_key::Generate;
-use warp::data::{DataObject, DataType};
+use warp::data::DataType;
 use warp::hooks::Hooks;
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -224,6 +224,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             dcutr: config.ipfs_setting.relay_client.dcutr,
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
+            keep_alive: true,
             kad_configuration: Some({
                 let mut conf = ipfs::libp2p::kad::KademliaConfig::default();
                 conf.disjoint_query_paths(true);
@@ -241,6 +242,11 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                     let mut config = YamuxConfig::default();
                     config.set_max_buffer_size(16 * 1024 * 1024);
                     config.set_receive_window_size(16 * 1024 * 1024);
+                    config
+                },
+                mplex_config: {
+                    let mut config = MplexConfig::default();
+                    config.set_max_buffer_size(usize::MAX);
                     config
                 },
                 ..Default::default()
@@ -273,49 +279,49 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         info!("passing future into tokio task");
         tokio::spawn(fut);
 
-        let ipfs_clone = ipfs.clone();
-        let config_ = config.clone();
-        tokio::spawn(async move {
-            if config_.ipfs_setting.relay_client.enable {
-                info!("Relay client enabled. Loading relays");
-                for addr in config_.bootstrap.address() {
-                    if let Err(e) = ipfs_clone
-                        .swarm_listen_on(addr.with(Protocol::P2pCircuit))
-                        .await
-                    {
-                        info!("Error listening on relay: {e}");
-                        continue;
-                    }
-                    tokio::time::sleep(Duration::from_millis(400)).await;
-                    if config.ipfs_setting.relay_client.single {
-                        break;
-                    }
-                }
-
-                //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
-                //      anything on this end
-                for addr in config_.ipfs_setting.relay_client.relay_address.iter() {
-                    if let Err(e) = ipfs_clone.dial(addr.clone()).await {
-                        error!("Error dialing relay {}: {e}", addr.clone());
+        tokio::spawn({
+            let ipfs = ipfs.clone();
+            let config = config.clone();
+            async move {
+                if config.ipfs_setting.relay_client.enable {
+                    info!("Relay client enabled. Loading relays");
+                    for addr in config.bootstrap.address() {
+                        if let Err(e) = ipfs.swarm_listen_on(addr.with(Protocol::P2pCircuit)).await
+                        {
+                            info!("Error listening on relay: {e}");
+                            continue;
+                        }
+                        tokio::time::sleep(Duration::from_millis(400)).await;
+                        if config.ipfs_setting.relay_client.single {
+                            break;
+                        }
                     }
 
-                    if let Err(e) = ipfs_clone
-                        .swarm_listen_on(addr.clone().with(Protocol::P2pCircuit))
-                        .await
-                    {
-                        info!("Error listening on relay: {e}");
-                        continue;
-                    }
-                    tokio::time::sleep(Duration::from_millis(400)).await;
-                    if config.ipfs_setting.relay_client.single {
-                        break;
+                    //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
+                    //      anything on this end
+                    for addr in config.ipfs_setting.relay_client.relay_address.iter() {
+                        if let Err(e) = ipfs.dial(addr.clone()).await {
+                            error!("Error dialing relay {}: {e}", addr.clone());
+                        }
+
+                        if let Err(e) = ipfs
+                            .swarm_listen_on(addr.clone().with(Protocol::P2pCircuit))
+                            .await
+                        {
+                            info!("Error listening on relay: {e}");
+                            continue;
+                        }
+                        tokio::time::sleep(Duration::from_millis(400)).await;
+                        if config.ipfs_setting.relay_client.single {
+                            break;
+                        }
                     }
                 }
-            }
-            if config_.ipfs_setting.bootstrap && !empty_bootstrap {
-                //TODO: run bootstrap in intervals
-                if let Err(e) = ipfs_clone.direct_bootstrap().await {
-                    error!("Error bootstrapping: {e}");
+                if config.ipfs_setting.bootstrap && !empty_bootstrap {
+                    //TODO: run bootstrap in intervals
+                    if let Err(e) = ipfs.direct_bootstrap().await {
+                        error!("Error bootstrapping: {e}");
+                    }
                 }
             }
         });
@@ -335,7 +341,11 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             tesseract.clone(),
             config.store_setting.broadcast_interval,
             self.tx.clone(),
-            (config.store_setting.discovery, relays),
+            (
+                config.store_setting.discovery,
+                relays,
+                config.store_setting.override_ipld,
+            ),
         )
         .await?;
         info!("Identity store initialized");
@@ -343,10 +353,10 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         let friend_store = FriendsStore::new(
             ipfs.clone(),
             identity_store.clone(),
-            config.path.map(|p| p.join("friends")),
+            config.path,
             tesseract.clone(),
             config.store_setting.broadcast_interval,
-            self.tx.clone(),
+            (self.tx.clone(), config.store_setting.override_ipld),
         )
         .await?;
         info!("friends store initialized");
@@ -490,10 +500,6 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 )?;
                 cache.add_data(DataType::from(Module::Accounts), &object)?;
             }
-            if let Ok(hooks) = self.get_hooks() {
-                let object = DataObject::new(DataType::Accounts, identity.clone())?;
-                hooks.trigger("accounts::new_identity", &object);
-            }
             Ok(identity.did_key())
         })
     }
@@ -526,7 +532,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                             }
                         }
                     }
-                    store.lookup(LookupBy::DidKey(Box::new(pk))).await
+                    store.lookup(LookupBy::DidKey(pk)).await
                 }
                 (None, Some(username), false) => {
                     if let Ok(cache) = self.get_cache() {
@@ -578,7 +584,6 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
 
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
         async_block_in_place_uncheck(async {
-            let ipfs = self.ipfs()?.clone();
             let mut store = self.identity_store()?;
             let mut identity = self.get_own_identity()?;
             let old_identity = identity.clone();
@@ -628,35 +633,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 _ => return Err(Error::CannotUpdateIdentity),
             }
 
-            let mut old_cid = None;
-
-            if let Ok(cid) = store.get_cid().await {
-                info!("Current CID for identity: {cid}");
-                info!("Is it pinned?");
-                if ipfs.is_pinned(&cid).await? {
-                    info!("Cid is pinned. Removing pin");
-                    ipfs.remove_pin(&cid, false).await?;
-                }
-                old_cid = Some(cid);
-            };
-
-            //TODO: Build out ipld object with extracted data (eg images) and store them directly with the cid
-            info!("Converting identity to ipld");
-            let ipld = to_ipld(&identity).map_err(anyhow::Error::from)?;
-            info!("Storing identity into ipfd");
-            let ident_cid = ipfs.put_dag(ipld).await?;
-
-            info!("New identity cid is {ident_cid}. Pinning it");
-
-            ipfs.insert_pin(&ident_cid, false).await?;
-            info!("ident_cid is pinned it");
-            store.save_cid(ident_cid).await?;
-            if let Some(old_cid) = old_cid {
-                info!("Removing {old_cid}");
-                if let Err(e) = ipfs.remove_block(old_cid).await {
-                    error!("Cannot remove {old_cid}: {e}");
-                }
-            }
+            store.identity_update(identity.clone()).await?;
 
             if let Ok(mut cache) = self.get_cache_mut() {
                 let mut query = QueryBuilder::default();
@@ -688,10 +665,6 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
             info!("Update identity store");
             store.update_identity().await?;
 
-            if let Ok(hooks) = self.get_hooks() {
-                let object = DataObject::new(DataType::Accounts, identity.clone())?;
-                hooks.trigger("accounts::update_identity", &object);
-            }
             Ok(())
         })
     }
@@ -734,27 +707,27 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
 
     fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.friend_store()?;
-        Ok(store.list_incoming_request())
+        async_block_in_place_uncheck(store.list_incoming_request())
     }
 
     fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.friend_store()?;
-        Ok(store.list_outgoing_request())
+        async_block_in_place_uncheck(store.list_outgoing_request())
     }
 
     fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store()?;
-        Ok(store.received_friend_request_from(did))
+        async_block_in_place_uncheck(store.received_friend_request_from(did))
     }
 
     fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store()?;
-        Ok(store.sent_friend_request_to(did))
+        async_block_in_place_uncheck(store.sent_friend_request_to(did))
     }
 
     fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
         let store = self.friend_store()?;
-        Ok(store.list_all_request())
+        async_block_in_place_uncheck(store.list_all_request())
     }
 
     fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
@@ -769,7 +742,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
 
     fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store()?;
-        Ok(store.is_blocked(did))
+        async_block_in_place_uncheck(store.is_blocked(did))
     }
 
     fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
@@ -779,12 +752,12 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
 
     fn block_list(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store()?;
-        async_block_in_place_uncheck(store.block_list())
+        async_block_in_place_uncheck(store.block_list()).map(Vec::from_iter)
     }
 
     fn list_friends(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store()?;
-        async_block_in_place_uncheck(store.friends_list())
+        async_block_in_place_uncheck(store.friends_list()).map(Vec::from_iter)
     }
 
     fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {

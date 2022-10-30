@@ -1,21 +1,31 @@
 #[cfg(test)]
 mod test {
-
-    use warp::multipass::identity::IdentityUpdate;
+    use warp::crypto::DID;
+    use warp::multipass::identity::{Identity, IdentityUpdate};
     use warp::multipass::MultiPass;
     use warp::tesseract::Tesseract;
     use warp_mp_ipfs::ipfs_identity_temporary;
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn create_identity() -> anyhow::Result<()> {
+    async fn create_account(
+        username: Option<&str>,
+        passphrase: Option<&str>,
+    ) -> anyhow::Result<(Box<dyn MultiPass>, DID, Identity)> {
         let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
+        let config = warp_mp_ipfs::config::MpIpfsConfig::development();
+        let mut account = ipfs_identity_temporary(Some(config), tesseract, None).await?;
+        let did = account.create_identity(username, passphrase)?;
+        let identity = account.get_own_identity()?;
+        Ok((Box::new(account), did, identity))
+    }
 
-        let mut account = ipfs_identity_temporary(None, tesseract, None).await?;
-        let did = account.create_identity(
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn create_identity() -> anyhow::Result<()> {
+        let (_, did, _) = create_account(
             None,
             Some("morning caution dose lab six actress pond humble pause enact virtual train"),
-        )?;
+        )
+        .await?;
 
         assert_eq!(
             did.to_string(),
@@ -27,16 +37,11 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_own_identity() -> anyhow::Result<()> {
-        let tesseract = Tesseract::default();
-        tesseract.unlock(b"internal pass").unwrap();
-
-        let mut account = ipfs_identity_temporary(None, tesseract, None).await?;
-        account.create_identity(
+        let (_, _, identity) = create_account(
             Some("JohnDoe"),
             Some("morning caution dose lab six actress pond humble pause enact virtual train"),
-        )?;
-
-        let identity = account.get_own_identity()?;
+        )
+        .await?;
 
         assert_eq!(identity.username(), "JohnDoe");
         assert_eq!(
@@ -47,20 +52,15 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn get_identity() -> anyhow::Result<()> {
-        let tesseract_a = Tesseract::default();
-        tesseract_a.unlock(b"internal pass").unwrap();
-        let mut account_a = ipfs_identity_temporary(None, tesseract_a, None).await?;
-        account_a.create_identity(
+        let (account_a, _, _) = create_account(
             Some("JohnDoe"),
             Some("morning caution dose lab six actress pond humble pause enact virtual train"),
-        )?;
+        )
+        .await?;
 
-        let tesseract_b = Tesseract::default();
-        tesseract_b.unlock(b"internal pass").unwrap();
-        let mut account_b = ipfs_identity_temporary(None, tesseract_b, None).await?;
-        let did_b = account_b.create_identity(Some("JaneDoe"), None)?;
+        let (_, did_b, _) = create_account(Some("JaneDoe"), None).await?;
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
         tokio::time::sleep(std::time::Duration::from_millis(600)).await;
@@ -78,24 +78,15 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[ignore = "Will re-evaluate"]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn get_identity_by_username() -> anyhow::Result<()> {
-        let tesseract_a = Tesseract::default();
-        tesseract_a.unlock(b"internal pass").unwrap();
-        let mut account_a = ipfs_identity_temporary(None, tesseract_a, None).await?;
-        account_a.create_identity(
-            Some("JohnDoe"),
-            Some("morning caution dose lab six actress pond humble pause enact virtual train"),
-        )?;
+        let (account_a, _, _) = create_account(Some("JohnDoe"), None).await?;
 
-        let tesseract_b = Tesseract::default();
-        tesseract_b.unlock(b"internal pass").unwrap();
-        let mut account_b = ipfs_identity_temporary(None, tesseract_b, None).await?;
-        account_b.create_identity(Some("JaneDoe"), None)?;
+        let (_account_b, _, _) = create_account(Some("JaneDoe"), None).await?;
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
-        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
         let identity_b = account_a
             .get_identity(String::from("JaneDoe").into())?
             .first()
@@ -106,7 +97,6 @@ mod test {
         let identity_b = identity_b.unwrap();
 
         assert_eq!(identity_b.username(), "JaneDoe");
-
         Ok(())
     }
 

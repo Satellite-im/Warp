@@ -22,6 +22,8 @@ struct Opt {
     #[clap(long)]
     path: Option<PathBuf>,
     #[clap(long)]
+    context: Option<String>,
+    #[clap(long)]
     experimental_node: bool,
     #[clap(long)]
     direct: bool,
@@ -29,8 +31,14 @@ struct Opt {
     no_discovery: bool,
     #[clap(long)]
     mdns: bool,
+    #[clap(long)]
+    r#override: Option<bool>,
+    #[clap(long)]
+    bootstrap: Option<bool>,
 }
 
+//Note: Cache can be enabled but the internals may need a little rework but since extension handles caching itself, this isnt needed for now
+#[allow(dead_code)]
 fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
     if let Some(root) = root {
         let storage =
@@ -44,24 +52,34 @@ fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn Pocke
 async fn account(
     username: Option<&str>,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-    experimental: bool,
-    direct: bool,
-    no_discovery: bool,
-    mdns: bool,
+    opt: &Opt,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let tesseract = Tesseract::default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    let mut config = MpIpfsConfig::testing(experimental);
-    if direct {
+    let mut config = MpIpfsConfig::testing(opt.experimental_node);
+
+    if !opt.direct || !opt.no_discovery {
+        config.store_setting.discovery = Discovery::Provider(opt.context.clone());
+    }
+
+    if opt.direct {
         config.store_setting.discovery = Discovery::Direct;
     }
-    if no_discovery {
+    if opt.no_discovery {
         config.store_setting.discovery = Discovery::None;
         config.ipfs_setting.bootstrap = false;
     }
-    config.ipfs_setting.mdns.enable = mdns;
+    if let Some(oride) = opt.r#override {
+        config.store_setting.override_ipld = oride;
+    }
+
+    if let Some(bootstrap) = opt.bootstrap {
+        config.ipfs_setting.bootstrap = bootstrap;
+    }
+
+    config.ipfs_setting.mdns.enable = opt.mdns;
     let mut account = ipfs_identity_temporary(Some(config), tesseract, cache).await?;
     account.create_identity(username, None)?;
     Ok(Box::new(account))
@@ -71,10 +89,7 @@ async fn account_persistent<P: AsRef<Path>>(
     username: Option<&str>,
     path: P,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-    experimental: bool,
-    direct: bool,
-    no_discovery: bool,
-    mdns: bool,
+    opt: &Opt,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let path = path.as_ref();
     let tesseract = match Tesseract::from_file(path.join("tdatastore")) {
@@ -90,16 +105,27 @@ async fn account_persistent<P: AsRef<Path>>(
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    let mut config = MpIpfsConfig::production(&path, experimental);
-    if direct {
+    let mut config = MpIpfsConfig::production(&path, opt.experimental_node);
+    if !opt.direct || !opt.no_discovery {
+        config.store_setting.discovery = Discovery::Provider(opt.context.clone());
+    }
+    if opt.direct {
         config.store_setting.discovery = Discovery::Direct;
     }
-    if no_discovery {
+    if opt.no_discovery {
         config.store_setting.discovery = Discovery::None;
         config.ipfs_setting.bootstrap = false;
     }
 
-    config.ipfs_setting.mdns.enable = mdns;
+    if let Some(oride) = opt.r#override {
+        config.store_setting.override_ipld = oride;
+    }
+
+    if let Some(bootstrap) = opt.bootstrap {
+        config.ipfs_setting.bootstrap = bootstrap;
+    }
+
+    config.ipfs_setting.mdns.enable = opt.mdns;
     let mut account = ipfs_identity_persistent(config, tesseract, cache).await?;
     if account.get_own_identity().is_err() {
         account.create_identity(username, None)?;
@@ -109,9 +135,17 @@ async fn account_persistent<P: AsRef<Path>>(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let opt = Opt::parse();
     if fdlimit::raise_fd_limit().is_none() {}
 
-    let file_appender = tracing_appender::rolling::hourly("./", "warp_mp_identity_interface.log");
+    let file_appender = match &opt.path {
+        Some(path) => tracing_appender::rolling::hourly(path, "warp_mp_identity_interface.log"),
+        None => tracing_appender::rolling::hourly(
+            std::env::temp_dir(),
+            "warp_mp_identity_interface.log",
+        ),
+    };
+
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     tracing_subscriber::fmt()
@@ -119,34 +153,11 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let opt = Opt::parse();
-
-    let cache = cache_setup(opt.path.clone()).ok();
+    let cache = None; //cache_setup(opt.path.clone()).ok();
 
     let mut account = match opt.path.as_ref() {
-        Some(path) => {
-            account_persistent(
-                None,
-                path,
-                cache,
-                opt.experimental_node,
-                opt.direct,
-                opt.no_discovery,
-                opt.mdns,
-            )
-            .await?
-        }
-        None => {
-            account(
-                None,
-                cache,
-                opt.experimental_node,
-                opt.direct,
-                opt.no_discovery,
-                opt.mdns,
-            )
-            .await?
-        }
+        Some(path) => account_persistent(None, path, cache, &opt).await?,
+        None => account(None, cache, &opt).await?,
     };
 
     println!("Obtaining identity....");

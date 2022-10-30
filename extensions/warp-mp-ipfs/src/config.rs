@@ -94,6 +94,14 @@ impl Default for Swarm {
     }
 }
 
+/*
+    experimental connection limits:
+                max_pending_incoming: Some(512),
+                max_pending_outgoing: Some(512),
+                max_established_incoming: Some(512),
+                max_established_outgoing: Some(512),
+*/
+
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionLimit {
     pub max_pending_incoming: Option<u32>,
@@ -130,15 +138,18 @@ pub struct StoreSetting {
     pub sync: Vec<Multiaddr>,
     /// Interval to push or check node
     pub sync_interval: u64,
+    /// Use objects directly rather than a cid
+    pub override_ipld: bool,
 }
 
 impl Default for StoreSetting {
     fn default() -> Self {
         Self {
-            broadcast_interval: 100,
+            broadcast_interval: 500,
             discovery: Discovery::Provider(None),
             sync: Vec::new(),
             sync_interval: 100,
+            override_ipld: true,
         }
     }
 }
@@ -200,7 +211,6 @@ impl MpIpfsConfig {
             },
             store_setting: StoreSetting {
                 discovery: Discovery::Provider(None),
-                broadcast_interval: 100,
                 ..Default::default()
             },
             ..Default::default()
@@ -222,7 +232,6 @@ impl MpIpfsConfig {
                 ..Default::default()
             },
             store_setting: StoreSetting {
-                broadcast_interval: 100,
                 discovery: Discovery::None,
                 ..Default::default()
             },
@@ -246,7 +255,6 @@ impl MpIpfsConfig {
                 ..Default::default()
             },
             store_setting: StoreSetting {
-                broadcast_interval: 100,
                 discovery: Discovery::None,
                 ..Default::default()
             },
@@ -273,7 +281,6 @@ impl MpIpfsConfig {
                 ..Default::default()
             },
             store_setting: StoreSetting {
-                broadcast_interval: 100,
                 discovery: Discovery::Provider(None),
                 ..Default::default()
             },

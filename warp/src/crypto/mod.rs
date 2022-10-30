@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, str::FromStr};
 
 pub use aead;
 pub use aes_gcm;
@@ -32,6 +32,13 @@ use crate::error::Error;
 #[derive(FFIVec, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct DID(DIDKey);
+
+impl FromStr for DID {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        did_key::resolve(s).map_err(|_| Error::PublicKeyInvalid).map(DID)
+    }
+}
 
 impl core::hash::Hash for DID {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {

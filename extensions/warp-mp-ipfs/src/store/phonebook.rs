@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::Context;
@@ -56,7 +57,7 @@ impl<T: IpfsTypes> PhoneBook<T> {
         (book, fut)
     }
 
-    pub async fn add_friend_list(&self, list: Vec<DID>) -> anyhow::Result<()> {
+    pub async fn add_friend_list(&self, list: HashSet<DID>) -> anyhow::Result<()> {
         for friend in list.iter() {
             self.add_friend(friend).await?;
         }
@@ -135,11 +136,8 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
                     let mut online = vec![];
                     for (friend, status, _) in self.friends.iter() {
                         if let Some(status) = status {
-                            match *status {
-                                PeerConnectionType::Connected
-                                | PeerConnectionType::SubscribedAndConnected
-                                | PeerConnectionType::Subscribed => online.push(friend.clone()),
-                                _ => {}
+                            if *status == PeerConnectionType::Connected {
+                                online.push(friend.clone())
                             }
                         }
                     }
@@ -191,11 +189,7 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
             let discovery = discovery.clone();
             //Note: We are using this to get the results from the function because it continues to show `Poll::Pending`
             //TODO: Switch back to manually polling and loop back over until it doesnt return `Poll::Pending`
-            match warp::async_block_in_place_uncheck(connected_to_peer(
-                ipfs.clone(),
-                None,
-                did.clone(),
-            )) {
+            match warp::async_block_in_place_uncheck(connected_to_peer(ipfs.clone(), did.clone())) {
                 Ok(inner_status) => match (inner_status, *discovering) {
                     (PeerConnectionType::NotConnected, false) => {
                         let ipfs = ipfs.clone();
@@ -229,9 +223,7 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
                         }
                         *status = Some(PeerConnectionType::NotConnected);
                     }
-                    (PeerConnectionType::Connected, true)
-                    | (PeerConnectionType::SubscribedAndConnected, true)
-                    | (PeerConnectionType::Subscribed, true) => {
+                    (PeerConnectionType::Connected, true) => {
                         if let Err(e) =
                             event.send(MultiPassEventKind::IdentityOnline { did: did.clone() })
                         {
@@ -240,9 +232,7 @@ impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
                         *discovering = false;
                         *status = Some(inner_status)
                     }
-                    (PeerConnectionType::SubscribedAndConnected, false)
-                    | (PeerConnectionType::Subscribed, false)
-                    | (PeerConnectionType::Connected, false) => {
+                    (PeerConnectionType::Connected, false) => {
                         if let Some(inner_status2) = *status {
                             if inner_status2 == PeerConnectionType::NotConnected {
                                 if let Err(e) = event
