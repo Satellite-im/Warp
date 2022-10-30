@@ -243,14 +243,76 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         Ok(())
     }
 
-    async fn put_buffer(&mut self, _name: &str, _buffer: &Vec<u8>) -> Result<()> {
-        let _ipfs = self.ipfs()?;
-        Err(Error::Unimplemented)
+    async fn put_buffer(&mut self, name: &str, buffer: &Vec<u8>) -> Result<()> {
+        let ipfs = self.ipfs()?;
+
+        if self.current_directory()?.get_item_by_path(name).is_ok() {
+            return Err(Error::Other); //TODO: Exist
+        }
+
+        let mut adder = FileAdder::default();
+        //Maybe write directly to avoid reallocation?
+        let mut reader =
+            BufReader::with_capacity(adder.size_hint(), Cursor::new(buffer.as_slice()));
+        let mut written = 0;
+        let mut last_cid = None;
+
+        {
+            let ipfs = ipfs.clone();
+            loop {
+                match reader.fill_buf().await? {
+                    buffer if buffer.is_empty() => {
+                        let blocks = adder.finish();
+                        for (cid, block) in blocks {
+                            let block = Block::new(cid, block)?;
+                            let cid = ipfs.put_block(block).await?;
+                            last_cid = Some(cid);
+                        }
+                        break;
+                    }
+                    buffer => {
+                        let mut total = 0;
+
+                        while total < buffer.len() {
+                            let (blocks, consumed) = adder.push(&buffer[total..]);
+                            for (cid, block) in blocks {
+                                let block = Block::new(cid, block)?;
+                                let _cid = ipfs.put_block(block).await?;
+                            }
+                            total += consumed;
+                            written += consumed;
+                        }
+                        reader.consume(total);
+                    }
+                }
+            }
+        }
+        let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
+
+        let file = warp::constellation::file::File::new(name);
+        file.set_size(written);
+        file.set_reference(&format!("/ipfs/{cid}"));
+        file.hash_mut().hash_from_slice(buffer)?;
+        self.current_directory()?.add_item(file)?;
+        Ok(())
     }
 
-    async fn get_buffer(&self, _name: &str) -> Result<Vec<u8>> {
-        let _ipfs = self.ipfs()?;
-        Err(Error::Unimplemented)
+    async fn get_buffer(&self, name: &str) -> Result<Vec<u8>> {
+        let ipfs = self.ipfs()?;
+        let item = self.current_directory()?.get_item_by_path(name)?;
+        let file = item.get_file()?;
+        let reference = file.reference().ok_or(Error::Other)?; //Reference not found
+        let stream = ipfs
+            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
+            .await
+            .map_err(anyhow::Error::from)?;
+        pin_mut!(stream);
+        let mut buffer = vec![];
+        while let Some(data) = stream.next().await {
+            let mut bytes = data.map_err(anyhow::Error::from)?;
+            buffer.append(&mut bytes);
+        }
+        Ok(buffer)
     }
 
     fn set_path(&mut self, path: PathBuf) {
