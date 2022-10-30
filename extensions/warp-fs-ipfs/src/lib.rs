@@ -213,7 +213,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             }
         }
         let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
-
+        ipfs.insert_pin(&cid, true).await?;
         let file = warp::constellation::file::File::new(name);
         file.set_size(written);
         file.set_reference(&format!("/ipfs/{cid}"));
@@ -289,6 +289,8 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         }
         let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
 
+        ipfs.insert_pin(&cid, true).await?;
+
         let file = warp::constellation::file::File::new(name);
         file.set_size(written);
         file.set_reference(&format!("/ipfs/{cid}"));
@@ -307,12 +309,43 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             .await
             .map_err(anyhow::Error::from)?;
         pin_mut!(stream);
+
         let mut buffer = vec![];
         while let Some(data) = stream.next().await {
             let mut bytes = data.map_err(anyhow::Error::from)?;
             buffer.append(&mut bytes);
         }
+
         Ok(buffer)
+    }
+
+    /// Used to remove data from the filesystem
+    async fn remove(&mut self, name: &str, _: bool) -> Result<()> {
+        let ipfs = self.ipfs()?;
+        //TODO: Recursively delete directory but for now only support deleting a file
+        let directory = self.current_directory()?;
+        let item = directory.get_item_by_path(name)?;
+
+        let file = item.get_file()?;
+        let reference = file
+            .reference()
+            .ok_or(Error::ObjectNotFound)?
+            .parse::<IpfsPath>()?; //Reference not found
+
+        let cid = reference
+            .root()
+            .cid()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Invalid path root"))?;
+
+        if ipfs.is_pinned(&cid).await? {
+            ipfs.remove_pin(&cid, true).await?;
+        }
+
+        ipfs.remove_block(cid).await?;
+        directory.remove_item(&item.name())?;
+
+        Ok(())
     }
 
     fn set_path(&mut self, path: PathBuf) {
