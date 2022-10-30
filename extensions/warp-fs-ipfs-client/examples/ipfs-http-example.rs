@@ -1,6 +1,6 @@
 use tokio::io::AsyncReadExt;
 use warp::constellation::Constellation;
-use warp_fs_ipfs::IpfsFileSystem;
+use warp_fs_ipfs_client::IpfsFileSystem;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

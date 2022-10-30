@@ -1,5 +1,5 @@
 [package]
-name = "warp-fs-ipfs"
+name = "warp-fs-ipfs-client"
 version = "0.1.0"
 edition = "2021"
 
