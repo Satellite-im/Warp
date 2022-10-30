@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use warp::{multipass::MultiPass, tesseract::Tesseract, sync::RwLock, constellation::Constellation};
+use warp::{
+    constellation::Constellation, multipass::MultiPass, sync::RwLock, tesseract::Tesseract,
+};
 use warp_fs_ipfs::{IpfsFileSystem, Temporary};
 use warp_mp_ipfs::{config::MpIpfsConfig, ipfs_identity_temporary};
 

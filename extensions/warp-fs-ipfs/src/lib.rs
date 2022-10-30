@@ -1,4 +1,5 @@
 use futures::{pin_mut, StreamExt};
+use std::io::Cursor;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -24,12 +25,13 @@ pub type Persistent = Types;
 
 type Result<T> = std::result::Result<T, Error>;
 
+#[allow(clippy::type_complexity)]
 pub struct IpfsFileSystem<T: IpfsTypes> {
     index: Directory,
     path: PathBuf,
     modified: DateTime<Utc>,
     ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
-    account: Arc<RwLock<Box<dyn MultiPass>>>,
+    account: Arc<tokio::sync::RwLock<Option<Arc<RwLock<Box<dyn MultiPass>>>>>>,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
 }
 
@@ -48,44 +50,55 @@ impl<T: IpfsTypes> Clone for IpfsFileSystem<T> {
 
 impl<T: IpfsTypes> IpfsFileSystem<T> {
     pub async fn new(account: Arc<RwLock<Box<dyn MultiPass>>>) -> anyhow::Result<Self> {
-        let mut filesystem = IpfsFileSystem {
+        let filesystem = IpfsFileSystem {
             index: Directory::new("root"),
             path: PathBuf::new(),
             modified: Utc::now(),
-            account,
+            account: Default::default(),
             ipfs: Default::default(),
             cache: None,
         };
 
-        if filesystem.account.read().get_own_identity().is_err() {
-            debug!("Identity doesnt exist. Waiting for it to load or to be created");
-            let mut filesystem = filesystem.clone();
-            tokio::spawn(async move {
-                loop {
-                    match filesystem.account.get_own_identity() {
-                        Ok(_) => break,
-                        _ => {
-                            //TODO: have a flag that would tell is it been an error other than it not being available
-                            //      so we dont try to extract ipfs
-                            tokio::time::sleep(Duration::from_millis(100)).await
+        *filesystem.account.write().await = Some(account);
+
+        if let Some(account) = filesystem.account.read().await.clone() {
+            if account.read().get_own_identity().is_err() {
+                debug!("Identity doesnt exist. Waiting for it to load or to be created");
+                let mut filesystem = filesystem.clone();
+
+                tokio::spawn({
+                    let account = account.clone();
+                    async move {
+                        loop {
+                            match account.get_own_identity() {
+                                Ok(_) => break,
+                                _ => {
+                                    //TODO: have a flag that would tell is it been an error other than it not being available
+                                    //      so we dont try to extract ipfs
+                                    tokio::time::sleep(Duration::from_millis(100)).await
+                                }
+                            }
+                        }
+                        if let Err(e) = filesystem.initialize().await {
+                            error!("Error initializing filesystem: {e}");
                         }
                     }
-                }
-                if let Err(e) = filesystem.initialize().await {
-                    error!("Error initializing store: {e}");
-                }
-            });
-        } else {
-            filesystem.initialize().await?;
+                });
+            } else {
+                let mut filesystem = filesystem.clone();
+                filesystem.initialize().await?;
+            }
         }
 
         Ok(filesystem)
     }
 
     async fn initialize(&mut self) -> Result<()> {
-        debug!("Initializing internal store");
+        debug!("Initializing or fetch ipfs");
 
-        let ipfs_handle = match self.account.handle() {
+        let account = self.account.read().await.clone().ok_or(Error::MultiPassExtensionUnavailable)?;
+
+        let ipfs_handle = match account.handle() {
             Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
             _ => None,
         };
