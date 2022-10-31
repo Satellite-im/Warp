@@ -96,7 +96,12 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
     async fn initialize(&mut self) -> Result<()> {
         debug!("Initializing or fetch ipfs");
 
-        let account = self.account.read().await.clone().ok_or(Error::MultiPassExtensionUnavailable)?;
+        let account = self
+            .account
+            .read()
+            .await
+            .clone()
+            .ok_or(Error::MultiPassExtensionUnavailable)?;
 
         let ipfs_handle = match account.handle() {
             Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
@@ -335,6 +340,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
     /// Used to remove data from the filesystem
     async fn remove(&mut self, name: &str, _: bool) -> Result<()> {
         let ipfs = self.ipfs()?;
+
         //TODO: Recursively delete directory but for now only support deleting a file
         let directory = self.current_directory()?;
         let item = directory.get_item_by_path(name)?;

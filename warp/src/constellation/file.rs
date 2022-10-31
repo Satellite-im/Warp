@@ -71,6 +71,12 @@ pub struct File {
     reference: Arc<RwLock<Option<String>>>,
 }
 
+impl core::hash::Hash for File {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id().hash(state);
+    }
+}
+
 impl PartialEq for File {
     fn eq(&self, other: &Self) -> bool {
         self.id() == other.id()

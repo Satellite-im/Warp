@@ -596,7 +596,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn constellation_fs_ipfs_new(
+    pub unsafe extern "C" fn constellation_fs_ipfs_client_new(
         pd: *mut PocketDimensionAdapter,
     ) -> *mut ConstellationAdapter {
         let mut ipfs = IpfsFileSystem::new();
@@ -614,7 +614,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn constellation_fs_ipfs_new_with_uri(
+    pub unsafe extern "C" fn constellation_fs_ipfs_client_new_with_uri(
         pd: *const PocketDimensionAdapter,
         uri: *const c_char,
     ) -> FFIResult<ConstellationAdapter> {

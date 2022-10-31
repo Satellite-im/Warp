@@ -14,9 +14,23 @@ use warp_derive::FFIFree;
 use wasm_bindgen::prelude::*;
 
 /// `Item` is a type that handles both `File` and `Directory`
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(Serialize, Deserialize, Clone, Debug, warp_derive::FFIVec, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Item(ItemInner);
+
+impl core::hash::Hash for Item {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id().hash(state)
+    }
+}
+
+impl PartialEq for Item {
+    fn eq(&self, other: &Self) -> bool {
+        self.id() == other.id()
+    }
+}
+
+impl Eq for Item {}
 
 /// `Item` is a type that handles both `File` and `Directory`
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

@@ -53,6 +53,12 @@ pub struct Directory {
     items: Arc<RwLock<Vec<Item>>>,
 }
 
+impl core::hash::Hash for Directory {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id().hash(state);
+    }
+}
+
 impl PartialEq for Directory {
     fn eq(&self, other: &Self) -> bool {
         self.id() == other.id()
