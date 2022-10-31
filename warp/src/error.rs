@@ -34,6 +34,14 @@ pub enum Error {
     InvalidConversion,
     #[error("Path supplied is invalid")]
     InvalidPath,
+    #[error("Directory already exist")]
+    DirectoryExist,
+    #[error("File already exist")]
+    FileExist,
+    #[error("File cannot be found")]
+    FileNotFound,
+    #[error("Directory cannot be found")]
+    DirectoryNotFound,
 
     //PocketDimension Errors
     #[error("Pocket dimension extension is unavailable")]
@@ -213,10 +221,6 @@ pub enum Error {
     ObjectNotFound,
     #[error("The length of the key is invalid")]
     InvalidKeyLength,
-    #[error("File is not found")]
-    FileNotFound,
-    #[error("Directory is not found")]
-    DirectoryNotFound,
     #[error("Error to be determined")]
     ToBeDetermined,
     #[error("{0}")]

@@ -115,13 +115,14 @@ impl Directory {
             .filter(|&s| !s.is_empty())
             .collect::<Vec<_>>();
 
-        // checl to determine if the array is empty
+        // check to determine if the array is empty
         if path.is_empty() {
             return directory;
         }
 
         let name = path.remove(0);
         *directory.name.write() = name.to_string();
+
         if !path.is_empty() {
             let sub = Self::new(path.join("/").as_str());
             if directory.add_item(sub).is_ok() {};
