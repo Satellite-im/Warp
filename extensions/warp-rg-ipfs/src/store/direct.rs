@@ -210,7 +210,7 @@ impl DirectConversation {
         if let Some(path) = self.path() {
             let path = path.join(self.id().to_string());
             if !path.is_file() {
-                anyhow::bail!(Error::FileInvalid);
+                anyhow::bail!(Error::InvalidFile);
             }
             tokio::fs::remove_file(path).await?;
         }
