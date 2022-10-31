@@ -367,11 +367,92 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         Ok(())
     }
 
+    async fn rename(&mut self, current: &str, new: &str) -> Result<()> {
+        //Used as guard in the event its not available but will be used in the future
+        let _ipfs = self.ipfs()?;
+
+        //Note: This will only support renaming the file or directory in the index
+        let directory = self.current_directory()?;
+
+        directory.rename_item(current, new)?;
+
+        Ok(())
+    }
+
+    async fn create_directory(&mut self, name: &str, recursive: bool) -> Result<()> {
+        //Used as guard in the event its not available but will be used in the future
+        let _ipfs = self.ipfs()?;
+        let directory = self.current_directory()?;
+        
+        //Prevent creating recursive/nested directorieis if `recursive` isnt true
+        if name.contains('/') && !recursive {
+            return Err(Error::InvalidDirectory);
+        }
+
+        if directory.has_item(name) || directory.get_item_by_path(name).is_ok() {
+            return Err(Error::DirectoryExist);
+        }
+
+        self.current_directory()?
+            .add_directory(Directory::new(name))?;
+
+        Ok(())
+    }
+
     fn set_path(&mut self, path: PathBuf) {
         self.path = path;
     }
 
     fn get_path(&self) -> PathBuf {
         self.path.clone()
+    }
+}
+
+pub mod ffi {
+    use crate::{IpfsFileSystem, Persistent, Temporary};
+    use warp::constellation::ConstellationAdapter;
+    use warp::error::Error;
+    use warp::ffi::FFIResult;
+    use warp::multipass::MultiPassAdapter;
+    use warp::sync::{Arc, RwLock};
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_fs_ipfs_temporary_new(
+        multipass: *const MultiPassAdapter,
+    ) -> FFIResult<ConstellationAdapter> {
+        let account = match multipass.is_null() {
+            true => {
+                return FFIResult::err(Error::NullPointerContext {
+                    pointer: "multipass".into(),
+                })
+            }
+            false => (*multipass).inner(),
+        };
+
+        warp::async_on_block(IpfsFileSystem::<Temporary>::new(account))
+            .map(|account| ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(account)))))
+            .map_err(Error::from)
+            .into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_fs_ipfs_persistent_new(
+        multipass: *const MultiPassAdapter,
+    ) -> FFIResult<ConstellationAdapter> {
+        let account = match multipass.is_null() {
+            true => {
+                return FFIResult::err(Error::NullPointerContext {
+                    pointer: "multipass".into(),
+                })
+            }
+            false => (*multipass).inner(),
+        };
+
+        warp::async_on_block(IpfsFileSystem::<Persistent>::new(account))
+            .map(|account| ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(account)))))
+            .map_err(Error::from)
+            .into()
     }
 }
