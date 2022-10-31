@@ -161,7 +161,7 @@ impl Directory {
             .filter(|&s| !s.is_empty())
             .collect::<Vec<_>>();
         if path.is_empty() {
-            return Err(Error::ItemInvalid);
+            return Err(Error::InvalidItem);
         }
         let name = path.remove(0);
         let item = self.get_item(name)?;

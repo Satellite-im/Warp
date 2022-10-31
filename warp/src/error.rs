@@ -21,11 +21,11 @@ pub enum Error {
     #[error("Directory cannot contain itself")]
     DirParadox,
     #[error("Directory cannot be found or is invalid")]
-    DirInvalid,
+    InvalidDirectory,
     #[error("File cannot be found or is invalid")]
-    FileInvalid,
+    InvalidFile,
     #[error("Item cannot be found or is invalid")]
-    ItemInvalid,
+    InvalidItem,
     #[error("Item is not a valid file")]
     ItemNotFile,
     #[error("Item is not a valid Directory")]
@@ -253,8 +253,8 @@ impl Error {
             Error::AlreadySubscribed => String::from("AlreadySubscribed"),
             Error::DuplicateName => String::from("DuplicateName"),
             Error::DirParadox => String::from("DirParadox"),
-            Error::DirInvalid => String::from("DirInvalid"),
-            Error::ItemInvalid => String::from("ItemInvalid"),
+            Error::InvalidDirectory => String::from("InvalidDirectory"),
+            Error::InvalidFile => String::from("InvalidFile"),
             Error::ItemNotFile => String::from("ItemNotFile"),
             Error::ItemNotDirectory => String::from("ItemNotDirectory"),
             Error::InvalidConversion => String::from("InvalidConversion"),

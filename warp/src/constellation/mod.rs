@@ -94,7 +94,7 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
         let directory = self.current_directory()?;
         let inner_item = &mut directory.get_item_by_path(path)?;
         if inner_item.id() != item.id() && inner_item.item_type() != item.item_type() {
-            return Err(Error::ItemInvalid);
+            return Err(Error::InvalidItem);
         }
         *inner_item = item;
         Ok(())

@@ -239,7 +239,7 @@ impl Directory {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn remove_item(&self, item_name: &str) -> Result<Item, Error> {
         if !self.has_item(item_name) {
-            return Err(Error::ItemInvalid);
+            return Err(Error::InvalidItem);
         }
         let index = self.get_item_index(item_name)?;
         let item = self.items.write().remove(index);
@@ -385,14 +385,14 @@ impl Directory {
     /// ```
     pub fn get_item(&self, item_name: &str) -> Result<Item, Error> {
         if !self.has_item(item_name) {
-            return Err(Error::ItemInvalid);
+            return Err(Error::InvalidItem);
         }
         let index = self.get_item_index(item_name)?;
         self.items
             .read()
             .get(index)
             .cloned()
-            .ok_or(Error::ItemInvalid)
+            .ok_or(Error::InvalidItem)
     }
 
     /// Used to find an item throughout the `Directory` and its children
@@ -426,7 +426,7 @@ impl Directory {
                 }
             }
         }
-        Err(Error::ItemInvalid)
+        Err(Error::InvalidItem)
     }
 
     /// Used to get a search for items listed and return a list of `Item` matching the terms
