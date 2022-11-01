@@ -103,27 +103,6 @@ pub struct IpfsSetting {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoreSetting {
-    /// Interval for broadcasting out identity or checking queue (queue will be moved into its own system in the future)
-    pub broadcast_interval: u64,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    /// Placeholder for a offline agents to obtain information regarding one own identity
-    pub sync: Vec<Multiaddr>,
-    /// Interval to push or check node
-    pub sync_interval: u64,
-}
-
-impl Default for StoreSetting {
-    fn default() -> Self {
-        Self {
-            broadcast_interval: 500,
-            sync: Vec::new(),
-            sync_interval: 100,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FsIpfsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
@@ -131,7 +110,7 @@ pub struct FsIpfsConfig {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub listen_on: Vec<Multiaddr>,
     pub ipfs_setting: IpfsSetting,
-    pub store_setting: StoreSetting,
+    pub max_storage_size: Option<usize>,
 }
 
 impl Default for FsIpfsConfig {
@@ -148,7 +127,7 @@ impl Default for FsIpfsConfig {
                 bootstrap: false,
                 ..Default::default()
             },
-            store_setting: Default::default(),
+            max_storage_size: None,
         }
     }
 }
@@ -160,12 +139,9 @@ impl FsIpfsConfig {
     }
 
     /// Test configuration. Used for in-memory
-    pub fn testing(experimental: bool) -> FsIpfsConfig {
+    pub fn testing() -> FsIpfsConfig {
         FsIpfsConfig {
-            bootstrap: match experimental {
-                true => Bootstrap::Experimental,
-                false => Bootstrap::Ipfs,
-            },
+            bootstrap: Bootstrap::Ipfs,
             ipfs_setting: IpfsSetting {
                 bootstrap: true,
                 mdns: Mdns { enable: true },
@@ -218,12 +194,9 @@ impl FsIpfsConfig {
     }
 
     /// Recommended production configuration
-    pub fn production<P: AsRef<std::path::Path>>(path: P, experimental: bool) -> FsIpfsConfig {
+    pub fn production<P: AsRef<std::path::Path>>(path: P,) -> FsIpfsConfig {
         FsIpfsConfig {
-            bootstrap: match experimental {
-                true => Bootstrap::Experimental,
-                false => Bootstrap::Ipfs,
-            },
+            bootstrap: Bootstrap::Ipfs,
             path: Some(path.as_ref().to_path_buf()),
             ipfs_setting: IpfsSetting {
                 mdns: Mdns { enable: true },
@@ -340,15 +313,14 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn fs_ipfs_config_testing(experimental: bool) -> *mut FsIpfsConfig {
-        Box::into_raw(Box::new(FsIpfsConfig::testing(experimental)))
+    pub unsafe extern "C" fn fs_ipfs_config_testing() -> *mut FsIpfsConfig {
+        Box::into_raw(Box::new(FsIpfsConfig::testing()))
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn fs_ipfs_config_production(
         path: *const c_char,
-        experimental: bool,
     ) -> FFIResult<FsIpfsConfig> {
         if path.is_null() {
             return FFIResult::err(Error::Any(anyhow::anyhow!("config cannot be null")));
@@ -356,7 +328,7 @@ pub mod ffi {
 
         let path = CStr::from_ptr(path).to_string_lossy().to_string();
 
-        FFIResult::ok(FsIpfsConfig::production(path, experimental))
+        FFIResult::ok(FsIpfsConfig::production(path))
     }
 
     #[allow(clippy::missing_safety_doc)]

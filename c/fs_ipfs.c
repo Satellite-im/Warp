@@ -54,7 +54,7 @@ int main()
 {
     MultiPassAdapter *account = new_account();
 
-    FFIResult_ConstellationAdapter result_fs = constellation_fs_ipfs_temporary_new(account);
+    FFIResult_ConstellationAdapter result_fs = constellation_fs_ipfs_temporary_new(account, NULL);
 
 
     if (result_fs.error)

@@ -1,12 +1,18 @@
 pub mod config;
+use config::FsIpfsConfig;
 use futures::{pin_mut, StreamExt};
+use libipld::serde::{from_ipld, to_ipld};
+use libipld::Cid;
 use std::any::Any;
 use std::io::Cursor;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use warp::constellation::ConstellationDataType;
 use warp::logging::tracing::{debug, error};
 use warp::multipass::MultiPass;
+use warp::sata::{Kind, Sata};
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 // use warp_common::futures::TryStreamExt;
 use warp::module::Module;
@@ -31,8 +37,11 @@ type Result<T> = std::result::Result<T, Error>;
 pub struct IpfsFileSystem<T: IpfsTypes> {
     index: Directory,
     path: PathBuf,
+    max_size: Arc<AtomicUsize>,
     modified: DateTime<Utc>,
+    config: Option<FsIpfsConfig>,
     ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
+    index_cid: Arc<RwLock<Option<Cid>>>,
     account: Arc<tokio::sync::RwLock<Option<Arc<RwLock<Box<dyn MultiPass>>>>>>,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
 }
@@ -43,7 +52,10 @@ impl<T: IpfsTypes> Clone for IpfsFileSystem<T> {
             index: self.index.clone(),
             path: self.path.clone(),
             modified: self.modified,
+            max_size: self.max_size.clone(),
+            config: self.config.clone(),
             ipfs: self.ipfs.clone(),
+            index_cid: self.index_cid.clone(),
             account: self.account.clone(),
             cache: self.cache.clone(),
         }
@@ -51,11 +63,17 @@ impl<T: IpfsTypes> Clone for IpfsFileSystem<T> {
 }
 
 impl<T: IpfsTypes> IpfsFileSystem<T> {
-    pub async fn new(account: Arc<RwLock<Box<dyn MultiPass>>>) -> anyhow::Result<Self> {
+    pub async fn new(
+        account: Arc<RwLock<Box<dyn MultiPass>>>,
+        config: Option<FsIpfsConfig>,
+    ) -> anyhow::Result<Self> {
         let filesystem = IpfsFileSystem {
             index: Directory::new("root"),
             path: PathBuf::new(),
             modified: Utc::now(),
+            config,
+            max_size: Arc::new(AtomicUsize::new(4 * 1024 * 1024)),
+            index_cid: Default::default(),
             account: Default::default(),
             ipfs: Default::default(),
             cache: None,
@@ -117,7 +135,100 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
 
         *self.ipfs.write() = Some(ipfs);
 
+        if let Err(_e) = self.import_index().await {
+            //TODO: Log error
+        }
+
+        tokio::spawn({
+            let fs = self.clone();
+            async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                    if let Err(_e) = fs.export_index().await {
+                        //Log error
+                    }
+                }
+            }
+        });
+
         Ok(())
+    }
+
+    #[allow(clippy::clone_on_copy)]
+    pub async fn export_index(&self) -> Result<()> {
+        let ipfs = self.ipfs()?;
+        let mut object = Sata::default();
+        let index = self.export(ConstellationDataType::Json)?;
+        let data = match self.account().await {
+            Ok(account) => {
+                let key = account.decrypt_private_key(None)?;
+                object.add_recipient(&key)?;
+                object.encrypt(libipld::IpldCodec::DagJson, &key, Kind::Reference, index)?
+            }
+            _ => object.encode(libipld::IpldCodec::DagJson, Kind::Reference, index)?,
+        };
+
+        let ipld = to_ipld(data).map_err(anyhow::Error::from)?;
+        let cid = ipfs.put_dag(ipld).await?;
+        let last_cid = self.index_cid.read().clone();
+        *self.index_cid.write() = Some(cid);
+        if let Some(last_cid) = last_cid {
+            if ipfs.is_pinned(&last_cid).await? {
+                ipfs.remove_pin(&last_cid, false).await?;
+            }
+            ipfs.remove_block(last_cid).await?;
+        }
+
+        if let Some(config) = &self.config {
+            if let Some(path) = config.path.as_ref() {
+                if let Err(_e) = tokio::fs::write(path.join(".index_id"), cid.to_string()).await {
+                    //Log export?
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn import_index(&mut self) -> Result<()> {
+        let ipfs = self.ipfs()?;
+        if let Some(config) = &self.config {
+            if let Some(path) = config.path.as_ref() {
+                let cid_str = tokio::fs::read(path.join(".index_id"))
+                    .await
+                    .map(|bytes| String::from_utf8_lossy(&bytes).to_string())?;
+
+                let cid: Cid = cid_str.parse().map_err(anyhow::Error::from)?;
+                *self.index_cid.write() = Some(cid);
+
+                let ipld = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    ipfs.get_dag(IpfsPath::from(cid)),
+                )
+                .await
+                .map_err(anyhow::Error::from)??;
+
+                let data: Sata = from_ipld(ipld).map_err(anyhow::Error::from)?;
+
+                let index: String = match self.account().await {
+                    Ok(account) => {
+                        let key = account.decrypt_private_key(None)?;
+                        data.decrypt(&key)?
+                    }
+                    _ => data.decode()?,
+                };
+
+                self.import(ConstellationDataType::Json, index)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn account(&self) -> Result<Arc<RwLock<Box<dyn MultiPass>>>> {
+        self.account
+            .read()
+            .await
+            .clone()
+            .ok_or(Error::MultiPassExtensionUnavailable)
     }
 
     pub fn ipfs(&self) -> Result<Ipfs<T>> {
@@ -246,7 +357,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         file.set_reference(&format!("/ipfs/{cid}"));
         file.hash_mut().hash_from_file(&path)?;
         self.current_directory()?.add_item(file)?;
-
+        if let Err(_e) = self.export_index().await {}
         Ok(())
     }
 
@@ -329,6 +440,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         file.set_reference(&format!("/ipfs/{cid}"));
         file.hash_mut().hash_from_slice(buffer)?;
         self.current_directory()?.add_item(file)?;
+        if let Err(_e) = self.export_index().await {}
         Ok(())
     }
 
@@ -387,7 +499,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 
         ipfs.remove_block(cid).await?;
         directory.remove_item(&item.name())?;
-
+        if let Err(_e) = self.export_index().await {}
         Ok(())
     }
 
@@ -402,7 +514,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         let directory = self.current_directory()?;
 
         directory.rename_item(current, new)?;
-
+        if let Err(_e) = self.export_index().await {}
         Ok(())
     }
 
@@ -426,7 +538,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 
         self.current_directory()?
             .add_directory(Directory::new(name))?;
-
+        if let Err(_e) = self.export_index().await {}
         Ok(())
     }
 
@@ -440,6 +552,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 }
 
 pub mod ffi {
+    use crate::config::FsIpfsConfig;
     use crate::{IpfsFileSystem, Persistent, Temporary};
     use warp::constellation::ConstellationAdapter;
     use warp::error::Error;
@@ -451,6 +564,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn constellation_fs_ipfs_temporary_new(
         multipass: *const MultiPassAdapter,
+        config: *const FsIpfsConfig,
     ) -> FFIResult<ConstellationAdapter> {
         let account = match multipass.is_null() {
             true => {
@@ -460,8 +574,11 @@ pub mod ffi {
             }
             false => (*multipass).inner(),
         };
-
-        warp::async_on_block(IpfsFileSystem::<Temporary>::new(account))
+        let config = match config.is_null() {
+            true => None,
+            false => Some((*config).clone()),
+        };
+        warp::async_on_block(IpfsFileSystem::<Temporary>::new(account, config))
             .map(|account| ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(account)))))
             .map_err(Error::from)
             .into()
@@ -471,6 +588,7 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn constellation_fs_ipfs_persistent_new(
         multipass: *const MultiPassAdapter,
+        config: *const FsIpfsConfig,
     ) -> FFIResult<ConstellationAdapter> {
         let account = match multipass.is_null() {
             true => {
@@ -480,8 +598,12 @@ pub mod ffi {
             }
             false => (*multipass).inner(),
         };
+        let config = match config.is_null() {
+            true => None,
+            false => Some((*config).clone()),
+        };
 
-        warp::async_on_block(IpfsFileSystem::<Persistent>::new(account))
+        warp::async_on_block(IpfsFileSystem::<Persistent>::new(account, config))
             .map(|account| ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(account)))))
             .map_err(Error::from)
             .into()

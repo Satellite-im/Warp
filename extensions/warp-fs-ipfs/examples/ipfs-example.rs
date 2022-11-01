@@ -20,7 +20,7 @@ async fn account(username: Option<&str>) -> anyhow::Result<Arc<RwLock<Box<dyn Mu
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let account = account(None).await?;
-    let mut filesystem = IpfsFileSystem::<Temporary>::new(account.clone()).await?;
+    let mut filesystem = IpfsFileSystem::<Temporary>::new(account.clone(), None).await?;
     filesystem.put_buffer("readme.txt", &b"Hello, World!".to_vec()).await?;
     let buffer = filesystem.get_buffer("readme.txt").await?;
     let data = String::from_utf8_lossy(&buffer);
