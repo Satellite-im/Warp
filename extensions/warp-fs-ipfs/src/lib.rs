@@ -19,7 +19,6 @@ use warp::module::Module;
 
 use ipfs::{unixfs::ll::file::adder::FileAdder, Block};
 
-use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 use ipfs::{Ipfs, IpfsPath, IpfsTypes, TestTypes, Types};
 
@@ -239,15 +238,11 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
             .ok_or(Error::ConstellationExtensionUnavailable)
     }
 
-    pub fn set_cache(&mut self, cache: Arc<RwLock<Box<dyn PocketDimension>>>) {
-        self.cache = Some(cache);
-    }
-
     pub fn get_cache(&self) -> anyhow::Result<RwLockReadGuard<Box<dyn PocketDimension>>> {
         let cache = self
             .cache
             .as_ref()
-            .ok_or_else(|| anyhow!("Pocket Dimension Extension is not set"))?;
+            .ok_or(Error::PocketDimensionExtensionUnavailable)?;
 
         let inner = cache.read();
         Ok(inner)
