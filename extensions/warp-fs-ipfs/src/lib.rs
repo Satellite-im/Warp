@@ -1,4 +1,5 @@
 use futures::{pin_mut, StreamExt};
+use std::any::Any;
 use std::io::Cursor;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -164,7 +165,11 @@ impl<T: IpfsTypes> Extension for IpfsFileSystem<T> {
     }
 }
 
-impl<T: IpfsTypes> SingleHandle for IpfsFileSystem<T> {}
+impl<T: IpfsTypes> SingleHandle for IpfsFileSystem<T> {
+    fn handle(&self) -> Result<Box<dyn Any>> {
+        self.ipfs().map(|ipfs| Box::new(ipfs) as Box<dyn Any>)
+    }
+}
 
 #[async_trait::async_trait]
 impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
