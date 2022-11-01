@@ -21,11 +21,11 @@ pub enum Error {
     #[error("Directory cannot contain itself")]
     DirParadox,
     #[error("Directory cannot be found or is invalid")]
-    DirInvalid,
+    InvalidDirectory,
     #[error("File cannot be found or is invalid")]
-    FileInvalid,
+    InvalidFile,
     #[error("Item cannot be found or is invalid")]
-    ItemInvalid,
+    InvalidItem,
     #[error("Item is not a valid file")]
     ItemNotFile,
     #[error("Item is not a valid Directory")]
@@ -34,6 +34,14 @@ pub enum Error {
     InvalidConversion,
     #[error("Path supplied is invalid")]
     InvalidPath,
+    #[error("Directory already exist")]
+    DirectoryExist,
+    #[error("File already exist")]
+    FileExist,
+    #[error("File cannot be found")]
+    FileNotFound,
+    #[error("Directory cannot be found")]
+    DirectoryNotFound,
 
     //PocketDimension Errors
     #[error("Pocket dimension extension is unavailable")]
@@ -213,10 +221,6 @@ pub enum Error {
     ObjectNotFound,
     #[error("The length of the key is invalid")]
     InvalidKeyLength,
-    #[error("File is not found")]
-    FileNotFound,
-    #[error("Directory is not found")]
-    DirectoryNotFound,
     #[error("Error to be determined")]
     ToBeDetermined,
     #[error("{0}")]
@@ -253,8 +257,8 @@ impl Error {
             Error::AlreadySubscribed => String::from("AlreadySubscribed"),
             Error::DuplicateName => String::from("DuplicateName"),
             Error::DirParadox => String::from("DirParadox"),
-            Error::DirInvalid => String::from("DirInvalid"),
-            Error::ItemInvalid => String::from("ItemInvalid"),
+            Error::InvalidDirectory => String::from("InvalidDirectory"),
+            Error::InvalidFile => String::from("InvalidFile"),
             Error::ItemNotFile => String::from("ItemNotFile"),
             Error::ItemNotDirectory => String::from("ItemNotDirectory"),
             Error::InvalidConversion => String::from("InvalidConversion"),

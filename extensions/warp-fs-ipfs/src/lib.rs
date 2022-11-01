@@ -1,132 +1,246 @@
 pub mod config;
-
-use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
-use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
-use warp::sata::Sata;
+use config::FsIpfsConfig;
+use futures::{pin_mut, StreamExt};
+use libipld::serde::{from_ipld, to_ipld};
+use libipld::Cid;
+use std::any::Any;
+use std::io::Cursor;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicUsize;
+use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use warp::constellation::ConstellationDataType;
+use warp::logging::tracing::{debug, error};
+use warp::multipass::MultiPass;
+use warp::sata::{Kind, Sata};
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 // use warp_common::futures::TryStreamExt;
 use warp::module::Module;
 
+use ipfs::{unixfs::ll::file::adder::FileAdder, Block};
+
 use anyhow::anyhow;
 use chrono::{DateTime, Utc};
-use futures::TryStreamExt;
-use serde::{Deserialize, Serialize};
-use tokio_util::io::StreamReader;
+use ipfs::{Ipfs, IpfsPath, IpfsTypes, TestTypes, Types};
+
 use warp::constellation::{directory::Directory, Constellation};
-use warp::data::{DataObject, DataType};
 use warp::error::Error;
-use warp::hooks::Hooks;
-use warp::pocket_dimension::query::QueryBuilder;
-use warp::pocket_dimension::{DimensionData, PocketDimension};
+use warp::pocket_dimension::PocketDimension;
 use warp::{Extension, SingleHandle};
+
+pub type Temporary = TestTypes;
+pub type Persistent = Types;
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct IpfsFileSystem {
-    pub index: Directory,
+#[allow(clippy::type_complexity)]
+pub struct IpfsFileSystem<T: IpfsTypes> {
+    index: Directory,
     path: PathBuf,
-    pub modified: DateTime<Utc>,
-    #[serde(skip)]
-    pub client: IpfsInternalClient,
-    #[serde(skip)]
-    pub cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-    #[serde(skip)]
-    pub hooks: Option<Hooks>,
+    max_size: Arc<AtomicUsize>,
+    modified: DateTime<Utc>,
+    config: Option<FsIpfsConfig>,
+    ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
+    index_cid: Arc<RwLock<Option<Cid>>>,
+    account: Arc<tokio::sync::RwLock<Option<Arc<RwLock<Box<dyn MultiPass>>>>>>,
+    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
 }
 
-#[derive(Default, Clone)]
-pub struct IpfsInternalClient {
-    pub client: IpfsClient<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>,
-    pub option: IpfsOption,
-}
-
-#[derive(Clone)]
-pub enum IpfsOption {
-    Mfs,
-    Object,
-}
-
-impl Default for IpfsOption {
-    fn default() -> Self {
-        Self::Mfs
-    }
-}
-
-impl IpfsInternalClient {
-    pub fn new(
-        client: IpfsClient<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>,
-        option: IpfsOption,
-    ) -> Self {
-        Self { client, option }
-    }
-}
-
-impl AsRef<IpfsClient<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>>
-    for IpfsInternalClient
-{
-    fn as_ref(&self) -> &IpfsClient<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>> {
-        &self.client
-    }
-}
-
-impl From<IpfsClient<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>>
-    for IpfsInternalClient
-{
-    fn from(
-        client: IpfsClient<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>,
-    ) -> Self {
+impl<T: IpfsTypes> Clone for IpfsFileSystem<T> {
+    fn clone(&self) -> Self {
         Self {
-            client,
-            ..Default::default()
+            index: self.index.clone(),
+            path: self.path.clone(),
+            modified: self.modified,
+            max_size: self.max_size.clone(),
+            config: self.config.clone(),
+            ipfs: self.ipfs.clone(),
+            index_cid: self.index_cid.clone(),
+            account: self.account.clone(),
+            cache: self.cache.clone(),
         }
     }
 }
 
-impl Default for IpfsFileSystem {
-    fn default() -> IpfsFileSystem {
-        IpfsFileSystem {
+impl<T: IpfsTypes> IpfsFileSystem<T> {
+    pub async fn new(
+        account: Arc<RwLock<Box<dyn MultiPass>>>,
+        config: Option<FsIpfsConfig>,
+    ) -> anyhow::Result<Self> {
+        let filesystem = IpfsFileSystem {
             index: Directory::new("root"),
             path: PathBuf::new(),
             modified: Utc::now(),
-            client: IpfsInternalClient::default(),
+            config,
+            max_size: Arc::new(AtomicUsize::new(4 * 1024 * 1024)),
+            index_cid: Default::default(),
+            account: Default::default(),
+            ipfs: Default::default(),
             cache: None,
-            hooks: None,
+        };
+
+        *filesystem.account.write().await = Some(account);
+
+        if let Some(account) = filesystem.account.read().await.clone() {
+            if account.read().get_own_identity().is_err() {
+                debug!("Identity doesnt exist. Waiting for it to load or to be created");
+                let mut filesystem = filesystem.clone();
+
+                tokio::spawn({
+                    let account = account.clone();
+                    async move {
+                        loop {
+                            match account.get_own_identity() {
+                                Ok(_) => break,
+                                _ => {
+                                    //TODO: have a flag that would tell is it been an error other than it not being available
+                                    //      so we dont try to extract ipfs
+                                    tokio::time::sleep(Duration::from_millis(100)).await
+                                }
+                            }
+                        }
+                        if let Err(e) = filesystem.initialize().await {
+                            error!("Error initializing filesystem: {e}");
+                        }
+                    }
+                });
+            } else {
+                let mut filesystem = filesystem.clone();
+                filesystem.initialize().await?;
+            }
         }
-    }
-}
 
-impl IpfsFileSystem {
-    pub fn new() -> Self {
-        IpfsFileSystem::default()
+        Ok(filesystem)
     }
 
-    pub fn from_config(config: config::Config) -> anyhow::Result<Self> {
-        let config::Config { api_server } = config;
-        if let Some(api_server) = api_server {
-            Self::new_with_uri(api_server)
-        } else {
-            Ok(Self::new())
+    async fn initialize(&mut self) -> Result<()> {
+        debug!("Initializing or fetch ipfs");
+
+        let account = self
+            .account
+            .read()
+            .await
+            .clone()
+            .ok_or(Error::MultiPassExtensionUnavailable)?;
+
+        let ipfs_handle = match account.handle() {
+            Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
+            _ => None,
+        };
+
+        let ipfs = match ipfs_handle {
+            Some(ipfs) => ipfs,
+            None => return Err(Error::ConstellationExtensionUnavailable),
+        };
+
+        *self.ipfs.write() = Some(ipfs);
+
+        if let Err(_e) = self.import_index().await {
+            //TODO: Log error
         }
+
+        tokio::spawn({
+            let fs = self.clone();
+            async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                    if let Err(_e) = fs.export_index().await {
+                        //Log error
+                    }
+                }
+            }
+        });
+
+        Ok(())
     }
 
-    pub fn new_with_uri<S: AsRef<str>>(uri: S) -> anyhow::Result<Self> {
-        let mut system = IpfsFileSystem::default();
-        let client =
-            IpfsClient::<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>::from_str(
-                uri.as_ref(),
-            )?;
-        system.client = IpfsInternalClient::from(client);
-        Ok(system)
+    #[allow(clippy::clone_on_copy)]
+    pub async fn export_index(&self) -> Result<()> {
+        let ipfs = self.ipfs()?;
+        let mut object = Sata::default();
+        let index = self.export(ConstellationDataType::Json)?;
+        let data = match self.account().await {
+            Ok(account) => {
+                let key = account.decrypt_private_key(None)?;
+                object.add_recipient(&key)?;
+                object.encrypt(libipld::IpldCodec::DagJson, &key, Kind::Reference, index)?
+            }
+            _ => object.encode(libipld::IpldCodec::DagJson, Kind::Reference, index)?,
+        };
+
+        let ipld = to_ipld(data).map_err(anyhow::Error::from)?;
+        let cid = ipfs.put_dag(ipld).await?;
+        let last_cid = self.index_cid.read().clone();
+        *self.index_cid.write() = Some(cid);
+        if let Some(last_cid) = last_cid {
+            if ipfs.is_pinned(&last_cid).await? {
+                ipfs.remove_pin(&last_cid, false).await?;
+            }
+            ipfs.remove_block(last_cid).await?;
+        }
+
+        if let Some(config) = &self.config {
+            if let Some(path) = config.path.as_ref() {
+                if let Err(_e) = tokio::fs::write(path.join(".index_id"), cid.to_string()).await {
+                    //Log export?
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn import_index(&mut self) -> Result<()> {
+        let ipfs = self.ipfs()?;
+        if let Some(config) = &self.config {
+            if let Some(path) = config.path.as_ref() {
+                let cid_str = tokio::fs::read(path.join(".index_id"))
+                    .await
+                    .map(|bytes| String::from_utf8_lossy(&bytes).to_string())?;
+
+                let cid: Cid = cid_str.parse().map_err(anyhow::Error::from)?;
+                *self.index_cid.write() = Some(cid);
+
+                let ipld = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    ipfs.get_dag(IpfsPath::from(cid)),
+                )
+                .await
+                .map_err(anyhow::Error::from)??;
+
+                let data: Sata = from_ipld(ipld).map_err(anyhow::Error::from)?;
+
+                let index: String = match self.account().await {
+                    Ok(account) => {
+                        let key = account.decrypt_private_key(None)?;
+                        data.decrypt(&key)?
+                    }
+                    _ => data.decode()?,
+                };
+
+                self.import(ConstellationDataType::Json, index)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn account(&self) -> Result<Arc<RwLock<Box<dyn MultiPass>>>> {
+        self.account
+            .read()
+            .await
+            .clone()
+            .ok_or(Error::MultiPassExtensionUnavailable)
+    }
+
+    pub fn ipfs(&self) -> Result<Ipfs<T>> {
+        self.ipfs
+            .read()
+            .as_ref()
+            .cloned()
+            .ok_or(Error::ConstellationExtensionUnavailable)
     }
 
     pub fn set_cache(&mut self, cache: Arc<RwLock<Box<dyn PocketDimension>>>) {
         self.cache = Some(cache);
-    }
-
-    pub fn set_hook(&mut self, hook: Hooks) {
-        self.hooks = Some(hook)
     }
 
     pub fn get_cache(&self) -> anyhow::Result<RwLockReadGuard<Box<dyn PocketDimension>>> {
@@ -150,7 +264,7 @@ impl IpfsFileSystem {
     }
 }
 
-impl Extension for IpfsFileSystem {
+impl<T: IpfsTypes> Extension for IpfsFileSystem<T> {
     fn id(&self) -> String {
         String::from("warp-fs-ipfs")
     }
@@ -163,10 +277,14 @@ impl Extension for IpfsFileSystem {
     }
 }
 
-impl SingleHandle for IpfsFileSystem {}
+impl<T: IpfsTypes> SingleHandle for IpfsFileSystem<T> {
+    fn handle(&self) -> Result<Box<dyn Any>> {
+        self.ipfs().map(|ipfs| Box::new(ipfs) as Box<dyn Any>)
+    }
+}
 
 #[async_trait::async_trait]
-impl Constellation for IpfsFileSystem {
+impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
     fn modified(&self) -> DateTime<Utc> {
         self.modified
     }
@@ -180,361 +298,247 @@ impl Constellation for IpfsFileSystem {
     }
 
     async fn put(&mut self, name: &str, path: &str) -> Result<()> {
-        //TODO: Implement a remote check along with a check within constellation to determine if the file exist
-        if self.root_directory().get_item_by_path(name).is_ok() {
-            return Err(warp::error::Error::IoError(std::io::Error::from(
-                ErrorKind::AlreadyExists,
-            )));
+        let ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
+
+        if self.current_directory()?.get_item_by_path(name).is_ok() {
+            return Err(Error::DuplicateName);
         }
 
-        let name = affix_root(name);
+        let path = PathBuf::from(path);
+        if !path.is_file() {
+            return Err(Error::FileNotFound);
+        }
 
-        let fs = std::fs::File::open(path)?;
-        let size = fs.metadata()?.len();
-        let client = self.client.as_ref();
+        let mut adder = FileAdder::default();
+        let file = tokio::fs::File::open(&path).await?;
 
-        let hash = match self.client.option {
-            IpfsOption::Mfs => {
-                client
-                    .files_write(&name, true, true, fs)
-                    .await
-                    .map_err(|e| anyhow!(e))?;
+        //TODO: use a larger buffer(?)
+        let mut reader = BufReader::with_capacity(adder.size_hint(), file);
+        let mut written = 0;
+        let mut last_cid = None;
 
-                // Get the file stat from ipfs
-                let stat = client.files_stat(&name).await.map_err(|e| anyhow!(e))?;
+        {
+            let ipfs = ipfs.clone();
+            loop {
+                match reader.fill_buf().await? {
+                    buffer if buffer.is_empty() => {
+                        let blocks = adder.finish();
+                        for (cid, block) in blocks {
+                            let block = Block::new(cid, block)?;
+                            let cid = ipfs.put_block(block).await?;
+                            last_cid = Some(cid);
+                        }
+                        break;
+                    }
+                    buffer => {
+                        let mut total = 0;
 
-                //check and compare size and if its different from local size to error
-
-                if stat.size != size {
-                    //Delete from ipfs
-                    client
-                        .files_rm(&name, false)
-                        .await
-                        .map_err(|e| anyhow!(e))?;
-
-                    return Err(Error::Any(anyhow!(
-                        "Size of the file does not match what was uploaded"
-                    )));
+                        while total < buffer.len() {
+                            let (blocks, consumed) = adder.push(&buffer[total..]);
+                            for (cid, block) in blocks {
+                                let block = Block::new(cid, block)?;
+                                let _cid = ipfs.put_block(block).await?;
+                            }
+                            total += consumed;
+                            written += consumed;
+                        }
+                        reader.consume(total);
+                    }
                 }
-
-                let hash = stat.hash;
-
-                //Note: MFS will pin files at the root of the system, but any stored
-                //      in directories will not be automatically pinned.
-                let res = client.pin_add(&hash, true).await.map_err(|e| anyhow!(e))?;
-
-                if !res.pins.contains(&hash) {
-                    //TODO: Error?
-                }
-
-                hash
             }
-            IpfsOption::Object => {
-                let res = client.add(fs).await.map_err(|e| anyhow!(e))?;
-
-                //pin file since ipfs mfs doesnt do it automatically
-
-                //TODO: Give a choice to pin file or not
-
-                // let res = client
-                //     .pin_add(&hash, true)
-                //     .await
-                //     .map_err(|_| Error::ToBeDetermined)?;
-                //
-                // if !res.pins.contains(&hash) {
-                //     //TODO: Error?
-                // }
-
-                res.hash
-            }
-        };
-
-        let file = warp::constellation::file::File::new(&name[1..]);
-        file.set_size(size as usize);
-
-        file.hash_mut().hash_from_file(path)?;
-
-        file.set_reference(&hash);
-
-        self.current_directory()?.add_item(file.clone())?;
-
-        self.modified = Utc::now();
-
-        if let Ok(mut cache) = self.get_cache_mut() {
-            let object = Sata::default().encode(
-                warp::sata::libipld::IpldCodec::DagCbor,
-                warp::sata::Kind::Reference,
-                DimensionData::from(path),
-            )?;
-            cache.add_data(DataType::from(Module::FileSystem), &object)?;
         }
-
-        if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
-            hook.trigger("filesystem::new_file", &object)
-        }
-
+        let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
+        ipfs.insert_pin(&cid, true).await?;
+        let file = warp::constellation::file::File::new(name);
+        file.set_size(written);
+        file.set_reference(&format!("/ipfs/{cid}"));
+        file.hash_mut().hash_from_file(&path)?;
+        self.current_directory()?.add_item(file)?;
+        if let Err(_e) = self.export_index().await {}
         Ok(())
     }
 
     async fn get(&self, name: &str, path: &str) -> Result<()> {
-        // TODO: Implement a function that would check against both remote and constellation
-        //       otherwise this would give an error if it doesnt exist within constellation
-        //       even if it exist remotely
-        // if self.root_directory().get_item_by_path(name).is_err() {
-        //     return Err(warp_common::error::Error::IoError(std::io::Error::from(
-        //         ErrorKind::NotFound,
-        //     )));
-        // }
-
-        let name = affix_root(name);
-
-        if let Ok(cache) = self.get_cache() {
-            let name = Path::new(&name)
-                .file_name()
-                .ok_or(Error::Other)?
-                .to_string_lossy()
-                .to_string();
-
-            let mut query = QueryBuilder::default();
-            query.r#where("name", &name)?;
-            if let Ok(list) = cache.get_data(DataType::from(Module::FileSystem), Some(&query)) {
-                //get last
-                if !list.is_empty() {
-                    let obj = list.last().unwrap();
-                    if let Ok(data) = obj.decode::<DimensionData>() {
-                        if let Ok(mut file) = std::fs::File::create(path) {
-                            data.write_from_path(&mut file)?;
-                            return Ok(());
-                        }
-                    }
-                }
-            }
+        let ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
+        let item = self.current_directory()?.get_item_by_path(name)?;
+        let file = item.get_file()?;
+        let reference = file.reference().ok_or(Error::Other)?; //Reference not found
+        let stream = ipfs
+            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
+            .await
+            .map_err(anyhow::Error::from)?;
+        pin_mut!(stream);
+        let mut file = tokio::fs::File::create(path).await?;
+        while let Some(data) = stream.next().await {
+            let bytes = data.map_err(anyhow::Error::from)?;
+            file.write_all(&bytes).await?;
+            file.flush().await?;
         }
-
-        let _file = self
-            .current_directory()?
-            .get_item_by_path(&name)
-            .and_then(|item| item.get_file())?;
-
-        let mut fs = tokio::fs::File::create(path).await?;
-
-        let client = self.client.as_ref();
-
-        match self.client.option {
-            IpfsOption::Mfs => {
-                let stream = client
-                    .files_read(&name)
-                    .map_err(|_| std::io::Error::from(ErrorKind::Other));
-
-                let mut reader_stream = StreamReader::new(stream);
-
-                tokio::io::copy(&mut reader_stream, &mut fs).await?;
-
-                //Compare size though here we should compare hash instead.
-
-                let size = tokio::fs::metadata(path).await?.len();
-
-                let stat = client.files_stat(&name).await.map_err(|e| anyhow!(e))?;
-
-                //check and compare size and if its different from local size to error
-                //TODO: Compare hashes instead
-                if stat.size != size {
-                    tokio::fs::remove_file(path).await?;
-                    return Err(Error::Any(anyhow!("File downloaded was invalid")));
-                }
-            }
-            _ => return Err(Error::Unimplemented),
-        };
-
+        //TODO: Validate file against the hashed reference
         Ok(())
     }
 
     async fn put_buffer(&mut self, name: &str, buffer: &Vec<u8>) -> Result<()> {
-        let name = affix_root(name);
+        let ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
 
-        let fs = std::io::Cursor::new(buffer.clone());
-        let client = self.client.as_ref();
-
-        let file = warp::constellation::file::File::new(&name[1..]);
-
-        let hash = match self.client.option {
-            IpfsOption::Mfs => {
-                client
-                    .files_write(&name, true, true, fs)
-                    .await
-                    .map_err(|e| anyhow!(e))?;
-                // Get the file stat from ipfs
-                let stat = client.files_stat(&name).await.map_err(|e| anyhow!(e))?;
-
-                //check and compare size and if its different from local size to error
-                let size = buffer.len() as u64;
-
-                if stat.size != size {
-                    //Delete from ipfs
-                    client
-                        .files_rm(&name, false)
-                        .await
-                        .map_err(|e| anyhow!(e))?;
-
-                    return Err(Error::Any(anyhow!("File downloaded was invalid")));
-                }
-                file.set_size(size as usize);
-
-                let hash = stat.hash;
-
-                let res = client.pin_add(&hash, true).await.map_err(|e| anyhow!(e))?;
-
-                if !res.pins.contains(&hash) {
-                    //TODO: Error?
-                }
-
-                hash
-            }
-            _ => return Err(Error::Unimplemented),
-        };
-        file.hash_mut().hash_from_slice(buffer)?;
-        file.set_reference(&hash);
-
-        self.current_directory()?.add_item(file.clone())?;
-
-        self.modified = Utc::now();
-
-        if let Ok(mut cache) = self.get_cache_mut() {
-            let name = Path::new(&name)
-                .file_name()
-                .ok_or(Error::Other)?
-                .to_string_lossy()
-                .to_string();
-
-            let object = Sata::default().encode(
-                warp::sata::libipld::IpldCodec::DagCbor,
-                warp::sata::Kind::Reference,
-                DimensionData::from_buffer(&name, buffer),
-            )?;
-            cache.add_data(DataType::from(Module::FileSystem), &object)?;
+        if self.current_directory()?.get_item_by_path(name).is_ok() {
+            return Err(Error::FileExist);
         }
 
-        if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
-            hook.trigger("filesystem::new_file", &object)
-        }
+        let mut adder = FileAdder::default();
+        //Maybe write directly to avoid reallocation?
+        let mut reader =
+            BufReader::with_capacity(adder.size_hint(), Cursor::new(buffer.as_slice()));
+        let mut written = 0;
+        let mut last_cid = None;
 
-        Ok(())
-    }
+        {
+            let ipfs = ipfs.clone();
+            loop {
+                match reader.fill_buf().await? {
+                    buffer if buffer.is_empty() => {
+                        let blocks = adder.finish();
+                        for (cid, block) in blocks {
+                            let block = Block::new(cid, block)?;
+                            let cid = ipfs.put_block(block).await?;
+                            last_cid = Some(cid);
+                        }
+                        break;
+                    }
+                    buffer => {
+                        let mut total = 0;
 
-    async fn get_buffer(&self, name: &str) -> Result<Vec<u8>> {
-        let name = affix_root(name);
-
-        if let Ok(cache) = self.get_cache() {
-            let name = Path::new(&name)
-                .file_name()
-                .ok_or(Error::Other)?
-                .to_string_lossy()
-                .to_string();
-
-            let mut query = QueryBuilder::default();
-            query.r#where("name", &name)?;
-            if let Ok(list) = cache.get_data(DataType::from(Module::FileSystem), Some(&query)) {
-                //get last
-                if !list.is_empty() {
-                    let obj = list.last().unwrap();
-                    if let Ok(data) = obj.decode::<DimensionData>() {
-                        let mut buffer = vec![];
-                        data.write_from_path(&mut buffer)?;
-                        return Ok(buffer);
+                        while total < buffer.len() {
+                            let (blocks, consumed) = adder.push(&buffer[total..]);
+                            for (cid, block) in blocks {
+                                let block = Block::new(cid, block)?;
+                                let _cid = ipfs.put_block(block).await?;
+                            }
+                            total += consumed;
+                            written += consumed;
+                        }
+                        reader.consume(total);
                     }
                 }
             }
         }
+        let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
 
-        let _file = self
-            .current_directory()?
-            .get_item(&name[1..])
-            .and_then(|item| item.get_file())?;
+        ipfs.insert_pin(&cid, true).await?;
 
-        let client = self.client.as_ref();
-        match self.client.option {
-            IpfsOption::Mfs => {
-                let stream = client
-                    .files_read(&name)
-                    .map_err(|_| std::io::Error::from(ErrorKind::Other));
-
-                let mut reader_stream = StreamReader::new(stream);
-
-                let mut buffer = vec![];
-
-                tokio::io::copy(&mut reader_stream, &mut buffer).await?;
-
-                Ok(buffer)
-            }
-            _ => Err(Error::Unimplemented),
-        }
-    }
-
-    async fn remove(&mut self, name: &str, recursive: bool) -> Result<()> {
-        let name = affix_root(name);
-
-        //TODO: Resolve to full directory
-        if !self.current_directory()?.has_item(&name[1..]) {
-            return Err(warp::error::Error::IoError(std::io::Error::from(
-                ErrorKind::NotFound,
-            )));
-        }
-        let client = self.client.as_ref();
-        match self.client.option {
-            IpfsOption::Mfs => {
-                client
-                    .files_rm(&name, recursive)
-                    .await
-                    .map_err(|e| anyhow!(e))?;
-
-                self.current_directory()?.remove_item(&name[1..])?
-            }
-            _ => return Err(Error::Unimplemented),
-        };
-
-        if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::from(Module::FileSystem), ())?;
-            hook.trigger("filesystem::remove_file", &object)
-        }
+        let file = warp::constellation::file::File::new(name);
+        file.set_size(written);
+        file.set_reference(&format!("/ipfs/{cid}"));
+        file.hash_mut().hash_from_slice(buffer)?;
+        self.current_directory()?.add_item(file)?;
+        if let Err(_e) = self.export_index().await {}
         Ok(())
     }
 
-    async fn create_directory(&mut self, path: &str, recursive: bool) -> Result<()> {
-        let path = affix_root(path);
+    async fn get_buffer(&self, name: &str) -> Result<Vec<u8>> {
+        let ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
 
-        // check to see if the path exist within the filesystem
-        if self.open_directory(&path).is_ok() {
-            return Err(Error::Unimplemented);
+        let item = self.current_directory()?.get_item_by_path(name)?;
+        let file = item.get_file()?;
+        let reference = file.reference().ok_or(Error::Other)?; //Reference not found
+        let stream = ipfs
+            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
+            .await
+            .map_err(anyhow::Error::from)?;
+        pin_mut!(stream);
+
+        let mut buffer = vec![];
+        while let Some(data) = stream.next().await {
+            let mut bytes = data.map_err(anyhow::Error::from)?;
+            buffer.append(&mut bytes);
         }
 
-        match self.client.option {
-            IpfsOption::Mfs => {
-                let client = self.client.as_ref();
-                client
-                    .files_mkdir(&path, recursive)
-                    .await
-                    .map_err(|e| anyhow!(e))?;
-            }
-            _ => return Err(Error::Unimplemented),
-        };
+        //TODO: Validate file against the hashed reference
+        Ok(buffer)
+    }
 
-        let directory = Directory::new(&path);
+    /// Used to remove data from the filesystem
+    async fn remove(&mut self, name: &str, _: bool) -> Result<()> {
+        let ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
 
-        if let Err(err) = self.current_directory()?.add_item(directory.clone()) {
-            let client = self.client.as_ref();
-            if let IpfsOption::Mfs = self.client.option {
-                client.files_rm(&path, true).await.map_err(|e| anyhow!(e))?;
-            };
-            return Err(err);
+        //TODO: Recursively delete directory but for now only support deleting a file
+        let directory = self.current_directory()?;
+
+        let item = directory.get_item_by_path(name)?;
+
+        let file = item.get_file()?;
+        let reference = file
+            .reference()
+            .ok_or(Error::ObjectNotFound)?
+            .parse::<IpfsPath>()?; //Reference not found
+
+        let cid = reference
+            .root()
+            .cid()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Invalid path root"))?;
+
+        if ipfs.is_pinned(&cid).await? {
+            ipfs.remove_pin(&cid, true).await?;
         }
 
-        if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::from(Module::FileSystem), directory)?;
-            hook.trigger("filesystem::create_directory", &object)
+        ipfs.remove_block(cid).await?;
+        directory.remove_item(&item.name())?;
+        if let Err(_e) = self.export_index().await {}
+        Ok(())
+    }
+
+    async fn rename(&mut self, current: &str, new: &str) -> Result<()> {
+        //Used as guard in the event its not available but will be used in the future
+        let _ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
+
+        //Note: This will only support renaming the file or directory in the index
+        let directory = self.current_directory()?;
+
+        directory.rename_item(current, new)?;
+        if let Err(_e) = self.export_index().await {}
+        Ok(())
+    }
+
+    async fn create_directory(&mut self, name: &str, recursive: bool) -> Result<()> {
+        //Used as guard in the event its not available but will be used in the future
+        let _ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
+
+        let directory = self.current_directory()?;
+
+        //Prevent creating recursive/nested directorieis if `recursive` isnt true
+        if name.contains('/') && !recursive {
+            return Err(Error::InvalidDirectory);
         }
 
+        if directory.has_item(name) || directory.get_item_by_path(name).is_ok() {
+            return Err(Error::DirectoryExist);
+        }
+
+        self.current_directory()?
+            .add_directory(Directory::new(name))?;
+        if let Err(_e) = self.export_index().await {}
         Ok(())
     }
 
@@ -547,95 +551,61 @@ impl Constellation for IpfsFileSystem {
     }
 }
 
-fn affix_root<S: AsRef<str>>(name: S) -> String {
-    let name = String::from(name.as_ref());
-    match name.starts_with('/') {
-        true => name,
-        false => format!("/{}", name),
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use anyhow::Result;
-    // use crate::IpfsFileSystem;
-    // use warp_constellation::constellation::Constellation;
-
-    #[tokio::test]
-    async fn default_node_with_buffer() -> Result<()> {
-        //TODO: Add a check to determine if ipfs node is running
-        // let mut system = IpfsFileSystem::default();
-        // system
-        //     .from_buffer("test", &b"Hello, World!".to_vec())
-        //     .await?;
-        //
-        // assert_eq!(system.current_directory().has_item("test"), true);
-        //
-        // let mut buffer: Vec<u8> = vec![];
-        //
-        // system.to_buffer("test", &mut buffer).await?;
-        //
-        // assert_eq!(String::from_utf8_lossy(&buffer), "Hello, World!");
-        //
-        // system.remove("test", false).await?;
-        //
-        // assert_eq!(system.current_directory().has_item("test"), false);
-        Ok(())
-    }
-}
-
 pub mod ffi {
-    use crate::IpfsFileSystem;
-    use std::ffi::CStr;
-    use std::os::raw::c_char;
+    use crate::config::FsIpfsConfig;
+    use crate::{IpfsFileSystem, Persistent, Temporary};
     use warp::constellation::ConstellationAdapter;
     use warp::error::Error;
     use warp::ffi::FFIResult;
-    use warp::pocket_dimension::PocketDimensionAdapter;
+    use warp::multipass::MultiPassAdapter;
     use warp::sync::{Arc, RwLock};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn constellation_fs_ipfs_new(
-        pd: *mut PocketDimensionAdapter,
-    ) -> *mut ConstellationAdapter {
-        let mut ipfs = IpfsFileSystem::new();
-
-        if !pd.is_null() {
-            let pd = &*(pd);
-            ipfs.set_cache(pd.inner().clone());
-        }
-
-        let obj = Box::new(ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(
-            ipfs,
-        )))));
-        Box::into_raw(obj) as *mut ConstellationAdapter
+    pub unsafe extern "C" fn constellation_fs_ipfs_temporary_new(
+        multipass: *const MultiPassAdapter,
+        config: *const FsIpfsConfig,
+    ) -> FFIResult<ConstellationAdapter> {
+        let account = match multipass.is_null() {
+            true => {
+                return FFIResult::err(Error::NullPointerContext {
+                    pointer: "multipass".into(),
+                })
+            }
+            false => (*multipass).inner(),
+        };
+        let config = match config.is_null() {
+            true => None,
+            false => Some((*config).clone()),
+        };
+        warp::async_on_block(IpfsFileSystem::<Temporary>::new(account, config))
+            .map(|account| ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(account)))))
+            .map_err(Error::from)
+            .into()
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn constellation_fs_ipfs_new_with_uri(
-        pd: *const PocketDimensionAdapter,
-        uri: *const c_char,
+    pub unsafe extern "C" fn constellation_fs_ipfs_persistent_new(
+        multipass: *const MultiPassAdapter,
+        config: *const FsIpfsConfig,
     ) -> FFIResult<ConstellationAdapter> {
-        if uri.is_null() {
-            return FFIResult::err(Error::Any(anyhow::anyhow!("URI is null")));
-        }
-
-        let uri = CStr::from_ptr(uri).to_string_lossy().to_string();
-
-        let mut ipfs = match IpfsFileSystem::new_with_uri(uri) {
-            Ok(ipfs) => ipfs,
-            Err(e) => return FFIResult::err(Error::Any(e)),
+        let account = match multipass.is_null() {
+            true => {
+                return FFIResult::err(Error::NullPointerContext {
+                    pointer: "multipass".into(),
+                })
+            }
+            false => (*multipass).inner(),
+        };
+        let config = match config.is_null() {
+            true => None,
+            false => Some((*config).clone()),
         };
 
-        if !pd.is_null() {
-            let pd = &*pd;
-            ipfs.set_cache(pd.inner().clone());
-        }
-
-        FFIResult::ok(ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(
-            ipfs,
-        )))))
+        warp::async_on_block(IpfsFileSystem::<Persistent>::new(account, config))
+            .map(|account| ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(account)))))
+            .map_err(Error::from)
+            .into()
     }
 }

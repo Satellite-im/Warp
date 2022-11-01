@@ -110,33 +110,32 @@ pub fn runtime_handle() -> tokio::runtime::Handle {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+pub fn async_handle() -> tokio::runtime::Handle {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => handle,
+        Err(_) => runtime_handle(),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn async_spawn<F>(fut: F) -> JoinHandle<F::Output>
 where
     F: futures::Future + Send + 'static,
     <F as futures::Future>::Output: std::marker::Send,
 {
-    let handle = match tokio::runtime::Handle::try_current() {
-        Ok(handle) => handle,
-        Err(_) => runtime_handle(),
-    };
+    let handle = async_handle();
     handle.spawn(fut)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn async_on_block<F: futures::Future>(fut: F) -> F::Output {
-    let handle = match tokio::runtime::Handle::try_current() {
-        Ok(handle) => handle,
-        Err(_) => runtime_handle(),
-    };
+    let handle = async_handle();
     handle.block_on(fut)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn async_block_in_place<F: futures::Future>(fut: F) -> std::io::Result<F::Output> {
-    let handle = match tokio::runtime::Handle::try_current() {
-        Ok(handle) => handle,
-        Err(_) => runtime_handle(),
-    };
+    let handle = async_handle();
     Ok(tokio::task::block_in_place(|| handle.block_on(fut)))
 }
 

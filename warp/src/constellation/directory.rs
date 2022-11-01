@@ -53,6 +53,12 @@ pub struct Directory {
     items: Arc<RwLock<Vec<Item>>>,
 }
 
+impl core::hash::Hash for Directory {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id().hash(state);
+    }
+}
+
 impl PartialEq for Directory {
     fn eq(&self, other: &Self) -> bool {
         self.id() == other.id()
@@ -109,13 +115,14 @@ impl Directory {
             .filter(|&s| !s.is_empty())
             .collect::<Vec<_>>();
 
-        // checl to determine if the array is empty
+        // check to determine if the array is empty
         if path.is_empty() {
             return directory;
         }
 
         let name = path.remove(0);
         *directory.name.write() = name.to_string();
+
         if !path.is_empty() {
             let sub = Self::new(path.join("/").as_str());
             if directory.add_item(sub).is_ok() {};
@@ -239,7 +246,7 @@ impl Directory {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn remove_item(&self, item_name: &str) -> Result<Item, Error> {
         if !self.has_item(item_name) {
-            return Err(Error::ItemInvalid);
+            return Err(Error::InvalidItem);
         }
         let index = self.get_item_index(item_name)?;
         let item = self.items.write().remove(index);
@@ -385,14 +392,14 @@ impl Directory {
     /// ```
     pub fn get_item(&self, item_name: &str) -> Result<Item, Error> {
         if !self.has_item(item_name) {
-            return Err(Error::ItemInvalid);
+            return Err(Error::InvalidItem);
         }
         let index = self.get_item_index(item_name)?;
         self.items
             .read()
             .get(index)
             .cloned()
-            .ok_or(Error::ItemInvalid)
+            .ok_or(Error::InvalidItem)
     }
 
     /// Used to find an item throughout the `Directory` and its children
@@ -426,7 +433,7 @@ impl Directory {
                 }
             }
         }
-        Err(Error::ItemInvalid)
+        Err(Error::InvalidItem)
     }
 
     /// Used to get a search for items listed and return a list of `Item` matching the terms

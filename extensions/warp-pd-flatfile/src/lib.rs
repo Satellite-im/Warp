@@ -211,7 +211,7 @@ impl FlatfileStorage {
     }
 
     pub fn initialize_internal(&mut self) -> Result<()> {
-        let index_file = self.index_file.clone().ok_or(Error::FileInvalid)?;
+        let index_file = self.index_file.clone().ok_or(Error::InvalidFile)?;
         self.initialize_index_file(index_file)
     }
 
