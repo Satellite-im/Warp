@@ -1,3 +1,4 @@
+pub mod config;
 use futures::{pin_mut, StreamExt};
 use std::any::Any;
 use std::io::Cursor;
