@@ -11,6 +11,9 @@ build_static_crypto:
 build_static_fs_memory:
 				mkdir -p bin && clang -Wall -Wextra fs_memory.c -o bin/fs_memory ../target/debug/libwarp.a ../target/debug/libwarp_fs_memory.a -lm
 
+build_static_fs_ipfs:
+				mkdir -p bin && clang -Wall -Wextra fs_ipfs.c -o bin/fs_ipfs ../target/debug/libwarp.a ../target/debug/libwarp_fs_ipfs.a ../target/debug/libwarp_mp_ipfs.a -lm -lz
+
 build_static_fs_storj:
 				mkdir -p bin && clang -Wall -Wextra fs_storj.c -o bin/fs_storj ../target/debug/libwarp.a ../target/debug/libwarp_fs_storj.a ../target/debug/libwarp_pd_flatfile.a -lm -lssl -lcrypto
 
