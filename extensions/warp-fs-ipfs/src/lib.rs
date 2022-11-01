@@ -187,20 +187,23 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 
     async fn put(&mut self, name: &str, path: &str) -> Result<()> {
         let ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
 
         if self.current_directory()?.get_item_by_path(name).is_ok() {
-            return Err(Error::Other); //TODO: Exist
+            return Err(Error::DuplicateName);
         }
+
         let path = PathBuf::from(path);
         if !path.is_file() {
-            return Err(Error::IoError(std::io::Error::from(
-                std::io::ErrorKind::NotFound,
-            )));
+            return Err(Error::FileNotFound);
         }
 
         let mut adder = FileAdder::default();
         let file = tokio::fs::File::open(&path).await?;
-        //TODO: use a larger buffer
+
+        //TODO: use a larger buffer(?)
         let mut reader = BufReader::with_capacity(adder.size_hint(), file);
         let mut written = 0;
         let mut last_cid = None;
@@ -248,6 +251,9 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 
     async fn get(&self, name: &str, path: &str) -> Result<()> {
         let ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
         let reference = file.reference().ok_or(Error::Other)?; //Reference not found
@@ -268,6 +274,9 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 
     async fn put_buffer(&mut self, name: &str, buffer: &Vec<u8>) -> Result<()> {
         let ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
 
         if self.current_directory()?.get_item_by_path(name).is_ok() {
             return Err(Error::Other); //TODO: Exist
@@ -324,6 +333,10 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 
     async fn get_buffer(&self, name: &str) -> Result<Vec<u8>> {
         let ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
+
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
         let reference = file.reference().ok_or(Error::Other)?; //Reference not found
@@ -339,15 +352,20 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             buffer.append(&mut bytes);
         }
 
+        //TODO: Validate file against the hashed reference
         Ok(buffer)
     }
 
     /// Used to remove data from the filesystem
     async fn remove(&mut self, name: &str, _: bool) -> Result<()> {
         let ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
 
         //TODO: Recursively delete directory but for now only support deleting a file
         let directory = self.current_directory()?;
+
         let item = directory.get_item_by_path(name)?;
 
         let file = item.get_file()?;
@@ -375,6 +393,9 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
     async fn rename(&mut self, current: &str, new: &str) -> Result<()> {
         //Used as guard in the event its not available but will be used in the future
         let _ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
 
         //Note: This will only support renaming the file or directory in the index
         let directory = self.current_directory()?;
@@ -387,8 +408,12 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
     async fn create_directory(&mut self, name: &str, recursive: bool) -> Result<()> {
         //Used as guard in the event its not available but will be used in the future
         let _ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
+
         let directory = self.current_directory()?;
-        
+
         //Prevent creating recursive/nested directorieis if `recursive` isnt true
         if name.contains('/') && !recursive {
             return Err(Error::InvalidDirectory);
