@@ -29,7 +29,7 @@ fn main() {
             "-c",
             "cbindgen.toml",
             "-o",
-            "warp-fs-ipfs-client.h",
+            "warp-fs-ipfs.h",
         ])
         .stdout(std::process::Stdio::inherit())
         .output()
