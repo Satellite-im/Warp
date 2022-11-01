@@ -106,6 +106,8 @@ async fn create_rg(
     Ok(chat)
 }
 
+#[allow(clippy::clone_on_copy)]
+#[allow(clippy::await_holding_lock)]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     if fdlimit::raise_fd_limit().is_none() {}
@@ -491,13 +493,14 @@ async fn main() -> anyhow::Result<()> {
 
                         }
                         Some("/pin") => {
+                            let topic = topic.read().clone();
                             match cmd_line.next() {
                                 Some("all") => {
                                    let messages = chat
-                                       .get_messages(*topic.read(), MessageOptions::default())
+                                       .get_messages(topic, MessageOptions::default())
                                        .await?;
                                    for message in messages.iter() {
-                                       chat.pin(*topic.read(), message.id(), PinState::Pin).await?;
+                                       chat.pin(topic, message.id(), PinState::Pin).await?;
                                        writeln!(stdout, "Pinned {}", message.id())?;
                                    }
                                 },
@@ -509,7 +512,7 @@ async fn main() -> anyhow::Result<()> {
                                             continue
                                         }
                                     };
-                                    chat.pin(*topic.read(), id, PinState::Pin).await?;
+                                    chat.pin(topic, id, PinState::Pin).await?;
                                     writeln!(stdout, "Pinned {}", id)?;
                                 },
                                 None => { writeln!(stdout, "/pin <id | all>")? }
@@ -589,7 +592,7 @@ async fn message_event_handle(
                 message_id,
             } => {
                 if *topic.read() == conversation_id {
-                    if let Ok(message) = raygun.get_message(*topic.read(), message_id).await {
+                    if let Ok(message) = raygun.get_message(conversation_id, message_id).await {
                         let username = get_username(multipass.clone(), message.sender())
                             .unwrap_or_else(|_| message.sender().to_string());
                         //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
