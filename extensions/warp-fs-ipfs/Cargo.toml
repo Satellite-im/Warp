@@ -27,6 +27,15 @@ chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
 warp-mp-ipfs = { path = "../warp-mp-ipfs" }
+fdlimit = "0.2"
+bs58 = "0.4"
+rustyline-async = "0.2"
+comfy-table = "6.0"
+tracing-subscriber = "0.3"
+tracing-appender = "0.2"
+
+clap = { version = "4.0", features = ["derive"] }
+dirs = "4.0"
 
 [build-dependencies]
 cbindgen = "0.23"
