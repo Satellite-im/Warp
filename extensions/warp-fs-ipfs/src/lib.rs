@@ -391,7 +391,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         let _g = handle.enter();
 
         if self.current_directory()?.get_item_by_path(name).is_ok() {
-            return Err(Error::Other); //TODO: Exist
+            return Err(Error::FileExist);
         }
 
         let mut adder = FileAdder::default();
