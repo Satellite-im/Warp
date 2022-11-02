@@ -2,6 +2,7 @@ use std::{path::Path, sync::Arc};
 
 use anyhow::bail;
 use clap::{Parser, Subcommand};
+use comfy_table::Table;
 use std::path::PathBuf;
 use warp::{
     constellation::Constellation, multipass::MultiPass, sync::RwLock, tesseract::Tesseract,
@@ -35,6 +36,12 @@ enum Command {
         local: String,
     },
     DeleteFile {
+        remote: String,
+    },
+    List {
+        remote: Option<String>,
+    },
+    FileInfo {
         remote: String,
     },
     FileReference {
@@ -108,6 +115,39 @@ async fn main() -> anyhow::Result<()> {
                 Err(e) => println!("Error deleting file: {e}"),
             };
         }
+        Command::FileInfo { remote } => {
+            match filesystem
+                .current_directory()?
+                .get_item(&remote)
+                .and_then(|item| item.get_file())
+            {
+                Ok(file) => {
+                    let mut table = Table::new();
+                    table.set_header(vec![
+                        "Name",
+                        "Size",
+                        "Favorite",
+                        "Description",
+                        "Creation",
+                        "Modified",
+                        "Reference",
+                    ]);
+                    table.add_row(vec![
+                        file.name(),
+                        format!("{} MB", file.size() / 1024 / 1024),
+                        file.favorite().to_string(),
+                        file.description(),
+                        file.creation().date().to_string(),
+                        file.modified().date().to_string(),
+                        file.reference().unwrap_or_else(|| String::from("N/A")),
+                    ]);
+
+                    println!("{table}");
+                }
+                Err(_) => println!("File doesnt exist"),
+            }
+        }
+        Command::List { .. } => {}
         Command::FileReference { remote } => {
             match filesystem
                 .current_directory()?
