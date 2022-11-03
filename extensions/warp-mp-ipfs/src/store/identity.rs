@@ -447,7 +447,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(identity)
     }
 
-    //Note: We are calling `IdentityStore::cache` multiple times instead of a single call in the event of
+    //Note: We are calling `IdentityStore::cache` multiple times, but shouldnt have any impact on performance.
     pub async fn lookup(&self, lookup: LookupBy) -> Result<Vec<Identity>, Error> {
         let own_did = self
             .identity
