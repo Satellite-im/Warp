@@ -112,6 +112,20 @@ pub struct ConnectionLimit {
     pub max_established_per_peer: Option<u32>,
 }
 
+impl ConnectionLimit {
+    //Note: Further testing needs to be done for connection limits and impact on hole punching
+    pub fn production() -> Self {
+        Self {
+            max_pending_incoming: Some(512),
+            max_pending_outgoing: Some(512),
+            max_established_incoming: Some(512),
+            max_established_outgoing: Some(512),
+            max_established: None,
+            max_established_per_peer: None,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct RelayServer {
     /// Used to enable the node as a relay server. Only should be enabled if the node isnt behind a NAT or could be connected to directly
