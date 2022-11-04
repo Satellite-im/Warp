@@ -217,10 +217,28 @@ impl Conversation {
     }
 }
 
+#[derive(Default, Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[repr(C)]
+#[serde(rename_all="snake_case")]
+pub enum MessageType {
+    #[default]
+    /// Regular message sent or received
+    Message,
+    /// Attachment; Can represent a file, image, etc., which can be from 
+    /// constellation or sent directly
+    Attachment,
+    /// Event sent as a message. 
+    /// TBD
+    Event
+}
+
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 pub struct Message {
     /// ID of the Message
     id: Uuid,
+
+    /// Type of message being sent
+    message_type: MessageType,
 
     /// Conversion id where `Message` is associated with.
     conversation_id: Uuid,
@@ -257,6 +275,7 @@ impl Default for Message {
     fn default() -> Self {
         Self {
             id: Uuid::new_v4(),
+            message_type: Default::default(),
             conversation_id: Uuid::nil(),
             sender: Default::default(),
             date: Utc::now(),
@@ -280,6 +299,10 @@ impl Message {
 impl Message {
     pub fn id(&self) -> Uuid {
         self.id
+    }
+
+    pub fn message_type(&self) -> MessageType {
+        self.message_type
     }
 
     pub fn conversation_id(&self) -> Uuid {
@@ -322,6 +345,10 @@ impl Message {
 impl Message {
     pub fn set_id(&mut self, id: Uuid) {
         self.id = id
+    }
+
+    pub fn set_message_type(&mut self, message_type: MessageType) {
+        self.message_type = message_type;
     }
 
     pub fn set_conversation_id(&mut self, id: Uuid) {
