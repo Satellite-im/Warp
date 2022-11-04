@@ -27,7 +27,7 @@ use crate::Persistent;
 
 use super::document::DocumentType;
 use super::identity::IdentityStore;
-use super::phonebook::PhoneBook;
+// use super::phonebook::PhoneBook;
 use super::{
     did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, PeerConnectionType,
     FRIENDS_BROADCAST,
@@ -56,7 +56,7 @@ pub struct FriendsStore<T: IpfsTypes> {
     // Tesseract
     tesseract: Tesseract,
 
-    phonebook: PhoneBook<T>,
+    // phonebook: PhoneBook<T>,
 
     tx: broadcast::Sender<MultiPassEventKind>,
 }
@@ -124,7 +124,7 @@ impl<T: IpfsTypes> Clone for FriendsStore<T> {
             end_event: self.end_event.clone(),
             queue: self.queue.clone(),
             tesseract: self.tesseract.clone(),
-            phonebook: self.phonebook.clone(),
+            // phonebook: self.phonebook.clone(),
             tx: self.tx.clone(),
         }
     }
@@ -149,8 +149,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let did_key = Arc::new(did_keypair(&tesseract)?);
         let override_ipld = Arc::new(AtomicBool::new(override_ipld));
 
-        let (phonebook, fut) = PhoneBook::new(ipfs.clone(), tx.clone());
-        tokio::spawn(fut);
+        // let (phonebook, fut) = PhoneBook::new(ipfs.clone(), tx.clone());
+        // tokio::spawn(fut);
 
         let store = Self {
             ipfs,
@@ -160,7 +160,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             end_event,
             queue,
             tesseract,
-            phonebook,
+            // phonebook,
             tx,
             override_ipld,
         };
@@ -179,13 +179,13 @@ impl<T: IpfsTypes> FriendsStore<T> {
         tokio::spawn(async move {
             let mut store = store_inner;
 
-            let discovery = store.identity.discovery_type();
+            // let discovery = store.identity.discovery_type();
 
-            if let Err(_e) = store.phonebook.set_discovery(discovery).await {}
+            // if let Err(_e) = store.phonebook.set_discovery(discovery).await {}
 
-            for addr in store.identity.relays() {
-                if let Err(_e) = store.phonebook.add_relay(addr).await {}
-            }
+            // for addr in store.identity.relays() {
+            //     if let Err(_e) = store.phonebook.add_relay(addr).await {}
+            // }
 
             if let Some(path) = store.path.as_ref() {
                 if let Ok(queue) = tokio::fs::read(path.join(".request_queue")).await {
@@ -195,11 +195,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
             }
 
-            if let Ok(friends) = store.friends_list().await {
-                if let Err(_e) = store.phonebook.add_friend_list(friends).await {
-                    error!("Error adding friends in phonebook: {_e}");
-                }
-            }
+            // if let Ok(friends) = store.friends_list().await {
+            //     if let Err(_e) = store.phonebook.add_friend_list(friends).await {
+            //         error!("Error adding friends in phonebook: {_e}");
+            //     }
+            // }
 
             // autoban the blocklist
             match store.block_list().await {
@@ -251,7 +251,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         message: Arc<GossipsubMessage>,
     ) -> anyhow::Result<()> {
         if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
-            let data = data.decrypt::<FriendRequest>(&*self.did_key)?;
+            let data = data.decrypt::<FriendRequest>(&self.did_key)?;
 
             if data.to().ne(local_public_key) {
                 warn!("Request is not meant for identity. Skipping");
@@ -727,9 +727,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
             self.set_friends_list(list).await?;
         }
 
-        if let Err(_e) = self.phonebook.add_friend(pubkey).await {
-            error!("Error: {_e}");
-        }
+        // if let Err(_e) = self.phonebook.add_friend(pubkey).await {
+        //     error!("Error: {_e}");
+        // }
 
         if let Err(e) = self.tx.send(MultiPassEventKind::FriendAdded {
             did: pubkey.clone(),
@@ -754,9 +754,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
             self.set_friends_list(list).await?;
         }
 
-        if let Err(_e) = self.phonebook.remove_friend(pubkey).await {
-            error!("Error: {_e}");
-        }
+        // if let Err(_e) = self.phonebook.remove_friend(pubkey).await {
+        //     error!("Error: {_e}");
+        // }
 
         if broadcast {
             let (local_ipfs_public_key, _) = self.local().await?;
