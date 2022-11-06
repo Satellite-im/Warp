@@ -403,7 +403,7 @@ impl Tesseract {
         if !self.is_unlock() {
             return Err(Error::TesseractLocked);
         }
-        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &*self.enc_pass.read())?;
+        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &self.enc_pass.read())?;
         let data = Cipher::direct_encrypt(CipherType::Aes256Gcm, value.as_bytes(), &pkey)?;
         self.internal.write().insert(key.to_string(), data);
         self.save()
@@ -447,7 +447,7 @@ impl Tesseract {
             return Err(Error::ObjectNotFound);
         }
 
-        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &*self.enc_pass.read())?;
+        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &self.enc_pass.read())?;
         let data = self.internal.read().get(key).cloned().ok_or(Error::ObjectNotFound)?;
         let slice = Cipher::direct_decrypt(CipherType::Aes256Gcm, &data, &pkey)?;
         let plain_text = String::from_utf8_lossy(&slice[..]).to_string();
@@ -464,7 +464,7 @@ impl Tesseract {
             return Err(Error::ObjectNotFound);
         }
 
-        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &*self.enc_pass.read())?;
+        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &self.enc_pass.read())?;
         let data = self.internal.read().get(key).cloned().ok_or(Error::ObjectNotFound)?;
         Cipher::direct_decrypt(CipherType::Aes256Gcm, &data, &pkey)?;
         Ok(())

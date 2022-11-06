@@ -68,7 +68,7 @@ async fn account_persistent<P: AsRef<Path>>(
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    let mut config = MpIpfsConfig::production(&path, opt.experimental_node);
+    let mut config = MpIpfsConfig::production(path, opt.experimental_node);
 
     config.ipfs_setting.mdns.enable = opt.mdns;
     let mut account = ipfs_identity_persistent(config, tesseract, None).await?;
