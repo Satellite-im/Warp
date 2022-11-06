@@ -251,7 +251,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         message: Arc<GossipsubMessage>,
     ) -> anyhow::Result<()> {
         if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
-            let data = data.decrypt::<FriendRequest>(&*self.did_key)?;
+            let data = data.decrypt::<FriendRequest>(&self.did_key)?;
 
             if data.to().ne(local_public_key) {
                 warn!("Request is not meant for identity. Skipping");

@@ -243,7 +243,7 @@ impl Constellation for StorjFilesystem {
         let file = warp::constellation::file::File::new(&name);
         file.set_size(size as usize);
         file.set_reference(&url);
-        file.hash_mut().hash_from_file(&path)?;
+        file.hash_mut().hash_from_file(path)?;
 
         self.current_directory()?.add_item(file.clone())?;
 

@@ -105,7 +105,7 @@ async fn account_persistent<P: AsRef<Path>>(
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    let mut config = MpIpfsConfig::production(&path, opt.experimental_node);
+    let mut config = MpIpfsConfig::production(path, opt.experimental_node);
     if !opt.direct || !opt.no_discovery {
         config.store_setting.discovery = Discovery::Provider(opt.context.clone());
     }
