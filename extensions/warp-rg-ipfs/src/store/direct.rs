@@ -280,10 +280,10 @@ impl DirectConversation {
 
             while let Some(stream) = stream.next().await {
                 if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
-                    if let Ok(data) = data.decrypt::<Vec<u8>>(&*did) {
+                    if let Ok(data) = data.decrypt::<Vec<u8>>(&did) {
                         if let Ok(event) = serde_json::from_slice::<MessagingEvents>(&data) {
                             if let Err(e) = direct_message_event(
-                                &mut *convo.messages_mut(),
+                                &mut convo.messages_mut(),
                                 &event,
                                 &filter,
                                 tx.clone(),
@@ -965,7 +965,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::New(message);
 
         direct_message_event(
-            &mut *conversation.messages_mut(),
+            &mut conversation.messages_mut(),
             &event,
             &self.spam_filter,
             tx,
@@ -1021,12 +1021,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         ]
         .concat();
 
-        let signature = super::sign_serde(&*self.did, &construct)?;
+        let signature = super::sign_serde(&self.did, &construct)?;
 
         let event = MessagingEvents::Edit(conversation.id(), message_id, messages, signature);
 
         direct_message_event(
-            &mut *conversation.messages_mut(),
+            &mut conversation.messages_mut(),
             &event,
             &self.spam_filter,
             tx,
@@ -1093,7 +1093,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let event = MessagingEvents::New(message);
         direct_message_event(
-            &mut *conversation.messages_mut(),
+            &mut conversation.messages_mut(),
             &event,
             &self.spam_filter,
             tx,
@@ -1117,7 +1117,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let tx = conversation.event_handle()?;
         let event = MessagingEvents::Delete(conversation.id(), message_id);
         direct_message_event(
-            &mut *conversation.messages_mut(),
+            &mut conversation.messages_mut(),
             &event,
             &self.spam_filter,
             tx,
@@ -1148,7 +1148,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let event = MessagingEvents::Pin(conversation.id(), own_did.clone(), message_id, state);
         direct_message_event(
-            &mut *conversation.messages_mut(),
+            &mut conversation.messages_mut(),
             &event,
             &self.spam_filter,
             tx,
@@ -1187,7 +1187,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             MessagingEvents::React(conversation.id(), own_did.clone(), message_id, state, emoji);
 
         direct_message_event(
-            &mut *conversation.messages_mut(),
+            &mut conversation.messages_mut(),
             &event,
             &self.spam_filter,
             tx,

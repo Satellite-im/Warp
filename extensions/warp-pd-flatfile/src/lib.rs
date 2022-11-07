@@ -197,7 +197,7 @@ impl FlatfileStorage {
         storage.use_index_file = true;
 
         let mut cache_file_index = storage.directory.clone();
-        cache_file_index.push(&file);
+        cache_file_index.push(file);
 
         let mut index = FlatfileIndex::default();
         if !cache_file_index.is_file() {
@@ -226,7 +226,7 @@ impl FlatfileStorage {
         self.use_index_file = true;
 
         let mut cache_file_index = self.directory.clone();
-        cache_file_index.push(&file);
+        cache_file_index.push(file);
 
         let mut index = FlatfileIndex::default();
         if !cache_file_index.is_file() {
