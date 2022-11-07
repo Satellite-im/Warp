@@ -492,7 +492,7 @@ pub enum EmbedState {
 }
 
 #[async_trait::async_trait]
-pub trait RayGun: RayGunStream + Extension + Sync + Send + SingleHandle {
+pub trait RayGun: RayGunStream + RayGunAttachment + Extension + Sync + Send + SingleHandle {
     // Start a new conversation.
     async fn create_conversation(&mut self, _: &DID) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
@@ -680,6 +680,14 @@ where
         self.write()
             .embeds(conversation_id, message_id, state)
             .await
+    }
+}
+
+#[allow(clippy::await_holding_lock)]
+#[async_trait::async_trait]
+impl<T: ?Sized> RayGunAttachment for Arc<RwLock<Box<T>>> where T: RayGunAttachment {
+    async fn attach(&mut self, conversation_id: Uuid, files: Vec<PathBuf>, message: Vec<String>) -> Result<(), Error> {
+        self.write().attach(conversation_id, files, message).await
     }
 }
 
