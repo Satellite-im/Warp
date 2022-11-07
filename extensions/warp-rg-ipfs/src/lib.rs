@@ -7,6 +7,7 @@ use config::RgIpfsConfig;
 use ipfs::IpfsTypes;
 use ipfs::{Ipfs, TestTypes, Types};
 use warp::constellation::Constellation;
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -24,7 +25,7 @@ use warp::module::Module;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::group::{GroupChat, GroupChatManagement, GroupInvite};
-use warp::raygun::RayGunEventKind;
+use warp::raygun::{RayGunEventKind, RayGunAttachment};
 use warp::raygun::{Conversation, MessageEventStream, RayGunEventStream, RayGunStream};
 use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
 use warp::sync::RwLock;
@@ -342,6 +343,14 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
             .embeds(conversation_id, message_id, state)
             .await
             .map_err(Error::from)
+    }
+}
+
+#[async_trait::async_trait]
+impl<T: IpfsTypes> RayGunAttachment for IpfsMessaging<T> {
+    async fn attach(&mut self, _conversation_id: Uuid, _files: Vec<PathBuf>, _message: Vec<String>) -> Result<()> {
+        //TODO:
+        Err(Error::Unimplemented)
     }
 }
 
