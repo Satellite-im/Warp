@@ -325,6 +325,7 @@ impl DirectConversation {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 impl<T: IpfsTypes> DirectMessageStore<T> {
     pub async fn new(
         ipfs: Ipfs<T>,

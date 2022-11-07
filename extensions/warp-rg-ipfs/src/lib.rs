@@ -6,7 +6,6 @@ use crate::spam_filter::SpamFilter;
 use config::RgIpfsConfig;
 use ipfs::IpfsTypes;
 use ipfs::{Ipfs, TestTypes, Types};
-use warp::constellation::Constellation;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -17,6 +16,7 @@ use tokio::sync::broadcast;
 #[allow(unused_imports)]
 use tokio::sync::broadcast::{Receiver, Sender};
 use uuid::Uuid;
+use warp::constellation::Constellation;
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::logging::tracing::log::error;
@@ -25,9 +25,9 @@ use warp::module::Module;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::group::{GroupChat, GroupChatManagement, GroupInvite};
-use warp::raygun::{RayGunEventKind, RayGunAttachment};
 use warp::raygun::{Conversation, MessageEventStream, RayGunEventStream, RayGunStream};
 use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
+use warp::raygun::{RayGunAttachment, RayGunEventKind};
 use warp::sync::RwLock;
 use warp::sync::{RwLockReadGuard, RwLockWriteGuard};
 use warp::Extension;
@@ -259,7 +259,6 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         self.messaging_store()?
             .get_messages(conversation_id, opt)
             .await
-            .map_err(Error::from)
     }
 
     async fn send(
@@ -270,29 +269,19 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
     ) -> Result<()> {
         let mut store = self.messaging_store()?;
         match message_id {
-            Some(id) => store
-                .edit_message(conversation_id, id, value)
-                .await
-                .map_err(Error::from),
-            None => store
-                .send_message(conversation_id, value)
-                .await
-                .map_err(Error::from),
+            Some(id) => store.edit_message(conversation_id, id, value).await,
+            None => store.send_message(conversation_id, value).await,
         }
     }
 
     async fn delete(&mut self, conversation_id: Uuid, message_id: Option<Uuid>) -> Result<()> {
         let mut store = self.messaging_store()?;
         match message_id {
-            Some(id) => store
-                .delete_message(conversation_id, id, true)
-                .await
-                .map_err(Error::from),
+            Some(id) => store.delete_message(conversation_id, id, true).await,
             None => store
                 .delete_conversation(conversation_id, true)
                 .await
-                .map(|_| ())
-                .map_err(Error::from),
+                .map(|_| ()),
         }
     }
 
@@ -306,7 +295,6 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         self.messaging_store()?
             .react(conversation_id, message_id, state, emoji)
             .await
-            .map_err(Error::from)
     }
 
     async fn pin(
@@ -318,7 +306,6 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         self.messaging_store()?
             .pin_message(conversation_id, message_id, state)
             .await
-            .map_err(Error::from)
     }
 
     async fn reply(
@@ -330,7 +317,6 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         self.messaging_store()?
             .reply_message(conversation_id, message_id, value)
             .await
-            .map_err(Error::from)
     }
 
     async fn embeds(
@@ -342,13 +328,17 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         self.messaging_store()?
             .embeds(conversation_id, message_id, state)
             .await
-            .map_err(Error::from)
     }
 }
 
 #[async_trait::async_trait]
 impl<T: IpfsTypes> RayGunAttachment for IpfsMessaging<T> {
-    async fn attach(&mut self, _conversation_id: Uuid, _files: Vec<PathBuf>, _message: Vec<String>) -> Result<()> {
+    async fn attach(
+        &mut self,
+        _conversation_id: Uuid,
+        _files: Vec<PathBuf>,
+        _message: Vec<String>,
+    ) -> Result<()> {
         //TODO:
         Err(Error::Unimplemented)
     }
