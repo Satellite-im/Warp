@@ -14,6 +14,7 @@ use chrono::{DateTime, Utc};
 use core::ops::Range;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use uuid::Uuid;
 
 #[allow(unused_imports)]
@@ -219,17 +220,30 @@ impl Conversation {
 
 #[derive(Default, Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
 #[repr(C)]
-#[serde(rename_all="snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum MessageType {
     #[default]
     /// Regular message sent or received
     Message,
-    /// Attachment; Can represent a file, image, etc., which can be from 
+    /// Attachment; Can represent a file, image, etc., which can be from
     /// constellation or sent directly
     Attachment,
-    /// Event sent as a message. 
+    /// Event sent as a message.
     /// TBD
-    Event
+    Event,
+}
+
+#[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct MessageAttachment {
+    /// Name of the attached file
+    filename: String,
+
+    /// Size of the attached file
+    size: usize,
+
+    /// Reference to the file attached
+    reference: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
@@ -262,6 +276,9 @@ pub struct Message {
     /// Message context for `Message`
     value: Vec<String>,
 
+    /// List of Attachment
+    attachment: Vec<MessageAttachment>,
+
     /// Signature of the message
     #[serde(skip_serializing_if = "Option::is_none")]
     signature: Option<Vec<u8>>,
@@ -283,6 +300,7 @@ impl Default for Message {
             reactions: Vec::new(),
             replied: None,
             value: Vec::new(),
+            attachment: Vec::new(),
             signature: Default::default(),
             metadata: HashMap::new(),
         }
@@ -329,6 +347,10 @@ impl Message {
         self.value.clone()
     }
 
+    pub fn attachments(&self) -> Vec<MessageAttachment> {
+        self.attachment.clone()
+    }
+
     pub fn signature(&self) -> Vec<u8> {
         self.signature.clone().unwrap_or_default()
     }
@@ -373,6 +395,10 @@ impl Message {
 
     pub fn set_value(&mut self, val: Vec<String>) {
         self.value = val
+    }
+
+    pub fn set_attachment(&mut self, attachments: Vec<MessageAttachment>) {
+        self.attachment = attachments
     }
 
     pub fn set_signature(&mut self, signature: Option<Vec<u8>>) {
@@ -535,6 +561,15 @@ pub trait RayGun: RayGunStream + Extension + Sync + Send + SingleHandle {
         message_id: Uuid,
         state: EmbedState,
     ) -> Result<(), Error>;
+}
+
+#[async_trait::async_trait]
+pub trait RayGunAttachment: Sync + Send {
+    /// Send files to a conversation.
+    /// If no files is provided in the array, it will throw an error
+    async fn attach(&mut self, _: Uuid, _: Vec<PathBuf>, _: Vec<String>) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
 }
 
 #[async_trait::async_trait]
