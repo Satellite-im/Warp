@@ -23,10 +23,27 @@ pub enum FileType {
     #[display(fmt = "generic")]
     #[default]
     Generic,
+    #[display(fmt = "image/jpeg")]
+    Jpeg,
+    #[display(fmt = "image/gif")]
+    Gif,
     #[display(fmt = "image/png")]
-    ImagePng,
+    Png,
+    #[display(fmt = "image/bmp")]
+    Bmp,
+    #[display(fmt = "image/svg")]
+    Svg,
+    Image,
+    Mp3,
+    Mp4,
+    Avi,
+    Video,
     #[display(fmt = "archive")]
     Archive,
+    #[display(fmt = "pdf")]
+    Pdf,
+    #[display(fmt = "text")]
+    Text,
     #[display(fmt = "other")]
     Other,
 }
