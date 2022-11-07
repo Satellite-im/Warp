@@ -9,6 +9,7 @@ use libipld::IpldCodec;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{self, Sender as BroadcastSender};
 use uuid::Uuid;
+use warp::constellation::Constellation;
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::logging::tracing::log::{error, trace};
@@ -41,6 +42,9 @@ pub struct DirectMessageStore<T: IpfsTypes> {
     // account instance
     account: Arc<RwLock<Box<dyn MultiPass>>>,
 
+    // filesystem instance
+    filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
+
     // Queue
     queue: Arc<RwLock<Vec<Queue>>>,
 
@@ -66,6 +70,7 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
             path: self.path.clone(),
             direct_conversation: self.direct_conversation.clone(),
             account: self.account.clone(),
+            filesystem: self.filesystem.clone(),
             queue: self.queue.clone(),
             did: self.did.clone(),
             event: self.event.clone(),
@@ -325,6 +330,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         ipfs: Ipfs<T>,
         path: Option<PathBuf>,
         account: Arc<RwLock<Box<dyn MultiPass>>>,
+        filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
         discovery: bool,
         interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
@@ -363,6 +369,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             ipfs,
             direct_conversation,
             account,
+            filesystem,
             queue,
             did,
             event,

@@ -96,10 +96,10 @@ async fn create_rg(
     let chat = match path.as_ref() {
         Some(path) => {
             let config = RgIpfsConfig::production(path);
-            Box::new(IpfsMessaging::<Persistent>::new(Some(config), account, Some(cache)).await?)
+            Box::new(IpfsMessaging::<Persistent>::new(Some(config), account, None, Some(cache)).await?)
                 as Box<dyn RayGun>
         }
-        None => Box::new(IpfsMessaging::<Temporary>::new(None, account, Some(cache)).await?)
+        None => Box::new(IpfsMessaging::<Temporary>::new(None, account, None, Some(cache)).await?)
             as Box<dyn RayGun>,
     };
 

@@ -6,6 +6,7 @@ use crate::spam_filter::SpamFilter;
 use config::RgIpfsConfig;
 use ipfs::IpfsTypes;
 use ipfs::{Ipfs, TestTypes, Types};
+use warp::constellation::Constellation;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -42,6 +43,7 @@ pub struct IpfsMessaging<T: IpfsTypes> {
     ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
     direct_store: Arc<RwLock<Option<DirectMessageStore<T>>>>,
     config: Option<RgIpfsConfig>,
+    constellation: Option<Arc<RwLock<Box<dyn Constellation>>>>,
     initialize: Arc<AtomicBool>,
     tx: Sender<RayGunEventKind>,
     //TODO: GroupManager
@@ -59,6 +61,7 @@ impl<T: IpfsTypes> Clone for IpfsMessaging<T> {
             ipfs: self.ipfs.clone(),
             direct_store: self.direct_store.clone(),
             config: self.config.clone(),
+            constellation: self.constellation.clone(),
             initialize: self.initialize.clone(),
             tx: self.tx.clone(),
         }
@@ -69,6 +72,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
     pub async fn new(
         config: Option<RgIpfsConfig>,
         account: Arc<RwLock<Box<dyn MultiPass>>>,
+        constellation: Option<Arc<RwLock<Box<dyn Constellation>>>>,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
         let (tx, _) = broadcast::channel(1024);
@@ -79,6 +83,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             cache,
             ipfs: Default::default(),
             direct_store: Default::default(),
+            constellation,
             initialize: Default::default(),
             tx,
         };
@@ -160,6 +165,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
                 ipfs.clone(),
                 config.path.map(|p| p.join("messages")),
                 self.account.clone(),
+                self.constellation.clone(),
                 discovery,
                 config.store_setting.broadcast_interval,
                 self.tx.clone(),
@@ -410,6 +416,7 @@ pub mod ffi {
         match async_on_block(IpfsMessaging::<Temporary>::new(
             config,
             account.inner(),
+            None,
             cache.map(|p| p.inner()),
         )) {
             Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(RwLock::new(Box::new(a))))),
@@ -443,6 +450,7 @@ pub mod ffi {
         match async_on_block(IpfsMessaging::<Persistent>::new(
             config,
             account.inner(),
+            None,
             cache.map(|p| p.inner()),
         )) {
             Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(RwLock::new(Box::new(a))))),
