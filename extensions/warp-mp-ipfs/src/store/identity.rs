@@ -143,7 +143,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         };
         if store.path.is_some() {
             if let Err(_e) = store.load_cid().await {
-                //TODO
+                //We can ignore if it doesnt exist
             }
         }
 
@@ -166,6 +166,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             let mut tick = tokio::time::interval(Duration::from_millis(interval));
             //Use to update the seen list
             let mut update_seen = tokio::time::interval(Duration::from_secs(10));
+            let mut clear_seen = tokio::time::interval(Duration::from_secs(15));
             loop {
                 if store.end_event.load(Ordering::SeqCst) {
                     break;
@@ -186,6 +187,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
                         if let Err(e) = store.update_pubsub_peers_list().await {
                             error!("Error: {e}");
                         }
+                    }
+                    _ = clear_seen.tick() => {
+                        store.seen.write().clear();
                     }
                     _ = tick.tick() => {
                         if let Err(e) = store.broadcast_identity().await {
