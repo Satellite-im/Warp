@@ -1,11 +1,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi;
 
-use std::{
-    collections::HashMap,
-    fmt::Debug,
-    sync::atomic::{AtomicUsize, Ordering},
-};
+use std::{collections::HashMap, fmt::Debug, sync::atomic::Ordering};
 use warp_derive::FFIFree;
 use zeroize::Zeroize;
 
