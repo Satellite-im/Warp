@@ -927,6 +927,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let lines_value_length: usize = messages
             .iter()
             .filter(|s| !s.is_empty())
+            .map(|s| s.trim())
             .map(|s| s.chars().count())
             .sum();
 
