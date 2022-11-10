@@ -607,11 +607,30 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                     identity.set_username(&username)
                 }
                 (None, Some(data), None, None) => {
+                    let len = data.len();
+                    if len > 2 * 1024 * 1024 {
+                        return Err(Error::InvalidLength {
+                            context: "profile picture".into(),
+                            current: len,
+                            minimum: None,
+                            maximum: Some(2 * 1024 * 1024),
+                        });
+                    }
+
                     let mut graphics = identity.graphics();
                     graphics.set_profile_picture(&data);
                     identity.set_graphics(graphics);
                 }
                 (None, None, Some(data), None) => {
+                    let len = data.len();
+                    if len > 2 * 1024 * 1024 {
+                        return Err(Error::InvalidLength {
+                            context: "profile banner".into(),
+                            current: len,
+                            minimum: None,
+                            maximum: Some(2 * 1024 * 1024),
+                        });
+                    }
                     let mut graphics = identity.graphics();
                     graphics.set_profile_banner(&data);
                     identity.set_graphics(graphics);
