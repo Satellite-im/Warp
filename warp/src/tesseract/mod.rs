@@ -1,11 +1,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi;
 
-use std::{
-    collections::HashMap,
-    fmt::Debug,
-    sync::atomic::{AtomicUsize, Ordering},
-};
+use std::{collections::HashMap, fmt::Debug, sync::atomic::Ordering};
 use warp_derive::FFIFree;
 use zeroize::Zeroize;
 
@@ -42,7 +38,6 @@ pub struct Tesseract {
     check: Arc<AtomicBool>,
     unlock: Arc<AtomicBool>,
     soft_unlock: Arc<AtomicBool>,
-    internal_counter: Arc<AtomicUsize>,
 }
 
 impl Default for Tesseract {
@@ -55,18 +50,12 @@ impl Default for Tesseract {
             check: Arc::new(Default::default()),
             unlock: Arc::new(Default::default()),
             soft_unlock: Arc::new(Default::default()),
-            internal_counter: Arc::new(AtomicUsize::new(1)),
         }
     }
 }
 
 impl Clone for Tesseract {
     fn clone(&self) -> Self {
-        {
-            let mut counter = self.internal_counter.load(Ordering::SeqCst);
-            counter += 1;
-            self.internal_counter.store(counter, Ordering::SeqCst);
-        }
         Tesseract {
             internal: self.internal.clone(),
             enc_pass: self.enc_pass.clone(),
@@ -75,7 +64,6 @@ impl Clone for Tesseract {
             check: self.check.clone(),
             unlock: self.unlock.clone(),
             soft_unlock: self.soft_unlock.clone(),
-            internal_counter: self.internal_counter.clone(),
         }
     }
 }
@@ -93,15 +81,7 @@ impl Debug for Tesseract {
 
 impl Drop for Tesseract {
     fn drop(&mut self) {
-        let counter = {
-            let mut counter = self.internal_counter.load(Ordering::SeqCst);
-            if counter != 0 {
-                counter -= 1;
-                self.internal_counter.store(counter, Ordering::SeqCst)
-            }
-            counter
-        };
-        if counter == 0 && self.is_unlock() {
+        if Arc::strong_count(&self.enc_pass) == 1 && self.is_unlock() {
             self.lock()
         }
     }
@@ -448,7 +428,12 @@ impl Tesseract {
         }
 
         let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &self.enc_pass.read())?;
-        let data = self.internal.read().get(key).cloned().ok_or(Error::ObjectNotFound)?;
+        let data = self
+            .internal
+            .read()
+            .get(key)
+            .cloned()
+            .ok_or(Error::ObjectNotFound)?;
         let slice = Cipher::direct_decrypt(CipherType::Aes256Gcm, &data, &pkey)?;
         let plain_text = String::from_utf8_lossy(&slice[..]).to_string();
         Ok(plain_text)
@@ -465,7 +450,12 @@ impl Tesseract {
         }
 
         let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &self.enc_pass.read())?;
-        let data = self.internal.read().get(key).cloned().ok_or(Error::ObjectNotFound)?;
+        let data = self
+            .internal
+            .read()
+            .get(key)
+            .cloned()
+            .ok_or(Error::ObjectNotFound)?;
         Cipher::direct_decrypt(CipherType::Aes256Gcm, &data, &pkey)?;
         Ok(())
     }
