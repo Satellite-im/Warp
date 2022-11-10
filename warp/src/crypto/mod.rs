@@ -35,8 +35,15 @@ pub struct DID(DIDKey);
 
 impl FromStr for DID {
     type Err = Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        did_key::resolve(s).map_err(|_| Error::PublicKeyInvalid).map(DID)
+    fn from_str(key: &str) -> Result<Self, Self::Err> {
+        let key = match key.starts_with("did:key:") {
+            true => key.to_string(),
+            false => format!("did:key:{}", key),
+        };
+
+        std::panic::catch_unwind(|| did_key::resolve(&key))
+            .map_err(|_| Error::PublicKeyInvalid)
+            .and_then(|res| res.map(DID).map_err(|_| Error::PublicKeyInvalid))
     }
 }
 
@@ -139,8 +146,7 @@ impl Display for DID {
 impl TryFrom<String> for DID {
     type Error = Error;
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        let did = did_key::resolve(&value).map_err(|_| Error::Other)?;
-        Ok(DID(did))
+        DID::from_str(&value)
     }
 }
 
