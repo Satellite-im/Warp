@@ -1316,6 +1316,7 @@ pub fn direct_message_event(
             let lines_value_length: usize = message
                 .value()
                 .iter()
+                .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
                 .map(|s| s.chars().count())
                 .sum();
@@ -1376,6 +1377,7 @@ pub fn direct_message_event(
 
             let lines_value_length: usize = val
                 .iter()
+                .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
                 .map(|s| s.chars().count())
                 .sum();
