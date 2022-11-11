@@ -288,10 +288,6 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         self.index.clone()
     }
 
-    fn get_path_mut(&mut self) -> &mut PathBuf {
-        &mut self.path
-    }
-
     async fn put(&mut self, name: &str, path: &str) -> Result<()> {
         let ipfs = self.ipfs()?;
         //Used to enter the tokio context

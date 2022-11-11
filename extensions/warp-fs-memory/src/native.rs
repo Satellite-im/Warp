@@ -31,10 +31,6 @@ impl Constellation for MemorySystem {
         self.path.clone()
     }
 
-    fn get_path_mut(&mut self) -> &mut PathBuf {
-        &mut self.path
-    }
-
     async fn put(&mut self, name: &str, path: &str) -> Result<()> {
         let mut internal_file = item::file::File::new(name);
 
