@@ -600,6 +600,12 @@ pub trait RayGunAttachment: Sync + Send {
     async fn attach(&mut self, _: Uuid, _: Vec<PathBuf>, _: Vec<String>) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
+
+    /// Downloads a file that been attached to a message
+    /// Note: Must use the filename assiocated when downloading
+    async fn download(&self, _: Uuid, _: Uuid, _: String, _: PathBuf) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
 }
 
 #[async_trait::async_trait]
@@ -726,6 +732,16 @@ where
         message: Vec<String>,
     ) -> Result<(), Error> {
         self.write().attach(conversation_id, files, message).await
+    }
+
+    async fn download(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        file: String,
+        path: PathBuf,
+    ) -> Result<(), Error> {
+        self.read().download(conversation_id, message_id, file, path).await
     }
 }
 
