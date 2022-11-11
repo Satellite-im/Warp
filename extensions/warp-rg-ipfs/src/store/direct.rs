@@ -16,8 +16,8 @@ use warp::logging::tracing::log::{error, trace};
 use warp::logging::tracing::warn;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    Conversation, EmbedState, Message, MessageEventKind, MessageOptions, PinState, RayGunEventKind,
-    Reaction, ReactionState,
+    Conversation, EmbedState, Message, MessageAttachment, MessageEventKind, MessageOptions,
+    PinState, RayGunEventKind, Reaction, ReactionState, MessageType,
 };
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock};
@@ -1206,6 +1206,128 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         warp::async_block_in_place_uncheck(
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
+        self.send_event(conversation.id(), event).await
+    }
+
+
+    #[allow(clippy::await_holding_lock)]
+    pub async fn attach(
+        &mut self,
+        conversation: Uuid,
+        files: Vec<PathBuf>,
+        messages: Vec<String>,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get_conversation(conversation)?;
+        let tx = conversation.event_handle()?;
+
+        //TODO: Send directly if constellation isnt present
+        //      this will require uploading to ipfs directly from here
+        //      or setting up a seperate stream channel related to
+        //      the subscribed topic
+        //      possibly as a configuration option
+        let constellation = self
+            .filesystem
+            .clone()
+            .ok_or(Error::ConstellationExtensionUnavailable)?;
+
+        let files = files
+            .iter()
+            .filter(|path| path.is_file())
+            .collect::<Vec<_>>();
+
+        let mut attachments = vec![];
+
+        for file in files {
+            let mut filename = match file.file_name() {
+                Some(file) => file.to_string_lossy().to_string(),
+                None => continue,
+            };
+
+            let original = filename.clone();
+
+            let current_directory = constellation.read().current_directory()?;
+
+            let mut interval = 0;
+            let skip;
+            loop {
+                if current_directory.has_item(&filename) {
+                    if interval >= 20 {
+                        skip = true;
+                        break;
+                    }
+                    interval += 1;
+                    filename = format!("{original}{interval}");
+                    continue;
+                }
+                skip = false;
+                break;
+            }
+
+            if skip {
+                continue;
+            }
+
+            let remote = file.to_string_lossy().to_string();
+
+            if let Err(e) = constellation.write().put(&filename, &remote).await {
+                error!("Error uploading {filename}: {e}");
+            }
+
+            let file = match current_directory
+                .get_item(&filename)
+                .and_then(|item| item.get_file())
+            {
+                Ok(file) => file,
+                Err(_) => continue,
+            };
+            
+            let mut attach = MessageAttachment::default();
+            attach.set_filename(file.name());
+            attach.set_size(file.size());
+            attach.set_reference(file.reference());
+
+            attachments.push(attach);
+        }
+
+        let own_did = &*self.did.clone();
+
+        let mut message = Message::default();
+        message.set_message_type(MessageType::Attachment);
+        message.set_conversation_id(conversation.id());
+        message.set_sender(own_did.clone());
+        message.set_attachment(attachments);
+        message.set_value(messages.clone());
+
+        let construct = vec![
+            message.id().into_bytes().to_vec(),
+            message.conversation_id().into_bytes().to_vec(),
+            own_did.to_string().as_bytes().to_vec(),
+            message
+                .value()
+                .iter()
+                .map(|s| s.as_bytes())
+                .collect::<Vec<_>>()
+                .concat(),
+        ]
+        .concat();
+
+        let signature = super::sign_serde(own_did, &construct)?;
+        message.set_signature(Some(signature));
+
+        let event = MessagingEvents::New(message);
+
+        direct_message_event(
+            &mut conversation.messages_mut(),
+            &event,
+            &self.spam_filter,
+            tx,
+            MessageDirection::Out,
+            Default::default(),
+        )?;
+        warp::async_block_in_place_uncheck(
+            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
+        )?;
+
         self.send_event(conversation.id(), event).await
     }
 

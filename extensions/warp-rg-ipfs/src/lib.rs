@@ -335,12 +335,13 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
 impl<T: IpfsTypes> RayGunAttachment for IpfsMessaging<T> {
     async fn attach(
         &mut self,
-        _conversation_id: Uuid,
-        _files: Vec<PathBuf>,
-        _message: Vec<String>,
+        conversation_id: Uuid,
+        files: Vec<PathBuf>,
+        message: Vec<String>,
     ) -> Result<()> {
-        //TODO:
-        Err(Error::Unimplemented)
+        self.messaging_store()?
+            .attach(conversation_id, files, message)
+            .await
     }
 }
 

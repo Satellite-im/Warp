@@ -271,8 +271,8 @@ impl MessageAttachment {
         self.size = size;
     }
 
-    pub fn set_reference<S: AsRef<str>>(&mut self, reference: S) {
-        self.reference = Some(reference.as_ref().to_string())
+    pub fn set_reference(&mut self, reference: Option<String>) {
+        self.reference = reference;
     }
 }
 
