@@ -1235,6 +1235,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .filter(|path| path.is_file())
             .collect::<Vec<_>>();
 
+        if files.is_empty() {
+            return Err(Error::InvalidMessage);
+        }
+
         let mut attachments = vec![];
 
         for file in files {
