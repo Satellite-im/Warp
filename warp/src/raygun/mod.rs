@@ -233,7 +233,9 @@ pub enum MessageType {
     Event,
 }
 
-#[derive(Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[derive(
+    Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
+)]
 #[serde(rename_all = "snake_case")]
 pub struct MessageAttachment {
     /// Name of the attached file
@@ -244,6 +246,34 @@ pub struct MessageAttachment {
 
     /// Reference to the file attached
     reference: Option<String>,
+}
+
+impl MessageAttachment {
+    pub fn filename(&self) -> String {
+        self.filename.clone()
+    }
+
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    pub fn reference(&self) -> Option<String> {
+        self.reference.clone()
+    }
+}
+
+impl MessageAttachment {
+    pub fn set_filename<S: AsRef<str>>(&mut self, filename: S) {
+        self.filename = filename.as_ref().to_string()
+    }
+
+    pub fn set_size(&mut self, size: usize) {
+        self.size = size;
+    }
+
+    pub fn set_reference<S: AsRef<str>>(&mut self, reference: S) {
+        self.reference = Some(reference.as_ref().to_string())
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
@@ -685,8 +715,16 @@ where
 
 #[allow(clippy::await_holding_lock)]
 #[async_trait::async_trait]
-impl<T: ?Sized> RayGunAttachment for Arc<RwLock<Box<T>>> where T: RayGunAttachment {
-    async fn attach(&mut self, conversation_id: Uuid, files: Vec<PathBuf>, message: Vec<String>) -> Result<(), Error> {
+impl<T: ?Sized> RayGunAttachment for Arc<RwLock<Box<T>>>
+where
+    T: RayGunAttachment,
+{
+    async fn attach(
+        &mut self,
+        conversation_id: Uuid,
+        files: Vec<PathBuf>,
+        message: Vec<String>,
+    ) -> Result<(), Error> {
         self.write().attach(conversation_id, files, message).await
     }
 }
