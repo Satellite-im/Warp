@@ -175,10 +175,6 @@ impl Constellation for IpfsFileSystem {
         self.index.clone()
     }
 
-    fn get_path_mut(&mut self) -> &mut PathBuf {
-        &mut self.path
-    }
-
     async fn put(&mut self, name: &str, path: &str) -> Result<()> {
         //TODO: Implement a remote check along with a check within constellation to determine if the file exist
         if self.root_directory().get_item_by_path(name).is_ok() {
