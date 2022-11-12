@@ -17,8 +17,8 @@ use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{
-    ConversationType, MessageEventKind, MessageEventStream, MessageOptions, PinState, RayGun,
-    RayGunStream, ReactionState, RayGunAttachment,
+    ConversationType, MessageEventKind, MessageEventStream, MessageOptions, MessageType, PinState,
+    RayGun, RayGunAttachment, RayGunStream, ReactionState,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -121,11 +121,14 @@ async fn create_rg(
         Some(path) => {
             let config = RgIpfsConfig::production(path);
             Box::new(
-                IpfsMessaging::<Persistent>::new(Some(config), account, filesystem, Some(cache)).await?,
+                IpfsMessaging::<Persistent>::new(Some(config), account, filesystem, Some(cache))
+                    .await?,
             ) as Box<dyn RayGun>
         }
-        None => Box::new(IpfsMessaging::<Temporary>::new(None, account, filesystem, Some(cache)).await?)
-            as Box<dyn RayGun>,
+        None => {
+            Box::new(IpfsMessaging::<Temporary>::new(None, account, filesystem, Some(cache)).await?)
+                as Box<dyn RayGun>
+        }
     };
 
     Ok(chat)
@@ -164,7 +167,13 @@ async fn main() -> anyhow::Result<()> {
     let fs = create_fs(new_account.clone(), opt.path.clone()).await?;
 
     let mut chat = Arc::new(RwLock::new(
-        create_rg(opt.path.clone(), new_account.clone(), Some(fs.clone()), cache).await?,
+        create_rg(
+            opt.path.clone(),
+            new_account.clone(),
+            Some(fs.clone()),
+            cache,
+        )
+        .await?,
     ));
 
     println!("Obtaining identity....");
@@ -632,6 +641,7 @@ async fn message_event_handle(
     mut stream: MessageEventStream,
     conversation_id: Arc<RwLock<Uuid>>,
 ) -> anyhow::Result<()> {
+    let identity = multipass.get_own_identity()?;
     let topic = conversation_id.clone();
     while let Some(event) = stream.next().await {
         match event {
@@ -647,24 +657,62 @@ async fn message_event_handle(
                     if let Ok(message) = raygun.get_message(conversation_id, message_id).await {
                         let username = get_username(multipass.clone(), message.sender())
                             .unwrap_or_else(|_| message.sender().to_string());
-                        //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
-                        match message.metadata().get("is_spam") {
-                            Some(_) => {
-                                writeln!(
-                                    stdout,
-                                    "[{}] @> [SPAM!] {}",
-                                    username,
-                                    message.value().join("\n")
-                                )?;
+
+                        match message.message_type() {
+                            MessageType::Message => match message.metadata().get("is_spam") {
+                                Some(_) => {
+                                    writeln!(
+                                        stdout,
+                                        "[{}] @> [SPAM!] {}",
+                                        username,
+                                        message.value().join("\n")
+                                    )?;
+                                }
+                                None => {
+                                    writeln!(
+                                        stdout,
+                                        "[{}] @> {}",
+                                        username,
+                                        message.value().join("\n")
+                                    )?;
+                                }
+                            },
+                            MessageType::Attachment => {
+                                if !message.value().is_empty() {
+                                    match message.metadata().get("is_spam") {
+                                        Some(_) => {
+                                            writeln!(
+                                                stdout,
+                                                "[{}] @> [SPAM!] {}",
+                                                username,
+                                                message.value().join("\n")
+                                            )?;
+                                        }
+                                        None => {
+                                            writeln!(
+                                                stdout,
+                                                "[{}] @> {}",
+                                                username,
+                                                message.value().join("\n")
+                                            )?;
+                                        }
+                                    }
+                                }
+
+                                let attachment = message.attachments().first().cloned().unwrap(); //Assume for now
+
+                                if message.sender() == identity.did_key() {
+                                    writeln!(stdout, ">> File {} attached", attachment.filename())?;
+                                } else {
+                                    writeln!(
+                                        stdout,
+                                        ">> File {} been attached with size {} bytes",
+                                        attachment.filename(),
+                                        attachment.size()
+                                    )?;
+                                }
                             }
-                            None => {
-                                writeln!(
-                                    stdout,
-                                    "[{}] @> {}",
-                                    username,
-                                    message.value().join("\n")
-                                )?;
-                            }
+                            MessageType::Event => {}
                         }
                     }
                 }
