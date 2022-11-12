@@ -6,7 +6,7 @@ use libipld::Cid;
 use std::any::Any;
 use std::io::Cursor;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use warp::constellation::ConstellationDataType;
@@ -534,6 +534,35 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         self.current_directory()?
             .add_directory(Directory::new(name))?;
         if let Err(_e) = self.export_index().await {}
+        Ok(())
+    }
+
+    async fn sync_ref(&mut self, path: &str) -> Result<()> {
+        let ipfs = self.ipfs()?;
+        let handle = warp::async_handle();
+        let _g = handle.enter();
+
+        let directory = self.current_directory()?;
+        let file = directory
+            .get_item_by_path(path)
+            .and_then(|item| item.get_file())?;
+        let reference = file.reference().ok_or(Error::FileNotFound)?;
+
+        tokio::spawn(async move {
+
+            let stream = ipfs
+                .cat_unixfs(reference.parse::<IpfsPath>()?, None)
+                .await
+                .map_err(anyhow::Error::from)?;
+
+            pin_mut!(stream);
+
+            while let Some(data) = stream.next().await {
+                let _ = data.map_err(anyhow::Error::from)?;
+            }
+            Ok::<_, Error>(())
+        });
+
         Ok(())
     }
 
