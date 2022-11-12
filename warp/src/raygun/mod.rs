@@ -1,5 +1,6 @@
 pub mod group;
 
+use crate::constellation::file::File;
 use crate::crypto::DID;
 use crate::error::Error;
 use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -232,50 +233,6 @@ pub enum MessageType {
     /// TBD
     Event,
 }
-
-#[derive(
-    Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
-)]
-#[serde(rename_all = "snake_case")]
-pub struct MessageAttachment {
-    /// Name of the attached file
-    filename: String,
-
-    /// Size of the attached file
-    size: usize,
-
-    /// Reference to the file attached
-    reference: Option<String>,
-}
-
-impl MessageAttachment {
-    pub fn filename(&self) -> String {
-        self.filename.clone()
-    }
-
-    pub fn size(&self) -> usize {
-        self.size
-    }
-
-    pub fn reference(&self) -> Option<String> {
-        self.reference.clone()
-    }
-}
-
-impl MessageAttachment {
-    pub fn set_filename<S: AsRef<str>>(&mut self, filename: S) {
-        self.filename = filename.as_ref().to_string()
-    }
-
-    pub fn set_size(&mut self, size: usize) {
-        self.size = size;
-    }
-
-    pub fn set_reference(&mut self, reference: Option<String>) {
-        self.reference = reference;
-    }
-}
-
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 pub struct Message {
     /// ID of the Message
@@ -307,7 +264,7 @@ pub struct Message {
     value: Vec<String>,
 
     /// List of Attachment
-    attachment: Vec<MessageAttachment>,
+    attachment: Vec<File>,
 
     /// Signature of the message
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -377,7 +334,7 @@ impl Message {
         self.value.clone()
     }
 
-    pub fn attachments(&self) -> Vec<MessageAttachment> {
+    pub fn attachments(&self) -> Vec<File> {
         self.attachment.clone()
     }
 
@@ -427,7 +384,7 @@ impl Message {
         self.value = val
     }
 
-    pub fn set_attachment(&mut self, attachments: Vec<MessageAttachment>) {
+    pub fn set_attachment(&mut self, attachments: Vec<File>) {
         self.attachment = attachments
     }
 
@@ -741,7 +698,9 @@ where
         file: String,
         path: PathBuf,
     ) -> Result<(), Error> {
-        self.read().download(conversation_id, message_id, file, path).await
+        self.read()
+            .download(conversation_id, message_id, file, path)
+            .await
     }
 }
 

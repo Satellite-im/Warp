@@ -16,8 +16,8 @@ use warp::logging::tracing::log::{error, trace};
 use warp::logging::tracing::warn;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    Conversation, EmbedState, Message, MessageAttachment, MessageEventKind, MessageOptions,
-    PinState, RayGunEventKind, Reaction, ReactionState, MessageType,
+    Conversation, EmbedState, Message, MessageEventKind, MessageOptions,
+    MessageType, PinState, RayGunEventKind, Reaction, ReactionState,
 };
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock};
@@ -269,6 +269,7 @@ impl DirectConversation {
     pub fn start_task(
         &mut self,
         did: Arc<DID>,
+        filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
         decrypted: Arc<AtomicBool>,
         filter: &Arc<Option<SpamFilter>>,
         stream: SubscriptionStream,
@@ -282,13 +283,14 @@ impl DirectConversation {
 
         let task = warp::async_spawn(async move {
             futures::pin_mut!(stream);
-
+            let filesystem = filesystem;
             while let Some(stream) = stream.next().await {
                 if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
                     if let Ok(data) = data.decrypt::<Vec<u8>>(&did) {
                         if let Ok(event) = serde_json::from_slice::<MessagingEvents>(&data) {
                             if let Err(e) = direct_message_event(
                                 &mut convo.messages_mut(),
+                                filesystem.clone(),
                                 &event,
                                 &filter,
                                 tx.clone(),
@@ -415,6 +417,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                 conversation.set_path(path);
                                 conversation.start_task(
                                     store.did.clone(),
+                                    store.filesystem.clone(),
                                     store.store_decrypted.clone(),
                                     &store.spam_filter,
                                     stream,
@@ -486,7 +489,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                             continue;
                                                         }
                                                     };
-                                                convo.start_task(store.did.clone(), store.store_decrypted.clone(), &store.spam_filter, stream);
+                                                convo.start_task(store.did.clone(),store.filesystem.clone(), store.store_decrypted.clone(), &store.spam_filter, stream);
                                                 if let Some(path) = store.path.as_ref() {
                                                     convo.set_path(path);
                                                     if let Err(e) = convo.to_file((!store.store_decrypted.load(Ordering::SeqCst)).then_some(&*store.did)).await {
@@ -672,6 +675,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         conversation.start_task(
             self.did.clone(),
+            self.filesystem.clone(),
             self.store_decrypted.clone(),
             &self.spam_filter,
             stream,
@@ -975,6 +979,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         direct_message_event(
             &mut conversation.messages_mut(),
+            None,
             &event,
             &self.spam_filter,
             tx,
@@ -1036,6 +1041,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         direct_message_event(
             &mut conversation.messages_mut(),
+            None,
             &event,
             &self.spam_filter,
             tx,
@@ -1103,6 +1109,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::New(message);
         direct_message_event(
             &mut conversation.messages_mut(),
+            None,
             &event,
             &self.spam_filter,
             tx,
@@ -1127,6 +1134,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::Delete(conversation.id(), message_id);
         direct_message_event(
             &mut conversation.messages_mut(),
+            None,
             &event,
             &self.spam_filter,
             tx,
@@ -1158,6 +1166,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::Pin(conversation.id(), own_did.clone(), message_id, state);
         direct_message_event(
             &mut conversation.messages_mut(),
+            None,
             &event,
             &self.spam_filter,
             tx,
@@ -1197,6 +1206,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         direct_message_event(
             &mut conversation.messages_mut(),
+            None,
             &event,
             &self.spam_filter,
             tx,
@@ -1208,7 +1218,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         )?;
         self.send_event(conversation.id(), event).await
     }
-
 
     #[allow(clippy::await_holding_lock)]
     pub async fn attach(
@@ -1284,13 +1293,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 Ok(file) => file,
                 Err(_) => continue,
             };
-            
-            let mut attach = MessageAttachment::default();
-            attach.set_filename(file.name());
-            attach.set_size(file.size());
-            attach.set_reference(file.reference());
 
-            attachments.push(attach);
+            let new_file = warp::constellation::file::File::new(&file.name());
+            new_file.set_size(file.size());
+            new_file.set_hash(file.hash());
+            new_file.set_reference(&file.reference().unwrap_or_default());
+            attachments.push(new_file);
         }
 
         let own_did = &*self.did.clone();
@@ -1322,6 +1330,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         direct_message_event(
             &mut conversation.messages_mut(),
+            None,
             &event,
             &self.spam_filter,
             tx,
@@ -1333,6 +1342,48 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         )?;
 
         self.send_event(conversation.id(), event).await
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    pub async fn download(
+        &mut self,
+        conversation: Uuid,
+        message_id: Uuid,
+        file: &str,
+        path: PathBuf,
+        override_path: bool,
+    ) -> Result<(), Error> {
+        let constellation = self
+            .filesystem
+            .clone()
+            .ok_or(Error::ConstellationExtensionUnavailable)?;
+
+        if constellation.read().id() != "warp-fs-ipfs" {
+            //Note: Temporary for now; Will get lifted in the future
+            return Err(Error::Unimplemented);
+        }
+
+        let message = self.get_message(conversation, message_id)?;
+
+        if message.message_type() != MessageType::Attachment {
+            return Err(Error::InvalidMessage);
+        }
+
+        let _attachment = message
+            .attachments()
+            .iter()
+            .find(|attachment| attachment.name() == file)
+            .cloned()
+            .ok_or(Error::FileNotFound)?;
+
+        //Maybe allow overriding the file?
+        if path.is_file() && !override_path {
+            return Err(Error::FileExist);
+        }
+
+        //check to make sure its in constellation just in case
+
+        Ok(())
     }
 
     pub async fn send_event<S: Serialize + Send + Sync>(
@@ -1427,6 +1478,7 @@ pub struct EventOpt {
     pub keep_if_owned: Arc<AtomicBool>,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum MessageDirection {
     In,
     Out,
@@ -1434,6 +1486,7 @@ pub enum MessageDirection {
 
 pub fn direct_message_event(
     messages: &mut Vec<Message>,
+    filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
     events: &MessagingEvents,
     filter: &Arc<Option<SpamFilter>>,
     tx: BroadcastSender<MessageEventKind>,
@@ -1480,8 +1533,34 @@ pub fn direct_message_event(
             }
             spam_check(&mut message, filter)?;
             let conversation_id = message.conversation_id();
-            // let coid = message.conversation_id();
+
             messages.push(message.clone());
+
+            if message.message_type() == MessageType::Attachment
+                && direction == MessageDirection::In
+            {
+                if let Some(fs) = filesystem {
+                    let dir = fs.read().root_directory();
+                    for file in message.attachments() {
+                        let original = file.name();
+                        let mut inc = 0;
+                        loop {
+                            if dir.has_item(&original) {
+                                if inc >= 20 {
+                                    break;
+                                }
+                                inc += 1;
+                                file.set_name(&format!("{original}-{inc}"));
+                                continue;
+                            }
+                            break;
+                        }
+                        if let Err(e) = dir.add_file(file) {
+                            error!("Error adding file to constellation: {e}");
+                        }
+                    }
+                }
+            }
 
             let event = match direction {
                 MessageDirection::In => MessageEventKind::MessageReceived {
