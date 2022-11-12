@@ -548,20 +548,20 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             .and_then(|item| item.get_file())?;
         let reference = file.reference().ok_or(Error::FileNotFound)?;
 
-        tokio::spawn(async move {
+        let stream = ipfs
+            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
+            .await
+            .map_err(anyhow::Error::from)?;
 
-            let stream = ipfs
-                .cat_unixfs(reference.parse::<IpfsPath>()?, None)
-                .await
-                .map_err(anyhow::Error::from)?;
+        pin_mut!(stream);
 
-            pin_mut!(stream);
-
-            while let Some(data) = stream.next().await {
-                let _ = data.map_err(anyhow::Error::from)?;
-            }
-            Ok::<_, Error>(())
-        });
+        while let Some(data) = stream.next().await {
+            //This is to make sure there isnt any errors while tranversing the links
+            //however we do not need to deal with the data itself as the will store
+            //it in the blockstore after being found or blocks being exchanged from peer
+            //TODO: Should check first chunk and timeout if it exceeds a specific length
+            let _ = data.map_err(anyhow::Error::from)?;
+        }
 
         Ok(())
     }
