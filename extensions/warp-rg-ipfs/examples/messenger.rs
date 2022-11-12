@@ -702,12 +702,12 @@ async fn message_event_handle(
                                 let attachment = message.attachments().first().cloned().unwrap(); //Assume for now
 
                                 if message.sender() == identity.did_key() {
-                                    writeln!(stdout, ">> File {} attached", attachment.filename())?;
+                                    writeln!(stdout, ">> File {} attached", attachment.name())?;
                                 } else {
                                     writeln!(
                                         stdout,
                                         ">> File {} been attached with size {} bytes",
-                                        attachment.filename(),
+                                        attachment.name(),
                                         attachment.size()
                                     )?;
                                 }

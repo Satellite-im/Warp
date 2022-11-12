@@ -1232,8 +1232,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         //TODO: Send directly if constellation isnt present
         //      this will require uploading to ipfs directly from here
         //      or setting up a seperate stream channel related to
-        //      the subscribed topic
-        //      possibly as a configuration option
+        //      the subscribed topic possibly as a configuration option
         let constellation = self
             .filesystem
             .clone()
