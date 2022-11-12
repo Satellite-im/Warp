@@ -343,6 +343,18 @@ impl<T: IpfsTypes> RayGunAttachment for IpfsMessaging<T> {
             .attach(conversation_id, files, message)
             .await
     }
+
+    async fn download(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        file: String,
+        path: PathBuf,
+    ) -> Result<()> {
+        self.messaging_store()?
+            .download(conversation_id, message_id, &file, path, false)
+            .await
+    }
 }
 
 #[async_trait::async_trait]

@@ -1345,7 +1345,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
     #[allow(clippy::await_holding_lock)]
     pub async fn download(
-        &mut self,
+        &self,
         conversation: Uuid,
         message_id: Uuid,
         file: &str,
