@@ -9,6 +9,7 @@ use std::str::FromStr;
 use tokio::task::JoinHandle;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
+use warp::constellation::Constellation;
 use warp::crypto::zeroize::Zeroizing;
 use warp::crypto::DID;
 use warp::error::Error;
@@ -17,10 +18,12 @@ use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{
     ConversationType, MessageEventKind, MessageEventStream, MessageOptions, PinState, RayGun,
-    RayGunStream, ReactionState,
+    RayGunStream, ReactionState, RayGunAttachment,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
+use warp_fs_ipfs::config::FsIpfsConfig;
+use warp_fs_ipfs::{IpfsFileSystem, Persistent as FsPersistent, Temporary as FsTemporary};
 use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
 use warp_pd_flatfile::FlatfileStorage;
 use warp_pd_stretto::StrettoClient;
@@ -28,7 +31,6 @@ use warp_rg_ipfs::config::RgIpfsConfig;
 use warp_rg_ipfs::IpfsMessaging;
 use warp_rg_ipfs::Persistent;
 use warp_rg_ipfs::Temporary;
-
 #[derive(Debug, Parser)]
 #[clap(name = "")]
 struct Opt {
@@ -87,19 +89,42 @@ async fn create_account<P: AsRef<Path>>(
     Ok(account)
 }
 
+async fn create_fs<P: AsRef<Path>>(
+    account: Arc<RwLock<Box<dyn MultiPass>>>,
+    path: Option<P>,
+) -> anyhow::Result<Arc<RwLock<Box<dyn Constellation>>>> {
+    let config = match path.as_ref() {
+        Some(path) => FsIpfsConfig::production(path),
+        None => FsIpfsConfig::testing(),
+    };
+
+    let filesystem: Arc<RwLock<Box<dyn Constellation>>> = match path.is_some() {
+        true => Arc::new(RwLock::new(Box::new(
+            IpfsFileSystem::<FsPersistent>::new(account, Some(config)).await?,
+        ))),
+        false => Arc::new(RwLock::new(Box::new(
+            IpfsFileSystem::<FsTemporary>::new(account, Some(config)).await?,
+        ))),
+    };
+
+    Ok(filesystem)
+}
+
 #[allow(dead_code)]
 async fn create_rg(
     path: Option<PathBuf>,
     account: Arc<RwLock<Box<dyn MultiPass>>>,
+    filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
     cache: Arc<RwLock<Box<dyn PocketDimension>>>,
 ) -> anyhow::Result<Box<dyn RayGun>> {
     let chat = match path.as_ref() {
         Some(path) => {
             let config = RgIpfsConfig::production(path);
-            Box::new(IpfsMessaging::<Persistent>::new(Some(config), account, None, Some(cache)).await?)
-                as Box<dyn RayGun>
+            Box::new(
+                IpfsMessaging::<Persistent>::new(Some(config), account, filesystem, Some(cache)).await?,
+            ) as Box<dyn RayGun>
         }
-        None => Box::new(IpfsMessaging::<Temporary>::new(None, account, None, Some(cache)).await?)
+        None => Box::new(IpfsMessaging::<Temporary>::new(None, account, filesystem, Some(cache)).await?)
             as Box<dyn RayGun>,
     };
 
@@ -136,8 +161,10 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
+    let fs = create_fs(new_account.clone(), opt.path.clone()).await?;
+
     let mut chat = Arc::new(RwLock::new(
-        create_rg(opt.path.clone(), new_account.clone(), cache).await?,
+        create_rg(opt.path.clone(), new_account.clone(), Some(fs.clone()), cache).await?,
     ));
 
     println!("Obtaining identity....");
@@ -438,6 +465,31 @@ async fn main() -> anyhow::Result<()> {
                                 continue
                             }
                             writeln!(stdout, "Message edited")?;
+                        },
+                        Some("/attach") => {
+                            let file = match cmd_line.next() {
+                                Some(file) => PathBuf::from(file),
+                                None => {
+                                    writeln!(stdout, "/attach <path> [message]")?;
+                                    continue
+                                }
+                            };
+
+                            let mut messages = vec![];
+
+                            for item in cmd_line.by_ref() {
+                                messages.push(item.to_string());
+                            }
+
+                            let message = vec![messages.join(" ").to_string()];
+
+                            let conversation_id = topic.read().clone();
+
+                            if let Err(e) = chat.attach(conversation_id, vec![file], message).await {
+                                writeln!(stdout, "Error: {}", e)?;
+                                continue;
+                            }
+                            writeln!(stdout, "File sent")?
                         },
                         Some("/react") => {
                             let state = match cmd_line.next() {

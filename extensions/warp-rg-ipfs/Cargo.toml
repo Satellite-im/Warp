@@ -36,6 +36,7 @@ fdlimit = "0.2"
 warp-pd-stretto = { path = "../warp-pd-stretto" }
 warp-pd-flatfile = { path = "../warp-pd-flatfile" }
 warp-mp-ipfs = { path = "../warp-mp-ipfs" }
+warp-fs-ipfs = { path = "../warp-fs-ipfs" }
 rustyline-async = "0.2"
 comfy-table = "6.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
