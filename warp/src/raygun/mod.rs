@@ -1334,8 +1334,14 @@ pub mod ffi {
 
         let opt = Box::from_raw(option);
 
-        let start = convert_timstamp(start);
-        let end = convert_timstamp(end);
+        let start = match convert_timstamp(start) {
+            Some(s) => s,
+            None => return std::ptr::null_mut(),
+        };
+        let end = match convert_timstamp(end) {
+            Some(s) => s,
+            None => return std::ptr::null_mut(),
+        };
 
         let opt = opt.set_date_range(start..end);
 
@@ -1353,8 +1359,8 @@ pub mod ffi {
             .collect()
     }
 
-    fn convert_timstamp(timestamp: i64) -> DateTime<Utc> {
-        let naive = NaiveDateTime::from_timestamp(timestamp, 0);
-        DateTime::<Utc>::from_utc(naive, Utc)
+    fn convert_timstamp(timestamp: i64) -> Option<DateTime<Utc>> {
+        NaiveDateTime::from_timestamp_opt(timestamp, 0)
+            .map(|naive| DateTime::<Utc>::from_utc(naive, Utc))
     }
 }

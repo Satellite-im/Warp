@@ -927,6 +927,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let lines_value_length: usize = messages
             .iter()
             .filter(|s| !s.is_empty())
+            .map(|s| s.trim())
             .map(|s| s.chars().count())
             .sum();
 
@@ -995,6 +996,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let lines_value_length: usize = messages
             .iter()
             .filter(|s| !s.is_empty())
+            .map(|s| s.trim())
             .map(|s| s.chars().count())
             .sum();
 
@@ -1055,6 +1057,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let lines_value_length: usize = messages
             .iter()
             .filter(|s| !s.is_empty())
+            .map(|s| s.trim())
             .map(|s| s.chars().count())
             .sum();
 
@@ -1313,6 +1316,7 @@ pub fn direct_message_event(
             let lines_value_length: usize = message
                 .value()
                 .iter()
+                .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
                 .map(|s| s.chars().count())
                 .sum();
@@ -1373,6 +1377,7 @@ pub fn direct_message_event(
 
             let lines_value_length: usize = val
                 .iter()
+                .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
                 .map(|s| s.chars().count())
                 .sum();
