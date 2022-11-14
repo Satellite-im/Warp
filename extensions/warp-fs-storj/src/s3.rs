@@ -202,10 +202,6 @@ impl Constellation for StorjFilesystem {
         self.path.clone()
     }
 
-    fn get_path_mut(&mut self) -> &mut PathBuf {
-        &mut self.path
-    }
-
     /// Uploads file from path with the name format being `bucket_name://path/to/file`
     /// Note: This only supports uploading of files. This has not implemented creation of
     ///       directories.
