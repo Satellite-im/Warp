@@ -5,6 +5,7 @@ use futures::{pin_mut, StreamExt};
 use libipld::serde::{from_ipld, to_ipld};
 use libipld::Cid;
 use std::any::Any;
+use std::collections::HashSet;
 use std::io::Cursor;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
@@ -570,11 +571,46 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Invalid path root"))?;
 
+        let mut pinned_blocks: HashSet<_> = HashSet::from_iter(
+            ipfs.list_pins(None)
+                .await
+                .collect::<Vec<_>>()
+                .await
+                .iter()
+                .filter_map(|r| match r {
+                    Ok(v) => Some(v),
+                    Err(_) => None,
+                })
+                .map(|(b, _)| *b)
+                .collect::<Vec<_>>(),
+        );
+
         if ipfs.is_pinned(&cid).await? {
             ipfs.remove_pin(&cid, true).await?;
         }
 
-        ipfs.remove_block(cid).await?;
+        let new_pinned_blocks: HashSet<_> = HashSet::from_iter(
+            ipfs.list_pins(None)
+                .await
+                .collect::<Vec<_>>()
+                .await
+                .iter()
+                .filter_map(|r| match r {
+                    Ok(v) => Some(v),
+                    Err(_) => None,
+                })
+                .map(|(b, _)| *b)
+                .collect::<Vec<_>>(),
+        );
+
+        for s_cid in new_pinned_blocks.iter() {
+            pinned_blocks.remove(s_cid);
+        }
+
+        for cid in pinned_blocks {
+            ipfs.remove_block(cid).await?;
+        }
+
         directory.remove_item(&item.name())?;
         if let Err(_e) = self.export_index().await {}
         Ok(())
