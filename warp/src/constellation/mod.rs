@@ -12,6 +12,7 @@ use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 
 use directory::Directory;
+use futures::stream::BoxStream;
 use item::Item;
 
 use warp_derive::FFIFree;
@@ -127,6 +128,19 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
 
     /// Used to download data from the filesystem into a buffer
     async fn get_buffer(&self, _: &str) -> Result<Vec<u8>, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Used to upload file to the filesystem with data from a stream
+    async fn put_stream(&mut self, _: &str, _: BoxStream<'static, Vec<u8>>) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Used to download data from the filesystem using a stream
+    async fn get_stream(
+        &self,
+        _: &str,
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -251,6 +265,19 @@ where
     /// Used to download data from the filesystem into a buffer
     async fn get_buffer(&self, src: &str) -> Result<Vec<u8>, Error> {
         self.read().get_buffer(src).await
+    }
+
+    /// Used to upload file to the filesystem with data from a stream
+    async fn put_stream(&mut self, dest: &str, stream: BoxStream<'static, Vec<u8>>) -> Result<(), Error> {
+        self.write().put_stream(dest, stream).await
+    }
+
+    /// Used to download data from the filesystem using a stream
+    async fn get_stream(
+        &self,
+        src: &str,
+    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
+        self.read().get_stream(src).await
     }
 
     /// Used to remove data from the filesystem

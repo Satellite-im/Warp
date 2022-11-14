@@ -1,5 +1,6 @@
 pub mod config;
 use config::FsIpfsConfig;
+use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use libipld::serde::{from_ipld, to_ipld};
 use libipld::Cid;
@@ -458,6 +459,91 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 
         //TODO: Validate file against the hashed reference
         Ok(buffer)
+    }
+
+    /// Used to upload file to the filesystem with data from a stream
+    async fn put_stream(
+        &mut self,
+        name: &str,
+        mut stream: BoxStream<'static, Vec<u8>>,
+    ) -> Result<()> {
+        let ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
+
+        if self.current_directory()?.get_item_by_path(name).is_ok() {
+            return Err(Error::FileExist);
+        }
+
+        let mut adder = FileAdder::default();
+        //Maybe write directly to avoid reallocation?
+
+        let mut written = 0;
+        let mut last_cid = None;
+
+        while let Some(buffer) = stream.next().await {
+            let mut total = 0;
+
+            while total < buffer.len() {
+                let (blocks, consumed) = adder.push(&buffer[total..]);
+                for (cid, block) in blocks {
+                    let block = Block::new(cid, block)?;
+                    let _cid = ipfs.put_block(block).await?;
+                }
+                total += consumed;
+                written += consumed;
+            }
+        }
+
+        let blocks = adder.finish();
+        for (cid, block) in blocks {
+            let block = Block::new(cid, block)?;
+            let cid = ipfs.put_block(block).await?;
+            last_cid = Some(cid);
+        }
+
+        let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
+
+        ipfs.insert_pin(&cid, true).await?;
+
+        let file = warp::constellation::file::File::new(name);
+        file.set_size(written);
+        file.set_reference(&format!("/ipfs/{cid}"));
+        // file.hash_mut().hash_from_slice(buffer)?;
+        self.current_directory()?.add_item(file)?;
+        if let Err(_e) = self.export_index().await {}
+        Ok(())
+    }
+
+    /// Used to download data from the filesystem using a stream
+    async fn get_stream(&self, name: &str) -> Result<BoxStream<'static, Result<Vec<u8>>>> {
+        let ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
+
+        let item = self.current_directory()?.get_item_by_path(name)?;
+        let file = item.get_file()?;
+        let reference = file.reference().ok_or(Error::Other)?; //Reference not found
+
+        let stream = async_stream::stream! {
+            let cat_stream = ipfs
+                .cat_unixfs(reference.parse::<IpfsPath>()?, None)
+                .await
+                .map_err(anyhow::Error::from)?;
+
+            pin_mut!(cat_stream);
+            while let Some(data) = cat_stream.next().await {
+                match data {
+                    Ok(data) => yield Ok(data),
+                    Err(e) => yield Err(Error::from(anyhow::anyhow!("{e}"))),
+                }
+            }
+        };
+
+        //TODO: Validate file against the hashed reference
+        Ok(stream.boxed())
     }
 
     /// Used to remove data from the filesystem
