@@ -10,7 +10,7 @@ use libipld::IpldCodec;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{self, Sender as BroadcastSender};
 use uuid::Uuid;
-use warp::constellation::{self, Constellation};
+use warp::constellation::Constellation;
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::logging::tracing::log::{error, trace};
@@ -1397,7 +1397,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
                 let info = match ipfs.find_peer_info(peer_id).await {
                     Ok(info) => info,
-                    _ => return Ok::<_, Error>(())
+                    _ => return Ok::<_, Error>(()),
                 };
 
                 //This is done to insure we can successfully exchange blocks
@@ -1419,7 +1419,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         });
         tokio::task::yield_now().await;
 
-        constellation.read().get(file, &path.to_string_lossy()).await?;
+        constellation
+            .read()
+            .get(file, &path.to_string_lossy())
+            .await?;
         Ok(())
     }
 

@@ -533,13 +533,19 @@ async fn main() -> anyhow::Result<()> {
 
                             let conversation_id = topic.read().clone();
 
-                            if let Err(e) = chat.download(conversation_id, message_id, file, path).await {
-                                writeln!(stdout, "Error: {}", e)?;
-                                continue;
-                            }
-                            writeln!(stdout, "File downloaded")?
-
-
+                            tokio::spawn({
+                                let chat = chat.clone();
+                                let mut stdout = stdout.clone();
+                                async move {
+                                    writeln!(stdout, "Downloading....")?;
+                                    if let Err(e) = chat.download(conversation_id, message_id, file, path).await {
+                                        writeln!(stdout, "Error: {}", e)?;
+                                    } else {
+                                        writeln!(stdout, "File downloaded")?
+                                    }
+                                    Ok::<_, anyhow::Error>(())
+                                }
+                            });
                         },
                         Some("/react") => {
                             let state = match cmd_line.next() {
