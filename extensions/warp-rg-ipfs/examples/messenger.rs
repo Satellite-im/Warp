@@ -500,6 +500,47 @@ async fn main() -> anyhow::Result<()> {
                             }
                             writeln!(stdout, "File sent")?
                         },
+                        Some("/download") => {
+                            let message_id = match cmd_line.next() {
+                                Some(id) => match Uuid::from_str(id) {
+                                    Ok(uuid) => uuid,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing ID: {}", e)?;
+                                        continue
+                                    }
+                                },
+                                None => {
+                                    writeln!(stdout, "/download <message-id> <file> <path>")?;
+                                    continue
+                                }
+                            };
+
+                            let file = match cmd_line.next() {
+                                Some(file) => file.to_string(),
+                                None => {
+                                    writeln!(stdout, "/download <message-id> <file> <path>")?;
+                                    continue
+                                }
+                            };
+
+                            let path = match cmd_line.next() {
+                                Some(file) => PathBuf::from(file),
+                                None => {
+                                    writeln!(stdout, "/download <message-id> <file> <path>")?;
+                                    continue
+                                }
+                            };
+
+                            let conversation_id = topic.read().clone();
+
+                            if let Err(e) = chat.download(conversation_id, message_id, file, path).await {
+                                writeln!(stdout, "Error: {}", e)?;
+                                continue;
+                            }
+                            writeln!(stdout, "File downloaded")?
+
+
+                        },
                         Some("/react") => {
                             let state = match cmd_line.next() {
                                 Some("add") => ReactionState::Add,

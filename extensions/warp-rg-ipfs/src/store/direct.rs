@@ -3,21 +3,22 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use futures::{Stream, StreamExt};
+use ipfs::libp2p::swarm::dial_opts::DialOpts;
 use ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream};
 
 use libipld::IpldCodec;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{self, Sender as BroadcastSender};
 use uuid::Uuid;
-use warp::constellation::Constellation;
+use warp::constellation::{self, Constellation};
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::logging::tracing::log::{error, trace};
 use warp::logging::tracing::warn;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    Conversation, EmbedState, Message, MessageEventKind, MessageOptions,
-    MessageType, PinState, RayGunEventKind, Reaction, ReactionState,
+    Conversation, EmbedState, Message, MessageEventKind, MessageOptions, MessageType, PinState,
+    RayGunEventKind, Reaction, ReactionState,
 };
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock};
@@ -1368,20 +1369,57 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             return Err(Error::InvalidMessage);
         }
 
-        let _attachment = message
+        let attachment = message
             .attachments()
             .iter()
             .find(|attachment| attachment.name() == file)
             .cloned()
             .ok_or(Error::FileNotFound)?;
 
+        let root = constellation.read().root_directory();
+        if !root.has_item(&attachment.name()) {
+            root.add_file(attachment.clone())?;
+        }
+
         //Maybe allow overriding the file?
         if path.is_file() && !override_path {
             return Err(Error::FileExist);
         }
 
-        //check to make sure its in constellation just in case
+        tokio::spawn({
+            let ipfs = self.ipfs.clone();
+            let constellation = constellation.clone();
+            let attachment = attachment.clone();
+            async move {
+                let did = message.sender();
 
+                let peer_id = did_to_libp2p_pub(&did)?.to_peer_id();
+
+                let info = match ipfs.find_peer_info(peer_id).await {
+                    Ok(info) => info,
+                    _ => return Ok::<_, Error>(())
+                };
+
+                //This is done to insure we can successfully exchange blocks
+                let opt = DialOpts::peer_id(peer_id)
+                    .addresses(info.listen_addrs)
+                    .extend_addresses_through_behaviour()
+                    .build();
+
+                if let Err(e) = ipfs.dial(opt).await {
+                    error!("Error dialing peer: {e}");
+                }
+
+                if let Err(e) = constellation.write().sync_ref(&attachment.name()).await {
+                    error!("Error sync blocks: {e}");
+                }
+
+                Ok::<_, Error>(())
+            }
+        });
+        tokio::task::yield_now().await;
+
+        constellation.read().get(file, &path.to_string_lossy()).await?;
         Ok(())
     }
 
