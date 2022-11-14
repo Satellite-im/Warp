@@ -493,12 +493,20 @@ async fn main() -> anyhow::Result<()> {
                             let message = vec![messages.join(" ").to_string()];
 
                             let conversation_id = topic.read().clone();
+                            tokio::spawn({
+                                let mut chat = chat.clone();
+                                let mut stdout = stdout.clone();
+                                async move {
+                                    writeln!(stdout, "Sending....")?;
+                                    if let Err(e) = chat.attach(conversation_id, vec![file], message).await {
+                                        writeln!(stdout, "Error: {}", e)?;
+                                    } else {
+                                        writeln!(stdout, "File sent")?
+                                    }
+                                    Ok::<_, anyhow::Error>(())
+                                }
+                            });
 
-                            if let Err(e) = chat.attach(conversation_id, vec![file], message).await {
-                                writeln!(stdout, "Error: {}", e)?;
-                                continue;
-                            }
-                            writeln!(stdout, "File sent")?
                         },
                         Some("/download") => {
                             let message_id = match cmd_line.next() {
@@ -533,19 +541,13 @@ async fn main() -> anyhow::Result<()> {
 
                             let conversation_id = topic.read().clone();
 
-                            tokio::spawn({
-                                let chat = chat.clone();
-                                let mut stdout = stdout.clone();
-                                async move {
-                                    writeln!(stdout, "Downloading....")?;
-                                    if let Err(e) = chat.download(conversation_id, message_id, file, path).await {
-                                        writeln!(stdout, "Error: {}", e)?;
-                                    } else {
-                                        writeln!(stdout, "File downloaded")?
-                                    }
-                                    Ok::<_, anyhow::Error>(())
-                                }
-                            });
+
+                            writeln!(stdout, "Downloading....")?;
+                            if let Err(e) = chat.download(conversation_id, message_id, file, path).await {
+                                writeln!(stdout, "Error: {}", e)?;
+                            } else {
+                                writeln!(stdout, "File downloaded")?
+                            }
                         },
                         Some("/react") => {
                             let state = match cmd_line.next() {

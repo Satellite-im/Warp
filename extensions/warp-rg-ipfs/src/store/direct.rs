@@ -1410,19 +1410,16 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     error!("Error dialing peer: {e}");
                 }
 
-                if let Err(e) = constellation.write().sync_ref(&attachment.name()).await {
-                    error!("Error sync blocks: {e}");
-                }
+                constellation.read()
+                    .get(&attachment.name(), &path.to_string_lossy())
+                    .await?;
 
                 Ok::<_, Error>(())
             }
         });
         tokio::task::yield_now().await;
 
-        constellation
-            .read()
-            .get(file, &path.to_string_lossy())
-            .await?;
+        //TODO: Create a stream to give progress from constellation
         Ok(())
     }
 
