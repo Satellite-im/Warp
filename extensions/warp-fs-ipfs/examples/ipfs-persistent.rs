@@ -3,7 +3,10 @@ use std::{path::Path, sync::Arc};
 use anyhow::bail;
 use clap::{Parser, Subcommand};
 use comfy_table::Table;
+use futures::StreamExt;
 use std::path::PathBuf;
+use tokio::io::AsyncWriteExt;
+use tokio_util::io::ReaderStream;
 use warp::{
     constellation::Constellation, multipass::MultiPass, sync::RwLock, tesseract::Tesseract,
 };
@@ -99,15 +102,30 @@ async fn main() -> anyhow::Result<()> {
             let remote =
                 remote.unwrap_or_else(|| file.file_name().unwrap().to_string_lossy().to_string());
 
-            filesystem.put(&remote, &file.to_string_lossy()).await?;
+            let file = tokio::fs::File::open(&local).await?;
+
+            let stream = ReaderStream::new(file)
+                .filter_map(|x| async { x.ok() })
+                .map(|x| x.into());
+
+            filesystem.put_stream(&remote, stream.boxed()).await?;
 
             println!("{} has been uploaded", remote);
         }
         Command::DownloadFile { remote, local } => {
-            match filesystem.get(&remote, &local).await {
-                Ok(_) => println!("File is downloaded to {local}"),
-                Err(e) => println!("Error downloading file: {e}"),
-            };
+            let mut stream = filesystem.get_stream(&remote).await?;
+
+            let mut written = 0;
+            let mut file = tokio::fs::File::create(&local).await?;
+            while let Some(Ok(data)) = stream.next().await {
+                file.write(&data).await?;
+                written += data.len();
+            }
+            file.flush().await?;
+            println!(
+                "{local} been downloaded with {} MB written",
+                written / 1024 / 1024
+            );
         }
         Command::DeleteFile { remote } => {
             match filesystem.remove(&remote, true).await {
@@ -137,8 +155,8 @@ async fn main() -> anyhow::Result<()> {
                         format!("{} MB", file.size() / 1024 / 1024),
                         file.favorite().to_string(),
                         file.description(),
-                        file.creation().date().to_string(),
-                        file.modified().date().to_string(),
+                        file.creation().date_naive().to_string(),
+                        file.modified().date_naive().to_string(),
                         file.reference().unwrap_or_else(|| String::from("N/A")),
                     ]);
 
