@@ -577,15 +577,14 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         let mut pinned_blocks: HashSet<_> = HashSet::from_iter(
             ipfs.list_pins(None)
                 .await
-                .collect::<Vec<_>>()
-                .await
-                .iter()
-                .filter_map(|r| match r {
-                    Ok(v) => Some(v),
-                    Err(_) => None,
+                .filter_map(|r| async move {
+                    match r {
+                        Ok(v) => Some(v.0),
+                        Err(_) => None,
+                    }
                 })
-                .map(|(b, _)| *b)
-                .collect::<Vec<_>>(),
+                .collect::<Vec<_>>()
+                .await,
         );
 
         if ipfs.is_pinned(&cid).await? {
@@ -595,15 +594,14 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         let new_pinned_blocks: HashSet<_> = HashSet::from_iter(
             ipfs.list_pins(None)
                 .await
-                .collect::<Vec<_>>()
-                .await
-                .iter()
-                .filter_map(|r| match r {
-                    Ok(v) => Some(v),
-                    Err(_) => None,
+                .filter_map(|r| async move {
+                    match r {
+                        Ok(v) => Some(v.0),
+                        Err(_) => None,
+                    }
                 })
-                .map(|(b, _)| *b)
-                .collect::<Vec<_>>(),
+                .collect::<Vec<_>>()
+                .await,
         );
 
         for s_cid in new_pinned_blocks.iter() {
