@@ -165,7 +165,40 @@ async fn main() -> anyhow::Result<()> {
                 Err(_) => println!("File doesnt exist"),
             }
         }
-        Command::List { .. } => {}
+        Command::List { remote } => {
+            let directory = filesystem.open_directory(remote.as_deref().unwrap_or_default())?;
+            let list = directory.get_items();
+            let mut table = Table::new();
+            table.set_header(vec![
+                "Name",
+                "Type",
+                "Size",
+                "Favorite",
+                "Description",
+                "Creation",
+                "Modified",
+                "Reference",
+            ]);
+            for item in list.iter() {
+                table.add_row(vec![
+                    item.name(),
+                    item.item_type().to_string(),
+                    format!("{} MB", item.size() / 1024 / 1024),
+                    item.favorite().to_string(),
+                    item.description(),
+                    item.creation().date_naive().to_string(),
+                    item.modified().date_naive().to_string(),
+                    if item.is_file() {
+                        item.get_file()?
+                            .reference()
+                            .unwrap_or_else(|| String::from("N/A"))
+                    } else {
+                        String::new()
+                    },
+                ]);
+            }
+            println!("{table}");
+        }
         Command::FileReference { remote } => {
             match filesystem
                 .current_directory()?

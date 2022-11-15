@@ -481,7 +481,6 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         }
 
         let mut adder = FileAdder::default();
-        //Maybe write directly to avoid reallocation?
 
         let mut written = 0;
         let mut last_cid = None;
