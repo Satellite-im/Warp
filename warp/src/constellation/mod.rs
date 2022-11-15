@@ -26,6 +26,53 @@ use js_sys::Promise;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::future_to_promise;
 
+#[derive(Debug, Clone)]
+pub enum Progression {
+    CurrentProgress {
+        /// name of the file
+        name: String,
+
+        /// size of the progression
+        current: usize,
+
+        /// total size of the file, if any is supplied
+        total: Option<usize>,
+    },
+    ProgressComplete {
+        /// name of the file
+        name: String,
+
+        /// total size of the file, if any is supplied
+        total: Option<usize>,
+    },
+    ProgressFailed {
+        /// name of the file that failed
+        name: String,
+        
+        /// last known size, if any, of where it failed
+        last_size: Option<usize>,
+
+        /// error of why it failed, if any
+        error: Option<String>,
+    },
+}
+
+pub struct ConstellationProgressStream(pub BoxStream<'static, Progression>);
+
+impl core::ops::Deref for ConstellationProgressStream {
+    type Target = BoxStream<'static, Progression>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for ConstellationProgressStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+
 /// Interface that would provide functionality around the filesystem.
 #[async_trait::async_trait]
 pub trait Constellation: Extension + Sync + Send + SingleHandle {
@@ -247,7 +294,11 @@ where
     }
 
     /// Used to upload file to the filesystem with data from a stream
-    async fn put_stream(&mut self, dest: &str, stream: BoxStream<'static, Vec<u8>>) -> Result<(), Error> {
+    async fn put_stream(
+        &mut self,
+        dest: &str,
+        stream: BoxStream<'static, Vec<u8>>,
+    ) -> Result<(), Error> {
         self.write().put_stream(dest, stream).await
     }
 
