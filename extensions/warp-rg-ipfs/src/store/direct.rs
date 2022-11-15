@@ -8,9 +8,11 @@ use ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream};
 
 use libipld::IpldCodec;
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast::{self, Sender as BroadcastSender};
+use tokio_util::io::ReaderStream;
 use uuid::Uuid;
-use warp::constellation::Constellation;
+use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::logging::tracing::log::{error, trace};
@@ -1282,10 +1284,37 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 continue;
             }
 
-            let remote = file.to_string_lossy().to_string();
+            let file = tokio::fs::File::open(&file).await?;
 
-            if let Err(e) = constellation.write().put(&filename, &remote).await {
-                error!("Error uploading {filename}: {e}");
+            let size = file.metadata().await?.len() as usize;
+
+            let stream = ReaderStream::new(file)
+                .filter_map(|x| async { x.ok() })
+                .map(|x| x.into());
+
+            let mut progress = match constellation
+                .write()
+                .put_stream(&filename, Some(size), stream.boxed())
+                .await
+            {
+                Ok(stream) => stream,
+                Err(e) => {
+                    error!("Error uploading {filename}: {e}");
+                    continue;
+                }
+            };
+
+            let mut complete = false;
+
+            while let Some(progress) = progress.next().await {
+                if let Progression::ProgressComplete { .. } = progress {
+                    complete = true;
+                    break;
+                }
+            }
+
+            if !complete {
+                continue;
             }
 
             let file = match current_directory
@@ -1354,7 +1383,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         file: &str,
         path: PathBuf,
         override_path: bool,
-    ) -> Result<(), Error> {
+    ) -> Result<ConstellationProgressStream, Error> {
         let constellation = self
             .filesystem
             .clone()
@@ -1388,6 +1417,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             return Err(Error::FileExist);
         }
 
+        let (tx, mut rx) = tokio::sync::broadcast::channel(10);
+
         tokio::spawn({
             let ipfs = self.ipfs.clone();
             let constellation = constellation.clone();
@@ -1411,18 +1442,65 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 if let Err(e) = ipfs.dial(opt).await {
                     error!("Error dialing peer: {e}");
                 }
+                let mut file = tokio::fs::File::create(path).await?;
 
-                constellation.read()
-                    .get(&attachment.name(), &path.to_string_lossy())
-                    .await?;
-
+                let mut stream = constellation.read().get_stream(&attachment.name()).await?;
+                let mut written = 0;
+                let mut failed = false;
+                while let Some(res) = stream.next().await {
+                    match res {
+                        Ok(bytes) => match file.write(&bytes).await {
+                            Ok(size) => {
+                                written += size;
+                                let _ = tx.send(Progression::CurrentProgress {
+                                    name: attachment.name(),
+                                    current: written,
+                                    total: Some(attachment.size()),
+                                });
+                            }
+                            Err(e) => {
+                                let _ = tx.send(Progression::ProgressFailed {
+                                    name: attachment.name(),
+                                    last_size: Some(written),
+                                    error: Some(e.to_string()),
+                                });
+                                failed = true;
+                                break;
+                            }
+                        },
+                        Err(e) => {
+                            let _ = tx.send(Progression::ProgressFailed {
+                                name: attachment.name(),
+                                last_size: Some(written),
+                                error: Some(e.to_string()),
+                            });
+                            failed = true;
+                            break;
+                        }
+                    }
+                }
+                if !failed {
+                    let _ = tx.send(Progression::ProgressComplete {
+                        name: attachment.name(),
+                        total: Some(attachment.size()),
+                    });
+                }
                 Ok::<_, Error>(())
             }
         });
         tokio::task::yield_now().await;
 
-        //TODO: Create a stream to give progress from constellation
-        Ok(())
+        let progress_stream = async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        };
+
+        Ok(ConstellationProgressStream(progress_stream.boxed()))
     }
 
     pub async fn send_event<S: Serialize + Send + Sync>(

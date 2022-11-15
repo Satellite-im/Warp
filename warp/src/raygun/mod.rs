@@ -1,6 +1,7 @@
 pub mod group;
 
 use crate::constellation::file::File;
+use crate::constellation::ConstellationProgressStream;
 use crate::crypto::DID;
 use crate::error::Error;
 use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -560,7 +561,13 @@ pub trait RayGunAttachment: Sync + Send {
 
     /// Downloads a file that been attached to a message
     /// Note: Must use the filename assiocated when downloading
-    async fn download(&self, _: Uuid, _: Uuid, _: String, _: PathBuf) -> Result<(), Error> {
+    async fn download(
+        &self,
+        _: Uuid,
+        _: Uuid,
+        _: String,
+        _: PathBuf,
+    ) -> Result<ConstellationProgressStream, Error> {
         Err(Error::Unimplemented)
     }
 }
@@ -697,7 +704,7 @@ where
         message_id: Uuid,
         file: String,
         path: PathBuf,
-    ) -> Result<(), Error> {
+    ) -> Result<ConstellationProgressStream, Error> {
         self.read()
             .download(conversation_id, message_id, file, path)
             .await

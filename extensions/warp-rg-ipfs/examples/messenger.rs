@@ -9,7 +9,7 @@ use std::str::FromStr;
 use tokio::task::JoinHandle;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
-use warp::constellation::Constellation;
+use warp::constellation::{Constellation, Progression};
 use warp::crypto::zeroize::Zeroizing;
 use warp::crypto::DID;
 use warp::error::Error;
@@ -543,11 +543,43 @@ async fn main() -> anyhow::Result<()> {
 
 
                             writeln!(stdout, "Downloading....")?;
-                            if let Err(e) = chat.download(conversation_id, message_id, file, path).await {
-                                writeln!(stdout, "Error: {}", e)?;
-                            } else {
-                                writeln!(stdout, "File downloaded")?
-                            }
+                            let mut stream = match chat.download(conversation_id, message_id, file, path).await {
+                                Ok(stream) => stream,
+                                Err(e) => {
+                                    writeln!(stdout, "Error: {}", e)?;
+                                    continue;
+                                }
+                            };
+
+                            tokio::spawn({
+                                let mut stdout = stdout.clone();
+                                async move {
+                                    while let Some(event) = stream.next().await {
+                                        match event {
+                                            Progression::CurrentProgress { .. } => {}
+                                            Progression::ProgressComplete { name, total } => {
+                                                writeln!(stdout,
+                                                    "{name} has been downloaded with {} MB",
+                                                    total.unwrap_or_default() / 1024 / 1024
+                                                )?;
+                                            }
+                                            Progression::ProgressFailed {
+                                                name,
+                                                last_size,
+                                                error,
+                                            } => {
+                                                writeln!(stdout,
+                                                    "{name} failed to upload at {} MB due to: {}",
+                                                    last_size.unwrap_or_default(),
+                                                    error.unwrap_or_default()
+                                                )?;
+                                            }
+                                        }
+                                        tokio::time::sleep(std::time::Duration::from_nanos(50)).await;
+                                    }
+                                    Ok::<_, anyhow::Error>(())
+                                }
+                            });
                         },
                         Some("/react") => {
                             let state = match cmd_line.next() {

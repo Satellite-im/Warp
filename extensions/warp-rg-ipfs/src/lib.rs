@@ -16,7 +16,7 @@ use tokio::sync::broadcast;
 #[allow(unused_imports)]
 use tokio::sync::broadcast::{Receiver, Sender};
 use uuid::Uuid;
-use warp::constellation::Constellation;
+use warp::constellation::{Constellation, ConstellationProgressStream};
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::logging::tracing::log::error;
@@ -350,7 +350,7 @@ impl<T: IpfsTypes> RayGunAttachment for IpfsMessaging<T> {
         message_id: Uuid,
         file: String,
         path: PathBuf,
-    ) -> Result<()> {
+    ) -> Result<ConstellationProgressStream> {
         self.messaging_store()?
             .download(conversation_id, message_id, &file, path, false)
             .await
