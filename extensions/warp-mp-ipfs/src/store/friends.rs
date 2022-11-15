@@ -35,7 +35,7 @@ use super::identity::IdentityStore;
 use super::phonebook::PhoneBook;
 use super::{
     did_keypair, did_to_libp2p_pub, get_inbox_topic, libp2p_pub_to_did, sign_serde,
-    PeerConnectionType, FRIENDS_BROADCAST,
+    PeerConnectionType,
 };
 
 pub struct FriendsStore<T: IpfsTypes> {
@@ -474,9 +474,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
                     let bytes = serde_json::to_vec(&payload)?;
 
+                    let topic = get_inbox_topic(recipient.clone());
+
                     if self
                         .ipfs
-                        .pubsub_publish(FRIENDS_BROADCAST.into(), bytes)
+                        .pubsub_publish(topic, bytes)
                         .await
                         .is_err()
                     {
@@ -1197,4 +1199,4 @@ fn validate_request(real_request: &FriendRequest) -> Result<(), Error> {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-struct Queue(PeerId, Sata);
+struct Queue(PeerId, Sata, DID);
