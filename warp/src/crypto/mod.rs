@@ -77,13 +77,13 @@ impl PartialEq for DID {
 impl Clone for DID {
     fn clone(&self) -> Self {
         let public_bytes = self.0.public_key_bytes();
-        let private_bytes = self.0.private_key_bytes();
-        let pk = if private_bytes.is_empty() || private_bytes.len() != 32 {
-            None
-        } else {
-            Some(private_bytes.as_slice())
-        };
-        // let pk = None;
+        // let private_bytes = self.0.private_key_bytes();
+        // let pk = if private_bytes.is_empty() || private_bytes.len() != 32 {
+        //     None
+        // } else {
+        //     Some(private_bytes.as_slice())
+        // };
+        let pk = None;
         let did = match self.0 {
             did_key::KeyPair::Ed25519(_) => {
                 did_key::from_existing_key::<Ed25519KeyPair>(&public_bytes, pk)

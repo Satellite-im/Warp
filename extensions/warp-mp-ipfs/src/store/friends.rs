@@ -149,10 +149,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
             false => None,
         };
 
-        let did = did_keypair(&tesseract)?;
         let end_event = Arc::new(AtomicBool::new(false));
         let queue = Arc::new(Default::default());
-        let did_key = Arc::new(did.clone());
+        let did_key = Arc::new(did_keypair(&tesseract)?);
         let override_ipld = Arc::new(AtomicBool::new(override_ipld));
 
         let (phonebook, fut) = PhoneBook::new(ipfs.clone(), tx.clone());
@@ -161,7 +160,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let store = Self {
             ipfs,
             identity,
-            did_key,
+            did_key: did_key.clone(),
             path,
             end_event,
             queue,
@@ -175,7 +174,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let stream = store
             .ipfs
-            .pubsub_subscribe(get_inbox_topic(did.clone()))
+            .pubsub_subscribe(get_inbox_topic(did_key.as_ref()))
             .await?;
 
         let (local_ipfs_public_key, _) = store.local().await?;
@@ -995,7 +994,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let remote_peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
 
-        let topic = get_inbox_topic(recipient.clone());
+        let topic = get_inbox_topic(recipient);
 
         if matches!(
             self.identity.discovery_type(),

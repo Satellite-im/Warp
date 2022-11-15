@@ -26,7 +26,7 @@ pub const IDENTITY_BROADCAST: &str = "identity/broadcast";
 pub const FRIENDS_BROADCAST: &str = "friends/broadcast";
 pub const SYNC_BROADCAST: &str = "/identity/sync/broadcast";
 
-pub fn get_inbox_topic(did: DID) -> String {
+pub fn get_inbox_topic(did: &DID) -> String {
     format!("/peer/{}/inbox", did.to_string())
 }
 
