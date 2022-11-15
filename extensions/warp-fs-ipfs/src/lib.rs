@@ -348,7 +348,10 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         let file = warp::constellation::file::File::new(name);
         file.set_size(written);
         file.set_reference(&format!("/ipfs/{cid}"));
-        file.hash_mut().hash_from_file(&path)?;
+        let f = file.clone();
+        tokio::task::spawn_blocking(move || f.hash_mut().hash_from_file(&path))
+            .await
+            .map_err(anyhow::Error::from)??;
         self.current_directory()?.add_item(file)?;
         if let Err(_e) = self.export_index().await {}
         Ok(())
