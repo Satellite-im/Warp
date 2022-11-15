@@ -126,7 +126,10 @@ async fn main() -> anyhow::Result<()> {
                     } => {
                         println!("Written {} MB for {name}", current / 1024 / 1024);
                         if let Some(total) = total {
-                            println!("{}% completed", (((current as f64) / (total as f64)) * 100.) as usize)
+                            println!(
+                                "{}% completed",
+                                (((current as f64) / (total as f64)) * 100.) as usize
+                            )
                         }
                     }
                     Progression::ProgressComplete { name, total } => {
@@ -155,8 +158,8 @@ async fn main() -> anyhow::Result<()> {
             let mut written = 0;
             let mut file = tokio::fs::File::create(&local).await?;
             while let Some(Ok(data)) = stream.next().await {
-                file.write(&data).await?;
-                written += data.len();
+                let size = file.write(&data).await?;
+                written += size;
             }
             file.flush().await?;
             println!(
