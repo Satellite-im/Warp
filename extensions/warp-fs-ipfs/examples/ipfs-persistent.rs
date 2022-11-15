@@ -107,11 +107,15 @@ async fn main() -> anyhow::Result<()> {
 
             let file = tokio::fs::File::open(&local).await?;
 
+            let size = file.metadata().await?.len() as usize;
+
             let stream = ReaderStream::new(file)
                 .filter_map(|x| async { x.ok() })
                 .map(|x| x.into());
 
-            let mut event = filesystem.put_stream(&remote, stream.boxed()).await?;
+            let mut event = filesystem
+                .put_stream(&remote, Some(size), stream.boxed())
+                .await?;
 
             while let Some(event) = event.next().await {
                 match event {
@@ -121,6 +125,9 @@ async fn main() -> anyhow::Result<()> {
                         total,
                     } => {
                         println!("Written {} MB for {name}", current / 1024 / 1024);
+                        if let Some(total) = total {
+                            println!("{}% completed", (((current as f64) / (total as f64)) * 100.) as usize)
+                        }
                     }
                     Progression::ProgressComplete { name, total } => {
                         println!(

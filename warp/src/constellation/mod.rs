@@ -160,6 +160,7 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
     async fn put_stream(
         &mut self,
         _: &str,
+        _: Option<usize>,
         _: BoxStream<'static, Vec<u8>>,
     ) -> Result<ConstellationProgressStream, Error> {
         Err(Error::Unimplemented)
@@ -300,9 +301,10 @@ where
     async fn put_stream(
         &mut self,
         dest: &str,
+        total_size: Option<usize>,
         stream: BoxStream<'static, Vec<u8>>,
     ) -> Result<ConstellationProgressStream, Error> {
-        self.write().put_stream(dest, stream).await
+        self.write().put_stream(dest, total_size, stream).await
     }
 
     /// Used to download data from the filesystem using a stream

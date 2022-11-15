@@ -469,6 +469,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
     async fn put_stream(
         &mut self,
         name: &str,
+        total_size: Option<usize>,
         mut stream: BoxStream<'static, Vec<u8>>,
     ) -> Result<ConstellationProgressStream> {
         let ipfs = self.ipfs()?;
@@ -488,54 +489,65 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             let name = name.to_string();
             let fs = self.clone();
             async move {
-                // let mut stream = stream;
-                let mut adder = FileAdder::default();
+                let mut last_written = 0;
+                let result = {
+                    let mut adder = FileAdder::default();
 
-                let mut written = 0;
-                let mut last_cid = None;
+                    let mut written = 0;
+                    let mut last_cid = None;
 
-                while let Some(buffer) = stream.next().await {
-                    let mut total = 0;
+                    while let Some(buffer) = stream.next().await {
+                        let mut total = 0;
 
-                    while total < buffer.len() {
-                        let (blocks, consumed) = adder.push(&buffer[total..]);
-                        for (cid, block) in blocks {
-                            let block = Block::new(cid, block)?;
-                            let _cid = ipfs.put_block(block).await?;
+                        while total < buffer.len() {
+                            let (blocks, consumed) = adder.push(&buffer[total..]);
+                            for (cid, block) in blocks {
+                                let block = Block::new(cid, block)?;
+                                let _cid = ipfs.put_block(block).await?;
+                            }
+                            total += consumed;
+                            written += consumed;
+                            last_written += consumed;
                         }
-                        total += consumed;
-                        written += consumed;
+                        let _ = tx.send(Progression::CurrentProgress {
+                            name: name.to_string(),
+                            current: written,
+                            total: total_size,
+                        });
                     }
-                    let _ = tx.send(Progression::CurrentProgress {
+
+                    let blocks = adder.finish();
+                    for (cid, block) in blocks {
+                        let block = Block::new(cid, block)?;
+                        let cid = ipfs.put_block(block).await?;
+                        last_cid = Some(cid);
+                    }
+
+                    let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
+
+                    ipfs.insert_pin(&cid, true).await?;
+
+                    let file = warp::constellation::file::File::new(&name);
+                    file.set_size(written);
+                    file.set_reference(&format!("/ipfs/{cid}"));
+                    // file.hash_mut().hash_from_slice(buffer)?;
+                    current_directory.add_item(file)?;
+                    if let Err(_e) = fs.export_index().await {}
+
+                    let _ = tx.send(Progression::ProgressComplete {
                         name: name.to_string(),
-                        current: written,
-                        total: None,
+                        total: Some(written),
+                    });
+
+                    Ok::<_, Error>(())
+                };
+                if let Err(e) = result {
+                    let _ = tx.send(Progression::ProgressFailed {
+                        name,
+                        last_size: Some(last_written),
+                        error: Some(e.to_string()),
                     });
                 }
-
-                let blocks = adder.finish();
-                for (cid, block) in blocks {
-                    let block = Block::new(cid, block)?;
-                    let cid = ipfs.put_block(block).await?;
-                    last_cid = Some(cid);
-                }
-
-                let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
-
-                ipfs.insert_pin(&cid, true).await?;
-
-                let file = warp::constellation::file::File::new(&name);
-                file.set_size(written);
-                file.set_reference(&format!("/ipfs/{cid}"));
-                // file.hash_mut().hash_from_slice(buffer)?;
-                current_directory.add_item(file)?;
-                if let Err(_e) = fs.export_index().await {}
-
-                let _ = tx.send(Progression::ProgressComplete {
-                    name: name.to_string(),
-                    total: Some(written),
-                });
-
                 Ok::<_, Error>(())
             }
         });
