@@ -9,6 +9,7 @@ use super::directory::Directory;
 use super::file::File;
 use crate::error::Error;
 use warp_derive::FFIFree;
+use derive_more::Display;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -41,12 +42,15 @@ pub enum ItemInner {
 }
 
 /// The type that `Item` represents
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Display)]
 #[serde(rename_all = "snake_case")]
 #[repr(C)]
 pub enum ItemType {
+    #[display(fmt = "file")]
     FileItem,
+    #[display(fmt = "item")]
     DirectoryItem,
+    #[display(fmt = "invalid")]
     /// Would be invalid or undetermined
     InvalidItem,
 }

@@ -480,6 +480,12 @@ impl Hash {
         self.sha256 = Some(bs58::encode(res).into_string());
         Ok(())
     }
+
+    /// Set sha256 multihash
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn set_sha256hash(&mut self, hash: &[u8]) {
+        self.sha256 = Some(bs58::encode(&hash).into_string());
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
