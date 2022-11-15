@@ -89,27 +89,6 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
         }
     }
 
-    /// Used to update an [`Item`] within the current [`Directory`]
-    fn update_item(&mut self, path: &str, item: Item) -> Result<(), Error> {
-        let directory = self.current_directory()?;
-        let inner_item = &mut directory.get_item_by_path(path)?;
-        if inner_item.id() != item.id() && inner_item.item_type() != item.item_type() {
-            return Err(Error::InvalidItem);
-        }
-        *inner_item = item;
-        Ok(())
-    }
-
-    /// Used to update an [`File`] within the current [`Directory`]
-    fn update_file(&mut self, path: &str, file: file::File) -> Result<(), Error> {
-        self.update_item(path, file.into())
-    }
-
-    /// Used to update an [`Directory`] within the current [`Directory`]
-    fn update_directory(&mut self, path: &str, directory: Directory) -> Result<(), Error> {
-        self.update_item(path, directory.into())
-    }
-
     /// Used to upload file to the filesystem
     async fn put(&mut self, _: &str, _: &str) -> Result<(), Error> {
         Err(Error::Unimplemented)
@@ -557,9 +536,6 @@ pub mod ffi {
     use std::ffi::CStr;
     use std::os::raw::c_char;
 
-    use super::file::File;
-    use super::item::Item;
-
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_select(
@@ -641,111 +617,6 @@ pub mod ffi {
         }
         let constellation = &*(ctx);
         constellation.read_guard().current_directory().into()
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn constellation_update_item(
-        ctx: *mut ConstellationAdapter,
-        path: *const c_char,
-        item: *const Item,
-    ) -> FFIResult_Null {
-        if ctx.is_null() {
-            return FFIResult_Null::err(Error::NullPointerContext {
-                pointer: "ctx".into(),
-            });
-        }
-
-        if path.is_null() {
-            return FFIResult_Null::err(Error::NullPointerContext {
-                pointer: "path".into(),
-            });
-        }
-
-        if item.is_null() {
-            return FFIResult_Null::err(Error::NullPointerContext {
-                pointer: "item".into(),
-            });
-        }
-
-        let constellation = &mut *(ctx);
-
-        let path = CStr::from_ptr(path).to_string_lossy().to_string();
-        let item = &*item;
-
-        ConstellationAdapter::write_guard(constellation)
-            .update_item(&path, item.clone())
-            .into()
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn constellation_update_file(
-        ctx: *mut ConstellationAdapter,
-        path: *const c_char,
-        file: *const File,
-    ) -> FFIResult_Null {
-        if ctx.is_null() {
-            return FFIResult_Null::err(Error::NullPointerContext {
-                pointer: "ctx".into(),
-            });
-        }
-
-        if path.is_null() {
-            return FFIResult_Null::err(Error::NullPointerContext {
-                pointer: "path".into(),
-            });
-        }
-
-        if file.is_null() {
-            return FFIResult_Null::err(Error::NullPointerContext {
-                pointer: "item".into(),
-            });
-        }
-
-        let constellation = &mut *(ctx);
-
-        let path = CStr::from_ptr(path).to_string_lossy().to_string();
-        let file = &*file;
-
-        ConstellationAdapter::write_guard(constellation)
-            .update_file(&path, file.clone())
-            .into()
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn constellation_update_directory(
-        ctx: *mut ConstellationAdapter,
-        path: *const c_char,
-        directory: *const Directory,
-    ) -> FFIResult_Null {
-        if ctx.is_null() {
-            return FFIResult_Null::err(Error::NullPointerContext {
-                pointer: "ctx".into(),
-            });
-        }
-
-        if path.is_null() {
-            return FFIResult_Null::err(Error::NullPointerContext {
-                pointer: "path".into(),
-            });
-        }
-
-        if directory.is_null() {
-            return FFIResult_Null::err(Error::NullPointerContext {
-                pointer: "directory".into(),
-            });
-        }
-
-        let constellation = &mut *(ctx);
-
-        let path = CStr::from_ptr(path).to_string_lossy().to_string();
-        let directory = &*directory;
-
-        ConstellationAdapter::write_guard(constellation)
-            .update_directory(&path, directory.clone())
-            .into()
     }
 
     #[allow(clippy::await_holding_lock)]
