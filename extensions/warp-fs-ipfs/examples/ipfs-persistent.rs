@@ -8,7 +8,10 @@ use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use warp::{
-    constellation::Constellation, multipass::MultiPass, sync::RwLock, tesseract::Tesseract,
+    constellation::{Constellation, Progression},
+    multipass::MultiPass,
+    sync::RwLock,
+    tesseract::Tesseract,
 };
 use warp_fs_ipfs::{config::FsIpfsConfig, IpfsFileSystem, Persistent};
 use warp_mp_ipfs::{config::MpIpfsConfig, ipfs_identity_persistent};
@@ -108,9 +111,36 @@ async fn main() -> anyhow::Result<()> {
                 .filter_map(|x| async { x.ok() })
                 .map(|x| x.into());
 
-            filesystem.put_stream(&remote, stream.boxed()).await?;
+            let mut event = filesystem.put_stream(&remote, stream.boxed()).await?;
 
-            println!("{} has been uploaded", remote);
+            while let Some(event) = event.next().await {
+                match event {
+                    Progression::CurrentProgress {
+                        name,
+                        current,
+                        total,
+                    } => {
+                        println!("Written {} MB for {name}", current / 1024 / 1024);
+                    }
+                    Progression::ProgressComplete { name, total } => {
+                        println!(
+                            "{name} has been uploaded with {} MB",
+                            total.unwrap_or_default() / 1024 / 1024
+                        );
+                    }
+                    Progression::ProgressFailed {
+                        name,
+                        last_size,
+                        error,
+                    } => {
+                        println!(
+                            "{name} failed to upload at {} MB due to: {}",
+                            last_size.unwrap_or_default(),
+                            error.unwrap_or_default()
+                        );
+                    }
+                }
+            }
         }
         Command::DownloadFile { remote, local } => {
             let mut stream = filesystem.get_stream(&remote).await?;

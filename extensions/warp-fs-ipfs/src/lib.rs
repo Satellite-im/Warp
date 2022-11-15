@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use warp::constellation::ConstellationDataType;
+use warp::constellation::{ConstellationDataType, ConstellationProgressStream, Progression};
 use warp::logging::tracing::{debug, error};
 use warp::multipass::MultiPass;
 use warp::sata::{Kind, Sata};
@@ -470,53 +470,87 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         &mut self,
         name: &str,
         mut stream: BoxStream<'static, Vec<u8>>,
-    ) -> Result<()> {
+    ) -> Result<ConstellationProgressStream> {
         let ipfs = self.ipfs()?;
         //Used to enter the tokio context
         let handle = warp::async_handle();
         let _g = handle.enter();
 
-        if self.current_directory()?.get_item_by_path(name).is_ok() {
+        let current_directory = self.current_directory()?;
+
+        if current_directory.get_item_by_path(name).is_ok() {
             return Err(Error::FileExist);
         }
 
-        let mut adder = FileAdder::default();
+        let (tx, mut rx) = tokio::sync::broadcast::channel(5);
 
-        let mut written = 0;
-        let mut last_cid = None;
+        tokio::spawn({
+            let name = name.to_string();
+            let fs = self.clone();
+            async move {
+                // let mut stream = stream;
+                let mut adder = FileAdder::default();
 
-        while let Some(buffer) = stream.next().await {
-            let mut total = 0;
+                let mut written = 0;
+                let mut last_cid = None;
 
-            while total < buffer.len() {
-                let (blocks, consumed) = adder.push(&buffer[total..]);
+                while let Some(buffer) = stream.next().await {
+                    let mut total = 0;
+
+                    while total < buffer.len() {
+                        let (blocks, consumed) = adder.push(&buffer[total..]);
+                        for (cid, block) in blocks {
+                            let block = Block::new(cid, block)?;
+                            let _cid = ipfs.put_block(block).await?;
+                        }
+                        total += consumed;
+                        written += consumed;
+                    }
+                    let _ = tx.send(Progression::CurrentProgress {
+                        name: name.to_string(),
+                        current: written,
+                        total: None,
+                    });
+                }
+
+                let blocks = adder.finish();
                 for (cid, block) in blocks {
                     let block = Block::new(cid, block)?;
-                    let _cid = ipfs.put_block(block).await?;
+                    let cid = ipfs.put_block(block).await?;
+                    last_cid = Some(cid);
                 }
-                total += consumed;
-                written += consumed;
+
+                let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
+
+                ipfs.insert_pin(&cid, true).await?;
+
+                let file = warp::constellation::file::File::new(&name);
+                file.set_size(written);
+                file.set_reference(&format!("/ipfs/{cid}"));
+                // file.hash_mut().hash_from_slice(buffer)?;
+                current_directory.add_item(file)?;
+                if let Err(_e) = fs.export_index().await {}
+
+                let _ = tx.send(Progression::ProgressComplete {
+                    name: name.to_string(),
+                    total: Some(written),
+                });
+
+                Ok::<_, Error>(())
             }
-        }
+        });
 
-        let blocks = adder.finish();
-        for (cid, block) in blocks {
-            let block = Block::new(cid, block)?;
-            let cid = ipfs.put_block(block).await?;
-            last_cid = Some(cid);
-        }
+        let progress_stream = async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        };
 
-        let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
-
-        ipfs.insert_pin(&cid, true).await?;
-
-        let file = warp::constellation::file::File::new(name);
-        file.set_size(written);
-        file.set_reference(&format!("/ipfs/{cid}"));
-        // file.hash_mut().hash_from_slice(buffer)?;
-        self.current_directory()?.add_item(file)?;
-        if let Err(_e) = self.export_index().await {}
-        Ok(())
+        Ok(ConstellationProgressStream(progress_stream.boxed()))
     }
 
     /// Used to download data from the filesystem using a stream

@@ -48,7 +48,7 @@ pub enum Progression {
     ProgressFailed {
         /// name of the file that failed
         name: String,
-        
+
         /// last known size, if any, of where it failed
         last_size: Option<usize>,
 
@@ -71,7 +71,6 @@ impl core::ops::DerefMut for ConstellationProgressStream {
         &mut self.0
     }
 }
-
 
 /// Interface that would provide functionality around the filesystem.
 #[async_trait::async_trait]
@@ -158,7 +157,11 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
     }
 
     /// Used to upload file to the filesystem with data from a stream
-    async fn put_stream(&mut self, _: &str, _: BoxStream<'static, Vec<u8>>) -> Result<(), Error> {
+    async fn put_stream(
+        &mut self,
+        _: &str,
+        _: BoxStream<'static, Vec<u8>>,
+    ) -> Result<ConstellationProgressStream, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -298,7 +301,7 @@ where
         &mut self,
         dest: &str,
         stream: BoxStream<'static, Vec<u8>>,
-    ) -> Result<(), Error> {
+    ) -> Result<ConstellationProgressStream, Error> {
         self.write().put_stream(dest, stream).await
     }
 
