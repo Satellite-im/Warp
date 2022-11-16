@@ -2,13 +2,13 @@ pub mod config;
 use config::FsIpfsConfig;
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
+use ipfs::unixfs::ll::file::adder::{Chunker, FileAdderBuilder};
 use libipld::serde::{from_ipld, to_ipld};
 use libipld::Cid;
 use std::any::Any;
 use std::collections::HashSet;
 use std::io::Cursor;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use warp::constellation::{ConstellationDataType, ConstellationProgressStream, Progression};
@@ -481,14 +481,16 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         }
 
         let (tx, mut rx) = tokio::sync::broadcast::channel(5);
-
+        let config = self.config.clone().unwrap_or_default();
         tokio::spawn({
             let name = name.to_string();
             let fs = self.clone();
             async move {
                 let mut last_written = 0;
                 let result = {
-                    let mut adder = FileAdder::default();
+                    let mut adder = FileAdderBuilder::default()
+                        .with_chunker(Chunker::Size(config.chunking.unwrap_or(1024 * 1024)))
+                        .build();
 
                     let mut written = 0;
                     let mut last_cid = None;
