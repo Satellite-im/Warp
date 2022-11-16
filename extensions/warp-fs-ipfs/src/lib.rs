@@ -489,7 +489,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
                 let mut last_written = 0;
                 let result = {
                     let mut adder = FileAdderBuilder::default()
-                        .with_chunker(Chunker::Size(config.chunking.unwrap_or(1024 * 1024)))
+                        .with_chunker(Chunker::Size(config.chunking.unwrap_or(256 * 1024)))
                         .build();
 
                     let mut written = 0;

@@ -131,7 +131,7 @@ impl Default for FsIpfsConfig {
             },
             max_storage_size: Some(1024 * 1024 * 1024),
             max_file_size: Some(50 * 1024 * 1024),
-            chunking: Some(1024 * 1024),
+            chunking: None,
         }
     }
 }
