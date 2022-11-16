@@ -1417,7 +1417,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             return Err(Error::FileExist);
         }
 
-        let (tx, mut rx) = tokio::sync::broadcast::channel(10);
+        let (tx, mut rx) = tokio::sync::broadcast::channel(50000);
 
         tokio::spawn({
             let ipfs = self.ipfs.clone();
@@ -1442,6 +1442,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 if let Err(e) = ipfs.dial(opt).await {
                     error!("Error dialing peer: {e}");
                 }
+
                 let mut file = tokio::fs::File::create(path).await?;
 
                 let mut stream = constellation.read().get_stream(&attachment.name()).await?;
@@ -1482,7 +1483,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 if !failed {
                     let _ = tx.send(Progression::ProgressComplete {
                         name: attachment.name(),
-                        total: Some(attachment.size()),
+                        total: Some(written),
                     });
                 }
                 Ok::<_, Error>(())
