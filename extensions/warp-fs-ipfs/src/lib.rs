@@ -2,13 +2,13 @@ pub mod config;
 use config::FsIpfsConfig;
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
+use ipfs::unixfs::ll::file::adder::{Chunker, FileAdderBuilder};
 use libipld::serde::{from_ipld, to_ipld};
 use libipld::Cid;
 use std::any::Any;
 use std::collections::HashSet;
 use std::io::Cursor;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use warp::constellation::{ConstellationDataType, ConstellationProgressStream, Progression};
@@ -38,7 +38,6 @@ type Result<T> = std::result::Result<T, Error>;
 pub struct IpfsFileSystem<T: IpfsTypes> {
     index: Directory,
     path: PathBuf,
-    max_size: Arc<AtomicUsize>,
     modified: DateTime<Utc>,
     config: Option<FsIpfsConfig>,
     ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
@@ -53,7 +52,6 @@ impl<T: IpfsTypes> Clone for IpfsFileSystem<T> {
             index: self.index.clone(),
             path: self.path.clone(),
             modified: self.modified,
-            max_size: self.max_size.clone(),
             config: self.config.clone(),
             ipfs: self.ipfs.clone(),
             index_cid: self.index_cid.clone(),
@@ -73,7 +71,6 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
             path: PathBuf::new(),
             modified: Utc::now(),
             config,
-            max_size: Arc::new(AtomicUsize::new(4 * 1024 * 1024)),
             index_cid: Default::default(),
             account: Default::default(),
             ipfs: Default::default(),
@@ -484,14 +481,16 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         }
 
         let (tx, mut rx) = tokio::sync::broadcast::channel(5);
-
+        let config = self.config.clone().unwrap_or_default();
         tokio::spawn({
             let name = name.to_string();
             let fs = self.clone();
             async move {
                 let mut last_written = 0;
                 let result = {
-                    let mut adder = FileAdder::default();
+                    let mut adder = FileAdderBuilder::default()
+                        .with_chunker(Chunker::Size(config.chunking.unwrap_or(1024 * 1024)))
+                        .build();
 
                     let mut written = 0;
                     let mut last_cid = None;
