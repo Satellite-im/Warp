@@ -7,6 +7,7 @@ use crate::error::Error;
 use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::{Extension, SingleHandle};
 
+use derive_more::Display;
 use futures::stream::BoxStream;
 use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
@@ -220,18 +221,21 @@ impl Conversation {
     }
 }
 
-#[derive(Default, Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq, Display)]
 #[repr(C)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageType {
-    #[default]
     /// Regular message sent or received
+    #[display(fmt = "message")]
+    #[default]
     Message,
     /// Attachment; Can represent a file, image, etc., which can be from
     /// constellation or sent directly
+    #[display(fmt = "attachment")]
     Attachment,
     /// Event sent as a message.
     /// TBD
+    #[display(fmt = "event")]
     Event,
 }
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]

@@ -384,7 +384,7 @@ async fn main() -> anyhow::Result<()> {
                         },
                         Some("/list") => {
                             let mut table = Table::new();
-                            table.set_header(vec!["Message ID", "Conversation ID", "Date", "Sender", "Message", "Pinned", "Reaction"]);
+                            table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Sender", "Message", "Pinned", "Reaction"]);
                             let local_topic = match cmd_line.next() {
                                 Some(id) => match Uuid::from_str(id) {
                                     Ok(uuid) => uuid,
@@ -422,6 +422,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                                 table.add_row(vec![
                                     &message.id().to_string(),
+                                    &message.message_type().to_string(),
                                     &message.conversation_id().to_string(),
                                     &message.date().to_string(),
                                     &username,
@@ -575,7 +576,6 @@ async fn main() -> anyhow::Result<()> {
                                                 )?;
                                             }
                                         }
-                                        tokio::time::sleep(std::time::Duration::from_nanos(50)).await;
                                     }
                                     Ok::<_, anyhow::Error>(())
                                 }
