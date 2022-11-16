@@ -1533,15 +1533,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let bytes = serde_json::to_vec(&payload)?;
 
-        if bytes.len() >= 256 * 1024 {
-            return Err(Error::InvalidLength {
-                context: "payload".into(),
-                current: bytes.len(),
-                minimum: Some(1),
-                maximum: Some(256 * 1024),
-            });
-        }
-
         let peers = self.ipfs.pubsub_peers(Some(conversation.topic())).await?;
 
         let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
