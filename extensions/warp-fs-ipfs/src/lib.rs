@@ -38,7 +38,6 @@ type Result<T> = std::result::Result<T, Error>;
 pub struct IpfsFileSystem<T: IpfsTypes> {
     index: Directory,
     path: PathBuf,
-    max_size: Arc<AtomicUsize>,
     modified: DateTime<Utc>,
     config: Option<FsIpfsConfig>,
     ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
@@ -53,7 +52,6 @@ impl<T: IpfsTypes> Clone for IpfsFileSystem<T> {
             index: self.index.clone(),
             path: self.path.clone(),
             modified: self.modified,
-            max_size: self.max_size.clone(),
             config: self.config.clone(),
             ipfs: self.ipfs.clone(),
             index_cid: self.index_cid.clone(),
@@ -73,7 +71,6 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
             path: PathBuf::new(),
             modified: Utc::now(),
             config,
-            max_size: Arc::new(AtomicUsize::new(4 * 1024 * 1024)),
             index_cid: Default::default(),
             account: Default::default(),
             ipfs: Default::default(),

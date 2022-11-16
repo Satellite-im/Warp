@@ -111,6 +111,8 @@ pub struct FsIpfsConfig {
     pub listen_on: Vec<Multiaddr>,
     pub ipfs_setting: IpfsSetting,
     pub max_storage_size: Option<usize>,
+    pub max_file_size: Option<usize>,
+    pub chunking: Option<usize>,
 }
 
 impl Default for FsIpfsConfig {
@@ -127,7 +129,9 @@ impl Default for FsIpfsConfig {
                 bootstrap: false,
                 ..Default::default()
             },
-            max_storage_size: None,
+            max_storage_size: Some(1024 * 1024 * 1024),
+            max_file_size: Some(50 * 1024 * 1024),
+            chunking: Some(1024 * 1024),
         }
     }
 }
@@ -194,7 +198,7 @@ impl FsIpfsConfig {
     }
 
     /// Recommended production configuration
-    pub fn production<P: AsRef<std::path::Path>>(path: P,) -> FsIpfsConfig {
+    pub fn production<P: AsRef<std::path::Path>>(path: P) -> FsIpfsConfig {
         FsIpfsConfig {
             bootstrap: Bootstrap::Ipfs,
             path: Some(path.as_ref().to_path_buf()),
