@@ -6,7 +6,7 @@ use ipfs::libp2p::kad::protocol::DEFAULT_PROTO_NAME;
 use ipfs::libp2p::mplex::MplexConfig;
 use ipfs::libp2p::swarm::ConnectionLimits;
 use ipfs::libp2p::yamux::YamuxConfig;
-use ipfs::p2p::TransportConfig;
+use ipfs::p2p::{TransportConfig, IdentifyConfiguration};
 use sata::Sata;
 use std::any::Any;
 use std::borrow::Cow;
@@ -225,6 +225,12 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
             keep_alive: true,
+            identify_configuration: Some({
+                let mut config = IdentifyConfiguration::default();
+                config.cache = 100;
+                config.push_update = true;
+                config
+            }),
             kad_configuration: Some({
                 let mut conf = ipfs::libp2p::kad::KademliaConfig::default();
                 conf.disjoint_query_paths(true);
