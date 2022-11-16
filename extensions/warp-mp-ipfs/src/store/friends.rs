@@ -473,14 +473,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
                     let bytes = serde_json::to_vec(&payload)?;
 
-                    let topic = get_inbox_topic(recipient.clone());
+                    let topic = get_inbox_topic(&request.to());
 
-                    if self
-                        .ipfs
-                        .pubsub_publish(topic, bytes)
-                        .await
-                        .is_err()
-                    {
+                    if self.ipfs.pubsub_publish(topic, bytes).await.is_err() {
                         //Because we are unable to send a single request for whatever reason, kill the iteration
                         //and proceed to the next item in line
                         break;
