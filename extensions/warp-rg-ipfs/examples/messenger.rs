@@ -138,15 +138,18 @@ async fn create_rg(
 #[allow(clippy::await_holding_lock)]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let opt = Opt::parse();
     if fdlimit::raise_fd_limit().is_none() {}
-    let file_appender = tracing_appender::rolling::hourly("./", "warp_rg_ipfs_messenger.log");
+
+    let file_appender = tracing_appender::rolling::hourly(
+        opt.path.clone().unwrap_or_else(|| PathBuf::from("./")),
+        "warp_rg_ipfs_messenger.log",
+    );
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     tracing_subscriber::fmt()
         .with_writer(non_blocking)
         .with_env_filter(EnvFilter::from_default_env())
         .init();
-
-    let opt = Opt::parse();
 
     let cache = cache_setup(opt.path.as_ref().map(|p| p.join("cache")))?;
     let password = if opt.with_key {
@@ -791,7 +794,7 @@ async fn message_event_handle(
                                         attachment.name(),
                                         attachment.size()
                                     )?;
-                                    
+
                                     writeln!(
                                         stdout,
                                         ">> Do `/download {} {} <path>` to download",
