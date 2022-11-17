@@ -791,6 +791,13 @@ async fn message_event_handle(
                                         attachment.name(),
                                         attachment.size()
                                     )?;
+                                    
+                                    writeln!(
+                                        stdout,
+                                        ">> Do `/download {} {} <path>` to download",
+                                        message.id(),
+                                        attachment.name(),
+                                    )?;
                                 }
                             }
                             MessageType::Event => {}
