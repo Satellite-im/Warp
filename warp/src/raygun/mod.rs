@@ -5,6 +5,7 @@ use crate::error::Error;
 use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::{Extension, SingleHandle};
 
+use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
@@ -439,7 +440,7 @@ pub enum EmbedState {
 }
 
 #[async_trait::async_trait]
-pub trait RayGun: RayGunStream + Extension + Sync + Send + SingleHandle {
+pub trait RayGun: RayGunStream + Extension + Sync + Send + SingleHandle + DynClone{
     // Start a new conversation.
     async fn create_conversation(&mut self, _: &DID) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
@@ -509,6 +510,8 @@ pub trait RayGun: RayGunStream + Extension + Sync + Send + SingleHandle {
         state: EmbedState,
     ) -> Result<(), Error>;
 }
+
+dyn_clone::clone_trait_object!(RayGun);
 
 #[async_trait::async_trait]
 pub trait RayGunStream: Sync + Send {

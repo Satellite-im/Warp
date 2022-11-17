@@ -1,6 +1,7 @@
 pub mod generator;
 pub mod identity;
 
+use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 use warp_derive::FFIFree;
@@ -49,7 +50,7 @@ impl core::ops::DerefMut for MultiPassEventStream {
 }
 
 pub trait MultiPass:
-    Extension + IdentityInformation + Friends + FriendsEvent + Sync + Send + SingleHandle
+    Extension + IdentityInformation + Friends + FriendsEvent + Sync + Send + SingleHandle + DynClone
 {
     /// Create an [`Identity`]
     fn create_identity(
@@ -105,6 +106,8 @@ where
         self.write().refresh_cache()
     }
 }
+
+dyn_clone::clone_trait_object!(MultiPass);
 
 pub trait Friends: Sync + Send {
     /// Send friend request to corresponding public key

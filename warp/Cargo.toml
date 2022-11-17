@@ -60,6 +60,7 @@ hex = "0.4"
 libipld = { version = "0.14", features = ["serde-codec"] }
 
 # Misc
+dyn-clone = "1.0"
 uuid = { version = "1.0", features = ["serde", "v4"] }
 regex = "1.5"
 derive_more = "0.99"
