@@ -1382,7 +1382,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         message_id: Uuid,
         file: &str,
         path: PathBuf,
-        override_path: bool,
+        _: bool,
     ) -> Result<ConstellationProgressStream, Error> {
         let constellation = self
             .filesystem
@@ -1410,11 +1410,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let root = constellation.read().root_directory();
         if !root.has_item(&attachment.name()) {
             root.add_file(attachment.clone())?;
-        }
-
-        //Maybe allow overriding the file?
-        if path.is_file() && !override_path {
-            return Err(Error::FileExist);
         }
 
         let (tx, mut rx) = tokio::sync::broadcast::channel(50000);
