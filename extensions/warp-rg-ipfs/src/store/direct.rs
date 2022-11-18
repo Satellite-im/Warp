@@ -1418,24 +1418,27 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             let ipfs = self.ipfs.clone();
             let constellation = constellation.clone();
             let attachment = attachment.clone();
+            let own_did = self.did.clone();
             async move {
                 let did = message.sender();
 
-                let peer_id = did_to_libp2p_pub(&did)?.to_peer_id();
+                if !did.eq(&own_did) {
+                    let peer_id = did_to_libp2p_pub(&did)?.to_peer_id();
 
-                let info = match ipfs.find_peer_info(peer_id).await {
-                    Ok(info) => info,
-                    _ => return Ok::<_, Error>(()),
-                };
+                    let info = match ipfs.find_peer_info(peer_id).await {
+                        Ok(info) => info,
+                        _ => return Ok::<_, Error>(()),
+                    };
 
-                //This is done to insure we can successfully exchange blocks
-                let opt = DialOpts::peer_id(peer_id)
-                    .addresses(info.listen_addrs)
-                    .extend_addresses_through_behaviour()
-                    .build();
+                    //This is done to insure we can successfully exchange blocks
+                    let opt = DialOpts::peer_id(peer_id)
+                        .addresses(info.listen_addrs)
+                        .extend_addresses_through_behaviour()
+                        .build();
 
-                if let Err(e) = ipfs.dial(opt).await {
-                    error!("Error dialing peer: {e}");
+                    if let Err(e) = ipfs.dial(opt).await {
+                        error!("Error dialing peer: {e}");
+                    }
                 }
 
                 let mut file = tokio::fs::File::create(path).await?;
