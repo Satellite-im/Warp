@@ -602,7 +602,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
             ) {
                 (Some(username), None, None, None) => {
                     let len = username.chars().count();
-                    if len <= 3 || len >= 64 {
+                    if !(4..=64).contains(&len) {
                         return Err(Error::InvalidLength {
                             context: "username".into(),
                             current: len,
