@@ -1317,6 +1317,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 continue;
             }
 
+            //Note: If this fails this there might be a possible race condition
             let file = match current_directory
                 .get_item(&filename)
                 .and_then(|item| item.get_file())
@@ -1438,12 +1439,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                             }
                         }
                         _ => {
-                            warn!("Sender not found or is not online");
+                            warn!("Sender not found or is not connected");
                         }
                     };
                 }
 
-                let mut file = tokio::fs::File::create(path).await?;
+                let mut file = tokio::fs::File::create(&path).await?;
 
                 let mut stream = constellation.read().get_stream(&attachment.name()).await?;
                 let mut written = 0;
@@ -1460,6 +1461,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                 });
                             }
                             Err(e) => {
+                                error!("Error writing to disk: {e}");
                                 let _ = tx.send(Progression::ProgressFailed {
                                     name: attachment.name(),
                                     last_size: Some(written),
@@ -1470,6 +1472,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                             }
                         },
                         Err(e) => {
+                            error!("Error reading from stream: {e}");
                             let _ = tx.send(Progression::ProgressFailed {
                                 name: attachment.name(),
                                 last_size: Some(written),
@@ -1480,7 +1483,18 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         }
                     }
                 }
+
+                if failed {
+                    drop(file);
+                    if let Err(e) = tokio::fs::remove_file(&path).await {
+                        error!("Error removing file: {e}");
+                    }
+                }
+                
                 if !failed {
+                    if let Err(e) = file.flush().await {
+                        error!("Error flushing stream: {e}");
+                    }
                     let _ = tx.send(Progression::ProgressComplete {
                         name: attachment.name(),
                         total: Some(written),
