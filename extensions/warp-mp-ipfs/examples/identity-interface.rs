@@ -193,12 +193,20 @@ async fn main() -> anyhow::Result<()> {
                             };
                             writeln!(stdout, "> A request has been sent to {}. Do \"request close {}\" to if you wish to close the request", username, did)?;
                         }
-                        warp::multipass::MultiPassEventKind::FriendRequestRejected { from } => {
-                            let username = match account.get_identity(Identifier::did_key(from.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
-                                Ok(idents) => idents.username(),
-                                Err(_) => from.to_string()
-                            };
-                            writeln!(stdout, "> {} has denied requested your request", username)?;
+                        warp::multipass::MultiPassEventKind::FriendRequestRejected { from, to } => {
+                            if from == own_identity.did_key() {
+                                let username = match account.get_identity(Identifier::did_key(to.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
+                                    Ok(idents) => idents.username(),
+                                    Err(_) => to.to_string()
+                                };
+                                writeln!(stdout, "> You've rejected {} request", username)?;
+                            } else {
+                                let username = match account.get_identity(Identifier::did_key(from.clone())).and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist)) {
+                                    Ok(idents) => idents.username(),
+                                    Err(_) => from.to_string()
+                                };
+                                writeln!(stdout, "> {} rejected your request", username)?;
+                            }
                         },
                         warp::multipass::MultiPassEventKind::FriendRequestClosed { from, to } => {
                             if from == own_identity.did_key() {

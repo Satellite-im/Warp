@@ -338,10 +338,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     list.remove(&internal_request);
                     self.set_request_list(list).await?;
 
-                    if let Err(e) = self
-                        .tx
-                        .send(MultiPassEventKind::FriendRequestRejected { from: data.from() })
-                    {
+                    if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestRejected {
+                        from: data.from(),
+                        to: data.to(),
+                    }) {
                         error!("Error broadcasting event: {e}");
                     }
                 }
@@ -443,7 +443,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let list = self.list_all_raw_request().await?;
 
-        //TODO: Use the iterator instead 
+        //TODO: Use the iterator instead
         for request in list.iter() {
             // checking the from and status is just a precaution and not required
             if request.request_type() == InternalRequestType::Outgoing
@@ -974,6 +974,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
             }
             FriendRequestStatus::RequestRemoved => {
                 if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestClosed {
+                    from: request.from(),
+                    to: request.to(),
+                }) {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            FriendRequestStatus::Denied => {
+                if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestRejected {
                     from: request.from(),
                     to: request.to(),
                 }) {
