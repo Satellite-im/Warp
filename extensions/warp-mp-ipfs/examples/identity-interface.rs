@@ -5,7 +5,6 @@ use rustyline_async::{Readline, ReadlineError};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use tracing_subscriber::EnvFilter;
-use warp::error::Error;
 use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
@@ -276,7 +275,7 @@ async fn main() -> anyhow::Result<()> {
                                 .and_then(|list| list.first().cloned())
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
-                                
+
                             writeln!(stdout, "> {} went offline", username)?;
                         },
                     }
