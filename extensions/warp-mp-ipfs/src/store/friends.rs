@@ -338,10 +338,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     list.remove(&internal_request);
                     self.set_request_list(list).await?;
 
-                    if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestRejected {
-                        from: data.from(),
-                        to: data.to(),
-                    }) {
+                    if let Err(e) =
+                        self.tx
+                            .send(MultiPassEventKind::OutgoingFriendRequestRejected {
+                                did: data.from(),
+                            })
+                    {
                         error!("Error broadcasting event: {e}");
                     }
                 }
@@ -368,10 +370,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
                     self.set_request_list(list).await?;
 
-                    if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestClosed {
-                        from: data.from(),
-                        to: data.to(),
-                    }) {
+                    if let Err(e) = self
+                        .tx
+                        .send(MultiPassEventKind::IncomingFriendRequestClosed { did: data.from() })
+                    {
                         error!("Error broadcasting event: {e}");
                     }
                 }
@@ -973,18 +975,18 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
             }
             FriendRequestStatus::RequestRemoved => {
-                if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestClosed {
-                    from: request.from(),
-                    to: request.to(),
-                }) {
+                if let Err(e) = self
+                    .tx
+                    .send(MultiPassEventKind::OutgoingFriendRequestClosed { did: request.to() })
+                {
                     error!("Error broadcasting event: {e}");
                 }
             }
             FriendRequestStatus::Denied => {
-                if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestRejected {
-                    from: request.from(),
-                    to: request.to(),
-                }) {
+                if let Err(e) = self
+                    .tx
+                    .send(MultiPassEventKind::IncomingFriendRequestRejected { did: request.to() })
+                {
                     error!("Error broadcasting event: {e}");
                 }
             }
