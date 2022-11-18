@@ -1425,20 +1425,22 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 if !did.eq(&own_did) {
                     let peer_id = did_to_libp2p_pub(&did)?.to_peer_id();
 
-                    let info = match ipfs.find_peer_info(peer_id).await {
-                        Ok(info) => info,
-                        _ => return Ok::<_, Error>(()),
+                    match ipfs.find_peer_info(peer_id).await {
+                        Ok(info) => {
+                            //This is done to insure we can successfully exchange blocks
+                            let opt = DialOpts::peer_id(peer_id)
+                                .addresses(info.listen_addrs)
+                                .extend_addresses_through_behaviour()
+                                .build();
+
+                            if let Err(e) = ipfs.dial(opt).await {
+                                error!("Error dialing peer: {e}");
+                            }
+                        }
+                        _ => {
+                            warn!("Sender not found or is not online");
+                        }
                     };
-
-                    //This is done to insure we can successfully exchange blocks
-                    let opt = DialOpts::peer_id(peer_id)
-                        .addresses(info.listen_addrs)
-                        .extend_addresses_through_behaviour()
-                        .build();
-
-                    if let Err(e) = ipfs.dial(opt).await {
-                        error!("Error dialing peer: {e}");
-                    }
                 }
 
                 let mut file = tokio::fs::File::create(path).await?;
