@@ -33,10 +33,7 @@ use crate::Persistent;
 use super::document::DocumentType;
 use super::identity::IdentityStore;
 use super::phonebook::PhoneBook;
-use super::{
-    did_keypair, did_to_libp2p_pub, get_inbox_topic, libp2p_pub_to_did, sign_serde,
-    PeerConnectionType,
-};
+use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, PeerConnectionType};
 
 pub struct FriendsStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
@@ -160,7 +157,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let store = Self {
             ipfs,
             identity,
-            did_key: did_key.clone(),
+            did_key,
             path,
             end_event,
             queue,
@@ -174,7 +171,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let stream = store
             .ipfs
-            .pubsub_subscribe(get_inbox_topic(did_key.as_ref()))
+            .pubsub_subscribe(get_inbox_topic(store.did_key.as_ref()))
             .await?;
 
         let (local_ipfs_public_key, _) = store.local().await?;
@@ -1190,6 +1187,10 @@ fn validate_request(real_request: &FriendRequest) -> Result<(), Error> {
 
     verify_serde_sig(real_request.from(), &request, &signature)?;
     Ok(())
+}
+
+pub fn get_inbox_topic(did: &DID) -> String {
+    format!("/peer/{}/inbox", did.to_string())
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
