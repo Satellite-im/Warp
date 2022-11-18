@@ -480,7 +480,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             return Err(Error::FileExist);
         }
 
-        let (tx, mut rx) = tokio::sync::broadcast::channel(5);
+        let (tx, mut rx) = tokio::sync::broadcast::channel(50000);
         let config = self.config.clone().unwrap_or_default();
         tokio::spawn({
             let name = name.to_string();
