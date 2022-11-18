@@ -1450,9 +1450,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 let mut failed = false;
                 while let Some(res) = stream.next().await {
                     match res {
-                        Ok(bytes) => match file.write(&bytes).await {
-                            Ok(size) => {
-                                written += size;
+                        Ok(bytes) => match file.write_all(&bytes).await {
+                            Ok(_) => {
+                                written += bytes.len();
                                 let _ = tx.send(Progression::CurrentProgress {
                                     name: attachment.name(),
                                     current: written,
