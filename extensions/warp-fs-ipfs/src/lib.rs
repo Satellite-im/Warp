@@ -581,8 +581,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
                 .await
                 .map_err(anyhow::Error::from)?;
 
-            pin_mut!(cat_stream);
-            while let Some(data) = cat_stream.next().await {
+            for await data in cat_stream {
                 match data {
                     Ok(data) => yield Ok(data),
                     Err(e) => yield Err(Error::from(anyhow::anyhow!("{e}"))),
