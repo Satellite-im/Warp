@@ -1,22 +1,27 @@
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use futures::{Stream, StreamExt};
+use ipfs::libp2p::swarm::dial_opts::DialOpts;
 use ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream};
 
 use libipld::IpldCodec;
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast::{self, Sender as BroadcastSender};
+use tokio_util::io::ReaderStream;
 use uuid::Uuid;
+use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::logging::tracing::log::{error, trace};
 use warp::logging::tracing::warn;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    Conversation, EmbedState, Message, MessageEventKind, MessageOptions, PinState, RayGunEventKind,
-    Reaction, ReactionState,
+    Conversation, EmbedState, Location, Message, MessageEventKind, MessageOptions, MessageType,
+    PinState, RayGunEventKind, Reaction, ReactionState,
 };
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock};
@@ -40,6 +45,9 @@ pub struct DirectMessageStore<T: IpfsTypes> {
 
     // account instance
     account: Arc<RwLock<Box<dyn MultiPass>>>,
+
+    // filesystem instance
+    filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
 
     // Queue
     queue: Arc<RwLock<Vec<Queue>>>,
@@ -66,6 +74,7 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
             path: self.path.clone(),
             direct_conversation: self.direct_conversation.clone(),
             account: self.account.clone(),
+            filesystem: self.filesystem.clone(),
             queue: self.queue.clone(),
             did: self.did.clone(),
             event: self.event.clone(),
@@ -264,6 +273,7 @@ impl DirectConversation {
     pub fn start_task(
         &mut self,
         did: Arc<DID>,
+        filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
         decrypted: Arc<AtomicBool>,
         filter: &Arc<Option<SpamFilter>>,
         stream: SubscriptionStream,
@@ -277,13 +287,14 @@ impl DirectConversation {
 
         let task = warp::async_spawn(async move {
             futures::pin_mut!(stream);
-
+            let filesystem = filesystem;
             while let Some(stream) = stream.next().await {
                 if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
                     if let Ok(data) = data.decrypt::<Vec<u8>>(&did) {
                         if let Ok(event) = serde_json::from_slice::<MessagingEvents>(&data) {
                             if let Err(e) = direct_message_event(
                                 &mut convo.messages_mut(),
+                                filesystem.clone(),
                                 &event,
                                 &filter,
                                 tx.clone(),
@@ -320,11 +331,13 @@ impl DirectConversation {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 impl<T: IpfsTypes> DirectMessageStore<T> {
     pub async fn new(
         ipfs: Ipfs<T>,
         path: Option<PathBuf>,
         account: Arc<RwLock<Box<dyn MultiPass>>>,
+        filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
         discovery: bool,
         interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
@@ -363,6 +376,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             ipfs,
             direct_conversation,
             account,
+            filesystem,
             queue,
             did,
             event,
@@ -407,6 +421,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                 conversation.set_path(path);
                                 conversation.start_task(
                                     store.did.clone(),
+                                    store.filesystem.clone(),
                                     store.store_decrypted.clone(),
                                     &store.spam_filter,
                                     stream,
@@ -478,7 +493,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                             continue;
                                                         }
                                                     };
-                                                convo.start_task(store.did.clone(), store.store_decrypted.clone(), &store.spam_filter, stream);
+                                                convo.start_task(store.did.clone(),store.filesystem.clone(), store.store_decrypted.clone(), &store.spam_filter, stream);
                                                 if let Some(path) = store.path.as_ref() {
                                                     convo.set_path(path);
                                                     if let Err(e) = convo.to_file((!store.store_decrypted.load(Ordering::SeqCst)).then_some(&*store.did)).await {
@@ -664,6 +679,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         conversation.start_task(
             self.did.clone(),
+            self.filesystem.clone(),
             self.store_decrypted.clone(),
             &self.spam_filter,
             stream,
@@ -967,6 +983,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         direct_message_event(
             &mut conversation.messages_mut(),
+            None,
             &event,
             &self.spam_filter,
             tx,
@@ -1029,6 +1046,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         direct_message_event(
             &mut conversation.messages_mut(),
+            None,
             &event,
             &self.spam_filter,
             tx,
@@ -1097,6 +1115,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::New(message);
         direct_message_event(
             &mut conversation.messages_mut(),
+            None,
             &event,
             &self.spam_filter,
             tx,
@@ -1121,6 +1140,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::Delete(conversation.id(), message_id);
         direct_message_event(
             &mut conversation.messages_mut(),
+            None,
             &event,
             &self.spam_filter,
             tx,
@@ -1152,6 +1172,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::Pin(conversation.id(), own_did.clone(), message_id, state);
         direct_message_event(
             &mut conversation.messages_mut(),
+            None,
             &event,
             &self.spam_filter,
             tx,
@@ -1191,6 +1212,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         direct_message_event(
             &mut conversation.messages_mut(),
+            None,
             &event,
             &self.spam_filter,
             tx,
@@ -1201,6 +1223,335 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
         self.send_event(conversation.id(), event).await
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    //TODO: Return a vector of streams for events of progression for uploading (possibly passing it through to raygun events)
+    pub async fn attach(
+        &mut self,
+        conversation: Uuid,
+        location: Location,
+        files: Vec<PathBuf>,
+        messages: Vec<String>,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get_conversation(conversation)?;
+        let tx = conversation.event_handle()?;
+
+        //TODO: Send directly if constellation isnt present
+        //      this will require uploading to ipfs directly from here
+        //      or setting up a seperate stream channel related to
+        //      the subscribed topic possibly as a configuration option
+        let constellation = self
+            .filesystem
+            .clone()
+            .ok_or(Error::ConstellationExtensionUnavailable)?;
+
+        let files = files
+            .iter()
+            .filter(|path| path.is_file())
+            .collect::<Vec<_>>();
+
+        if files.is_empty() {
+            return Err(Error::InvalidMessage);
+        }
+
+        let mut attachments = vec![];
+
+        for file in files {
+            let file = match location {
+                Location::Constellation => {
+                    let path = file.display().to_string();
+                    match constellation
+                        .root_directory()
+                        .get_item_by_path(&path)
+                        .and_then(|item| item.get_file())
+                        .ok()
+                    {
+                        Some(f) => f,
+                        None => continue,
+                    }
+                }
+                Location::Disk => {
+                    let mut filename = match file.file_name() {
+                        Some(file) => file.to_string_lossy().to_string(),
+                        None => continue,
+                    };
+
+                    let original = filename.clone();
+
+                    let current_directory = constellation.read().current_directory()?;
+
+                    let mut interval = 0;
+                    let skip;
+                    loop {
+                        if current_directory.has_item(&filename) {
+                            if interval >= 20 {
+                                skip = true;
+                                break;
+                            }
+                            interval += 1;
+                            let file = PathBuf::from(&original);
+                            let file_stem =
+                                file.file_stem().and_then(OsStr::to_str).map(str::to_string);
+                            let ext = file.extension().and_then(OsStr::to_str).map(str::to_string);
+
+                            filename = match (file_stem, ext) {
+                                (Some(filename), Some(ext)) => {
+                                    format!("{filename} ({interval}).{ext}")
+                                }
+                                _ => format!("{original} ({interval})"),
+                            };
+                            continue;
+                        }
+                        skip = false;
+                        break;
+                    }
+
+                    if skip {
+                        continue;
+                    }
+
+                    let file = tokio::fs::File::open(&file).await?;
+
+                    let size = file.metadata().await?.len() as usize;
+
+                    let stream = ReaderStream::new(file)
+                        .filter_map(|x| async { x.ok() })
+                        .map(|x| x.into());
+
+                    let mut progress = match constellation
+                        .write()
+                        .put_stream(&filename, Some(size), stream.boxed())
+                        .await
+                    {
+                        Ok(stream) => stream,
+                        Err(e) => {
+                            error!("Error uploading {filename}: {e}");
+                            continue;
+                        }
+                    };
+
+                    let mut complete = false;
+
+                    while let Some(progress) = progress.next().await {
+                        if let Progression::ProgressComplete { .. } = progress {
+                            complete = true;
+                            break;
+                        }
+                    }
+
+                    if !complete {
+                        continue;
+                    }
+
+                    //Note: If this fails this there might be a possible race condition
+                    match current_directory
+                        .get_item(&filename)
+                        .and_then(|item| item.get_file())
+                    {
+                        Ok(file) => file,
+                        Err(_) => continue,
+                    }
+                }
+            };
+
+            // We reconstruct it to avoid out any possible metadata that was apart of the `File` structure
+            let new_file = warp::constellation::file::File::new(&file.name());
+            new_file.set_size(file.size());
+            new_file.set_hash(file.hash());
+            new_file.set_reference(&file.reference().unwrap_or_default());
+            attachments.push(new_file);
+        }
+
+        let own_did = &*self.did.clone();
+
+        let mut message = Message::default();
+        message.set_message_type(MessageType::Attachment);
+        message.set_conversation_id(conversation.id());
+        message.set_sender(own_did.clone());
+        message.set_attachment(attachments);
+        message.set_value(messages.clone());
+
+        let construct = vec![
+            message.id().into_bytes().to_vec(),
+            message.conversation_id().into_bytes().to_vec(),
+            own_did.to_string().as_bytes().to_vec(),
+            message
+                .value()
+                .iter()
+                .map(|s| s.as_bytes())
+                .collect::<Vec<_>>()
+                .concat(),
+        ]
+        .concat();
+
+        let signature = super::sign_serde(own_did, &construct)?;
+        message.set_signature(Some(signature));
+
+        let event = MessagingEvents::New(message);
+
+        direct_message_event(
+            &mut conversation.messages_mut(),
+            None,
+            &event,
+            &self.spam_filter,
+            tx,
+            MessageDirection::Out,
+            Default::default(),
+        )?;
+        warp::async_block_in_place_uncheck(
+            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
+        )?;
+
+        self.send_event(conversation.id(), event).await
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    pub async fn download(
+        &self,
+        conversation: Uuid,
+        message_id: Uuid,
+        file: &str,
+        path: PathBuf,
+        _: bool,
+    ) -> Result<ConstellationProgressStream, Error> {
+        let constellation = self
+            .filesystem
+            .clone()
+            .ok_or(Error::ConstellationExtensionUnavailable)?;
+
+        if constellation.read().id() != "warp-fs-ipfs" {
+            //Note: Temporary for now; Will get lifted in the future
+            return Err(Error::Unimplemented);
+        }
+
+        let message = self.get_message(conversation, message_id)?;
+
+        if message.message_type() != MessageType::Attachment {
+            return Err(Error::InvalidMessage);
+        }
+
+        let attachment = message
+            .attachments()
+            .iter()
+            .find(|attachment| attachment.name() == file)
+            .cloned()
+            .ok_or(Error::FileNotFound)?;
+
+        let root = constellation.read().root_directory();
+        if !root.has_item(&attachment.name()) {
+            root.add_file(attachment.clone())?;
+        }
+
+        let ipfs = self.ipfs.clone();
+        let constellation = constellation.clone();
+        let attachment = attachment.clone();
+        let own_did = self.did.clone();
+
+        let progress_stream = async_stream::stream! {
+                let did = message.sender();
+                if !did.eq(&own_did) {
+                    if let Ok(peer_id) = did_to_libp2p_pub(&did).map(|pk| pk.to_peer_id()) {
+                        match ipfs.find_peer_info(peer_id).await {
+                            Ok(info) => {
+                                //This is done to insure we can successfully exchange blocks
+                                let opt = DialOpts::peer_id(peer_id)
+                                    .addresses(info.listen_addrs)
+                                    .extend_addresses_through_behaviour()
+                                    .build();
+
+                                if let Err(e) = ipfs.dial(opt).await {
+                                    error!("Error dialing peer: {e}");
+                                }
+                            }
+                            _ => {
+                                warn!("Sender not found or is not connected");
+                            }
+                        };
+                    }
+                }
+
+                let mut file = match tokio::fs::File::create(&path).await {
+                    Ok(file) => file,
+                    Err(e) => {
+                        error!("Error creating file: {e}");
+                        yield Progression::ProgressFailed {
+                                    name: attachment.name(),
+                                    last_size: None,
+                                    error: Some(e.to_string()),
+                        };
+                        return;
+                    }
+                };
+
+                let stream = match constellation.get_stream(&attachment.name()).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        error!("Error creating stream: {e}");
+                        yield Progression::ProgressFailed {
+                                    name: attachment.name(),
+                                    last_size: None,
+                                    error: Some(e.to_string()),
+                        };
+                        return;
+                    }
+                };
+
+                let mut written = 0;
+                let mut failed = false;
+                for await res in stream  {
+                    match res {
+                        Ok(bytes) => match file.write_all(&bytes).await {
+                            Ok(_) => {
+                                written += bytes.len();
+                                yield Progression::CurrentProgress {
+                                    name: attachment.name(),
+                                    current: written,
+                                    total: Some(attachment.size()),
+                                };
+                            }
+                            Err(e) => {
+                                error!("Error writing to disk: {e}");
+                                yield Progression::ProgressFailed {
+                                    name: attachment.name(),
+                                    last_size: Some(written),
+                                    error: Some(e.to_string()),
+                                };
+                                failed = true;
+                                break;
+                            }
+                        },
+                        Err(e) => {
+                            error!("Error reading from stream: {e}");
+                            yield Progression::ProgressFailed {
+                                    name: attachment.name(),
+                                    last_size: Some(written),
+                                    error: Some(e.to_string()),
+                            };
+                            failed = true;
+                            break;
+                        }
+                    }
+                }
+
+                if failed {
+                    if let Err(e) = tokio::fs::remove_file(&path).await {
+                        error!("Error removing file: {e}");
+                    }
+                }
+
+                if !failed {
+                    if let Err(e) = file.flush().await {
+                        error!("Error flushing stream: {e}");
+                    }
+                    yield Progression::ProgressComplete {
+                        name: attachment.name(),
+                        total: Some(written),
+                    };
+                }
+        };
+
+        Ok(ConstellationProgressStream(progress_stream.boxed()))
     }
 
     pub async fn send_event<S: Serialize + Send + Sync>(
@@ -1231,15 +1582,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         )?;
 
         let bytes = serde_json::to_vec(&payload)?;
-
-        if bytes.len() >= 256 * 1024 {
-            return Err(Error::InvalidLength {
-                context: "payload".into(),
-                current: bytes.len(),
-                minimum: Some(1),
-                maximum: Some(256 * 1024),
-            });
-        }
 
         let peers = self.ipfs.pubsub_peers(Some(conversation.topic())).await?;
 
@@ -1295,6 +1637,7 @@ pub struct EventOpt {
     pub keep_if_owned: Arc<AtomicBool>,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum MessageDirection {
     In,
     Out,
@@ -1302,6 +1645,7 @@ pub enum MessageDirection {
 
 pub fn direct_message_event(
     messages: &mut Vec<Message>,
+    filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
     events: &MessagingEvents,
     filter: &Arc<Option<SpamFilter>>,
     tx: BroadcastSender<MessageEventKind>,
@@ -1349,8 +1693,34 @@ pub fn direct_message_event(
             }
             spam_check(&mut message, filter)?;
             let conversation_id = message.conversation_id();
-            // let coid = message.conversation_id();
+
             messages.push(message.clone());
+
+            if message.message_type() == MessageType::Attachment
+                && direction == MessageDirection::In
+            {
+                if let Some(fs) = filesystem {
+                    let dir = fs.read().root_directory();
+                    for file in message.attachments() {
+                        let original = file.name();
+                        let mut inc = 0;
+                        loop {
+                            if dir.has_item(&original) {
+                                if inc >= 20 {
+                                    break;
+                                }
+                                inc += 1;
+                                file.set_name(&format!("{original}-{inc}"));
+                                continue;
+                            }
+                            break;
+                        }
+                        if let Err(e) = dir.add_file(file) {
+                            error!("Error adding file to constellation: {e}");
+                        }
+                    }
+                }
+            }
 
             let event = match direction {
                 MessageDirection::In => MessageEventKind::MessageReceived {

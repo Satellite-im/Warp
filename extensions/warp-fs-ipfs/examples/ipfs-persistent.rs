@@ -3,9 +3,15 @@ use std::{path::Path, sync::Arc};
 use anyhow::bail;
 use clap::{Parser, Subcommand};
 use comfy_table::Table;
+use futures::StreamExt;
 use std::path::PathBuf;
+use tokio::io::AsyncWriteExt;
+use tokio_util::io::ReaderStream;
 use warp::{
-    constellation::Constellation, multipass::MultiPass, sync::RwLock, tesseract::Tesseract,
+    constellation::{Constellation, Progression},
+    multipass::MultiPass,
+    sync::RwLock,
+    tesseract::Tesseract,
 };
 use warp_fs_ipfs::{config::FsIpfsConfig, IpfsFileSystem, Persistent};
 use warp_mp_ipfs::{config::MpIpfsConfig, ipfs_identity_persistent};
@@ -99,15 +105,68 @@ async fn main() -> anyhow::Result<()> {
             let remote =
                 remote.unwrap_or_else(|| file.file_name().unwrap().to_string_lossy().to_string());
 
-            filesystem.put(&remote, &file.to_string_lossy()).await?;
+            let file = tokio::fs::File::open(&local).await?;
 
-            println!("{} has been uploaded", remote);
+            let size = file.metadata().await?.len() as usize;
+
+            let stream = ReaderStream::new(file)
+                .filter_map(|x| async { x.ok() })
+                .map(|x| x.into());
+
+            let mut event = filesystem
+                .put_stream(&remote, Some(size), stream.boxed())
+                .await?;
+
+            while let Some(event) = event.next().await {
+                match event {
+                    Progression::CurrentProgress {
+                        name,
+                        current,
+                        total,
+                    } => {
+                        println!("Written {} MB for {name}", current / 1024 / 1024);
+                        if let Some(total) = total {
+                            println!(
+                                "{}% completed",
+                                (((current as f64) / (total as f64)) * 100.) as usize
+                            )
+                        }
+                    }
+                    Progression::ProgressComplete { name, total } => {
+                        println!(
+                            "{name} has been uploaded with {} MB",
+                            total.unwrap_or_default() / 1024 / 1024
+                        );
+                    }
+                    Progression::ProgressFailed {
+                        name,
+                        last_size,
+                        error,
+                    } => {
+                        println!(
+                            "{name} failed to upload at {} MB due to: {}",
+                            last_size.unwrap_or_default(),
+                            error.unwrap_or_default()
+                        );
+                    }
+                }
+            }
         }
         Command::DownloadFile { remote, local } => {
-            match filesystem.get(&remote, &local).await {
-                Ok(_) => println!("File is downloaded to {local}"),
-                Err(e) => println!("Error downloading file: {e}"),
-            };
+            let mut stream = filesystem.get_stream(&remote).await?;
+
+            let mut written = 0;
+            let mut file = tokio::fs::File::create(&local).await?;
+            while let Some(Ok(data)) = stream.next().await {
+                file.write_all(&data).await?;
+                written += data.len();
+                file.flush().await?;
+            }
+
+            println!(
+                "{local} been downloaded with {} MB written",
+                written / 1024 / 1024
+            );
         }
         Command::DeleteFile { remote } => {
             match filesystem.remove(&remote, true).await {
@@ -137,8 +196,8 @@ async fn main() -> anyhow::Result<()> {
                         format!("{} MB", file.size() / 1024 / 1024),
                         file.favorite().to_string(),
                         file.description(),
-                        file.creation().date().to_string(),
-                        file.modified().date().to_string(),
+                        file.creation().date_naive().to_string(),
+                        file.modified().date_naive().to_string(),
                         file.reference().unwrap_or_else(|| String::from("N/A")),
                     ]);
 
@@ -147,7 +206,40 @@ async fn main() -> anyhow::Result<()> {
                 Err(_) => println!("File doesnt exist"),
             }
         }
-        Command::List { .. } => {}
+        Command::List { remote } => {
+            let directory = filesystem.open_directory(remote.as_deref().unwrap_or_default())?;
+            let list = directory.get_items();
+            let mut table = Table::new();
+            table.set_header(vec![
+                "Name",
+                "Type",
+                "Size",
+                "Favorite",
+                "Description",
+                "Creation",
+                "Modified",
+                "Reference",
+            ]);
+            for item in list.iter() {
+                table.add_row(vec![
+                    item.name(),
+                    item.item_type().to_string(),
+                    format!("{} MB", item.size() / 1024 / 1024),
+                    item.favorite().to_string(),
+                    item.description(),
+                    item.creation().date_naive().to_string(),
+                    item.modified().date_naive().to_string(),
+                    if item.is_file() {
+                        item.get_file()?
+                            .reference()
+                            .unwrap_or_else(|| String::from("N/A"))
+                    } else {
+                        String::new()
+                    },
+                ]);
+            }
+            println!("{table}");
+        }
         Command::FileReference { remote } => {
             match filesystem
                 .current_directory()?

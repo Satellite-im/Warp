@@ -1,15 +1,17 @@
 pub mod config;
 use config::FsIpfsConfig;
+use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
+use ipfs::unixfs::ll::file::adder::{Chunker, FileAdderBuilder};
 use libipld::serde::{from_ipld, to_ipld};
 use libipld::Cid;
 use std::any::Any;
+use std::collections::HashSet;
 use std::io::Cursor;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use warp::constellation::ConstellationDataType;
+use warp::constellation::{ConstellationDataType, ConstellationProgressStream, Progression};
 use warp::logging::tracing::{debug, error};
 use warp::multipass::MultiPass;
 use warp::sata::{Kind, Sata};
@@ -36,7 +38,6 @@ type Result<T> = std::result::Result<T, Error>;
 pub struct IpfsFileSystem<T: IpfsTypes> {
     index: Directory,
     path: PathBuf,
-    max_size: Arc<AtomicUsize>,
     modified: DateTime<Utc>,
     config: Option<FsIpfsConfig>,
     ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
@@ -51,7 +52,6 @@ impl<T: IpfsTypes> Clone for IpfsFileSystem<T> {
             index: self.index.clone(),
             path: self.path.clone(),
             modified: self.modified,
-            max_size: self.max_size.clone(),
             config: self.config.clone(),
             ipfs: self.ipfs.clone(),
             index_cid: self.index_cid.clone(),
@@ -71,7 +71,6 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
             path: PathBuf::new(),
             modified: Utc::now(),
             config,
-            max_size: Arc::new(AtomicUsize::new(4 * 1024 * 1024)),
             index_cid: Default::default(),
             account: Default::default(),
             ipfs: Default::default(),
@@ -346,7 +345,10 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         let file = warp::constellation::file::File::new(name);
         file.set_size(written);
         file.set_reference(&format!("/ipfs/{cid}"));
-        file.hash_mut().hash_from_file(&path)?;
+        let f = file.clone();
+        tokio::task::spawn_blocking(move || f.hash_mut().hash_from_file(&path))
+            .await
+            .map_err(anyhow::Error::from)??;
         self.current_directory()?.add_item(file)?;
         if let Err(_e) = self.export_index().await {}
         Ok(())
@@ -460,6 +462,137 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         Ok(buffer)
     }
 
+    /// Used to upload file to the filesystem with data from a stream
+    async fn put_stream(
+        &mut self,
+        name: &str,
+        total_size: Option<usize>,
+        mut stream: BoxStream<'static, Vec<u8>>,
+    ) -> Result<ConstellationProgressStream> {
+        let ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
+
+        let current_directory = self.current_directory()?;
+
+        if current_directory.get_item_by_path(name).is_ok() {
+            return Err(Error::FileExist);
+        }
+
+        let (tx, mut rx) = tokio::sync::broadcast::channel(50000);
+        let config = self.config.clone().unwrap_or_default();
+        tokio::spawn({
+            let name = name.to_string();
+            let fs = self.clone();
+            async move {
+                let mut last_written = 0;
+                let result = {
+                    let mut adder = FileAdderBuilder::default()
+                        .with_chunker(Chunker::Size(config.chunking.unwrap_or(256 * 1024)))
+                        .build();
+
+                    let mut written = 0;
+                    let mut last_cid = None;
+
+                    while let Some(buffer) = stream.next().await {
+                        let mut total = 0;
+
+                        while total < buffer.len() {
+                            let (blocks, consumed) = adder.push(&buffer[total..]);
+                            for (cid, block) in blocks {
+                                let block = Block::new(cid, block)?;
+                                let _cid = ipfs.put_block(block).await?;
+                            }
+                            total += consumed;
+                            written += consumed;
+                            last_written += consumed;
+                        }
+                        let _ = tx.send(Progression::CurrentProgress {
+                            name: name.to_string(),
+                            current: written,
+                            total: total_size,
+                        });
+                    }
+
+                    let blocks = adder.finish();
+                    for (cid, block) in blocks {
+                        let block = Block::new(cid, block)?;
+                        let cid = ipfs.put_block(block).await?;
+                        last_cid = Some(cid);
+                    }
+
+                    let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
+
+                    ipfs.insert_pin(&cid, true).await?;
+
+                    let file = warp::constellation::file::File::new(&name);
+                    file.set_size(written);
+                    file.set_reference(&format!("/ipfs/{cid}"));
+                    // file.hash_mut().hash_from_slice(buffer)?;
+                    current_directory.add_item(file)?;
+                    if let Err(_e) = fs.export_index().await {}
+
+                    let _ = tx.send(Progression::ProgressComplete {
+                        name: name.to_string(),
+                        total: Some(written),
+                    });
+
+                    Ok::<_, Error>(())
+                };
+                if let Err(e) = result {
+                    let _ = tx.send(Progression::ProgressFailed {
+                        name,
+                        last_size: Some(last_written),
+                        error: Some(e.to_string()),
+                    });
+                }
+                Ok::<_, Error>(())
+            }
+        });
+
+        let progress_stream = async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        };
+
+        Ok(ConstellationProgressStream(progress_stream.boxed()))
+    }
+
+    /// Used to download data from the filesystem using a stream
+    async fn get_stream(&self, name: &str) -> Result<BoxStream<'static, Result<Vec<u8>>>> {
+        let ipfs = self.ipfs()?;
+        //Used to enter the tokio context
+        let handle = warp::async_handle();
+        let _g = handle.enter();
+
+        let item = self.current_directory()?.get_item_by_path(name)?;
+        let file = item.get_file()?;
+        let reference = file.reference().ok_or(Error::Other)?; //Reference not found
+
+        let stream = async_stream::stream! {
+            let cat_stream = ipfs
+                .cat_unixfs(reference.parse::<IpfsPath>()?, None)
+                .await
+                .map_err(anyhow::Error::from)?;
+
+            for await data in cat_stream {
+                match data {
+                    Ok(data) => yield Ok(data),
+                    Err(e) => yield Err(Error::from(anyhow::anyhow!("{e}"))),
+                }
+            }
+        };
+
+        //TODO: Validate file against the hashed reference
+        Ok(stream.boxed())
+    }
+
     /// Used to remove data from the filesystem
     async fn remove(&mut self, name: &str, _: bool) -> Result<()> {
         let ipfs = self.ipfs()?;
@@ -484,11 +617,44 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Invalid path root"))?;
 
+        let mut pinned_blocks: HashSet<_> = HashSet::from_iter(
+            ipfs.list_pins(None)
+                .await
+                .filter_map(|r| async move {
+                    match r {
+                        Ok(v) => Some(v.0),
+                        Err(_) => None,
+                    }
+                })
+                .collect::<Vec<_>>()
+                .await,
+        );
+
         if ipfs.is_pinned(&cid).await? {
             ipfs.remove_pin(&cid, true).await?;
         }
 
-        ipfs.remove_block(cid).await?;
+        let new_pinned_blocks: HashSet<_> = HashSet::from_iter(
+            ipfs.list_pins(None)
+                .await
+                .filter_map(|r| async move {
+                    match r {
+                        Ok(v) => Some(v.0),
+                        Err(_) => None,
+                    }
+                })
+                .collect::<Vec<_>>()
+                .await,
+        );
+
+        for s_cid in new_pinned_blocks.iter() {
+            pinned_blocks.remove(s_cid);
+        }
+
+        for cid in pinned_blocks {
+            ipfs.remove_block(cid).await?;
+        }
+
         directory.remove_item(&item.name())?;
         if let Err(_e) = self.export_index().await {}
         Ok(())
@@ -530,6 +696,35 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         self.current_directory()?
             .add_directory(Directory::new(name))?;
         if let Err(_e) = self.export_index().await {}
+        Ok(())
+    }
+
+    async fn sync_ref(&mut self, path: &str) -> Result<()> {
+        let ipfs = self.ipfs()?;
+        let handle = warp::async_handle();
+        let _g = handle.enter();
+
+        let directory = self.current_directory()?;
+        let file = directory
+            .get_item_by_path(path)
+            .and_then(|item| item.get_file())?;
+        let reference = file.reference().ok_or(Error::FileNotFound)?;
+
+        let stream = ipfs
+            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
+            .await
+            .map_err(anyhow::Error::from)?;
+
+        pin_mut!(stream);
+
+        while let Some(data) = stream.next().await {
+            //This is to make sure there isnt any errors while tranversing the links
+            //however we do not need to deal with the data itself as the will store
+            //it in the blockstore after being found or blocks being exchanged from peer
+            //TODO: Should check first chunk and timeout if it exceeds a specific length
+            let _ = data.map_err(anyhow::Error::from)?;
+        }
+
         Ok(())
     }
 

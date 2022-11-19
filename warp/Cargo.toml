@@ -23,18 +23,18 @@ x25519-dalek = { version = "1" }
 ed25519-dalek = { version = "1" }
 curve25519-dalek = "3.2"
 chacha20poly1305 = { version = "0.9", features = ["stream"] }
-blake2 = { version = "0.10"  }
-sha1   = { version = "0.10" }
-sha2   = { version = "0.10"  }
-sha3   = { version = "0.10"  }
+blake2 = { version = "0.10" }
+sha1 = { version = "0.10" }
+sha2 = { version = "0.10" }
+sha3 = { version = "0.10" }
 hmac = { version = "0.12.0", default-features = false }
 digest = { version = "0.10" }
 aes-gcm = { version = "0.9" }
 aead = { version = "0.4", default-features = false }
 zeroize = "1"
-rand = { version = "0.7"  }
+rand = { version = "0.7" }
 multihash = { version = "0.16", features = ["sha1"] }
-did-key = "0.1"
+did-key = { git = "https://github.com/Satellite-im/did-key.rs", branch = "backport-patch" }
 tiny-bip39 = "1.0"
 
 # Error handling crates
@@ -68,7 +68,11 @@ libc = "0.2"
 warp-derive = { path = "./warp-derive" }
 sata = { git = "https://github.com/Satellite-im/Sata" }
 tracing = { default-features = false, features = ["log"], version = "0.1" }
-tracing-futures = { default-features = false, features = ["std-future", "std", "futures-03"], version = "0.2" }
+tracing-futures = { default-features = false, features = [
+    "std-future",
+    "std",
+    "futures-03",
+], version = "0.2" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 
