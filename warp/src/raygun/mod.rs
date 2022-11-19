@@ -85,6 +85,18 @@ pub enum MessageEventKind {
         did_key: DID,
         reaction: String,
     },
+    EventReceived(MessageEvent),
+    EventCancelled(MessageEvent)
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[serde(rename_all = "snake_case")]
+#[repr(C)]
+pub enum MessageEvent {
+    /// Event that represents typing
+    Typing,
+
+    //TODO: Custom events?
 }
 
 #[derive(FFIFree)]
@@ -271,6 +283,9 @@ pub struct Message {
     /// List of Attachment
     attachment: Vec<File>,
 
+    /// Event payload
+    event: Option<MessageEvent>,
+
     /// Signature of the message
     #[serde(skip_serializing_if = "Option::is_none")]
     signature: Option<Vec<u8>>,
@@ -293,6 +308,7 @@ impl Default for Message {
             replied: None,
             value: Vec::new(),
             attachment: Vec::new(),
+            event: None,
             signature: Default::default(),
             metadata: HashMap::new(),
         }
@@ -343,6 +359,10 @@ impl Message {
         self.attachment.clone()
     }
 
+    pub fn event(&self) -> Option<MessageEvent> {
+        self.event
+    }
+
     pub fn signature(&self) -> Vec<u8> {
         self.signature.clone().unwrap_or_default()
     }
@@ -391,6 +411,10 @@ impl Message {
 
     pub fn set_attachment(&mut self, attachments: Vec<File>) {
         self.attachment = attachments
+    }
+
+    pub fn set_event(&mut self, event: MessageEvent) {
+        self.event = Some(event)
     }
 
     pub fn set_signature(&mut self, signature: Option<Vec<u8>>) {
@@ -595,6 +619,19 @@ pub trait RayGunStream: Sync + Send {
 
     /// Subscribe to an stream of events
     async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
+        Err(Error::Unimplemented)
+    }
+}
+
+#[async_trait::async_trait]
+pub trait RayGunEvents: Sync + Send {
+    /// Send an event to a conversation
+    async fn send_event(&mut self, _: Uuid, _: MessageEvent) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Cancel event that was sent, if any.
+    async fn cancel_event(&mut self, _: Uuid, _: MessageEvent) -> Result<RayGunEventStream, Error> {
         Err(Error::Unimplemented)
     }
 }
