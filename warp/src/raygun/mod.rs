@@ -85,17 +85,26 @@ pub enum MessageEventKind {
         did_key: DID,
         reaction: String,
     },
-    EventReceived(MessageEvent),
-    EventCancelled(MessageEvent)
+    EventReceived {
+        conversation_id: Uuid,
+        did_key: DID,
+        event: MessageEvent,
+    },
+    EventCancelled {
+        conversation_id: Uuid,
+        did_key: DID,
+        event: MessageEvent,
+    },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
+)]
 #[serde(rename_all = "snake_case")]
 #[repr(C)]
 pub enum MessageEvent {
     /// Event that represents typing
     Typing,
-
     //TODO: Custom events?
 }
 
@@ -631,7 +640,7 @@ pub trait RayGunEvents: Sync + Send {
     }
 
     /// Cancel event that was sent, if any.
-    async fn cancel_event(&mut self, _: Uuid, _: MessageEvent) -> Result<RayGunEventStream, Error> {
+    async fn cancel_event(&mut self, _: Uuid, _: MessageEvent) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 }
@@ -777,6 +786,23 @@ where
         conversation_id: Uuid,
     ) -> Result<MessageEventStream, Error> {
         self.write().get_conversation_stream(conversation_id).await
+    }
+}
+
+#[allow(clippy::await_holding_lock)]
+#[async_trait::async_trait]
+impl<T: ?Sized> RayGunEvents for Arc<RwLock<Box<T>>>
+where
+    T: RayGunEvents,
+{
+    /// Send an event to a conversation
+    async fn send_event(&mut self, conversation_id: Uuid, event: MessageEvent) -> Result<(), Error> {
+        self.write().send_event(conversation_id, event).await
+    }
+
+    /// Cancel event that was sent, if any.
+    async fn cancel_event(&mut self, conversation_id: Uuid, event: MessageEvent) -> Result<(), Error> {
+        self.write().cancel_event(conversation_id, event).await
     }
 }
 

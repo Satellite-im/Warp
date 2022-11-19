@@ -884,6 +884,7 @@ async fn message_event_handle(
                     )?;
                 }
             }
+            _ => {}
         }
     }
     Ok(())
