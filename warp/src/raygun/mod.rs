@@ -1,10 +1,13 @@
 pub mod group;
 
+use crate::constellation::file::File;
+use crate::constellation::ConstellationProgressStream;
 use crate::crypto::DID;
 use crate::error::Error;
 use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::{Extension, SingleHandle};
 
+use derive_more::Display;
 use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use warp_derive::FFIFree;
@@ -15,6 +18,7 @@ use chrono::{DateTime, Utc};
 use core::ops::Range;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use uuid::Uuid;
 
 #[allow(unused_imports)]
@@ -218,10 +222,30 @@ impl Conversation {
     }
 }
 
+#[derive(Default, Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq, Display)]
+#[repr(C)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageType {
+    /// Regular message sent or received
+    #[display(fmt = "message")]
+    #[default]
+    Message,
+    /// Attachment; Can represent a file, image, etc., which can be from
+    /// constellation or sent directly
+    #[display(fmt = "attachment")]
+    Attachment,
+    /// Event sent as a message.
+    /// TBD
+    #[display(fmt = "event")]
+    Event,
+}
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 pub struct Message {
     /// ID of the Message
     id: Uuid,
+
+    /// Type of message being sent
+    message_type: MessageType,
 
     /// Conversion id where `Message` is associated with.
     conversation_id: Uuid,
@@ -245,6 +269,9 @@ pub struct Message {
     /// Message context for `Message`
     value: Vec<String>,
 
+    /// List of Attachment
+    attachment: Vec<File>,
+
     /// Signature of the message
     #[serde(skip_serializing_if = "Option::is_none")]
     signature: Option<Vec<u8>>,
@@ -258,6 +285,7 @@ impl Default for Message {
     fn default() -> Self {
         Self {
             id: Uuid::new_v4(),
+            message_type: Default::default(),
             conversation_id: Uuid::nil(),
             sender: Default::default(),
             date: Utc::now(),
@@ -265,6 +293,7 @@ impl Default for Message {
             reactions: Vec::new(),
             replied: None,
             value: Vec::new(),
+            attachment: Vec::new(),
             signature: Default::default(),
             metadata: HashMap::new(),
         }
@@ -281,6 +310,10 @@ impl Message {
 impl Message {
     pub fn id(&self) -> Uuid {
         self.id
+    }
+
+    pub fn message_type(&self) -> MessageType {
+        self.message_type
     }
 
     pub fn conversation_id(&self) -> Uuid {
@@ -307,6 +340,10 @@ impl Message {
         self.value.clone()
     }
 
+    pub fn attachments(&self) -> Vec<File> {
+        self.attachment.clone()
+    }
+
     pub fn signature(&self) -> Vec<u8> {
         self.signature.clone().unwrap_or_default()
     }
@@ -323,6 +360,10 @@ impl Message {
 impl Message {
     pub fn set_id(&mut self, id: Uuid) {
         self.id = id
+    }
+
+    pub fn set_message_type(&mut self, message_type: MessageType) {
+        self.message_type = message_type;
     }
 
     pub fn set_conversation_id(&mut self, id: Uuid) {
@@ -347,6 +388,10 @@ impl Message {
 
     pub fn set_value(&mut self, val: Vec<String>) {
         self.value = val
+    }
+
+    pub fn set_attachment(&mut self, attachments: Vec<File>) {
+        self.attachment = attachments
     }
 
     pub fn set_signature(&mut self, signature: Option<Vec<u8>>) {
@@ -439,8 +484,20 @@ pub enum EmbedState {
     Disable,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub enum Location {
+    /// Use [`Constellation`] to send a file from constellation
+    Constellation,
+
+    /// Use file from disk
+    Disk,
+}
+
 #[async_trait::async_trait]
-pub trait RayGun: RayGunStream + Extension + Sync + Send + SingleHandle + DynClone{
+pub trait RayGun:
+    RayGunStream + RayGunAttachment + Extension + Sync + Send + SingleHandle + DynClone
+{
     // Start a new conversation.
     async fn create_conversation(&mut self, _: &DID) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
@@ -512,6 +569,27 @@ pub trait RayGun: RayGunStream + Extension + Sync + Send + SingleHandle + DynClo
 }
 
 dyn_clone::clone_trait_object!(RayGun);
+
+#[async_trait::async_trait]
+pub trait RayGunAttachment: Sync + Send {
+    /// Send files to a conversation.
+    /// If no files is provided in the array, it will throw an error
+    async fn attach(&mut self, _: Uuid, _: Vec<PathBuf>, _: Vec<String>) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Downloads a file that been attached to a message
+    /// Note: Must use the filename assiocated when downloading
+    async fn download(
+        &self,
+        _: Uuid,
+        _: Uuid,
+        _: String,
+        _: PathBuf,
+    ) -> Result<ConstellationProgressStream, Error> {
+        Err(Error::Unimplemented)
+    }
+}
 
 #[async_trait::async_trait]
 pub trait RayGunStream: Sync + Send {
@@ -620,6 +698,34 @@ where
     ) -> Result<(), Error> {
         self.write()
             .embeds(conversation_id, message_id, state)
+            .await
+    }
+}
+
+#[allow(clippy::await_holding_lock)]
+#[async_trait::async_trait]
+impl<T: ?Sized> RayGunAttachment for Arc<RwLock<Box<T>>>
+where
+    T: RayGunAttachment,
+{
+    async fn attach(
+        &mut self,
+        conversation_id: Uuid,
+        files: Vec<PathBuf>,
+        message: Vec<String>,
+    ) -> Result<(), Error> {
+        self.write().attach(conversation_id, files, message).await
+    }
+
+    async fn download(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+        file: String,
+        path: PathBuf,
+    ) -> Result<ConstellationProgressStream, Error> {
+        self.read()
+            .download(conversation_id, message_id, file, path)
             .await
     }
 }

@@ -25,8 +25,10 @@ use self::identity::{IdentityStatus, Relationship};
 pub enum MultiPassEventKind {
     FriendRequestReceived { from: DID },
     FriendRequestSent { to: DID },
-    FriendRequestRejected { from: DID },
-    FriendRequestClosed { from: DID, to: DID },
+    IncomingFriendRequestRejected { did: DID },
+    OutgoingFriendRequestRejected { did: DID },
+    IncomingFriendRequestClosed { did: DID },
+    OutgoingFriendRequestClosed { did: DID },
     FriendAdded { did: DID },
     FriendRemoved { did: DID },
     IdentityOnline { did: DID },

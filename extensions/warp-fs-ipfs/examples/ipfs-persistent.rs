@@ -158,10 +158,11 @@ async fn main() -> anyhow::Result<()> {
             let mut written = 0;
             let mut file = tokio::fs::File::create(&local).await?;
             while let Some(Ok(data)) = stream.next().await {
-                let size = file.write(&data).await?;
-                written += size;
+                file.write_all(&data).await?;
+                written += data.len();
+                file.flush().await?;
             }
-            file.flush().await?;
+
             println!(
                 "{local} been downloaded with {} MB written",
                 written / 1024 / 1024

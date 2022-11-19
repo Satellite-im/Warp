@@ -480,7 +480,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             return Err(Error::FileExist);
         }
 
-        let (tx, mut rx) = tokio::sync::broadcast::channel(5);
+        let (tx, mut rx) = tokio::sync::broadcast::channel(50000);
         let config = self.config.clone().unwrap_or_default();
         tokio::spawn({
             let name = name.to_string();
@@ -489,7 +489,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
                 let mut last_written = 0;
                 let result = {
                     let mut adder = FileAdderBuilder::default()
-                        .with_chunker(Chunker::Size(config.chunking.unwrap_or(1024 * 1024)))
+                        .with_chunker(Chunker::Size(config.chunking.unwrap_or(256 * 1024)))
                         .build();
 
                     let mut written = 0;
@@ -581,8 +581,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
                 .await
                 .map_err(anyhow::Error::from)?;
 
-            pin_mut!(cat_stream);
-            while let Some(data) = cat_stream.next().await {
+            for await data in cat_stream {
                 match data {
                     Ok(data) => yield Ok(data),
                     Err(e) => yield Err(Error::from(anyhow::anyhow!("{e}"))),
@@ -697,6 +696,35 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         self.current_directory()?
             .add_directory(Directory::new(name))?;
         if let Err(_e) = self.export_index().await {}
+        Ok(())
+    }
+
+    async fn sync_ref(&mut self, path: &str) -> Result<()> {
+        let ipfs = self.ipfs()?;
+        let handle = warp::async_handle();
+        let _g = handle.enter();
+
+        let directory = self.current_directory()?;
+        let file = directory
+            .get_item_by_path(path)
+            .and_then(|item| item.get_file())?;
+        let reference = file.reference().ok_or(Error::FileNotFound)?;
+
+        let stream = ipfs
+            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
+            .await
+            .map_err(anyhow::Error::from)?;
+
+        pin_mut!(stream);
+
+        while let Some(data) = stream.next().await {
+            //This is to make sure there isnt any errors while tranversing the links
+            //however we do not need to deal with the data itself as the will store
+            //it in the blockstore after being found or blocks being exchanged from peer
+            //TODO: Should check first chunk and timeout if it exceeds a specific length
+            let _ = data.map_err(anyhow::Error::from)?;
+        }
+
         Ok(())
     }
 
