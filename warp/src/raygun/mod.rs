@@ -292,9 +292,6 @@ pub struct Message {
     /// List of Attachment
     attachment: Vec<File>,
 
-    /// Event payload
-    event: Option<MessageEvent>,
-
     /// Signature of the message
     #[serde(skip_serializing_if = "Option::is_none")]
     signature: Option<Vec<u8>>,
@@ -317,7 +314,6 @@ impl Default for Message {
             replied: None,
             value: Vec::new(),
             attachment: Vec::new(),
-            event: None,
             signature: Default::default(),
             metadata: HashMap::new(),
         }
@@ -368,10 +364,6 @@ impl Message {
         self.attachment.clone()
     }
 
-    pub fn event(&self) -> Option<MessageEvent> {
-        self.event
-    }
-
     pub fn signature(&self) -> Vec<u8> {
         self.signature.clone().unwrap_or_default()
     }
@@ -420,10 +412,6 @@ impl Message {
 
     pub fn set_attachment(&mut self, attachments: Vec<File>) {
         self.attachment = attachments
-    }
-
-    pub fn set_event(&mut self, event: MessageEvent) {
-        self.event = Some(event)
     }
 
     pub fn set_signature(&mut self, signature: Option<Vec<u8>>) {

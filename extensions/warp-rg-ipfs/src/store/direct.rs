@@ -20,8 +20,8 @@ use warp::logging::tracing::log::{error, trace};
 use warp::logging::tracing::warn;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    Conversation, EmbedState, Location, Message, MessageEventKind, MessageOptions, MessageType,
-    PinState, RayGunEventKind, Reaction, ReactionState,
+    Conversation, EmbedState, Location, Message, MessageEvent, MessageEventKind, MessageOptions,
+    MessageType, PinState, RayGunEventKind, Reaction, ReactionState,
 };
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock};
@@ -994,7 +994,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
 
-        self.send_event(conversation.id(), event).await
+        self.send_raw_event(conversation.id(), event, true).await
     }
 
     pub async fn edit_message(
@@ -1057,7 +1057,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation
                 .to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(&*self.did)),
         )?;
-        self.send_event(conversation.id(), event).await
+        self.send_raw_event(conversation.id(), event, true).await
     }
 
     pub async fn reply_message(
@@ -1126,7 +1126,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
 
-        self.send_event(conversation.id(), event).await
+        self.send_raw_event(conversation.id(), event, true).await
     }
 
     pub async fn delete_message(
@@ -1153,7 +1153,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         )?;
 
         if broadcast {
-            self.send_event(conversation.id(), event).await?;
+            self.send_raw_event(conversation.id(), event, true).await?;
         }
 
         Ok(())
@@ -1183,7 +1183,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
 
-        self.send_event(conversation.id(), event).await
+        self.send_raw_event(conversation.id(), event, true).await
     }
 
     pub async fn embeds(
@@ -1222,7 +1222,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         warp::async_block_in_place_uncheck(
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
-        self.send_event(conversation.id(), event).await
+        self.send_raw_event(conversation.id(), event, true).await
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1403,7 +1403,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
 
-        self.send_event(conversation.id(), event).await
+        self.send_raw_event(conversation.id(), event, true).await
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1445,7 +1445,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let ipfs = self.ipfs.clone();
         let constellation = constellation.clone();
-        let attachment = attachment.clone();
         let own_did = self.did.clone();
 
         let progress_stream = async_stream::stream! {
@@ -1554,10 +1553,63 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         Ok(ConstellationProgressStream(progress_stream.boxed()))
     }
 
-    pub async fn send_event<S: Serialize + Send + Sync>(
+    pub async fn send_event(
+        &mut self,
+        conversation_id: Uuid,
+        event: MessageEvent,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get_conversation(conversation_id)?;
+        let tx = conversation.event_handle()?;
+        let own_did = &*self.did;
+
+        let event = MessagingEvents::Event(conversation.id(), own_did.clone(), event, false);
+
+        direct_message_event(
+            &mut conversation.messages_mut(),
+            None,
+            &event,
+            &self.spam_filter,
+            tx,
+            MessageDirection::Out,
+            Default::default(),
+        )?;
+        warp::async_block_in_place_uncheck(
+            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
+        )?;
+        self.send_raw_event(conversation.id(), event, false).await
+    }
+
+    pub async fn cancel_event(
+        &mut self,
+        conversation_id: Uuid,
+        event: MessageEvent,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get_conversation(conversation_id)?;
+        let tx = conversation.event_handle()?;
+        let own_did = &*self.did;
+
+        let event = MessagingEvents::Event(conversation.id(), own_did.clone(), event, true);
+
+        direct_message_event(
+            &mut conversation.messages_mut(),
+            None,
+            &event,
+            &self.spam_filter,
+            tx,
+            MessageDirection::Out,
+            Default::default(),
+        )?;
+        warp::async_block_in_place_uncheck(
+            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
+        )?;
+        self.send_raw_event(conversation.id(), event, false).await
+    }
+
+    pub async fn send_raw_event<S: Serialize + Send + Sync>(
         &mut self,
         conversation: Uuid,
         event: S,
+        queue: bool,
     ) -> Result<(), Error> {
         let conversation = self.get_conversation(conversation)?;
 
@@ -1590,7 +1642,24 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         match peers.contains(&peer_id) {
             true => {
                 if let Err(e) = self.ipfs.pubsub_publish(conversation.topic(), bytes).await {
-                    warn!("Unable to publish to topic due to error: {e}... Queuing event");
+                    if queue {
+                        warn!("Unable to publish to topic due to error: {e}... Queuing event");
+                        if let Err(e) = self
+                            .queue_event(Queue::direct(
+                                conversation.id(),
+                                peer_id,
+                                conversation.topic(),
+                                payload,
+                            ))
+                            .await
+                        {
+                            error!("Error submitting event to queue: {e}");
+                        }
+                    }
+                }
+            }
+            false => {
+                if queue {
                     if let Err(e) = self
                         .queue_event(Queue::direct(
                             conversation.id(),
@@ -1602,19 +1671,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     {
                         error!("Error submitting event to queue: {e}");
                     }
-                }
-            }
-            false => {
-                if let Err(e) = self
-                    .queue_event(Queue::direct(
-                        conversation.id(),
-                        peer_id,
-                        conversation.topic(),
-                        payload,
-                    ))
-                    .await
-                {
-                    error!("Error submitting event to queue: {e}");
                 }
             }
         };
@@ -1942,6 +1998,25 @@ pub fn direct_message_event(
                             error!("Error broadcasting event: {e}");
                         }
                     }
+                }
+            }
+        }
+        MessagingEvents::Event(conversation_id, did_key, event, cancelled) => {
+            if direction == MessageDirection::In {
+                let ev = match cancelled {
+                    true => MessageEventKind::EventCancelled {
+                        conversation_id,
+                        did_key,
+                        event,
+                    },
+                    false => MessageEventKind::EventReceived {
+                        conversation_id,
+                        did_key,
+                        event,
+                    },
+                };
+                if let Err(e) = tx.send(ev) {
+                    error!("Error broadcasting event: {e}");
                 }
             }
         }
