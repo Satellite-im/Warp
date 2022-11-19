@@ -560,7 +560,19 @@ async fn main() -> anyhow::Result<()> {
                                 async move {
                                     while let Some(event) = stream.next().await {
                                         match event {
-                                            Progression::CurrentProgress { .. } => {}
+                                            Progression::CurrentProgress {
+                                                name,
+                                                current,
+                                                total,
+                                            } => {
+                                                writeln!(stdout, "Written {} MB for {name}", current / 1024 / 1024)?;
+                                                if let Some(total) = total {
+                                                    writeln!(stdout,
+                                                        "{}% completed",
+                                                        (((current as f64) / (total as f64)) * 100.) as usize
+                                                    )?;
+                                                }
+                                            }
                                             Progression::ProgressComplete { name, total } => {
                                                 writeln!(stdout,
                                                     "{name} has been downloaded with {} MB",
@@ -573,7 +585,7 @@ async fn main() -> anyhow::Result<()> {
                                                 error,
                                             } => {
                                                 writeln!(stdout,
-                                                    "{name} failed to upload at {} MB due to: {}",
+                                                    "{name} failed to download at {} MB due to: {}",
                                                     last_size.unwrap_or_default(),
                                                     error.unwrap_or_default()
                                                 )?;
