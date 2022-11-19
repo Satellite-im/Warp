@@ -13,9 +13,11 @@ use crate::{
     store::{did_to_libp2p_pub, IdentityPayload},
     Persistent,
 };
-use futures::{FutureExt, StreamExt};
+use futures::{pin_mut, FutureExt, StreamExt};
 use ipfs::{
-    libp2p::gossipsub::GossipsubMessage, Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId,
+    libp2p::gossipsub::GossipsubMessage,
+    unixfs::ll::file::adder::{Chunker, FileAdderBuilder},
+    Block, Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId,
 };
 use libipld::{
     serde::{from_ipld, to_ipld},
@@ -256,6 +258,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         let did = identity.did_key();
 
+        let picture = root.picture;
+        let banner = root.banner;
+
         //Note: Sending Cid and using bitswap with normal discovery works, however
         //      with direct or no discovery may not exchange blocks as expected
         //      For now, we will send the identity directly as the payload but
@@ -266,7 +271,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
             false => DocumentType::Cid(root.identity),
         };
 
-        let payload = IdentityPayload { did, payload };
+        let payload = IdentityPayload {
+            did,
+            payload,
+            picture,
+            banner,
+        };
 
         let res = data.encode(libipld::IpldCodec::DagJson, sata::Kind::Static, payload)?;
 
@@ -331,10 +341,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 let username = identity.username();
                 let short_id = identity.short_id();
                 let did = identity.did_key();
+                let picture = object.picture;
+                let banner = object.banner;
                 let identity = payload.clone();
                 CacheDocument {
                     username,
                     did,
+                    picture,
+                    banner,
                     short_id,
                     identity,
                 }
@@ -575,8 +589,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         let future_list =
             futures::stream::FuturesUnordered::from_iter(idents_docs.iter().map(|doc| {
-                doc.identity
-                    .resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
+                doc.resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
                     .boxed()
             }));
 
@@ -712,6 +725,128 @@ impl<T: IpfsTypes> IdentityStore<T> {
             let cid = cid.to_string();
             tokio::fs::write(path.join(".cache_id"), cid).await?;
         }
+        Ok(())
+    }
+
+    pub async fn store_photo(&mut self, photo: &[u8]) -> Result<Cid, Error> {
+        if photo.len() >= 5 * 1024 * 1024 {
+            return Err(Error::InvalidLength {
+                context: "photo".into(),
+                current: photo.len(),
+                minimum: None,
+                maximum: Some(5 * 1024 * 1024),
+            });
+        }
+        let ipfs = self.ipfs.clone();
+
+        let mut adder = FileAdderBuilder::default()
+            .with_chunker(Chunker::Size(256 * 1024))
+            .build();
+
+        let mut last_cid = None;
+
+        let mut stream = futures::stream::iter(vec![photo]);
+
+        while let Some(buffer) = stream.next().await {
+            let mut total = 0;
+
+            while total < buffer.len() {
+                let (blocks, consumed) = adder.push(&buffer[total..]);
+                for (cid, block) in blocks {
+                    let block = Block::new(cid, block)?;
+                    let _cid = ipfs.put_block(block).await?;
+                }
+                total += consumed;
+            }
+        }
+
+        let blocks = adder.finish();
+        for (cid, block) in blocks {
+            let block = Block::new(cid, block)?;
+            let cid = ipfs.put_block(block).await?;
+            last_cid = Some(cid);
+        }
+
+        let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
+
+        ipfs.insert_pin(&cid, true).await?;
+
+        Ok(cid)
+    }
+
+    pub async fn retrieve_photo(&mut self, path: Cid) -> Result<String, Error> {
+        let ipfs = self.ipfs.clone();
+
+        let stream = ipfs
+            .cat_unixfs(path, None)
+            .await
+            .map_err(anyhow::Error::from)?;
+
+        pin_mut!(stream);
+
+        let mut data = vec![];
+
+        while let Some(stream) = stream.next().await {
+            if data.len() >= 5 * 1024 * 1024 {
+                return Err(Error::InvalidLength {
+                    context: "data".into(),
+                    current: data.len(),
+                    minimum: None,
+                    maximum: Some(5 * 1024 * 1024),
+                });
+            }
+            match stream {
+                Ok(bytes) => {
+                    data.extend(bytes);
+                }
+                Err(e) => return Err(Error::from(anyhow::anyhow!("{e}"))),
+            }
+        }
+
+        Ok(String::from_utf8_lossy(&data).to_string())
+    }
+
+    pub async fn delete_photo(&mut self, cid: Cid) -> Result<(), Error> {
+        let ipfs = self.ipfs.clone();
+
+        let mut pinned_blocks: HashSet<_> = HashSet::from_iter(
+            ipfs.list_pins(None)
+                .await
+                .filter_map(|r| async move {
+                    match r {
+                        Ok(v) => Some(v.0),
+                        Err(_) => None,
+                    }
+                })
+                .collect::<Vec<_>>()
+                .await,
+        );
+
+        if ipfs.is_pinned(&cid).await? {
+            ipfs.remove_pin(&cid, true).await?;
+        }
+
+        let new_pinned_blocks: HashSet<_> = HashSet::from_iter(
+            ipfs.list_pins(None)
+                .await
+                .filter_map(|r| async move {
+                    match r {
+                        Ok(v) => Some(v.0),
+                        Err(_) => None,
+                    }
+                })
+                .collect::<Vec<_>>()
+                .await,
+        );
+
+        for s_cid in new_pinned_blocks.iter() {
+            pinned_blocks.remove(s_cid);
+        }
+
+        for cid in pinned_blocks {
+            ipfs.remove_block(cid).await?;
+        }
+
         Ok(())
     }
 

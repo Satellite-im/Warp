@@ -1,3 +1,4 @@
+use futures::StreamExt;
 use ipfs::{Ipfs, IpfsPath, IpfsTypes};
 use libipld::{serde::from_ipld, Cid};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -62,8 +63,15 @@ impl<T> From<Cid> for DocumentType<T> {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct RootDocument {
     pub identity: Cid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub picture: Option<Cid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub banner: Option<Cid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub friends: Option<DocumentType<HashSet<DID>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub blocks: Option<DocumentType<HashSet<DID>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<DocumentType<HashSet<InternalRequest>>>,
 }
 
@@ -122,7 +130,111 @@ pub struct CacheDocument {
     pub username: String,
     pub did: DID,
     pub short_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub picture: Option<Cid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub banner: Option<Cid>,
     pub identity: DocumentType<Identity>,
+}
+
+impl CacheDocument {
+    pub async fn resolve<P: IpfsTypes>(
+        &self,
+        ipfs: Ipfs<P>,
+        timeout: Option<Duration>,
+    ) -> Result<Identity, Error> {
+        
+        let mut identity = self.identity.resolve(ipfs.clone(), timeout).await?;
+        if identity.username() != self.username.clone()
+            || identity.did_key() != self.did.clone()
+            || identity.short_id() != self.short_id
+        {
+            return Err(Error::IdentityDoesntExist); //TODO: Invalid Identity
+        }
+
+        if let Some(cid) = self.picture {
+            let ipfs = ipfs.clone();
+            let fut = async {
+                let stream = ipfs
+                    .cat_unixfs(IpfsPath::from(cid), None)
+                    .await
+                    .map_err(anyhow::Error::from)?;
+
+                futures::pin_mut!(stream);
+
+                let mut data = vec![];
+
+                while let Some(stream) = stream.next().await {
+                    if data.len() >= 5 * 1024 * 1024 {
+                        return Err(Error::InvalidLength {
+                            context: "data".into(),
+                            current: data.len(),
+                            minimum: None,
+                            maximum: Some(5 * 1024 * 1024),
+                        });
+                    }
+                    match stream {
+                        Ok(bytes) => {
+                            data.extend(bytes);
+                        }
+                        Err(e) => return Err(Error::from(anyhow::anyhow!("{e}"))),
+                    }
+                }
+
+                Ok(String::from_utf8_lossy(&data).to_string())
+            };
+            let timeout = timeout.unwrap_or(std::time::Duration::from_secs(15));
+            let picture = match tokio::time::timeout(timeout, fut).await {
+                Ok(Ok(data)) => data,
+                Ok(Err(_)) | Err(_) => String::new(),
+            };
+            let mut graphics = identity.graphics();
+            graphics.set_profile_picture(&picture);
+            identity.set_graphics(graphics);
+        }
+        if let Some(cid) = self.banner {
+            let ipfs = ipfs.clone();
+            let fut = async {
+                let stream = ipfs
+                    .cat_unixfs(IpfsPath::from(cid), None)
+                    .await
+                    .map_err(anyhow::Error::from)?;
+
+                futures::pin_mut!(stream);
+
+                let mut data = vec![];
+
+                while let Some(stream) = stream.next().await {
+                    if data.len() >= 5 * 1024 * 1024 {
+                        return Err(Error::InvalidLength {
+                            context: "data".into(),
+                            current: data.len(),
+                            minimum: None,
+                            maximum: Some(5 * 1024 * 1024),
+                        });
+                    }
+                    match stream {
+                        Ok(bytes) => {
+                            data.extend(bytes);
+                        }
+                        Err(e) => return Err(Error::from(anyhow::anyhow!("{e}"))),
+                    }
+                }
+
+                Ok(String::from_utf8_lossy(&data).to_string())
+            };
+            let timeout = timeout.unwrap_or(std::time::Duration::from_secs(15));
+            let picture = match tokio::time::timeout(timeout, fut).await {
+                Ok(Ok(data)) => data,
+                Ok(Err(_)) | Err(_) => String::new(),
+            };
+            let mut graphics = identity.graphics();
+            graphics.set_profile_banner(&picture);
+            identity.set_graphics(graphics);
+        }
+
+        Ok(identity)
+    }
 }
 
 impl Hash for CacheDocument {
