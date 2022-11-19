@@ -18,10 +18,7 @@ use warp::error::Error;
 use warp::logging::tracing::log::{error, trace};
 use warp::logging::tracing::warn;
 use warp::multipass::MultiPass;
-use warp::raygun::{
-    Conversation, EmbedState, Message, MessageEventKind, MessageOptions, MessageType, PinState,
-    RayGunEventKind, Reaction, ReactionState,
-};
+use warp::raygun::{Conversation, EmbedState, Location, Message, MessageEventKind, MessageOptions, MessageType, PinState, RayGunEventKind, Reaction, ReactionState};
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock};
 
@@ -1228,6 +1225,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     pub async fn attach(
         &mut self,
         conversation: Uuid,
+        location: Location,
         files: Vec<PathBuf>,
         messages: Vec<String>,
     ) -> Result<(), Error> {
@@ -1255,77 +1253,89 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let mut attachments = vec![];
 
         for file in files {
-            let mut filename = match file.file_name() {
-                Some(file) => file.to_string_lossy().to_string(),
-                None => continue,
-            };
+            let file= match location {
+                Location::Constellation => {
+                    let path = file.display().to_string();
+                    match constellation.root_directory().get_item_by_path(&path).and_then(|item| item.get_file()).ok() {
+                        Some(f) => f,
+                        None => continue
+                    }
+                },
+                Location::Disk => {
+                    let mut filename = match file.file_name() {
+                        Some(file) => file.to_string_lossy().to_string(),
+                        None => continue,
+                    };
 
-            let original = filename.clone();
+                    let original = filename.clone();
 
-            let current_directory = constellation.read().current_directory()?;
+                    let current_directory = constellation.read().current_directory()?;
 
-            let mut interval = 0;
-            let skip;
-            loop {
-                if current_directory.has_item(&filename) {
-                    if interval >= 20 {
-                        skip = true;
+                    let mut interval = 0;
+                    let skip;
+                    loop {
+                        if current_directory.has_item(&filename) {
+                            if interval >= 20 {
+                                skip = true;
+                                break;
+                            }
+                            interval += 1;
+                            filename = format!("{original}{interval}");
+                            continue;
+                        }
+                        skip = false;
                         break;
                     }
-                    interval += 1;
-                    filename = format!("{original}{interval}");
-                    continue;
-                }
-                skip = false;
-                break;
-            }
 
-            if skip {
-                continue;
-            }
+                    if skip {
+                        continue;
+                    }
 
-            let file = tokio::fs::File::open(&file).await?;
+                    let file = tokio::fs::File::open(&file).await?;
 
-            let size = file.metadata().await?.len() as usize;
+                    let size = file.metadata().await?.len() as usize;
 
-            let stream = ReaderStream::new(file)
-                .filter_map(|x| async { x.ok() })
-                .map(|x| x.into());
+                    let stream = ReaderStream::new(file)
+                        .filter_map(|x| async { x.ok() })
+                        .map(|x| x.into());
 
-            let mut progress = match constellation
-                .write()
-                .put_stream(&filename, Some(size), stream.boxed())
-                .await
-            {
-                Ok(stream) => stream,
-                Err(e) => {
-                    error!("Error uploading {filename}: {e}");
-                    continue;
+                    let mut progress = match constellation
+                        .write()
+                        .put_stream(&filename, Some(size), stream.boxed())
+                        .await
+                    {
+                        Ok(stream) => stream,
+                        Err(e) => {
+                            error!("Error uploading {filename}: {e}");
+                            continue;
+                        }
+                    };
+
+                    let mut complete = false;
+
+                    while let Some(progress) = progress.next().await {
+                        if let Progression::ProgressComplete { .. } = progress {
+                            complete = true;
+                            break;
+                        }
+                    }
+
+                    if !complete {
+                        continue;
+                    }
+
+                    //Note: If this fails this there might be a possible race condition
+                    match current_directory
+                        .get_item(&filename)
+                        .and_then(|item| item.get_file())
+                    {
+                        Ok(file) => file,
+                        Err(_) => continue,
+                    }
                 }
             };
 
-            let mut complete = false;
-
-            while let Some(progress) = progress.next().await {
-                if let Progression::ProgressComplete { .. } = progress {
-                    complete = true;
-                    break;
-                }
-            }
-
-            if !complete {
-                continue;
-            }
-
-            //Note: If this fails this there might be a possible race condition
-            let file = match current_directory
-                .get_item(&filename)
-                .and_then(|item| item.get_file())
-            {
-                Ok(file) => file,
-                Err(_) => continue,
-            };
-
+            // We reconstruct it to avoid out any possible metadata that was apart of the `File` structure
             let new_file = warp::constellation::file::File::new(&file.name());
             new_file.set_size(file.size());
             new_file.set_hash(file.hash());

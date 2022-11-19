@@ -25,7 +25,7 @@ use warp::module::Module;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::group::{GroupChat, GroupChatManagement, GroupInvite};
-use warp::raygun::{Conversation, MessageEventStream, RayGunEventStream, RayGunStream};
+use warp::raygun::{Conversation, Location, MessageEventStream, RayGunEventStream, RayGunStream};
 use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
 use warp::raygun::{RayGunAttachment, RayGunEventKind};
 use warp::sync::RwLock;
@@ -340,7 +340,7 @@ impl<T: IpfsTypes> RayGunAttachment for IpfsMessaging<T> {
         message: Vec<String>,
     ) -> Result<()> {
         self.messaging_store()?
-            .attach(conversation_id, files, message)
+            .attach(conversation_id, Location::Disk, files, message)
             .await
     }
 

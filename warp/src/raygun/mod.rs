@@ -483,6 +483,16 @@ pub enum EmbedState {
     Disable,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub enum Location {
+    /// Use [`Constellation`] to send a file from constellation
+    Constellation,
+
+    /// Use file from disk
+    Disk,
+}
+
 #[async_trait::async_trait]
 pub trait RayGun: RayGunStream + RayGunAttachment + Extension + Sync + Send + SingleHandle {
     // Start a new conversation.
