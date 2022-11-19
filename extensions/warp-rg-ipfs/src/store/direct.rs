@@ -1413,71 +1413,91 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             root.add_file(attachment.clone())?;
         }
 
-        let (tx, mut rx) = tokio::sync::broadcast::channel(50000);
+        let ipfs = self.ipfs.clone();
+        let constellation = constellation.clone();
+        let attachment = attachment.clone();
+        let own_did = self.did.clone();
 
-        tokio::spawn({
-            let ipfs = self.ipfs.clone();
-            let constellation = constellation.clone();
-            let attachment = attachment.clone();
-            let own_did = self.did.clone();
-            async move {
+        let progress_stream = async_stream::stream! {
                 let did = message.sender();
-
                 if !did.eq(&own_did) {
-                    let peer_id = did_to_libp2p_pub(&did)?.to_peer_id();
+                    if let Ok(peer_id) = did_to_libp2p_pub(&did).map(|pk| pk.to_peer_id()) {
+                        match ipfs.find_peer_info(peer_id).await {
+                            Ok(info) => {
+                                //This is done to insure we can successfully exchange blocks
+                                let opt = DialOpts::peer_id(peer_id)
+                                    .addresses(info.listen_addrs)
+                                    .extend_addresses_through_behaviour()
+                                    .build();
 
-                    match ipfs.find_peer_info(peer_id).await {
-                        Ok(info) => {
-                            //This is done to insure we can successfully exchange blocks
-                            let opt = DialOpts::peer_id(peer_id)
-                                .addresses(info.listen_addrs)
-                                .extend_addresses_through_behaviour()
-                                .build();
-
-                            if let Err(e) = ipfs.dial(opt).await {
-                                error!("Error dialing peer: {e}");
+                                if let Err(e) = ipfs.dial(opt).await {
+                                    error!("Error dialing peer: {e}");
+                                }
                             }
-                        }
-                        _ => {
-                            warn!("Sender not found or is not connected");
-                        }
-                    };
+                            _ => {
+                                warn!("Sender not found or is not connected");
+                            }
+                        };
+                    }
                 }
 
-                let mut file = tokio::fs::File::create(&path).await?;
+                let mut file = match tokio::fs::File::create(&path).await {
+                    Ok(file) => file,
+                    Err(e) => {
+                        error!("Error creating file: {e}");
+                        yield Progression::ProgressFailed {
+                                    name: attachment.name(),
+                                    last_size: None,
+                                    error: Some(e.to_string()),
+                        };
+                        return;
+                    }
+                };
 
-                let mut stream = constellation.read().get_stream(&attachment.name()).await?;
+                let stream = match constellation.get_stream(&attachment.name()).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        error!("Error creating stream: {e}");
+                        yield Progression::ProgressFailed {
+                                    name: attachment.name(),
+                                    last_size: None,
+                                    error: Some(e.to_string()),
+                        };
+                        return;
+                    }
+                };
+
                 let mut written = 0;
                 let mut failed = false;
-                while let Some(res) = stream.next().await {
+                for await res in stream  {
                     match res {
                         Ok(bytes) => match file.write_all(&bytes).await {
                             Ok(_) => {
                                 written += bytes.len();
-                                let _ = tx.send(Progression::CurrentProgress {
+                                yield Progression::CurrentProgress {
                                     name: attachment.name(),
                                     current: written,
                                     total: Some(attachment.size()),
-                                });
+                                };
                             }
                             Err(e) => {
                                 error!("Error writing to disk: {e}");
-                                let _ = tx.send(Progression::ProgressFailed {
+                                yield Progression::ProgressFailed {
                                     name: attachment.name(),
                                     last_size: Some(written),
                                     error: Some(e.to_string()),
-                                });
+                                };
                                 failed = true;
                                 break;
                             }
                         },
                         Err(e) => {
                             error!("Error reading from stream: {e}");
-                            let _ = tx.send(Progression::ProgressFailed {
-                                name: attachment.name(),
-                                last_size: Some(written),
-                                error: Some(e.to_string()),
-                            });
+                            yield Progression::ProgressFailed {
+                                    name: attachment.name(),
+                                    last_size: Some(written),
+                                    error: Some(e.to_string()),
+                            };
                             failed = true;
                             break;
                         }
@@ -1485,34 +1505,20 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 }
 
                 if failed {
-                    drop(file);
                     if let Err(e) = tokio::fs::remove_file(&path).await {
                         error!("Error removing file: {e}");
                     }
                 }
-                
+
                 if !failed {
                     if let Err(e) = file.flush().await {
                         error!("Error flushing stream: {e}");
                     }
-                    let _ = tx.send(Progression::ProgressComplete {
+                    yield Progression::ProgressComplete {
                         name: attachment.name(),
                         total: Some(written),
-                    });
+                    };
                 }
-                Ok::<_, Error>(())
-            }
-        });
-        tokio::task::yield_now().await;
-
-        let progress_stream = async_stream::stream! {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => yield event,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    Err(_) => {}
-                };
-            }
         };
 
         Ok(ConstellationProgressStream(progress_stream.boxed()))
