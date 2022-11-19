@@ -26,7 +26,8 @@ use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::group::{GroupChat, GroupChatManagement, GroupInvite};
 use warp::raygun::{
-    Conversation, Location, MessageEventStream, RayGunEventStream, RayGunEvents, RayGunStream, MessageEvent,
+    Conversation, Location, MessageEvent, MessageEventStream, RayGunEventStream, RayGunEvents,
+    RayGunStream,
 };
 use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
 use warp::raygun::{RayGunAttachment, RayGunEventKind};
@@ -388,14 +389,16 @@ impl<T: IpfsTypes> RayGunStream for IpfsMessaging<T> {
 
 #[async_trait::async_trait]
 impl<T: IpfsTypes> RayGunEvents for IpfsMessaging<T> {
-    /// Send an event to a conversation
-    async fn send_event(&mut self, _: Uuid, _: MessageEvent) -> Result<()> {
-        Err(Error::Unimplemented)
+    async fn send_event(&mut self, conversation_id: Uuid, event: MessageEvent) -> Result<()> {
+        self.messaging_store()?
+            .send_event(conversation_id, event)
+            .await
     }
 
-    /// Cancel event that was sent, if any.
-    async fn cancel_event(&mut self, _: Uuid, _: MessageEvent) -> Result<()> {
-        Err(Error::Unimplemented)
+    async fn cancel_event(&mut self, conversation_id: Uuid, event: MessageEvent) -> Result<()> {
+        self.messaging_store()?
+            .cancel_event(conversation_id, event)
+            .await
     }
 }
 

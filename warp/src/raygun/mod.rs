@@ -795,6 +795,8 @@ where
     }
 
     /// Cancel event that was sent, if any.
+    /// Note: This would only send the cancel event 
+    ///       Unless an event is continuious internally until it times out
     async fn cancel_event(
         &mut self,
         conversation_id: Uuid,
