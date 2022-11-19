@@ -527,7 +527,9 @@ pub enum Location {
 }
 
 #[async_trait::async_trait]
-pub trait RayGun: RayGunStream + RayGunAttachment + Extension + Sync + Send + SingleHandle {
+pub trait RayGun:
+    RayGunStream + RayGunAttachment + RayGunEvents + Extension + Sync + Send + SingleHandle
+{
     // Start a new conversation.
     async fn create_conversation(&mut self, _: &DID) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
@@ -796,12 +798,20 @@ where
     T: RayGunEvents,
 {
     /// Send an event to a conversation
-    async fn send_event(&mut self, conversation_id: Uuid, event: MessageEvent) -> Result<(), Error> {
+    async fn send_event(
+        &mut self,
+        conversation_id: Uuid,
+        event: MessageEvent,
+    ) -> Result<(), Error> {
         self.write().send_event(conversation_id, event).await
     }
 
     /// Cancel event that was sent, if any.
-    async fn cancel_event(&mut self, conversation_id: Uuid, event: MessageEvent) -> Result<(), Error> {
+    async fn cancel_event(
+        &mut self,
+        conversation_id: Uuid,
+        event: MessageEvent,
+    ) -> Result<(), Error> {
         self.write().cancel_event(conversation_id, event).await
     }
 }
