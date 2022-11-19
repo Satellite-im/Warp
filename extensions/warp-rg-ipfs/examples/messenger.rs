@@ -9,6 +9,7 @@ use std::str::FromStr;
 use tokio::task::JoinHandle;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
+use warp::constellation::{Constellation, Progression};
 use warp::crypto::zeroize::Zeroizing;
 use warp::crypto::DID;
 use warp::error::Error;
@@ -16,11 +17,13 @@ use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{
-    ConversationType, MessageEventKind, MessageEventStream, MessageOptions, PinState, RayGun,
-    RayGunStream, ReactionState,
+    ConversationType, MessageEventKind, MessageEventStream, MessageOptions, MessageType, PinState,
+    RayGun, RayGunAttachment, RayGunStream, ReactionState,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
+use warp_fs_ipfs::config::FsIpfsConfig;
+use warp_fs_ipfs::{IpfsFileSystem, Persistent as FsPersistent, Temporary as FsTemporary};
 use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
 use warp_pd_flatfile::FlatfileStorage;
 use warp_pd_stretto::StrettoClient;
@@ -28,7 +31,6 @@ use warp_rg_ipfs::config::RgIpfsConfig;
 use warp_rg_ipfs::IpfsMessaging;
 use warp_rg_ipfs::Persistent;
 use warp_rg_ipfs::Temporary;
-
 #[derive(Debug, Parser)]
 #[clap(name = "")]
 struct Opt {
@@ -87,20 +89,46 @@ async fn create_account<P: AsRef<Path>>(
     Ok(account)
 }
 
+async fn create_fs<P: AsRef<Path>>(
+    account: Arc<RwLock<Box<dyn MultiPass>>>,
+    path: Option<P>,
+) -> anyhow::Result<Arc<RwLock<Box<dyn Constellation>>>> {
+    let config = match path.as_ref() {
+        Some(path) => FsIpfsConfig::production(path),
+        None => FsIpfsConfig::testing(),
+    };
+
+    let filesystem: Arc<RwLock<Box<dyn Constellation>>> = match path.is_some() {
+        true => Arc::new(RwLock::new(Box::new(
+            IpfsFileSystem::<FsPersistent>::new(account, Some(config)).await?,
+        ))),
+        false => Arc::new(RwLock::new(Box::new(
+            IpfsFileSystem::<FsTemporary>::new(account, Some(config)).await?,
+        ))),
+    };
+
+    Ok(filesystem)
+}
+
 #[allow(dead_code)]
 async fn create_rg(
     path: Option<PathBuf>,
     account: Arc<RwLock<Box<dyn MultiPass>>>,
+    filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
     cache: Arc<RwLock<Box<dyn PocketDimension>>>,
 ) -> anyhow::Result<Box<dyn RayGun>> {
     let chat = match path.as_ref() {
         Some(path) => {
             let config = RgIpfsConfig::production(path);
-            Box::new(IpfsMessaging::<Persistent>::new(Some(config), account, Some(cache)).await?)
+            Box::new(
+                IpfsMessaging::<Persistent>::new(Some(config), account, filesystem, Some(cache))
+                    .await?,
+            ) as Box<dyn RayGun>
+        }
+        None => {
+            Box::new(IpfsMessaging::<Temporary>::new(None, account, filesystem, Some(cache)).await?)
                 as Box<dyn RayGun>
         }
-        None => Box::new(IpfsMessaging::<Temporary>::new(None, account, Some(cache)).await?)
-            as Box<dyn RayGun>,
     };
 
     Ok(chat)
@@ -110,15 +138,18 @@ async fn create_rg(
 #[allow(clippy::await_holding_lock)]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let opt = Opt::parse();
     if fdlimit::raise_fd_limit().is_none() {}
-    let file_appender = tracing_appender::rolling::hourly("./", "warp_rg_ipfs_messenger.log");
+
+    let file_appender = tracing_appender::rolling::hourly(
+        opt.path.clone().unwrap_or_else(|| PathBuf::from("./")),
+        "warp_rg_ipfs_messenger.log",
+    );
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     tracing_subscriber::fmt()
         .with_writer(non_blocking)
         .with_env_filter(EnvFilter::from_default_env())
         .init();
-
-    let opt = Opt::parse();
 
     let cache = cache_setup(opt.path.as_ref().map(|p| p.join("cache")))?;
     let password = if opt.with_key {
@@ -136,8 +167,16 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
+    let fs = create_fs(new_account.clone(), opt.path.clone()).await?;
+
     let mut chat = Arc::new(RwLock::new(
-        create_rg(opt.path.clone(), new_account.clone(), cache).await?,
+        create_rg(
+            opt.path.clone(),
+            new_account.clone(),
+            Some(fs.clone()),
+            cache,
+        )
+        .await?,
     ));
 
     println!("Obtaining identity....");
@@ -348,7 +387,7 @@ async fn main() -> anyhow::Result<()> {
                         },
                         Some("/list") => {
                             let mut table = Table::new();
-                            table.set_header(vec!["Message ID", "Conversation ID", "Date", "Sender", "Message", "Pinned", "Reaction"]);
+                            table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Sender", "Message", "Pinned", "Reaction"]);
                             let local_topic = match cmd_line.next() {
                                 Some(id) => match Uuid::from_str(id) {
                                     Ok(uuid) => uuid,
@@ -386,6 +425,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                                 table.add_row(vec![
                                     &message.id().to_string(),
+                                    &message.message_type().to_string(),
                                     &message.conversation_id().to_string(),
                                     &message.date().to_string(),
                                     &username,
@@ -438,6 +478,123 @@ async fn main() -> anyhow::Result<()> {
                                 continue
                             }
                             writeln!(stdout, "Message edited")?;
+                        },
+                        Some("/attach") => {
+                            let file = match cmd_line.next() {
+                                Some(file) => PathBuf::from(file),
+                                None => {
+                                    writeln!(stdout, "/attach <path> [message]")?;
+                                    continue
+                                }
+                            };
+
+                            let mut messages = vec![];
+
+                            for item in cmd_line.by_ref() {
+                                messages.push(item.to_string());
+                            }
+
+                            let message = vec![messages.join(" ").to_string()];
+
+                            let conversation_id = topic.read().clone();
+                            tokio::spawn({
+                                let mut chat = chat.clone();
+                                let mut stdout = stdout.clone();
+                                async move {
+                                    writeln!(stdout, "Sending....")?;
+                                    if let Err(e) = chat.attach(conversation_id, vec![file], message).await {
+                                        writeln!(stdout, "Error: {}", e)?;
+                                    } else {
+                                        writeln!(stdout, "File sent")?
+                                    }
+                                    Ok::<_, anyhow::Error>(())
+                                }
+                            });
+
+                        },
+                        Some("/download") => {
+                            let message_id = match cmd_line.next() {
+                                Some(id) => match Uuid::from_str(id) {
+                                    Ok(uuid) => uuid,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing ID: {}", e)?;
+                                        continue
+                                    }
+                                },
+                                None => {
+                                    writeln!(stdout, "/download <message-id> <file> <path>")?;
+                                    continue
+                                }
+                            };
+
+                            let file = match cmd_line.next() {
+                                Some(file) => file.to_string(),
+                                None => {
+                                    writeln!(stdout, "/download <message-id> <file> <path>")?;
+                                    continue
+                                }
+                            };
+
+                            let path = match cmd_line.next() {
+                                Some(file) => PathBuf::from(file),
+                                None => {
+                                    writeln!(stdout, "/download <message-id> <file> <path>")?;
+                                    continue
+                                }
+                            };
+
+                            let conversation_id = topic.read().clone();
+
+
+                            writeln!(stdout, "Downloading....")?;
+                            let mut stream = match chat.download(conversation_id, message_id, file, path).await {
+                                Ok(stream) => stream,
+                                Err(e) => {
+                                    writeln!(stdout, "Error: {}", e)?;
+                                    continue;
+                                }
+                            };
+
+                            tokio::spawn({
+                                let mut stdout = stdout.clone();
+                                async move {
+                                    while let Some(event) = stream.next().await {
+                                        match event {
+                                            Progression::CurrentProgress {
+                                                name,
+                                                current,
+                                                total,
+                                            } => {
+                                                writeln!(stdout, "Written {} MB for {name}", current / 1024 / 1024)?;
+                                                if let Some(total) = total {
+                                                    writeln!(stdout,
+                                                        "{}% completed",
+                                                        (((current as f64) / (total as f64)) * 100.) as usize
+                                                    )?;
+                                                }
+                                            }
+                                            Progression::ProgressComplete { name, total } => {
+                                                writeln!(stdout,
+                                                    "{name} has been downloaded with {} MB",
+                                                    total.unwrap_or_default() / 1024 / 1024
+                                                )?;
+                                            }
+                                            Progression::ProgressFailed {
+                                                name,
+                                                last_size,
+                                                error,
+                                            } => {
+                                                writeln!(stdout,
+                                                    "{name} failed to download at {} MB due to: {}",
+                                                    last_size.unwrap_or_default(),
+                                                    error.unwrap_or_default()
+                                                )?;
+                                            }
+                                        }
+                                    }
+                                    Ok::<_, anyhow::Error>(())
+                                }
+                            });
                         },
                         Some("/react") => {
                             let state = match cmd_line.next() {
@@ -580,6 +737,7 @@ async fn message_event_handle(
     mut stream: MessageEventStream,
     conversation_id: Arc<RwLock<Uuid>>,
 ) -> anyhow::Result<()> {
+    let identity = multipass.get_own_identity()?;
     let topic = conversation_id.clone();
     while let Some(event) = stream.next().await {
         match event {
@@ -595,24 +753,69 @@ async fn message_event_handle(
                     if let Ok(message) = raygun.get_message(conversation_id, message_id).await {
                         let username = get_username(multipass.clone(), message.sender())
                             .unwrap_or_else(|_| message.sender().to_string());
-                        //TODO: Clear terminal and use the array of messages from the conversation instead of getting last conversation
-                        match message.metadata().get("is_spam") {
-                            Some(_) => {
-                                writeln!(
-                                    stdout,
-                                    "[{}] @> [SPAM!] {}",
-                                    username,
-                                    message.value().join("\n")
-                                )?;
+
+                        match message.message_type() {
+                            MessageType::Message => match message.metadata().get("is_spam") {
+                                Some(_) => {
+                                    writeln!(
+                                        stdout,
+                                        "[{}] @> [SPAM!] {}",
+                                        username,
+                                        message.value().join("\n")
+                                    )?;
+                                }
+                                None => {
+                                    writeln!(
+                                        stdout,
+                                        "[{}] @> {}",
+                                        username,
+                                        message.value().join("\n")
+                                    )?;
+                                }
+                            },
+                            MessageType::Attachment => {
+                                if !message.value().is_empty() {
+                                    match message.metadata().get("is_spam") {
+                                        Some(_) => {
+                                            writeln!(
+                                                stdout,
+                                                "[{}] @> [SPAM!] {}",
+                                                username,
+                                                message.value().join("\n")
+                                            )?;
+                                        }
+                                        None => {
+                                            writeln!(
+                                                stdout,
+                                                "[{}] @> {}",
+                                                username,
+                                                message.value().join("\n")
+                                            )?;
+                                        }
+                                    }
+                                }
+
+                                let attachment = message.attachments().first().cloned().unwrap(); //Assume for now
+
+                                if message.sender() == identity.did_key() {
+                                    writeln!(stdout, ">> File {} attached", attachment.name())?;
+                                } else {
+                                    writeln!(
+                                        stdout,
+                                        ">> File {} been attached with size {} bytes",
+                                        attachment.name(),
+                                        attachment.size()
+                                    )?;
+
+                                    writeln!(
+                                        stdout,
+                                        ">> Do `/download {} {} <path>` to download",
+                                        message.id(),
+                                        attachment.name(),
+                                    )?;
+                                }
                             }
-                            None => {
-                                writeln!(
-                                    stdout,
-                                    "[{}] @> {}",
-                                    username,
-                                    message.value().join("\n")
-                                )?;
-                            }
+                            MessageType::Event => {}
                         }
                     }
                 }
