@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -18,7 +19,10 @@ use warp::error::Error;
 use warp::logging::tracing::log::{error, trace};
 use warp::logging::tracing::warn;
 use warp::multipass::MultiPass;
-use warp::raygun::{Conversation, EmbedState, Location, Message, MessageEventKind, MessageOptions, MessageType, PinState, RayGunEventKind, Reaction, ReactionState};
+use warp::raygun::{
+    Conversation, EmbedState, Location, Message, MessageEventKind, MessageOptions, MessageType,
+    PinState, RayGunEventKind, Reaction, ReactionState,
+};
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock};
 
@@ -1222,6 +1226,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     }
 
     #[allow(clippy::await_holding_lock)]
+    //TODO: Return a vector of streams for events of progression for uploading (possibly passing it through to raygun events)
     pub async fn attach(
         &mut self,
         conversation: Uuid,
@@ -1253,14 +1258,19 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let mut attachments = vec![];
 
         for file in files {
-            let file= match location {
+            let file = match location {
                 Location::Constellation => {
                     let path = file.display().to_string();
-                    match constellation.root_directory().get_item_by_path(&path).and_then(|item| item.get_file()).ok() {
+                    match constellation
+                        .root_directory()
+                        .get_item_by_path(&path)
+                        .and_then(|item| item.get_file())
+                        .ok()
+                    {
                         Some(f) => f,
-                        None => continue
+                        None => continue,
                     }
-                },
+                }
                 Location::Disk => {
                     let mut filename = match file.file_name() {
                         Some(file) => file.to_string_lossy().to_string(),
@@ -1280,7 +1290,17 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                 break;
                             }
                             interval += 1;
-                            filename = format!("{original}{interval}");
+                            let file = PathBuf::from(&original);
+                            let file_stem =
+                                file.file_stem().and_then(OsStr::to_str).map(str::to_string);
+                            let ext = file.extension().and_then(OsStr::to_str).map(str::to_string);
+
+                            filename = match (file_stem, ext) {
+                                (Some(filename), Some(ext)) => {
+                                    format!("{filename} ({interval}).{ext}")
+                                }
+                                _ => format!("{original} ({interval})"),
+                            };
                             continue;
                         }
                         skip = false;
