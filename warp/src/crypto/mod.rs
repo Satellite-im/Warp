@@ -6,7 +6,7 @@ pub use blake2;
 pub use chacha20poly1305;
 pub use curve25519_dalek;
 pub use did_key::{self, DIDKey, Ed25519KeyPair, Fingerprint, KeyMaterial};
-use did_key::{Bls12381KeyPairs, Generate, P256KeyPair, Secp256k1KeyPair, X25519KeyPair};
+use did_key::{Generate, P256KeyPair, Secp256k1KeyPair, X25519KeyPair};
 pub use digest;
 pub use ed25519_dalek;
 pub use getrandom;
@@ -93,9 +93,6 @@ impl Clone for DID {
             }
             did_key::KeyPair::P256(_) => {
                 did_key::from_existing_key::<P256KeyPair>(&public_bytes, pk)
-            }
-            did_key::KeyPair::Bls12381G1G2(_) => {
-                did_key::from_existing_key::<Bls12381KeyPairs>(&public_bytes, pk)
             }
             did_key::KeyPair::Secp256k1(_) => {
                 did_key::from_existing_key::<Secp256k1KeyPair>(&public_bytes, pk)
