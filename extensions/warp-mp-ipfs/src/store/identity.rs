@@ -34,7 +34,7 @@ use warp::{
         identity::{Identity, IdentityStatus, SHORT_ID_SIZE},
         MultiPassEventKind,
     },
-    sync::{Arc, RwLock},
+    sync::Arc,
     tesseract::Tesseract,
 };
 
@@ -49,15 +49,15 @@ pub struct IdentityStore<T: IpfsTypes> {
 
     path: Option<PathBuf>,
 
-    root_cid: Arc<RwLock<Option<Cid>>>,
+    root_cid: Arc<tokio::sync::RwLock<Option<Cid>>>,
 
-    cache_cid: Arc<RwLock<Option<Cid>>>,
+    cache_cid: Arc<tokio::sync::RwLock<Option<Cid>>>,
 
-    identity: Arc<RwLock<Option<Identity>>>,
+    identity: Arc<tokio::sync::RwLock<Option<Identity>>>,
 
-    seen: Arc<RwLock<HashSet<PeerId>>>,
+    seen: Arc<tokio::sync::RwLock<HashSet<PeerId>>>,
 
-    discovering: Arc<RwLock<HashSet<DID>>>,
+    discovering: Arc<tokio::sync::RwLock<HashSet<DID>>>,
 
     discovery: Discovery,
 
@@ -150,7 +150,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         }
 
         if let Ok(ident) = store.own_identity().await {
-            *store.identity.write() = Some(ident);
+            *store.identity.write().await = Some(ident);
             store.start_event.store(true, Ordering::SeqCst);
         }
         let id_broadcast_stream = store
@@ -215,7 +215,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             .ipfs
             .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
             .await?;
-        *self.seen.write() = HashSet::from_iter(peers);
+        *self.seen.write().await = HashSet::from_iter(peers);
         Ok(())
     }
 
@@ -230,10 +230,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
         //      the list isnt updated while checking and updating
 
         let peers = HashSet::from_iter(peers);
-        if peers.is_empty() || (!peers.is_empty() && self.seen.read().eq(&peers)) {
+        if peers.is_empty() || (!peers.is_empty() && self.seen.read().await.eq(&peers)) {
             return Ok(());
         }
-        let seen_list = self.seen.read().clone();
+        let seen_list = self.seen.read().await.clone();
 
         let mut havent_seen = vec![];
         for peer in peers.iter() {
@@ -246,7 +246,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             return Ok(());
         }
 
-        self.seen.write().extend(havent_seen);
+        self.seen.write().await.extend(havent_seen);
 
         let data = Sata::default();
 
@@ -309,11 +309,11 @@ impl<T: IpfsTypes> IdentityStore<T> {
             "Payload doesnt match identity"
         );
 
-        if let Some(own_id) = self.identity.read().clone() {
+        if let Some(own_id) = self.identity.read().await.clone() {
             anyhow::ensure!(own_id != identity, "Cannot accept own identity");
         }
 
-        let (old_cid, mut cache_documents) = match self.get_cache_cid() {
+        let (old_cid, mut cache_documents) = match self.get_cache_cid().await {
             Ok(cid) => match self
                 .get_dag::<HashSet<CacheDocument>>(IpfsPath::from(cid), None)
                 .await
@@ -419,7 +419,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     async fn cache(&self) -> HashSet<CacheDocument> {
-        let cache_cid = match self.get_cache_cid().ok() {
+        let cache_cid = match self.get_cache_cid().await.ok() {
             Some(cid) => cid,
             None => return Default::default(),
         };
@@ -479,6 +479,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let own_did = self
             .identity
             .read()
+            .await
             .clone()
             .map(|identity| identity.did_key())
             .ok_or_else(|| {
@@ -498,7 +499,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
                 let connected = connected_to_peer(self.ipfs.clone(), peer_id).await?;
                 if connected == PeerConnectionType::NotConnected
-                    && self.discovering.write().insert(pubkey.clone())
+                    && self.discovering.write().await.insert(pubkey.clone())
                 {
                     let discovering = self.discovering.clone();
                     //TODO: Have separate functionality (or refactor phonebook) to perform checks on peers
@@ -533,7 +534,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                 if let Ok(PeerConnectionType::Connected) =
                                     connected_to_peer(ipfs.clone(), peer_id).await
                                 {
-                                    discovering.write().remove(&pubkey);
+                                    discovering.write().await.remove(&pubkey);
                                     break;
                                 }
                                 tokio::time::sleep(Duration::from_secs(1)).await;
@@ -667,13 +668,13 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn get_root_document(&self) -> Result<RootDocument, Error> {
-        let root_cid = self.get_cid()?;
+        let root_cid = self.get_cid().await?;
         let path = IpfsPath::from(root_cid);
         self.get_dag(path, None).await
     }
 
     pub async fn set_root_document(&mut self, document: RootDocument) -> Result<(), Error> {
-        let old_cid = self.get_cid()?;
+        let old_cid = self.get_cid().await?;
         let root_cid = self.put_dag(document).await?;
         self.ipfs.remove_pin(&old_cid, true).await?;
         self.ipfs.insert_pin(&root_cid, true).await?;
@@ -736,7 +737,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn save_cid(&mut self, cid: Cid) -> Result<(), Error> {
-        *self.root_cid.write() = Some(cid);
+        *self.root_cid.write().await = Some(cid);
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
             tokio::fs::write(path.join(".id"), cid).await?;
@@ -745,7 +746,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn save_cache_cid(&mut self, cid: Cid) -> Result<(), Error> {
-        *self.cache_cid.write() = Some(cid);
+        *self.cache_cid.write().await = Some(cid);
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
             tokio::fs::write(path.join(".cache_id"), cid).await?;
@@ -850,33 +851,33 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 .await
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
             {
-                *self.root_cid.write() = cid_str.parse().ok()
+                *self.root_cid.write().await = cid_str.parse().ok()
             }
 
             if let Ok(cid_str) = tokio::fs::read(path.join(".cache_id"))
                 .await
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
             {
-                *self.cache_cid.write() = cid_str.parse().ok();
+                *self.cache_cid.write().await = cid_str.parse().ok();
             }
         }
         Ok(())
     }
 
-    pub fn get_cache_cid(&self) -> Result<Cid, Error> {
-        (self.cache_cid.read().clone())
+    pub async fn get_cache_cid(&self) -> Result<Cid, Error> {
+        (self.cache_cid.read().await.clone())
             .ok_or_else(|| Error::OtherWithContext("Cache cannot be found".into()))
     }
 
-    pub fn get_cid(&self) -> Result<Cid, Error> {
-        (self.root_cid.read().clone()).ok_or(Error::IdentityDoesntExist)
+    pub async fn get_cid(&self) -> Result<Cid, Error> {
+        (self.root_cid.read().await.clone()).ok_or(Error::IdentityDoesntExist)
     }
 
     pub async fn update_identity(&self) -> Result<(), Error> {
         let ident = self.own_identity().await?;
         self.validate_identity(&ident)?;
-        *self.identity.write() = Some(ident);
-        self.seen.write().clear();
+        *self.identity.write().await = Some(ident);
+        self.seen.write().await.clear();
         Ok(())
     }
 
