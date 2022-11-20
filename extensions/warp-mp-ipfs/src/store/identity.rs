@@ -757,6 +757,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     pub async fn store_photo(
         &mut self,
         mut stream: BoxStream<'static, Vec<u8>>,
+        limit: Option<usize>
     ) -> Result<Cid, Error> {
         let ipfs = self.ipfs.clone();
 
@@ -777,13 +778,15 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 }
                 total += consumed;
             }
-            if total >= 5 * 1024 * 1024 {
-                return Err(Error::InvalidLength {
-                    context: "photo".into(),
-                    current: total,
-                    minimum: None,
-                    maximum: Some(5 * 1024 * 1024),
-                });
+            if let Some(limit) = limit {
+                if total >= limit {
+                    return Err(Error::InvalidLength {
+                        context: "photo".into(),
+                        current: total,
+                        minimum: None,
+                        maximum: Some(limit),
+                    });
+                }
             }
         }
 

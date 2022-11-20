@@ -628,8 +628,8 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                         .store_photo(
                             futures::stream::once(async move {
                                 serde_json::to_vec(&data).unwrap_or_default()
-                            })
-                            .boxed(),
+                            }).boxed(),
+                            Some(2 * 1024 * 1024)
                         )
                         .await?;
 
@@ -662,8 +662,8 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                         .store_photo(
                             futures::stream::once(async move {
                                 serde_json::to_vec(&data).unwrap_or_default()
-                            })
-                            .boxed(),
+                            }).boxed(),
+                            Some(2 * 1024 * 1024)
                         )
                         .await?;
 
