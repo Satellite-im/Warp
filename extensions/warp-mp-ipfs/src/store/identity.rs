@@ -13,7 +13,7 @@ use crate::{
     store::{did_to_libp2p_pub, IdentityPayload},
     Persistent,
 };
-use futures::{pin_mut, FutureExt, StreamExt};
+use futures::{stream::BoxStream, FutureExt, StreamExt};
 use ipfs::{
     libp2p::gossipsub::GossipsubMessage,
     unixfs::ll::file::adder::{Chunker, FileAdderBuilder},
@@ -293,19 +293,19 @@ impl<T: IpfsTypes> IdentityStore<T> {
     async fn process_message(&mut self, message: Arc<GossipsubMessage>) -> anyhow::Result<()> {
         let data = serde_json::from_slice::<Sata>(&message.data)?;
 
-        let object = data.decode::<IdentityPayload>()?;
+        let raw_object = data.decode::<IdentityPayload>()?;
 
-        let payload = object.payload;
+        let payload = raw_object.payload;
 
         //TODO: Validate public key against peer that sent it
-        let _pk = did_to_libp2p_pub(&object.did)?;
+        let _pk = did_to_libp2p_pub(&raw_object.did)?;
 
         let identity = payload
             .resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
             .await?;
 
         anyhow::ensure!(
-            object.did == identity.did_key(),
+            raw_object.did == identity.did_key(),
             "Payload doesnt match identity"
         );
 
@@ -341,8 +341,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 let username = identity.username();
                 let short_id = identity.short_id();
                 let did = identity.did_key();
-                let picture = object.picture;
-                let banner = object.banner;
+                let picture = raw_object.picture.clone();
+                let banner = raw_object.banner.clone();
                 let identity = payload.clone();
                 CacheDocument {
                     username,
@@ -356,27 +356,41 @@ impl<T: IpfsTypes> IdentityStore<T> {
         };
 
         match (found, &document.identity) {
-            (true, object) if object != &payload => {
+            (true, object) => {
+                let mut change = false;
                 if document.username != identity.username() {
                     document.username = identity.username();
+                    change = true;
+                }
+                if document.picture != raw_object.picture {
+                    document.picture = raw_object.picture;
+                    change = true;
+                }
+                if document.banner != raw_object.banner {
+                    document.banner = raw_object.banner;
+                    change = true;
+                }
+                if object != &payload {
+                    document.identity = payload;
+                    change = true;
                 }
 
-                document.identity = payload;
-                cache_documents.replace(document);
+                if change {
+                    cache_documents.replace(document);
 
-                let new_cid = self.put_dag(cache_documents).await?;
+                    let new_cid = self.put_dag(cache_documents).await?;
 
-                self.ipfs.insert_pin(&new_cid, false).await?;
-                self.save_cache_cid(new_cid).await?;
-                if let Some(old_cid) = old_cid {
-                    if self.ipfs.is_pinned(&old_cid).await? {
-                        self.ipfs.remove_pin(&old_cid, false).await?;
+                    self.ipfs.insert_pin(&new_cid, false).await?;
+                    self.save_cache_cid(new_cid).await?;
+                    if let Some(old_cid) = old_cid {
+                        if self.ipfs.is_pinned(&old_cid).await? {
+                            self.ipfs.remove_pin(&old_cid, false).await?;
+                        }
+                        // Do we want to remove the old block?
+                        self.ipfs.remove_block(old_cid).await?;
                     }
-                    // Do we want to remove the old block?
-                    self.ipfs.remove_block(old_cid).await?;
                 }
             }
-            (true, object) if object == &payload => {}
             (false, _object) => {
                 cache_documents.insert(document);
 
@@ -392,7 +406,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     self.ipfs.remove_block(old_cid).await?;
                 }
             }
-            _ => {}
         };
         Ok(())
     }
@@ -607,12 +620,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn identity_update(&mut self, identity: Identity) -> Result<(), Error> {
-        let rcid = self.get_cid()?;
-        let path = IpfsPath::from(rcid);
+        let mut root_document = self.get_root_document().await?;
         let ident_cid = self.put_dag(identity).await?;
-
-        let mut root_document: RootDocument = self.get_dag(path, None).await?;
         root_document.identity = ident_cid;
+
         self.set_root_document(root_document).await
     }
 
@@ -695,11 +706,25 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn own_identity(&self) -> Result<Identity, Error> {
-        let root_cid = self.get_cid()?;
-        let path = IpfsPath::from(root_cid)
-            .sub_path("identity")
-            .map_err(anyhow::Error::from)?;
-        let identity = self.get_dag::<Identity>(path, None).await?;
+        let root_document = self.get_root_document().await?;
+        let ipfs = self.ipfs.clone();
+        let path = IpfsPath::from(root_document.identity);
+        let mut identity = self.get_dag::<Identity>(path, None).await?;
+
+        if let Some(document) = root_document.banner {
+            let banner = document.resolve_or_default(ipfs.clone(), None).await;
+            let mut graphics = identity.graphics();
+            graphics.set_profile_banner(&banner);
+            identity.set_graphics(graphics);
+        }
+
+        if let Some(document) = root_document.picture {
+            let picture = document.resolve_or_default(ipfs.clone(), None).await;
+            let mut graphics = identity.graphics();
+            graphics.set_profile_picture(&picture);
+            identity.set_graphics(graphics);
+        }
+
         let public_key = identity.did_key();
         let kp_public_key = libp2p_pub_to_did(&self.get_keypair()?.public())?;
         if public_key != kp_public_key {
@@ -728,15 +753,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(())
     }
 
-    pub async fn store_photo(&mut self, photo: &[u8]) -> Result<Cid, Error> {
-        if photo.len() >= 5 * 1024 * 1024 {
-            return Err(Error::InvalidLength {
-                context: "photo".into(),
-                current: photo.len(),
-                minimum: None,
-                maximum: Some(5 * 1024 * 1024),
-            });
-        }
+    pub async fn store_photo(
+        &mut self,
+        mut stream: BoxStream<'static, Vec<u8>>,
+    ) -> Result<Cid, Error> {
         let ipfs = self.ipfs.clone();
 
         let mut adder = FileAdderBuilder::default()
@@ -744,8 +764,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
             .build();
 
         let mut last_cid = None;
-
-        let mut stream = futures::stream::iter(vec![photo]);
 
         while let Some(buffer) = stream.next().await {
             let mut total = 0;
@@ -757,6 +775,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     let _cid = ipfs.put_block(block).await?;
                 }
                 total += consumed;
+            }
+            if total >= 5 * 1024 * 1024 {
+                return Err(Error::InvalidLength {
+                    context: "photo".into(),
+                    current: total,
+                    minimum: None,
+                    maximum: Some(5 * 1024 * 1024),
+                });
             }
         }
 
@@ -772,38 +798,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
         ipfs.insert_pin(&cid, true).await?;
 
         Ok(cid)
-    }
-
-    pub async fn retrieve_photo(&mut self, path: Cid) -> Result<String, Error> {
-        let ipfs = self.ipfs.clone();
-
-        let stream = ipfs
-            .cat_unixfs(path, None)
-            .await
-            .map_err(anyhow::Error::from)?;
-
-        pin_mut!(stream);
-
-        let mut data = vec![];
-
-        while let Some(stream) = stream.next().await {
-            if data.len() >= 5 * 1024 * 1024 {
-                return Err(Error::InvalidLength {
-                    context: "data".into(),
-                    current: data.len(),
-                    minimum: None,
-                    maximum: Some(5 * 1024 * 1024),
-                });
-            }
-            match stream {
-                Ok(bytes) => {
-                    data.extend(bytes);
-                }
-                Err(e) => return Err(Error::from(anyhow::anyhow!("{e}"))),
-            }
-        }
-
-        Ok(String::from_utf8_lossy(&data).to_string())
     }
 
     pub async fn delete_photo(&mut self, cid: Cid) -> Result<(), Error> {
@@ -934,31 +928,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
                         current: len,
                         minimum: None,
                         maximum: Some(512),
-                    });
-                }
-            }
-        }
-        {
-            let graphics = identity.graphics();
-            {
-                let len = graphics.profile_banner().len();
-                if len > 2 * 1024 * 1024 {
-                    return Err(Error::InvalidLength {
-                        context: "profile banner".into(),
-                        current: len,
-                        minimum: None,
-                        maximum: Some(2 * 1024 * 1024),
-                    });
-                }
-            }
-            {
-                let len = graphics.profile_picture().len();
-                if len > 2 * 1024 * 1024 {
-                    return Err(Error::InvalidLength {
-                        context: "profile picture".into(),
-                        current: len,
-                        minimum: None,
-                        maximum: Some(2 * 1024 * 1024),
                     });
                 }
             }

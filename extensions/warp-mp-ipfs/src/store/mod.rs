@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use ipfs::{IpfsTypes, Multiaddr, PeerId, Protocol};
-use libipld::Cid;
 use serde::{Deserialize, Serialize};
 use tracing::log::error;
 use warp::{
@@ -79,11 +78,11 @@ pub struct IdentityPayload {
 
     /// Type that represents profile picture
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub picture: Option<Cid>,
+    pub picture: Option<DocumentType<String>>,
 
     /// Type that represents profile banner
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub banner: Option<Cid>,
+    pub banner: Option<DocumentType<String>>,
 
     /// Type that represents identity or cid
     pub payload: DocumentType<Identity>,

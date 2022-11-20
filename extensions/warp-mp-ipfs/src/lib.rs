@@ -2,11 +2,12 @@ pub mod config;
 pub mod store;
 
 use config::MpIpfsConfig;
+use futures::StreamExt;
 use ipfs::libp2p::kad::protocol::DEFAULT_PROTO_NAME;
 use ipfs::libp2p::mplex::MplexConfig;
 use ipfs::libp2p::swarm::ConnectionLimits;
-use ipfs::libp2p::yamux::{YamuxConfig, WindowUpdateMode};
-use ipfs::p2p::{TransportConfig, IdentifyConfiguration};
+use ipfs::libp2p::yamux::{WindowUpdateMode, YamuxConfig};
+use ipfs::p2p::{IdentifyConfiguration, TransportConfig};
 use sata::Sata;
 use std::any::Any;
 use std::borrow::Cow;
@@ -39,6 +40,7 @@ use warp::multipass::{
 };
 
 use crate::config::Bootstrap;
+use crate::store::document::DocumentType;
 
 pub type Temporary = TestTypes;
 pub type Persistent = Types;
@@ -611,7 +613,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                         });
                     }
 
-                    identity.set_username(&username)
+                    identity.set_username(&username);
                 }
                 (None, Some(data), None, None) => {
                     let len = data.len();
@@ -623,10 +625,30 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                             maximum: Some(2 * 1024 * 1024),
                         });
                     }
+                    let cid = store
+                        .store_photo(
+                            futures::stream::once(async move {
+                                serde_json::to_vec(&data).unwrap_or_default()
+                            })
+                            .boxed(),
+                        )
+                        .await?;
 
-                    let mut graphics = identity.graphics();
-                    graphics.set_profile_picture(&data);
-                    identity.set_graphics(graphics);
+                    let mut root_document = store.get_root_document().await?;
+
+                    if let Some(picture) = root_document.picture {
+                        if let DocumentType::UnixFS(picture_cid, _) = picture {
+                            if picture_cid == cid {
+                                return Err(Error::CannotUpdateIdentityPicture);
+                            }
+                            if let Err(e) = store.delete_photo(picture_cid).await {
+                                error!("Error deleting picture: {e}");
+                            }
+                        }
+                    }
+
+                    root_document.picture = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
+                    store.set_root_document(root_document).await?;
                 }
                 (None, None, Some(data), None) => {
                     let len = data.len();
@@ -638,9 +660,30 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                             maximum: Some(2 * 1024 * 1024),
                         });
                     }
-                    let mut graphics = identity.graphics();
-                    graphics.set_profile_banner(&data);
-                    identity.set_graphics(graphics);
+
+                    let cid = store
+                        .store_photo(
+                            futures::stream::once(async move {
+                                serde_json::to_vec(&data).unwrap_or_default()
+                            })
+                            .boxed(),
+                        )
+                        .await?;
+
+                    let mut root_document = store.get_root_document().await?;
+                    if let Some(banner) = root_document.banner {
+                        if let DocumentType::UnixFS(banner_cid, _) = banner {
+                            if banner_cid == cid {
+                                return Err(Error::CannotUpdateIdentityBanner);
+                            }
+                            if let Err(e) = store.delete_photo(banner_cid).await {
+                                error!("Error deleting banner: {e}");
+                            }
+                        }
+                    }
+
+                    root_document.banner = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
+                    store.set_root_document(root_document).await?;
                 }
                 (None, None, None, Some(status)) => {
                     if let Some(status) = status.clone() {
@@ -654,11 +697,10 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                             });
                         }
                     }
-                    identity.set_status_message(status)
+                    identity.set_status_message(status);
                 }
                 _ => return Err(Error::CannotUpdateIdentity),
             }
-
             store.identity_update(identity.clone()).await?;
 
             if let Ok(mut cache) = self.get_cache_mut() {
