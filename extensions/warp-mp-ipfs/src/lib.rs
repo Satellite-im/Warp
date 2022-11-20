@@ -227,11 +227,10 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
             keep_alive: true,
-            identify_configuration: Some({
-                let mut config = IdentifyConfiguration::default();
-                config.cache = 100;
-                config.push_update = true;
-                config
+            identify_configuration: Some(IdentifyConfiguration {
+                cache: 100,
+                push_update: true,
+                ..Default::default()
             }),
             kad_configuration: Some({
                 let mut conf = ipfs::libp2p::kad::KademliaConfig::default();
