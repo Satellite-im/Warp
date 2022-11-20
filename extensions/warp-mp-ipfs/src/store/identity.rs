@@ -165,8 +165,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
             let mut tick = tokio::time::interval(Duration::from_millis(interval));
             //Use to update the seen list
-            let mut update_seen = tokio::time::interval(Duration::from_secs(10));
-            let mut clear_seen = tokio::time::interval(Duration::from_secs(15));
+            // let mut update_seen = tokio::time::interval(Duration::from_secs(10));
+            // let mut clear_seen = tokio::time::interval(Duration::from_secs(15));
             loop {
                 if store.end_event.load(Ordering::SeqCst) {
                     break;
@@ -183,14 +183,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
                             }
                         }
                     }
-                    _ = update_seen.tick() => {
-                        if let Err(e) = store.update_pubsub_peers_list().await {
-                            error!("Error: {e}");
-                        }
-                    }
-                    _ = clear_seen.tick() => {
-                        store.seen.write().clear();
-                    }
+                    // _ = update_seen.tick() => {
+                    //     if let Err(e) = store.update_pubsub_peers_list().await {
+                    //         error!("Error: {e}");
+                    //     }
+                    // }
+                    // _ = clear_seen.tick() => {
+                    //     store.seen.write().clear();
+                    // }
                     _ = tick.tick() => {
                         if let Err(e) = store.broadcast_identity().await {
                             error!("Error broadcasting identity: {e}");
@@ -212,14 +212,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(store)
     }
 
-    async fn update_pubsub_peers_list(&self) -> anyhow::Result<()> {
-        let peers = self
-            .ipfs
-            .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
-            .await?;
-        *self.seen.write() = HashSet::from_iter(peers);
-        Ok(())
-    }
+    // async fn update_pubsub_peers_list(&self) -> anyhow::Result<()> {
+    //     let peers = self
+    //         .ipfs
+    //         .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
+    //         .await?;
+    //     *self.seen.write() = HashSet::from_iter(peers);
+    //     Ok(())
+    // }
 
     //TODO: Replace with a request/resposne style broadcast
     async fn broadcast_identity(&self) -> anyhow::Result<()> {
@@ -228,27 +228,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
             .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
             .await?;
 
-        //TODO: Maybe use write lock and drop it once no longer needed to be sure that
-        //      the list isnt updated while checking and updating
-
-        let peers = HashSet::from_iter(peers);
-        if peers.is_empty() || (!peers.is_empty() && self.seen.read().eq(&peers)) {
+        if peers.is_empty() {
             return Ok(());
         }
-        let seen_list = self.seen.read().clone();
-
-        let mut havent_seen = vec![];
-        for peer in peers.iter() {
-            if !seen_list.contains(peer) {
-                havent_seen.push(peer);
-            }
-        }
-
-        if havent_seen.is_empty() {
-            return Ok(());
-        }
-
-        self.seen.write().extend(havent_seen);
 
         let data = Sata::default();
 
