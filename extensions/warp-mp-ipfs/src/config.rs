@@ -159,7 +159,7 @@ pub struct StoreSetting {
 impl Default for StoreSetting {
     fn default() -> Self {
         Self {
-            broadcast_interval: 500,
+            broadcast_interval: 1000,
             discovery: Discovery::Provider(None),
             sync: Vec::new(),
             sync_interval: 100,
