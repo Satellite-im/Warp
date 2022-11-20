@@ -636,14 +636,12 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
 
                     let mut root_document = store.get_root_document().await?;
 
-                    if let Some(picture) = root_document.picture {
-                        if let DocumentType::UnixFS(picture_cid, _) = picture {
-                            if picture_cid == cid {
-                                return Err(Error::CannotUpdateIdentityPicture);
-                            }
-                            if let Err(e) = store.delete_photo(picture_cid).await {
-                                error!("Error deleting picture: {e}");
-                            }
+                    if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
+                        if picture_cid == cid {
+                            return Err(Error::CannotUpdateIdentityPicture);
+                        }
+                        if let Err(e) = store.delete_photo(picture_cid).await {
+                            error!("Error deleting picture: {e}");
                         }
                     }
 
@@ -671,14 +669,12 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                         .await?;
 
                     let mut root_document = store.get_root_document().await?;
-                    if let Some(banner) = root_document.banner {
-                        if let DocumentType::UnixFS(banner_cid, _) = banner {
-                            if banner_cid == cid {
-                                return Err(Error::CannotUpdateIdentityBanner);
-                            }
-                            if let Err(e) = store.delete_photo(banner_cid).await {
-                                error!("Error deleting banner: {e}");
-                            }
+                    if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
+                        if banner_cid == cid {
+                            return Err(Error::CannotUpdateIdentityBanner);
+                        }
+                        if let Err(e) = store.delete_photo(banner_cid).await {
+                            error!("Error deleting banner: {e}");
                         }
                     }
 
