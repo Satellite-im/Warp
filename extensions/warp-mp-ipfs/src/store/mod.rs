@@ -21,6 +21,7 @@ pub mod document;
 pub mod friends;
 pub mod identity;
 pub mod phonebook;
+pub mod sync;
 
 pub const IDENTITY_BROADCAST: &str = "identity/broadcast";
 pub const FRIENDS_BROADCAST: &str = "friends/broadcast";
