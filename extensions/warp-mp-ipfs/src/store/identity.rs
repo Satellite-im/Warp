@@ -28,7 +28,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::broadcast;
 use tracing::log::error;
 use warp::{
-    crypto::{DIDKey, Ed25519KeyPair, Fingerprint, DID},
+    crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
     multipass::{
         identity::{Identity, IdentityStatus, SHORT_ID_SIZE},
@@ -231,7 +231,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             .await?;
 
         if peers.is_empty() {
-            return Ok(())
+            return Ok(());
         }
 
         let data = Sata::default();
@@ -247,11 +247,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let picture = root.picture;
         let banner = root.banner;
 
-        //Note: Sending Cid and using bitswap with normal discovery works, however
-        //      with direct or no discovery may not exchange blocks as expected
-        //      For now, we will send the identity directly as the payload but
-        //      may change in the future to using cid once bitswap is sorted
-        //      out upstream
         let payload = match self.override_ipld.load(Ordering::Relaxed) {
             true => DocumentType::Object(identity),
             false => DocumentType::Cid(root.identity),
@@ -444,10 +439,13 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         let ident_cid = self.put_dag(identity.clone()).await?;
 
-        let root_document = RootDocument {
+        let mut root_document = RootDocument {
             identity: ident_cid,
             ..Default::default()
         };
+
+        let did_kp = self.get_keypair_did()?;
+        root_document.sign(&did_kp)?;
 
         let root_cid = self.put_dag(root_document).await?;
 
@@ -646,6 +644,13 @@ impl<T: IpfsTypes> IdentityStore<T> {
         }
     }
 
+    pub fn get_keypair_did(&self) -> anyhow::Result<DID> {
+        let kp = self.get_raw_keypair()?.encode();
+        let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
+        let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
+        Ok(did.into())
+    }
+
     pub fn get_raw_keypair(&self) -> anyhow::Result<ipfs::libp2p::identity::ed25519::Keypair> {
         match self.get_keypair()? {
             Keypair::Ed25519(kp) => Ok(kp),
@@ -659,8 +664,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
         self.get_dag(path, None).await
     }
 
-    pub async fn set_root_document(&mut self, document: RootDocument) -> Result<(), Error> {
+    pub async fn set_root_document(&mut self, mut document: RootDocument) -> Result<(), Error> {
         let old_cid = self.get_cid().await?;
+        let did_kp = self.get_keypair_did()?;
+        document.sign(&did_kp)?;
         let root_cid = self.put_dag(document).await?;
         self.ipfs.remove_pin(&old_cid, true).await?;
         self.ipfs.insert_pin(&root_cid, true).await?;
@@ -743,7 +750,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     pub async fn store_photo(
         &mut self,
         mut stream: BoxStream<'static, Vec<u8>>,
-        limit: Option<usize>
+        limit: Option<usize>,
     ) -> Result<Cid, Error> {
         let ipfs = self.ipfs.clone();
 
