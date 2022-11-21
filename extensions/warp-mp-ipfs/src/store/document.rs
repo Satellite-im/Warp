@@ -41,6 +41,8 @@ impl<T> DocumentType<T> {
                     Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
                 }
             }
+            //This will resolve into a buffer that can be deserialize into T.
+            //Best not to use this to resolve a large file. 
             DocumentType::UnixFS(cid, limit) => {
                 let fut = async {
                     let stream = ipfs
