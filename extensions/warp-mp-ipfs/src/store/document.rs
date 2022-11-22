@@ -106,7 +106,7 @@ impl<T> From<Cid> for DocumentType<T> {
 }
 
 /// node root document for their identity, friends, blocks, etc, along with previous cid (if we wish to track that)
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RootDocument {
     //TODO: Maybe use DocumentType<Identity>?
     pub identity: Cid,
