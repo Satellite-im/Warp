@@ -546,13 +546,16 @@ impl<T: IpfsTypes> FriendsStore<T> {
             .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        internal_request.valid()?;
+        if let Err(e) = internal_request.valid() {
+            list.remove(&internal_request);
+            self.set_request_list(list).await?;
+            return Err(e);
+        }
 
         if self.is_friend(pubkey).await.is_ok() {
+            warn!("Already friends. Removing request");
             list.remove(&internal_request);
-
             self.set_request_list(list).await?;
-
             return Ok(());
         }
 
