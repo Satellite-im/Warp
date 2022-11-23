@@ -136,18 +136,18 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
     }
 
     /// Used to upload file to the filesystem
-    async fn put(&mut self, _: &str, _: &str) -> Result<(), Error> {
+    async fn put(&mut self, _: &str, _: &str) -> Result<ConstellationProgressStream, Error> {
         Err(Error::Unimplemented)
     }
 
     /// Used to download a file from the filesystem
-    async fn get(&self, _: &str, _: &str) -> Result<(), Error> {
+    async fn get(&self, _: &str, _: &str) -> Result<ConstellationProgressStream, Error> {
         Err(Error::Unimplemented)
     }
 
     /// Used to upload file to the filesystem with data from buffer
     #[allow(clippy::ptr_arg)]
-    async fn put_buffer(&mut self, _: &str, _: &Vec<u8>) -> Result<(), Error> {
+    async fn put_buffer(&mut self, _: &str, _: &Vec<u8>) -> Result<ConstellationProgressStream, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -277,18 +277,18 @@ where
     }
 
     /// Used to upload file to the filesystem
-    async fn put(&mut self, dest: &str, src: &str) -> Result<(), Error> {
+    async fn put(&mut self, dest: &str, src: &str) -> Result<ConstellationProgressStream, Error> {
         self.write().put(dest, src).await
     }
 
     /// Used to download a file from the filesystem
-    async fn get(&self, src: &str, dest: &str) -> Result<(), Error> {
+    async fn get(&self, src: &str, dest: &str) -> Result<ConstellationProgressStream, Error> {
         self.read().get(src, dest).await
     }
 
     /// Used to upload file to the filesystem with data from buffer
     #[allow(clippy::ptr_arg)]
-    async fn put_buffer(&mut self, dest: &str, src: &Vec<u8>) -> Result<(), Error> {
+    async fn put_buffer(&mut self, dest: &str, src: &Vec<u8>) -> Result<ConstellationProgressStream, Error> {
         self.write().put_buffer(dest, src).await
     }
 
@@ -592,6 +592,8 @@ pub mod ffi {
     use std::ffi::CStr;
     use std::os::raw::c_char;
 
+    use super::ConstellationProgressStream;
+
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_select(
@@ -682,17 +684,17 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         local: *const c_char,
-    ) -> FFIResult_Null {
+    ) -> FFIResult<ConstellationProgressStream> {
         if ctx.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if remote.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
         }
 
         if local.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Local path cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Local path cannot be null")));
         }
 
         let constellation = &mut *(ctx);
@@ -711,17 +713,17 @@ pub mod ffi {
         remote: *const c_char,
         buffer: *const u8,
         buffer_size: usize,
-    ) -> FFIResult_Null {
+    ) -> FFIResult<ConstellationProgressStream> {
         if ctx.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if remote.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
         }
 
         if buffer.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Buffer cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Buffer cannot be null")));
         }
 
         let slice = std::slice::from_raw_parts(buffer, buffer_size);
@@ -746,17 +748,17 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         local: *const c_char,
-    ) -> FFIResult_Null {
+    ) -> FFIResult<ConstellationProgressStream> {
         if ctx.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if remote.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
         }
 
         if local.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Local path cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Local path cannot be null")));
         }
 
         let constellation = &*(ctx);

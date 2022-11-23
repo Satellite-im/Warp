@@ -1,25 +1,25 @@
 pub mod config;
 use config::FsIpfsConfig;
-use futures::stream::BoxStream;
+use futures::stream::{self, BoxStream};
 use futures::{pin_mut, StreamExt};
 use ipfs::unixfs::ll::file::adder::{Chunker, FileAdderBuilder};
 use libipld::serde::{from_ipld, to_ipld};
 use libipld::Cid;
 use std::any::Any;
 use std::collections::HashSet;
-use std::io::Cursor;
 use std::path::PathBuf;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::AsyncWriteExt;
+use tokio_util::io::ReaderStream;
 use warp::constellation::{ConstellationDataType, ConstellationProgressStream, Progression};
 use warp::logging::tracing::{debug, error};
 use warp::multipass::MultiPass;
 use warp::sata::{Kind, Sata};
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
-// use warp_common::futures::TryStreamExt;
+
 use warp::module::Module;
 
-use ipfs::{unixfs::ll::file::adder::FileAdder, Block};
+use ipfs::Block;
 
 use chrono::{DateTime, Utc};
 use ipfs::{Ipfs, IpfsPath, IpfsTypes, TestTypes, Types};
@@ -287,8 +287,8 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         self.index.clone()
     }
 
-    async fn put(&mut self, name: &str, path: &str) -> Result<()> {
-        let ipfs = self.ipfs()?;
+    async fn put(&mut self, name: &str, path: &str) -> Result<ConstellationProgressStream> {
+        let _ipfs = self.ipfs()?;
         //Used to enter the tokio context
         let handle = warp::async_handle();
         let _g = handle.enter();
@@ -302,139 +302,88 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             return Err(Error::FileNotFound);
         }
 
-        let mut adder = FileAdder::default();
         let file = tokio::fs::File::open(&path).await?;
+        let size = file.metadata().await?.len() as usize;
+        let stream = ReaderStream::new(file)
+            .filter_map(|x| async { x.ok() })
+            .map(|x| x.into());
 
-        //TODO: use a larger buffer(?)
-        let mut reader = BufReader::with_capacity(adder.size_hint(), file);
-        let mut written = 0;
-        let mut last_cid = None;
-
-        {
-            let ipfs = ipfs.clone();
-            loop {
-                match reader.fill_buf().await? {
-                    buffer if buffer.is_empty() => {
-                        let blocks = adder.finish();
-                        for (cid, block) in blocks {
-                            let block = Block::new(cid, block)?;
-                            let cid = ipfs.put_block(block).await?;
-                            last_cid = Some(cid);
-                        }
-                        break;
-                    }
-                    buffer => {
-                        let mut total = 0;
-
-                        while total < buffer.len() {
-                            let (blocks, consumed) = adder.push(&buffer[total..]);
-                            for (cid, block) in blocks {
-                                let block = Block::new(cid, block)?;
-                                let _cid = ipfs.put_block(block).await?;
-                            }
-                            total += consumed;
-                            written += consumed;
-                        }
-                        reader.consume(total);
-                    }
-                }
-            }
-        }
-        let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
-        ipfs.insert_pin(&cid, true).await?;
-        let file = warp::constellation::file::File::new(name);
-        file.set_size(written);
-        file.set_reference(&format!("/ipfs/{cid}"));
-        let f = file.clone();
-        tokio::task::spawn_blocking(move || f.hash_mut().hash_from_file(&path))
-            .await
-            .map_err(anyhow::Error::from)??;
-        self.current_directory()?.add_item(file)?;
-        if let Err(_e) = self.export_index().await {}
-        Ok(())
+        self.put_stream(name, Some(size), stream.boxed()).await
     }
 
-    async fn get(&self, name: &str, path: &str) -> Result<()> {
-        let ipfs = self.ipfs()?;
+    async fn get(&self, name: &str, path: &str) -> Result<ConstellationProgressStream> {
+        let _ipfs = self.ipfs()?;
         //Used to enter the tokio context
         let handle = warp::async_handle();
         let _g = handle.enter();
+
         let item = self.current_directory()?.get_item_by_path(name)?;
-        let file = item.get_file()?;
-        let reference = file.reference().ok_or(Error::Other)?; //Reference not found
-        let stream = ipfs
-            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
-            .await
-            .map_err(anyhow::Error::from)?;
-        pin_mut!(stream);
+        let inner_file = item.get_file()?;
+
         let mut file = tokio::fs::File::create(path).await?;
-        while let Some(data) = stream.next().await {
-            let bytes = data.map_err(anyhow::Error::from)?;
-            file.write_all(&bytes).await?;
-            file.flush().await?;
-        }
-        //TODO: Validate file against the hashed reference
-        Ok(())
-    }
+        let mut inner_stream = self.get_stream(name).await?;
+        let name = name.to_string();
+        let stream = async_stream::stream! {
+            let mut total = 0;
 
-    async fn put_buffer(&mut self, name: &str, buffer: &Vec<u8>) -> Result<()> {
-        let ipfs = self.ipfs()?;
-        //Used to enter the tokio context
-        let handle = warp::async_handle();
-        let _g = handle.enter();
-
-        if self.current_directory()?.get_item_by_path(name).is_ok() {
-            return Err(Error::FileExist);
-        }
-
-        let mut adder = FileAdder::default();
-        //Maybe write directly to avoid reallocation?
-        let mut reader =
-            BufReader::with_capacity(adder.size_hint(), Cursor::new(buffer.as_slice()));
-        let mut written = 0;
-        let mut last_cid = None;
-
-        {
-            let ipfs = ipfs.clone();
-            loop {
-                match reader.fill_buf().await? {
-                    buffer if buffer.is_empty() => {
-                        let blocks = adder.finish();
-                        for (cid, block) in blocks {
-                            let block = Block::new(cid, block)?;
-                            let cid = ipfs.put_block(block).await?;
-                            last_cid = Some(cid);
+            while let Some(data) = inner_stream.next().await {
+                match data {
+                    Ok(bytes) => {
+                        if let Err(e) = file.write_all(&bytes).await {
+                            yield Progression::ProgressFailed {
+                                name: name.clone(),
+                                last_size: Some(total),
+                                error: Some(e.to_string()),
+                            };
+                            return;
                         }
-                        break;
+                        if let Err(e) = file.flush().await {
+                            yield Progression::ProgressFailed {
+                                name: name.clone(),
+                                last_size: Some(total),
+                                error: Some(e.to_string()),
+                            };
+                            return;
+                        }
+                        total += bytes.len();
+                        yield Progression::CurrentProgress {
+                            name: name.clone(),
+                            current: total,
+                            total: Some(inner_file.size()),
+                        };
                     }
-                    buffer => {
-                        let mut total = 0;
-
-                        while total < buffer.len() {
-                            let (blocks, consumed) = adder.push(&buffer[total..]);
-                            for (cid, block) in blocks {
-                                let block = Block::new(cid, block)?;
-                                let _cid = ipfs.put_block(block).await?;
-                            }
-                            total += consumed;
-                            written += consumed;
-                        }
-                        reader.consume(total);
+                    Err(e) => {
+                        yield Progression::ProgressFailed {
+                                name: name.clone(),
+                                last_size: Some(total),
+                                error: Some(e.to_string()),
+                        };
+                        return;
                     }
                 }
             }
-        }
-        let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
+            yield Progression::ProgressComplete { name: name.clone(), total: Some(total) }
+        };
 
-        ipfs.insert_pin(&cid, true).await?;
+        //TODO: Validate file against the hashed reference
+        Ok(ConstellationProgressStream(stream.boxed()))
+    }
 
-        let file = warp::constellation::file::File::new(name);
-        file.set_size(written);
-        file.set_reference(&format!("/ipfs/{cid}"));
-        file.hash_mut().hash_from_slice(buffer)?;
-        self.current_directory()?.add_item(file)?;
-        if let Err(_e) = self.export_index().await {}
-        Ok(())
+    async fn put_buffer(
+        &mut self,
+        name: &str,
+        buffer: &Vec<u8>,
+    ) -> Result<ConstellationProgressStream> {
+        self.put_stream(
+            name,
+            Some(buffer.len()),
+            stream::once({
+                let buffer = buffer.clone();
+                async move { buffer }
+            })
+            .boxed(),
+        )
+        .await
     }
 
     async fn get_buffer(&self, name: &str) -> Result<Vec<u8>> {
