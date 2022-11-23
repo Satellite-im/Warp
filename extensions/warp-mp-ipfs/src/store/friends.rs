@@ -438,6 +438,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     if let Entry::Occupied(mut entry) = self.queue.write().await.entry(did.clone())
                     {
                         let _ = entry.get_mut().remove(index);
+                        if entry.get().is_empty() {
+                            entry.remove_entry();
+                        }
                     }
 
                     self.save_queue().await;
@@ -487,7 +490,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         }
 
         if self.has_request_from(pubkey).await? {
-            return Err(Error::FriendRequestExist);
+            return self.accept_request(pubkey).await;
         }
 
         let list = self.list_all_raw_request().await?;
@@ -544,6 +547,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
             .ok_or(Error::CannotFindFriendRequest)?;
 
         internal_request.valid()?;
+
+        if self.is_friend(pubkey).await.is_ok() {
+            list.remove(&internal_request);
+
+            self.set_request_list(list).await?;
+
+            return Ok(());
+        }
 
         let mut request = FriendRequest::default();
         request.set_from(local_public_key);
