@@ -439,22 +439,18 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     {
                         let _ = entry.get_mut().remove(index);
                         if entry.get().is_empty() {
-                            entry.remove_entry();
+                            entry.remove();
                         }
                     }
 
                     self.save_queue().await;
                 }
 
-                // let index = self
-                //     .queue
-                //     .read()
-                //     .await
-                //     .iter()
-                //     .position(|q| Queue(*peer, data.clone()).eq(q))
-                //     .ok_or_else(|| Error::OtherWithContext("Cannot find item in queue".into()))?;
-
-                // let _ = self.queue.write().await.remove(did);
+                if let Entry::Occupied(entry) = self.queue.write().await.entry(did.clone()) {
+                    if entry.get().is_empty() {
+                        entry.remove();
+                    }
+                }
 
                 self.save_queue().await;
             }
@@ -603,7 +599,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
             .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        internal_request.valid()?;
+        if let Err(e) = internal_request.valid() {
+            list.remove(&internal_request);
+            self.set_request_list(list).await?;
+            return Err(e);
+        }
 
         let mut request = FriendRequest::default();
         request.set_from(local_public_key);
