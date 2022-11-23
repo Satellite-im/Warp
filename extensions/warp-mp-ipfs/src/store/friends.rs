@@ -2,7 +2,8 @@
 use futures::StreamExt;
 use ipfs::libp2p::gossipsub::GossipsubMessage;
 use ipfs::{Ipfs, IpfsTypes, PeerId};
-use std::collections::HashSet;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,7 +19,7 @@ use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::identity::{FriendRequest, FriendRequestStatus};
 use warp::multipass::MultiPassEventKind;
-use warp::sync::{Arc, RwLock};
+use warp::sync::Arc;
 
 use warp::tesseract::Tesseract;
 
@@ -52,7 +53,7 @@ pub struct FriendsStore<T: IpfsTypes> {
     override_ipld: Arc<AtomicBool>,
 
     // Used to broadcast request
-    queue: Arc<AsyncRwLock<Vec<Queue>>>,
+    queue: Arc<AsyncRwLock<HashMap<DID, VecDeque<InternalRequest>>>>,
 
     // Tesseract
     tesseract: Tesseract,
@@ -402,26 +403,55 @@ impl<T: IpfsTypes> FriendsStore<T> {
     //TODO: Implement checks to determine if request been accepted, etc.
     async fn check_queue(&self) -> anyhow::Result<()> {
         let list = self.queue.read().await.clone();
-        for item in list.iter() {
-            let Queue(peer, data) = item;
+        for (did, requests) in list.iter() {
             if let Ok(crate::store::PeerConnectionType::Connected) =
-                connected_to_peer(self.ipfs.clone(), *peer).await
+                connected_to_peer(self.ipfs.clone(), did.clone()).await
             {
-                let bytes = serde_json::to_vec(&data)?;
+                for (index, request) in requests.iter().enumerate() {
+                    let mut data = Sata::default();
+                    data.add_recipient(&request.to())
+                        .map_err(anyhow::Error::from)?;
 
-                self.ipfs
-                    .pubsub_publish(FRIENDS_BROADCAST.into(), bytes)
-                    .await?;
+                    let kp = &*self.did_key;
+                    let payload = data
+                        .encrypt(
+                            IpldCodec::DagJson,
+                            kp.as_ref(),
+                            Kind::Reference,
+                            request.clone(),
+                        )
+                        .map_err(anyhow::Error::from)?;
 
-                let index = self
-                    .queue
-                    .read()
-                    .await
-                    .iter()
-                    .position(|q| Queue(*peer, data.clone()).eq(q))
-                    .ok_or_else(|| Error::OtherWithContext("Cannot find item in queue".into()))?;
+                    let bytes = serde_json::to_vec(&payload)?;
 
-                let _ = self.queue.write().await.remove(index);
+                    if self
+                        .ipfs
+                        .pubsub_publish(FRIENDS_BROADCAST.into(), bytes)
+                        .await
+                        .is_err()
+                    {
+                        //Because we are unable to send a single request for whatever reason, kill the iteration
+                        //and proceed to the next item in line
+                        break;
+                    }
+
+                    if let Entry::Occupied(mut entry) = self.queue.write().await.entry(did.clone())
+                    {
+                        let _ = entry.get_mut().remove(index);
+                    }
+
+                    self.save_queue().await;
+                }
+
+                // let index = self
+                //     .queue
+                //     .read()
+                //     .await
+                //     .iter()
+                //     .position(|q| Queue(*peer, data.clone()).eq(q))
+                //     .ok_or_else(|| Error::OtherWithContext("Cannot find item in queue".into()))?;
+
+                // let _ = self.queue.write().await.remove(did);
 
                 self.save_queue().await;
             }
@@ -953,6 +983,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 request.clone(),
             )
             .map_err(anyhow::Error::from)?;
+
         let bytes = serde_json::to_vec(&payload)?;
 
         //Check to make sure the payload itself doesnt exceed 256kb
@@ -974,7 +1005,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
             self.queue
                 .write()
                 .await
-                .push(Queue(remote_peer_id, payload));
+                .entry(request.to())
+                .or_default()
+                .push_back(InternalRequest::Out(request.clone()));
+
             self.save_queue().await;
         } else if let Err(_e) = self
             .ipfs
@@ -984,7 +1018,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
             self.queue
                 .write()
                 .await
-                .push(Queue(remote_peer_id, payload));
+                .entry(request.to())
+                .or_default()
+                .push_back(InternalRequest::Out(request.clone()));
+
             self.save_queue().await;
         }
 
