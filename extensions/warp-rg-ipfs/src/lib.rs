@@ -25,7 +25,10 @@ use warp::module::Module;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::group::{GroupChat, GroupChatManagement, GroupInvite};
-use warp::raygun::{Conversation, Location, MessageEventStream, RayGunEventStream, RayGunStream};
+use warp::raygun::{
+    Conversation, Location, MessageEvent, MessageEventStream, RayGunEventStream, RayGunEvents,
+    RayGunStream,
+};
 use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
 use warp::raygun::{RayGunAttachment, RayGunEventKind};
 use warp::sync::RwLock;
@@ -381,6 +384,21 @@ impl<T: IpfsTypes> RayGunStream for IpfsMessaging<T> {
         let store = self.messaging_store()?;
         let stream = store.get_conversation_stream(conversation_id)?;
         Ok(MessageEventStream(Box::pin(stream)))
+    }
+}
+
+#[async_trait::async_trait]
+impl<T: IpfsTypes> RayGunEvents for IpfsMessaging<T> {
+    async fn send_event(&mut self, conversation_id: Uuid, event: MessageEvent) -> Result<()> {
+        self.messaging_store()?
+            .send_event(conversation_id, event)
+            .await
+    }
+
+    async fn cancel_event(&mut self, conversation_id: Uuid, event: MessageEvent) -> Result<()> {
+        self.messaging_store()?
+            .cancel_event(conversation_id, event)
+            .await
     }
 }
 
