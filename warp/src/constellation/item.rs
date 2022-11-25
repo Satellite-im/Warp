@@ -238,6 +238,11 @@ impl Item {
             return Err(Error::DuplicateName);
         }
 
+
+        if self.directory().unwrap_or_default().has_item(&self.name()) {
+            return Err(Error::DuplicateName);
+        }
+
         match &self.0 {
             ItemInner::File(file) => file.set_name(name),
             ItemInner::Directory(directory) => directory.set_name(name),
