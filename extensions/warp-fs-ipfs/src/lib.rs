@@ -670,6 +670,10 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         //Note: This will only support renaming the file or directory in the index
         let directory = self.current_directory()?;
 
+        if directory.get_item_by_path(new).is_ok() {
+            return Err(Error::DuplicateName);
+        }
+
         directory.rename_item(current, new)?;
         if let Err(_e) = self.export_index().await {}
         Ok(())
