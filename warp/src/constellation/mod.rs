@@ -4,7 +4,7 @@ pub mod item;
 
 use std::path::{Path, PathBuf};
 
-use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard, AsyncRwLock};
 
 use crate::error::Error;
 use crate::{Extension, SingleHandle};
@@ -229,72 +229,70 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle {
     }
 }
 
-//TODO: This would require a refactor to remove returned references
-#[allow(clippy::await_holding_lock)]
 #[async_trait::async_trait]
-impl<T: ?Sized> Constellation for Arc<RwLock<Box<T>>>
+impl<T: ?Sized> Constellation for Arc<AsyncRwLock<Box<T>>>
 where
     T: Constellation,
 {
     /// Provides the timestamp of when the file system was modified
     fn modified(&self) -> DateTime<Utc> {
-        self.read().modified()
+        tokio::task::block_in_place(|| self.blocking_read()).modified()
     }
 
     /// Get root directory
     fn root_directory(&self) -> Directory {
-        self.read().root_directory()
+        tokio::task::block_in_place(|| self.blocking_read()).root_directory()
     }
 
     /// Get current directory
     fn current_directory(&self) -> Result<Directory, Error> {
-        self.read().current_directory()
+        tokio::task::block_in_place(|| self.blocking_read()).current_directory()
     }
 
     /// Select a directory within the filesystem
     fn select(&mut self, path: &str) -> Result<(), Error> {
-        self.write().select(path)
+        tokio::task::block_in_place(|| self.blocking_write()).select(path)
     }
 
     /// Set path to current directory
     fn set_path(&mut self, path: PathBuf) {
-        self.write().set_path(path)
+        tokio::task::block_in_place(|| self.blocking_write()).set_path(path)
     }
 
     /// Get path of current directory
     fn get_path(&self) -> PathBuf {
-        self.read().get_path()
+        tokio::task::block_in_place(|| self.blocking_read()).get_path()
     }
 
     /// Go back to the previous directory
     fn go_back(&mut self) -> Result<(), Error> {
-        self.write().go_back()
+        tokio::task::block_in_place(|| self.blocking_write()).go_back()
     }
 
     /// Returns a mutable directory from the filesystem
     fn open_directory(&self, path: &str) -> Result<Directory, Error> {
-        self.write().open_directory(path)
+        tokio::task::block_in_place(|| self.blocking_write()).open_directory(path)
     }
 
     /// Used to upload file to the filesystem
     async fn put(&mut self, dest: &str, src: &str) -> Result<(), Error> {
-        self.write().put(dest, src).await
+        self.write().await.put(dest, src).await
     }
 
     /// Used to download a file from the filesystem
     async fn get(&self, src: &str, dest: &str) -> Result<(), Error> {
-        self.read().get(src, dest).await
+        self.read().await.get(src, dest).await
     }
 
     /// Used to upload file to the filesystem with data from buffer
     #[allow(clippy::ptr_arg)]
     async fn put_buffer(&mut self, dest: &str, src: &Vec<u8>) -> Result<(), Error> {
-        self.write().put_buffer(dest, src).await
+        self.write().await.put_buffer(dest, src).await
     }
 
     /// Used to download data from the filesystem into a buffer
     async fn get_buffer(&self, src: &str) -> Result<Vec<u8>, Error> {
-        self.read().get_buffer(src).await
+        self.read().await.get_buffer(src).await
     }
 
     /// Used to upload file to the filesystem with data from a stream
@@ -304,7 +302,7 @@ where
         total_size: Option<usize>,
         stream: BoxStream<'static, Vec<u8>>,
     ) -> Result<ConstellationProgressStream, Error> {
-        self.write().put_stream(dest, total_size, stream).await
+        self.write().await.put_stream(dest, total_size, stream).await
     }
 
     /// Used to download data from the filesystem using a stream
@@ -312,41 +310,41 @@ where
         &self,
         src: &str,
     ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
-        self.read().get_stream(src).await
+        self.read().await.get_stream(src).await
     }
 
     /// Used to remove data from the filesystem
     async fn remove(&mut self, path: &str, recursive: bool) -> Result<(), Error> {
-        self.write().remove(path, recursive).await
+        self.write().await.remove(path, recursive).await
     }
 
     async fn rename(&mut self, old: &str, new: &str) -> Result<(), Error> {
-        self.write().rename(old, new).await
+        self.write().await.rename(old, new).await
     }
 
     /// Used to move data within the filesystem
     async fn move_item(&mut self, path: &str, dest: &str) -> Result<(), Error> {
-        self.write().move_item(path, dest).await
+        self.write().await.move_item(path, dest).await
     }
 
     /// Used to create a directory within the filesystem.
     async fn create_directory(&mut self, path: &str, recursive: bool) -> Result<(), Error> {
-        self.write().create_directory(path, recursive).await
+        self.write().await.create_directory(path, recursive).await
     }
 
     /// Used to sync references within the filesystem for a file
     async fn sync_ref(&mut self, path: &str) -> Result<(), Error> {
-        self.write().sync_ref(path).await
+        self.write().await.sync_ref(path).await
     }
 
     /// Used to export the filesystem to a specific structure. Currently supports `Json`, `Toml`, and `Yaml`
     fn export(&self, r#type: ConstellationDataType) -> Result<String, Error> {
-        self.read().export(r#type)
+        tokio::task::block_in_place(|| self.blocking_read().export(r#type))
     }
 
     /// Used to import data into the filesystem. This would override current contents.
     fn import(&mut self, r#type: ConstellationDataType, data: String) -> Result<(), Error> {
-        self.write().import(r#type, data)
+        tokio::task::block_in_place(|| self.blocking_write().import(r#type, data))
     }
 }
 

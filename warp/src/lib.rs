@@ -1,5 +1,6 @@
 pub mod sync {
     pub use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+    pub use tokio::sync::{RwLock as AsyncRwLock, RwLockReadGuard as AsyncRwLockReadGuard, RwLockWriteGuard as AsyncRwLockWriteGuard, Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard};
     pub use std::sync::Arc;
 }
 
@@ -39,14 +40,15 @@ pub trait SingleHandle {
     }
 }
 
-impl<T: ?Sized> SingleHandle for sync::Arc<sync::RwLock<Box<T>>>
+impl<T: ?Sized> SingleHandle for sync::Arc<tokio::sync::RwLock<Box<T>>>
 where
     T: SingleHandle,
 {
     fn handle(&self) -> Result<Box<dyn core::any::Any>, error::Error> {
-        self.read().handle()
+        tokio::task::block_in_place(|| self.blocking_read().handle())
     }
 }
+
 
 pub trait Extension {
     /// Returns an id of the extension. Should be the crate name (eg in a `warp-module-ext` format)
@@ -68,24 +70,24 @@ pub trait Extension {
     fn module(&self) -> crate::module::Module;
 }
 
-impl<T: ?Sized> Extension for sync::Arc<sync::RwLock<Box<T>>>
+impl<T: ?Sized> Extension for sync::Arc<tokio::sync::RwLock<Box<T>>>
 where
     T: Extension,
 {
     fn id(&self) -> String {
-        self.read().id()
+        tokio::task::block_in_place(|| self.blocking_read().id())
     }
 
     fn name(&self) -> String {
-        self.read().name()
+        tokio::task::block_in_place(|| self.blocking_read().name())
     }
 
     fn description(&self) -> String {
-        self.read().description()
+        tokio::task::block_in_place(|| self.blocking_read().description())
     }
 
     fn module(&self) -> crate::module::Module {
-        self.read().module()
+        tokio::task::block_in_place(|| self.blocking_read().module())
     }
 }
 

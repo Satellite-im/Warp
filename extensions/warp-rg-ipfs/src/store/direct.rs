@@ -13,18 +13,19 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast::{self, Sender as BroadcastSender};
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
+use warp::Extension;
 use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::logging::tracing::log::{error, trace};
 use warp::logging::tracing::warn;
-use warp::multipass::MultiPass;
+use warp::multipass::{MultiPass, Friends};
 use warp::raygun::{
     Conversation, EmbedState, Location, Message, MessageEventKind, MessageOptions, MessageType,
     PinState, RayGunEventKind, Reaction, ReactionState,
 };
 use warp::sata::Sata;
-use warp::sync::{Arc, RwLock};
+use warp::sync::{Arc, AsyncRwLock};
 
 use crate::{Persistent, SpamFilter};
 
@@ -41,16 +42,16 @@ pub struct DirectMessageStore<T: IpfsTypes> {
     path: Option<PathBuf>,
 
     // list of conversations
-    direct_conversation: Arc<RwLock<Vec<DirectConversation>>>,
+    direct_conversation: Arc<AsyncRwLock<Vec<DirectConversation>>>,
 
     // account instance
-    account: Arc<RwLock<Box<dyn MultiPass>>>,
+    account: Arc<AsyncRwLock<Box<dyn MultiPass>>>,
 
     // filesystem instance
-    filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
+    filesystem: Option<Arc<AsyncRwLock<Box<dyn Constellation>>>>,
 
     // Queue
-    queue: Arc<RwLock<Vec<Queue>>>,
+    queue: Arc<AsyncRwLock<Vec<Queue>>>,
 
     // DID
     did: Arc<DID>,
@@ -91,10 +92,10 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
 pub struct DirectConversation {
     conversation: Arc<Conversation>,
     #[serde(skip)]
-    path: Arc<RwLock<Option<PathBuf>>>,
-    messages: Arc<RwLock<Vec<Message>>>,
+    path: Arc<warp::sync::RwLock<Option<PathBuf>>>,
+    messages: Arc<warp::sync::RwLock<Vec<Message>>>,
     #[serde(skip)]
-    task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
+    task: Arc<warp::sync::RwLock<Option<tokio::task::JoinHandle<()>>>>,
     #[serde(skip)]
     tx: Option<BroadcastSender<MessageEventKind>>,
 }
@@ -273,7 +274,7 @@ impl DirectConversation {
     pub fn start_task(
         &mut self,
         did: Arc<DID>,
-        filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
+        filesystem: Option<Arc<AsyncRwLock<Box<dyn Constellation>>>>,
         decrypted: Arc<AtomicBool>,
         filter: &Arc<Option<SpamFilter>>,
         stream: SubscriptionStream,
@@ -336,8 +337,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     pub async fn new(
         ipfs: Ipfs<T>,
         path: Option<PathBuf>,
-        account: Arc<RwLock<Box<dyn MultiPass>>>,
-        filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
+        account: Arc<AsyncRwLock<Box<dyn MultiPass>>>,
+        filesystem: Option<Arc<AsyncRwLock<Box<dyn Constellation>>>>,
         discovery: bool,
         interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
@@ -360,7 +361,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         }
         let direct_conversation = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
-        let did = Arc::new(account.read().decrypt_private_key(None)?);
+        let did = Arc::new(account.decrypt_private_key(None)?);
         let spam_filter = Arc::new(if check_spam {
             Some(SpamFilter::default()?)
         } else {
@@ -389,7 +390,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         if let Some(path) = store.path.as_ref() {
             if let Ok(queue) = tokio::fs::read(path.join("queue")).await {
                 if let Ok(queue) = serde_json::from_slice(&queue) {
-                    *store.queue.write() = queue;
+                    *store.queue.write().await = queue;
                 }
             }
             if path.is_dir() {
@@ -426,7 +427,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                     &store.spam_filter,
                                     stream,
                                 );
-                                store.direct_conversation.write().push(conversation);
+                                store.direct_conversation.write().await.push(conversation);
                             }
                             Err(e) => {
                                 error!("Unable to load conversation: {e}");
@@ -471,12 +472,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                         continue
                                                     }
                                                 };
-                                                if store.exist(id) {
+                                                if store.exist(id).await {
                                                     warn!("Conversation with {id} exist");
                                                     continue;
                                                 }
 
-                                                if let Ok(list) = store.account.read().block_list() {
+                                                if let Ok(list) = store.account.block_list() {
                                                     if list.contains(&peer) {
                                                         warn!("{peer} is blocked");
                                                         continue
@@ -505,12 +506,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                     error!("Error broadcasting event: {e}");
                                                 }
 
-                                                store.direct_conversation.write().push(convo);
+                                                store.direct_conversation.write().await.push(convo);
 
                                             }
                                             ConversationEvents::DeleteConversation(id) => {
                                                 trace!("Delete conversation event received for {id}");
-                                                if !store.exist(id) {
+                                                if !store.exist(id).await {
                                                     error!("Conversation {id} doesnt exist");
                                                     continue;
                                                 }
@@ -520,7 +521,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                     None => continue
                                                 };
 
-                                                match store.get_conversation(id) {
+                                                match store.get_conversation(id).await {
                                                     Ok(conversation) if conversation.recipients().contains(&sender) => {},
                                                     _ => {
                                                         error!("Conversation exist but did not match condition required");
@@ -530,12 +531,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
                                                 let index = store
                                                     .direct_conversation
-                                                    .read()
+                                                    .read().await
                                                     .iter()
                                                     .position(|convo| convo.id() == id);
 
                                                 if let Some(index) = index {
-                                                    let conversation = store.direct_conversation.write().remove(index);
+                                                    let conversation = store.direct_conversation.write().await.remove(index);
 
                                                     conversation.end_task();
 
@@ -565,7 +566,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         }
                     }
                     _ = interval.tick() => {
-                        let list = store.queue.read().clone();
+                        let list = store.queue.read().await.clone();
                         for item in list.iter() {
                             let Queue::Direct { id, peer, topic, data } = item;
                             if let Ok(peers) = store.ipfs.pubsub_peers(Some(topic.clone())).await {
@@ -584,7 +585,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                         continue
                                     }
 
-                                    let index = match store.queue.read().iter().position(|q| {
+                                    let index = match store.queue.read().await.iter().position(|q| {
                                         Queue::Direct { id:*id, peer:*peer, topic: topic.clone(), data: data.clone() }.eq(q)
                                     }) {
                                         Some(index) => index,
@@ -595,10 +596,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                         }
                                     };
 
-                                    let _ = store.queue.write().remove(index);
+                                    let _ = store.queue.write().await.remove(index);
 
                                     if let Some(path) = store.path.as_ref() {
-                                        let bytes = match serde_json::to_vec(&store.queue) {
+                                        let bytes = match serde_json::to_vec(&*store.queue.read().await) {
                                             Ok(bytes) => bytes,
                                             Err(e) => {
                                                 error!("Error serializing data to bytes: {e}");
@@ -635,10 +636,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 impl<T: IpfsTypes> DirectMessageStore<T> {
     pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
         if self.with_friends.load(Ordering::SeqCst) {
-            self.account.read().has_friend(did_key)?;
+            self.account.has_friend(did_key)?;
         }
 
-        if let Ok(list) = self.account.read().block_list() {
+        if let Ok(list) = self.account.block_list() {
             if list.contains(did_key) {
                 return Err(Error::PublicKeyIsBlocked);
             }
@@ -650,7 +651,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             return Err(Error::CannotCreateConversation);
         }
 
-        for convo in &*self.direct_conversation.read() {
+        for convo in &*self.direct_conversation.read().await {
             if convo.recipients().contains(did_key) && convo.recipients().contains(own_did) {
                 return Err(Error::ConversationExist {
                     conversation: convo.conversation(),
@@ -659,7 +660,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         }
 
         //Temporary limit
-        if self.direct_conversation.read().len() >= 32 {
+        if self.direct_conversation.read().await.len() >= 32 {
             return Err(Error::ConversationLimitReached);
         }
 
@@ -694,7 +695,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let raw_convo = conversation.conversation();
 
-        self.direct_conversation.write().push(conversation);
+        self.direct_conversation.write().await.push(conversation);
 
         let peers = self
             .ipfs
@@ -760,12 +761,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     ) -> Result<DirectConversation, Error> {
         let index = self
             .direct_conversation
-            .read()
+            .read().await
             .iter()
             .position(|convo| convo.id() == conversation)
             .ok_or(Error::InvalidConversation)?;
 
-        let conversation = self.direct_conversation.write().remove(index);
+        let conversation = self.direct_conversation.write().await.remove(index);
         conversation.end_task();
         if broadcast {
             let recipients = conversation.recipients();
@@ -845,21 +846,21 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         Ok(conversation)
     }
 
-    pub fn list_conversations(&self) -> Vec<Conversation> {
+    pub async fn list_conversations(&self) -> Vec<Conversation> {
         self.direct_conversation
-            .read()
+            .read().await
             .iter()
             .map(|convo| convo.conversation())
             .collect()
     }
 
-    pub fn messages_count(&self, conversation: Uuid) -> Result<usize, Error> {
-        self.get_conversation(conversation)
+    pub async fn messages_count(&self, conversation: Uuid) -> Result<usize, Error> {
+        self.get_conversation(conversation).await
             .map(|convo| convo.messages().len())
     }
 
-    pub fn get_message(&self, conversation: Uuid, message_id: Uuid) -> Result<Message, Error> {
-        self.get_conversation(conversation)?
+    pub async fn get_message(&self, conversation: Uuid, message_id: Uuid) -> Result<Message, Error> {
+        self.get_conversation(conversation).await?
             .messages()
             .iter()
             .find(|message| message.id() == message_id)
@@ -872,7 +873,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation: Uuid,
         opt: MessageOptions,
     ) -> Result<Vec<Message>, Error> {
-        let conversation = self.get_conversation(conversation)?;
+        let conversation = self.get_conversation(conversation).await?;
 
         let messages = conversation.messages();
 
@@ -908,24 +909,25 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         Ok(list)
     }
 
-    pub fn exist(&self, conversation: Uuid) -> bool {
-        self.get_conversation(conversation).is_ok()
+    pub async fn exist(&self, conversation: Uuid) -> bool {
+        self.get_conversation(conversation).await.is_ok()
     }
 
-    pub fn get_conversation(&self, conversation: Uuid) -> Result<DirectConversation, Error> {
-        self.direct_conversation
-            .read()
+    pub async fn get_conversation(&self, conversation: Uuid) -> Result<DirectConversation, Error> {
+        let index = self.direct_conversation
+            .read().await
             .iter()
-            .position(|convo| convo.id() == conversation)
-            .and_then(|index| self.direct_conversation.read().get(index).cloned())
-            .ok_or(Error::InvalidConversation)
+            .position(|convo| convo.id() == conversation).ok_or(Error::InvalidConversation)?;
+
+    
+        self.direct_conversation.read().await.get(index).cloned().ok_or(Error::InvalidConversation)
     }
 
-    pub fn get_conversation_stream(
+    pub async fn get_conversation_stream(
         &self,
         conversation: Uuid,
     ) -> Result<impl Stream<Item = MessageEventKind>, Error> {
-        let conversation = self.get_conversation(conversation)?;
+        let conversation = self.get_conversation(conversation).await?;
         conversation.conversation_stream().map_err(Error::from)
     }
 
@@ -934,7 +936,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation: Uuid,
         messages: Vec<String>,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation)?;
+        let mut conversation = self.get_conversation(conversation).await?;
         let tx = conversation.event_handle()?;
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
@@ -1003,7 +1005,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         message_id: Uuid,
         messages: Vec<String>,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation)?;
+        let mut conversation = self.get_conversation(conversation).await?;
         let tx = conversation.event_handle()?;
 
         if messages.is_empty() {
@@ -1066,7 +1068,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         message_id: Uuid,
         messages: Vec<String>,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation)?;
+        let mut conversation = self.get_conversation(conversation).await?;
         let tx = conversation.event_handle()?;
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
@@ -1135,7 +1137,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         message_id: Uuid,
         broadcast: bool,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation)?;
+        let mut conversation = self.get_conversation(conversation).await?;
         let tx = conversation.event_handle()?;
         let event = MessagingEvents::Delete(conversation.id(), message_id);
         direct_message_event(
@@ -1165,7 +1167,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         message_id: Uuid,
         state: PinState,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation)?;
+        let mut conversation = self.get_conversation(conversation).await?;
         let tx = conversation.event_handle()?;
         let own_did = &*self.did;
 
@@ -1203,7 +1205,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         state: ReactionState,
         emoji: String,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation)?;
+        let mut conversation = self.get_conversation(conversation).await?;
         let tx = conversation.event_handle()?;
         let own_did = &*self.did;
 
@@ -1234,7 +1236,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         files: Vec<PathBuf>,
         messages: Vec<String>,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation)?;
+        let mut conversation = self.get_conversation(conversation).await?;
         let tx = conversation.event_handle()?;
 
         //TODO: Send directly if constellation isnt present
@@ -1279,7 +1281,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
                     let original = filename.clone();
 
-                    let current_directory = constellation.read().current_directory()?;
+                    let current_directory = constellation.read().await.current_directory()?;
 
                     let mut interval = 0;
                     let skip;
@@ -1320,7 +1322,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         .map(|x| x.into());
 
                     let mut progress = match constellation
-                        .write()
+                        .write().await
                         .put_stream(&filename, Some(size), stream.boxed())
                         .await
                     {
@@ -1420,12 +1422,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .clone()
             .ok_or(Error::ConstellationExtensionUnavailable)?;
 
-        if constellation.read().id() != "warp-fs-ipfs" {
+        if constellation.id() != "warp-fs-ipfs" {
             //Note: Temporary for now; Will get lifted in the future
             return Err(Error::Unimplemented);
         }
 
-        let message = self.get_message(conversation, message_id)?;
+        let message = self.get_message(conversation, message_id).await?;
 
         if message.message_type() != MessageType::Attachment {
             return Err(Error::InvalidMessage);
@@ -1438,7 +1440,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .cloned()
             .ok_or(Error::FileNotFound)?;
 
-        let root = constellation.read().root_directory();
+        let root = constellation.read().await.root_directory();
         if !root.has_item(&attachment.name()) {
             root.add_file(attachment.clone())?;
         }
@@ -1559,7 +1561,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation: Uuid,
         event: S,
     ) -> Result<(), Error> {
-        let conversation = self.get_conversation(conversation)?;
+        let conversation = self.get_conversation(conversation).await?;
 
         let recipients = conversation.recipients();
 
@@ -1623,9 +1625,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     }
 
     async fn queue_event(&mut self, queue: Queue) -> Result<(), Error> {
-        self.queue.write().push(queue);
+        self.queue.write().await.push(queue);
         if let Some(path) = self.path.as_ref() {
-            let bytes = serde_json::to_vec(&self.queue)?;
+            let bytes = serde_json::to_vec(&*self.queue.read().await)?;
             warp::async_block_in_place_uncheck(tokio::fs::write(path.join("queue"), bytes))?;
         }
         Ok(())
@@ -1645,7 +1647,7 @@ pub enum MessageDirection {
 
 pub fn direct_message_event(
     messages: &mut Vec<Message>,
-    filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
+    filesystem: Option<Arc<AsyncRwLock<Box<dyn Constellation>>>>,
     events: &MessagingEvents,
     filter: &Arc<Option<SpamFilter>>,
     tx: BroadcastSender<MessageEventKind>,
@@ -1700,7 +1702,7 @@ pub fn direct_message_event(
                 && direction == MessageDirection::In
             {
                 if let Some(fs) = filesystem {
-                    let dir = fs.read().root_directory();
+                    let dir = fs.root_directory();
                     for file in message.attachments() {
                         let original = file.name();
                         let mut inc = 0;

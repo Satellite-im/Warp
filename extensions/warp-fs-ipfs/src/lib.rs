@@ -15,7 +15,7 @@ use warp::constellation::{ConstellationDataType, ConstellationProgressStream, Pr
 use warp::logging::tracing::{debug, error};
 use warp::multipass::MultiPass;
 use warp::sata::{Kind, Sata};
-use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use warp::sync::{Arc, AsyncRwLock, AsyncRwLockReadGuard, AsyncRwLockWriteGuard};
 // use warp_common::futures::TryStreamExt;
 use warp::module::Module;
 
@@ -40,10 +40,10 @@ pub struct IpfsFileSystem<T: IpfsTypes> {
     path: PathBuf,
     modified: DateTime<Utc>,
     config: Option<FsIpfsConfig>,
-    ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
-    index_cid: Arc<RwLock<Option<Cid>>>,
-    account: Arc<tokio::sync::RwLock<Option<Arc<RwLock<Box<dyn MultiPass>>>>>>,
-    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
+    ipfs: Arc<AsyncRwLock<Option<Ipfs<T>>>>,
+    index_cid: Arc<AsyncRwLock<Option<Cid>>>,
+    account: Arc<AsyncRwLock<Option<Arc<AsyncRwLock<Box<dyn MultiPass>>>>>>,
+    cache: Option<Arc<AsyncRwLock<Box<dyn PocketDimension>>>>,
 }
 
 impl<T: IpfsTypes> Clone for IpfsFileSystem<T> {
@@ -63,7 +63,7 @@ impl<T: IpfsTypes> Clone for IpfsFileSystem<T> {
 
 impl<T: IpfsTypes> IpfsFileSystem<T> {
     pub async fn new(
-        account: Arc<RwLock<Box<dyn MultiPass>>>,
+        account: Arc<AsyncRwLock<Box<dyn MultiPass>>>,
         config: Option<FsIpfsConfig>,
     ) -> anyhow::Result<Self> {
         let filesystem = IpfsFileSystem {
@@ -80,7 +80,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
         *filesystem.account.write().await = Some(account);
 
         if let Some(account) = filesystem.account.read().await.clone() {
-            if account.read().get_own_identity().is_err() {
+            if account.get_own_identity().is_err() {
                 debug!("Identity doesnt exist. Waiting for it to load or to be created");
                 let mut filesystem = filesystem.clone();
 
@@ -131,7 +131,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
             None => return Err(Error::ConstellationExtensionUnavailable),
         };
 
-        *self.ipfs.write() = Some(ipfs);
+        *self.ipfs.write().await = Some(ipfs);
 
         if let Err(_e) = self.import_index().await {
             //TODO: Log error
@@ -168,8 +168,8 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
 
         let ipld = to_ipld(data).map_err(anyhow::Error::from)?;
         let cid = ipfs.put_dag(ipld).await?;
-        let last_cid = self.index_cid.read().clone();
-        *self.index_cid.write() = Some(cid);
+        let last_cid = self.index_cid.read().await.clone();
+        *self.index_cid.write().await = Some(cid);
         if let Some(last_cid) = last_cid {
             if ipfs.is_pinned(&last_cid).await? {
                 ipfs.remove_pin(&last_cid, false).await?;
@@ -196,7 +196,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
                     .map(|bytes| String::from_utf8_lossy(&bytes).to_string())?;
 
                 let cid: Cid = cid_str.parse().map_err(anyhow::Error::from)?;
-                *self.index_cid.write() = Some(cid);
+                *self.index_cid.write().await = Some(cid);
 
                 let ipld = tokio::time::timeout(
                     std::time::Duration::from_secs(5),
@@ -221,7 +221,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
         Ok(())
     }
 
-    pub async fn account(&self) -> Result<Arc<RwLock<Box<dyn MultiPass>>>> {
+    pub async fn account(&self) -> Result<Arc<AsyncRwLock<Box<dyn MultiPass>>>> {
         self.account
             .read()
             .await
@@ -230,30 +230,30 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
     }
 
     pub fn ipfs(&self) -> Result<Ipfs<T>> {
-        self.ipfs
-            .read()
+        tokio::task::block_in_place(|| self.ipfs
+            .blocking_read()
             .as_ref()
             .cloned()
-            .ok_or(Error::ConstellationExtensionUnavailable)
+            .ok_or(Error::ConstellationExtensionUnavailable))
     }
 
-    pub fn get_cache(&self) -> anyhow::Result<RwLockReadGuard<Box<dyn PocketDimension>>> {
+    pub async fn get_cache(&self) -> anyhow::Result<AsyncRwLockReadGuard<Box<dyn PocketDimension>>> {
         let cache = self
             .cache
             .as_ref()
             .ok_or(Error::PocketDimensionExtensionUnavailable)?;
 
-        let inner = cache.read();
+        let inner = cache.read().await;
         Ok(inner)
     }
 
-    pub fn get_cache_mut(&self) -> anyhow::Result<RwLockWriteGuard<Box<dyn PocketDimension>>> {
+    pub async fn get_cache_mut(&self) -> anyhow::Result<AsyncRwLockWriteGuard<Box<dyn PocketDimension>>> {
         let cache = self
             .cache
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Pocket Dimension Extension is not set"))?;
 
-        let inner = cache.write();
+        let inner = cache.write().await;
         Ok(inner)
     }
 }

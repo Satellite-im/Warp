@@ -20,7 +20,7 @@ use warp::raygun::{
     ConversationType, MessageEventKind, MessageEventStream, MessageOptions, MessageType, PinState,
     RayGun, RayGunAttachment, RayGunStream, ReactionState,
 };
-use warp::sync::{Arc, RwLock};
+use warp::sync::{Arc, AsyncRwLock};
 use warp::tesseract::Tesseract;
 use warp_fs_ipfs::config::FsIpfsConfig;
 use warp_fs_ipfs::{IpfsFileSystem, Persistent as FsPersistent, Temporary as FsTemporary};
@@ -41,21 +41,21 @@ struct Opt {
     experimental_node: bool,
 }
 
-fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
+fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<AsyncRwLock<Box<dyn PocketDimension>>>> {
     if let Some(root) = root {
         let storage = FlatfileStorage::new_with_index_file(root, PathBuf::from("cache-index"))?;
-        return Ok(Arc::new(RwLock::new(Box::new(storage))));
+        return Ok(Arc::new(AsyncRwLock::new(Box::new(storage))));
     }
     let storage = StrettoClient::new()?;
-    Ok(Arc::new(RwLock::new(Box::new(storage))))
+    Ok(Arc::new(AsyncRwLock::new(Box::new(storage))))
 }
 
 async fn create_account<P: AsRef<Path>>(
     path: Option<P>,
-    cache: Arc<RwLock<Box<dyn PocketDimension>>>,
+    cache: Arc<AsyncRwLock<Box<dyn PocketDimension>>>,
     passphrase: Zeroizing<String>,
     experimental: bool,
-) -> anyhow::Result<Arc<RwLock<Box<dyn MultiPass>>>> {
+) -> anyhow::Result<Arc<AsyncRwLock<Box<dyn MultiPass>>>> {
     let tesseract = match path.as_ref() {
         Some(path) => {
             let path = path.as_ref();
@@ -74,35 +74,35 @@ async fn create_account<P: AsRef<Path>>(
         None => warp_mp_ipfs::config::MpIpfsConfig::testing(experimental),
     };
 
-    let account: Arc<RwLock<Box<dyn MultiPass>>> = match path.is_some() {
-        true => Arc::new(RwLock::new(Box::new(
+    let account: Arc<AsyncRwLock<Box<dyn MultiPass>>> = match path.is_some() {
+        true => Arc::new(AsyncRwLock::new(Box::new(
             ipfs_identity_persistent(config, tesseract, Some(cache)).await?,
         ))),
-        false => Arc::new(RwLock::new(Box::new(
+        false => Arc::new(AsyncRwLock::new(Box::new(
             ipfs_identity_temporary(Some(config), tesseract, Some(cache)).await?,
         ))),
     };
 
-    if account.read().get_own_identity().is_err() {
-        account.write().create_identity(None, None)?;
+    if account.get_own_identity().is_err() {
+        account.write().await.create_identity(None, None)?;
     }
     Ok(account)
 }
 
 async fn create_fs<P: AsRef<Path>>(
-    account: Arc<RwLock<Box<dyn MultiPass>>>,
+    account: Arc<AsyncRwLock<Box<dyn MultiPass>>>,
     path: Option<P>,
-) -> anyhow::Result<Arc<RwLock<Box<dyn Constellation>>>> {
+) -> anyhow::Result<Arc<AsyncRwLock<Box<dyn Constellation>>>> {
     let config = match path.as_ref() {
         Some(path) => FsIpfsConfig::production(path),
         None => FsIpfsConfig::testing(),
     };
 
-    let filesystem: Arc<RwLock<Box<dyn Constellation>>> = match path.is_some() {
-        true => Arc::new(RwLock::new(Box::new(
+    let filesystem: Arc<AsyncRwLock<Box<dyn Constellation>>> = match path.is_some() {
+        true => Arc::new(AsyncRwLock::new(Box::new(
             IpfsFileSystem::<FsPersistent>::new(account, Some(config)).await?,
         ))),
-        false => Arc::new(RwLock::new(Box::new(
+        false => Arc::new(AsyncRwLock::new(Box::new(
             IpfsFileSystem::<FsTemporary>::new(account, Some(config)).await?,
         ))),
     };
@@ -113,9 +113,9 @@ async fn create_fs<P: AsRef<Path>>(
 #[allow(dead_code)]
 async fn create_rg(
     path: Option<PathBuf>,
-    account: Arc<RwLock<Box<dyn MultiPass>>>,
-    filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
-    cache: Arc<RwLock<Box<dyn PocketDimension>>>,
+    account: Arc<AsyncRwLock<Box<dyn MultiPass>>>,
+    filesystem: Option<Arc<AsyncRwLock<Box<dyn Constellation>>>>,
+    cache: Arc<AsyncRwLock<Box<dyn PocketDimension>>>,
 ) -> anyhow::Result<Box<dyn RayGun>> {
     let chat = match path.as_ref() {
         Some(path) => {
@@ -169,7 +169,7 @@ async fn main() -> anyhow::Result<()> {
 
     let fs = create_fs(new_account.clone(), opt.path.clone()).await?;
 
-    let mut chat = Arc::new(RwLock::new(
+    let mut chat = Arc::new(AsyncRwLock::new(
         create_rg(
             opt.path.clone(),
             new_account.clone(),
@@ -180,7 +180,7 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     println!("Obtaining identity....");
-    let identity = new_account.read().get_own_identity()?;
+    let identity = new_account.get_own_identity()?;
     println!(
         "Registered user {}#{}",
         identity.username(),
@@ -193,7 +193,7 @@ async fn main() -> anyhow::Result<()> {
         identity.short_id()
     ))?;
 
-    let topic = Arc::new(RwLock::new(Uuid::nil()));
+    let topic = Arc::new(warp::sync::RwLock::new(Uuid::nil()));
 
     let mut stream_map: HashMap<Uuid, JoinHandle<()>> = HashMap::new();
 
@@ -722,8 +722,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn get_username(account: Arc<RwLock<Box<dyn MultiPass>>>, did: DID) -> anyhow::Result<String> {
-    let account = account.read();
+fn get_username(account: Arc<AsyncRwLock<Box<dyn MultiPass>>>, did: DID) -> anyhow::Result<String> {
     let identity = account
         .get_identity(Identifier::did_key(did))
         .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
@@ -732,10 +731,10 @@ fn get_username(account: Arc<RwLock<Box<dyn MultiPass>>>, did: DID) -> anyhow::R
 
 async fn message_event_handle(
     mut stdout: SharedWriter,
-    multipass: Arc<RwLock<Box<dyn MultiPass>>>,
-    raygun: Arc<RwLock<Box<dyn RayGun>>>,
+    multipass: Arc<AsyncRwLock<Box<dyn MultiPass>>>,
+    raygun: Arc<AsyncRwLock<Box<dyn RayGun>>>,
     mut stream: MessageEventStream,
-    conversation_id: Arc<RwLock<Uuid>>,
+    conversation_id: Arc<warp::sync::RwLock<Uuid>>,
 ) -> anyhow::Result<()> {
     let identity = multipass.get_own_identity()?;
     let topic = conversation_id.clone();

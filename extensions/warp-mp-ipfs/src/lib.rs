@@ -21,7 +21,7 @@ use warp::crypto::did_key::Generate;
 use warp::data::DataType;
 use warp::hooks::Hooks;
 use warp::pocket_dimension::query::QueryBuilder;
-use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use warp::sync::{Arc, AsyncRwLock, AsyncRwLockReadGuard, AsyncRwLockWriteGuard};
 
 use warp::module::Module;
 use warp::pocket_dimension::PocketDimension;
@@ -46,13 +46,13 @@ pub type Temporary = TestTypes;
 pub type Persistent = Types;
 
 pub struct IpfsIdentity<T: IpfsTypes> {
-    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
+    cache: Option<Arc<AsyncRwLock<Box<dyn PocketDimension>>>>,
     config: MpIpfsConfig,
     hooks: Option<Hooks>,
-    ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
+    ipfs: Arc<AsyncRwLock<Option<Ipfs<T>>>>,
     tesseract: Tesseract,
-    friend_store: Arc<RwLock<Option<FriendsStore<T>>>>,
-    identity_store: Arc<RwLock<Option<IdentityStore<T>>>>,
+    friend_store: Arc<AsyncRwLock<Option<FriendsStore<T>>>>,
+    identity_store: Arc<AsyncRwLock<Option<IdentityStore<T>>>>,
     initialized: Arc<AtomicBool>,
     tx: broadcast::Sender<MultiPassEventKind>,
 }
@@ -76,7 +76,7 @@ impl<T: IpfsTypes> Clone for IpfsIdentity<T> {
 pub async fn ipfs_identity_persistent(
     config: MpIpfsConfig,
     tesseract: Tesseract,
-    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
+    cache: Option<Arc<AsyncRwLock<Box<dyn PocketDimension>>>>,
 ) -> anyhow::Result<IpfsIdentity<Persistent>> {
     if config.path.is_none() {
         anyhow::bail!("Path is required for identity to be persistent")
@@ -86,7 +86,7 @@ pub async fn ipfs_identity_persistent(
 pub async fn ipfs_identity_temporary(
     config: Option<MpIpfsConfig>,
     tesseract: Tesseract,
-    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
+    cache: Option<Arc<AsyncRwLock<Box<dyn PocketDimension>>>>,
 ) -> anyhow::Result<IpfsIdentity<Temporary>> {
     if let Some(config) = &config {
         if config.path.is_some() {
@@ -100,7 +100,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
     pub async fn new(
         config: MpIpfsConfig,
         tesseract: Tesseract,
-        cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
+        cache: Option<Arc<AsyncRwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<IpfsIdentity<T>> {
         let (tx, _) = broadcast::channel(1024);
         trace!("Initializing Multipass");
@@ -135,7 +135,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
     async fn initialize_store(&mut self, init: bool) -> anyhow::Result<()> {
         let tesseract = self.tesseract.clone();
 
-        if init && self.identity_store.read().is_some() && self.friend_store.read().is_some()
+        if init && self.identity_store.read().await.is_some() && self.friend_store.read().await.is_some()
             || self.initialized.load(Ordering::SeqCst)
         {
             warn!("Identity is already loaded");
@@ -369,53 +369,53 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         .await?;
         info!("friends store initialized");
 
-        *self.identity_store.write() = Some(identity_store);
-        *self.friend_store.write() = Some(friend_store);
+        *self.identity_store.write().await = Some(identity_store);
+        *self.friend_store.write().await = Some(friend_store);
 
-        *self.ipfs.write() = Some(ipfs);
+        *self.ipfs.write().await = Some(ipfs);
         self.initialized.store(true, Ordering::SeqCst);
         info!("multipass initialized");
         Ok(())
     }
 
     pub fn friend_store(&self) -> Result<FriendsStore<T>, Error> {
-        self.friend_store
-            .read()
+        tokio::task::block_in_place(|| self.friend_store
+            .blocking_read()
             .clone()
-            .ok_or(Error::MultiPassExtensionUnavailable)
+            .ok_or(Error::MultiPassExtensionUnavailable))
     }
 
     pub fn identity_store(&self) -> Result<IdentityStore<T>, Error> {
-        self.identity_store
-            .read()
+        tokio::task::block_in_place(|| self.identity_store
+            .blocking_read()
             .clone()
-            .ok_or(Error::MultiPassExtensionUnavailable)
+            .ok_or(Error::MultiPassExtensionUnavailable))
     }
 
     pub fn ipfs(&self) -> Result<Ipfs<T>, Error> {
-        self.ipfs
-            .read()
+        tokio::task::block_in_place(|| self.ipfs
+            .blocking_read()
             .clone()
-            .ok_or(Error::MultiPassExtensionUnavailable)
+            .ok_or(Error::MultiPassExtensionUnavailable))
     }
 
-    pub fn get_cache(&self) -> Result<RwLockReadGuard<Box<dyn PocketDimension>>, Error> {
+    pub fn get_cache(&self) -> Result<AsyncRwLockReadGuard<Box<dyn PocketDimension>>, Error> {
         let cache = self
             .cache
             .as_ref()
             .ok_or(Error::PocketDimensionExtensionUnavailable)?;
 
-        let inner = cache.read();
+        let inner = tokio::task::block_in_place(|| cache.blocking_read());
         Ok(inner)
     }
 
-    pub fn get_cache_mut(&self) -> Result<RwLockWriteGuard<Box<dyn PocketDimension>>, Error> {
+    pub fn get_cache_mut(&self) -> Result<AsyncRwLockWriteGuard<Box<dyn PocketDimension>>, Error> {
         let cache = self
             .cache
             .as_ref()
             .ok_or(Error::PocketDimensionExtensionUnavailable)?;
 
-        let inner = cache.write();
+        let inner = tokio::task::block_in_place(|| cache.blocking_write());
         Ok(inner)
     }
 
@@ -880,7 +880,7 @@ pub mod ffi {
     use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::sync::{Arc, RwLock};
+    use warp::sync::{Arc, AsyncRwLock};
     use warp::tesseract::Tesseract;
 
     #[allow(clippy::missing_safety_doc)]
@@ -917,7 +917,7 @@ pub mod ffi {
             Err(e) => return FFIResult::err(Error::from(e)),
         };
 
-        FFIResult::ok(MultiPassAdapter::new(Arc::new(RwLock::new(Box::new(
+        FFIResult::ok(MultiPassAdapter::new(Arc::new(AsyncRwLock::new(Box::new(
             account,
         )))))
     }
@@ -958,7 +958,7 @@ pub mod ffi {
             Err(e) => return FFIResult::err(Error::from(e)),
         };
 
-        FFIResult::ok(MultiPassAdapter::new(Arc::new(RwLock::new(Box::new(
+        FFIResult::ok(MultiPassAdapter::new(Arc::new(AsyncRwLock::new(Box::new(
             account,
         )))))
     }

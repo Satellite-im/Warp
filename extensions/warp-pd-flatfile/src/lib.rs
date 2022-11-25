@@ -740,7 +740,7 @@ pub mod ffi {
     use warp::error::Error;
     use warp::ffi::FFIResult;
     use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::sync::{Arc, RwLock};
+    use warp::sync::{Arc, AsyncRwLock};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -760,7 +760,7 @@ pub mod ffi {
         };
 
         match FlatfileStorage::new_with_index_file(path, index_file) {
-            Ok(flatfile) => FFIResult::ok(PocketDimensionAdapter::new(Arc::new(RwLock::new(
+            Ok(flatfile) => FFIResult::ok(PocketDimensionAdapter::new(Arc::new(AsyncRwLock::new(
                 Box::new(flatfile),
             )))),
             Err(e) => FFIResult::err(e),

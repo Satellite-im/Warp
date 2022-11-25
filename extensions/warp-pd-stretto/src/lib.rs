@@ -301,13 +301,13 @@ mod test {
 pub mod ffi {
     use crate::StrettoClient;
     use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::sync::{Arc, RwLock};
+    use warp::sync::{Arc, AsyncRwLock};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn pocketdimension_stretto_new() -> *mut PocketDimensionAdapter {
         let client = match StrettoClient::new() {
-            Ok(client) => PocketDimensionAdapter::new(Arc::new(RwLock::new(Box::new(client)))),
+            Ok(client) => PocketDimensionAdapter::new(Arc::new(AsyncRwLock::new(Box::new(client)))),
             Err(_) => return std::ptr::null_mut(),
         };
 

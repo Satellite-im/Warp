@@ -8,7 +8,7 @@ use warp_derive::FFIFree;
 use wasm_bindgen::prelude::*;
 
 use crate::error::Error;
-use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use crate::sync::{Arc, AsyncRwLockReadGuard, AsyncRwLockWriteGuard, AsyncRwLock};
 
 use crate::{Extension, SingleHandle};
 use identity::Identity;
@@ -79,7 +79,7 @@ pub trait MultiPass:
     fn refresh_cache(&mut self) -> Result<(), Error>;
 }
 
-impl<T: ?Sized> MultiPass for Arc<RwLock<Box<T>>>
+impl<T: ?Sized> MultiPass for Arc<AsyncRwLock<Box<T>>>
 where
     T: MultiPass,
 {
@@ -88,25 +88,26 @@ where
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<DID, Error> {
-        self.write().create_identity(username, passphrase)
+        tokio::task::block_in_place(|| self.blocking_write().create_identity(username, passphrase))
     }
 
     fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
-        self.read().get_identity(id)
+        tokio::task::block_in_place(|| self.blocking_read().get_identity(id))
     }
 
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
-        self.write().update_identity(option)
+        tokio::task::block_in_place(|| self.blocking_write().update_identity(option))
     }
 
     fn decrypt_private_key(&self, passphrase: Option<&str>) -> Result<DID, Error> {
-        self.read().decrypt_private_key(passphrase)
+        tokio::task::block_in_place(|| self.blocking_read().decrypt_private_key(passphrase))
     }
 
     fn refresh_cache(&mut self) -> Result<(), Error> {
-        self.write().refresh_cache()
+        tokio::task::block_in_place(|| self.blocking_write().refresh_cache())
     }
 }
+
 
 pub trait Friends: Sync + Send {
     /// Send friend request to corresponding public key
@@ -197,94 +198,94 @@ pub trait FriendsEvent: Sync + Send {
     }
 }
 
-impl<T: ?Sized> Friends for Arc<RwLock<Box<T>>>
+impl<T: ?Sized> Friends for Arc<AsyncRwLock<Box<T>>>
 where
     T: Friends,
 {
     fn send_request(&mut self, key: &DID) -> Result<(), Error> {
-        self.write().send_request(key)
+        tokio::task::block_in_place(|| self.blocking_write().send_request(key))
     }
 
     /// Accept friend request from public key
     fn accept_request(&mut self, key: &DID) -> Result<(), Error> {
-        self.write().accept_request(key)
+        tokio::task::block_in_place(|| self.blocking_write().accept_request(key))
     }
 
     /// Deny friend request from public key
     fn deny_request(&mut self, key: &DID) -> Result<(), Error> {
-        self.write().deny_request(key)
+        tokio::task::block_in_place(|| self.blocking_write().deny_request(key))
     }
 
     /// Closing or retracting friend request
     fn close_request(&mut self, key: &DID) -> Result<(), Error> {
-        self.write().close_request(key)
+        tokio::task::block_in_place(|| self.blocking_write().close_request(key))
     }
 
     /// List the incoming friend request
     fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        self.read().list_incoming_request()
+        tokio::task::block_in_place(|| self.blocking_read().list_incoming_request())
     }
 
     /// Check to determine if a request been received from the DID
     fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
-        self.read().received_friend_request_from(did)
+        tokio::task::block_in_place(|| self.blocking_read().received_friend_request_from(did))
     }
 
     fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
-        self.read().sent_friend_request_to(did)
+        tokio::task::block_in_place(|| self.blocking_read().sent_friend_request_to(did))
     }
 
     /// List the outgoing friend request
     fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        self.read().list_outgoing_request()
+        tokio::task::block_in_place(|| self.blocking_read().list_outgoing_request())
     }
 
     /// List all the friend request that been sent or received
     fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        self.read().list_all_request()
+        tokio::task::block_in_place(|| self.blocking_write().list_all_request())
     }
 
     /// Remove friend from contacts
     fn remove_friend(&mut self, key: &DID) -> Result<(), Error> {
-        self.write().remove_friend(key)
+        tokio::task::block_in_place(|| self.blocking_write().remove_friend(key))
     }
 
     /// Block public key, rather it be a friend or not, from being able to send request to account public address
     fn block(&mut self, key: &DID) -> Result<(), Error> {
-        self.write().block(key)
+        tokio::task::block_in_place(|| self.blocking_write().block(key))
     }
 
     /// Unblock public key
     fn unblock(&mut self, key: &DID) -> Result<(), Error> {
-        self.write().unblock(key)
+        tokio::task::block_in_place(|| self.blocking_write().unblock(key))
     }
 
     /// List block list
     fn block_list(&self) -> Result<Vec<DID>, Error> {
-        self.read().block_list()
+        tokio::task::block_in_place(|| self.blocking_read().block_list())
     }
 
     /// Check to see if public key is blocked
     fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
-        self.read().is_blocked(did)
+        tokio::task::block_in_place(|| self.blocking_read().is_blocked(did))
     }
     /// List all friends public key
     fn list_friends(&self) -> Result<Vec<DID>, Error> {
-        self.read().list_friends()
+        tokio::task::block_in_place(|| self.blocking_read().list_friends())
     }
 
     /// Check to see if public key is friend of the account
     fn has_friend(&self, key: &DID) -> Result<(), Error> {
-        self.write().has_friend(key)
+        tokio::task::block_in_place(|| self.blocking_write().has_friend(key))
     }
 }
 
-impl<T: ?Sized> FriendsEvent for Arc<RwLock<Box<T>>>
+impl<T: ?Sized> FriendsEvent for Arc<AsyncRwLock<Box<T>>>
 where
     T: FriendsEvent,
 {
     fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
-        self.write().subscribe()
+        tokio::task::block_in_place(|| self.blocking_write().subscribe())
     }
 }
 
@@ -299,183 +300,184 @@ pub trait IdentityInformation: Send + Sync {
     }
 }
 
-impl<T: ?Sized> IdentityInformation for Arc<RwLock<Box<T>>>
+impl<T: ?Sized> IdentityInformation for Arc<AsyncRwLock<Box<T>>>
 where
     T: IdentityInformation,
 {
     /// Identity status to determine if they are online or offline
     fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
-        self.read().identity_status(did)
+        tokio::task::block_in_place(|| self.blocking_read().identity_status(did))
     }
     /// Find the relationship with an existing identity.
     fn identity_relationship(&self, did: &DID) -> Result<Relationship, Error> {
-        self.read().identity_relationship(did)
+        tokio::task::block_in_place(|| self.blocking_read().identity_relationship(did))
     }
 }
+
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(FFIFree)]
 pub struct MultiPassAdapter {
-    object: Arc<RwLock<Box<dyn MultiPass>>>,
+    object: Arc<AsyncRwLock<Box<dyn MultiPass>>>,
 }
 
 impl MultiPassAdapter {
-    pub fn new(object: Arc<RwLock<Box<dyn MultiPass>>>) -> Self {
+    pub fn new(object: Arc<AsyncRwLock<Box<dyn MultiPass>>>) -> Self {
         MultiPassAdapter { object }
     }
 
-    pub fn inner(&self) -> Arc<RwLock<Box<dyn MultiPass>>> {
+    pub fn inner(&self) -> Arc<AsyncRwLock<Box<dyn MultiPass>>> {
         self.object.clone()
     }
 
-    pub fn read_guard(&self) -> RwLockReadGuard<Box<dyn MultiPass>> {
-        self.object.read()
+    pub fn read_guard(&self) -> AsyncRwLockReadGuard<Box<dyn MultiPass>> {
+        tokio::task::block_in_place(|| self.object.blocking_read())
     }
 
-    pub fn write_guard(&mut self) -> RwLockWriteGuard<Box<dyn MultiPass>> {
-        self.object.write()
+    pub fn write_guard(&mut self) -> AsyncRwLockWriteGuard<Box<dyn MultiPass>> {
+        tokio::task::block_in_place(|| self.object.blocking_write())
     }
 }
 
-//TODO: Determine if this should be used for wasm
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl MultiPassAdapter {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn create_identity(
-        &mut self,
-        username: Option<String>,
-        passphrase: Option<String>,
-    ) -> Result<DID, Error> {
-        self.write_guard()
-            .create_identity(username.as_deref(), passphrase.as_deref())
-    }
+// //TODO: Determine if this should be used for wasm
+// #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+// impl MultiPassAdapter {
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub fn create_identity(
+//         &mut self,
+//         username: Option<String>,
+//         passphrase: Option<String>,
+//     ) -> Result<DID, Error> {
+//         self.write_guard()
+//             .create_identity(username.as_deref(), passphrase.as_deref())
+//     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
-        self.read_guard().get_identity(id)
-    }
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
+//         self.read_guard().get_identity(id)
+//     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn get_own_identity(&self) -> Result<Identity, Error> {
-        self.read_guard().get_own_identity()
-    }
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub fn get_own_identity(&self) -> Result<Identity, Error> {
+//         self.read_guard().get_own_identity()
+//     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
-        self.write_guard().update_identity(option)
-    }
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
+//         self.write_guard().update_identity(option)
+//     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn decrypt_private_key(&self, passphrase: Option<String>) -> Result<DID, Error> {
-        self.read_guard().decrypt_private_key(passphrase.as_deref())
-    }
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub fn decrypt_private_key(&self, passphrase: Option<String>) -> Result<DID, Error> {
+//         self.read_guard().decrypt_private_key(passphrase.as_deref())
+//     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn refresh_cache(&mut self) -> Result<(), Error> {
-        self.write_guard().refresh_cache()
-    }
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub fn refresh_cache(&mut self) -> Result<(), Error> {
+//         self.write_guard().refresh_cache()
+//     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.write_guard().send_request(pubkey)
-    }
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+//         self.write_guard().send_request(pubkey)
+//     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.write_guard().accept_request(pubkey)
-    }
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+//         self.write_guard().accept_request(pubkey)
+//     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.write_guard().deny_request(pubkey)
-    }
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+//         self.write_guard().deny_request(pubkey)
+//     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.write_guard().close_request(pubkey)
-    }
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+//         self.write_guard().close_request(pubkey)
+//     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
-        self.write_guard().remove_friend(pubkey)
-    }
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
+//         self.write_guard().remove_friend(pubkey)
+//     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
-        self.read_guard().has_friend(pubkey)
-    }
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
+//         self.read_guard().has_friend(pubkey)
+//     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn id(&self) -> String {
-        self.read_guard().id()
-    }
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub fn id(&self) -> String {
+//         self.read_guard().id()
+//     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn name(&self) -> String {
-        self.read_guard().name()
-    }
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub fn name(&self) -> String {
+//         self.read_guard().name()
+//     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn description(&self) -> String {
-        self.read_guard().description()
-    }
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub fn description(&self) -> String {
+//         self.read_guard().description()
+//     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn module(&self) -> crate::module::Module {
-        self.read_guard().module()
-    }
-}
+//     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+//     pub fn module(&self) -> crate::module::Module {
+//         self.read_guard().module()
+//     }
+// }
 
-#[cfg(not(target_arch = "wasm32"))]
-impl MultiPassAdapter {
-    pub fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        self.read_guard().list_incoming_request()
-    }
+// #[cfg(not(target_arch = "wasm32"))]
+// impl MultiPassAdapter {
+//     pub fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
+//         self.read_guard().list_incoming_request()
+//     }
 
-    pub fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        self.read_guard().list_outgoing_request()
-    }
+//     pub fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
+//         self.read_guard().list_outgoing_request()
+//     }
 
-    pub fn list_friends(&self) -> Result<Vec<DID>, Error> {
-        self.read_guard().list_friends()
-    }
+//     pub fn list_friends(&self) -> Result<Vec<DID>, Error> {
+//         self.read_guard().list_friends()
+//     }
 
-    pub fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        self.read_guard().list_all_request()
-    }
-}
+//     pub fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
+//         self.read_guard().list_all_request()
+//     }
+// }
 
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl MultiPassAdapter {
-    #[wasm_bindgen]
-    pub fn list_incoming_request(&self) -> Result<JsValue, Error> {
-        self.read_guard()
-            .list_incoming_request()
-            .map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
-    }
+// #[cfg(target_arch = "wasm32")]
+// #[wasm_bindgen]
+// impl MultiPassAdapter {
+//     #[wasm_bindgen]
+//     pub fn list_incoming_request(&self) -> Result<JsValue, Error> {
+//         self.read_guard()
+//             .list_incoming_request()
+//             .map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
+//     }
 
-    #[wasm_bindgen]
-    pub fn list_outgoing_request(&self) -> Result<JsValue, Error> {
-        self.read_guard()
-            .list_outgoing_request()
-            .map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
-    }
+//     #[wasm_bindgen]
+//     pub fn list_outgoing_request(&self) -> Result<JsValue, Error> {
+//         self.read_guard()
+//             .list_outgoing_request()
+//             .map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
+//     }
 
-    #[wasm_bindgen]
-    pub fn list_friends(&self) -> Result<JsValue, Error> {
-        self.read_guard()
-            .list_friends()
-            .map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
-    }
+//     #[wasm_bindgen]
+//     pub fn list_friends(&self) -> Result<JsValue, Error> {
+//         self.read_guard()
+//             .list_friends()
+//             .map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
+//     }
 
-    #[wasm_bindgen]
-    pub fn list_all_request(&self) -> Result<JsValue, Error> {
-        self.read_guard()
-            .list_all_request()
-            .map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
-    }
-}
+//     #[wasm_bindgen]
+//     pub fn list_all_request(&self) -> Result<JsValue, Error> {
+//         self.read_guard()
+//             .list_all_request()
+//             .map(|v| serde_wasm_bindgen::to_value(&v).unwrap())
+//     }
+// }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {

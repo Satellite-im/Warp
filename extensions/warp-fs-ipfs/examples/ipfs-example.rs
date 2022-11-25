@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use warp::{
-    constellation::Constellation, multipass::MultiPass, sync::RwLock, tesseract::Tesseract,
+    constellation::Constellation, multipass::MultiPass, sync::AsyncRwLock, tesseract::Tesseract,
 };
 use warp_fs_ipfs::{IpfsFileSystem, Temporary};
 use warp_mp_ipfs::{config::MpIpfsConfig, ipfs_identity_temporary};
 
-async fn account() -> anyhow::Result<Arc<RwLock<Box<dyn MultiPass>>>> {
+async fn account() -> anyhow::Result<Arc<AsyncRwLock<Box<dyn MultiPass>>>> {
     let tesseract = Tesseract::default();
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
@@ -14,7 +14,7 @@ async fn account() -> anyhow::Result<Arc<RwLock<Box<dyn MultiPass>>>> {
     let config = MpIpfsConfig::development();
     let mut account = ipfs_identity_temporary(Some(config), tesseract, None).await?;
     account.create_identity(None, None)?;
-    Ok(Arc::new(RwLock::new(Box::new(account))))
+    Ok(Arc::new(AsyncRwLock::new(Box::new(account))))
 }
 
 #[tokio::main]

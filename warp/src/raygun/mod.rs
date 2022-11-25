@@ -4,7 +4,7 @@ use crate::constellation::file::File;
 use crate::constellation::ConstellationProgressStream;
 use crate::crypto::DID;
 use crate::error::Error;
-use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use crate::sync::{Arc, AsyncRwLock, AsyncRwLockReadGuard, AsyncRwLockWriteGuard};
 use crate::{Extension, SingleHandle};
 
 use derive_more::Display;
@@ -599,25 +599,24 @@ pub trait RayGunStream: Sync + Send {
     }
 }
 
-#[allow(clippy::await_holding_lock)]
 #[async_trait::async_trait]
-impl<T: ?Sized> RayGun for Arc<RwLock<Box<T>>>
+impl<T: ?Sized> RayGun for Arc<AsyncRwLock<Box<T>>>
 where
     T: RayGun,
 {
     // Start a new conversation.
     async fn create_conversation(&mut self, key: &DID) -> Result<Conversation, Error> {
-        self.write().create_conversation(key).await
+        self.write().await.create_conversation(key).await
     }
 
     // List all active conversations
     async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
-        self.read().list_conversations().await
+        self.read().await.list_conversations().await
     }
 
     /// Retrieve all messages from a conversation
     async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message, Error> {
-        self.read().get_message(conversation_id, message_id).await
+        self.read().await.get_message(conversation_id, message_id).await
     }
 
     /// Retrieve all messages from a conversation
@@ -626,7 +625,7 @@ where
         conversation_id: Uuid,
         options: MessageOptions,
     ) -> Result<Vec<Message>, Error> {
-        self.read().get_messages(conversation_id, options).await
+        self.read().await.get_messages(conversation_id, options).await
     }
 
     /// Sends a message to a conversation. If `message_id` is provided, it will override the selected message
@@ -636,7 +635,7 @@ where
         message_id: Option<Uuid>,
         message: Vec<String>,
     ) -> Result<(), Error> {
-        self.write()
+        self.write().await
             .send(conversation_id, message_id, message)
             .await
     }
@@ -647,7 +646,7 @@ where
         conversation_id: Uuid,
         message_id: Option<Uuid>,
     ) -> Result<(), Error> {
-        self.write().delete(conversation_id, message_id).await
+        self.write().await.delete(conversation_id, message_id).await
     }
 
     /// React to a message
@@ -658,7 +657,7 @@ where
         state: ReactionState,
         emoji: String,
     ) -> Result<(), Error> {
-        self.write()
+        self.write().await
             .react(conversation_id, message_id, state, emoji)
             .await
     }
@@ -670,7 +669,7 @@ where
         message_id: Uuid,
         state: PinState,
     ) -> Result<(), Error> {
-        self.write().pin(conversation_id, message_id, state).await
+        self.write().await.pin(conversation_id, message_id, state).await
     }
 
     /// Reply to a message within a conversation
@@ -680,7 +679,7 @@ where
         message_id: Uuid,
         message: Vec<String>,
     ) -> Result<(), Error> {
-        self.write()
+        self.write().await
             .reply(conversation_id, message_id, message)
             .await
     }
@@ -691,15 +690,14 @@ where
         message_id: Uuid,
         state: EmbedState,
     ) -> Result<(), Error> {
-        self.write()
+        self.write().await
             .embeds(conversation_id, message_id, state)
             .await
     }
 }
 
-#[allow(clippy::await_holding_lock)]
 #[async_trait::async_trait]
-impl<T: ?Sized> RayGunAttachment for Arc<RwLock<Box<T>>>
+impl<T: ?Sized> RayGunAttachment for Arc<tokio::sync::RwLock<Box<T>>>
 where
     T: RayGunAttachment,
 {
@@ -709,7 +707,7 @@ where
         files: Vec<PathBuf>,
         message: Vec<String>,
     ) -> Result<(), Error> {
-        self.write().attach(conversation_id, files, message).await
+        self.write().await.attach(conversation_id, files, message).await
     }
 
     async fn download(
@@ -719,51 +717,50 @@ where
         file: String,
         path: PathBuf,
     ) -> Result<ConstellationProgressStream, Error> {
-        self.read()
+        self.read().await
             .download(conversation_id, message_id, file, path)
             .await
     }
 }
 
-#[allow(clippy::await_holding_lock)]
 #[async_trait::async_trait]
-impl<T: ?Sized> RayGunStream for Arc<RwLock<Box<T>>>
+impl<T: ?Sized> RayGunStream for Arc<tokio::sync::RwLock<Box<T>>>
 where
     T: RayGunStream,
 {
     async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
-        self.write().subscribe().await
+        self.write().await.subscribe().await
     }
 
     async fn get_conversation_stream(
         &mut self,
         conversation_id: Uuid,
     ) -> Result<MessageEventStream, Error> {
-        self.write().get_conversation_stream(conversation_id).await
+        self.write().await.get_conversation_stream(conversation_id).await
     }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(FFIFree)]
 pub struct RayGunAdapter {
-    object: Arc<RwLock<Box<dyn RayGun>>>,
+    object: Arc<AsyncRwLock<Box<dyn RayGun>>>,
 }
 
 impl RayGunAdapter {
-    pub fn new(object: Arc<RwLock<Box<dyn RayGun>>>) -> Self {
+    pub fn new(object: Arc<AsyncRwLock<Box<dyn RayGun>>>) -> Self {
         RayGunAdapter { object }
     }
 
-    pub fn inner(&self) -> Arc<RwLock<Box<dyn RayGun>>> {
+    pub fn inner(&self) -> Arc<AsyncRwLock<Box<dyn RayGun>>> {
         self.object.clone()
     }
 
-    pub fn read_guard(&self) -> RwLockReadGuard<Box<dyn RayGun>> {
-        self.object.read()
+    pub fn read_guard(&self) -> AsyncRwLockReadGuard<Box<dyn RayGun>> {
+        tokio::task::block_in_place(|| self.object.blocking_read())
     }
 
-    pub fn write_guard(&mut self) -> RwLockWriteGuard<Box<dyn RayGun>> {
-        self.object.write()
+    pub fn write_guard(&mut self) -> AsyncRwLockWriteGuard<Box<dyn RayGun>> {
+        tokio::task::block_in_place(|| self.object.blocking_write())
     }
 }
 
