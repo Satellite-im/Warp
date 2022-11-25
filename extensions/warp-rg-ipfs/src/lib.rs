@@ -29,7 +29,6 @@ use warp::raygun::{Conversation, Location, MessageEventStream, RayGunEventStream
 use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
 use warp::raygun::{RayGunAttachment, RayGunEventKind};
 use warp::sync::AsyncRwLock;
-use warp::sync::{RwLockReadGuard, RwLockWriteGuard};
 use warp::Extension;
 use warp::SingleHandle;
 

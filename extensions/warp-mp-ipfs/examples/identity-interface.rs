@@ -8,7 +8,7 @@ use tracing_subscriber::EnvFilter;
 use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::sync::{Arc, RwLock};
+use warp::sync::{Arc, AsyncRwLock};
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::config::{Discovery, MpIpfsConfig};
 use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
@@ -38,19 +38,19 @@ struct Opt {
 
 //Note: Cache can be enabled but the internals may need a little rework but since extension handles caching itself, this isnt needed for now
 #[allow(dead_code)]
-fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
+fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<AsyncRwLock<Box<dyn PocketDimension>>>> {
     if let Some(root) = root {
         let storage =
             FlatfileStorage::new_with_index_file(root.join("cache"), PathBuf::from("cache-index"))?;
-        return Ok(Arc::new(RwLock::new(Box::new(storage))));
+        return Ok(Arc::new(AsyncRwLock::new(Box::new(storage))));
     }
     let storage = StrettoClient::new()?;
-    Ok(Arc::new(RwLock::new(Box::new(storage))))
+    Ok(Arc::new(AsyncRwLock::new(Box::new(storage))))
 }
 
 async fn account(
     username: Option<&str>,
-    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
+    cache: Option<Arc<AsyncRwLock<Box<dyn PocketDimension>>>>,
     opt: &Opt,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let tesseract = Tesseract::default();
@@ -87,7 +87,7 @@ async fn account(
 async fn account_persistent<P: AsRef<Path>>(
     username: Option<&str>,
     path: P,
-    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
+    cache: Option<Arc<AsyncRwLock<Box<dyn PocketDimension>>>>,
     opt: &Opt,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let path = path.as_ref();
