@@ -461,103 +461,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                             if let Ok(sata) = serde_json::from_slice::<Sata>(&message.data) {
                                 if let Ok(data) = sata.decrypt::<Vec<u8>>(did.as_ref()) {
                                     if let Ok(events) = serde_json::from_slice::<ConversationEvents>(&data) {
-                                        match events {
-                                            ConversationEvents::NewConversation(peer) => {
-                                                trace!("New conversation event received from {peer}");
-                                                let id = match super::generate_shared_topic(did, &peer, Some("direct-conversation")) {
-                                                    Ok(id) => id,
-                                                    Err(e) => {
-                                                        error!("Error generating topic id: {e}");
-                                                        continue
-                                                    }
-                                                };
-                                                if store.exist(id) {
-                                                    warn!("Conversation with {id} exist");
-                                                    continue;
-                                                }
-
-                                                if let Ok(list) = store.account.read().block_list() {
-                                                    if list.contains(&peer) {
-                                                        warn!("{peer} is blocked");
-                                                        continue
-                                                    }
-                                                }
-
-                                                let list = [did.clone(), peer];
-                                                let mut convo = DirectConversation::new_with_id(id, list);
-                                                let stream =
-                                                    match store.ipfs.pubsub_subscribe(convo.topic()).await {
-                                                        Ok(stream) => stream,
-                                                        Err(e) => {
-                                                            error!("Error subscribing to conversation: {e}");
-                                                            continue;
-                                                        }
-                                                    };
-                                                convo.start_task(store.did.clone(),store.filesystem.clone(), store.store_decrypted.clone(), &store.spam_filter, stream);
-                                                if let Some(path) = store.path.as_ref() {
-                                                    convo.set_path(path);
-                                                    if let Err(e) = convo.to_file((!store.store_decrypted.load(Ordering::SeqCst)).then_some(&*store.did)).await {
-                                                        error!("Error saving conversation: {e}");
-                                                    }
-                                                }
-
-                                                if let Err(e) = store.event.send(RayGunEventKind::ConversationCreated { conversation_id: convo.conversation().id() }) {
-                                                    error!("Error broadcasting event: {e}");
-                                                }
-
-                                                store.direct_conversation.write().push(convo);
-
-                                            }
-                                            ConversationEvents::DeleteConversation(id) => {
-                                                trace!("Delete conversation event received for {id}");
-                                                if !store.exist(id) {
-                                                    error!("Conversation {id} doesnt exist");
-                                                    continue;
-                                                }
-
-                                                let sender = match sata.sender() {
-                                                    Some(sender) => DID::from(sender),
-                                                    None => continue
-                                                };
-
-                                                match store.get_conversation(id) {
-                                                    Ok(conversation) if conversation.recipients().contains(&sender) => {},
-                                                    _ => {
-                                                        error!("Conversation exist but did not match condition required");
-                                                        continue
-                                                    }
-                                                };
-
-                                                let index = store
-                                                    .direct_conversation
-                                                    .read()
-                                                    .iter()
-                                                    .position(|convo| convo.id() == id);
-
-                                                if let Some(index) = index {
-                                                    let conversation = store.direct_conversation.write().remove(index);
-
-                                                    conversation.end_task();
-
-                                                    let topic = conversation.topic();
-
-                                                    //Note needed as we ran `conversation.end_task();` which would unsubscribe from the topic
-                                                    //after dropping the stream, but this serves as a secondary precaution
-                                                    if store.ipfs.pubsub_unsubscribe(&topic).await.is_ok()
-                                                    {
-                                                        warn!("topic should have been unsubscribed after dropping conversation.");
-                                                    }
-
-                                                    if let Err(e) = conversation.delete().await {
-                                                        error!("Error deleting conversation: {e}");
-                                                    }
-                                                    drop(conversation);
-                                                    if let Err(e) = store.event.send(RayGunEventKind::ConversationDeleted { conversation_id: id }) {
-                                                        error!("Error broadcasting event: {e}");
-                                                    }
-                                                    trace!("Conversation deleted");
-                                                }
-                                            }
+                                        if let Err(e) = store.process_conversation(sata, events).await {
+                                            error!("Error processing conversation: {e}");
                                         }
                                     }
                                 }
@@ -565,52 +470,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         }
                     }
                     _ = interval.tick() => {
-                        let list = store.queue.read().clone();
-                        for item in list.iter() {
-                            let Queue::Direct { id, peer, topic, data } = item;
-                            if let Ok(peers) = store.ipfs.pubsub_peers(Some(topic.clone())).await {
-                                //TODO: Check peer against conversation to see if they are connected
-                                if peers.contains(peer) {
-                                    let bytes = match serde_json::to_vec(&data) {
-                                        Ok(bytes) => bytes,
-                                        Err(e) => {
-                                            error!("Error serializing data to bytes: {e}");
-                                            continue
-                                        }
-                                    };
-
-                                    if let Err(e) = store.ipfs.pubsub_publish(topic.clone(), bytes).await {
-                                        error!("Error publishing to topic: {e}");
-                                        continue
-                                    }
-
-                                    let index = match store.queue.read().iter().position(|q| {
-                                        Queue::Direct { id:*id, peer:*peer, topic: topic.clone(), data: data.clone() }.eq(q)
-                                    }) {
-                                        Some(index) => index,
-                                        //If we somehow ended up here then there is likely a race condition
-                                        None => {
-                                            error!("Unable to remove item from queue. Likely race condition");
-                                            continue
-                                        }
-                                    };
-
-                                    let _ = store.queue.write().remove(index);
-
-                                    if let Some(path) = store.path.as_ref() {
-                                        let bytes = match serde_json::to_vec(&store.queue) {
-                                            Ok(bytes) => bytes,
-                                            Err(e) => {
-                                                error!("Error serializing data to bytes: {e}");
-                                                continue;
-                                            }
-                                        };
-                                        if let Err(e) = tokio::fs::write(path.join("queue"), bytes).await {
-                                            error!("Error saving queue: {e}");
-                                        }
-                                    }
-                                }
-                            }
+                        if let Err(e) = store.process_queue().await {
+                            error!("Error processing queue: {e}");
                         }
                     }
                 }
@@ -629,6 +490,180 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .await
             .map(|(p, _)| (p.clone(), p.to_peer_id()))?;
         Ok((local_ipfs_public_key, local_peer_id))
+    }
+
+    async fn process_conversation(
+        &self,
+        data: Sata,
+        event: ConversationEvents,
+    ) -> anyhow::Result<()> {
+        match event {
+            ConversationEvents::NewConversation(peer) => {
+                let did = &*self.did;
+                trace!("New conversation event received from {peer}");
+                let id = super::generate_shared_topic(did, &peer, Some("direct-conversation"))?;
+
+                if self.exist(id) {
+                    warn!("Conversation with {id} exist");
+                    return Ok(());
+                }
+
+                if let Ok(list) = self.account.read().block_list() {
+                    if list.contains(&peer) {
+                        warn!("{peer} is blocked");
+                        return Ok(());
+                    }
+                }
+
+                let list = [did.clone(), peer];
+                let mut convo = DirectConversation::new_with_id(id, list);
+                let stream = match self.ipfs.pubsub_subscribe(convo.topic()).await {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        error!("Error subscribing to conversation: {e}");
+                        return Ok(());
+                    }
+                };
+                convo.start_task(
+                    self.did.clone(),
+                    self.filesystem.clone(),
+                    self.store_decrypted.clone(),
+                    &self.spam_filter,
+                    stream,
+                );
+                if let Some(path) = self.path.as_ref() {
+                    convo.set_path(path);
+                    if let Err(e) = convo
+                        .to_file(
+                            (!self.store_decrypted.load(Ordering::SeqCst)).then_some(&*self.did),
+                        )
+                        .await
+                    {
+                        anyhow::bail!("Error saving conversation: {e}");
+                    }
+                }
+
+                if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
+                    conversation_id: convo.conversation().id(),
+                }) {
+                    error!("Error broadcasting event: {e}");
+                }
+
+                self.direct_conversation.write().push(convo);
+            }
+            ConversationEvents::DeleteConversation(id) => {
+                trace!("Delete conversation event received for {id}");
+                if !self.exist(id) {
+                    anyhow::bail!("Conversation {id} doesnt exist");
+                }
+
+                let sender = match data.sender() {
+                    Some(sender) => DID::from(sender),
+                    None => return Ok(()),
+                };
+
+                match self.get_conversation(id) {
+                    Ok(conversation) if conversation.recipients().contains(&sender) => {}
+                    _ => {
+                        anyhow::bail!("Conversation exist but did not match condition required");
+                    }
+                };
+
+                let index = self
+                    .direct_conversation
+                    .read()
+                    .iter()
+                    .position(|convo| convo.id() == id);
+
+                if let Some(index) = index {
+                    let conversation = self.direct_conversation.write().remove(index);
+
+                    conversation.end_task();
+
+                    let topic = conversation.topic();
+
+                    //Note needed as we ran `conversation.end_task();` which would unsubscribe from the topic
+                    //after dropping the stream, but this serves as a secondary precaution
+                    if self.ipfs.pubsub_unsubscribe(&topic).await.is_ok() {
+                        warn!("topic should have been unsubscribed after dropping conversation.");
+                    }
+
+                    if let Err(e) = conversation.delete().await {
+                        error!("Error deleting conversation: {e}");
+                    }
+                    drop(conversation);
+                    if let Err(e) = self.event.send(RayGunEventKind::ConversationDeleted {
+                        conversation_id: id,
+                    }) {
+                        error!("Error broadcasting event: {e}");
+                    }
+                    trace!("Conversation deleted");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn process_queue(&self) -> anyhow::Result<()> {
+        let list = self.queue.read().clone();
+        for item in list.iter() {
+            let Queue::Direct {
+                id,
+                peer,
+                topic,
+                data,
+            } = item;
+            if let Ok(peers) = self.ipfs.pubsub_peers(Some(topic.clone())).await {
+                //TODO: Check peer against conversation to see if they are connected
+                if peers.contains(peer) {
+                    let bytes = match serde_json::to_vec(&data) {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            error!("Error serializing data to bytes: {e}");
+                            continue;
+                        }
+                    };
+
+                    if let Err(e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
+                        error!("Error publishing to topic: {e}");
+                        continue;
+                    }
+
+                    let index = match self.queue.read().iter().position(|q| {
+                        Queue::Direct {
+                            id: *id,
+                            peer: *peer,
+                            topic: topic.clone(),
+                            data: data.clone(),
+                        }
+                        .eq(q)
+                    }) {
+                        Some(index) => index,
+                        //If we somehow ended up here then there is likely a race condition
+                        None => {
+                            error!("Unable to remove item from queue. Likely race condition");
+                            continue;
+                        }
+                    };
+
+                    let _ = self.queue.write().remove(index);
+
+                    if let Some(path) = self.path.as_ref() {
+                        let bytes = match serde_json::to_vec(&self.queue) {
+                            Ok(bytes) => bytes,
+                            Err(e) => {
+                                error!("Error serializing data to bytes: {e}");
+                                continue;
+                            }
+                        };
+                        if let Err(e) = tokio::fs::write(path.join("queue"), bytes).await {
+                            error!("Error saving queue: {e}");
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
