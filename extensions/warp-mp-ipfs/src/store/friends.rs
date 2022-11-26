@@ -218,6 +218,53 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
             };
 
+            // scan through friends list to see if there is any incoming request or outgoing request matching
+            // and clear them out of the request list as a precautionary measure
+            tokio::spawn({
+                let mut store = store.clone();
+                async move {
+                    let friends = match store.friends_list().await {
+                        Ok(list) => list,
+                        _ => return
+                    };
+
+                    for friend in friends.iter() {
+                        let mut list = store.list_all_raw_request().await.unwrap_or_default();
+                        // cleanup outgoing
+                        match list
+                        .iter()
+                        .find(|request| {
+                            request.request_type() == InternalRequestType::Outgoing
+                                && request.to() == friend.clone()
+                                && request.status() == FriendRequestStatus::Pending
+                        }).cloned() {
+                            Some(req) => {
+                                list.remove(&req);
+                            },
+                            None => {}
+                        };
+
+                        // cleanup incoming
+                        match list
+                        .iter()
+                        .find(|request| {
+                            request.request_type() == InternalRequestType::Incoming
+                                && request.from() == friend.clone()
+                                && request.status() == FriendRequestStatus::Pending
+                        }).cloned() {
+                            Some(req) => {
+                                list.remove(&req);
+                            },
+                            None => {}
+                        };
+
+                        if let Err(_e) = store.set_request_list(list).await {}
+                    }
+
+                }
+            });
+            tokio::task::yield_now().await;
+
             futures::pin_mut!(stream);
             let mut broadcast_interval = tokio::time::interval(Duration::from_millis(interval));
 
