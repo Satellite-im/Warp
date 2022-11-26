@@ -2,6 +2,9 @@
 use futures::StreamExt;
 use ipfs::libp2p::gossipsub::GossipsubMessage;
 use ipfs::{Ipfs, IpfsTypes, PeerId};
+use warp::crypto::cipher::Cipher;
+use warp::crypto::did_key::Generate;
+use warp::crypto::zeroize::Zeroizing;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Deref;
@@ -15,7 +18,7 @@ use tracing::log::{error, warn};
 use libipld::IpldCodec;
 use sata::{Kind, Sata};
 use serde::{Deserialize, Serialize};
-use warp::crypto::DID;
+use warp::crypto::{DID, KeyMaterial, Ed25519KeyPair};
 use warp::error::Error;
 use warp::multipass::identity::{FriendRequest, FriendRequestStatus};
 use warp::multipass::MultiPassEventKind;
@@ -189,12 +192,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 if let Err(_e) = store.phonebook.add_relay(addr).await {}
             }
 
-            if let Some(path) = store.path.as_ref() {
-                if let Ok(queue) = tokio::fs::read(path.join(".request_queue")).await {
-                    if let Ok(queue) = serde_json::from_slice(&queue) {
-                        *store.queue.write().await = queue;
-                    }
-                }
+            if let Err(e) = store.load_queue().await {
+                error!("Error loading queue: {e}");
             }
 
             if let Ok(friends) = store.friends_list().await {
@@ -1070,6 +1069,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
     }
 
     async fn save_queue(&self) {
+        use warp::crypto::did_key::ECDH;
         if let Some(path) = self.path.as_ref() {
             let bytes = match serde_json::to_vec(&*self.queue.read().await) {
                 Ok(bytes) => bytes,
@@ -1079,10 +1079,47 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
             };
 
-            if let Err(e) = tokio::fs::write(path.join(".request_queue"), bytes).await {
+            let prikey = Ed25519KeyPair::from_secret_key(&self.did_key.private_key_bytes()).get_x25519();
+            let pubkey = Ed25519KeyPair::from_public_key(&self.did_key.public_key_bytes()).get_x25519();
+
+            let prik = match std::panic::catch_unwind(|| prikey.key_exchange(&pubkey)) {
+                Ok(pri) => Zeroizing::new(pri),
+                Err(e) => {
+                    error!("Error generating key: {e:?}");
+                    return;
+                }
+            };
+
+            let data = match Cipher::direct_encrypt(warp::crypto::cipher::CipherType::Aes256Gcm, &bytes, &prik) {
+                Ok(d) => d,
+                Err(e) => {
+                    error!("Error encrypting queue: {e}");
+                    return;
+                }
+            };
+
+            if let Err(e) = tokio::fs::write(path.join(".request_queue"), data).await {
                 error!("Error saving queue: {e}");
             }
         }
+    }
+
+    async fn load_queue(&self) -> anyhow::Result<()> {
+        use warp::crypto::did_key::ECDH;
+        if let Some(path) = self.path.as_ref() {
+            let data = tokio::fs::read(path.join(".request_queue")).await?;
+
+            let prikey = Ed25519KeyPair::from_secret_key(&self.did_key.private_key_bytes()).get_x25519();
+            let pubkey = Ed25519KeyPair::from_public_key(&self.did_key.public_key_bytes()).get_x25519();
+
+            let prik = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey)).map(Zeroizing::new).map_err(|_| anyhow::anyhow!("Error performing key exchange"))?;
+
+            let data = Cipher::direct_decrypt(warp::crypto::cipher::CipherType::Aes256Gcm, &data, &prik)?;
+
+            *self.queue.write().await = serde_json::from_slice(&data)?; 
+        }
+
+        Ok(())
     }
 }
 
