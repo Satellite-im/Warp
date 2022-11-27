@@ -121,7 +121,7 @@ impl Extension for StorjFilesystem {
 pub struct StorjFilesystem {
     pub index: Directory,
     pub modified: DateTime<Utc>,
-    path: PathBuf,
+    path: Arc<RwLock<PathBuf>>,
     #[serde(skip)]
     pub client: StorjClient,
     #[serde(skip)]
@@ -134,7 +134,7 @@ impl Default for StorjFilesystem {
     fn default() -> StorjFilesystem {
         StorjFilesystem {
             index: Directory::new("root"),
-            path: PathBuf::new(),
+            path: Default::default(),
             modified: Utc::now(),
             client: StorjClient::default(),
             cache: None,
@@ -195,11 +195,11 @@ impl Constellation for StorjFilesystem {
     }
 
     fn set_path(&mut self, path: PathBuf) {
-        self.path = path;
+        *self.path.write() = path;
     }
 
     fn get_path(&self) -> PathBuf {
-        self.path.clone()
+        self.path.read().clone()
     }
 
     /// Uploads file from path with the name format being `bucket_name://path/to/file`

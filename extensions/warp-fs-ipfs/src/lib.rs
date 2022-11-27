@@ -37,7 +37,7 @@ type Result<T> = std::result::Result<T, Error>;
 #[allow(clippy::type_complexity)]
 pub struct IpfsFileSystem<T: IpfsTypes> {
     index: Directory,
-    path: PathBuf,
+    path: Arc<RwLock<PathBuf>>,
     modified: DateTime<Utc>,
     config: Option<FsIpfsConfig>,
     ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
@@ -68,7 +68,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
     ) -> anyhow::Result<Self> {
         let filesystem = IpfsFileSystem {
             index: Directory::new("root"),
-            path: PathBuf::new(),
+            path: Arc::new(Default::default()),
             modified: Utc::now(),
             config,
             index_cid: Default::default(),
@@ -733,11 +733,11 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
     }
 
     fn set_path(&mut self, path: PathBuf) {
-        self.path = path;
+        *self.path.write() = path;
     }
 
     fn get_path(&self) -> PathBuf {
-        self.path.clone()
+        self.path.read().clone()
     }
 }
 
