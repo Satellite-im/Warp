@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::path::Path;
 
 use anyhow::bail;
 use clap::{Parser, Subcommand};
@@ -10,7 +10,6 @@ use tokio_util::io::ReaderStream;
 use warp::{
     constellation::{Constellation, Progression},
     multipass::MultiPass,
-    sync::RwLock,
     tesseract::Tesseract,
 };
 use warp_fs_ipfs::{config::FsIpfsConfig, IpfsFileSystem, Persistent};
@@ -59,7 +58,7 @@ async fn account_persistent<P: AsRef<Path>>(
     username: Option<&str>,
     path: P,
     opt: &Opt,
-) -> anyhow::Result<Arc<RwLock<Box<dyn MultiPass>>>> {
+) -> anyhow::Result<Box<dyn MultiPass>> {
     let path = path.as_ref();
     let tesseract = match Tesseract::from_file(path.join("tdatastore")) {
         Ok(tess) => tess,
@@ -81,7 +80,7 @@ async fn account_persistent<P: AsRef<Path>>(
     if account.get_own_identity().is_err() {
         account.create_identity(username, None)?;
     }
-    Ok(Arc::new(RwLock::new(Box::new(account))))
+    Ok(Box::new(account))
 }
 
 #[tokio::main]
