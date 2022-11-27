@@ -563,6 +563,38 @@ async fn main() -> anyhow::Result<()> {
 
                             writeln!(stdout, "Username updated")?;
                         },
+                        Some("update-picture") => {
+                            let picture = match cmd_line.next() {
+                                Some(picture) => picture,
+                                None => {
+                                    writeln!(stdout, "picture is required")?;
+                                    continue;
+                                }
+                            };
+
+                            if let Err(e) = account.update_identity(IdentityUpdate::set_graphics_picture(picture.to_string())) {
+                                writeln!(stdout, "Error updating picture: {}", e)?;
+                                continue;
+                            }
+
+                            writeln!(stdout, "picture updated")?;
+                        },
+                        Some("update-banner") => {
+                            let banner = match cmd_line.next() {
+                                Some(banner) => banner,
+                                None => {
+                                    writeln!(stdout, "banner is required")?;
+                                    continue;
+                                }
+                            };
+
+                            if let Err(e) = account.update_identity(IdentityUpdate::set_graphics_banner(banner.to_string())) {
+                                writeln!(stdout, "Error updating banner: {}", e)?;
+                                continue;
+                            }
+
+                            writeln!(stdout, "banner updated")?;
+                        },
                         Some("lookup") => {
                             let idents = match cmd_line.next() {
                                 Some("username") => {
@@ -618,7 +650,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             let mut table = Table::new();
-                            table.set_header(vec!["Username", "Public Key", "Status Message", "Status"]);
+                            table.set_header(vec!["Username", "Public Key", "Status Message", "Banner", "Picture", "Status"]);
                             for identity in idents {
                                 let status = match identity.did_key() == own_identity.did_key() {
                                     true => IdentityStatus::Online,
@@ -628,6 +660,8 @@ async fn main() -> anyhow::Result<()> {
                                     identity.username(),
                                     identity.did_key().to_string(),
                                     identity.status_message().unwrap_or_default(),
+                                    (!identity.graphics().profile_banner().is_empty()).to_string(),
+                                    (!identity.graphics().profile_picture().is_empty()).to_string(),
                                     format!("{:?}", status),
                                 ]);
                             }

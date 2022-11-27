@@ -13,9 +13,11 @@ use crate::{
     store::{did_to_libp2p_pub, IdentityPayload},
     Persistent,
 };
-use futures::{FutureExt, StreamExt};
+use futures::{stream::BoxStream, FutureExt, StreamExt};
 use ipfs::{
-    libp2p::gossipsub::GossipsubMessage, Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId,
+    libp2p::gossipsub::GossipsubMessage,
+    unixfs::ll::file::adder::{Chunker, FileAdderBuilder},
+    Block, Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId,
 };
 use libipld::{
     serde::{from_ipld, to_ipld},
@@ -26,13 +28,13 @@ use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::broadcast;
 use tracing::log::error;
 use warp::{
-    crypto::{DIDKey, Ed25519KeyPair, Fingerprint, DID},
+    crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
     multipass::{
         identity::{Identity, IdentityStatus, SHORT_ID_SIZE},
         MultiPassEventKind,
     },
-    sync::{Arc, RwLock},
+    sync::Arc,
     tesseract::Tesseract,
 };
 
@@ -47,15 +49,15 @@ pub struct IdentityStore<T: IpfsTypes> {
 
     path: Option<PathBuf>,
 
-    root_cid: Arc<RwLock<Option<Cid>>>,
+    root_cid: Arc<tokio::sync::RwLock<Option<Cid>>>,
 
-    cache_cid: Arc<RwLock<Option<Cid>>>,
+    cache_cid: Arc<tokio::sync::RwLock<Option<Cid>>>,
 
-    identity: Arc<RwLock<Option<Identity>>>,
+    identity: Arc<tokio::sync::RwLock<Option<Identity>>>,
 
-    seen: Arc<RwLock<HashSet<PeerId>>>,
+    seen: Arc<tokio::sync::RwLock<HashSet<PeerId>>>,
 
-    discovering: Arc<RwLock<HashSet<DID>>>,
+    discovering: Arc<tokio::sync::RwLock<HashSet<DID>>>,
 
     discovery: Discovery,
 
@@ -143,12 +145,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
         };
         if store.path.is_some() {
             if let Err(_e) = store.load_cid().await {
-                //TODO
+                //We can ignore if it doesnt exist
             }
         }
 
         if let Ok(ident) = store.own_identity().await {
-            *store.identity.write() = Some(ident);
+            *store.identity.write().await = Some(ident);
             store.start_event.store(true, Ordering::SeqCst);
         }
         let id_broadcast_stream = store
@@ -165,7 +167,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
             let mut tick = tokio::time::interval(Duration::from_millis(interval));
             //Use to update the seen list
-            let mut update_seen = tokio::time::interval(Duration::from_secs(10));
+            // let mut update_seen = tokio::time::interval(Duration::from_secs(10));
+            // let mut clear_seen = tokio::time::interval(Duration::from_secs(15));
             loop {
                 if store.end_event.load(Ordering::SeqCst) {
                     break;
@@ -182,11 +185,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
                             }
                         }
                     }
-                    _ = update_seen.tick() => {
-                        if let Err(e) = store.update_pubsub_peers_list().await {
-                            error!("Error: {e}");
-                        }
-                    }
+                    // _ = update_seen.tick() => {
+                    //     if let Err(e) = store.update_pubsub_peers_list().await {
+                    //         error!("Error: {e}");
+                    //     }
+                    // }
+                    // _ = clear_seen.tick() => {
+                    //     store.seen.write().clear();
+                    // }
                     _ = tick.tick() => {
                         if let Err(e) = store.broadcast_identity().await {
                             error!("Error broadcasting identity: {e}");
@@ -208,14 +214,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(store)
     }
 
-    async fn update_pubsub_peers_list(&self) -> anyhow::Result<()> {
-        let peers = self
-            .ipfs
-            .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
-            .await?;
-        *self.seen.write() = HashSet::from_iter(peers);
-        Ok(())
-    }
+    // async fn update_pubsub_peers_list(&self) -> anyhow::Result<()> {
+    //     let peers = self
+    //         .ipfs
+    //         .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
+    //         .await?;
+    //     *self.seen.write() = HashSet::from_iter(peers);
+    //     Ok(())
+    // }
 
     //TODO: Replace with a request/resposne style broadcast
     async fn broadcast_identity(&self) -> anyhow::Result<()> {
@@ -224,27 +230,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
             .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
             .await?;
 
-        //TODO: Maybe use write lock and drop it once no longer needed to be sure that
-        //      the list isnt updated while checking and updating
-
-        let peers = HashSet::from_iter(peers);
-        if peers.is_empty() || (!peers.is_empty() && self.seen.read().eq(&peers)) {
+        if peers.is_empty() {
             return Ok(());
         }
-        let seen_list = self.seen.read().clone();
-
-        let mut havent_seen = vec![];
-        for peer in peers.iter() {
-            if !seen_list.contains(peer) {
-                havent_seen.push(peer);
-            }
-        }
-
-        if havent_seen.is_empty() {
-            return Ok(());
-        }
-
-        self.seen.write().extend(havent_seen);
 
         let data = Sata::default();
 
@@ -256,17 +244,20 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         let did = identity.did_key();
 
-        //Note: Sending Cid and using bitswap with normal discovery works, however
-        //      with direct or no discovery may not exchange blocks as expected
-        //      For now, we will send the identity directly as the payload but
-        //      may change in the future to using cid once bitswap is sorted
-        //      out upstream
+        let picture = root.picture;
+        let banner = root.banner;
+
         let payload = match self.override_ipld.load(Ordering::Relaxed) {
             true => DocumentType::Object(identity),
             false => DocumentType::Cid(root.identity),
         };
 
-        let payload = IdentityPayload { did, payload };
+        let payload = IdentityPayload {
+            did,
+            payload,
+            picture,
+            banner,
+        };
 
         let res = data.encode(libipld::IpldCodec::DagJson, sata::Kind::Static, payload)?;
 
@@ -283,27 +274,27 @@ impl<T: IpfsTypes> IdentityStore<T> {
     async fn process_message(&mut self, message: Arc<GossipsubMessage>) -> anyhow::Result<()> {
         let data = serde_json::from_slice::<Sata>(&message.data)?;
 
-        let object = data.decode::<IdentityPayload>()?;
+        let raw_object = data.decode::<IdentityPayload>()?;
 
-        let payload = object.payload;
+        let payload = raw_object.payload;
 
         //TODO: Validate public key against peer that sent it
-        let _pk = did_to_libp2p_pub(&object.did)?;
+        let _pk = did_to_libp2p_pub(&raw_object.did)?;
 
         let identity = payload
             .resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
             .await?;
 
         anyhow::ensure!(
-            object.did == identity.did_key(),
+            raw_object.did == identity.did_key(),
             "Payload doesnt match identity"
         );
 
-        if let Some(own_id) = self.identity.read().clone() {
+        if let Some(own_id) = self.identity.read().await.clone() {
             anyhow::ensure!(own_id != identity, "Cannot accept own identity");
         }
 
-        let (old_cid, mut cache_documents) = match self.get_cache_cid() {
+        let (old_cid, mut cache_documents) = match self.get_cache_cid().await {
             Ok(cid) => match self
                 .get_dag::<HashSet<CacheDocument>>(IpfsPath::from(cid), None)
                 .await
@@ -331,10 +322,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 let username = identity.username();
                 let short_id = identity.short_id();
                 let did = identity.did_key();
+                let picture = raw_object.picture.clone();
+                let banner = raw_object.banner.clone();
                 let identity = payload.clone();
                 CacheDocument {
                     username,
                     did,
+                    picture,
+                    banner,
                     short_id,
                     identity,
                 }
@@ -342,27 +337,41 @@ impl<T: IpfsTypes> IdentityStore<T> {
         };
 
         match (found, &document.identity) {
-            (true, object) if object != &payload => {
+            (true, object) => {
+                let mut change = false;
                 if document.username != identity.username() {
                     document.username = identity.username();
+                    change = true;
+                }
+                if document.picture != raw_object.picture {
+                    document.picture = raw_object.picture;
+                    change = true;
+                }
+                if document.banner != raw_object.banner {
+                    document.banner = raw_object.banner;
+                    change = true;
+                }
+                if object != &payload {
+                    document.identity = payload;
+                    change = true;
                 }
 
-                document.identity = payload;
-                cache_documents.replace(document);
+                if change {
+                    cache_documents.replace(document);
 
-                let new_cid = self.put_dag(cache_documents).await?;
+                    let new_cid = self.put_dag(cache_documents).await?;
 
-                self.ipfs.insert_pin(&new_cid, false).await?;
-                self.save_cache_cid(new_cid).await?;
-                if let Some(old_cid) = old_cid {
-                    if self.ipfs.is_pinned(&old_cid).await? {
-                        self.ipfs.remove_pin(&old_cid, false).await?;
+                    self.ipfs.insert_pin(&new_cid, false).await?;
+                    self.save_cache_cid(new_cid).await?;
+                    if let Some(old_cid) = old_cid {
+                        if self.ipfs.is_pinned(&old_cid).await? {
+                            self.ipfs.remove_pin(&old_cid, false).await?;
+                        }
+                        // Do we want to remove the old block?
+                        self.ipfs.remove_block(old_cid).await?;
                     }
-                    // Do we want to remove the old block?
-                    self.ipfs.remove_block(old_cid).await?;
                 }
             }
-            (true, object) if object == &payload => {}
             (false, _object) => {
                 cache_documents.insert(document);
 
@@ -378,7 +387,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     self.ipfs.remove_block(old_cid).await?;
                 }
             }
-            _ => {}
         };
         Ok(())
     }
@@ -392,7 +400,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     async fn cache(&self) -> HashSet<CacheDocument> {
-        let cache_cid = match self.get_cache_cid().ok() {
+        let cache_cid = match self.get_cache_cid().await.ok() {
             Some(cid) => cid,
             None => return Default::default(),
         };
@@ -431,10 +439,13 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         let ident_cid = self.put_dag(identity.clone()).await?;
 
-        let root_document = RootDocument {
+        let mut root_document = RootDocument {
             identity: ident_cid,
             ..Default::default()
         };
+
+        let did_kp = self.get_keypair_did()?;
+        root_document.sign(&did_kp)?;
 
         let root_cid = self.put_dag(root_document).await?;
 
@@ -452,6 +463,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let own_did = self
             .identity
             .read()
+            .await
             .clone()
             .map(|identity| identity.did_key())
             .ok_or_else(|| {
@@ -471,7 +483,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
                 let connected = connected_to_peer(self.ipfs.clone(), peer_id).await?;
                 if connected == PeerConnectionType::NotConnected
-                    && self.discovering.write().insert(pubkey.clone())
+                    && self.discovering.write().await.insert(pubkey.clone())
                 {
                     let discovering = self.discovering.clone();
                     //TODO: Have separate functionality (or refactor phonebook) to perform checks on peers
@@ -506,7 +518,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                 if let Ok(PeerConnectionType::Connected) =
                                     connected_to_peer(ipfs.clone(), peer_id).await
                                 {
-                                    discovering.write().remove(&pubkey);
+                                    discovering.write().await.remove(&pubkey);
                                     break;
                                 }
                                 tokio::time::sleep(Duration::from_secs(1)).await;
@@ -575,8 +587,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         let future_list =
             futures::stream::FuturesUnordered::from_iter(idents_docs.iter().map(|doc| {
-                doc.identity
-                    .resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
+                doc.resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
                     .boxed()
             }));
 
@@ -594,12 +605,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn identity_update(&mut self, identity: Identity) -> Result<(), Error> {
-        let rcid = self.get_cid()?;
-        let path = IpfsPath::from(rcid);
+        let mut root_document = self.get_root_document().await?;
         let ident_cid = self.put_dag(identity).await?;
-
-        let mut root_document: RootDocument = self.get_dag(path, None).await?;
         root_document.identity = ident_cid;
+
         self.set_root_document(root_document).await
     }
 
@@ -635,6 +644,13 @@ impl<T: IpfsTypes> IdentityStore<T> {
         }
     }
 
+    pub fn get_keypair_did(&self) -> anyhow::Result<DID> {
+        let kp = self.get_raw_keypair()?.encode();
+        let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
+        let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
+        Ok(did.into())
+    }
+
     pub fn get_raw_keypair(&self) -> anyhow::Result<ipfs::libp2p::identity::ed25519::Keypair> {
         match self.get_keypair()? {
             Keypair::Ed25519(kp) => Ok(kp),
@@ -643,15 +659,21 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn get_root_document(&self) -> Result<RootDocument, Error> {
-        let root_cid = self.get_cid()?;
+        let root_cid = self.get_cid().await?;
         let path = IpfsPath::from(root_cid);
         self.get_dag(path, None).await
     }
 
-    pub async fn set_root_document(&mut self, document: RootDocument) -> Result<(), Error> {
-        let old_cid = self.get_cid()?;
+    pub async fn set_root_document(&mut self, mut document: RootDocument) -> Result<(), Error> {
+        let old_cid = self.get_cid().await?;
+        let did_kp = self.get_keypair_did()?;
+        document.sign(&did_kp)?;
+
         let root_cid = self.put_dag(document).await?;
-        self.ipfs.remove_pin(&old_cid, true).await?;
+        if self.ipfs.is_pinned(&old_cid).await? {
+            self.ipfs.remove_pin(&old_cid, true).await?;
+        }
+
         self.ipfs.insert_pin(&root_cid, true).await?;
         self.save_cid(root_cid).await?;
         Ok(())
@@ -682,11 +704,25 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn own_identity(&self) -> Result<Identity, Error> {
-        let root_cid = self.get_cid()?;
-        let path = IpfsPath::from(root_cid)
-            .sub_path("identity")
-            .map_err(anyhow::Error::from)?;
-        let identity = self.get_dag::<Identity>(path, None).await?;
+        let root_document = self.get_root_document().await?;
+        let ipfs = self.ipfs.clone();
+        let path = IpfsPath::from(root_document.identity);
+        let mut identity = self.get_dag::<Identity>(path, None).await?;
+
+        if let Some(document) = root_document.banner {
+            let banner = document.resolve_or_default(ipfs.clone(), None).await;
+            let mut graphics = identity.graphics();
+            graphics.set_profile_banner(&banner);
+            identity.set_graphics(graphics);
+        }
+
+        if let Some(document) = root_document.picture {
+            let picture = document.resolve_or_default(ipfs.clone(), None).await;
+            let mut graphics = identity.graphics();
+            graphics.set_profile_picture(&picture);
+            identity.set_graphics(graphics);
+        }
+
         let public_key = identity.did_key();
         let kp_public_key = libp2p_pub_to_did(&self.get_keypair()?.public())?;
         if public_key != kp_public_key {
@@ -698,7 +734,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn save_cid(&mut self, cid: Cid) -> Result<(), Error> {
-        *self.root_cid.write() = Some(cid);
+        *self.root_cid.write().await = Some(cid);
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
             tokio::fs::write(path.join(".id"), cid).await?;
@@ -707,11 +743,105 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn save_cache_cid(&mut self, cid: Cid) -> Result<(), Error> {
-        *self.cache_cid.write() = Some(cid);
+        *self.cache_cid.write().await = Some(cid);
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
             tokio::fs::write(path.join(".cache_id"), cid).await?;
         }
+        Ok(())
+    }
+
+    pub async fn store_photo(
+        &mut self,
+        mut stream: BoxStream<'static, Vec<u8>>,
+        limit: Option<usize>,
+    ) -> Result<Cid, Error> {
+        let ipfs = self.ipfs.clone();
+
+        let mut adder = FileAdderBuilder::default()
+            .with_chunker(Chunker::Size(256 * 1024))
+            .build();
+
+        let mut last_cid = None;
+
+        while let Some(buffer) = stream.next().await {
+            let mut total = 0;
+
+            while total < buffer.len() {
+                let (blocks, consumed) = adder.push(&buffer[total..]);
+                for (cid, block) in blocks {
+                    let block = Block::new(cid, block)?;
+                    let _cid = ipfs.put_block(block).await?;
+                }
+                total += consumed;
+            }
+            if let Some(limit) = limit {
+                if total >= limit {
+                    return Err(Error::InvalidLength {
+                        context: "photo".into(),
+                        current: total,
+                        minimum: None,
+                        maximum: Some(limit),
+                    });
+                }
+            }
+        }
+
+        let blocks = adder.finish();
+        for (cid, block) in blocks {
+            let block = Block::new(cid, block)?;
+            let cid = ipfs.put_block(block).await?;
+            last_cid = Some(cid);
+        }
+
+        let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
+
+        ipfs.insert_pin(&cid, true).await?;
+
+        Ok(cid)
+    }
+
+    pub async fn delete_photo(&mut self, cid: Cid) -> Result<(), Error> {
+        let ipfs = self.ipfs.clone();
+
+        let mut pinned_blocks: HashSet<_> = HashSet::from_iter(
+            ipfs.list_pins(None)
+                .await
+                .filter_map(|r| async move {
+                    match r {
+                        Ok(v) => Some(v.0),
+                        Err(_) => None,
+                    }
+                })
+                .collect::<Vec<_>>()
+                .await,
+        );
+
+        if ipfs.is_pinned(&cid).await? {
+            ipfs.remove_pin(&cid, true).await?;
+        }
+
+        let new_pinned_blocks: HashSet<_> = HashSet::from_iter(
+            ipfs.list_pins(None)
+                .await
+                .filter_map(|r| async move {
+                    match r {
+                        Ok(v) => Some(v.0),
+                        Err(_) => None,
+                    }
+                })
+                .collect::<Vec<_>>()
+                .await,
+        );
+
+        for s_cid in new_pinned_blocks.iter() {
+            pinned_blocks.remove(s_cid);
+        }
+
+        for cid in pinned_blocks {
+            ipfs.remove_block(cid).await?;
+        }
+
         Ok(())
     }
 
@@ -721,33 +851,33 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 .await
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
             {
-                *self.root_cid.write() = cid_str.parse().ok()
+                *self.root_cid.write().await = cid_str.parse().ok()
             }
 
             if let Ok(cid_str) = tokio::fs::read(path.join(".cache_id"))
                 .await
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
             {
-                *self.cache_cid.write() = cid_str.parse().ok();
+                *self.cache_cid.write().await = cid_str.parse().ok();
             }
         }
         Ok(())
     }
 
-    pub fn get_cache_cid(&self) -> Result<Cid, Error> {
-        (self.cache_cid.read().clone())
+    pub async fn get_cache_cid(&self) -> Result<Cid, Error> {
+        (self.cache_cid.read().await.clone())
             .ok_or_else(|| Error::OtherWithContext("Cache cannot be found".into()))
     }
 
-    pub fn get_cid(&self) -> Result<Cid, Error> {
-        (self.root_cid.read().clone()).ok_or(Error::IdentityDoesntExist)
+    pub async fn get_cid(&self) -> Result<Cid, Error> {
+        (self.root_cid.read().await.clone()).ok_or(Error::IdentityDoesntExist)
     }
 
     pub async fn update_identity(&self) -> Result<(), Error> {
         let ident = self.own_identity().await?;
         self.validate_identity(&ident)?;
-        *self.identity.write() = Some(ident);
-        self.seen.write().clear();
+        *self.identity.write().await = Some(ident);
+        self.seen.write().await.clear();
         Ok(())
     }
 
@@ -799,31 +929,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
                         current: len,
                         minimum: None,
                         maximum: Some(512),
-                    });
-                }
-            }
-        }
-        {
-            let graphics = identity.graphics();
-            {
-                let len = graphics.profile_banner().len();
-                if len > 2 * 1024 * 1024 {
-                    return Err(Error::InvalidLength {
-                        context: "profile banner".into(),
-                        current: len,
-                        minimum: None,
-                        maximum: Some(2 * 1024 * 1024),
-                    });
-                }
-            }
-            {
-                let len = graphics.profile_picture().len();
-                if len > 2 * 1024 * 1024 {
-                    return Err(Error::InvalidLength {
-                        context: "profile picture".into(),
-                        current: len,
-                        minimum: None,
-                        maximum: Some(2 * 1024 * 1024),
                     });
                 }
             }

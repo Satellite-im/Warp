@@ -75,6 +75,15 @@ pub enum Payload {
 pub struct IdentityPayload {
     /// Not required but would be used to cross check the identity did, sender (if sent directly)
     pub did: DID,
+
+    /// Type that represents profile picture
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub picture: Option<DocumentType<String>>,
+
+    /// Type that represents profile banner
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub banner: Option<DocumentType<String>>,
+
     /// Type that represents identity or cid
     pub payload: DocumentType<Identity>,
 }
