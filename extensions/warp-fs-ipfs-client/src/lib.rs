@@ -26,7 +26,7 @@ type Result<T> = std::result::Result<T, Error>;
 #[derive(Serialize, Deserialize, Clone)]
 pub struct IpfsFileSystem {
     pub index: Directory,
-    path: PathBuf,
+    path: Arc<RwLock<PathBuf>>,
     pub modified: DateTime<Utc>,
     #[serde(skip)]
     pub client: IpfsInternalClient,
@@ -88,7 +88,7 @@ impl Default for IpfsFileSystem {
     fn default() -> IpfsFileSystem {
         IpfsFileSystem {
             index: Directory::new("root"),
-            path: PathBuf::new(),
+            path: Default::default(),
             modified: Utc::now(),
             client: IpfsInternalClient::default(),
             cache: None,
@@ -535,11 +535,11 @@ impl Constellation for IpfsFileSystem {
     }
 
     fn set_path(&mut self, path: PathBuf) {
-        self.path = path;
+        *self.path.write() = path;
     }
 
     fn get_path(&self) -> PathBuf {
-        self.path.clone()
+        self.path.read().clone()
     }
 }
 

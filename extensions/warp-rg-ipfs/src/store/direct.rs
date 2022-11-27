@@ -44,10 +44,10 @@ pub struct DirectMessageStore<T: IpfsTypes> {
     direct_conversation: Arc<RwLock<Vec<DirectConversation>>>,
 
     // account instance
-    account: Arc<RwLock<Box<dyn MultiPass>>>,
+    account: Box<dyn MultiPass>,
 
     // filesystem instance
-    filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
+    filesystem: Option<Box<dyn Constellation>>,
 
     // Queue
     queue: Arc<RwLock<Vec<Queue>>>,
@@ -273,7 +273,7 @@ impl DirectConversation {
     pub fn start_task(
         &mut self,
         did: Arc<DID>,
-        filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
+        filesystem: Option<Box<dyn Constellation>>,
         decrypted: Arc<AtomicBool>,
         filter: &Arc<Option<SpamFilter>>,
         stream: SubscriptionStream,
@@ -336,8 +336,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     pub async fn new(
         ipfs: Ipfs<T>,
         path: Option<PathBuf>,
-        account: Arc<RwLock<Box<dyn MultiPass>>>,
-        filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
+        account: Box<dyn MultiPass>,
+        filesystem: Option<Box<dyn Constellation>>,
         discovery: bool,
         interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
@@ -360,7 +360,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         }
         let direct_conversation = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
-        let did = Arc::new(account.read().decrypt_private_key(None)?);
+        let did = Arc::new(account.decrypt_private_key(None)?);
         let spam_filter = Arc::new(if check_spam {
             Some(SpamFilter::default()?)
         } else {
@@ -476,7 +476,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                     continue;
                                                 }
 
-                                                if let Ok(list) = store.account.read().block_list() {
+                                                if let Ok(list) = store.account.block_list() {
                                                     if list.contains(&peer) {
                                                         warn!("{peer} is blocked");
                                                         continue
@@ -635,10 +635,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 impl<T: IpfsTypes> DirectMessageStore<T> {
     pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
         if self.with_friends.load(Ordering::SeqCst) {
-            self.account.read().has_friend(did_key)?;
+            self.account.has_friend(did_key)?;
         }
 
-        if let Ok(list) = self.account.read().block_list() {
+        if let Ok(list) = self.account.block_list() {
             if list.contains(did_key) {
                 return Err(Error::PublicKeyIsBlocked);
             }
@@ -1241,7 +1241,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         //      this will require uploading to ipfs directly from here
         //      or setting up a seperate stream channel related to
         //      the subscribed topic possibly as a configuration option
-        let constellation = self
+        let mut constellation = self
             .filesystem
             .clone()
             .ok_or(Error::ConstellationExtensionUnavailable)?;
@@ -1279,7 +1279,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
                     let original = filename.clone();
 
-                    let current_directory = constellation.read().current_directory()?;
+                    let current_directory = constellation.current_directory()?;
 
                     let mut interval = 0;
                     let skip;
@@ -1320,7 +1320,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         .map(|x| x.into());
 
                     let mut progress = match constellation
-                        .write()
                         .put_stream(&filename, Some(size), stream.boxed())
                         .await
                     {
@@ -1420,7 +1419,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .clone()
             .ok_or(Error::ConstellationExtensionUnavailable)?;
 
-        if constellation.read().id() != "warp-fs-ipfs" {
+        if constellation.id() != "warp-fs-ipfs" {
             //Note: Temporary for now; Will get lifted in the future
             return Err(Error::Unimplemented);
         }
@@ -1438,7 +1437,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .cloned()
             .ok_or(Error::FileNotFound)?;
 
-        let root = constellation.read().root_directory();
+        let root = constellation.root_directory();
         if !root.has_item(&attachment.name()) {
             root.add_file(attachment.clone())?;
         }
@@ -1701,7 +1700,7 @@ pub enum MessageDirection {
 
 pub fn direct_message_event(
     messages: &mut Vec<Message>,
-    filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
+    filesystem: Option<Box<dyn Constellation>>,
     events: &MessagingEvents,
     filter: &Arc<Option<SpamFilter>>,
     tx: BroadcastSender<MessageEventKind>,
@@ -1756,7 +1755,7 @@ pub fn direct_message_event(
                 && direction == MessageDirection::In
             {
                 if let Some(fs) = filesystem {
-                    let dir = fs.read().root_directory();
+                    let dir = fs.root_directory();
                     for file in message.attachments() {
                         let original = file.name();
                         let mut inc = 0;

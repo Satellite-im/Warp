@@ -17,8 +17,8 @@ use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{
-    ConversationType, MessageEventKind, MessageEventStream, MessageOptions, MessageType, PinState,
-    RayGun, RayGunAttachment, RayGunStream, ReactionState, RayGunEvents, MessageEvent,
+    ConversationType, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions,
+    MessageType, PinState, RayGun, ReactionState,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -55,7 +55,7 @@ async fn create_account<P: AsRef<Path>>(
     cache: Arc<RwLock<Box<dyn PocketDimension>>>,
     passphrase: Zeroizing<String>,
     experimental: bool,
-) -> anyhow::Result<Arc<RwLock<Box<dyn MultiPass>>>> {
+) -> anyhow::Result<Box<dyn MultiPass>> {
     let tesseract = match path.as_ref() {
         Some(path) => {
             let path = path.as_ref();
@@ -74,37 +74,29 @@ async fn create_account<P: AsRef<Path>>(
         None => warp_mp_ipfs::config::MpIpfsConfig::testing(experimental),
     };
 
-    let account: Arc<RwLock<Box<dyn MultiPass>>> = match path.is_some() {
-        true => Arc::new(RwLock::new(Box::new(
-            ipfs_identity_persistent(config, tesseract, Some(cache)).await?,
-        ))),
-        false => Arc::new(RwLock::new(Box::new(
-            ipfs_identity_temporary(Some(config), tesseract, Some(cache)).await?,
-        ))),
+    let mut account: Box<dyn MultiPass> = match path.is_some() {
+        true => Box::new(ipfs_identity_persistent(config, tesseract, Some(cache)).await?),
+        false => Box::new(ipfs_identity_temporary(Some(config), tesseract, Some(cache)).await?),
     };
 
-    if account.read().get_own_identity().is_err() {
-        account.write().create_identity(None, None)?;
+    if account.get_own_identity().is_err() {
+        account.create_identity(None, None)?;
     }
     Ok(account)
 }
 
 async fn create_fs<P: AsRef<Path>>(
-    account: Arc<RwLock<Box<dyn MultiPass>>>,
+    account: Box<dyn MultiPass>,
     path: Option<P>,
-) -> anyhow::Result<Arc<RwLock<Box<dyn Constellation>>>> {
+) -> anyhow::Result<Box<dyn Constellation>> {
     let config = match path.as_ref() {
         Some(path) => FsIpfsConfig::production(path),
         None => FsIpfsConfig::testing(),
     };
 
-    let filesystem: Arc<RwLock<Box<dyn Constellation>>> = match path.is_some() {
-        true => Arc::new(RwLock::new(Box::new(
-            IpfsFileSystem::<FsPersistent>::new(account, Some(config)).await?,
-        ))),
-        false => Arc::new(RwLock::new(Box::new(
-            IpfsFileSystem::<FsTemporary>::new(account, Some(config)).await?,
-        ))),
+    let filesystem: Box<dyn Constellation> = match path.is_some() {
+        true => Box::new(IpfsFileSystem::<FsPersistent>::new(account, Some(config)).await?),
+        false => Box::new(IpfsFileSystem::<FsTemporary>::new(account, Some(config)).await?),
     };
 
     Ok(filesystem)
@@ -113,8 +105,8 @@ async fn create_fs<P: AsRef<Path>>(
 #[allow(dead_code)]
 async fn create_rg(
     path: Option<PathBuf>,
-    account: Arc<RwLock<Box<dyn MultiPass>>>,
-    filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
+    account: Box<dyn MultiPass>,
+    filesystem: Option<Box<dyn Constellation>>,
     cache: Arc<RwLock<Box<dyn PocketDimension>>>,
 ) -> anyhow::Result<Box<dyn RayGun>> {
     let chat = match path.as_ref() {
@@ -169,18 +161,16 @@ async fn main() -> anyhow::Result<()> {
 
     let fs = create_fs(new_account.clone(), opt.path.clone()).await?;
 
-    let mut chat = Arc::new(RwLock::new(
-        create_rg(
-            opt.path.clone(),
-            new_account.clone(),
-            Some(fs.clone()),
-            cache,
-        )
-        .await?,
-    ));
+    let mut chat = create_rg(
+        opt.path.clone(),
+        new_account.clone(),
+        Some(fs.clone()),
+        cache,
+    )
+    .await?;
 
     println!("Obtaining identity....");
-    let identity = new_account.read().get_own_identity()?;
+    let identity = new_account.get_own_identity()?;
     println!(
         "Registered user {}#{}",
         identity.username(),
@@ -730,8 +720,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn get_username(account: Arc<RwLock<Box<dyn MultiPass>>>, did: DID) -> anyhow::Result<String> {
-    let account = account.read();
+fn get_username(account: Box<dyn MultiPass>, did: DID) -> anyhow::Result<String> {
     let identity = account
         .get_identity(Identifier::did_key(did))
         .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
@@ -740,8 +729,8 @@ fn get_username(account: Arc<RwLock<Box<dyn MultiPass>>>, did: DID) -> anyhow::R
 
 async fn message_event_handle(
     mut stdout: SharedWriter,
-    multipass: Arc<RwLock<Box<dyn MultiPass>>>,
-    raygun: Arc<RwLock<Box<dyn RayGun>>>,
+    multipass: Box<dyn MultiPass>,
+    raygun: Box<dyn RayGun>,
     mut stream: MessageEventStream,
     conversation_id: Arc<RwLock<Uuid>>,
 ) -> anyhow::Result<()> {
@@ -892,37 +881,37 @@ async fn message_event_handle(
                     )?;
                 }
             }
-            MessageEventKind::EventReceived { conversation_id, did_key, event } => {
+            MessageEventKind::EventReceived {
+                conversation_id,
+                did_key,
+                event,
+            } => {
                 if *topic.read() == conversation_id {
                     let username = get_username(multipass.clone(), did_key.clone())
                         .unwrap_or_else(|_| did_key.to_string());
                     match event {
                         MessageEvent::Typing => {
-                            writeln!(
-                                stdout,
-                                ">>> {} is typing",
-                                username,
-                            )?;
+                            writeln!(stdout, ">>> {} is typing", username,)?;
                         }
                     }
                 }
-            },
-            MessageEventKind::EventCancelled { conversation_id, did_key, event } => {
+            }
+            MessageEventKind::EventCancelled {
+                conversation_id,
+                did_key,
+                event,
+            } => {
                 if *topic.read() == conversation_id {
                     let username = get_username(multipass.clone(), did_key.clone())
                         .unwrap_or_else(|_| did_key.to_string());
 
-                match event {
+                    match event {
                         MessageEvent::Typing => {
-                            writeln!(
-                                stdout,
-                                ">>> {} is no longer typing",
-                                username,
-                            )?;
+                            writeln!(stdout, ">>> {} is no longer typing", username,)?;
                         }
-                    }        
+                    }
                 }
-            },
+            }
         }
     }
     Ok(())

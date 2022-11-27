@@ -35,12 +35,13 @@ impl Constellation for MemorySystem {
         let mut internal_file = item::file::File::new(name);
 
         let fs_path = path.to_string();
-        let (internal_file, bytes) =  {
+        let (internal_file, bytes) = {
             let bytes = internal_file.insert_from_path(fs_path).unwrap_or_default();
             (internal_file, bytes)
         };
 
         self.internal
+            .write()
             .0
             .insert(internal_file)
             .map_err(anyhow::Error::from)?;
@@ -85,8 +86,10 @@ impl Constellation for MemorySystem {
 
         let internal_file = self
             .internal
+            .read()
             .as_ref()
             .get_item_from_path(String::from(name))
+            .cloned()
             .map_err(anyhow::Error::from)?;
 
         tokio::fs::write(path, internal_file.data().as_slice()).await?;
@@ -102,6 +105,7 @@ impl Constellation for MemorySystem {
         let mut internal_file = item::file::File::new(name);
         let bytes = internal_file.insert_buffer(buf.clone()).unwrap();
         self.internal
+            .write()
             .0
             .insert(internal_file.clone())
             .map_err(|_| Error::Other)?;
@@ -154,8 +158,10 @@ impl Constellation for MemorySystem {
 
         let file = self
             .internal
+            .read()
             .as_ref()
             .get_item_from_path(String::from(name))
+            .cloned()
             .map_err(|_| Error::Other)?;
 
         Ok(file.data())
@@ -166,11 +172,12 @@ impl Constellation for MemorySystem {
             return Err(Error::Other);
         }
 
-        if !self.internal.as_ref().exist(path) {
+        if !self.internal.read().as_ref().exist(path) {
             return Err(Error::ObjectNotFound);
         }
 
         self.internal
+            .write()
             .as_mut()
             .remove(path)
             .map_err(|_| Error::ObjectNotFound)?;
@@ -184,11 +191,12 @@ impl Constellation for MemorySystem {
             return Err(Error::Other);
         }
 
-        if !self.internal.as_ref().exist(path) {
+        if !self.internal.read().as_ref().exist(path) {
             return Err(Error::ObjectNotFound);
         }
 
         self.internal
+            .write()
             .as_mut()
             .to_directory_mut()?
             .get_item_mut_from_path(path)?
@@ -213,6 +221,7 @@ impl Constellation for MemorySystem {
         };
 
         self.internal
+            .write()
             .as_mut()
             .insert(inner_directory)
             .map_err(|_| Error::Other)?;
