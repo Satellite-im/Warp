@@ -41,7 +41,7 @@ use warp::multipass::{
 
 use crate::config::Bootstrap;
 use crate::store::document::DocumentType;
-use crate::store::sync::{Synchronize, NodeResponse, NodeRequest, Command};
+use crate::store::sync::Command;
 
 pub type Temporary = TestTypes;
 pub type Persistent = Types;

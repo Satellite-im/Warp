@@ -18,7 +18,7 @@ use futures::{stream::BoxStream, FutureExt, StreamExt};
 use ipfs::{
     libp2p::gossipsub::GossipsubMessage,
     unixfs::ll::file::adder::{Chunker, FileAdderBuilder},
-    Block, Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId, Node,
+    Block, Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId,
 };
 use libipld::{
     serde::{from_ipld, to_ipld},
@@ -42,7 +42,7 @@ use warp::{
 use super::{
     connected_to_peer,
     document::{CacheDocument, DocumentType, RootDocument},
-    libp2p_pub_to_did, PeerConnectionType, IDENTITY_BROADCAST, sync::{NodeRequest, NodeResponse, Command},
+    libp2p_pub_to_did, PeerConnectionType, IDENTITY_BROADCAST, sync::Command,
 };
 
 pub struct IdentityStore<T: IpfsTypes> {

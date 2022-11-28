@@ -1,7 +1,6 @@
 #![allow(clippy::await_holding_lock)]
 use futures::StreamExt;
 use ipfs::libp2p::gossipsub::GossipsubMessage;
-use ipfs::libp2p::identity;
 use ipfs::{Ipfs, IpfsTypes, PeerId};
 use warp::crypto::cipher::Cipher;
 use warp::crypto::did_key::Generate;
@@ -34,7 +33,6 @@ use crate::Persistent;
 use super::document::DocumentType;
 use super::identity::IdentityStore;
 use super::phonebook::PhoneBook;
-use super::sync::Synchronize;
 use super::{
     did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, PeerConnectionType,
     FRIENDS_BROADCAST,

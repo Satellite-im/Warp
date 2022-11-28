@@ -1,21 +1,17 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::mpsc::RecvError;
 
-use chrono::Duration;
 use futures::StreamExt;
-use ipfs::{Ipfs, IpfsTypes, Multiaddr, IpfsPath};
+use ipfs::{Ipfs, IpfsTypes, Multiaddr};
 use libipld::Cid;
-use libipld::serde::{from_ipld, to_ipld};
+use libipld::serde::{to_ipld};
 use sata::Sata;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::mpsc::{self, Sender};
 use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender};
 use tokio::sync::RwLock as AsyncRwLock;
 use uuid::Uuid;
-use warp::multipass::identity::Identity;
 use warp::{crypto::DID, error::Error};
 
 use super::document::{DocumentType, RootDocument};
@@ -86,7 +82,6 @@ impl<T: IpfsTypes> Synchronize<T> {
         tokio::spawn({
             let sync = sync.clone();
             let did = sync.did.clone();
-            let ipfs = sync.ipfs.clone();
             let request_list: AsyncRwLock<HashMap<Uuid, OneshotSender<NodeResponse>>> =
                 AsyncRwLock::new(Default::default());
             
