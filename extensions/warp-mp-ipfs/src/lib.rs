@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
+use store::webrtc::{SignalingMessage, WebrtcManager};
 use tokio::sync::broadcast;
 use tracing::log::{error, info, trace, warn};
 use warp::crypto::did_key::Generate;
@@ -35,7 +36,7 @@ use warp::multipass::identity::{
 };
 use warp::multipass::{
     identity, Friends, FriendsEvent, IdentityInformation, MultiPass, MultiPassEventKind,
-    MultiPassEventStream,
+    MultiPassEventStream, Signaling,
 };
 
 use crate::config::Bootstrap;
@@ -50,6 +51,7 @@ pub struct IpfsIdentity<T: IpfsTypes> {
     ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
     tesseract: Tesseract,
     friend_store: Arc<RwLock<Option<FriendsStore<T>>>>,
+    webrtc: Arc<RwLock<Option<WebrtcManager<T>>>>,
     identity_store: Arc<RwLock<Option<IdentityStore<T>>>>,
     initialized: Arc<AtomicBool>,
     tx: broadcast::Sender<MultiPassEventKind>,
@@ -67,6 +69,7 @@ impl<T: IpfsTypes> Clone for IpfsIdentity<T> {
             identity_store: self.identity_store.clone(),
             initialized: self.initialized.clone(),
             tx: self.tx.clone(),
+            webrtc: self.webrtc.clone(),
         }
     }
 }
@@ -114,6 +117,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             identity_store: Default::default(),
             initialized: Default::default(),
             tx,
+            webrtc: Default::default(),
         };
 
         if !identity.tesseract.is_unlock() {
@@ -171,6 +175,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         );
 
         let config = self.config.clone();
+        let config_clone = config.clone();
 
         let empty_bootstrap = match &config.bootstrap {
             Bootstrap::Ipfs | Bootstrap::Experimental => false,
@@ -361,8 +366,20 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         .await?;
         info!("friends store initialized");
 
+        let webrtc = WebrtcManager::new(
+            ipfs.clone(),
+            identity_store.clone(),
+            config_clone.path,
+            tesseract.clone(),
+            config.store_setting.broadcast_interval,
+            self.tx.clone(),
+        )
+        .await?;
+        info!("friends store initialized");
+
         *self.identity_store.write() = Some(identity_store);
         *self.friend_store.write() = Some(friend_store);
+        *self.webrtc.write() = Some(webrtc);
 
         *self.ipfs.write() = Some(ipfs);
         self.initialized.store(true, Ordering::SeqCst);
@@ -372,6 +389,13 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
     pub fn friend_store(&self) -> Result<FriendsStore<T>, Error> {
         self.friend_store
+            .read()
+            .clone()
+            .ok_or(Error::MultiPassExtensionUnavailable)
+    }
+
+    pub fn webrtc(&self) -> Result<WebrtcManager<T>, Error> {
+        self.webrtc
             .read()
             .clone()
             .ok_or(Error::MultiPassExtensionUnavailable)
@@ -425,6 +449,10 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             }
         }
         true
+    }
+
+    pub fn send_signal(&mut self, did: &DID, signaling_message: &Vec<u8>) -> Result<(), Error> {
+        self.send_message(did, signaling_message)
     }
 }
 
@@ -825,6 +853,14 @@ impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
         relationship.set_blocked(blocked);
 
         Ok(relationship)
+    }
+}
+
+impl<T: IpfsTypes> Signaling for IpfsIdentity<T> {
+    fn send_message(&mut self, pubkey: &DID, data: &Vec<u8>) -> Result<(), Error> {
+        println!("Sending message to {}", pubkey);
+        let mut store = self.webrtc()?;
+        async_block_in_place_uncheck(store.send_signal(pubkey, data))
     }
 }
 

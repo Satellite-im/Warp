@@ -49,7 +49,7 @@ impl core::ops::DerefMut for MultiPassEventStream {
 }
 
 pub trait MultiPass:
-    Extension + IdentityInformation + Friends + FriendsEvent + Sync + Send + SingleHandle
+    Extension + IdentityInformation + Friends + FriendsEvent + Sync + Send + SingleHandle + Signaling
 {
     /// Create an [`Identity`]
     fn create_identity(
@@ -103,6 +103,13 @@ where
 
     fn refresh_cache(&mut self) -> Result<(), Error> {
         self.write().refresh_cache()
+    }
+}
+
+pub trait Signaling: Sync + Send {
+    /// Send message to corresponding DID
+    fn send_message(&mut self, _: &DID, _: &Vec<u8>) -> Result<(), Error> {
+        Err(Error::Unimplemented)
     }
 }
 
@@ -192,6 +199,15 @@ pub trait FriendsEvent: Sync + Send {
     /// Subscribe to an stream of events
     fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
         Err(Error::Unimplemented)
+    }
+}
+
+impl<T: ?Sized> Signaling for Arc<RwLock<Box<T>>>
+where
+    T: Signaling,
+{
+    fn send_message(&mut self, key: &DID, data: &Vec<u8>) -> Result<(), Error> {
+        self.write().send_message(key, data)
     }
 }
 
