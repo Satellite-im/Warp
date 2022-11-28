@@ -50,7 +50,7 @@ pub struct MemorySystem {
     path: PathBuf,
     modified: DateTime<Utc>,
     #[serde(skip)]
-    internal: MemorySystemInternal,
+    internal: Arc<RwLock<MemorySystemInternal>>,
     #[serde(skip)]
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     #[serde(skip)]
@@ -66,7 +66,7 @@ impl Default for MemorySystem {
             current: Directory::new("root"),
             path: PathBuf::new(),
             modified: Utc::now(),
-            internal: MemorySystemInternal::default(),
+            internal: Default::default(),
             cache: None,
             hooks: None,
         }

@@ -13,7 +13,7 @@ use warp::{
     },
     error::Error,
     logging::tracing::log::{error, trace},
-    raygun::{Message, PinState, ReactionState},
+    raygun::{Message, PinState, ReactionState, MessageEvent},
 };
 
 pub const DIRECT_BROADCAST: &str = "direct/broadcast";
@@ -34,6 +34,7 @@ pub enum MessagingEvents {
     Delete(Uuid, Uuid),
     Pin(Uuid, DID, Uuid, PinState),
     React(Uuid, DID, Uuid, ReactionState, String),
+    Event(Uuid, DID, MessageEvent, bool),
 }
 
 pub fn generate_shared_topic(did_a: &DID, did_b: &DID, seed: Option<&str>) -> anyhow::Result<Uuid> {

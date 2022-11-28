@@ -20,8 +20,8 @@ use warp::logging::tracing::log::{error, trace};
 use warp::logging::tracing::warn;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    Conversation, EmbedState, Location, Message, MessageEventKind, MessageOptions, MessageType,
-    PinState, RayGunEventKind, Reaction, ReactionState,
+    Conversation, EmbedState, Location, Message, MessageEvent, MessageEventKind, MessageOptions,
+    MessageType, PinState, RayGunEventKind, Reaction, ReactionState,
 };
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock};
@@ -44,10 +44,10 @@ pub struct DirectMessageStore<T: IpfsTypes> {
     direct_conversation: Arc<RwLock<Vec<DirectConversation>>>,
 
     // account instance
-    account: Arc<RwLock<Box<dyn MultiPass>>>,
+    account: Box<dyn MultiPass>,
 
     // filesystem instance
-    filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
+    filesystem: Option<Box<dyn Constellation>>,
 
     // Queue
     queue: Arc<RwLock<Vec<Queue>>>,
@@ -273,7 +273,7 @@ impl DirectConversation {
     pub fn start_task(
         &mut self,
         did: Arc<DID>,
-        filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
+        filesystem: Option<Box<dyn Constellation>>,
         decrypted: Arc<AtomicBool>,
         filter: &Arc<Option<SpamFilter>>,
         stream: SubscriptionStream,
@@ -336,8 +336,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     pub async fn new(
         ipfs: Ipfs<T>,
         path: Option<PathBuf>,
-        account: Arc<RwLock<Box<dyn MultiPass>>>,
-        filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
+        account: Box<dyn MultiPass>,
+        filesystem: Option<Box<dyn Constellation>>,
         discovery: bool,
         interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
@@ -360,7 +360,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         }
         let direct_conversation = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
-        let did = Arc::new(account.read().decrypt_private_key(None)?);
+        let did = Arc::new(account.decrypt_private_key(None)?);
         let spam_filter = Arc::new(if check_spam {
             Some(SpamFilter::default()?)
         } else {
@@ -476,7 +476,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                                     continue;
                                                 }
 
-                                                if let Ok(list) = store.account.read().block_list() {
+                                                if let Ok(list) = store.account.block_list() {
                                                     if list.contains(&peer) {
                                                         warn!("{peer} is blocked");
                                                         continue
@@ -635,10 +635,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 impl<T: IpfsTypes> DirectMessageStore<T> {
     pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
         if self.with_friends.load(Ordering::SeqCst) {
-            self.account.read().has_friend(did_key)?;
+            self.account.has_friend(did_key)?;
         }
 
-        if let Ok(list) = self.account.read().block_list() {
+        if let Ok(list) = self.account.block_list() {
             if list.contains(did_key) {
                 return Err(Error::PublicKeyIsBlocked);
             }
@@ -994,7 +994,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
 
-        self.send_event(conversation.id(), event).await
+        self.send_raw_event(conversation.id(), event, true).await
     }
 
     pub async fn edit_message(
@@ -1057,7 +1057,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation
                 .to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(&*self.did)),
         )?;
-        self.send_event(conversation.id(), event).await
+        self.send_raw_event(conversation.id(), event, true).await
     }
 
     pub async fn reply_message(
@@ -1126,7 +1126,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
 
-        self.send_event(conversation.id(), event).await
+        self.send_raw_event(conversation.id(), event, true).await
     }
 
     pub async fn delete_message(
@@ -1153,7 +1153,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         )?;
 
         if broadcast {
-            self.send_event(conversation.id(), event).await?;
+            self.send_raw_event(conversation.id(), event, true).await?;
         }
 
         Ok(())
@@ -1183,7 +1183,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
 
-        self.send_event(conversation.id(), event).await
+        self.send_raw_event(conversation.id(), event, true).await
     }
 
     pub async fn embeds(
@@ -1222,7 +1222,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         warp::async_block_in_place_uncheck(
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
-        self.send_event(conversation.id(), event).await
+        self.send_raw_event(conversation.id(), event, true).await
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1241,7 +1241,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         //      this will require uploading to ipfs directly from here
         //      or setting up a seperate stream channel related to
         //      the subscribed topic possibly as a configuration option
-        let constellation = self
+        let mut constellation = self
             .filesystem
             .clone()
             .ok_or(Error::ConstellationExtensionUnavailable)?;
@@ -1279,7 +1279,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
                     let original = filename.clone();
 
-                    let current_directory = constellation.read().current_directory()?;
+                    let current_directory = constellation.current_directory()?;
 
                     let mut interval = 0;
                     let skip;
@@ -1320,7 +1320,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         .map(|x| x.into());
 
                     let mut progress = match constellation
-                        .write()
                         .put_stream(&filename, Some(size), stream.boxed())
                         .await
                     {
@@ -1403,7 +1402,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
 
-        self.send_event(conversation.id(), event).await
+        self.send_raw_event(conversation.id(), event, true).await
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1420,7 +1419,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .clone()
             .ok_or(Error::ConstellationExtensionUnavailable)?;
 
-        if constellation.read().id() != "warp-fs-ipfs" {
+        if constellation.id() != "warp-fs-ipfs" {
             //Note: Temporary for now; Will get lifted in the future
             return Err(Error::Unimplemented);
         }
@@ -1438,14 +1437,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .cloned()
             .ok_or(Error::FileNotFound)?;
 
-        let root = constellation.read().root_directory();
+        let root = constellation.root_directory();
         if !root.has_item(&attachment.name()) {
             root.add_file(attachment.clone())?;
         }
 
         let ipfs = self.ipfs.clone();
         let constellation = constellation.clone();
-        let attachment = attachment.clone();
         let own_did = self.did.clone();
 
         let progress_stream = async_stream::stream! {
@@ -1554,10 +1552,63 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         Ok(ConstellationProgressStream(progress_stream.boxed()))
     }
 
-    pub async fn send_event<S: Serialize + Send + Sync>(
+    pub async fn send_event(
+        &mut self,
+        conversation_id: Uuid,
+        event: MessageEvent,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get_conversation(conversation_id)?;
+        let tx = conversation.event_handle()?;
+        let own_did = &*self.did;
+
+        let event = MessagingEvents::Event(conversation.id(), own_did.clone(), event, false);
+
+        direct_message_event(
+            &mut conversation.messages_mut(),
+            None,
+            &event,
+            &self.spam_filter,
+            tx,
+            MessageDirection::Out,
+            Default::default(),
+        )?;
+        warp::async_block_in_place_uncheck(
+            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
+        )?;
+        self.send_raw_event(conversation.id(), event, false).await
+    }
+
+    pub async fn cancel_event(
+        &mut self,
+        conversation_id: Uuid,
+        event: MessageEvent,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get_conversation(conversation_id)?;
+        let tx = conversation.event_handle()?;
+        let own_did = &*self.did;
+
+        let event = MessagingEvents::Event(conversation.id(), own_did.clone(), event, true);
+
+        direct_message_event(
+            &mut conversation.messages_mut(),
+            None,
+            &event,
+            &self.spam_filter,
+            tx,
+            MessageDirection::Out,
+            Default::default(),
+        )?;
+        warp::async_block_in_place_uncheck(
+            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
+        )?;
+        self.send_raw_event(conversation.id(), event, false).await
+    }
+
+    pub async fn send_raw_event<S: Serialize + Send + Sync>(
         &mut self,
         conversation: Uuid,
         event: S,
+        queue: bool,
     ) -> Result<(), Error> {
         let conversation = self.get_conversation(conversation)?;
 
@@ -1590,7 +1641,24 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         match peers.contains(&peer_id) {
             true => {
                 if let Err(e) = self.ipfs.pubsub_publish(conversation.topic(), bytes).await {
-                    warn!("Unable to publish to topic due to error: {e}... Queuing event");
+                    if queue {
+                        warn!("Unable to publish to topic due to error: {e}... Queuing event");
+                        if let Err(e) = self
+                            .queue_event(Queue::direct(
+                                conversation.id(),
+                                peer_id,
+                                conversation.topic(),
+                                payload,
+                            ))
+                            .await
+                        {
+                            error!("Error submitting event to queue: {e}");
+                        }
+                    }
+                }
+            }
+            false => {
+                if queue {
                     if let Err(e) = self
                         .queue_event(Queue::direct(
                             conversation.id(),
@@ -1602,19 +1670,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     {
                         error!("Error submitting event to queue: {e}");
                     }
-                }
-            }
-            false => {
-                if let Err(e) = self
-                    .queue_event(Queue::direct(
-                        conversation.id(),
-                        peer_id,
-                        conversation.topic(),
-                        payload,
-                    ))
-                    .await
-                {
-                    error!("Error submitting event to queue: {e}");
                 }
             }
         };
@@ -1645,7 +1700,7 @@ pub enum MessageDirection {
 
 pub fn direct_message_event(
     messages: &mut Vec<Message>,
-    filesystem: Option<Arc<RwLock<Box<dyn Constellation>>>>,
+    filesystem: Option<Box<dyn Constellation>>,
     events: &MessagingEvents,
     filter: &Arc<Option<SpamFilter>>,
     tx: BroadcastSender<MessageEventKind>,
@@ -1700,7 +1755,7 @@ pub fn direct_message_event(
                 && direction == MessageDirection::In
             {
                 if let Some(fs) = filesystem {
-                    let dir = fs.read().root_directory();
+                    let dir = fs.root_directory();
                     for file in message.attachments() {
                         let original = file.name();
                         let mut inc = 0;
@@ -1942,6 +1997,25 @@ pub fn direct_message_event(
                             error!("Error broadcasting event: {e}");
                         }
                     }
+                }
+            }
+        }
+        MessagingEvents::Event(conversation_id, did_key, event, cancelled) => {
+            if direction == MessageDirection::In {
+                let ev = match cancelled {
+                    true => MessageEventKind::EventCancelled {
+                        conversation_id,
+                        did_key,
+                        event,
+                    },
+                    false => MessageEventKind::EventReceived {
+                        conversation_id,
+                        did_key,
+                        event,
+                    },
+                };
+                if let Err(e) = tx.send(ev) {
+                    error!("Error broadcasting event: {e}");
                 }
             }
         }

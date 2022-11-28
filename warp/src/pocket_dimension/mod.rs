@@ -4,6 +4,7 @@ use crate::data::DataType;
 use crate::error::Error;
 use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::{Extension, SingleHandle};
+use dyn_clone::DynClone;
 use query::QueryBuilder;
 use sata::Sata;
 #[cfg(not(target_arch = "wasm32"))]
@@ -139,7 +140,7 @@ impl DimensionData {
 /// for caching frequently used data so that request can be made faster. This makes it easy by sorting the data per module, as well
 /// as allowing querying by specific information stored inside the payload of the [`Sata`] for a quick turnaround for search
 /// results.
-pub trait PocketDimension: Extension + Send + Sync + SingleHandle {
+pub trait PocketDimension: Extension + Send + Sync + SingleHandle + DynClone{
     /// Used to add data to [`PocketDimension`] for [`Module`]
     fn add_data(&mut self, dimension: DataType, data: &Sata) -> Result<(), Error>;
 
@@ -162,6 +163,8 @@ pub trait PocketDimension: Extension + Send + Sync + SingleHandle {
     /// Will flush out the data related to [`Module`].
     fn empty(&mut self, dimension: DataType) -> Result<(), Error>;
 }
+
+dyn_clone::clone_trait_object!(PocketDimension);
 
 impl<T: ?Sized> PocketDimension for Arc<RwLock<Box<T>>>
 where

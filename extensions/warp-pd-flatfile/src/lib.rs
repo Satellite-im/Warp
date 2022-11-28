@@ -13,6 +13,7 @@ use warp::{error::Error, libipld::Ipld, SingleHandle};
 use warp::{
     libipld::Cid,
     sata::{Sata, State},
+    sync::{Arc, RwLock},
     Extension,
 };
 
@@ -25,7 +26,7 @@ use warp::pocket_dimension::{
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct FlatfileStorage {
     /// Path to caching directory
     pub directory: PathBuf,
@@ -77,17 +78,12 @@ impl Extension for FlatfileStorage {
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct FlatfileIndex(pub HashMap<DataType, Vec<Sata>>);
+pub struct FlatfileIndex(pub Arc<RwLock<HashMap<DataType, Vec<Sata>>>>);
 
-impl AsRef<HashMap<DataType, Vec<Sata>>> for FlatfileIndex {
-    fn as_ref(&self) -> &HashMap<DataType, Vec<Sata>> {
+impl core::ops::Deref for FlatfileIndex {
+    type Target = Arc<RwLock<HashMap<DataType, Vec<Sata>>>>;
+    fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-impl AsMut<HashMap<DataType, Vec<Sata>>> for FlatfileIndex {
-    fn as_mut(&mut self) -> &mut HashMap<DataType, Vec<Sata>> {
-        &mut self.0
     }
 }
 
@@ -131,7 +127,7 @@ impl FlatfileIndex {
     }
 
     pub fn insert(&mut self, data_type: DataType, data: Sata) -> Result<()> {
-        let index = self.as_mut();
+        let mut index = self.write();
 
         if let Some(list) = index.get(&data_type) {
             if list.contains(&data) {
@@ -143,7 +139,7 @@ impl FlatfileIndex {
     }
 
     pub fn remove_by_id(&mut self, data_type: DataType, id: Cid) -> Result<Sata> {
-        let index = self.as_mut();
+        let mut index = self.write();
 
         if let Some(list) = index.get_mut(&data_type) {
             let index = match list.iter().position(|data| data.id() == id) {
@@ -503,7 +499,7 @@ impl PocketDimension for FlatfileStorage {
     ) -> Result<()> {
         let list = self
             .index
-            .as_ref()
+            .read()
             .get(&dimension)
             .cloned()
             .unwrap_or_default();
@@ -522,7 +518,7 @@ impl PocketDimension for FlatfileStorage {
     ) -> Result<Vec<Sata>> {
         let list = self
             .index
-            .as_ref()
+            .read()
             .get(&dimension)
             .cloned()
             .unwrap_or_default();
@@ -586,7 +582,7 @@ impl PocketDimension for FlatfileStorage {
     }
 
     fn empty(&mut self, dimension: DataType) -> Result<()> {
-        let index = self.index.as_mut();
+        let mut index = self.index.write();
 
         let list = index.remove(&dimension);
 

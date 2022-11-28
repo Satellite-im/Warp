@@ -687,8 +687,11 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let old_cid = self.get_cid().await?;
         let did_kp = self.get_keypair_did()?;
         document.sign(&did_kp)?;
-        let root_cid = self.put_dag(document.clone()).await?;
-        self.ipfs.remove_pin(&old_cid, true).await?;
+
+        let root_cid = self.put_dag(document).await?;
+        if self.ipfs.is_pinned(&old_cid).await? {
+            self.ipfs.remove_pin(&old_cid, true).await?;
+        }
         self.ipfs.insert_pin(&root_cid, true).await?;
         self.send_sync_request(Command::Send).await?;
         self.save_cid(root_cid).await?;

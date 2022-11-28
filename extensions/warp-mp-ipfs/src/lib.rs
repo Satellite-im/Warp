@@ -202,6 +202,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 32
             },
             connection: ConnectionLimits::default(),
+            ..Default::default()
         };
 
         if let Some(limit) = swarm_config.limit {

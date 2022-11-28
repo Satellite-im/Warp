@@ -25,7 +25,10 @@ use warp::module::Module;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::group::{GroupChat, GroupChatManagement, GroupInvite};
-use warp::raygun::{Conversation, Location, MessageEventStream, RayGunEventStream, RayGunStream};
+use warp::raygun::{
+    Conversation, Location, MessageEvent, MessageEventStream, RayGunEventStream, RayGunEvents,
+    RayGunStream,
+};
 use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
 use warp::raygun::{RayGunAttachment, RayGunEventKind};
 use warp::sync::RwLock;
@@ -39,12 +42,12 @@ pub type Temporary = TestTypes;
 pub type Persistent = Types;
 
 pub struct IpfsMessaging<T: IpfsTypes> {
-    account: Arc<RwLock<Box<dyn MultiPass>>>,
+    account: Box<dyn MultiPass>,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
     direct_store: Arc<RwLock<Option<DirectMessageStore<T>>>>,
     config: Option<RgIpfsConfig>,
-    constellation: Option<Arc<RwLock<Box<dyn Constellation>>>>,
+    constellation: Option<Box<dyn Constellation>>,
     initialize: Arc<AtomicBool>,
     tx: Sender<RayGunEventKind>,
     //TODO: GroupManager
@@ -72,8 +75,8 @@ impl<T: IpfsTypes> Clone for IpfsMessaging<T> {
 impl<T: IpfsTypes> IpfsMessaging<T> {
     pub async fn new(
         config: Option<RgIpfsConfig>,
-        account: Arc<RwLock<Box<dyn MultiPass>>>,
-        constellation: Option<Arc<RwLock<Box<dyn Constellation>>>>,
+        account: Box<dyn MultiPass>,
+        constellation: Option<Box<dyn Constellation>>,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
         let (tx, _) = broadcast::channel(1024);
@@ -89,11 +92,11 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             tx,
         };
 
-        if messaging.account.read().get_own_identity().is_err() {
+        if messaging.account.get_own_identity().is_err() {
             trace!("Identity doesnt exist. Waiting for it to load or to be created");
             let mut messaging = messaging.clone();
             tokio::spawn(async move {
-                while messaging.account.read().get_own_identity().is_err() {
+                while messaging.account.get_own_identity().is_err() {
                     tokio::time::sleep(Duration::from_millis(100)).await
                 }
                 trace!("Identity found. Initializing store");
@@ -113,7 +116,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         let config = self.config.clone().unwrap_or_default();
         let discovery = false;
 
-        let ipfs_handle = match self.account.read().handle() {
+        let ipfs_handle = match self.account.handle() {
             Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
             _ => None,
         };
@@ -384,6 +387,21 @@ impl<T: IpfsTypes> RayGunStream for IpfsMessaging<T> {
     }
 }
 
+#[async_trait::async_trait]
+impl<T: IpfsTypes> RayGunEvents for IpfsMessaging<T> {
+    async fn send_event(&mut self, conversation_id: Uuid, event: MessageEvent) -> Result<()> {
+        self.messaging_store()?
+            .send_event(conversation_id, event)
+            .await
+    }
+
+    async fn cancel_event(&mut self, conversation_id: Uuid, event: MessageEvent) -> Result<()> {
+        self.messaging_store()?
+            .cancel_event(conversation_id, event)
+            .await
+    }
+}
+
 impl<T: IpfsTypes> GroupChat for IpfsMessaging<T> {}
 
 impl<T: IpfsTypes> GroupChatManagement for IpfsMessaging<T> {}
@@ -427,7 +445,7 @@ pub mod ffi {
 
         match async_on_block(IpfsMessaging::<Temporary>::new(
             config,
-            account.inner(),
+            account.inner().read().clone(),
             None,
             cache.map(|p| p.inner()),
         )) {
@@ -461,7 +479,7 @@ pub mod ffi {
 
         match async_on_block(IpfsMessaging::<Persistent>::new(
             config,
-            account.inner(),
+            account.inner().read().clone(),
             None,
             cache.map(|p| p.inner()),
         )) {

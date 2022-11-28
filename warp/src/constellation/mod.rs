@@ -12,6 +12,7 @@ use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 
 use directory::Directory;
+use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use item::Item;
 
@@ -74,7 +75,7 @@ impl core::ops::DerefMut for ConstellationProgressStream {
 
 /// Interface that would provide functionality around the filesystem.
 #[async_trait::async_trait]
-pub trait Constellation: Extension + Sync + Send + SingleHandle {
+pub trait Constellation: Extension + Sync + Send + SingleHandle + DynClone {
     /// Provides the timestamp of when the file system was modified
     fn modified(&self) -> DateTime<Utc>;
 
@@ -349,6 +350,8 @@ where
         self.write().import(r#type, data)
     }
 }
+
+dyn_clone::clone_trait_object!(Constellation);
 
 /// Types that would be used for import and export
 /// Currently only support `Json`, `Yaml`, and `Toml`.
