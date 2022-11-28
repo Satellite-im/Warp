@@ -247,6 +247,8 @@ pub enum Error {
     Unimplemented,
     #[error("An unknown error has occurred")]
     Other,
+    #[error("Channel Closed")]
+    ChannelClosed,
 }
 
 impl Error {
