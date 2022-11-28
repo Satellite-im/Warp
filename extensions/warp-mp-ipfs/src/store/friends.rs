@@ -1,6 +1,7 @@
 #![allow(clippy::await_holding_lock)]
 use futures::StreamExt;
 use ipfs::libp2p::gossipsub::GossipsubMessage;
+use ipfs::libp2p::identity;
 use ipfs::{Ipfs, IpfsTypes, PeerId};
 use std::collections::HashSet;
 use std::ops::Deref;
@@ -28,6 +29,7 @@ use crate::Persistent;
 use super::document::DocumentType;
 use super::identity::IdentityStore;
 use super::phonebook::PhoneBook;
+use super::sync::Synchronize;
 use super::{
     did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, PeerConnectionType,
     FRIENDS_BROADCAST,
@@ -513,6 +515,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         self.set_request_list(list).await?;
 
         self.broadcast_request(&request, false, true).await
+        
     }
 
     pub async fn reject_request(&mut self, pubkey: &DID) -> Result<(), Error> {
@@ -992,6 +995,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             }
             _ => {}
         };
+
         Ok(())
     }
 

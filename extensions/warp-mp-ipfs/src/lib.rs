@@ -41,6 +41,7 @@ use warp::multipass::{
 
 use crate::config::Bootstrap;
 use crate::store::document::DocumentType;
+use crate::store::sync::{Synchronize, NodeResponse, NodeRequest, Command};
 
 pub type Temporary = TestTypes;
 pub type Persistent = Types;
@@ -343,6 +344,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 .collect()
         });
 
+        
         let identity_store = IdentityStore::new(
             ipfs.clone(),
             config.path.clone(),
@@ -499,6 +501,11 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
             info!("Stores initialized. Creating identity");
             let identity = self.identity_store()?.create_identity(username).await?;
             info!("Identity with {} has been created", identity.did_key());
+
+            let identity_store = self.identity_store()?.clone();
+            
+            identity_store.send_sync_request(Command::Send).await?;
+            //identity_store.send_sync_request(Command::Fetch).await?;
 
             if let Ok(mut cache) = self.get_cache_mut() {
                 let object = Sata::default().encode(

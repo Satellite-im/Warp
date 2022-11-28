@@ -12,12 +12,13 @@ use crate::{
     config::Discovery,
     store::{did_to_libp2p_pub, IdentityPayload},
     Persistent,
+    store::sync::Synchronize,
 };
 use futures::{stream::BoxStream, FutureExt, StreamExt};
 use ipfs::{
     libp2p::gossipsub::GossipsubMessage,
     unixfs::ll::file::adder::{Chunker, FileAdderBuilder},
-    Block, Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId,
+    Block, Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId, Node,
 };
 use libipld::{
     serde::{from_ipld, to_ipld},
@@ -41,7 +42,7 @@ use warp::{
 use super::{
     connected_to_peer,
     document::{CacheDocument, DocumentType, RootDocument},
-    libp2p_pub_to_did, PeerConnectionType, IDENTITY_BROADCAST,
+    libp2p_pub_to_did, PeerConnectionType, IDENTITY_BROADCAST, sync::{NodeRequest, NodeResponse, Command},
 };
 
 pub struct IdentityStore<T: IpfsTypes> {
@@ -70,6 +71,8 @@ pub struct IdentityStore<T: IpfsTypes> {
     end_event: Arc<AtomicBool>,
 
     tesseract: Tesseract,
+
+    sync: Arc<tokio::sync::RwLock<Option<Synchronize<T>>>>,
 }
 
 impl<T: IpfsTypes> Clone for IdentityStore<T> {
@@ -88,6 +91,7 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
             relay: self.relay.clone(),
             override_ipld: self.override_ipld.clone(),
             tesseract: self.tesseract.clone(),
+            sync: self.sync.clone(),
         }
     }
 }
@@ -127,6 +131,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let seen = Arc::new(Default::default());
         let override_ipld = Arc::new(AtomicBool::new(override_ipld));
         let discovering = Arc::new(Default::default());
+        let sync = Arc::new(Default::default());
 
         let store = Self {
             ipfs,
@@ -142,6 +147,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             relay,
             tesseract,
             override_ipld,
+            sync,
         };
         if store.path.is_some() {
             if let Err(_e) = store.load_cid().await {
@@ -253,7 +259,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         };
 
         let payload = IdentityPayload {
-            did,
+            did: did.clone(),
             payload,
             picture,
             banner,
@@ -270,6 +276,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         Ok(())
     }
+
+    
 
     async fn process_message(&mut self, message: Arc<GossipsubMessage>) -> anyhow::Result<()> {
         let data = serde_json::from_slice::<Sata>(&message.data)?;
@@ -391,6 +399,16 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(())
     }
 
+    /*pub fn set_sync_did(&mut self, did: Arc<DID>) -> Synchronize<T>{
+       self.sync = Some(self.sync.clone().unwrap().set_did(did));
+       let sync = self.sync.clone();
+       sync.unwrap()
+    }
+
+    pub fn get_sync(&self) -> Synchronize<T> {
+        self.sync.clone().unwrap()
+    }*/
+
     pub fn discovery_type(&self) -> Discovery {
         self.discovery.clone()
     }
@@ -454,6 +472,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         self.save_cid(root_cid).await?;
         self.update_identity().await?;
+        self.update_sync().await?;
         self.enable_event();
         Ok(identity)
     }
@@ -606,7 +625,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     pub async fn identity_update(&mut self, identity: Identity) -> Result<(), Error> {
         let mut root_document = self.get_root_document().await?;
-        let ident_cid = self.put_dag(identity).await?;
+        let ident_cid = self.put_dag(identity.clone()).await?;
         root_document.identity = ident_cid;
 
         self.set_root_document(root_document).await
@@ -668,9 +687,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let old_cid = self.get_cid().await?;
         let did_kp = self.get_keypair_did()?;
         document.sign(&did_kp)?;
-        let root_cid = self.put_dag(document).await?;
+        let root_cid = self.put_dag(document.clone()).await?;
         self.ipfs.remove_pin(&old_cid, true).await?;
         self.ipfs.insert_pin(&root_cid, true).await?;
+        self.send_sync_request(Command::Send).await?;
         self.save_cid(root_cid).await?;
         Ok(())
     }
@@ -874,6 +894,20 @@ impl<T: IpfsTypes> IdentityStore<T> {
         self.validate_identity(&ident)?;
         *self.identity.write().await = Some(ident);
         self.seen.write().await.clear();
+        Ok(())
+    }
+
+    pub async fn update_sync(&self) -> Result<(), Error> {
+        let ident = self.own_identity().await?;
+        let sync = Synchronize::new(self.ipfs.clone(), Arc::new(ident.did_key())).await?;
+        *self.sync.write().await = Some(sync);
+        Ok(())
+    }
+
+    pub async fn send_sync_request(&self, cmd: Command) -> Result<(), Error> {
+        let root_doc = self.get_root_document().await?;
+        self.sync.read().await.as_ref().unwrap().clone().send_request(cmd, root_doc).await?;
+        
         Ok(())
     }
 
