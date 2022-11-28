@@ -37,12 +37,12 @@ type Result<T> = std::result::Result<T, Error>;
 #[allow(clippy::type_complexity)]
 pub struct IpfsFileSystem<T: IpfsTypes> {
     index: Directory,
-    path: PathBuf,
+    path: Arc<RwLock<PathBuf>>,
     modified: DateTime<Utc>,
     config: Option<FsIpfsConfig>,
     ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
     index_cid: Arc<RwLock<Option<Cid>>>,
-    account: Arc<tokio::sync::RwLock<Option<Arc<RwLock<Box<dyn MultiPass>>>>>>,
+    account: Arc<tokio::sync::RwLock<Option<Box<dyn MultiPass>>>>,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
 }
 
@@ -63,12 +63,12 @@ impl<T: IpfsTypes> Clone for IpfsFileSystem<T> {
 
 impl<T: IpfsTypes> IpfsFileSystem<T> {
     pub async fn new(
-        account: Arc<RwLock<Box<dyn MultiPass>>>,
+        account: Box<dyn MultiPass>,
         config: Option<FsIpfsConfig>,
     ) -> anyhow::Result<Self> {
         let filesystem = IpfsFileSystem {
             index: Directory::new("root"),
-            path: PathBuf::new(),
+            path: Arc::new(Default::default()),
             modified: Utc::now(),
             config,
             index_cid: Default::default(),
@@ -80,7 +80,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
         *filesystem.account.write().await = Some(account);
 
         if let Some(account) = filesystem.account.read().await.clone() {
-            if account.read().get_own_identity().is_err() {
+            if account.get_own_identity().is_err() {
                 debug!("Identity doesnt exist. Waiting for it to load or to be created");
                 let mut filesystem = filesystem.clone();
 
@@ -221,7 +221,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
         Ok(())
     }
 
-    pub async fn account(&self) -> Result<Arc<RwLock<Box<dyn MultiPass>>>> {
+    pub async fn account(&self) -> Result<Box<dyn MultiPass>> {
         self.account
             .read()
             .await
@@ -733,11 +733,11 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
     }
 
     fn set_path(&mut self, path: PathBuf) {
-        self.path = path;
+        *self.path.write() = path;
     }
 
     fn get_path(&self) -> PathBuf {
-        self.path.clone()
+        self.path.read().clone()
     }
 }
 
@@ -762,7 +762,7 @@ pub mod ffi {
                     pointer: "multipass".into(),
                 })
             }
-            false => (*multipass).inner(),
+            false => (*multipass).inner().read().clone(),
         };
         let config = match config.is_null() {
             true => None,
@@ -786,7 +786,7 @@ pub mod ffi {
                     pointer: "multipass".into(),
                 })
             }
-            false => (*multipass).inner(),
+            false => (*multipass).inner().read().clone(),
         };
         let config = match config.is_null() {
             true => None,

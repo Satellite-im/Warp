@@ -8,6 +8,7 @@ use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::{Extension, SingleHandle};
 
 use derive_more::Display;
+use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
@@ -516,7 +517,7 @@ pub enum Location {
 
 #[async_trait::async_trait]
 pub trait RayGun:
-    RayGunStream + RayGunAttachment + RayGunEvents + Extension + Sync + Send + SingleHandle
+    RayGunStream + RayGunAttachment + RayGunEvents + Extension + Sync + Send + SingleHandle + DynClone
 {
     // Start a new conversation.
     async fn create_conversation(&mut self, _: &DID) -> Result<Conversation, Error> {
@@ -587,6 +588,8 @@ pub trait RayGun:
         state: EmbedState,
     ) -> Result<(), Error>;
 }
+
+dyn_clone::clone_trait_object!(RayGun);
 
 #[async_trait::async_trait]
 pub trait RayGunAttachment: Sync + Send {
@@ -795,7 +798,7 @@ where
     }
 
     /// Cancel event that was sent, if any.
-    /// Note: This would only send the cancel event 
+    /// Note: This would only send the cancel event
     ///       Unless an event is continuious internally until it times out
     async fn cancel_event(
         &mut self,
