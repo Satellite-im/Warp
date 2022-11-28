@@ -50,7 +50,7 @@ pub struct DirectMessageStore<T: IpfsTypes> {
     filesystem: Option<Box<dyn Constellation>>,
 
     // Queue
-    queue: Arc<RwLock<Vec<Queue>>>,
+    queue: Arc<tokio::sync::RwLock<Vec<Queue>>>,
 
     // DID
     did: Arc<DID>,
@@ -389,7 +389,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         if let Some(path) = store.path.as_ref() {
             if let Ok(queue) = tokio::fs::read(path.join("queue")).await {
                 if let Ok(queue) = serde_json::from_slice(&queue) {
-                    *store.queue.write() = queue;
+                    *store.queue.write().await = queue;
                 }
             }
             if path.is_dir() {
@@ -605,7 +605,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     }
 
     async fn process_queue(&self) -> anyhow::Result<()> {
-        let list = self.queue.read().clone();
+        let list = self.queue.read().await.clone();
         for item in list.iter() {
             let Queue::Direct {
                 id,
@@ -629,7 +629,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         continue;
                     }
 
-                    let index = match self.queue.read().iter().position(|q| {
+                    let index = match self.queue.read().await.iter().position(|q| {
                         Queue::Direct {
                             id: *id,
                             peer: *peer,
@@ -646,10 +646,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         }
                     };
 
-                    let _ = self.queue.write().remove(index);
+                    let _ = self.queue.write().await.remove(index);
 
                     if let Some(path) = self.path.as_ref() {
-                        let bytes = match serde_json::to_vec(&self.queue) {
+                        let bytes = match serde_json::to_vec(&*self.queue.read().await) {
                             Ok(bytes) => bytes,
                             Err(e) => {
                                 error!("Error serializing data to bytes: {e}");
@@ -1713,9 +1713,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     }
 
     async fn queue_event(&mut self, queue: Queue) -> Result<(), Error> {
-        self.queue.write().push(queue);
+        self.queue.write().await.push(queue);
         if let Some(path) = self.path.as_ref() {
-            let bytes = serde_json::to_vec(&self.queue)?;
+            let bytes = serde_json::to_vec(&*self.queue.read().await)?;
             warp::async_block_in_place_uncheck(tokio::fs::write(path.join("queue"), bytes))?;
         }
         Ok(())
