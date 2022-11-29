@@ -592,14 +592,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
             }));
 
         let list = future_list
+            .filter_map(|res| async { res.ok() })
             .collect::<Vec<_>>()
-            .await
-            .iter()
-            .filter_map(|res| match res {
-                Ok(ident) => Some(ident.clone()),
-                _ => None,
-            })
-            .collect();
+            .await;
 
         Ok(list)
     }
