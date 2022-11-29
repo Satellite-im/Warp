@@ -42,7 +42,7 @@ use warp::{
 use super::{
     connected_to_peer,
     document::{CacheDocument, DocumentType, RootDocument},
-    libp2p_pub_to_did, PeerConnectionType, IDENTITY_BROADCAST, sync::Command,
+    libp2p_pub_to_did, PeerConnectionType, IDENTITY_BROADCAST,
 };
 
 pub struct IdentityStore<T: IpfsTypes> {
@@ -693,7 +693,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             self.ipfs.remove_pin(&old_cid, true).await?;
         }
         self.ipfs.insert_pin(&root_cid, true).await?;
-        self.send_sync_request(Command::Send).await?;
+        self.send_sync_request().await?;
         self.save_cid(root_cid).await?;
         Ok(())
     }
@@ -907,11 +907,17 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(())
     }
 
-    pub async fn send_sync_request(&self, cmd: Command) -> Result<(), Error> {
+    pub async fn send_sync_request(&self) -> Result<(), Error> {
         let root_doc = self.get_root_document().await?;
-        self.sync.read().await.as_ref().unwrap().clone().send_request(cmd, root_doc).await?;
+        self.sync.read().await.as_ref().unwrap().clone().send_request(root_doc).await?;
         
         Ok(())
+    }
+
+    pub async fn fetch_root_document_request(&self) -> Result<RootDocument, Error> {
+        let root = self.sync.read().await.as_ref().unwrap().clone().fetch_root_document().await?;
+        
+        Ok(root)
     }
 
     pub fn validate_identity(&self, identity: &Identity) -> Result<(), Error> {

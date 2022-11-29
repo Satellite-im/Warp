@@ -178,7 +178,7 @@ impl<T: IpfsTypes> Synchronize<T> {
     }
 
 
-    pub async fn send_request(self, select_cmd: Command, root_doc: RootDocument) -> Result<(), Error> {
+    pub async fn send_request(self, root_doc: RootDocument) -> Result<(), Error> {
         
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         let peers = self
@@ -187,37 +187,23 @@ impl<T: IpfsTypes> Synchronize<T> {
         .await?;
 
         if peers.is_empty() {
-            return Ok(());
+            unreachable!()
         }
-        tokio::spawn( async move {
 
-            match  select_cmd {
-                Command::Send => {
+            
                     
                     let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
                     let node_request = NodeRequest::SendRootDocument(DocumentType::Object(root_doc), one_tx);
-                    if let Err(err) =  self.tx.clone().send(node_request).await {
-                        println!("{}", err);
+                    if let Err(_err) =  self.tx.clone().send(node_request).await {
+                        return  Err(Error::ChannelClosed);
                     }
-                    println!("Waiting for a response from Sync Node");
-                    if let Err(err) = one_rx.await {
-                        println!("{}", err);
-                    }
-                    println!("Root Document is Stored on Sync Node");
-                },
-                Command::Fetch => {
-                    match self.fetch_root_document().await {
-                        Ok(root) => {
-                            println!("{:?}", root);
+                    match one_rx.await {
+                        Ok(_res) => {
                         },
-                        Err(e) => {println!("{}", e);}
-                    }
-                }
-            }
-
-        }).await.unwrap();
-
-       
+                        Err(_) => {
+                            return  Err(Error::ChannelClosed);
+                        }
+                    } 
        
 
         Ok(())
@@ -228,7 +214,6 @@ impl<T: IpfsTypes> Synchronize<T> {
         let node_request = NodeRequest::FetchRootDocument(one_tx);
         let _ = self.tx.clone().send(node_request).await; 
 
-        println!("Waiting for a response from Sync Node");
         match one_rx.await {
 
             Ok(res) => {

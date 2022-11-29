@@ -41,7 +41,6 @@ use warp::multipass::{
 
 use crate::config::Bootstrap;
 use crate::store::document::DocumentType;
-use crate::store::sync::Command;
 
 pub type Temporary = TestTypes;
 pub type Persistent = Types;
@@ -505,7 +504,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
 
             let identity_store = self.identity_store()?.clone();
             
-            identity_store.send_sync_request(Command::Send).await?;
+            identity_store.send_sync_request().await?;
             //identity_store.send_sync_request(Command::Fetch).await?;
 
             if let Ok(mut cache) = self.get_cache_mut() {
