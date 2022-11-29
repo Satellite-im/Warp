@@ -1,4 +1,5 @@
 pub mod direct;
+pub mod document;
 
 use std::time::Duration;
 
