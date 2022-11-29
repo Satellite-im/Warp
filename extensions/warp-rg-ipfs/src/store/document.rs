@@ -128,19 +128,17 @@ impl ConversationDocument {
         ipfs: Ipfs<T>,
         did: Arc<DID>,
     ) -> Result<Vec<Message>, Error> {
-        let fut_list = FuturesOrdered::from_iter(self.messages.iter().map(|document| {
+        let list = FuturesOrdered::from_iter(self.messages.iter().map(|document| {
             async {
                 let document = document.resolve(ipfs.clone(), None).await?;
 
                 document.resolve(ipfs.clone(), did.clone()).await
             }
             .boxed()
-        }));
-
-        let list = fut_list
-            .filter_map(|res| async { res.ok() })
-            .collect::<Vec<Message>>()
-            .await;
+        }))
+        .filter_map(|res| async { res.ok() })
+        .collect::<Vec<Message>>()
+        .await;
 
         Ok(list)
     }
