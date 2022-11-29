@@ -249,6 +249,8 @@ pub enum Error {
     Other,
     #[error("Channel Closed")]
     ChannelClosed,
+    #[error("No peers to the topic")]
+    NoPeers,
 }
 
 impl Error {
