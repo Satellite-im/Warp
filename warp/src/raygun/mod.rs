@@ -175,11 +175,13 @@ impl MessageOptions {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
 pub enum ConversationType {
+    #[display(fmt = "direct")]
     Direct,
+    #[display(fmt = "group")]
     Group,
 }
 
