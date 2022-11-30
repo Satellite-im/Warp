@@ -3,8 +3,9 @@ use futures::{stream::FuturesOrdered, StreamExt};
 use ipfs::{Ipfs, IpfsPath, IpfsTypes};
 use libipld::{serde::from_ipld, Cid};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{sync::Arc, time::Duration};
+use std::collections::BTreeSet;
 use std::hash::Hash;
+use std::{sync::Arc, time::Duration};
 use uuid::Uuid;
 use warp::{
     crypto::DID,
@@ -143,7 +144,6 @@ pub struct ConversationRootDocument {
 }
 
 impl ConversationRootDocument {
-    
     pub async fn get_conversation<T: IpfsTypes>(
         &self,
         ipfs: Ipfs<T>,
@@ -181,7 +181,7 @@ pub struct ConversationDocument {
     pub name: Option<String>,
     pub conversation_type: ConversationType,
     pub recipients: Vec<DID>,
-    pub messages: Vec<MessageDocument>,
+    pub messages: BTreeSet<MessageDocument>,
 }
 
 impl ConversationDocument {
@@ -196,13 +196,12 @@ impl ConversationDocument {
         }
 
         let messages = match option.date_range() {
-            Some(range) => self
-                .messages
-                .iter()
-                .filter(|message| message.date >= range.start && message.date <= range.end)
-                .cloned()
-                .collect::<Vec<_>>(),
-            None => self.messages.clone(),
+            Some(range) => Vec::from_iter(
+                self.messages
+                    .iter()
+                    .filter(|message| message.date >= range.start && message.date <= range.end),
+            ),
+            None => Vec::from_iter(self.messages.iter()),
         };
 
         let sorted = option
@@ -256,12 +255,24 @@ impl From<ConversationDocument> for Conversation {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageDocument {
     pub id: Uuid,
     pub conversation_id: Uuid,
     pub date: DateTime<Utc>,
     pub message: DocumentType<Sata>,
+}
+
+impl PartialOrd for MessageDocument {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.date.partial_cmp(&other.date)
+    }
+}
+
+impl Ord for MessageDocument {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.date.cmp(&other.date)
+    }
 }
 
 impl MessageDocument {
