@@ -159,13 +159,27 @@ impl ConversationDocument {
         let list = FuturesOrdered::from_iter(
             sorted
                 .iter()
-                .map(|document| document.resolve(ipfs.clone(), did.clone()).boxed()),
+                .map(|document| async { document.resolve(ipfs.clone(), did.clone()).await }),
         )
         .filter_map(|res| async { res.ok() })
         .collect::<Vec<Message>>()
         .await;
 
         Ok(list)
+    }
+
+    pub async fn get_message<T: IpfsTypes>(
+        &self,
+        ipfs: Ipfs<T>,
+        did: Arc<DID>,
+        message_id: Uuid,
+    ) -> Result<Message, Error> {
+        self.messages
+            .iter()
+            .find(|document| document.id == message_id)
+            .ok_or(Error::InvalidMessage)?
+            .resolve(ipfs, did)
+            .await
     }
 }
 
