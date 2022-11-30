@@ -246,7 +246,7 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
     }
 
     async fn list_conversations(&self) -> Result<Vec<Conversation>> {
-        Ok(self.messaging_store()?.list_conversations())
+        self.messaging_store()?.list_conversations().await
     }
 
     async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message> {

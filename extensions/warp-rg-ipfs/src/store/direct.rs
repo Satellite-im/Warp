@@ -5,9 +5,11 @@ use std::time::Duration;
 
 use futures::{Stream, StreamExt};
 use ipfs::libp2p::swarm::dial_opts::DialOpts;
-use ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream};
+use ipfs::{Ipfs, IpfsPath, IpfsTypes, PeerId, SubscriptionStream};
 
+use libipld::serde::{from_ipld, to_ipld};
 use libipld::{Cid, IpldCodec};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast::{self, Sender as BroadcastSender};
@@ -28,6 +30,7 @@ use warp::sync::{Arc, RwLock};
 
 use crate::{Persistent, SpamFilter};
 
+use super::document::ConversationRootDocument;
 use super::{
     did_to_libp2p_pub, topic_discovery, verify_serde_sig, ConversationEvents, MessagingEvents,
     DIRECT_BROADCAST,
@@ -443,6 +446,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             }
         }
 
+        if let Err(_e) = store.load_cid().await {}
+
         if discovery {
             let ipfs = store.ipfs.clone();
             tokio::spawn(async {
@@ -486,16 +491,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         });
         tokio::task::yield_now().await;
         Ok(store)
-    }
-
-    #[allow(dead_code)]
-    async fn local(&self) -> anyhow::Result<(ipfs::libp2p::identity::PublicKey, PeerId)> {
-        let (local_ipfs_public_key, local_peer_id) = self
-            .ipfs
-            .identity()
-            .await
-            .map(|(p, _)| (p.clone(), p.to_peer_id()))?;
-        Ok((local_ipfs_public_key, local_peer_id))
     }
 
     async fn process_conversation(
@@ -697,6 +692,48 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             }
         }
         Ok(())
+    }
+
+    pub async fn get_root_document(&self) -> Result<ConversationRootDocument, Error> {
+        let root_cid = self.get_cid().await?;
+        let path = IpfsPath::from(root_cid);
+        self.get_dag(path, None).await
+    }
+
+    pub async fn set_root_document(
+        &mut self,
+        document: ConversationRootDocument,
+    ) -> Result<(), Error> {
+        let old_cid = self.get_cid().await?;
+
+        let root_cid = self.put_dag(document).await?;
+        if self.ipfs.is_pinned(&old_cid).await? {
+            self.ipfs.remove_pin(&old_cid, true).await?;
+        }
+
+        self.ipfs.insert_pin(&root_cid, true).await?;
+        self.save_cid(root_cid).await?;
+        Ok(())
+    }
+
+    pub async fn get_dag<D: DeserializeOwned>(
+        &self,
+        path: IpfsPath,
+        timeout: Option<Duration>,
+    ) -> Result<D, Error> {
+        let timeout = timeout.unwrap_or(std::time::Duration::from_secs(30));
+        let identity = match tokio::time::timeout(timeout, self.ipfs.get_dag(path)).await {
+            Ok(Ok(ipld)) => from_ipld::<D>(ipld).map_err(anyhow::Error::from)?,
+            Ok(Err(e)) => return Err(Error::Any(e)),
+            Err(e) => return Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
+        };
+        Ok(identity)
+    }
+
+    pub async fn put_dag<S: Serialize>(&self, data: S) -> Result<Cid, Error> {
+        let ipld = to_ipld(data).map_err(anyhow::Error::from)?;
+        let cid = self.ipfs.put_dag(ipld).await?;
+        Ok(cid)
     }
 
     pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
@@ -911,12 +948,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         Ok(conversation)
     }
 
-    pub fn list_conversations(&self) -> Vec<Conversation> {
-        self.direct_conversation
-            .read()
-            .iter()
-            .map(|convo| convo.conversation())
-            .collect()
+    pub async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
+        let root = self.get_root_document().await?;
+        let list = root.list_conversations(self.ipfs.clone()).await?;
+        Ok(list.iter().map(|document| document.into()).collect())
     }
 
     pub fn messages_count(&self, conversation: Uuid) -> Result<usize, Error> {
