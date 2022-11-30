@@ -4,6 +4,7 @@ use ipfs::{Ipfs, IpfsPath, IpfsTypes};
 use libipld::{serde::from_ipld, Cid};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
+use std::hash::Hash;
 use uuid::Uuid;
 use warp::{
     crypto::DID,
@@ -13,11 +14,39 @@ use warp::{
 };
 
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub enum DocumentType<T> {
     Object(T),
     Cid(Cid),
     UnixFS(Cid, Option<usize>),
+}
+
+impl<T: Hash> Hash for DocumentType<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            DocumentType::Cid(cid) => Hash::hash(cid, state),
+            DocumentType::Object(object) => Hash::hash(object, state),
+            DocumentType::UnixFS(cid, limit) => {
+                Hash::hash(cid, state);
+                Hash::hash(limit, state)
+            }
+        }
+    }
+}
+
+impl<T: PartialEq> PartialEq for DocumentType<T> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (DocumentType::Object(left), DocumentType::Object(right)) => left.eq(right),
+            (DocumentType::Cid(left), DocumentType::Cid(right)) => left.eq(right),
+            (
+                DocumentType::UnixFS(left, Some(left_size)),
+                DocumentType::UnixFS(right, Some(right_size)),
+            ) => left.eq(right) && left_size.eq(right_size),
+            (DocumentType::UnixFS(left, None), DocumentType::UnixFS(right, None)) => left.eq(right),
+            _ => false,
+        }
+    }
 }
 
 impl<T> DocumentType<T> {
