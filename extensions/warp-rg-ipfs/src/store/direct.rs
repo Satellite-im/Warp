@@ -7,7 +7,7 @@ use futures::{Stream, StreamExt};
 use ipfs::libp2p::swarm::dial_opts::DialOpts;
 use ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream};
 
-use libipld::IpldCodec;
+use libipld::{Cid, IpldCodec};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast::{self, Sender as BroadcastSender};
@@ -43,6 +43,9 @@ pub struct DirectMessageStore<T: IpfsTypes> {
     // list of conversations
     direct_conversation: Arc<RwLock<Vec<DirectConversation>>>,
 
+    // conversation root cid
+    root_cid: Arc<tokio::sync::RwLock<Option<Cid>>>,
+
     // account instance
     account: Box<dyn MultiPass>,
 
@@ -73,6 +76,7 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
             ipfs: self.ipfs.clone(),
             path: self.path.clone(),
             direct_conversation: self.direct_conversation.clone(),
+            root_cid: self.root_cid.clone(),
             account: self.account.clone(),
             filesystem: self.filesystem.clone(),
             queue: self.queue.clone(),
@@ -360,6 +364,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         }
         let direct_conversation = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
+        let root_cid = Arc::new(Default::default());
         let did = Arc::new(account.decrypt_private_key(None)?);
         let spam_filter = Arc::new(if check_spam {
             Some(SpamFilter::default()?)
@@ -375,6 +380,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             path,
             ipfs,
             direct_conversation,
+            root_cid,
             account,
             filesystem,
             queue,
@@ -668,6 +674,31 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 }
 
 impl<T: IpfsTypes> DirectMessageStore<T> {
+    pub async fn save_cid(&mut self, cid: Cid) -> Result<(), Error> {
+        *self.root_cid.write().await = Some(cid);
+        if let Some(path) = self.path.as_ref() {
+            let cid = cid.to_string();
+            tokio::fs::write(path.join(".conversation_id"), cid).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn get_cid(&self) -> Result<Cid, Error> {
+        (self.root_cid.read().await.clone()).ok_or(Error::Other)
+    }
+
+    pub async fn load_cid(&self) -> Result<(), Error> {
+        if let Some(path) = self.path.as_ref() {
+            if let Ok(cid_str) = tokio::fs::read(path.join(".conversation_id"))
+                .await
+                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            {
+                *self.root_cid.write().await = cid_str.parse().ok()
+            }
+        }
+        Ok(())
+    }
+
     pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
         if self.with_friends.load(Ordering::SeqCst) {
             self.account.has_friend(did_key)?;
