@@ -1,5 +1,6 @@
 pub mod direct;
 pub mod document;
+pub mod conversation;
 
 use std::time::Duration;
 
