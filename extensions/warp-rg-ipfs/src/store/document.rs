@@ -8,7 +8,7 @@ use uuid::Uuid;
 use warp::{
     crypto::DID,
     error::Error,
-    raygun::{Conversation, ConversationType, Message},
+    raygun::{Conversation, ConversationType, Message, MessageOptions},
     sata::Sata,
 };
 
@@ -119,23 +119,31 @@ pub struct ConversationDocument {
     pub name: Option<String>,
     pub conversation_type: ConversationType,
     pub recipients: Vec<DID>,
-    pub messages: Vec<DocumentType<MessageDocument>>,
+    pub messages: Vec<MessageDocument>,
 }
 
 impl ConversationDocument {
-    pub async fn list_all_message<T: IpfsTypes>(
+    pub async fn get_messages<T: IpfsTypes>(
         &self,
         ipfs: Ipfs<T>,
         did: Arc<DID>,
+        option: MessageOptions,
     ) -> Result<Vec<Message>, Error> {
-        let list = FuturesOrdered::from_iter(self.messages.iter().map(|document| {
-            async {
-                let document = document.resolve(ipfs.clone(), None).await?;
+        let messages = match option.date_range() {
+            Some(range) => self
+                .messages
+                .iter()
+                .filter(|message| message.date >= range.start && message.date <= range.end)
+                .cloned()
+                .collect::<Vec<_>>(),
+            None => self.messages.clone(),
+        };
 
-                document.resolve(ipfs.clone(), did.clone()).await
-            }
-            .boxed()
-        }))
+        let list = FuturesOrdered::from_iter(
+            self.messages
+                .iter()
+                .map(|document| document.resolve(ipfs.clone(), did.clone()).boxed()),
+        )
         .filter_map(|res| async { res.ok() })
         .collect::<Vec<Message>>()
         .await;
