@@ -129,6 +129,10 @@ impl ConversationDocument {
         did: Arc<DID>,
         option: MessageOptions,
     ) -> Result<Vec<Message>, Error> {
+        if self.messages.is_empty() {
+            return Err(Error::EmptyMessage);
+        }
+
         let messages = match option.date_range() {
             Some(range) => self
                 .messages
@@ -139,8 +143,21 @@ impl ConversationDocument {
             None => self.messages.clone(),
         };
 
+        let sorted = option
+            .range()
+            .map(|mut range| {
+                let start = range.start;
+                let end = range.end;
+                range.start = messages.len() - end;
+                range.end = messages.len() - start;
+                range
+            })
+            .and_then(|range| messages.get(range))
+            .map(|messages| messages.to_vec())
+            .unwrap_or(messages);
+
         let list = FuturesOrdered::from_iter(
-            self.messages
+            sorted
                 .iter()
                 .map(|document| document.resolve(ipfs.clone(), did.clone()).boxed()),
         )
