@@ -113,6 +113,39 @@ pub struct ConversationRootDocument {
     pub conversations: Vec<DocumentType<ConversationDocument>>,
 }
 
+impl ConversationRootDocument {
+    
+    pub async fn get_conversation<T: IpfsTypes>(
+        &self,
+        ipfs: Ipfs<T>,
+        conversation_id: Uuid,
+    ) -> Result<ConversationDocument, Error> {
+        for document in self.conversations.iter() {
+            match document.resolve(ipfs.clone(), None).await {
+                Ok(document) if document.id == conversation_id => return Ok(document),
+                _ => continue,
+            }
+        }
+        Err(Error::InvalidConversation)
+    }
+
+    pub async fn list_conversations<T: IpfsTypes>(
+        &self,
+        ipfs: Ipfs<T>,
+    ) -> Result<Vec<ConversationDocument>, Error> {
+        let list = FuturesOrdered::from_iter(
+            self.conversations
+                .iter()
+                .map(|document| async { document.resolve(ipfs.clone(), None).await }),
+        )
+        .filter_map(|res| async { res.ok() })
+        .collect::<Vec<_>>()
+        .await;
+
+        Ok(list)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationDocument {
     pub id: Uuid,

@@ -691,8 +691,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn put_dag<S: Serialize>(&self, data: S) -> Result<Cid, Error> {
-        //Because it utilizes DHT requesting other nodes for the cid, it will stall so here we would need to timeout
-        //the request.
         let ipld = to_ipld(data).map_err(anyhow::Error::from)?;
         let cid = self.ipfs.put_dag(ipld).await?;
         Ok(cid)
