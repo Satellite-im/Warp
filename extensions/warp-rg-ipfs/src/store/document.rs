@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use futures::{stream::FuturesOrdered, FutureExt, StreamExt};
+use futures::{stream::FuturesOrdered, StreamExt};
 use ipfs::{Ipfs, IpfsPath, IpfsTypes};
 use libipld::{serde::from_ipld, Cid};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -110,7 +110,7 @@ impl<T> From<Cid> for DocumentType<T> {
 pub struct ConversationRootDocument {
     pub did: DID,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub conversations: Vec<ConversationDocument>,
+    pub conversations: Vec<DocumentType<ConversationDocument>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
