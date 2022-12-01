@@ -1448,6 +1448,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let own_did = self.did.clone();
 
         let progress_stream = async_stream::stream! {
+                yield Progression::CurrentProgress {
+                    name: attachment.name(),
+                    current: 0,
+                    total: Some(attachment.size()),
+                };
+                
                 let did = message.sender();
                 if !did.eq(&own_did) {
                     if let Ok(peer_id) = did_to_libp2p_pub(&did).map(|pk| pk.to_peer_id()) {
