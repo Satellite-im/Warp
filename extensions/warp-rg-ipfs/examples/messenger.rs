@@ -639,6 +639,34 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "Reacted")?
 
                         }
+                        Some("/status") => {
+                            let topic = topic.read().clone();
+                            let id = match cmd_line.next() {
+                                Some(id) => {
+                                    match Uuid::from_str(id) {
+                                        Ok(uuid) => uuid,
+                                        Err(e) => {
+                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            continue
+                                        }
+                                    }
+                                },
+                                None => {
+                                    writeln!(stdout, "/status <message_id>")?;
+                                    continue;
+                                }
+                            };
+
+                            let status = match chat.message_status(topic, id).await {
+                                Ok(status) => status,
+                                Err(_e) => {
+                                    writeln!(stdout, "Error getting message status: {}", _e)?;
+                                    continue
+                                }
+                            };
+
+                            writeln!(stdout, "Message Status: {status}")?;
+                        }
                         Some("/pin") => {
                             let topic = topic.read().clone();
                             match cmd_line.next() {
