@@ -51,7 +51,7 @@ impl ConversationDocument {
         let (tx, _) = broadcast::channel(1024);
         let tx = Some(tx);
 
-        let id = id.unwrap_or(Uuid::new_v4());
+        let id = id.unwrap_or_else(Uuid::new_v4);
         let name = None;
 
         if !recipients.contains(did) {

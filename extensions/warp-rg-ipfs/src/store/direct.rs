@@ -660,6 +660,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         Ok(())
     }
 
+    #[allow(clippy::clone_on_copy)]
     pub async fn get_cid(&self) -> Result<Cid, Error> {
         (self.root_cid.read().await.clone()).ok_or(Error::Other)
     }
