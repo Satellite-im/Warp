@@ -1,6 +1,6 @@
 use futures::{stream::FuturesOrdered, StreamExt};
 use ipfs::{Ipfs, IpfsPath, IpfsTypes};
-use libipld::{serde::from_ipld, Cid};
+use libipld::{serde::{from_ipld, to_ipld}, Cid};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::hash::Hash;
 use std::time::Duration;
@@ -8,6 +8,20 @@ use uuid::Uuid;
 use warp::{crypto::DID, error::Error};
 
 use super::conversation::ConversationDocument;
+
+#[async_trait::async_trait]
+pub(crate) trait ToDocument<T: IpfsTypes>: Sized {
+    async fn to_document(&self, ipfs: Ipfs<T>) -> Result<DocumentType<Self>, Error>;
+} 
+
+#[async_trait::async_trait]
+impl<T, I: IpfsTypes> ToDocument<I> for T where T: Serialize + Clone + Send + Sync {
+    async fn to_document(&self, ipfs: Ipfs<I>) -> Result<DocumentType<T>, Error> {
+        let ipld = to_ipld(self.clone()).map_err(anyhow::Error::from)?;
+        let cid = ipfs.put_dag(ipld).await?;
+        Ok(DocumentType::Cid(cid))
+    }
+}
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]

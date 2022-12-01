@@ -372,11 +372,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let queue = Arc::new(Default::default());
         let root_cid = Arc::new(Default::default());
         let did = Arc::new(account.decrypt_private_key(None)?);
-        let spam_filter = Arc::new(if check_spam {
-            Some(SpamFilter::default()?)
-        } else {
-            None
-        });
+        let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
 
         let store_decrypted = Arc::new(AtomicBool::new(store_decrypted));
         let allowed_unsigned_message = Arc::new(AtomicBool::new(allowed_unsigned_message));
