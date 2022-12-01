@@ -1,3 +1,4 @@
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -724,7 +725,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     if let Err(e) = self
                         .queue_event(
                             did_key.clone(),
-                            Queue::direct(convo_id, peer_id, DIRECT_BROADCAST.into(), data),
+                            Queue::direct(convo_id, None, peer_id, DIRECT_BROADCAST.into(), data),
                         )
                         .await
                     {
@@ -736,7 +737,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 if let Err(e) = self
                     .queue_event(
                         did_key.clone(),
-                        Queue::direct(convo_id, peer_id, DIRECT_BROADCAST.into(), data),
+                        Queue::direct(convo_id, None, peer_id, DIRECT_BROADCAST.into(), data),
                     )
                     .await
                 {
@@ -808,6 +809,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                 recipient.clone(),
                                 Queue::direct(
                                     conversation.id(),
+                                    None,
                                     peer_id,
                                     DIRECT_BROADCAST.into(),
                                     data,
@@ -825,6 +827,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                             recipient.clone(),
                             Queue::direct(
                                 conversation.id(),
+                                None,
                                 peer_id,
                                 DIRECT_BROADCAST.into(),
                                 data,
@@ -980,6 +983,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let signature = super::sign_serde(own_did, &construct)?;
         message.set_signature(Some(signature));
 
+        let message_id = message.id();
+
         let event = MessagingEvents::New(message);
 
         direct_message_event(
@@ -995,7 +1000,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
 
-        self.send_raw_event(conversation.id(), event, true).await
+        self.send_raw_event(conversation.id(), Some(message_id), event, true)
+            .await
     }
 
     pub async fn edit_message(
@@ -1058,7 +1064,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation
                 .to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(&*self.did)),
         )?;
-        self.send_raw_event(conversation.id(), event, true).await
+        self.send_raw_event(conversation.id(), None, event, true)
+            .await
     }
 
     pub async fn reply_message(
@@ -1127,7 +1134,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
 
-        self.send_raw_event(conversation.id(), event, true).await
+        self.send_raw_event(conversation.id(), None, event, true)
+            .await
     }
 
     pub async fn delete_message(
@@ -1154,7 +1162,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         )?;
 
         if broadcast {
-            self.send_raw_event(conversation.id(), event, true).await?;
+            self.send_raw_event(conversation.id(), None, event, true)
+                .await?;
         }
 
         Ok(())
@@ -1184,7 +1193,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
 
-        self.send_raw_event(conversation.id(), event, true).await
+        self.send_raw_event(conversation.id(), None, event, true)
+            .await
     }
 
     pub async fn embeds(
@@ -1223,7 +1233,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         warp::async_block_in_place_uncheck(
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
-        self.send_raw_event(conversation.id(), event, true).await
+        self.send_raw_event(conversation.id(), None, event, true)
+            .await
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1403,7 +1414,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
 
-        self.send_raw_event(conversation.id(), event, true).await
+        self.send_raw_event(conversation.id(), None, event, true)
+            .await
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1582,7 +1594,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         warp::async_block_in_place_uncheck(
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
-        self.send_raw_event(conversation.id(), event, false).await
+        self.send_raw_event(conversation.id(), None, event, false)
+            .await
     }
 
     pub async fn cancel_event(
@@ -1608,12 +1621,14 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         warp::async_block_in_place_uncheck(
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
-        self.send_raw_event(conversation.id(), event, false).await
+        self.send_raw_event(conversation.id(), None, event, false)
+            .await
     }
 
     pub async fn send_raw_event<S: Serialize + Send + Sync>(
         &mut self,
         conversation: Uuid,
+        message_id: Option<Uuid>,
         event: S,
         queue: bool,
     ) -> Result<(), Error> {
@@ -1655,6 +1670,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                 recipient.clone(),
                                 Queue::direct(
                                     conversation.id(),
+                                    message_id,
                                     peer_id,
                                     conversation.topic(),
                                     payload,
@@ -1674,6 +1690,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                             recipient.clone(),
                             Queue::direct(
                                 conversation.id(),
+                                message_id,
                                 peer_id,
                                 conversation.topic(),
                                 payload,
@@ -2064,6 +2081,7 @@ pub fn direct_message_event(
 pub enum Queue {
     Direct {
         id: Uuid,
+        m_id: Option<Uuid>,
         peer: PeerId,
         topic: String,
         data: Sata,
@@ -2072,9 +2090,10 @@ pub enum Queue {
 }
 
 impl Queue {
-    pub fn direct(id: Uuid, peer: PeerId, topic: String, data: Sata) -> Self {
+    pub fn direct(id: Uuid, m_id: Option<Uuid>, peer: PeerId, topic: String, data: Sata) -> Self {
         Queue::Direct {
             id,
+            m_id,
             peer,
             topic,
             data,
