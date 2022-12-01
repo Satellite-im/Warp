@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -600,13 +599,14 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                         let Queue::Direct { sent: inner_sent, topic:inner_topic, .. } = queue;
                                         
                                         if inner_topic.eq(&*topic) {
-                                            if *sent == *inner_sent {
+                                            if *sent != *inner_sent {
                                                 return false
                                             }
                                         }
                                         true
                                         
                                     });
+                                    store.save_queue().await;
                                 }
                                 
                             }
@@ -1453,7 +1453,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     current: 0,
                     total: Some(attachment.size()),
                 };
-                
+
                 let did = message.sender();
                 if !did.eq(&own_did) {
                     if let Ok(peer_id) = did_to_libp2p_pub(&did).map(|pk| pk.to_peer_id()) {
