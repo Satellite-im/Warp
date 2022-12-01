@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,7 +16,10 @@ use tokio::sync::broadcast::{self, Sender as BroadcastSender};
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
-use warp::crypto::DID;
+use warp::crypto::cipher::Cipher;
+use warp::crypto::did_key::Generate;
+use warp::crypto::zeroize::Zeroizing;
+use warp::crypto::{DID, Ed25519KeyPair, KeyMaterial};
 use warp::error::Error;
 use warp::logging::tracing::log::{error, trace};
 use warp::logging::tracing::warn;
@@ -26,6 +31,7 @@ use warp::raygun::{
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock};
 
+use crate::store::connected_to_peer;
 use crate::{Persistent, SpamFilter};
 
 use super::{
@@ -50,7 +56,7 @@ pub struct DirectMessageStore<T: IpfsTypes> {
     filesystem: Option<Box<dyn Constellation>>,
 
     // Queue
-    queue: Arc<RwLock<Vec<Queue>>>,
+    queue: Arc<tokio::sync::RwLock<HashMap<DID, Vec<Queue>>>>,
 
     // DID
     did: Arc<DID>,
@@ -387,10 +393,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         };
 
         if let Some(path) = store.path.as_ref() {
-            if let Ok(queue) = tokio::fs::read(path.join("queue")).await {
-                if let Ok(queue) = serde_json::from_slice(&queue) {
-                    *store.queue.write() = queue;
-                }
+            if let Err(_e) = store.load_queue().await {
+
             }
             if path.is_dir() {
                 for entry in std::fs::read_dir(path)? {
@@ -398,7 +402,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     let path_inner = entry.path();
                     if path_inner.is_file() {
                         //TODO: Check filename itself rather than the end of the path
-                        if path.ends_with("queue") {
+                        if path.ends_with(".messaging_queue") {
                             continue;
                         }
 
@@ -565,53 +569,43 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         }
                     }
                     _ = interval.tick() => {
-                        let list = store.queue.read().clone();
-                        for item in list.iter() {
-                            let Queue::Direct { id, peer, topic, data } = item;
-                            if let Ok(peers) = store.ipfs.pubsub_peers(Some(topic.clone())).await {
-                                //TODO: Check peer against conversation to see if they are connected
-                                if peers.contains(peer) {
-                                    let bytes = match serde_json::to_vec(&data) {
-                                        Ok(bytes) => bytes,
-                                        Err(e) => {
-                                            error!("Error serializing data to bytes: {e}");
-                                            continue
-                                        }
-                                    };
-
-                                    if let Err(e) = store.ipfs.pubsub_publish(topic.clone(), bytes).await {
-                                        error!("Error publishing to topic: {e}");
-                                        continue
-                                    }
-
-                                    let index = match store.queue.read().iter().position(|q| {
-                                        Queue::Direct { id:*id, peer:*peer, topic: topic.clone(), data: data.clone() }.eq(q)
-                                    }) {
-                                        Some(index) => index,
-                                        //If we somehow ended up here then there is likely a race condition
-                                        None => {
-                                            error!("Unable to remove item from queue. Likely race condition");
-                                            continue
-                                        }
-                                    };
-
-                                    let _ = store.queue.write().remove(index);
-
-                                    if let Some(path) = store.path.as_ref() {
-                                        let bytes = match serde_json::to_vec(&store.queue) {
+                        let list = store.queue.read().await.clone();
+                        for (did, items) in list.iter() {
+                            if let Ok(crate::store::PeerConnectionType::Connected) =
+                                connected_to_peer(store.ipfs.clone(), did.clone()).await
+                            {
+                            for (index, item) in items.iter().enumerate() {
+                                let Queue::Direct { peer, topic, data, .. } = item;
+                                if let Ok(peers) = store.ipfs.pubsub_peers(Some(topic.clone())).await {
+                                    //TODO: Check peer against conversation to see if they are connected
+                                    if peers.contains(peer) {
+                                        let bytes = match serde_json::to_vec(&data) {
                                             Ok(bytes) => bytes,
                                             Err(e) => {
                                                 error!("Error serializing data to bytes: {e}");
-                                                continue;
+                                                continue
                                             }
                                         };
-                                        if let Err(e) = tokio::fs::write(path.join("queue"), bytes).await {
-                                            error!("Error saving queue: {e}");
+
+                                        if let Err(e) = store.ipfs.pubsub_publish(topic.clone(), bytes).await {
+                                            error!("Error publishing to topic: {e}");
+                                            break;
                                         }
+
+                                        if let Entry::Occupied(mut entry) = store.queue.write().await.entry(did.clone())
+                                        {
+                                            let _ = entry.get_mut().remove(index);
+                                            if entry.get().is_empty() {
+                                                entry.remove();
+                                            }
+                                        }
+
+                                        store.save_queue().await;
                                     }
                                 }
                             }
                         }
+                    }
                     }
                 }
                 tokio::time::sleep(Duration::from_millis(1)).await;
@@ -723,7 +717,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 {
                     warn!("Unable to publish to topic. Queuing event");
                     if let Err(e) = self
-                        .queue_event(Queue::direct(
+                        .queue_event(did_key.clone(), Queue::direct(
                             convo_id,
                             peer_id,
                             DIRECT_BROADCAST.into(),
@@ -737,7 +731,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             }
             false => {
                 if let Err(e) = self
-                    .queue_event(Queue::direct(
+                    .queue_event(did_key.clone(), Queue::direct(
                         convo_id,
                         peer_id,
                         DIRECT_BROADCAST.into(),
@@ -809,7 +803,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         //      "max_transmit_size" within rust-libp2p gossipsub
                         //      For now we will queue the message if we hit an error
                         if let Err(e) = self
-                            .queue_event(Queue::direct(
+                            .queue_event(recipient.clone(), Queue::direct(
                                 conversation.id(),
                                 peer_id,
                                 DIRECT_BROADCAST.into(),
@@ -823,7 +817,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 }
                 false => {
                     if let Err(e) = self
-                        .queue_event(Queue::direct(
+                        .queue_event(recipient.clone(), Queue::direct(
                             conversation.id(),
                             peer_id,
                             DIRECT_BROADCAST.into(),
@@ -1644,7 +1638,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     if queue {
                         warn!("Unable to publish to topic due to error: {e}... Queuing event");
                         if let Err(e) = self
-                            .queue_event(Queue::direct(
+                            .queue_event(recipient.clone(), Queue::direct(
                                 conversation.id(),
                                 peer_id,
                                 conversation.topic(),
@@ -1660,7 +1654,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             false => {
                 if queue {
                     if let Err(e) = self
-                        .queue_event(Queue::direct(
+                        .queue_event(recipient.clone(), Queue::direct(
                             conversation.id(),
                             peer_id,
                             conversation.topic(),
@@ -1677,12 +1671,64 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         Ok(())
     }
 
-    async fn queue_event(&mut self, queue: Queue) -> Result<(), Error> {
-        self.queue.write().push(queue);
+    async fn queue_event(&mut self, did: DID, queue: Queue) -> Result<(), Error> {
+        self.queue.write().await.entry(did).or_default().push(queue);
+        self.save_queue().await;
+        
+        Ok(())
+    }
+
+    async fn save_queue(&self) {
+        use warp::crypto::did_key::ECDH;
         if let Some(path) = self.path.as_ref() {
-            let bytes = serde_json::to_vec(&self.queue)?;
-            warp::async_block_in_place_uncheck(tokio::fs::write(path.join("queue"), bytes))?;
+            let bytes = match serde_json::to_vec(&*self.queue.read().await) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    error!("Error serializing queue list into bytes: {e}");
+                    return;
+                }
+            };
+
+            let prikey = Ed25519KeyPair::from_secret_key(&self.did.private_key_bytes()).get_x25519();
+            let pubkey = Ed25519KeyPair::from_public_key(&self.did.public_key_bytes()).get_x25519();
+
+            let prik = match std::panic::catch_unwind(|| prikey.key_exchange(&pubkey)) {
+                Ok(pri) => Zeroizing::new(pri),
+                Err(e) => {
+                    error!("Error generating key: {e:?}");
+                    return;
+                }
+            };
+
+            let data = match Cipher::direct_encrypt(warp::crypto::cipher::CipherType::Aes256Gcm, &bytes, &prik) {
+                Ok(d) => d,
+                Err(e) => {
+                    error!("Error encrypting queue: {e}");
+                    return;
+                }
+            };
+
+            if let Err(e) = tokio::fs::write(path.join(".messaging_queue"), data).await {
+                error!("Error saving queue: {e}");
+            }
         }
+    }
+
+    async fn load_queue(&self) -> anyhow::Result<()> {
+        use warp::crypto::did_key::ECDH;
+        if let Some(path) = self.path.as_ref() {
+            let data = tokio::fs::read(path.join(".messaging_queue")).await?;
+
+            let prikey = Ed25519KeyPair::from_secret_key(&self.did.private_key_bytes()).get_x25519();
+            let pubkey = Ed25519KeyPair::from_public_key(&self.did.public_key_bytes()).get_x25519();
+
+            let prik = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey)).map(Zeroizing::new).map_err(|_| anyhow::anyhow!("Error performing key exchange"))?;
+
+            let data = Cipher::direct_decrypt(warp::crypto::cipher::CipherType::Aes256Gcm, &data, &prik)?;
+
+            *self.queue.write().await = serde_json::from_slice(&data)?; 
+        }
+
         Ok(())
     }
 }
