@@ -8,19 +8,88 @@ use uuid::Uuid;
 use warp::{
     crypto::DID,
     error::Error,
-    raygun::{Conversation, ConversationType, Message, MessageOptions},
+    raygun::{Conversation, ConversationType, Message, MessageEventKind, MessageOptions},
     sata::Sata,
+    sync::RwLock,
 };
+
+use tokio::sync::broadcast::{self, Sender as BroadcastSender};
 
 use super::document::DocumentType;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationDocument {
     pub id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creator: Option<DID>,
     pub conversation_type: ConversationType,
     pub recipients: Vec<DID>,
     pub messages: BTreeSet<MessageDocument>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    #[serde(skip)]
+    task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
+    #[serde(skip)]
+    tx: Option<BroadcastSender<MessageEventKind>>,
+}
+
+impl ConversationDocument {
+    pub fn new(
+        did: &DID,
+        mut recipients: Vec<DID>,
+        id: Option<Uuid>,
+        conversation_type: ConversationType,
+    ) -> Result<Self, Error> {
+        let (tx, _) = broadcast::channel(1024);
+        let tx = Some(tx);
+
+        let id = id.unwrap_or(Uuid::new_v4());
+        let name = None;
+
+        if !recipients.contains(did) {
+            recipients.push(did.clone());
+        }
+
+        if recipients.len() < 2 {
+            return Err(Error::OtherWithContext("Conversation requires a min of 2 recipients".into()));
+        }
+
+        let task = Arc::new(Default::default());
+        let messages = BTreeSet::new();
+        Ok(Self {
+            id,
+            name,
+            recipients,
+            creator: None,
+            conversation_type,
+            messages,
+            task,
+            tx,
+            signature: None,
+        })
+    }
+
+    pub fn new_direct(did: &DID, recipients: [DID; 2]) -> Result<Self, Error> {
+        let conversation_id = Some(super::generate_shared_topic(
+            did,
+            recipients
+                .iter()
+                .filter(|peer| did.ne(peer))
+                .collect::<Vec<_>>()
+                .first()
+                .ok_or(Error::Other)?,
+            Some("direct-conversation"),
+        )?);
+
+        Self::new(
+            did,
+            recipients.to_vec(),
+            conversation_id,
+            ConversationType::Direct,
+        )
+    }
 }
 
 impl ConversationDocument {
