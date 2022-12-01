@@ -5,7 +5,8 @@ use warp::multipass::identity::Identity;
 use warp::multipass::MultiPass;
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::config::MpIpfsConfig;
-use warp_mp_ipfs::{ipfs_identity_temporary, IpfsIdentity};
+use warp_mp_ipfs::store::parsers::signaling::SignalingPayload;
+use warp_mp_ipfs::{ipfs_identity_temporary, IpfsIdentity, Signaling};
 
 async fn account(username: Option<&str>) -> anyhow::Result<Box<IpfsIdentity<TestTypes>>> {
     let tesseract = Tesseract::default();
@@ -36,7 +37,10 @@ async fn main() -> anyhow::Result<()> {
     println!("{} with {}", username(&ident_b), ident_b.did_key());
     println!();
 
-    let data = vec![10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+    let data = SignalingPayload::default();
+
+    println!("data: {:?}", data);
+
     if let Err(e) = account_a.send_signal(&ident_b.did_key(), &data) {
         println!("Error sending message: {}", e);
     }

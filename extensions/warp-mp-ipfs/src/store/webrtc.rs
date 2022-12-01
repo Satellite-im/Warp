@@ -1,5 +1,4 @@
 #![allow(clippy::await_holding_lock)]
-use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use ipfs::libp2p::gossipsub::GossipsubMessage;
 use ipfs::{Ipfs, IpfsTypes, PeerId};
@@ -16,45 +15,22 @@ use sata::{Kind, Sata};
 use serde::{Deserialize, Serialize};
 use warp::crypto::DID;
 use warp::error::Error;
-use warp::multipass::{MultiPassEventKind, PubsubMessage};
+use warp::multipass::{MultiPassEventKind, PubsubMessage, SignedMessage};
 use warp::sync::{Arc, RwLock};
 
 use warp::tesseract::Tesseract;
 
 use crate::config::Discovery;
-use crate::store::{connected_to_peer, verify_serde_sig};
+use crate::store::connected_to_peer;
 use crate::Persistent;
+use warp::multipass::Signable;
 
 use super::identity::IdentityStore;
 use super::parsers::signaling::SignalingPayload;
-use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, PeerConnectionType};
+use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType};
 
 pub fn get_signaling_topic(did: &DID) -> String {
     format!("/peer/{}/signaling", did)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CustomPayload {
-    pub is_offer: bool,
-    pub data: String,
-}
-
-fn test() {
-    let mut a: PubsubMessage<CustomPayload> = PubsubMessage {
-        from: DID::default(),
-        to: DID::default(),
-        message_type: "test".to_string(),
-        payload: CustomPayload {
-            is_offer: true,
-            data: "test".to_string(),
-        },
-    };
-
-    if let Ok(b) = a.sign() {
-        println!("{:?}", b);
-
-        b.verify();
-    }
 }
 
 pub struct WebrtcManager<T: IpfsTypes> {
@@ -100,129 +76,6 @@ impl Deref for SignalingMessage {
         }
     }
 }
-
-// impl InternalRequest {
-//     pub fn request_type(&self) -> InternalRequestType {
-//         match self {
-//             InternalRequest::In(_) => InternalRequestType::Incoming,
-//             InternalRequest::Out(_) => InternalRequestType::Outgoing,
-//         }
-//     }
-// }
-
-// #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
-// pub enum InternalRequestType {
-//     Incoming,
-//     Outgoing,
-// }
-
-// impl InternalRequest {
-//     pub fn valid(&self) -> Result<(), Error> {
-//         let mut request = FriendRequest::default();
-//         request.set_from(self.from());
-//         request.set_to(self.to());
-//         request.set_status(self.status());
-//         request.set_date(self.date());
-
-//         let signature = match self.signature() {
-//             Some(s) => bs58::decode(s).into_vec()?,
-//             None => return Err(Error::InvalidSignature),
-//         };
-
-//         verify_serde_sig(self.from(), &request, &signature)?;
-
-//         Ok(())
-//     }
-// }
-
-// pub struct SignalingMessage {
-//     message: Message,
-// }
-
-// impl SignalingMessage {
-//     pub fn new(from: DID, to: DID, payload: SignalingPayload) -> Self {
-//         let message = Message::default();
-
-//         let serialized_payload = serde_json::to_string(&payload).unwrap();
-
-//         message.set_from(from);
-//         message.set_to(to);
-//         message.set_payload(serialized_payload);
-
-//         let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
-
-//         message.set_signature(signature);
-
-//         Self { message }
-//     }
-// }
-
-// #[cfg(not(target_arch = "wasm32"))]
-// impl SignalingMessage {
-//     pub fn set_date(&mut self, date: DateTime<Utc>) {
-//         self.date = date
-//     }
-
-//     pub fn date(&self) -> DateTime<Utc> {
-//         self.date
-//     }
-// }
-
-// #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Eq)]
-// #[serde(rename_all = "lowercase", tag = "type")]
-// pub enum InternalSignaling {
-//     Offer(SignalingMessage),
-//     Answer(SignalingMessage),
-//     Candidate(SignalingMessage),
-// }
-
-// impl Deref for InternalSignaling {
-//     type Target = SignalingMessage;
-
-//     fn deref(&self) -> &Self::Target {
-//         match self {
-//             InternalSignaling::Offer(req) => req,
-//             InternalSignaling::Answer(req) => req,
-//             InternalSignaling::Candidate(req) => req,
-//         }
-//     }
-// }
-
-// impl InternalSignaling {
-//     pub fn signal_type(&self) -> InternalSignalingType {
-//         match self {
-//             InternalSignaling::Offer(_) => InternalSignalingType::Offer,
-//             InternalSignaling::Answer(_) => InternalSignalingType::Answer,
-//             InternalSignaling::Candidate(_) => InternalSignalingType::Candidate,
-//         }
-//     }
-// }
-
-// #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
-// pub enum InternalSignalingType {
-//     Offer,
-//     Answer,
-//     Candidate,
-// }
-
-// impl InternalSignaling {
-//     pub fn valid(&self) -> Result<(), Error> {
-//         let mut message = SignalingMessage::default();
-//         message.set_from(self.from());
-//         message.set_to(self.to());
-//         message.set_data(self.data());
-//         message.set_date(self.date());
-
-//         let signature = match self.signature() {
-//             Some(s) => bs58::decode(s).into_vec()?,
-//             None => return Err(Error::InvalidSignature),
-//         };
-
-//         verify_serde_sig(self.from(), &message, &signature)?;
-
-//         Ok(())
-//     }
-// }
 
 impl<T: IpfsTypes> Clone for WebrtcManager<T> {
     fn clone(&self) -> Self {
@@ -317,17 +170,18 @@ impl<T: IpfsTypes> WebrtcManager<T> {
         message: Arc<GossipsubMessage>,
     ) -> anyhow::Result<()> {
         if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
-            let data = data.decrypt::<SignalingMessage>(&self.did_key)?;
+            println!("Received: {:?}", data);
+            let data = data.decrypt::<SignedMessage>(&self.did_key)?;
 
             println!("Received signaling message: {:#?}", data);
 
-            if data.to().ne(local_public_key) {
+            if data.message.to.ne(local_public_key) {
                 warn!("Request is not meant for identity. Skipping");
                 return Ok(());
             }
 
             // first verify the request before processing it
-            validate_message(&data)?;
+            // validate_message(&data)?;
         }
         Ok(())
     }
@@ -372,7 +226,11 @@ impl<T: IpfsTypes> WebrtcManager<T> {
 }
 
 impl<T: IpfsTypes> WebrtcManager<T> {
-    pub async fn send_signal(&mut self, pubkey: &DID, payload: &String) -> Result<(), Error> {
+    pub async fn send_signal(
+        &mut self,
+        pubkey: &DID,
+        payload: &SignalingPayload,
+    ) -> Result<(), Error> {
         println!("Sending signal to: {}", pubkey);
 
         let (local_ipfs_public_key, _) = self.local().await?;
@@ -382,30 +240,48 @@ impl<T: IpfsTypes> WebrtcManager<T> {
             return Err(Error::CannotSendSelfFriendRequest);
         }
 
-        Ok(())
+        let mut signaling_message: PubsubMessage<SignalingPayload> = PubsubMessage {
+            from: local_public_key,
+            to: pubkey.clone(),
+            message_type: "signaling".into(),
+            payload: payload.clone(),
+        };
 
-        // let mut signaling_message = SignalingMessage::default();
-        // signaling_message.set_from(local_public_key);
-        // signaling_message.set_to(pubkey.clone());
-        // signaling_message.set_data(payload.clone());
-        // let signature =
-        //     bs58::encode(sign_serde(&self.tesseract, &signaling_message)?).into_string();
+        let signed_message = signaling_message.sign(&self.tesseract)?;
 
-        // signaling_message.set_signature(signature);
+        self.send_message(pubkey, &signed_message).await
+    }
 
-        // self.broadcast_message(&signaling_message).await
+    pub async fn send_message(
+        &mut self,
+        pubkey: &DID,
+        payload: &SignedMessage,
+    ) -> Result<(), Error> {
+        println!(
+            "Sending message to: {}\n Signature: {:?} \n Message: {:?}",
+            pubkey, payload.signature, payload.message
+        );
+
+        let (local_ipfs_public_key, _) = self.local().await?;
+        let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
+
+        if local_public_key.eq(pubkey) {
+            return Err(Error::CannotSendSelfFriendRequest);
+        }
+
+        self.broadcast_message(&payload).await
     }
 }
 
 impl<T: IpfsTypes> WebrtcManager<T> {
-    pub async fn broadcast_message(&mut self, request: &SignalingMessage) -> Result<(), Error> {
-        let remote_peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
+    pub async fn broadcast_message(&mut self, signed_message: &SignedMessage) -> Result<(), Error> {
+        let remote_peer_id = did_to_libp2p_pub(&signed_message.message.to)?.to_peer_id();
 
         if matches!(
             self.identity.discovery_type(),
             Discovery::Direct | Discovery::None
         ) {
-            let peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
+            let peer_id = did_to_libp2p_pub(&signed_message.message.to)?.to_peer_id();
 
             let connected = super::connected_to_peer(self.ipfs.clone(), remote_peer_id).await?;
 
@@ -422,7 +298,7 @@ impl<T: IpfsTypes> WebrtcManager<T> {
 
                 if let Err(_e) = res {
                     let ipfs = self.ipfs.clone();
-                    let pubkey = request.to();
+                    let pubkey = signed_message.message.to.clone();
                     let relay = self.identity.relays();
                     let discovery = self.identity.discovery_type();
                     tokio::spawn(async move {
@@ -437,7 +313,7 @@ impl<T: IpfsTypes> WebrtcManager<T> {
         }
 
         let mut data = Sata::default();
-        data.add_recipient(&request.to())
+        data.add_recipient(&signed_message.message.to)
             .map_err(anyhow::Error::from)?;
         let kp = &*self.did_key;
         let payload = data
@@ -445,7 +321,7 @@ impl<T: IpfsTypes> WebrtcManager<T> {
                 IpldCodec::DagJson,
                 kp.as_ref(),
                 Kind::Static,
-                request.clone(),
+                signed_message.clone(),
             )
             .map_err(anyhow::Error::from)?;
         let bytes = serde_json::to_vec(&payload)?;
@@ -460,24 +336,33 @@ impl<T: IpfsTypes> WebrtcManager<T> {
             });
         }
 
+        println!(
+            "Going to broadcast : {}",
+            get_signaling_topic(&signed_message.message.to)
+        );
+
         let peers = self
             .ipfs
-            .pubsub_peers(Some(get_signaling_topic(&request.to())))
+            .pubsub_peers(Some(get_signaling_topic(&signed_message.message.to)))
             .await?;
 
         if !peers.contains(&remote_peer_id) {
-            self.queue
-                .write()
-                .push(Queue(remote_peer_id, payload, request.to()));
+            self.queue.write().push(Queue(
+                remote_peer_id,
+                payload,
+                signed_message.message.to.clone(),
+            ));
             self.save_queue().await;
         } else if let Err(_e) = self
             .ipfs
-            .pubsub_publish(get_signaling_topic(&request.to()), bytes)
+            .pubsub_publish(get_signaling_topic(&signed_message.message.to), bytes)
             .await
         {
-            self.queue
-                .write()
-                .push(Queue(remote_peer_id, payload, request.to()));
+            self.queue.write().push(Queue(
+                remote_peer_id,
+                payload,
+                signed_message.message.to.clone(),
+            ));
             self.save_queue().await;
         }
 

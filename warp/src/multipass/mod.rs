@@ -1,7 +1,8 @@
 pub mod generator;
 pub mod identity;
 
-use did_key::CoreSign;
+use did_key::{CoreSign, DIDKey, Ed25519KeyPair, Generate};
+use ed25519_dalek::Keypair;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 use warp_derive::FFIFree;
@@ -10,6 +11,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::error::Error;
 use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use crate::tesseract::Tesseract;
 // use crate::tesseract::Tesseract;
 use crate::{Extension, SingleHandle};
 use identity::Identity;
@@ -50,7 +52,8 @@ impl core::ops::DerefMut for MultiPassEventStream {
 }
 
 // Note that this are temporary
-fn sign_serde<D: Serialize>(did: &DID, data: &D) -> anyhow::Result<Vec<u8>> {
+fn sign_serde<D: Serialize>(tesseract: &Tesseract, data: &D) -> anyhow::Result<Vec<u8>> {
+    let did = did_keypair(tesseract)?;
     let bytes = serde_json::to_vec(data)?;
     Ok(did.as_ref().sign(&bytes))
 }
@@ -92,8 +95,8 @@ impl SignedMessage {
     }
 }
 
-trait Signable {
-    fn sign(&mut self) -> Result<SignedMessage, Error>;
+pub trait Signable {
+    fn sign(&mut self, tesseract: &Tesseract) -> Result<SignedMessage, Error>;
 }
 
 trait Parsable<T> {
@@ -104,7 +107,7 @@ impl<T> Signable for PubsubMessage<T>
 where
     T: Serialize,
 {
-    fn sign(&mut self) -> Result<SignedMessage, Error> {
+    fn sign(&mut self, tesseract: &Tesseract) -> Result<SignedMessage, Error> {
         match serde_json::to_vec(&self.payload) {
             Ok(payload) => {
                 let message = RawMessage {
@@ -114,13 +117,21 @@ where
                     payload,
                 };
 
-                let signature = sign_serde(&self.from, &message)?;
+                let signature = sign_serde(&tesseract, &message)?;
 
                 Ok(SignedMessage { message, signature })
             }
             Err(_) => Err(Error::Unimplemented),
         }
     }
+}
+
+fn did_keypair(tesseract: &Tesseract) -> anyhow::Result<DID> {
+    let kp = tesseract.retrieve("keypair")?;
+    let kp = bs58::decode(kp).into_vec()?;
+    let id_kp = Keypair::from_bytes(&kp)?;
+    let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(id_kp.secret.as_bytes()));
+    Ok(did.into())
 }
 
 pub trait MultiPass:
@@ -183,7 +194,7 @@ where
 
 pub trait Messaging: Sync + Send {
     /// Send message to corresponding DID
-    fn send_message(&mut self, _: &DID, _: &String) -> Result<(), Error> {
+    fn send_message(&mut self, _: &DID, _: &SignedMessage) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 }
@@ -281,7 +292,7 @@ impl<T: ?Sized> Messaging for Arc<RwLock<Box<T>>>
 where
     T: Messaging,
 {
-    fn send_message(&mut self, key: &DID, payload: &String) -> Result<(), Error> {
+    fn send_message(&mut self, key: &DID, payload: &SignedMessage) -> Result<(), Error> {
         self.write().send_message(key, payload)
     }
 }
