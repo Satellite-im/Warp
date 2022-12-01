@@ -484,16 +484,20 @@ impl Reaction {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
+#[serde(rename_all="snake_case")]
 #[repr(C)]
 pub enum MessageStatus {
     /// If a message has not been sent.
+    #[display(fmt = "not sent")]
     NotSent,
 
     /// If a message has been sent, either directly or through a third party service
+    #[display(fmt = "sent")]
     Sent,
 
     /// Confirmation of message being delivered. May be used in the future
+    #[display(fmt = "delivered")]
     Delivered,
 }
 
