@@ -251,7 +251,7 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
 
     async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message> {
         self.messaging_store()?
-            .get_message(conversation_id, message_id)
+            .get_message(conversation_id, message_id).await
     }
 
     async fn get_messages(

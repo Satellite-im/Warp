@@ -35,6 +35,12 @@ pub struct ConversationDocument {
     tx: Option<BroadcastSender<MessageEventKind>>,
 }
 
+impl PartialEq for ConversationDocument {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
 impl ConversationDocument {
     pub fn new(
         did: &DID,
@@ -53,7 +59,9 @@ impl ConversationDocument {
         }
 
         if recipients.len() < 2 {
-            return Err(Error::OtherWithContext("Conversation requires a min of 2 recipients".into()));
+            return Err(Error::OtherWithContext(
+                "Conversation requires a min of 2 recipients".into(),
+            ));
         }
 
         let task = Arc::new(Default::default());

@@ -954,18 +954,26 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         Ok(list.iter().map(|document| document.into()).collect())
     }
 
-    pub fn messages_count(&self, conversation: Uuid) -> Result<usize, Error> {
-        self.get_conversation(conversation)
-            .map(|convo| convo.messages().len())
+    pub async fn messages_count(&self, conversation: Uuid) -> Result<usize, Error> {
+        let document = self.get_root_document().await?;
+        let conversation = document
+            .get_conversation(self.ipfs.clone(), conversation)
+            .await?;
+        Ok(conversation.messages.len())
     }
 
-    pub fn get_message(&self, conversation: Uuid, message_id: Uuid) -> Result<Message, Error> {
-        self.get_conversation(conversation)?
-            .messages()
-            .iter()
-            .find(|message| message.id() == message_id)
-            .cloned()
-            .ok_or(Error::MessageNotFound)
+    pub async fn get_message(
+        &self,
+        conversation: Uuid,
+        message_id: Uuid,
+    ) -> Result<Message, Error> {
+        let document = self.get_root_document().await?;
+        let conversation = document
+            .get_conversation(self.ipfs.clone(), conversation)
+            .await?;
+        conversation
+            .get_message(self.ipfs.clone(), self.did.clone(), message_id)
+            .await
     }
 
     pub async fn get_messages(
@@ -1504,7 +1512,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             return Err(Error::Unimplemented);
         }
 
-        let message = self.get_message(conversation, message_id)?;
+        let message = self.get_message(conversation, message_id).await?;
 
         if message.message_type() != MessageType::Attachment {
             return Err(Error::InvalidMessage);
