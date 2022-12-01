@@ -486,6 +486,23 @@ impl Reaction {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
+#[serde(rename_all="snake_case")]
+#[repr(C)]
+pub enum MessageStatus {
+    /// If a message has not been sent.
+    #[display(fmt = "not sent")]
+    NotSent,
+
+    /// If a message has been sent, either directly or through a third party service
+    #[display(fmt = "sent")]
+    Sent,
+
+    /// Confirmation of message being delivered. May be used in the future
+    #[display(fmt = "delivered")]
+    Delivered,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub enum ReactionState {
@@ -526,13 +543,28 @@ pub trait RayGun:
         Err(Error::Unimplemented)
     }
 
-    // List all active conversations
+    /// Get an active conversation
+    async fn get_conversation(&self, _: Uuid) -> Result<Conversation, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// List all active conversations
     async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
         Err(Error::Unimplemented)
     }
 
     /// Retrieve all messages from a conversation
     async fn get_message(&self, _: Uuid, _: Uuid) -> Result<Message, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Get a number of messages in a conversation
+    async fn get_message_count(&self, _: Uuid) -> Result<usize, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Get a status of a message in a conversation
+    async fn message_status(&self, _: Uuid, _: Uuid) -> Result<MessageStatus, Error> {
         Err(Error::Unimplemented)
     }
 

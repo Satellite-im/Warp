@@ -4,7 +4,7 @@ pub mod conversation;
 
 use std::time::Duration;
 
-use ipfs::IpfsTypes;
+use ipfs::{IpfsTypes, PeerId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp::{
@@ -80,6 +80,48 @@ fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow
         .verify(&bytes, signature)
         .map_err(|e| anyhow::anyhow!("{:?}", e))?;
     Ok(())
+}
+
+
+#[allow(clippy::large_enum_variant)]
+pub enum PeerType {
+    PeerId(PeerId),
+    DID(DID),
+}
+
+impl From<DID> for PeerType {
+    fn from(did: DID) -> Self {
+        PeerType::DID(did)
+    }
+}
+
+impl From<PeerId> for PeerType {
+    fn from(peer_id: PeerId) -> Self {
+        PeerType::PeerId(peer_id)
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PeerConnectionType {
+    Connected,
+    NotConnected,
+}
+
+pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
+    ipfs: ipfs::Ipfs<T>,
+    pkey: I,
+) -> anyhow::Result<PeerConnectionType> {
+    let peer_id = match pkey.into() {
+        PeerType::DID(did) => did_to_libp2p_pub(&did)?.to_peer_id(),
+        PeerType::PeerId(peer) => peer,
+    };
+
+    let connected_peer = ipfs.connected().await?.iter().any(|peer| *peer == peer_id);
+
+    Ok(match connected_peer {
+        true => PeerConnectionType::Connected,
+        false => PeerConnectionType::NotConnected,
+    })
 }
 
 pub async fn topic_discovery<T: IpfsTypes, S: AsRef<str>>(

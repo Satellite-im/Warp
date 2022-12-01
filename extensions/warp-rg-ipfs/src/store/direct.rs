@@ -1,3 +1,5 @@
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,11 +25,12 @@ use warp::logging::tracing::warn;
 use warp::multipass::MultiPass;
 use warp::raygun::{
     Conversation, EmbedState, Location, Message, MessageEvent, MessageEventKind, MessageOptions,
-    MessageType, PinState, RayGunEventKind, Reaction, ReactionState,
+    MessageStatus, MessageType, PinState, RayGunEventKind, Reaction, ReactionState,
 };
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock};
 
+use crate::store::connected_to_peer;
 use crate::{Persistent, SpamFilter};
 
 use super::document::ConversationRootDocument;
@@ -56,7 +59,7 @@ pub struct DirectMessageStore<T: IpfsTypes> {
     filesystem: Option<Box<dyn Constellation>>,
 
     // Queue
-    queue: Arc<tokio::sync::RwLock<Vec<Queue>>>,
+    queue: Arc<tokio::sync::RwLock<HashMap<DID, Vec<Queue>>>>,
 
     // DID
     did: Arc<DID>,
@@ -396,18 +399,14 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         };
 
         if let Some(path) = store.path.as_ref() {
-            if let Ok(queue) = tokio::fs::read(path.join("queue")).await {
-                if let Ok(queue) = serde_json::from_slice(&queue) {
-                    *store.queue.write().await = queue;
-                }
-            }
+            if let Err(_e) = store.load_queue().await {}
             if path.is_dir() {
                 for entry in std::fs::read_dir(path)? {
                     let entry = entry?;
                     let path_inner = entry.path();
                     if path_inner.is_file() {
                         //TODO: Check filename itself rather than the end of the path
-                        if path.ends_with("queue") {
+                        if path.ends_with(".messaging_queue") {
                             continue;
                         }
 
@@ -606,62 +605,45 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     }
 
     async fn process_queue(&self) -> anyhow::Result<()> {
-        let list = self.queue.read().await.clone();
-        for item in list.iter() {
-            let Queue::Direct {
-                id,
-                peer,
-                topic,
-                data,
-            } = item;
-            if let Ok(peers) = self.ipfs.pubsub_peers(Some(topic.clone())).await {
-                //TODO: Check peer against conversation to see if they are connected
-                if peers.contains(peer) {
-                    let bytes = match serde_json::to_vec(&data) {
-                        Ok(bytes) => bytes,
-                        Err(e) => {
-                            error!("Error serializing data to bytes: {e}");
-                            continue;
-                        }
-                    };
+        let mut list = self.queue.read().await.clone();
+        for (did, items) in list.iter_mut() {
 
-                    if let Err(e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
-                        error!("Error publishing to topic: {e}");
-                        continue;
-                    }
+            if let Ok(crate::store::PeerConnectionType::Connected) = connected_to_peer(self.ipfs.clone(), did.clone()).await{
+                for item in items.iter_mut() {
+                    let Queue::Direct { peer, topic, data, sent, .. } = item;
+                    if !*sent {
+                        if let Ok(peers) = self.ipfs.pubsub_peers(Some(topic.clone())).await {
+                            //TODO: Check peer against conversation to see if they are connected
+                            if peers.contains(peer) {
+                                let bytes = match serde_json::to_vec(&data) {
+                                    Ok(bytes) => bytes,
+                                    Err(e) => {
+                                        error!("Error serializing data to bytes: {e}");
+                                        continue
+                                    }
+                                };
 
-                    let index = match self.queue.read().await.iter().position(|q| {
-                        Queue::Direct {
-                            id: *id,
-                            peer: *peer,
-                            topic: topic.clone(),
-                            data: data.clone(),
-                        }
-                        .eq(q)
-                    }) {
-                        Some(index) => index,
-                        //If we somehow ended up here then there is likely a race condition
-                        None => {
-                            error!("Unable to remove item from queue. Likely race condition");
-                            continue;
-                        }
-                    };
+                                if let Err(e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
+                                    error!("Error publishing to topic: {e}");
+                                    break;
+                                }
 
-                    let _ = self.queue.write().await.remove(index);
-
-                    if let Some(path) = self.path.as_ref() {
-                        let bytes = match serde_json::to_vec(&*self.queue.read().await) {
-                            Ok(bytes) => bytes,
-                            Err(e) => {
-                                error!("Error serializing data to bytes: {e}");
-                                continue;
+                                *sent = true;
                             }
-                        };
-                        if let Err(e) = tokio::fs::write(path.join("queue"), bytes).await {
-                            error!("Error saving queue: {e}");
                         }
                     }
+                    self.queue.write().await.entry(did.clone()).or_default().retain(|queue| {
+                        let Queue::Direct { sent: inner_sent, topic:inner_topic, .. } = queue;
+
+                        if inner_topic.eq(&*topic) && *sent != *inner_sent {
+                            return false
+                        }
+                        true
+
+                    });
+                    self.save_queue().await;
                 }
+
             }
         }
         Ok(())
@@ -826,12 +808,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 {
                     warn!("Unable to publish to topic. Queuing event");
                     if let Err(e) = self
-                        .queue_event(Queue::direct(
-                            convo_id,
-                            peer_id,
-                            DIRECT_BROADCAST.into(),
-                            data,
-                        ))
+                        .queue_event(
+                            did_key.clone(),
+                            Queue::direct(convo_id, None, peer_id, DIRECT_BROADCAST.into(), data),
+                        )
                         .await
                     {
                         error!("Error submitting event to queue: {e}");
@@ -840,12 +820,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             }
             false => {
                 if let Err(e) = self
-                    .queue_event(Queue::direct(
-                        convo_id,
-                        peer_id,
-                        DIRECT_BROADCAST.into(),
-                        data,
-                    ))
+                    .queue_event(
+                        did_key.clone(),
+                        Queue::direct(convo_id, None, peer_id, DIRECT_BROADCAST.into(), data),
+                    )
                     .await
                 {
                     error!("Error submitting event to queue: {e}");
@@ -912,12 +890,16 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         //      "max_transmit_size" within rust-libp2p gossipsub
                         //      For now we will queue the message if we hit an error
                         if let Err(e) = self
-                            .queue_event(Queue::direct(
-                                conversation.id(),
-                                peer_id,
-                                DIRECT_BROADCAST.into(),
-                                data,
-                            ))
+                            .queue_event(
+                                recipient.clone(),
+                                Queue::direct(
+                                    conversation.id(),
+                                    None,
+                                    peer_id,
+                                    DIRECT_BROADCAST.into(),
+                                    data,
+                                ),
+                            )
                             .await
                         {
                             error!("Error submitting event to queue: {e}");
@@ -926,12 +908,16 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 }
                 false => {
                     if let Err(e) = self
-                        .queue_event(Queue::direct(
-                            conversation.id(),
-                            peer_id,
-                            DIRECT_BROADCAST.into(),
-                            data,
-                        ))
+                        .queue_event(
+                            recipient.clone(),
+                            Queue::direct(
+                                conversation.id(),
+                                None,
+                                peer_id,
+                                DIRECT_BROADCAST.into(),
+                                data,
+                            ),
+                        )
                         .await
                     {
                         error!("Error submitting event to queue: {e}");
@@ -974,6 +960,43 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation
             .get_message(self.ipfs.clone(), self.did.clone(), message_id)
             .await
+    }
+
+    pub async fn message_status(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageStatus, Error> {
+        self.get_message(conversation_id, message_id).await?;
+
+        let conversation = self.get_conversation(conversation_id)?;
+
+        let own_did = &*self.did;
+
+        let list = conversation
+            .recipients()
+            .iter()
+            .filter(|did| own_did.ne(did))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for peer in list {
+            if let Entry::Occupied(entry) = self.queue.read().await.clone().entry(peer) {
+                for item in entry.get() {
+                    let Queue::Direct { id, m_id, .. } = item;
+                    if conversation.id() == *id {
+                        if let Some(m_id) = m_id {
+                            if message_id == *m_id {
+                                return Ok(MessageStatus::NotSent);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        //Not a guarantee that it been sent but for now since the message exist locally and not marked in queue, we will assume it have been sent 
+        Ok(MessageStatus::Sent)
     }
 
     pub async fn get_messages(
@@ -1067,6 +1090,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let signature = super::sign_serde(own_did, &construct)?;
         message.set_signature(Some(signature));
 
+        let message_id = message.id();
+
         let event = MessagingEvents::New(message);
 
         direct_message_event(
@@ -1082,7 +1107,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
 
-        self.send_raw_event(conversation.id(), event, true).await
+        self.send_raw_event(conversation.id(), Some(message_id), event, true)
+            .await
     }
 
     pub async fn edit_message(
@@ -1145,7 +1171,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation
                 .to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(&*self.did)),
         )?;
-        self.send_raw_event(conversation.id(), event, true).await
+        self.send_raw_event(conversation.id(), None, event, true)
+            .await
     }
 
     pub async fn reply_message(
@@ -1214,7 +1241,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
 
-        self.send_raw_event(conversation.id(), event, true).await
+        self.send_raw_event(conversation.id(), None, event, true)
+            .await
     }
 
     pub async fn delete_message(
@@ -1241,7 +1269,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         )?;
 
         if broadcast {
-            self.send_raw_event(conversation.id(), event, true).await?;
+            self.send_raw_event(conversation.id(), None, event, true)
+                .await?;
         }
 
         Ok(())
@@ -1271,7 +1300,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
 
-        self.send_raw_event(conversation.id(), event, true).await
+        self.send_raw_event(conversation.id(), None, event, true)
+            .await
     }
 
     pub async fn embeds(
@@ -1310,7 +1340,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         warp::async_block_in_place_uncheck(
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
-        self.send_raw_event(conversation.id(), event, true).await
+        self.send_raw_event(conversation.id(), None, event, true)
+            .await
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1490,7 +1521,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
 
-        self.send_raw_event(conversation.id(), event, true).await
+        self.send_raw_event(conversation.id(), None, event, true)
+            .await
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1535,6 +1567,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let own_did = self.did.clone();
 
         let progress_stream = async_stream::stream! {
+                yield Progression::CurrentProgress {
+                    name: attachment.name(),
+                    current: 0,
+                    total: Some(attachment.size()),
+                };
+
                 let did = message.sender();
                 if !did.eq(&own_did) {
                     if let Ok(peer_id) = did_to_libp2p_pub(&did).map(|pk| pk.to_peer_id()) {
@@ -1663,7 +1701,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         warp::async_block_in_place_uncheck(
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
-        self.send_raw_event(conversation.id(), event, false).await
+        self.send_raw_event(conversation.id(), None, event, false)
+            .await
     }
 
     pub async fn cancel_event(
@@ -1689,12 +1728,14 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         warp::async_block_in_place_uncheck(
             conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
         )?;
-        self.send_raw_event(conversation.id(), event, false).await
+        self.send_raw_event(conversation.id(), None, event, false)
+            .await
     }
 
     pub async fn send_raw_event<S: Serialize + Send + Sync>(
         &mut self,
         conversation: Uuid,
+        message_id: Option<Uuid>,
         event: S,
         queue: bool,
     ) -> Result<(), Error> {
@@ -1732,12 +1773,16 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     if queue {
                         warn!("Unable to publish to topic due to error: {e}... Queuing event");
                         if let Err(e) = self
-                            .queue_event(Queue::direct(
-                                conversation.id(),
-                                peer_id,
-                                conversation.topic(),
-                                payload,
-                            ))
+                            .queue_event(
+                                recipient.clone(),
+                                Queue::direct(
+                                    conversation.id(),
+                                    message_id,
+                                    peer_id,
+                                    conversation.topic(),
+                                    payload,
+                                ),
+                            )
                             .await
                         {
                             error!("Error submitting event to queue: {e}");
@@ -1748,12 +1793,16 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             false => {
                 if queue {
                     if let Err(e) = self
-                        .queue_event(Queue::direct(
-                            conversation.id(),
-                            peer_id,
-                            conversation.topic(),
-                            payload,
-                        ))
+                        .queue_event(
+                            recipient.clone(),
+                            Queue::direct(
+                                conversation.id(),
+                                message_id,
+                                peer_id,
+                                conversation.topic(),
+                                payload,
+                            ),
+                        )
                         .await
                     {
                         error!("Error submitting event to queue: {e}");
@@ -1765,12 +1814,35 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         Ok(())
     }
 
-    async fn queue_event(&mut self, queue: Queue) -> Result<(), Error> {
-        self.queue.write().await.push(queue);
+    async fn queue_event(&mut self, did: DID, queue: Queue) -> Result<(), Error> {
+        self.queue.write().await.entry(did).or_default().push(queue);
+        self.save_queue().await;
+
+        Ok(())
+    }
+
+    async fn save_queue(&self) {
         if let Some(path) = self.path.as_ref() {
-            let bytes = serde_json::to_vec(&*self.queue.read().await)?;
-            warp::async_block_in_place_uncheck(tokio::fs::write(path.join("queue"), bytes))?;
+            let bytes = match serde_json::to_vec(&*self.queue.read().await) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    error!("Error serializing queue list into bytes: {e}");
+                    return;
+                }
+            };
+
+            if let Err(e) = tokio::fs::write(path.join(".messaging_queue"), bytes).await {
+                error!("Error saving queue: {e}");
+            }
         }
+    }
+
+    async fn load_queue(&self) -> anyhow::Result<()> {
+        if let Some(path) = self.path.as_ref() {
+            let data = tokio::fs::read(path.join(".messaging_queue")).await?;
+            *self.queue.write().await = serde_json::from_slice(&data)?;
+        }
+
         Ok(())
     }
 }
@@ -2116,19 +2188,23 @@ pub fn direct_message_event(
 pub enum Queue {
     Direct {
         id: Uuid,
+        m_id: Option<Uuid>,
         peer: PeerId,
         topic: String,
         data: Sata,
+        sent: bool,
     },
 }
 
 impl Queue {
-    pub fn direct(id: Uuid, peer: PeerId, topic: String, data: Sata) -> Self {
+    pub fn direct(id: Uuid, m_id: Option<Uuid>, peer: PeerId, topic: String, data: Sata) -> Self {
         Queue::Direct {
             id,
+            m_id,
             peer,
             topic,
             data,
+            sent: false,
         }
     }
 }
