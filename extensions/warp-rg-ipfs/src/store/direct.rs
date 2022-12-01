@@ -504,7 +504,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 trace!("New conversation event received from {peer}");
                 let id = super::generate_shared_topic(did, &peer, Some("direct-conversation"))?;
 
-                if self.exist(id) {
+                if self.exist(id).await {
                     warn!("Conversation with {id} exist");
                     return Ok(());
                 }
@@ -554,7 +554,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             }
             ConversationEvents::DeleteConversation(id) => {
                 trace!("Delete conversation event received for {id}");
-                if !self.exist(id) {
+                if !self.exist(id).await {
                     anyhow::bail!("Conversation {id} doesnt exist");
                 }
 
@@ -973,44 +973,23 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation: Uuid,
         opt: MessageOptions,
     ) -> Result<Vec<Message>, Error> {
-        let conversation = self.get_conversation(conversation)?;
-
-        let messages = conversation.messages();
-
-        if messages.is_empty() {
-            return Err(Error::EmptyMessage);
-        }
-
-        //TODO: Maybe put checks to make sure the date range is valid
-        let messages = match opt.date_range() {
-            Some(range) => messages
-                .iter()
-                .filter(|message| message.date() >= range.start && message.date() <= range.end)
-                .cloned()
-                .collect::<Vec<_>>(),
-            None => messages,
-        };
-
-        let list = match opt
-            .range()
-            .map(|mut range| {
-                let start = range.start;
-                let end = range.end;
-                range.start = messages.len() - end;
-                range.end = messages.len() - start;
-                range
-            })
-            .and_then(|range| messages.get(range))
-            .map(|messages| messages.to_vec())
-        {
-            Some(messages) => messages,
-            None => messages,
-        };
-        Ok(list)
+        let document = self.get_root_document().await?;
+        let conversation = document
+            .get_conversation(self.ipfs.clone(), conversation)
+            .await?;
+        conversation
+            .get_messages(self.ipfs.clone(), self.did.clone(), opt)
+            .await
     }
 
-    pub fn exist(&self, conversation: Uuid) -> bool {
-        self.get_conversation(conversation).is_ok()
+    pub async fn exist(&self, conversation: Uuid) -> bool {
+        if let Ok(document) = self.get_root_document().await {
+            return document
+                .get_conversation(self.ipfs.clone(), conversation)
+                .await
+                .is_ok();
+        }
+        false
     }
 
     pub fn get_conversation(&self, conversation: Uuid) -> Result<DirectConversation, Error> {
