@@ -895,8 +895,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     let Queue::Direct { id, m_id, .. } = item;
                     if conversation.id() == *id {
                         if let Some(m_id) = m_id {
-                            if message_id != *m_id {
-                                return Ok(MessageStatus::Sent);
+                            if message_id == *m_id {
+                                return Ok(MessageStatus::NotSent);
                             }
                         }
                     }
@@ -904,7 +904,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             }
         }
 
-        Ok(MessageStatus::NotSent)
+        //Not a guarantee that it been sent but for now since the message exist locally and not marked in queue, we will assume it have been sent 
+        Ok(MessageStatus::Sent)
     }
 
     pub async fn get_messages(
