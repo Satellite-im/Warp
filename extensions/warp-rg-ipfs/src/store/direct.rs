@@ -508,11 +508,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     return Ok(());
                 }
 
-                if let Ok(list) = self.account.block_list() {
-                    if list.contains(&peer) {
-                        warn!("{peer} is blocked");
-                        return Ok(());
-                    }
+                if let Ok(true) = self.account.is_blocked(&peer) {
+                    warn!("{peer} is blocked");
+                    return Ok(());
                 }
 
                 let list = [did.clone(), peer];
@@ -524,6 +522,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         return Ok(());
                     }
                 };
+
                 convo.start_task(
                     self.did.clone(),
                     self.filesystem.clone(),
@@ -531,6 +530,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     &self.spam_filter,
                     stream,
                 );
+
                 if let Some(path) = self.path.as_ref() {
                     convo.set_path(path);
                     if let Err(e) = convo
@@ -607,10 +607,17 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     async fn process_queue(&self) -> anyhow::Result<()> {
         let mut list = self.queue.read().await.clone();
         for (did, items) in list.iter_mut() {
-
-            if let Ok(crate::store::PeerConnectionType::Connected) = connected_to_peer(self.ipfs.clone(), did.clone()).await{
+            if let Ok(crate::store::PeerConnectionType::Connected) =
+                connected_to_peer(self.ipfs.clone(), did.clone()).await
+            {
                 for item in items.iter_mut() {
-                    let Queue::Direct { peer, topic, data, sent, .. } = item;
+                    let Queue::Direct {
+                        peer,
+                        topic,
+                        data,
+                        sent,
+                        ..
+                    } = item;
                     if !*sent {
                         if let Ok(peers) = self.ipfs.pubsub_peers(Some(topic.clone())).await {
                             //TODO: Check peer against conversation to see if they are connected
@@ -619,11 +626,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                     Ok(bytes) => bytes,
                                     Err(e) => {
                                         error!("Error serializing data to bytes: {e}");
-                                        continue
+                                        continue;
                                     }
                                 };
 
-                                if let Err(e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
+                                if let Err(e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await
+                                {
                                     error!("Error publishing to topic: {e}");
                                     break;
                                 }
@@ -632,18 +640,25 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                             }
                         }
                     }
-                    self.queue.write().await.entry(did.clone()).or_default().retain(|queue| {
-                        let Queue::Direct { sent: inner_sent, topic:inner_topic, .. } = queue;
+                    self.queue
+                        .write()
+                        .await
+                        .entry(did.clone())
+                        .or_default()
+                        .retain(|queue| {
+                            let Queue::Direct {
+                                sent: inner_sent,
+                                topic: inner_topic,
+                                ..
+                            } = queue;
 
-                        if inner_topic.eq(&*topic) && *sent != *inner_sent {
-                            return false
-                        }
-                        true
-
-                    });
+                            if inner_topic.eq(&*topic) && *sent != *inner_sent {
+                                return false;
+                            }
+                            true
+                        });
                     self.save_queue().await;
                 }
-
             }
         }
         Ok(())
@@ -724,10 +739,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             self.account.has_friend(did_key)?;
         }
 
-        if let Ok(list) = self.account.block_list() {
-            if list.contains(did_key) {
-                return Err(Error::PublicKeyIsBlocked);
-            }
+        if let Ok(true) = self.account.is_blocked(did_key) {
+            return Err(Error::PublicKeyIsBlocked);
         }
 
         let own_did = &*self.did;
@@ -996,7 +1009,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             }
         }
 
-        //Not a guarantee that it been sent but for now since the message exist locally and not marked in queue, we will assume it have been sent 
+        //Not a guarantee that it been sent but for now since the message exist locally and not marked in queue, we will assume it have been sent
         Ok(MessageStatus::Sent)
     }
 
