@@ -569,43 +569,50 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         }
                     }
                     _ = interval.tick() => {
-                        let list = store.queue.read().await.clone();
-                        for (did, items) in list.iter() {
-                            if let Ok(crate::store::PeerConnectionType::Connected) =
-                                connected_to_peer(store.ipfs.clone(), did.clone()).await
-                            {
-                            for (index, item) in items.iter().enumerate() {
-                                let Queue::Direct { peer, topic, data, .. } = item;
-                                if let Ok(peers) = store.ipfs.pubsub_peers(Some(topic.clone())).await {
-                                    //TODO: Check peer against conversation to see if they are connected
-                                    if peers.contains(peer) {
-                                        let bytes = match serde_json::to_vec(&data) {
-                                            Ok(bytes) => bytes,
-                                            Err(e) => {
-                                                error!("Error serializing data to bytes: {e}");
-                                                continue
-                                            }
-                                        };
+                        let mut list = store.queue.read().await.clone();
+                        for (did, items) in list.iter_mut() {
 
-                                        if let Err(e) = store.ipfs.pubsub_publish(topic.clone(), bytes).await {
-                                            error!("Error publishing to topic: {e}");
-                                            break;
-                                        }
+                            if let Ok(crate::store::PeerConnectionType::Connected) = connected_to_peer(store.ipfs.clone(), did.clone()).await{
+                                for item in items.iter_mut() {
+                                    let Queue::Direct { peer, topic, data, sent, .. } = item;
+                                    if !*sent {
+                                        if let Ok(peers) = store.ipfs.pubsub_peers(Some(topic.clone())).await {
+                                            //TODO: Check peer against conversation to see if they are connected
+                                            if peers.contains(peer) {
+                                                let bytes = match serde_json::to_vec(&data) {
+                                                    Ok(bytes) => bytes,
+                                                    Err(e) => {
+                                                        error!("Error serializing data to bytes: {e}");
+                                                        continue
+                                                    }
+                                                };
 
-                                        if let Entry::Occupied(mut entry) = store.queue.write().await.entry(did.clone())
-                                        {
-                                            let _ = entry.get_mut().remove(index);
-                                            if entry.get().is_empty() {
-                                                entry.remove();
+                                                if let Err(e) = store.ipfs.pubsub_publish(topic.clone(), bytes).await {
+                                                    error!("Error publishing to topic: {e}");
+                                                    break;
+                                                }
+
+                                                *sent = true;
                                             }
                                         }
-
-                                        store.save_queue().await;
                                     }
+                                    store.queue.write().await.entry(did.clone()).or_default().retain(|queue| {
+                                        let Queue::Direct { sent: inner_sent, topic:inner_topic, .. } = queue;
+                                        
+                                        if inner_topic.eq(&*topic) {
+                                            if *sent == *inner_sent {
+                                                return false
+                                            }
+                                        }
+                                        true
+                                        
+                                    });
                                 }
+                                
                             }
+                            
                         }
-                    }
+                        
                     }
                 }
                 tokio::time::sleep(Duration::from_millis(1)).await;
@@ -2077,6 +2084,7 @@ pub enum Queue {
         peer: PeerId,
         topic: String,
         data: Sata,
+        sent: bool
     },
 }
 
@@ -2087,6 +2095,7 @@ impl Queue {
             peer,
             topic,
             data,
+            sent: false
         }
     }
 }
