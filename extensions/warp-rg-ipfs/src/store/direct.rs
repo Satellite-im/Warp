@@ -23,7 +23,7 @@ use warp::logging::tracing::warn;
 use warp::multipass::MultiPass;
 use warp::raygun::{
     Conversation, EmbedState, Location, Message, MessageEvent, MessageEventKind, MessageOptions,
-    MessageType, PinState, RayGunEventKind, Reaction, ReactionState,
+    MessageStatus, MessageType, PinState, RayGunEventKind, Reaction, ReactionState,
 };
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock};
@@ -869,6 +869,42 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .find(|message| message.id() == message_id)
             .cloned()
             .ok_or(Error::MessageNotFound)
+    }
+
+    pub async fn message_status(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageStatus, Error> {
+        self.get_message(conversation_id, message_id)?;
+
+        let conversation = self.get_conversation(conversation_id)?;
+
+        let own_did = &*self.did;
+
+        let list = conversation
+            .recipients()
+            .iter()
+            .filter(|did| own_did.ne(did))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for peer in list {
+            if let Entry::Occupied(entry) = self.queue.read().await.clone().entry(peer) {
+                for item in entry.get() {
+                    let Queue::Direct { id, m_id, .. } = item;
+                    if conversation.id() == *id {
+                        if let Some(m_id) = m_id {
+                            if message_id != *m_id {
+                                return Ok(MessageStatus::Sent);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(MessageStatus::NotSent)
     }
 
     pub async fn get_messages(

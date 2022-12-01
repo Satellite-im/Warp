@@ -26,8 +26,8 @@ use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::group::{GroupChat, GroupChatManagement, GroupInvite};
 use warp::raygun::{
-    Conversation, Location, MessageEvent, MessageEventStream, RayGunEventStream, RayGunEvents,
-    RayGunStream,
+    Conversation, Location, MessageEvent, MessageEventStream, MessageStatus, RayGunEventStream,
+    RayGunEvents, RayGunStream,
 };
 use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
 use warp::raygun::{RayGunAttachment, RayGunEventKind};
@@ -262,6 +262,16 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
     async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message> {
         self.messaging_store()?
             .get_message(conversation_id, message_id)
+    }
+
+    async fn message_status(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageStatus> {
+        self.messaging_store()?
+            .message_status(conversation_id, message_id)
+            .await
     }
 
     async fn get_messages(
