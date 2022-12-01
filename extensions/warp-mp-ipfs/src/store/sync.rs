@@ -133,7 +133,7 @@ impl<T: IpfsTypes> Synchronize<T> {
                                     let data = sata.encode(libipld::IpldCodec::DagJson, sata::Kind::Static, message)?;
                                     let bytes = serde_json::to_vec(&data)?;
                                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                                    ipfs.clone().pubsub_publish(format!("warp/rootdocument"), bytes).await?; 
+                                    ipfs.clone().pubsub_publish(format!("warp/rootdocument"), bytes).await?;
                             }
                         }
                     }
@@ -213,9 +213,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchRootDocument(one_tx);
         let _ = self.tx.clone().send(node_request).await; 
-
         match one_rx.await {
-
             Ok(res) => {
                 if let NodeResponse::FetchRootDocument { id: _, cid }  = res {
 

@@ -588,11 +588,6 @@ async fn main() -> anyhow::Result<()> {
                                 writeln!(stdout, "Error updating username: {}", e)?;
                                 continue;
                             }
-                            ipfs_account.clone().identity_store()?.send_sync_request().await?;
-                            writeln!(stdout, "Document stored on Sync Node")?;
-                        
-                            let root = ipfs_account.clone().identity_store()?.fetch_root_document_request().await?;
-                            writeln!(stdout, "Root Document: {:?}", root)?;
 
                             writeln!(stdout, "Username updated")?;
                            

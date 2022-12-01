@@ -693,7 +693,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
             self.ipfs.remove_pin(&old_cid, true).await?;
         }
         self.ipfs.insert_pin(&root_cid, true).await?;
-        self.send_sync_request().await?;
+        println!("Root CID is Pinned? {}", root_cid);
+        println!("Root CID is Pinned? {}", self.ipfs.is_pinned(&root_cid).await?);
+        //self.send_sync_request().await?;
         self.save_cid(root_cid).await?;
         Ok(())
     }

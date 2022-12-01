@@ -504,7 +504,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
 
             let identity_store = self.identity_store()?.clone();
             
-            identity_store.send_sync_request().await?;
+            //identity_store.send_sync_request().await?;
             //identity_store.send_sync_request(Command::Fetch).await?;
 
             if let Ok(mut cache) = self.get_cache_mut() {
