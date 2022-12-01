@@ -9,13 +9,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tracing::log::{error, warn};
+use warp::multipass::identity::Message;
 
 use libipld::IpldCodec;
 use sata::{Kind, Sata};
 use serde::{Deserialize, Serialize};
 use warp::crypto::DID;
 use warp::error::Error;
-use warp::multipass::MultiPassEventKind;
+use warp::multipass::{MultiPassEventKind, PubsubMessage};
 use warp::sync::{Arc, RwLock};
 
 use warp::tesseract::Tesseract;
@@ -25,10 +26,35 @@ use crate::store::{connected_to_peer, verify_serde_sig};
 use crate::Persistent;
 
 use super::identity::IdentityStore;
+use super::parsers::signaling::SignalingPayload;
 use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, PeerConnectionType};
 
 pub fn get_signaling_topic(did: &DID) -> String {
     format!("/peer/{}/signaling", did)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CustomPayload {
+    pub is_offer: bool,
+    pub data: String,
+}
+
+fn test() {
+    let mut a: PubsubMessage<CustomPayload> = PubsubMessage {
+        from: DID::default(),
+        to: DID::default(),
+        message_type: "test".to_string(),
+        payload: CustomPayload {
+            is_offer: true,
+            data: "test".to_string(),
+        },
+    };
+
+    if let Ok(b) = a.sign() {
+        println!("{:?}", b);
+
+        b.verify();
+    }
 }
 
 pub struct WebrtcManager<T: IpfsTypes> {
@@ -55,153 +81,148 @@ pub struct WebrtcManager<T: IpfsTypes> {
     tx: broadcast::Sender<MultiPassEventKind>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, Eq)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct SignalingMessage {
-    /// The account where the request came from
-    from: DID,
-
-    /// The account where the request was sent to
-    to: DID,
-
-    /// Date of the request
-    date: DateTime<Utc>,
-
-    /// Serialized signaling data
-    data: Vec<u8>,
-
-    is_offer: bool,
-
-    /// Signature of request
-    #[serde(skip_serializing_if = "Option::is_none")]
-    signature: Option<String>,
-}
-
-impl Default for SignalingMessage {
-    fn default() -> Self {
-        Self {
-            from: Default::default(),
-            to: Default::default(),
-            date: Utc::now(),
-            data: Default::default(),
-            is_offer: Default::default(),
-            signature: None,
-        }
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl SignalingMessage {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_from(&mut self, key: DID) {
-        self.from = key
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_to(&mut self, key: DID) {
-        self.to = key
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn set_data(&mut self, data: Vec<u8>) {
-        self.data = data
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_signature(&mut self, signature: String) {
-        self.signature = Some(signature);
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl SignalingMessage {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn from(&self) -> DID {
-        self.from.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn to(&self) -> DID {
-        self.to.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn data(&self) -> Vec<u8> {
-        self.data.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn signature(&self) -> Option<String> {
-        self.signature.clone()
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl SignalingMessage {
-    pub fn set_date(&mut self, date: DateTime<Utc>) {
-        self.date = date
-    }
-
-    pub fn date(&self) -> DateTime<Utc> {
-        self.date
-    }
-}
-
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Eq)]
 #[serde(rename_all = "lowercase", tag = "type")]
-pub enum InternalSignaling {
-    Offer(SignalingMessage),
-    Answer(SignalingMessage),
-    Candidate(SignalingMessage),
+pub enum SignalingMessage {
+    Offer(Message),
+    Answer(Message),
+    IceCandidate(Message),
 }
 
-impl Deref for InternalSignaling {
-    type Target = SignalingMessage;
+impl Deref for SignalingMessage {
+    type Target = Message;
 
     fn deref(&self) -> &Self::Target {
         match self {
-            InternalSignaling::Offer(req) => req,
-            InternalSignaling::Answer(req) => req,
-            InternalSignaling::Candidate(req) => req,
+            SignalingMessage::Offer(req) => req,
+            SignalingMessage::Answer(req) => req,
+            SignalingMessage::IceCandidate(req) => req,
         }
     }
 }
 
-impl InternalSignaling {
-    pub fn signal_type(&self) -> InternalSignalingType {
-        match self {
-            InternalSignaling::Offer(_) => InternalSignalingType::Offer,
-            InternalSignaling::Answer(_) => InternalSignalingType::Answer,
-            InternalSignaling::Candidate(_) => InternalSignalingType::Candidate,
-        }
-    }
-}
+// impl InternalRequest {
+//     pub fn request_type(&self) -> InternalRequestType {
+//         match self {
+//             InternalRequest::In(_) => InternalRequestType::Incoming,
+//             InternalRequest::Out(_) => InternalRequestType::Outgoing,
+//         }
+//     }
+// }
 
-#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InternalSignalingType {
-    Offer,
-    Answer,
-    Candidate,
-}
+// #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+// pub enum InternalRequestType {
+//     Incoming,
+//     Outgoing,
+// }
 
-impl InternalSignaling {
-    pub fn valid(&self) -> Result<(), Error> {
-        let mut message = SignalingMessage::default();
-        message.set_from(self.from());
-        message.set_to(self.to());
-        message.set_data(self.data());
-        message.set_date(self.date());
+// impl InternalRequest {
+//     pub fn valid(&self) -> Result<(), Error> {
+//         let mut request = FriendRequest::default();
+//         request.set_from(self.from());
+//         request.set_to(self.to());
+//         request.set_status(self.status());
+//         request.set_date(self.date());
 
-        let signature = match self.signature() {
-            Some(s) => bs58::decode(s).into_vec()?,
-            None => return Err(Error::InvalidSignature),
-        };
+//         let signature = match self.signature() {
+//             Some(s) => bs58::decode(s).into_vec()?,
+//             None => return Err(Error::InvalidSignature),
+//         };
 
-        verify_serde_sig(self.from(), &message, &signature)?;
+//         verify_serde_sig(self.from(), &request, &signature)?;
 
-        Ok(())
-    }
-}
+//         Ok(())
+//     }
+// }
+
+// pub struct SignalingMessage {
+//     message: Message,
+// }
+
+// impl SignalingMessage {
+//     pub fn new(from: DID, to: DID, payload: SignalingPayload) -> Self {
+//         let message = Message::default();
+
+//         let serialized_payload = serde_json::to_string(&payload).unwrap();
+
+//         message.set_from(from);
+//         message.set_to(to);
+//         message.set_payload(serialized_payload);
+
+//         let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
+
+//         message.set_signature(signature);
+
+//         Self { message }
+//     }
+// }
+
+// #[cfg(not(target_arch = "wasm32"))]
+// impl SignalingMessage {
+//     pub fn set_date(&mut self, date: DateTime<Utc>) {
+//         self.date = date
+//     }
+
+//     pub fn date(&self) -> DateTime<Utc> {
+//         self.date
+//     }
+// }
+
+// #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Eq)]
+// #[serde(rename_all = "lowercase", tag = "type")]
+// pub enum InternalSignaling {
+//     Offer(SignalingMessage),
+//     Answer(SignalingMessage),
+//     Candidate(SignalingMessage),
+// }
+
+// impl Deref for InternalSignaling {
+//     type Target = SignalingMessage;
+
+//     fn deref(&self) -> &Self::Target {
+//         match self {
+//             InternalSignaling::Offer(req) => req,
+//             InternalSignaling::Answer(req) => req,
+//             InternalSignaling::Candidate(req) => req,
+//         }
+//     }
+// }
+
+// impl InternalSignaling {
+//     pub fn signal_type(&self) -> InternalSignalingType {
+//         match self {
+//             InternalSignaling::Offer(_) => InternalSignalingType::Offer,
+//             InternalSignaling::Answer(_) => InternalSignalingType::Answer,
+//             InternalSignaling::Candidate(_) => InternalSignalingType::Candidate,
+//         }
+//     }
+// }
+
+// #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+// pub enum InternalSignalingType {
+//     Offer,
+//     Answer,
+//     Candidate,
+// }
+
+// impl InternalSignaling {
+//     pub fn valid(&self) -> Result<(), Error> {
+//         let mut message = SignalingMessage::default();
+//         message.set_from(self.from());
+//         message.set_to(self.to());
+//         message.set_data(self.data());
+//         message.set_date(self.date());
+
+//         let signature = match self.signature() {
+//             Some(s) => bs58::decode(s).into_vec()?,
+//             None => return Err(Error::InvalidSignature),
+//         };
+
+//         verify_serde_sig(self.from(), &message, &signature)?;
+
+//         Ok(())
+//     }
+// }
 
 impl<T: IpfsTypes> Clone for WebrtcManager<T> {
     fn clone(&self) -> Self {
@@ -351,11 +372,7 @@ impl<T: IpfsTypes> WebrtcManager<T> {
 }
 
 impl<T: IpfsTypes> WebrtcManager<T> {
-    pub async fn send_signal(
-        &mut self,
-        pubkey: &DID,
-        signaling_data: &Vec<u8>,
-    ) -> Result<(), Error> {
+    pub async fn send_signal(&mut self, pubkey: &DID, payload: &String) -> Result<(), Error> {
         println!("Sending signal to: {}", pubkey);
 
         let (local_ipfs_public_key, _) = self.local().await?;
@@ -365,16 +382,18 @@ impl<T: IpfsTypes> WebrtcManager<T> {
             return Err(Error::CannotSendSelfFriendRequest);
         }
 
-        let mut signaling_message = SignalingMessage::default();
-        signaling_message.set_from(local_public_key);
-        signaling_message.set_to(pubkey.clone());
-        signaling_message.set_data(signaling_data.clone());
-        let signature =
-            bs58::encode(sign_serde(&self.tesseract, &signaling_message)?).into_string();
+        Ok(())
 
-        signaling_message.set_signature(signature);
+        // let mut signaling_message = SignalingMessage::default();
+        // signaling_message.set_from(local_public_key);
+        // signaling_message.set_to(pubkey.clone());
+        // signaling_message.set_data(payload.clone());
+        // let signature =
+        //     bs58::encode(sign_serde(&self.tesseract, &signaling_message)?).into_string();
 
-        self.broadcast_message(&signaling_message).await
+        // signaling_message.set_signature(signature);
+
+        // self.broadcast_message(&signaling_message).await
     }
 }
 
@@ -483,18 +502,18 @@ impl<T: IpfsTypes> WebrtcManager<T> {
 }
 
 fn validate_message(real_message: &SignalingMessage) -> Result<(), Error> {
-    let mut signaling_message = SignalingMessage::default();
-    signaling_message.set_from(real_message.from());
-    signaling_message.set_to(real_message.to());
-    signaling_message.set_date(real_message.date());
-    signaling_message.set_data(real_message.data());
+    // let mut signaling_message = SignalingMessage::default();
+    // signaling_message.set_from(real_message.from());
+    // signaling_message.set_to(real_message.to());
+    // signaling_message.set_date(real_message.date());
+    // signaling_message.set_data(real_message.data());
 
-    let signature = match real_message.signature() {
-        Some(s) => bs58::decode(s).into_vec()?,
-        None => return Err(Error::InvalidSignature),
-    };
+    // let signature = match real_message.signature() {
+    //     Some(s) => bs58::decode(s).into_vec()?,
+    //     None => return Err(Error::InvalidSignature),
+    // };
 
-    verify_serde_sig(real_message.from(), &signaling_message, &signature)?;
+    // verify_serde_sig(real_message.from(), &signaling_message, &signature)?;
     Ok(())
 }
 

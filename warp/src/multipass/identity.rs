@@ -297,6 +297,98 @@ impl Identity {
     Serialize, Deserialize, Debug, Clone, Hash, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
 )]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub struct Message {
+    /// The account where the request came from
+    from: DID,
+
+    /// The account where the request was sent to
+    to: DID,
+
+    /// Encoded message payload
+    payload: String,
+
+    /// Type
+    message_type: String,
+
+    /// Date of the request
+    date: DateTime<Utc>,
+
+    /// Signature of request
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signature: Option<String>,
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+impl Message {
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_from(&mut self, key: DID) {
+        self.from = key
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_to(&mut self, key: DID) {
+        self.to = key
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_payload(&mut self, payload: String) {
+        self.payload = payload
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_signature(&mut self, signature: String) {
+        self.signature = Some(signature);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn from(&self) -> DID {
+        self.from.clone()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn to(&self) -> DID {
+        self.to.clone()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn payload(&self) -> String {
+        self.payload.clone()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn signature(&self) -> Option<String> {
+        self.signature.clone()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Message {
+    pub fn set_date(&mut self, date: DateTime<Utc>) {
+        self.date = date
+    }
+
+    pub fn date(&self) -> DateTime<Utc> {
+        self.date
+    }
+}
+
+impl Default for Message {
+    fn default() -> Self {
+        Self {
+            from: Default::default(),
+            to: Default::default(),
+            payload: Default::default(),
+            message_type: Default::default(),
+            date: Utc::now(),
+            signature: None,
+        }
+    }
+}
+
+#[derive(
+    Serialize, Deserialize, Debug, Clone, Hash, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
+)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct FriendRequest {
     /// The account where the request came from
     from: DID,

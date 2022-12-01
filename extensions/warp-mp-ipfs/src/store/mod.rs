@@ -20,6 +20,7 @@ use self::{document::DocumentType, friends::InternalRequest};
 pub mod document;
 pub mod friends;
 pub mod identity;
+pub mod parsers;
 pub mod phonebook;
 pub mod webrtc;
 

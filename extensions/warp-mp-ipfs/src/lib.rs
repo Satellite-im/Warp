@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
-use store::webrtc::{SignalingMessage, WebrtcManager};
+use store::webrtc::WebrtcManager;
 use tokio::sync::broadcast;
 use tracing::log::{error, info, trace, warn};
 use warp::crypto::did_key::Generate;
@@ -35,8 +35,8 @@ use warp::multipass::identity::{
     FriendRequest, Identifier, Identity, IdentityUpdate, Relationship,
 };
 use warp::multipass::{
-    identity, Friends, FriendsEvent, IdentityInformation, MultiPass, MultiPassEventKind,
-    MultiPassEventStream, Signaling,
+    identity, Friends, FriendsEvent, IdentityInformation, Messaging, MultiPass, MultiPassEventKind,
+    MultiPassEventStream,
 };
 
 use crate::config::Bootstrap;
@@ -451,8 +451,8 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         true
     }
 
-    pub fn send_signal(&mut self, did: &DID, signaling_message: &Vec<u8>) -> Result<(), Error> {
-        self.send_message(did, signaling_message)
+    pub fn send_signal(&mut self, did: &DID, payload: &String) -> Result<(), Error> {
+        self.send_message(did, payload)
     }
 }
 
@@ -856,11 +856,11 @@ impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
     }
 }
 
-impl<T: IpfsTypes> Signaling for IpfsIdentity<T> {
-    fn send_message(&mut self, pubkey: &DID, data: &Vec<u8>) -> Result<(), Error> {
+impl<T: IpfsTypes> Messaging for IpfsIdentity<T> {
+    fn send_message(&mut self, pubkey: &DID, payload: &String) -> Result<(), Error> {
         println!("Sending message to {}", pubkey);
         let mut store = self.webrtc()?;
-        async_block_in_place_uncheck(store.send_signal(pubkey, data))
+        async_block_in_place_uncheck(store.send_signal(pubkey, payload))
     }
 }
 

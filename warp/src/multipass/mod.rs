@@ -1,6 +1,7 @@
 pub mod generator;
 pub mod identity;
 
+use did_key::CoreSign;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 use warp_derive::FFIFree;
@@ -9,7 +10,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::error::Error;
 use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
-
+// use crate::tesseract::Tesseract;
 use crate::{Extension, SingleHandle};
 use identity::Identity;
 
@@ -48,8 +49,82 @@ impl core::ops::DerefMut for MultiPassEventStream {
     }
 }
 
+// Note that this are temporary
+fn sign_serde<D: Serialize>(did: &DID, data: &D) -> anyhow::Result<Vec<u8>> {
+    let bytes = serde_json::to_vec(data)?;
+    Ok(did.as_ref().sign(&bytes))
+}
+
+// Note that this are temporary
+fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow::Result<()> {
+    let bytes = serde_json::to_vec(data)?;
+    pk.as_ref()
+        .verify(&bytes, signature)
+        .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PubsubMessage<T> {
+    pub from: DID,
+    pub to: DID,
+    pub message_type: String,
+    pub payload: T,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RawMessage {
+    pub from: DID,
+    pub to: DID,
+    pub message_type: String,
+    pub payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SignedMessage {
+    pub message: RawMessage,
+    pub signature: Vec<u8>,
+}
+
+impl SignedMessage {
+    pub fn verify(&self) -> bool {
+        verify_serde_sig(self.message.from.clone(), &self.message, &self.signature).is_ok()
+    }
+}
+
+trait Signable {
+    fn sign(&mut self) -> Result<SignedMessage, Error>;
+}
+
+trait Parsable<T> {
+    fn parse(&self) -> Result<PubsubMessage<T>, Error>;
+}
+
+impl<T> Signable for PubsubMessage<T>
+where
+    T: Serialize,
+{
+    fn sign(&mut self) -> Result<SignedMessage, Error> {
+        match serde_json::to_vec(&self.payload) {
+            Ok(payload) => {
+                let message = RawMessage {
+                    from: self.from.clone(),
+                    to: self.to.clone(),
+                    message_type: self.message_type.clone(),
+                    payload,
+                };
+
+                let signature = sign_serde(&self.from, &message)?;
+
+                Ok(SignedMessage { message, signature })
+            }
+            Err(_) => Err(Error::Unimplemented),
+        }
+    }
+}
+
 pub trait MultiPass:
-    Extension + IdentityInformation + Friends + FriendsEvent + Sync + Send + SingleHandle + Signaling
+    Extension + IdentityInformation + Friends + FriendsEvent + Sync + Send + SingleHandle + Messaging
 {
     /// Create an [`Identity`]
     fn create_identity(
@@ -106,9 +181,9 @@ where
     }
 }
 
-pub trait Signaling: Sync + Send {
+pub trait Messaging: Sync + Send {
     /// Send message to corresponding DID
-    fn send_message(&mut self, _: &DID, _: &Vec<u8>) -> Result<(), Error> {
+    fn send_message(&mut self, _: &DID, _: &String) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 }
@@ -202,12 +277,12 @@ pub trait FriendsEvent: Sync + Send {
     }
 }
 
-impl<T: ?Sized> Signaling for Arc<RwLock<Box<T>>>
+impl<T: ?Sized> Messaging for Arc<RwLock<Box<T>>>
 where
-    T: Signaling,
+    T: Messaging,
 {
-    fn send_message(&mut self, key: &DID, data: &Vec<u8>) -> Result<(), Error> {
-        self.write().send_message(key, data)
+    fn send_message(&mut self, key: &DID, payload: &String) -> Result<(), Error> {
+        self.write().send_message(key, payload)
     }
 }
 
