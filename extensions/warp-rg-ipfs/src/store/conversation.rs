@@ -1,21 +1,22 @@
 use chrono::{DateTime, Utc};
-use futures::{stream::FuturesOrdered, StreamExt};
+use futures::{stream::FuturesOrdered, Future, StreamExt};
 use ipfs::{Ipfs, IpfsTypes};
+use libipld::IpldCodec;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use uuid::Uuid;
 use warp::{
-    crypto::DID,
+    crypto::{Fingerprint, DID},
     error::Error,
     raygun::{Conversation, ConversationType, Message, MessageEventKind, MessageOptions},
-    sata::Sata,
+    sata::{Kind, Sata},
     sync::RwLock,
 };
 
 use tokio::sync::broadcast::{self, Sender as BroadcastSender};
 
-use super::document::DocumentType;
+use super::document::{DocumentType, ToDocument};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationDocument {
@@ -203,6 +204,45 @@ impl Ord for MessageDocument {
 }
 
 impl MessageDocument {
+    pub async fn get_mut<T: IpfsTypes, F, FN: FnOnce(Ipfs<T>, &mut Message) -> F>(
+        &mut self,
+        ipfs: Ipfs<T>,
+        did: Arc<DID>,
+        func: FN,
+    ) -> Result<(), Error>
+    where
+        F: Future + Send + 'static,
+        <F as Future>::Output: Serialize + Send + 'static,
+    {
+        let recipients = self.receipients(ipfs.clone()).await?;
+        let mut message = self.resolve(ipfs.clone(), did.clone()).await?;
+
+        let output = func(ipfs.clone(), &mut message).await;
+
+        let mut object = Sata::default();
+        for recipient in recipients.iter() {
+            object.add_recipient(recipient)?;
+        }
+
+        let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, output)?;
+
+        self.message = data.to_document(ipfs).await?;
+
+        Ok(())
+    }
+
+    pub async fn receipients<T: IpfsTypes>(&self, ipfs: Ipfs<T>) -> Result<Vec<DID>, Error> {
+        let data = self.message.resolve(ipfs, None).await?;
+        data.recipients()
+            .map(|list| {
+                list.iter()
+                    .map(|key| key.fingerprint())
+                    .filter_map(|key| DID::try_from(key).ok())
+                    .collect()
+            })
+            .ok_or(Error::PublicKeyInvalid)
+    }
+
     pub async fn resolve<T: IpfsTypes>(
         &self,
         ipfs: Ipfs<T>,

@@ -1,6 +1,9 @@
 use futures::{stream::FuturesOrdered, StreamExt};
 use ipfs::{Ipfs, IpfsPath, IpfsTypes};
-use libipld::{serde::{from_ipld, to_ipld}, Cid};
+use libipld::{
+    serde::{from_ipld, to_ipld},
+    Cid,
+};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::hash::Hash;
 use std::time::Duration;
@@ -12,14 +15,33 @@ use super::conversation::ConversationDocument;
 #[async_trait::async_trait]
 pub(crate) trait ToDocument<T: IpfsTypes>: Sized {
     async fn to_document(&self, ipfs: Ipfs<T>) -> Result<DocumentType<Self>, Error>;
-} 
+}
 
 #[async_trait::async_trait]
-impl<T, I: IpfsTypes> ToDocument<I> for T where T: Serialize + Clone + Send + Sync {
+#[allow(clippy::wrong_self_convention)]
+pub(crate) trait FromDocument<T: IpfsTypes, I> {
+    async fn from_document(&self, ipfs: Ipfs<T>) -> Result<I, Error>;
+}
+
+#[async_trait::async_trait]
+impl<T, I: IpfsTypes> ToDocument<I> for T
+where
+    T: Serialize + Clone + Send + Sync,
+{
     async fn to_document(&self, ipfs: Ipfs<I>) -> Result<DocumentType<T>, Error> {
         let ipld = to_ipld(self.clone()).map_err(anyhow::Error::from)?;
         let cid = ipfs.put_dag(ipld).await?;
         Ok(DocumentType::Cid(cid))
+    }
+}
+
+#[async_trait::async_trait]
+impl<T, I: IpfsTypes> FromDocument<I, T> for DocumentType<T>
+where
+    T: Sized + Send + Sync + Clone + DeserializeOwned,
+{
+    async fn from_document(&self, ipfs: Ipfs<I>) -> Result<T, Error> {
+        self.resolve(ipfs, None).await
     }
 }
 
