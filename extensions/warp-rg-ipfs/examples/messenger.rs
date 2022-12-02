@@ -377,7 +377,7 @@ async fn main() -> anyhow::Result<()> {
                         },
                         Some("/list") => {
                             let mut table = Table::new();
-                            table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Sender", "Message", "Pinned", "Reaction"]);
+                            table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
                             let local_topic = match cmd_line.next() {
                                 Some(id) => match Uuid::from_str(id) {
                                     Ok(uuid) => uuid,
@@ -418,6 +418,7 @@ async fn main() -> anyhow::Result<()> {
                                     &message.message_type().to_string(),
                                     &message.conversation_id().to_string(),
                                     &message.date().to_string(),
+                                    &message.modified().map(|d| d.to_string()).unwrap_or("N/A".into()),
                                     &username,
                                     &message.value().join("\n"),
                                     &format!("{}", message.pinned()),
@@ -427,20 +428,6 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "{}", table)?;
                         },
                         Some("/edit") => {
-                            let conversation_id = match cmd_line.next() {
-                                Some(id) => match Uuid::from_str(id) {
-                                    Ok(uuid) => uuid,
-                                    Err(e) => {
-                                        writeln!(stdout, "Error parsing ID: {}", e)?;
-                                        continue
-                                    }
-                                },
-                                None => {
-                                    writeln!(stdout, "/edit <conversation-id> <message-id> <message>")?;
-                                    continue
-                                }
-                            };
-
                             let message_id = match cmd_line.next() {
                                 Some(id) => match Uuid::from_str(id) {
                                     Ok(uuid) => uuid,
@@ -450,7 +437,7 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                 },
                                 None => {
-                                    writeln!(stdout, "/edit <conversation-id> <message-id> <message>")?;
+                                    writeln!(stdout, "/edit <message-id> <message>")?;
                                     continue
                                 }
                             };
@@ -462,7 +449,7 @@ async fn main() -> anyhow::Result<()> {
                             }
 
                             let message = vec![messages.join(" ").to_string()];
-
+                            let conversation_id = topic.read().clone();
                             if let Err(e) = chat.send(conversation_id, Some(message_id), message).await {
                                 writeln!(stdout, "Error: {}", e)?;
                                 continue
