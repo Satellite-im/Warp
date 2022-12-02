@@ -175,15 +175,17 @@ impl MessageOptions {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Hash, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
 pub enum ConversationType {
+    #[display(fmt = "direct")]
     Direct,
+    #[display(fmt = "group")]
     Group,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(Debug, Hash, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 pub struct Conversation {
     id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
