@@ -277,6 +277,11 @@ pub struct Message {
     /// Timestamp of the message
     date: DateTime<Utc>,
 
+    /// Timestamp of when message was modified
+    /// Note: Only applies if the message itself was modified and not
+    ///       related to being pinned, reacted, etc.
+    modified: Option<DateTime<Utc>>,
+
     /// Pin a message over other messages
     pinned: bool,
 
@@ -310,6 +315,7 @@ impl Default for Message {
             conversation_id: Uuid::nil(),
             sender: Default::default(),
             date: Utc::now(),
+            modified: None,
             pinned: false,
             reactions: Vec::new(),
             replied: None,
@@ -318,6 +324,18 @@ impl Default for Message {
             signature: Default::default(),
             metadata: HashMap::new(),
         }
+    }
+}
+
+impl PartialOrd for Message {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        self.date.partial_cmp(&other.date)
+    }
+}
+
+impl Ord for Message {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.date.cmp(&other.date)
     }
 }
 
@@ -347,6 +365,10 @@ impl Message {
 
     pub fn date(&self) -> DateTime<Utc> {
         self.date
+    }
+
+    pub fn modified(&self) -> Option<DateTime<Utc>> {
+        self.modified
     }
 
     pub fn pinned(&self) -> bool {
@@ -397,6 +419,10 @@ impl Message {
 
     pub fn set_date(&mut self, date: DateTime<Utc>) {
         self.date = date
+    }
+
+    pub fn set_modified(&mut self, date: DateTime<Utc>) {
+        self.modified = Some(date)
     }
 
     pub fn set_pinned(&mut self, pin: bool) {
