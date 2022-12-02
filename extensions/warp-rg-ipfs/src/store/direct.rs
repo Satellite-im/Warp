@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use chrono::Utc;
 use futures::{Stream, StreamExt};
 use ipfs::libp2p::swarm::dial_opts::DialOpts;
 use ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream};
@@ -1086,7 +1087,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let signature = super::sign_serde(&self.did, &construct)?;
 
-        let event = MessagingEvents::Edit(conversation.id(), message_id, messages, signature);
+        let event = MessagingEvents::Edit(conversation.id(), message_id, Utc::now(), messages, signature);
 
         direct_message_event(
             &mut conversation.messages_mut(),
@@ -1882,7 +1883,7 @@ pub fn direct_message_event(
                 error!("Error broadcasting event: {e}");
             }
         }
-        MessagingEvents::Edit(convo_id, message_id, val, signature) => {
+        MessagingEvents::Edit(convo_id, message_id, modified, val, signature) => {
             let index = messages
                 .iter()
                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
@@ -1942,6 +1943,7 @@ pub fn direct_message_event(
             //TODO: Validate signature.
             message.set_signature(Some(signature));
             *message.value_mut() = val;
+            message.set_modified(modified);
             if let Err(e) = tx.send(MessageEventKind::MessageEdited {
                 conversation_id: convo_id,
                 message_id,
