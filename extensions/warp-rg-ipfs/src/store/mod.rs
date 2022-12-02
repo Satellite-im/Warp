@@ -2,6 +2,7 @@ pub mod direct;
 
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use ipfs::{IpfsTypes, PeerId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -30,7 +31,7 @@ pub enum ConversationEvents {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessagingEvents {
     New(Message),
-    Edit(Uuid, Uuid, Vec<String>, Vec<u8>),
+    Edit(Uuid, Uuid, DateTime<Utc>, Vec<String>, Vec<u8>),
     Delete(Uuid, Uuid),
     Pin(Uuid, DID, Uuid, PinState),
     React(Uuid, DID, Uuid, ReactionState, String),
