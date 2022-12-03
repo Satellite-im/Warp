@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use futures::{stream::FuturesOrdered, Future, StreamExt};
+use futures::{stream::FuturesOrdered, StreamExt};
 use ipfs::{Ipfs, IpfsTypes};
 use libipld::IpldCodec;
 use serde::{Deserialize, Serialize};
@@ -9,16 +9,16 @@ use uuid::Uuid;
 use warp::{
     crypto::{Fingerprint, DID},
     error::Error,
-    raygun::{Conversation, ConversationType, Message, MessageEventKind, MessageOptions},
+    raygun::{Conversation, ConversationType, Message, MessageOptions},
     sata::{Kind, Sata},
-    sync::RwLock,
+};
+use core::hash::Hash;
+
+use super::{
+    document::{DocumentType, ToDocument},
 };
 
-use tokio::sync::broadcast::{self, Sender as BroadcastSender};
-
-use super::document::{DocumentType, ToDocument};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct ConversationDocument {
     pub id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -30,10 +30,16 @@ pub struct ConversationDocument {
     pub messages: BTreeSet<MessageDocument>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
-    #[serde(skip)]
-    task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
-    #[serde(skip)]
-    tx: Option<BroadcastSender<MessageEventKind>>,
+    // #[serde(skip)]
+    // task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
+    // #[serde(skip)]
+    // tx: Option<BroadcastSender<MessageEventKind>>,
+}
+
+impl Hash for ConversationDocument {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state)
+    }
 }
 
 impl PartialEq for ConversationDocument {
@@ -43,20 +49,97 @@ impl PartialEq for ConversationDocument {
 }
 
 impl ConversationDocument {
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn topic(&self) -> String {
+        format!("{}/{}", self.conversation_type, self.id())
+    }
+
+    pub fn recipients(&self) -> Vec<DID> {
+        self.recipients.clone()
+    }
+}
+
+// impl ConversationDocument {
+//     //TODO: Linked into DirectMessageStore
+//     pub fn start_task<T: IpfsTypes>(
+//         &mut self,
+//         store: DirectMessageStore<T>,
+//         did: Arc<DID>,
+//         filesystem: Option<Box<dyn Constellation>>,
+//         filter: &Arc<Option<SpamFilter>>,
+//         stream: SubscriptionStream,
+//     ) {
+//         let mut convo = self.clone();
+//         let filter = filter.clone();
+//         let tx = match self.tx.clone() {
+//             Some(tx) => tx,
+//             None => return,
+//         };
+
+//         let task = warp::async_spawn({
+//             let filesystem = filesystem;
+//             async move {
+//                 futures::pin_mut!(stream);
+
+//                 while let Some(stream) = stream.next().await {
+//                     if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
+//                         if let Ok(data) = data.decrypt::<Vec<u8>>(&did) {
+//                             if let Ok(event) = serde_json::from_slice::<MessagingEvents>(&data) {
+//                                 if let Err(e) = direct_message_event(
+//                                     store.clone(),
+//                                     &mut convo,
+//                                     filesystem.clone(),
+//                                     &event,
+//                                     filter.clone(),
+//                                     tx.clone(),
+//                                     MessageDirection::In,
+//                                     Default::default(),
+//                                 )
+//                                 .await
+//                                 {
+//                                     error!("Error processing message: {e}");
+//                                     continue;
+//                                 }
+//                             }
+//                         }
+//                     }
+//                 }
+//             }
+//         });
+//         *self.task.write() = Some(task);
+//     }
+
+//     pub fn end_task(&self) {
+//         if self.task.read().is_none() {
+//             return;
+//         }
+//         let task = std::mem::replace(&mut *self.task.write(), None);
+//         if let Some(task) = task {
+//             task.abort();
+//         }
+//     }
+// }
+
+impl ConversationDocument {
     pub fn new(
         did: &DID,
         mut recipients: Vec<DID>,
         id: Option<Uuid>,
         conversation_type: ConversationType,
     ) -> Result<Self, Error> {
-        let (tx, _) = broadcast::channel(1024);
-        let tx = Some(tx);
+        // let (tx, _) = broadcast::channel(1024);
+        // let tx = Some(tx);
 
         let id = id.unwrap_or_else(Uuid::new_v4);
         let name = None;
 
-        if !recipients.contains(did) {
+        if !recipients.contains(did) && recipients.len() == 1 {
             recipients.push(did.clone());
+        } else if recipients.contains(did) && recipients.len() == 1 {
+            return Err(Error::CannotCreateConversation);
         }
 
         if recipients.len() < 2 {
@@ -65,7 +148,7 @@ impl ConversationDocument {
             ));
         }
 
-        let task = Arc::new(Default::default());
+        // let task = Arc::new(Default::default());
         let messages = BTreeSet::new();
         Ok(Self {
             id,
@@ -74,8 +157,8 @@ impl ConversationDocument {
             creator: None,
             conversation_type,
             messages,
-            task,
-            tx,
+            // task,
+            // tx,
             signature: None,
         })
     }
@@ -204,27 +287,57 @@ impl Ord for MessageDocument {
 }
 
 impl MessageDocument {
-    pub async fn get_mut<T: IpfsTypes, F, FN: FnOnce(Ipfs<T>, &mut Message) -> F>(
-        &mut self,
+    pub async fn new<T: IpfsTypes>(
         ipfs: Ipfs<T>,
         did: Arc<DID>,
-        func: FN,
-    ) -> Result<(), Error>
-    where
-        F: Future + Send + 'static,
-        <F as Future>::Output: Serialize + Send + 'static,
-    {
-        let recipients = self.receipients(ipfs.clone()).await?;
-        let mut message = self.resolve(ipfs.clone(), did.clone()).await?;
-
-        let output = func(ipfs.clone(), &mut message).await;
+        recipients: Vec<DID>,
+        message: Message,
+    ) -> Result<Self, Error> {
+        let id = message.id();
+        let conversation_id = message.conversation_id();
+        let date = message.date();
 
         let mut object = Sata::default();
         for recipient in recipients.iter() {
             object.add_recipient(recipient)?;
         }
 
-        let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, output)?;
+        let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, message)?;
+        let document = MessageDocument {
+            id,
+            conversation_id,
+            date,
+            message: data.to_document(ipfs).await?,
+        };
+
+        Ok(document)
+    }
+
+    pub async fn update<T: IpfsTypes>(
+        &mut self,
+        ipfs: Ipfs<T>,
+        did: Arc<DID>,
+        message: Message,
+    ) -> Result<(), Error> {
+        let recipients = self.receipients(ipfs.clone()).await?;
+        let old_message = self.resolve(ipfs.clone(), did.clone()).await?;
+
+        if old_message.id() != message.id()
+            || old_message.conversation_id() != message.conversation_id()
+        {
+            return Err(Error::InvalidMessage);
+        }
+
+        if old_message == message {
+            return Err(Error::MessageFound);
+        }
+
+        let mut object = Sata::default();
+        for recipient in recipients.iter() {
+            object.add_recipient(recipient)?;
+        }
+
+        let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, message)?;
 
         self.message = data.to_document(ipfs).await?;
 

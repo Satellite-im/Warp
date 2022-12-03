@@ -5,6 +5,7 @@ use libipld::{
     Cid,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::collections::HashSet;
 use std::hash::Hash;
 use std::time::Duration;
 use uuid::Uuid;
@@ -103,8 +104,8 @@ impl<T> DocumentType<T> {
                     Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
                 }
             }
-            //This will resolve into a buffer that can be deserialize into T.
-            //Best not to use this to resolve a large file.
+            //Note: This wont be used here in messaging for files
+            //      but may be used for larger payloads
             DocumentType::UnixFS(cid, limit) => {
                 let fut = async {
                     let stream = ipfs
@@ -167,11 +168,20 @@ impl<T> From<Cid> for DocumentType<T> {
     }
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConversationRootDocument {
     pub did: DID,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub conversations: Vec<DocumentType<ConversationDocument>>,
+    #[serde(skip_serializing_if = "HashSet::is_empty")]
+    pub conversations: HashSet<DocumentType<ConversationDocument>>,
+}
+
+impl ConversationRootDocument {
+    pub fn new(did: DID) -> Self {
+        Self {
+            did,
+            conversations: Default::default(),
+        }
+    }
 }
 
 impl ConversationRootDocument {
@@ -180,9 +190,20 @@ impl ConversationRootDocument {
         ipfs: Ipfs<T>,
         conversation_id: Uuid,
     ) -> Result<ConversationDocument, Error> {
-        for document in self.conversations.iter() {
-            match document.resolve(ipfs.clone(), None).await {
-                Ok(document) if document.id == conversation_id => return Ok(document),
+        let document_type = self
+            .get_conversation_document(ipfs.clone(), conversation_id)
+            .await?;
+        document_type.resolve(ipfs, None).await
+    }
+
+    pub async fn get_conversation_document<T: IpfsTypes>(
+        &self,
+        ipfs: Ipfs<T>,
+        conversation_id: Uuid,
+    ) -> Result<DocumentType<ConversationDocument>, Error> {
+        for document_type in self.conversations.iter() {
+            match document_type.resolve(ipfs.clone(), None).await {
+                Ok(document) if document.id == conversation_id => return Ok(document_type.clone()),
                 _ => continue,
             }
         }
@@ -203,5 +224,42 @@ impl ConversationRootDocument {
         .await;
 
         Ok(list)
+    }
+
+    pub async fn remove_conversation<T: IpfsTypes>(
+        &mut self,
+        ipfs: Ipfs<T>,
+        conversation_id: Uuid,
+    ) -> Result<ConversationDocument, Error> {
+        let document_type = self
+            .get_conversation_document(ipfs.clone(), conversation_id)
+            .await?;
+
+        if !self.conversations.remove(&document_type) {
+            return Err(Error::InvalidConversation);
+        }
+
+        document_type.resolve(ipfs, None).await
+    }
+
+    pub async fn update_conversation<T: IpfsTypes>(
+        &mut self,
+        ipfs: Ipfs<T>,
+        conversation_id: Uuid,
+        document: ConversationDocument,
+    ) -> Result<(), Error> {
+        let document_type = self
+            .get_conversation_document(ipfs.clone(), conversation_id)
+            .await?;
+
+        if !self.conversations.remove(&document_type) {
+            return Err(Error::InvalidConversation);
+        }
+
+        let document = document.to_document(ipfs.clone()).await?;
+
+        self.conversations.insert(document);
+
+        Ok(())
     }
 }

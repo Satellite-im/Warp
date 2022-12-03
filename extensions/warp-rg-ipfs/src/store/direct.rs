@@ -1,17 +1,17 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use chrono::Utc;
-use futures::{Stream, StreamExt};
+use futures::{Future, Stream, StreamExt};
 use ipfs::libp2p::swarm::dial_opts::DialOpts;
-use ipfs::{Ipfs, IpfsPath, IpfsTypes, PeerId, SubscriptionStream};
+use ipfs::{Ipfs, IpfsPath, IpfsTypes, PeerId};
 
 use libipld::serde::{from_ipld, to_ipld};
-use libipld::{Cid, IpldCodec};
+use libipld::Cid;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
@@ -25,16 +25,17 @@ use warp::logging::tracing::log::{error, trace};
 use warp::logging::tracing::warn;
 use warp::multipass::MultiPass;
 use warp::raygun::{
-    Conversation, EmbedState, Location, Message, MessageEvent, MessageEventKind, MessageOptions,
-    MessageStatus, MessageType, PinState, RayGunEventKind, Reaction, ReactionState,
+    Conversation, ConversationType, EmbedState, Location, Message, MessageEvent, MessageEventKind,
+    MessageOptions, MessageStatus, MessageType, PinState, RayGunEventKind, Reaction, ReactionState,
 };
 use warp::sata::Sata;
-use warp::sync::{Arc, RwLock};
+use warp::sync::Arc;
 
 use crate::store::connected_to_peer;
 use crate::{Persistent, SpamFilter};
 
-use super::document::ConversationRootDocument;
+use super::conversation::{ConversationDocument, MessageDocument};
+use super::document::{ConversationRootDocument, ToDocument};
 use super::{
     did_to_libp2p_pub, topic_discovery, verify_serde_sig, ConversationEvents, MessagingEvents,
     DIRECT_BROADCAST,
@@ -48,7 +49,7 @@ pub struct DirectMessageStore<T: IpfsTypes> {
     path: Option<PathBuf>,
 
     // list of conversations
-    direct_conversation: Arc<RwLock<Vec<DirectConversation>>>,
+    // direct_conversation: Arc<RwLock<Vec<DirectConversation>>>,
 
     // conversation root cid
     root_cid: Arc<tokio::sync::RwLock<Option<Cid>>>,
@@ -58,6 +59,8 @@ pub struct DirectMessageStore<T: IpfsTypes> {
 
     // filesystem instance
     filesystem: Option<Box<dyn Constellation>>,
+
+    stream: Arc<tokio::sync::RwLock<HashMap<Uuid, BroadcastSender<MessageEventKind>>>>,
 
     // Queue
     queue: Arc<tokio::sync::RwLock<HashMap<DID, Vec<Queue>>>>,
@@ -82,7 +85,8 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
         Self {
             ipfs: self.ipfs.clone(),
             path: self.path.clone(),
-            direct_conversation: self.direct_conversation.clone(),
+            // direct_conversation: self.direct_conversation.clone(),
+            stream: self.stream.clone(),
             root_cid: self.root_cid.clone(),
             account: self.account.clone(),
             filesystem: self.filesystem.clone(),
@@ -98,249 +102,159 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
 }
 
 //TODO: Replace message storage with either ipld document or sqlite.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DirectConversation {
-    conversation: Arc<Conversation>,
-    #[serde(skip)]
-    path: Arc<RwLock<Option<PathBuf>>>,
-    messages: Arc<RwLock<Vec<Message>>>,
-    #[serde(skip)]
-    task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
-    #[serde(skip)]
-    tx: Option<BroadcastSender<MessageEventKind>>,
-}
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct DirectConversation {
+//     conversation: Arc<Conversation>,
+//     #[serde(skip)]
+//     path: Arc<RwLock<Option<PathBuf>>>,
+//     messages: Arc<RwLock<Vec<Message>>>,
+//     #[serde(skip)]
+//     task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
+//     #[serde(skip)]
+//     tx: Option<BroadcastSender<MessageEventKind>>,
+// }
 
-impl PartialEq for DirectConversation {
-    fn eq(&self, other: &Self) -> bool {
-        self.conversation.id() == other.conversation.id()
-            && self.conversation.recipients() == other.conversation.recipients()
-    }
-}
+// impl PartialEq for DirectConversation {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.conversation.id() == other.conversation.id()
+//             && self.conversation.recipients() == other.conversation.recipients()
+//     }
+// }
 
-impl DirectConversation {
-    pub fn new(did: &DID, recipients: [DID; 2]) -> Result<Self, Error> {
-        let (tx, _) = broadcast::channel(1024);
-        let tx = Some(tx);
-        let conversation_id = super::generate_shared_topic(
-            did,
-            recipients
-                .iter()
-                .filter(|peer| did.ne(peer))
-                .collect::<Vec<_>>()
-                .first()
-                .ok_or(Error::Other)?,
-            Some("direct-conversation"),
-        )?;
-        let conversation = Arc::new({
-            let mut conversation = Conversation::default();
-            conversation.set_id(conversation_id);
-            conversation.set_recipients(recipients.to_vec());
-            conversation
-        });
+// impl DirectConversation {
+//     pub fn new(did: &DID, recipients: [DID; 2]) -> Result<Self, Error> {
+//         let (tx, _) = broadcast::channel(1024);
+//         let tx = Some(tx);
+//         let conversation_id = super::generate_shared_topic(
+//             did,
+//             recipients
+//                 .iter()
+//                 .filter(|peer| did.ne(peer))
+//                 .collect::<Vec<_>>()
+//                 .first()
+//                 .ok_or(Error::Other)?,
+//             Some("direct-conversation"),
+//         )?;
+//         let conversation = Arc::new({
+//             let mut conversation = Conversation::default();
+//             conversation.set_id(conversation_id);
+//             conversation.set_recipients(recipients.to_vec());
+//             conversation
+//         });
 
-        let messages = Arc::new(Default::default());
-        let task = Arc::new(Default::default());
-        let path = Arc::new(Default::default());
-        Ok(Self {
-            conversation,
-            path,
-            messages,
-            task,
-            tx,
-        })
-    }
+//         let messages = Arc::new(Default::default());
+//         let task = Arc::new(Default::default());
+//         let path = Arc::new(Default::default());
+//         Ok(Self {
+//             conversation,
+//             path,
+//             messages,
+//             task,
+//             tx,
+//         })
+//     }
 
-    pub fn new_with_id(id: Uuid, recipients: [DID; 2]) -> Self {
-        let (tx, _) = broadcast::channel(1024);
-        let tx = Some(tx);
+//     pub fn new_with_id(id: Uuid, recipients: [DID; 2]) -> Self {
+//         let (tx, _) = broadcast::channel(1024);
+//         let tx = Some(tx);
 
-        let conversation = Arc::new({
-            let mut conversation = Conversation::default();
-            conversation.set_id(id);
-            conversation.set_recipients(recipients.to_vec());
-            conversation
-        });
-        let messages = Arc::new(Default::default());
-        let task = Arc::new(Default::default());
-        let path = Arc::new(Default::default());
-        Self {
-            conversation,
-            path,
-            messages,
-            task,
-            tx,
-        }
-    }
+//         let conversation = Arc::new({
+//             let mut conversation = Conversation::default();
+//             conversation.set_id(id);
+//             conversation.set_recipients(recipients.to_vec());
+//             conversation
+//         });
+//         let messages = Arc::new(Default::default());
+//         let task = Arc::new(Default::default());
+//         let path = Arc::new(Default::default());
+//         Self {
+//             conversation,
+//             path,
+//             messages,
+//             task,
+//             tx,
+//         }
+//     }
 
-    pub fn set_path<P: AsRef<Path>>(&mut self, path: P) {
-        let path = path.as_ref().to_path_buf();
-        *self.path.write() = Some(path);
-    }
+//     pub fn set_path<P: AsRef<Path>>(&mut self, path: P) {
+//         let path = path.as_ref().to_path_buf();
+//         *self.path.write() = Some(path);
+//     }
 
-    pub fn path(&self) -> Option<PathBuf> {
-        self.path.read().clone()
-    }
+//     pub fn path(&self) -> Option<PathBuf> {
+//         self.path.read().clone()
+//     }
 
-    pub async fn from_file<P: AsRef<Path>>(path: P, key: Option<&DID>) -> anyhow::Result<Self> {
-        let bytes = tokio::fs::read(&path).await?;
+//     pub async fn from_file<P: AsRef<Path>>(path: P, key: Option<&DID>) -> anyhow::Result<Self> {
+//         let bytes = tokio::fs::read(&path).await?;
 
-        let mut conversation: DirectConversation = match key {
-            Some(key) => {
-                let data: Sata = serde_json::from_slice(&bytes)?;
-                let bytes = data.decrypt::<Vec<u8>>(key.as_ref())?;
-                serde_json::from_slice(&bytes)?
-            }
-            None => serde_json::from_slice(&bytes)?,
-        };
-        let (tx, _) = broadcast::channel(1024);
-        conversation.tx = Some(tx);
+//         let mut conversation: DirectConversation = match key {
+//             Some(key) => {
+//                 let data: Sata = serde_json::from_slice(&bytes)?;
+//                 let bytes = data.decrypt::<Vec<u8>>(key.as_ref())?;
+//                 serde_json::from_slice(&bytes)?
+//             }
+//             None => serde_json::from_slice(&bytes)?,
+//         };
+//         let (tx, _) = broadcast::channel(1024);
+//         conversation.tx = Some(tx);
 
-        Ok(conversation)
-    }
+//         Ok(conversation)
+//     }
 
-    pub fn event_handle(&self) -> anyhow::Result<BroadcastSender<MessageEventKind>> {
-        self.tx
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("Sender is not available"))
-    }
+//     pub fn event_handle(&self) -> anyhow::Result<BroadcastSender<MessageEventKind>> {
+//         self.tx
+//             .clone()
+//             .ok_or_else(|| anyhow::anyhow!("Sender is not available"))
+//     }
 
-    pub async fn to_file(&self, key: Option<&DID>) -> anyhow::Result<()> {
-        if let Some(path) = self.path() {
-            let bytes = match key {
-                Some(key) => {
-                    let mut data = Sata::default();
-                    data.add_recipient(key.as_ref())?;
-                    let data = data.encrypt(
-                        IpldCodec::DagJson,
-                        key.as_ref(),
-                        warp::sata::Kind::Reference,
-                        serde_json::to_vec(self)?,
-                    )?;
-                    serde_json::to_vec(&data)?
-                }
-                None => serde_json::to_vec(&self)?,
-            };
+//     pub async fn to_file(&self, key: Option<&DID>) -> anyhow::Result<()> {
+//         if let Some(path) = self.path() {
+//             let bytes = match key {
+//                 Some(key) => {
+//                     let mut data = Sata::default();
+//                     data.add_recipient(key.as_ref())?;
+//                     let data = data.encrypt(
+//                         IpldCodec::DagJson,
+//                         key.as_ref(),
+//                         warp::sata::Kind::Reference,
+//                         serde_json::to_vec(self)?,
+//                     )?;
+//                     serde_json::to_vec(&data)?
+//                 }
+//                 None => serde_json::to_vec(&self)?,
+//             };
 
-            tokio::fs::write(path.join(self.id().to_string()), &bytes).await?;
-        }
-        Ok(())
-    }
+//             tokio::fs::write(path.join(self.id().to_string()), &bytes).await?;
+//         }
+//         Ok(())
+//     }
 
-    pub async fn delete(&self) -> anyhow::Result<()> {
-        if let Some(path) = self.path() {
-            let path = path.join(self.id().to_string());
-            if !path.is_file() {
-                anyhow::bail!(Error::InvalidFile);
-            }
-            tokio::fs::remove_file(path).await?;
-        }
-        Ok(())
-    }
+//     pub async fn delete(&self) -> anyhow::Result<()> {
+//         if let Some(path) = self.path() {
+//             let path = path.join(self.id().to_string());
+//             if !path.is_file() {
+//                 anyhow::bail!(Error::InvalidFile);
+//             }
+//             tokio::fs::remove_file(path).await?;
+//         }
+//         Ok(())
+//     }
 
-    pub fn conversation_stream(&self) -> anyhow::Result<impl Stream<Item = MessageEventKind>> {
-        let mut rx = self.event_handle()?.subscribe();
+//     pub fn conversation_stream(&self) -> anyhow::Result<impl Stream<Item = MessageEventKind>> {
+//         let mut rx = self.event_handle()?.subscribe();
 
-        Ok(async_stream::stream! {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => yield event,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                    Err(_) => {}
-                };
-            }
-        })
-    }
-}
-
-impl DirectConversation {
-    pub fn id(&self) -> Uuid {
-        self.conversation.id()
-    }
-
-    pub fn conversation(&self) -> Conversation {
-        (*self.conversation).clone()
-    }
-
-    pub fn topic(&self) -> String {
-        format!("direct/{}", self.id())
-    }
-
-    pub fn recipients(&self) -> Vec<DID> {
-        self.conversation.recipients()
-    }
-
-    pub fn messages(&self) -> Vec<Message> {
-        self.messages.read().clone()
-    }
-}
-
-impl DirectConversation {
-    pub fn messages_mut(&mut self) -> warp::sync::RwLockWriteGuard<Vec<Message>> {
-        self.messages.write()
-    }
-}
-
-impl DirectConversation {
-    pub fn start_task(
-        &mut self,
-        did: Arc<DID>,
-        filesystem: Option<Box<dyn Constellation>>,
-        decrypted: Arc<AtomicBool>,
-        filter: &Arc<Option<SpamFilter>>,
-        stream: SubscriptionStream,
-    ) {
-        let mut convo = self.clone();
-        let filter = filter.clone();
-        let tx = match self.tx.clone() {
-            Some(tx) => tx,
-            None => return,
-        };
-
-        let task = warp::async_spawn(async move {
-            futures::pin_mut!(stream);
-            let filesystem = filesystem;
-            while let Some(stream) = stream.next().await {
-                if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
-                    if let Ok(data) = data.decrypt::<Vec<u8>>(&did) {
-                        if let Ok(event) = serde_json::from_slice::<MessagingEvents>(&data) {
-                            if let Err(e) = direct_message_event(
-                                &mut convo.messages_mut(),
-                                filesystem.clone(),
-                                &event,
-                                &filter,
-                                tx.clone(),
-                                MessageDirection::In,
-                                Default::default(),
-                            ) {
-                                error!("Error processing message: {e}");
-                                continue;
-                            }
-
-                            if let Err(e) = convo
-                                .to_file((!decrypted.load(Ordering::SeqCst)).then_some(&*did))
-                                .await
-                            {
-                                error!("Error saving message: {e}");
-                                continue;
-                            }
-                        }
-                    }
-                }
-            }
-        });
-        *self.task.write() = Some(task);
-    }
-
-    pub fn end_task(&self) {
-        if self.task.read().is_none() {
-            return;
-        }
-        let task = std::mem::replace(&mut *self.task.write(), None);
-        if let Some(task) = task {
-            task.abort();
-        }
-    }
-}
+//         Ok(async_stream::stream! {
+//             loop {
+//                 match rx.recv().await {
+//                     Ok(event) => yield event,
+//                     Err(broadcast::error::RecvError::Closed) => break,
+//                     Err(_) => {}
+//                 };
+//             }
+//         })
+//     }
+// }
 
 #[allow(clippy::too_many_arguments)]
 impl<T: IpfsTypes> DirectMessageStore<T> {
@@ -369,7 +283,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 tokio::fs::create_dir_all(path).await?;
             }
         }
-        let direct_conversation = Arc::new(Default::default());
+        // let direct_conversation = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
         let root_cid = Arc::new(Default::default());
         let did = Arc::new(account.decrypt_private_key(None)?);
@@ -378,11 +292,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let store_decrypted = Arc::new(AtomicBool::new(store_decrypted));
         let allowed_unsigned_message = Arc::new(AtomicBool::new(allowed_unsigned_message));
         let with_friends = Arc::new(AtomicBool::new(with_friends));
+        let stream = Arc::new(Default::default());
 
-        let store = Self {
+        let mut store = Self {
             path,
             ipfs,
-            direct_conversation,
+            // direct_conversation,
+            stream,
             root_cid,
             account,
             filesystem,
@@ -395,7 +311,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             with_friends,
         };
 
+        if let Err(_e) = store.new_cid().await {}
         if let Some(path) = store.path.as_ref() {
+            if let Err(_e) = store.load_cid().await {}
             if let Err(_e) = store.load_queue().await {}
             if path.is_dir() {
                 for entry in std::fs::read_dir(path)? {
@@ -407,36 +325,36 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                             continue;
                         }
 
-                        match DirectConversation::from_file(
-                            &path_inner,
-                            (!store.store_decrypted.load(Ordering::SeqCst)).then_some(&*store.did),
-                        )
-                        .await
-                        {
-                            Ok(mut conversation) => {
-                                let stream =
-                                    match store.ipfs.pubsub_subscribe(conversation.topic()).await {
-                                        Ok(stream) => stream,
-                                        Err(e) => {
-                                            error!("Unable to subscribe to conversation: {e}");
-                                            continue;
-                                        }
-                                    };
+                        // match DirectConversation::from_file(
+                        //     &path_inner,
+                        //     (!store.store_decrypted.load(Ordering::SeqCst)).then_some(&*store.did),
+                        // )
+                        // .await
+                        // {
+                        //     Ok(mut conversation) => {
+                        //         let stream =
+                        //             match store.ipfs.pubsub_subscribe(conversation.topic()).await {
+                        //                 Ok(stream) => stream,
+                        //                 Err(e) => {
+                        //                     error!("Unable to subscribe to conversation: {e}");
+                        //                     continue;
+                        //                 }
+                        //             };
 
-                                conversation.set_path(path);
-                                conversation.start_task(
-                                    store.did.clone(),
-                                    store.filesystem.clone(),
-                                    store.store_decrypted.clone(),
-                                    &store.spam_filter,
-                                    stream,
-                                );
-                                store.direct_conversation.write().push(conversation);
-                            }
-                            Err(e) => {
-                                error!("Unable to load conversation: {e}");
-                            }
-                        };
+                        //         // conversation.set_path(path);
+                        //         // conversation.start_task(
+                        //         //     store.did.clone(),
+                        //         //     store.filesystem.clone(),
+                        //         //     store.store_decrypted.clone(),
+                        //         //     &store.spam_filter,
+                        //         //     stream,
+                        //         // );
+                        //         // store.direct_conversation.write().push(conversation);
+                        //     }
+                        //     Err(e) => {
+                        //         error!("Unable to load conversation: {e}");
+                        //     }
+                        // };
                     }
                 }
             }
@@ -511,8 +429,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 }
 
                 let list = [did.clone(), peer];
-                let mut convo = DirectConversation::new_with_id(id, list);
-                let stream = match self.ipfs.pubsub_subscribe(convo.topic()).await {
+                let convo = ConversationDocument::new_direct(did, list)?;
+                let _stream = match self.ipfs.pubsub_subscribe(convo.topic()).await {
                     Ok(stream) => stream,
                     Err(e) => {
                         error!("Error subscribing to conversation: {e}");
@@ -520,33 +438,21 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     }
                 };
 
-                convo.start_task(
-                    self.did.clone(),
-                    self.filesystem.clone(),
-                    self.store_decrypted.clone(),
-                    &self.spam_filter,
-                    stream,
-                );
-
-                if let Some(path) = self.path.as_ref() {
-                    convo.set_path(path);
-                    if let Err(e) = convo
-                        .to_file(
-                            (!self.store_decrypted.load(Ordering::SeqCst)).then_some(&*self.did),
-                        )
-                        .await
-                    {
-                        anyhow::bail!("Error saving conversation: {e}");
-                    }
-                }
+                // convo.start_task(
+                //     self.did.clone(),
+                //     self.filesystem.clone(),
+                //     self.store_decrypted.clone(),
+                //     &self.spam_filter,
+                //     stream,
+                // );
 
                 if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
-                    conversation_id: convo.conversation().id(),
+                    conversation_id: convo.id(),
                 }) {
                     error!("Error broadcasting event: {e}");
                 }
 
-                self.direct_conversation.write().push(convo);
+                // self.direct_conversation.write().push(convo);
             }
             ConversationEvents::DeleteConversation(id) => {
                 trace!("Delete conversation event received for {id}");
@@ -559,43 +465,43 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     None => return Ok(()),
                 };
 
-                match self.get_conversation(id) {
+                match self.get_conversation(id).await {
                     Ok(conversation) if conversation.recipients().contains(&sender) => {}
                     _ => {
                         anyhow::bail!("Conversation exist but did not match condition required");
                     }
                 };
 
-                let index = self
-                    .direct_conversation
-                    .read()
-                    .iter()
-                    .position(|convo| convo.id() == id);
+                // let index = self
+                //     .direct_conversation
+                //     .read()
+                //     .iter()
+                //     .position(|convo| convo.id() == id);
 
-                if let Some(index) = index {
-                    let conversation = self.direct_conversation.write().remove(index);
+                // if let Some(index) = index {
+                //     let conversation = self.direct_conversation.write().remove(index);
 
-                    conversation.end_task();
+                //     // conversation.end_task();
 
-                    let topic = conversation.topic();
+                //     let topic = conversation.topic();
 
-                    //Note needed as we ran `conversation.end_task();` which would unsubscribe from the topic
-                    //after dropping the stream, but this serves as a secondary precaution
-                    if self.ipfs.pubsub_unsubscribe(&topic).await.is_ok() {
-                        warn!("topic should have been unsubscribed after dropping conversation.");
-                    }
+                //     //Note needed as we ran `conversation.end_task();` which would unsubscribe from the topic
+                //     //after dropping the stream, but this serves as a secondary precaution
+                //     if self.ipfs.pubsub_unsubscribe(&topic).await.is_ok() {
+                //         warn!("topic should have been unsubscribed after dropping conversation.");
+                //     }
 
-                    if let Err(e) = conversation.delete().await {
-                        error!("Error deleting conversation: {e}");
-                    }
-                    drop(conversation);
-                    if let Err(e) = self.event.send(RayGunEventKind::ConversationDeleted {
-                        conversation_id: id,
-                    }) {
-                        error!("Error broadcasting event: {e}");
-                    }
-                    trace!("Conversation deleted");
-                }
+                //     if let Err(e) = conversation.delete().await {
+                //         error!("Error deleting conversation: {e}");
+                //     }
+                //     drop(conversation);
+                //     if let Err(e) = self.event.send(RayGunEventKind::ConversationDeleted {
+                //         conversation_id: id,
+                //     }) {
+                //         error!("Error broadcasting event: {e}");
+                //     }
+                //     trace!("Conversation deleted");
+                // }
             }
         }
         Ok(())
@@ -677,6 +583,18 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         (self.root_cid.read().await.clone()).ok_or(Error::Other)
     }
 
+    pub async fn new_cid(&mut self) -> Result<(), Error> {
+        if let Some(path) = self.path.as_ref() {
+            if path.join(".conversation_id").is_file() {
+                return Ok(());
+            }
+        }
+
+        let new_root = ConversationRootDocument::new((*self.did).clone());
+        self.set_root_document(new_root).await?;
+        Ok(())
+    }
+
     pub async fn load_cid(&self) -> Result<(), Error> {
         if let Some(path) = self.path.as_ref() {
             if let Ok(cid_str) = tokio::fs::read(path.join(".conversation_id"))
@@ -699,15 +617,34 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         &mut self,
         document: ConversationRootDocument,
     ) -> Result<(), Error> {
-        let old_cid = self.get_cid().await?;
+        let old_cid = self.get_cid().await.ok();
 
         let root_cid = self.put_dag(document).await?;
-        if self.ipfs.is_pinned(&old_cid).await? {
-            self.ipfs.remove_pin(&old_cid, true).await?;
+        if let Some(old_cid) = old_cid {
+            if self.ipfs.is_pinned(&old_cid).await? {
+                self.ipfs.remove_pin(&old_cid, true).await?;
+            }
         }
 
         self.ipfs.insert_pin(&root_cid, true).await?;
         self.save_cid(root_cid).await?;
+        Ok(())
+    }
+
+    pub async fn root_document_mut<F, FN: FnOnce(&mut Self, &mut ConversationRootDocument) -> F>(
+        &mut self,
+        func: FN,
+    ) -> Result<(), Error>
+    where
+        F: Future + Send + 'static,
+        <F as Future>::Output: Serialize + Send + 'static,
+    {
+        let mut document = self.get_root_document().await?;
+
+        func(self, &mut document).await;
+
+        self.set_root_document(document).await?;
+
         Ok(())
     }
 
@@ -740,57 +677,67 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             return Err(Error::PublicKeyIsBlocked);
         }
 
-        let own_did = &*self.did;
+        let own_did = &*(self.did.clone());
 
         if did_key == own_did {
             return Err(Error::CannotCreateConversation);
         }
 
-        for convo in &*self.direct_conversation.read() {
-            if convo.recipients().contains(did_key) && convo.recipients().contains(own_did) {
-                return Err(Error::ConversationExist {
-                    conversation: convo.conversation(),
-                });
-            }
+        if let Some(conversation) = self
+            .list_conversations()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .find(|conversation| {
+                conversation.conversation_type() == ConversationType::Direct
+                    && conversation.recipients().contains(did_key)
+                    && conversation.recipients().contains(own_did)
+            })
+            .cloned()
+        {
+            return Err(Error::ConversationExist { conversation });
         }
 
         //Temporary limit
-        if self.direct_conversation.read().len() >= 32 {
+        if self.list_conversations().await.unwrap_or_default().len() >= 32 {
             return Err(Error::ConversationLimitReached);
         }
 
-        if let Ok(list) = self.account.get_identity(did_key.clone().into()) {
-            if list.is_empty() {
-                warn!("Unable to find identity. Creating conversation anyway");
+        tokio::spawn({
+            let account = self.account.clone();
+            let did = did_key.clone();
+            async move {
+                if let Ok(list) = account.get_identity(did.into()) {
+                    if list.is_empty() {
+                        warn!("Unable to find identity. Creating conversation anyway");
+                    }
+                }
             }
-        }
+        });
 
-        let mut conversation =
-            DirectConversation::new(own_did, [own_did.clone(), did_key.clone()])?;
+        let conversation =
+            ConversationDocument::new_direct(own_did, [own_did.clone(), did_key.clone()])?;
 
         let convo_id = conversation.id();
         let topic = conversation.topic();
 
-        let stream = self.ipfs.pubsub_subscribe(topic).await?;
+        let _stream = self.ipfs.pubsub_subscribe(topic).await?;
 
-        conversation.start_task(
-            self.did.clone(),
-            self.filesystem.clone(),
-            self.store_decrypted.clone(),
-            &self.spam_filter,
-            stream,
-        );
-        if let Some(path) = self.path.as_ref() {
-            conversation.set_path(path);
-            warp::async_block_in_place_uncheck(
-                conversation
-                    .to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
-            )?;
-        }
+        // conversation.start_task(
+        //     self.clone(),
+        //     self.did.clone(),
+        //     self.filesystem.clone(),
+        //     &self.spam_filter,
+        //     stream,
+        // );
 
-        let raw_convo = conversation.conversation();
+        let raw_convo = Conversation::from(&conversation);
 
-        self.direct_conversation.write().push(conversation);
+        let mut root_document = self.get_root_document().await?;
+        root_document
+            .conversations
+            .insert(conversation.to_document(self.ipfs.clone()).await?);
+        self.set_root_document(root_document).await?;
 
         let peers = self
             .ipfs
@@ -847,20 +794,18 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
     pub async fn delete_conversation(
         &mut self,
-        conversation: Uuid,
+        conversation_id: Uuid,
         broadcast: bool,
-    ) -> Result<DirectConversation, Error> {
-        let index = self
-            .direct_conversation
-            .read()
-            .iter()
-            .position(|convo| convo.id() == conversation)
-            .ok_or(Error::InvalidConversation)?;
+    ) -> Result<ConversationDocument, Error> {
+        let mut root = self.get_root_document().await?;
 
-        let conversation = self.direct_conversation.write().remove(index);
-        conversation.end_task();
+        let document_type = root
+            .remove_conversation(self.ipfs.clone(), conversation_id)
+            .await?;
+
+        // conversation.end_task();
         if broadcast {
-            let recipients = conversation.recipients();
+            let recipients = document_type.recipients();
 
             let own_did = &*self.did;
 
@@ -879,7 +824,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 libipld::IpldCodec::DagJson,
                 own_did.as_ref(),
                 warp::sata::Kind::Reference,
-                serde_json::to_vec(&ConversationEvents::DeleteConversation(conversation.id()))?,
+                serde_json::to_vec(&ConversationEvents::DeleteConversation(document_type.id()))?,
             )?;
 
             let peers = self
@@ -904,7 +849,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                             .queue_event(
                                 recipient.clone(),
                                 Queue::direct(
-                                    conversation.id(),
+                                    document_type.id(),
                                     None,
                                     peer_id,
                                     DIRECT_BROADCAST.into(),
@@ -922,7 +867,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                         .queue_event(
                             recipient.clone(),
                             Queue::direct(
-                                conversation.id(),
+                                document_type.id(),
                                 None,
                                 peer_id,
                                 DIRECT_BROADCAST.into(),
@@ -937,12 +882,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             };
         }
         if let Err(e) = self.event.send(RayGunEventKind::ConversationDeleted {
-            conversation_id: conversation.id(),
+            conversation_id: document_type.id(),
         }) {
             error!("Error broadcasting event: {e}");
         }
-        warp::async_block_in_place_uncheck(conversation.delete())?;
-        Ok(conversation)
+        // warp::async_block_in_place_uncheck(conversation.delete())?;
+        Ok(document_type)
     }
 
     pub async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
@@ -980,7 +925,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     ) -> Result<MessageStatus, Error> {
         self.get_message(conversation_id, message_id).await?;
 
-        let conversation = self.get_conversation(conversation_id)?;
+        let conversation = self.get_conversation(conversation_id).await?;
 
         let own_did = &*self.did;
 
@@ -1034,30 +979,60 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         false
     }
 
-    pub fn get_conversation(&self, conversation: Uuid) -> Result<DirectConversation, Error> {
-        self.direct_conversation
-            .read()
-            .iter()
-            .position(|convo| convo.id() == conversation)
-            .and_then(|index| self.direct_conversation.read().get(index).cloned())
-            .ok_or(Error::InvalidConversation)
+    pub async fn get_conversation(
+        &self,
+        conversation_id: Uuid,
+    ) -> Result<ConversationDocument, Error> {
+        let root = self.get_root_document().await?;
+        root.get_conversation(self.ipfs.clone(), conversation_id)
+            .await
     }
 
-    pub fn get_conversation_stream(
+    pub async fn get_conversation_sender(
         &self,
-        conversation: Uuid,
+        conversation_id: Uuid,
+    ) -> Result<BroadcastSender<MessageEventKind>, Error> {
+        let tx = self
+            .stream
+            .read()
+            .await
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?
+            .clone();
+        Ok(tx)
+    }
+
+    pub async fn get_conversation_stream(
+        &self,
+        conversation_id: Uuid,
     ) -> Result<impl Stream<Item = MessageEventKind>, Error> {
-        let conversation = self.get_conversation(conversation)?;
-        conversation.conversation_stream().map_err(Error::from)
+        let mut rx = self
+            .stream
+            .read()
+            .await
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?
+            .subscribe();
+
+        Ok(async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        })
     }
 
     pub async fn send_message(
         &mut self,
-        conversation: Uuid,
+        conversation_id: Uuid,
         messages: Vec<String>,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation)?;
-        let tx = conversation.event_handle()?;
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        let tx = self.get_conversation_sender(conversation_id).await?;
+
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
         }
@@ -1106,17 +1081,16 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::New(message);
 
         direct_message_event(
-            &mut conversation.messages_mut(),
+            self.clone(),
+            &mut conversation,
             None,
             &event,
-            &self.spam_filter,
+            self.spam_filter.clone(),
             tx,
             MessageDirection::Out,
             Default::default(),
-        )?;
-        warp::async_block_in_place_uncheck(
-            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
-        )?;
+        )
+        .await?;
 
         self.send_raw_event(conversation.id(), Some(message_id), event, true)
             .await
@@ -1124,12 +1098,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
     pub async fn edit_message(
         &mut self,
-        conversation: Uuid,
+        conversation_id: Uuid,
         message_id: Uuid,
         messages: Vec<String>,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation)?;
-        let tx = conversation.event_handle()?;
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        let tx = self.get_conversation_sender(conversation_id).await?;
 
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
@@ -1167,33 +1141,38 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let signature = super::sign_serde(&self.did, &construct)?;
 
-        let event = MessagingEvents::Edit(conversation.id(), message_id, Utc::now(), messages, signature);
+        let event = MessagingEvents::Edit(
+            conversation.id(),
+            message_id,
+            Utc::now(),
+            messages,
+            signature,
+        );
 
         direct_message_event(
-            &mut conversation.messages_mut(),
+            self.clone(),
+            &mut conversation,
             None,
             &event,
-            &self.spam_filter,
+            self.spam_filter.clone(),
             tx,
             MessageDirection::Out,
             Default::default(),
-        )?;
-        warp::async_block_in_place_uncheck(
-            conversation
-                .to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(&*self.did)),
-        )?;
+        )
+        .await?;
+
         self.send_raw_event(conversation.id(), None, event, true)
             .await
     }
 
     pub async fn reply_message(
         &mut self,
-        conversation: Uuid,
+        conversation_id: Uuid,
         message_id: Uuid,
         messages: Vec<String>,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation)?;
-        let tx = conversation.event_handle()?;
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        let tx = self.get_conversation_sender(conversation_id).await?;
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
         }
@@ -1240,17 +1219,16 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let event = MessagingEvents::New(message);
         direct_message_event(
-            &mut conversation.messages_mut(),
+            self.clone(),
+            &mut conversation,
             None,
             &event,
-            &self.spam_filter,
+            self.spam_filter.clone(),
             tx,
             MessageDirection::Out,
             Default::default(),
-        )?;
-        warp::async_block_in_place_uncheck(
-            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
-        )?;
+        )
+        .await?;
 
         self.send_raw_event(conversation.id(), None, event, true)
             .await
@@ -1258,26 +1236,24 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
     pub async fn delete_message(
         &mut self,
-        conversation: Uuid,
+        conversation_id: Uuid,
         message_id: Uuid,
         broadcast: bool,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation)?;
-        let tx = conversation.event_handle()?;
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        let tx = self.get_conversation_sender(conversation_id).await?;
         let event = MessagingEvents::Delete(conversation.id(), message_id);
         direct_message_event(
-            &mut conversation.messages_mut(),
+            self.clone(),
+            &mut conversation,
             None,
             &event,
-            &self.spam_filter,
+            self.spam_filter.clone(),
             tx,
             MessageDirection::Out,
             Default::default(),
-        )?;
-        warp::async_block_in_place_uncheck(
-            conversation
-                .to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(&*self.did)),
-        )?;
+        )
+        .await?;
 
         if broadcast {
             self.send_raw_event(conversation.id(), None, event, true)
@@ -1289,27 +1265,26 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
     pub async fn pin_message(
         &mut self,
-        conversation: Uuid,
+        conversation_id: Uuid,
         message_id: Uuid,
         state: PinState,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation)?;
-        let tx = conversation.event_handle()?;
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        let tx = self.get_conversation_sender(conversation_id).await?;
         let own_did = &*self.did;
 
         let event = MessagingEvents::Pin(conversation.id(), own_did.clone(), message_id, state);
         direct_message_event(
-            &mut conversation.messages_mut(),
+            self.clone(),
+            &mut conversation,
             None,
             &event,
-            &self.spam_filter,
+            self.spam_filter.clone(),
             tx,
             MessageDirection::Out,
             Default::default(),
-        )?;
-        warp::async_block_in_place_uncheck(
-            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
-        )?;
+        )
+        .await?;
 
         self.send_raw_event(conversation.id(), None, event, true)
             .await
@@ -1327,30 +1302,30 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
     pub async fn react(
         &mut self,
-        conversation: Uuid,
+        conversation_id: Uuid,
         message_id: Uuid,
         state: ReactionState,
         emoji: String,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation)?;
-        let tx = conversation.event_handle()?;
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        let tx = self.get_conversation_sender(conversation_id).await?;
         let own_did = &*self.did;
 
         let event =
             MessagingEvents::React(conversation.id(), own_did.clone(), message_id, state, emoji);
 
         direct_message_event(
-            &mut conversation.messages_mut(),
+            self.clone(),
+            &mut conversation,
             None,
             &event,
-            &self.spam_filter,
+            self.spam_filter.clone(),
             tx,
             MessageDirection::Out,
             Default::default(),
-        )?;
-        warp::async_block_in_place_uncheck(
-            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
-        )?;
+        )
+        .await?;
+
         self.send_raw_event(conversation.id(), None, event, true)
             .await
     }
@@ -1359,13 +1334,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     //TODO: Return a vector of streams for events of progression for uploading (possibly passing it through to raygun events)
     pub async fn attach(
         &mut self,
-        conversation: Uuid,
+        conversation_id: Uuid,
         location: Location,
         files: Vec<PathBuf>,
         messages: Vec<String>,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation)?;
-        let tx = conversation.event_handle()?;
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        let tx = self.get_conversation_sender(conversation_id).await?;
 
         //TODO: Send directly if constellation isnt present
         //      this will require uploading to ipfs directly from here
@@ -1520,17 +1495,16 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let event = MessagingEvents::New(message);
 
         direct_message_event(
-            &mut conversation.messages_mut(),
+            self.clone(),
+            &mut conversation,
             None,
             &event,
-            &self.spam_filter,
+            self.spam_filter.clone(),
             tx,
             MessageDirection::Out,
             Default::default(),
-        )?;
-        warp::async_block_in_place_uncheck(
-            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
-        )?;
+        )
+        .await?;
 
         self.send_raw_event(conversation.id(), None, event, true)
             .await
@@ -1694,24 +1668,24 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation_id)?;
-        let tx = conversation.event_handle()?;
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        let tx = self.get_conversation_sender(conversation_id).await?;
         let own_did = &*self.did;
 
         let event = MessagingEvents::Event(conversation.id(), own_did.clone(), event, false);
 
         direct_message_event(
-            &mut conversation.messages_mut(),
+            self.clone(),
+            &mut conversation,
             None,
             &event,
-            &self.spam_filter,
+            self.spam_filter.clone(),
             tx,
             MessageDirection::Out,
             Default::default(),
-        )?;
-        warp::async_block_in_place_uncheck(
-            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
-        )?;
+        )
+        .await?;
+
         self.send_raw_event(conversation.id(), None, event, false)
             .await
     }
@@ -1721,24 +1695,24 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation_id: Uuid,
         event: MessageEvent,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation_id)?;
-        let tx = conversation.event_handle()?;
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        let tx = self.get_conversation_sender(conversation_id).await?;
         let own_did = &*self.did;
 
         let event = MessagingEvents::Event(conversation.id(), own_did.clone(), event, true);
 
         direct_message_event(
-            &mut conversation.messages_mut(),
+            self.clone(),
+            &mut conversation,
             None,
             &event,
-            &self.spam_filter,
+            self.spam_filter.clone(),
             tx,
             MessageDirection::Out,
             Default::default(),
-        )?;
-        warp::async_block_in_place_uncheck(
-            conversation.to_file((!self.store_decrypted.load(Ordering::SeqCst)).then_some(own_did)),
-        )?;
+        )
+        .await?;
+
         self.send_raw_event(conversation.id(), None, event, false)
             .await
     }
@@ -1750,7 +1724,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         event: S,
         queue: bool,
     ) -> Result<(), Error> {
-        let conversation = self.get_conversation(conversation)?;
+        let conversation = self.get_conversation(conversation).await?;
 
         let recipients = conversation.recipients();
 
@@ -1869,20 +1843,27 @@ pub enum MessageDirection {
     Out,
 }
 
-pub fn direct_message_event(
-    messages: &mut Vec<Message>,
+#[allow(clippy::too_many_arguments)]
+pub async fn direct_message_event<'a, T: IpfsTypes>(
+    store: DirectMessageStore<T>,
+    document: &'a mut ConversationDocument,
     filesystem: Option<Box<dyn Constellation>>,
-    events: &MessagingEvents,
-    filter: &Arc<Option<SpamFilter>>,
+    events: &'a MessagingEvents,
+    filter: Arc<Option<SpamFilter>>,
     tx: BroadcastSender<MessageEventKind>,
     direction: MessageDirection,
     opt: EventOpt,
 ) -> Result<(), Error> {
     match events.clone() {
         MessagingEvents::New(mut message) => {
-            if messages.contains(&message) {
+            if document
+                .messages
+                .iter()
+                .any(|message_document| message_document.id == message.id())
+            {
                 return Err(Error::MessageFound);
             }
+
             let lines_value_length: usize = message
                 .value()
                 .iter()
@@ -1920,7 +1901,7 @@ pub fn direct_message_event(
             spam_check(&mut message, filter)?;
             let conversation_id = message.conversation_id();
 
-            messages.push(message.clone());
+            // messages.push(message.clone());
 
             if message.message_type() == MessageType::Attachment
                 && direction == MessageDirection::In
@@ -1948,14 +1929,26 @@ pub fn direct_message_event(
                 }
             }
 
+            let message_id = message.id();
+
+            let message_document = MessageDocument::new(
+                store.ipfs.clone(),
+                store.did.clone(),
+                document.recipients(),
+                message,
+            )
+            .await?;
+
+            document.messages.insert(message_document);
+
             let event = match direction {
                 MessageDirection::In => MessageEventKind::MessageReceived {
                     conversation_id,
-                    message_id: message.id(),
+                    message_id,
                 },
                 MessageDirection::Out => MessageEventKind::MessageSent {
                     conversation_id,
-                    message_id: message.id(),
+                    message_id,
                 },
             };
 
@@ -1964,12 +1957,16 @@ pub fn direct_message_event(
             }
         }
         MessagingEvents::Edit(convo_id, message_id, modified, val, signature) => {
-            let index = messages
+            let mut message_document = document
+                .messages
                 .iter()
-                .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
+                .find(|document| document.id == message_id && document.conversation_id == convo_id)
+                .cloned()
                 .ok_or(Error::MessageNotFound)?;
 
-            let message = messages.get_mut(index).ok_or(Error::MessageNotFound)?;
+            let mut message = message_document
+                .resolve(store.ipfs.clone(), store.did.clone())
+                .await?;
 
             let lines_value_length: usize = val
                 .iter()
@@ -2024,6 +2021,11 @@ pub fn direct_message_event(
             message.set_signature(Some(signature));
             *message.value_mut() = val;
             message.set_modified(modified);
+
+            message_document
+                .update(store.ipfs.clone(), store.did.clone(), message)
+                .await?;
+
             if let Err(e) = tx.send(MessageEventKind::MessageEdited {
                 conversation_id: convo_id,
                 message_id,
@@ -2032,13 +2034,17 @@ pub fn direct_message_event(
             }
         }
         MessagingEvents::Delete(convo_id, message_id) => {
-            let index = messages
+            let message_document = document
+                .messages
                 .iter()
-                .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
+                .cloned()
+                .find(|document| document.id == message_id && document.conversation_id == convo_id)
                 .ok_or(Error::MessageNotFound)?;
 
             if opt.keep_if_owned.load(Ordering::SeqCst) {
-                let message = messages.get(index).ok_or(Error::MessageNotFound)?;
+                let message = message_document
+                    .resolve(store.ipfs.clone(), store.did.clone())
+                    .await?;
                 let signature = message.signature();
                 let sender = message.sender();
                 let construct = vec![
@@ -2056,21 +2062,26 @@ pub fn direct_message_event(
                 verify_serde_sig(sender, &construct, &signature)?;
             }
 
-            let _ = messages.remove(index);
-            if let Err(e) = tx.send(MessageEventKind::MessageDeleted {
-                conversation_id: convo_id,
-                message_id,
-            }) {
-                error!("Error broadcasting event: {e}");
+            if document.messages.remove(&message_document) {
+                if let Err(e) = tx.send(MessageEventKind::MessageDeleted {
+                    conversation_id: convo_id,
+                    message_id,
+                }) {
+                    error!("Error broadcasting event: {e}");
+                }
             }
         }
         MessagingEvents::Pin(convo_id, _, message_id, state) => {
-            let index = messages
+            let mut message_document = document
+                .messages
                 .iter()
-                .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
+                .find(|document| document.id == message_id && document.conversation_id == convo_id)
+                .cloned()
                 .ok_or(Error::MessageNotFound)?;
 
-            let message = messages.get_mut(index).ok_or(Error::MessageNotFound)?;
+            let mut message = message_document
+                .resolve(store.ipfs.clone(), store.did.clone())
+                .await?;
 
             let event = match state {
                 PinState::Pin => {
@@ -2089,17 +2100,25 @@ pub fn direct_message_event(
                 }
             };
 
+            message_document
+                .update(store.ipfs.clone(), store.did.clone(), message)
+                .await?;
+
             if let Err(e) = tx.send(event) {
                 error!("Error broadcasting event: {e}");
             }
         }
         MessagingEvents::React(convo_id, sender, message_id, state, emoji) => {
-            let index = messages
+            let mut message_document = document
+                .messages
                 .iter()
-                .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
+                .find(|document| document.id == message_id && document.conversation_id == convo_id)
+                .cloned()
                 .ok_or(Error::MessageNotFound)?;
 
-            let message = messages.get_mut(index).ok_or(Error::MessageNotFound)?;
+            let mut message = message_document
+                .resolve(store.ipfs.clone(), store.did.clone())
+                .await?;
 
             let reactions = message.reactions_mut();
 
@@ -2130,6 +2149,11 @@ pub fn direct_message_event(
                     let reaction = reactions.get_mut(index).ok_or(Error::MessageNotFound)?;
 
                     reaction.users_mut().push(sender.clone());
+
+                    message_document
+                        .update(store.ipfs.clone(), store.did.clone(), message)
+                        .await?;
+
                     if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
                         conversation_id: convo_id,
                         message_id,
@@ -2160,6 +2184,11 @@ pub fn direct_message_event(
                     if reaction.users().is_empty() {
                         //Since there is no users listed under the emoji, the reaction should be removed from the message
                         reactions.remove(index);
+
+                        message_document
+                            .update(store.ipfs.clone(), store.did.clone(), message)
+                            .await?;
+
                         if let Err(e) = tx.send(MessageEventKind::MessageReactionRemoved {
                             conversation_id: convo_id,
                             message_id,
@@ -2195,6 +2224,332 @@ pub fn direct_message_event(
     Ok(())
 }
 
+// pub async fn message_event_processing(
+//     mut messages: Vec<Message>,
+//     filesystem: Option<Box<dyn Constellation>>,
+//     events: MessagingEvents,
+//     filter: &Arc<Option<SpamFilter>>,
+//     tx: BroadcastSender<MessageEventKind>,
+//     direction: MessageDirection,
+//     opt: EventOpt,
+// ) -> Result<(), Error> {
+//     match events.clone() {
+//         MessagingEvents::New(mut message) => {
+//             if messages.contains(&message) {
+//                 return Err(Error::MessageFound);
+//             }
+//             let lines_value_length: usize = message
+//                 .value()
+//                 .iter()
+//                 .map(|s| s.trim())
+//                 .filter(|s| !s.is_empty())
+//                 .map(|s| s.chars().count())
+//                 .sum();
+
+//             if lines_value_length >= 4096 {
+//                 return Err(Error::InvalidLength {
+//                     context: "message".into(),
+//                     current: lines_value_length,
+//                     minimum: Some(1),
+//                     maximum: Some(4096),
+//                 });
+//             }
+
+//             {
+//                 let signature = message.signature();
+//                 let sender = message.sender();
+//                 let construct = vec![
+//                     message.id().into_bytes().to_vec(),
+//                     message.conversation_id().into_bytes().to_vec(),
+//                     sender.to_string().as_bytes().to_vec(),
+//                     message
+//                         .value()
+//                         .iter()
+//                         .map(|s| s.as_bytes())
+//                         .collect::<Vec<_>>()
+//                         .concat(),
+//                 ]
+//                 .concat();
+//                 verify_serde_sig(sender, &construct, &signature)?;
+//             }
+//             spam_check(&mut message, filter)?;
+//             let conversation_id = message.conversation_id();
+
+//             messages.push(message.clone());
+
+//             if message.message_type() == MessageType::Attachment
+//                 && direction == MessageDirection::In
+//             {
+//                 if let Some(fs) = filesystem {
+//                     let dir = fs.root_directory();
+//                     for file in message.attachments() {
+//                         let original = file.name();
+//                         let mut inc = 0;
+//                         loop {
+//                             if dir.has_item(&original) {
+//                                 if inc >= 20 {
+//                                     break;
+//                                 }
+//                                 inc += 1;
+//                                 file.set_name(&format!("{original}-{inc}"));
+//                                 continue;
+//                             }
+//                             break;
+//                         }
+//                         if let Err(e) = dir.add_file(file) {
+//                             error!("Error adding file to constellation: {e}");
+//                         }
+//                     }
+//                 }
+//             }
+
+//             let event = match direction {
+//                 MessageDirection::In => MessageEventKind::MessageReceived {
+//                     conversation_id,
+//                     message_id: message.id(),
+//                 },
+//                 MessageDirection::Out => MessageEventKind::MessageSent {
+//                     conversation_id,
+//                     message_id: message.id(),
+//                 },
+//             };
+
+//             if let Err(e) = tx.send(event) {
+//                 error!("Error broadcasting event: {e}");
+//             }
+//         }
+//         MessagingEvents::Edit(convo_id, message_id, modified, val, signature) => {
+//             let index = messages
+//                 .iter()
+//                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
+//                 .ok_or(Error::MessageNotFound)?;
+
+//             let message = messages.get_mut(index).ok_or(Error::MessageNotFound)?;
+
+//             let lines_value_length: usize = val
+//                 .iter()
+//                 .map(|s| s.trim())
+//                 .filter(|s| !s.is_empty())
+//                 .map(|s| s.chars().count())
+//                 .sum();
+
+//             if lines_value_length >= 4096 {
+//                 return Err(Error::InvalidLength {
+//                     context: "message".into(),
+//                     current: lines_value_length,
+//                     minimum: Some(1),
+//                     maximum: Some(4096),
+//                 });
+//             }
+
+//             let sender = message.sender();
+//             //Validate the original message
+//             {
+//                 let signature = message.signature();
+//                 let construct = vec![
+//                     message.id().into_bytes().to_vec(),
+//                     message.conversation_id().into_bytes().to_vec(),
+//                     sender.to_string().as_bytes().to_vec(),
+//                     message
+//                         .value()
+//                         .iter()
+//                         .map(|s| s.as_bytes())
+//                         .collect::<Vec<_>>()
+//                         .concat(),
+//                 ]
+//                 .concat();
+//                 verify_serde_sig(sender.clone(), &construct, &signature)?;
+//             }
+
+//             //Validate the edit message
+//             {
+//                 let construct = vec![
+//                     message.id().into_bytes().to_vec(),
+//                     message.conversation_id().into_bytes().to_vec(),
+//                     sender.to_string().as_bytes().to_vec(),
+//                     val.iter()
+//                         .map(|s| s.as_bytes())
+//                         .collect::<Vec<_>>()
+//                         .concat(),
+//                 ]
+//                 .concat();
+//                 verify_serde_sig(sender, &construct, &signature)?;
+//             }
+//             //TODO: Validate signature.
+//             message.set_signature(Some(signature));
+//             *message.value_mut() = val;
+//             message.set_modified(modified);
+//             if let Err(e) = tx.send(MessageEventKind::MessageEdited {
+//                 conversation_id: convo_id,
+//                 message_id,
+//             }) {
+//                 error!("Error broadcasting event: {e}");
+//             }
+//         }
+//         MessagingEvents::Delete(convo_id, message_id) => {
+//             let index = messages
+//                 .iter()
+//                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
+//                 .ok_or(Error::MessageNotFound)?;
+
+//             if opt.keep_if_owned.load(Ordering::SeqCst) {
+//                 let message = messages.get(index).ok_or(Error::MessageNotFound)?;
+//                 let signature = message.signature();
+//                 let sender = message.sender();
+//                 let construct = vec![
+//                     message.id().into_bytes().to_vec(),
+//                     message.conversation_id().into_bytes().to_vec(),
+//                     sender.to_string().as_bytes().to_vec(),
+//                     message
+//                         .value()
+//                         .iter()
+//                         .map(|s| s.as_bytes())
+//                         .collect::<Vec<_>>()
+//                         .concat(),
+//                 ]
+//                 .concat();
+//                 verify_serde_sig(sender, &construct, &signature)?;
+//             }
+
+//             let _ = messages.remove(index);
+//             if let Err(e) = tx.send(MessageEventKind::MessageDeleted {
+//                 conversation_id: convo_id,
+//                 message_id,
+//             }) {
+//                 error!("Error broadcasting event: {e}");
+//             }
+//         }
+//         MessagingEvents::Pin(convo_id, _, message_id, state) => {
+//             let index = messages
+//                 .iter()
+//                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
+//                 .ok_or(Error::MessageNotFound)?;
+
+//             let message = messages.get_mut(index).ok_or(Error::MessageNotFound)?;
+
+//             let event = match state {
+//                 PinState::Pin => {
+//                     *message.pinned_mut() = true;
+//                     MessageEventKind::MessagePinned {
+//                         conversation_id: convo_id,
+//                         message_id,
+//                     }
+//                 }
+//                 PinState::Unpin => {
+//                     *message.pinned_mut() = false;
+//                     MessageEventKind::MessageUnpinned {
+//                         conversation_id: convo_id,
+//                         message_id,
+//                     }
+//                 }
+//             };
+
+//             if let Err(e) = tx.send(event) {
+//                 error!("Error broadcasting event: {e}");
+//             }
+//         }
+//         MessagingEvents::React(convo_id, sender, message_id, state, emoji) => {
+//             let index = messages
+//                 .iter()
+//                 .position(|conv| conv.conversation_id() == convo_id && conv.id() == message_id)
+//                 .ok_or(Error::MessageNotFound)?;
+
+//             let message = messages.get_mut(index).ok_or(Error::MessageNotFound)?;
+
+//             let reactions = message.reactions_mut();
+
+//             match state {
+//                 ReactionState::Add => {
+//                     let index = match reactions
+//                         .iter()
+//                         .position(|reaction| reaction.emoji().eq(&emoji))
+//                     {
+//                         Some(index) => index,
+//                         None => {
+//                             let mut reaction = Reaction::default();
+//                             reaction.set_emoji(&emoji);
+//                             reaction.set_users(vec![sender.clone()]);
+//                             reactions.push(reaction);
+//                             if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
+//                                 conversation_id: convo_id,
+//                                 message_id,
+//                                 did_key: sender,
+//                                 reaction: emoji,
+//                             }) {
+//                                 error!("Error broadcasting event: {e}");
+//                             }
+//                             return Ok(());
+//                         }
+//                     };
+
+//                     let reaction = reactions.get_mut(index).ok_or(Error::MessageNotFound)?;
+
+//                     reaction.users_mut().push(sender.clone());
+//                     if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
+//                         conversation_id: convo_id,
+//                         message_id,
+//                         did_key: sender,
+//                         reaction: emoji,
+//                     }) {
+//                         error!("Error broadcasting event: {e}");
+//                     }
+//                 }
+//                 ReactionState::Remove => {
+//                     let index = reactions
+//                         .iter()
+//                         .position(|reaction| {
+//                             reaction.users().contains(&sender) && reaction.emoji().eq(&emoji)
+//                         })
+//                         .ok_or(Error::MessageNotFound)?;
+
+//                     let reaction = reactions.get_mut(index).ok_or(Error::MessageNotFound)?;
+
+//                     let user_index = reaction
+//                         .users()
+//                         .iter()
+//                         .position(|reaction_sender| reaction_sender.eq(&sender))
+//                         .ok_or(Error::MessageNotFound)?;
+
+//                     reaction.users_mut().remove(user_index);
+
+//                     if reaction.users().is_empty() {
+//                         //Since there is no users listed under the emoji, the reaction should be removed from the message
+//                         reactions.remove(index);
+//                         if let Err(e) = tx.send(MessageEventKind::MessageReactionRemoved {
+//                             conversation_id: convo_id,
+//                             message_id,
+//                             did_key: sender,
+//                             reaction: emoji,
+//                         }) {
+//                             error!("Error broadcasting event: {e}");
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+//         MessagingEvents::Event(conversation_id, did_key, event, cancelled) => {
+//             if direction == MessageDirection::In {
+//                 let ev = match cancelled {
+//                     true => MessageEventKind::EventCancelled {
+//                         conversation_id,
+//                         did_key,
+//                         event,
+//                     },
+//                     false => MessageEventKind::EventReceived {
+//                         conversation_id,
+//                         did_key,
+//                         event,
+//                     },
+//                 };
+//                 if let Err(e) = tx.send(ev) {
+//                     error!("Error broadcasting event: {e}");
+//                 }
+//             }
+//         }
+//     }
+//     Ok(())
+// }
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Queue {
@@ -2221,7 +2576,7 @@ impl Queue {
     }
 }
 
-pub fn spam_check(message: &mut Message, filter: &Arc<Option<SpamFilter>>) -> anyhow::Result<()> {
+pub fn spam_check(message: &mut Message, filter: Arc<Option<SpamFilter>>) -> anyhow::Result<()> {
     if let Some(filter) = filter.as_ref() {
         if filter.process(&message.value().join(" "))? {
             message

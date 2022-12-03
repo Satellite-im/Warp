@@ -247,8 +247,8 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
 
     async fn get_conversation(&self, conversation_id: Uuid) -> Result<Conversation> {
         self.messaging_store()?
-            .get_conversation(conversation_id)
-            .map(|convo| convo.conversation())
+            .get_conversation(conversation_id).await
+            .map(|convo| convo.into())
     }
 
     async fn list_conversations(&self) -> Result<Vec<Conversation>> {
@@ -402,7 +402,7 @@ impl<T: IpfsTypes> RayGunStream for IpfsMessaging<T> {
         conversation_id: Uuid,
     ) -> Result<MessageEventStream> {
         let store = self.messaging_store()?;
-        let stream = store.get_conversation_stream(conversation_id)?;
+        let stream = store.get_conversation_stream(conversation_id).await?;
         Ok(MessageEventStream(Box::pin(stream)))
     }
 }
