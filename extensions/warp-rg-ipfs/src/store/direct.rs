@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use chrono::Utc;
-use futures::{Future, Stream, StreamExt};
+use futures::{Stream, StreamExt};
 use ipfs::libp2p::swarm::dial_opts::DialOpts;
 use ipfs::{Ipfs, IpfsPath, IpfsTypes, PeerId};
 
@@ -620,14 +620,18 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let old_cid = self.get_cid().await.ok();
 
         let root_cid = self.put_dag(document).await?;
+
+        self.ipfs.insert_pin(&root_cid, false).await?;
+        self.save_cid(root_cid).await?;
         if let Some(old_cid) = old_cid {
             if self.ipfs.is_pinned(&old_cid).await? {
-                self.ipfs.remove_pin(&old_cid, true).await?;
+                self.ipfs.remove_pin(&old_cid, false).await?;
+            }
+            if let Err(_e) = self.ipfs.remove_block(old_cid).await {
+                error!("Error removing root block: {_e}");
             }
         }
 
-        self.ipfs.insert_pin(&root_cid, true).await?;
-        self.save_cid(root_cid).await?;
         Ok(())
     }
 
@@ -720,7 +724,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         root_document
             .conversations
             .insert(conversation.to_document(self.ipfs.clone()).await?);
-        
+
         let (tx, _) = broadcast::channel(1024);
 
         self.stream.write().await.insert(conversation.id(), tx);
@@ -869,6 +873,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 }
             };
         }
+
+        self.set_root_document(root).await?;
+
         if let Err(e) = self.event.send(RayGunEventKind::ConversationDeleted {
             conversation_id: document_type.id(),
         }) {
@@ -972,7 +979,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation_id: Uuid,
     ) -> Result<ConversationDocument, Error> {
         let root = self.get_root_document().await?;
-        
+
         root.get_conversation(self.ipfs.clone(), conversation_id)
             .await
     }
@@ -1081,7 +1088,11 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         )
         .await?;
 
-        self.send_raw_event(conversation.id(), Some(message_id), event, true)
+        let mut root = self.get_root_document().await?;
+        root.update_conversation(self.ipfs.clone(), conversation_id, conversation)
+            .await?;
+        self.set_root_document(root).await?;
+        self.send_raw_event(conversation_id, Some(message_id), event, true)
             .await
     }
 
@@ -1149,8 +1160,11 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             Default::default(),
         )
         .await?;
-
-        self.send_raw_event(conversation.id(), None, event, true)
+        let mut root = self.get_root_document().await?;
+        root.update_conversation(self.ipfs.clone(), conversation_id, conversation)
+            .await?;
+        self.set_root_document(root).await?;
+        self.send_raw_event(conversation_id, None, event, true)
             .await
     }
 
@@ -1218,8 +1232,11 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             Default::default(),
         )
         .await?;
-
-        self.send_raw_event(conversation.id(), None, event, true)
+        let mut root = self.get_root_document().await?;
+        root.update_conversation(self.ipfs.clone(), conversation_id, conversation)
+            .await?;
+        self.set_root_document(root).await?;
+        self.send_raw_event(conversation_id, None, event, true)
             .await
     }
 
@@ -1244,8 +1261,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         )
         .await?;
 
+        let mut root = self.get_root_document().await?;
+        root.update_conversation(self.ipfs.clone(), conversation_id, conversation)
+            .await?;
+        self.set_root_document(root).await?;
+
         if broadcast {
-            self.send_raw_event(conversation.id(), None, event, true)
+            self.send_raw_event(conversation_id, None, event, true)
                 .await?;
         }
 
@@ -1275,7 +1297,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         )
         .await?;
 
-        self.send_raw_event(conversation.id(), None, event, true)
+        let mut root = self.get_root_document().await?;
+        root.update_conversation(self.ipfs.clone(), conversation_id, conversation)
+            .await?;
+        self.set_root_document(root).await?;
+
+        self.send_raw_event(conversation_id, None, event, true)
             .await
     }
 
@@ -1315,7 +1342,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         )
         .await?;
 
-        self.send_raw_event(conversation.id(), None, event, true)
+        let mut root = self.get_root_document().await?;
+        root.update_conversation(self.ipfs.clone(), conversation_id, conversation)
+            .await?;
+        self.set_root_document(root).await?;
+
+        self.send_raw_event(conversation_id, None, event, true)
             .await
     }
 
@@ -1495,7 +1527,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         )
         .await?;
 
-        self.send_raw_event(conversation.id(), None, event, true)
+        let mut root = self.get_root_document().await?;
+        root.update_conversation(self.ipfs.clone(), conversation_id, conversation)
+            .await?;
+        self.set_root_document(root).await?;
+
+        self.send_raw_event(conversation_id, None, event, true)
             .await
     }
 
@@ -1675,7 +1712,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         )
         .await?;
 
-        self.send_raw_event(conversation.id(), None, event, false)
+        self.send_raw_event(conversation_id, None, event, false)
             .await
     }
 
@@ -1702,7 +1739,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         )
         .await?;
 
-        self.send_raw_event(conversation.id(), None, event, false)
+        self.send_raw_event(conversation_id, None, event, false)
             .await
     }
 

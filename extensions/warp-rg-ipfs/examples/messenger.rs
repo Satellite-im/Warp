@@ -214,7 +214,7 @@ async fn main() -> anyhow::Result<()> {
     writeln!(stdout, "{message}")?;
 
     // loads all conversations into their own task to process events
-    for conversation in chat.list_conversations().await? {
+    for conversation in chat.list_conversations().await.unwrap_or_default() {
         {
             let topic = topic.clone();
             let id = conversation.id();
