@@ -2052,6 +2052,8 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
                 .update(store.ipfs.clone(), store.did.clone(), message)
                 .await?;
 
+            document.messages.replace(message_document);
+
             if let Err(e) = tx.send(MessageEventKind::MessageEdited {
                 conversation_id: convo_id,
                 message_id,
@@ -2130,6 +2132,7 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
                 .update(store.ipfs.clone(), store.did.clone(), message)
                 .await?;
 
+            document.messages.replace(message_document);
             if let Err(e) = tx.send(event) {
                 error!("Error broadcasting event: {e}");
             }
@@ -2179,7 +2182,7 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
                     message_document
                         .update(store.ipfs.clone(), store.did.clone(), message)
                         .await?;
-
+                    document.messages.replace(message_document);
                     if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
                         conversation_id: convo_id,
                         message_id,
@@ -2214,7 +2217,7 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
                         message_document
                             .update(store.ipfs.clone(), store.did.clone(), message)
                             .await?;
-
+                        document.messages.replace(message_document);
                         if let Err(e) = tx.send(MessageEventKind::MessageReactionRemoved {
                             conversation_id: convo_id,
                             message_id,
