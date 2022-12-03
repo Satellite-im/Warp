@@ -171,7 +171,6 @@ impl<T> From<Cid> for DocumentType<T> {
 #[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConversationRootDocument {
     pub did: DID,
-    #[serde(skip_serializing_if = "HashSet::is_empty")]
     pub conversations: HashSet<DocumentType<ConversationDocument>>,
 }
 

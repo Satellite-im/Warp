@@ -631,23 +631,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         Ok(())
     }
 
-    pub async fn root_document_mut<F, FN: FnOnce(&mut Self, &mut ConversationRootDocument) -> F>(
-        &mut self,
-        func: FN,
-    ) -> Result<(), Error>
-    where
-        F: Future + Send + 'static,
-        <F as Future>::Output: Serialize + Send + 'static,
-    {
-        let mut document = self.get_root_document().await?;
-
-        func(self, &mut document).await;
-
-        self.set_root_document(document).await?;
-
-        Ok(())
-    }
-
     pub async fn get_dag<D: DeserializeOwned>(
         &self,
         path: IpfsPath,
@@ -737,6 +720,11 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         root_document
             .conversations
             .insert(conversation.to_document(self.ipfs.clone()).await?);
+        
+        let (tx, _) = broadcast::channel(1024);
+
+        self.stream.write().await.insert(conversation.id(), tx);
+
         self.set_root_document(root_document).await?;
 
         let peers = self
@@ -984,6 +972,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation_id: Uuid,
     ) -> Result<ConversationDocument, Error> {
         let root = self.get_root_document().await?;
+        
         root.get_conversation(self.ipfs.clone(), conversation_id)
             .await
     }
