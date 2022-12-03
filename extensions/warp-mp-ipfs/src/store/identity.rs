@@ -23,7 +23,7 @@ use libipld::{
     serde::{from_ipld, to_ipld},
     Cid,
 };
-use sata::Sata;
+use warp::sata::Sata;
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::broadcast;
 use tracing::log::error;
@@ -259,7 +259,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             banner,
         };
 
-        let res = data.encode(libipld::IpldCodec::DagJson, sata::Kind::Static, payload)?;
+        let res = data.encode(libipld::IpldCodec::DagJson, warp::sata::Kind::Static, payload)?;
 
         //TODO: Maybe use bincode instead
         let bytes = serde_json::to_vec(&res)?;

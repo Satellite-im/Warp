@@ -9,10 +9,10 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 [dependencies]
 warp = { path = "../../warp" }
 
-ipfs = { git = "https://github.com/Satellite-im/rust-ipfs", rev = "4b25a45df6b24406d0199b2d87a3151a90941526", features = [
+ipfs = { git = "https://github.com/Satellite-im/rust-ipfs", rev = "5b7f68e975a338b350a6991c1e507f1d5f22a939", features = [
     "external-gossipsub-stream",
 ] }
-libipld = { version = "0.14", features = ["serde-codec"] }
+libipld = { version = "0.15", features = ["serde-codec"] }
 uuid = { version = "1.0", features = ["serde", "v4"] }
 tokio = { version = "1", features = ["full"] }
 futures = { version = "0.3" }
@@ -27,8 +27,6 @@ cfg-if = "1.0"
 tracing = "0.1"
 
 hex = "0.4"
-
-sata = { git = "https://github.com/Satellite-im/Sata" }
 
 chrono = { version = "0.4", features = ["serde"] }
 
