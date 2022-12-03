@@ -8,7 +8,7 @@ use ipfs::libp2p::mplex::MplexConfig;
 use ipfs::libp2p::swarm::ConnectionLimits;
 use ipfs::libp2p::yamux::{WindowUpdateMode, YamuxConfig};
 use ipfs::p2p::{IdentifyConfiguration, TransportConfig};
-use sata::Sata;
+use warp::sata::Sata;
 use std::any::Any;
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};

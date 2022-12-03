@@ -16,7 +16,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 use tracing::log::{error, warn};
 
 use libipld::IpldCodec;
-use sata::{Kind, Sata};
+use warp::sata::{Kind, Sata};
 use serde::{Deserialize, Serialize};
 use warp::crypto::{DID, KeyMaterial, Ed25519KeyPair};
 use warp::error::Error;
