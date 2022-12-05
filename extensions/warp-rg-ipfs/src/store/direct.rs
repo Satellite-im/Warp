@@ -16,6 +16,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast::{self, Sender as BroadcastSender};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
@@ -62,6 +63,8 @@ pub struct DirectMessageStore<T: IpfsTypes> {
 
     stream: Arc<tokio::sync::RwLock<HashMap<Uuid, BroadcastSender<MessageEventKind>>>>,
 
+    task: Arc<tokio::sync::RwLock<HashMap<Uuid, Arc<Semaphore>>>>,
+
     // Queue
     queue: Arc<tokio::sync::RwLock<HashMap<DID, Vec<Queue>>>>,
 
@@ -90,6 +93,7 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
             root_cid: self.root_cid.clone(),
             account: self.account.clone(),
             filesystem: self.filesystem.clone(),
+            task: self.task.clone(),
             queue: self.queue.clone(),
             did: self.did.clone(),
             event: self.event.clone(),
@@ -284,6 +288,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             }
         }
         // let direct_conversation = Arc::new(Default::default());
+        let task = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
         let root_cid = Arc::new(Default::default());
         let did = Arc::new(account.decrypt_private_key(None)?);
@@ -299,6 +304,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             ipfs,
             // direct_conversation,
             stream,
+            task,
             root_cid,
             account,
             filesystem,
@@ -312,55 +318,65 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         };
 
         if let Err(_e) = store.new_cid().await {}
-        if let Some(path) = store.path.as_ref() {
-            if let Err(_e) = store.load_cid().await {}
-            if let Err(_e) = store.load_queue().await {}
-            if path.is_dir() {
-                for entry in std::fs::read_dir(path)? {
-                    let entry = entry?;
-                    let path_inner = entry.path();
-                    if path_inner.is_file() {
-                        //TODO: Check filename itself rather than the end of the path
-                        if path.ends_with(".messaging_queue") {
-                            continue;
-                        }
 
-                        // match DirectConversation::from_file(
-                        //     &path_inner,
-                        //     (!store.store_decrypted.load(Ordering::SeqCst)).then_some(&*store.did),
-                        // )
-                        // .await
-                        // {
-                        //     Ok(mut conversation) => {
-                        //         let stream =
-                        //             match store.ipfs.pubsub_subscribe(conversation.topic()).await {
-                        //                 Ok(stream) => stream,
-                        //                 Err(e) => {
-                        //                     error!("Unable to subscribe to conversation: {e}");
-                        //                     continue;
-                        //                 }
-                        //             };
+        if let Err(_e) = store.load_cid().await {}
+        if let Err(_e) = store.load_queue().await {}
 
-                        //         // conversation.set_path(path);
-                        //         // conversation.start_task(
-                        //         //     store.did.clone(),
-                        //         //     store.filesystem.clone(),
-                        //         //     store.store_decrypted.clone(),
-                        //         //     &store.spam_filter,
-                        //         //     stream,
-                        //         // );
-                        //         // store.direct_conversation.write().push(conversation);
-                        //     }
-                        //     Err(e) => {
-                        //         error!("Unable to load conversation: {e}");
-                        //     }
-                        // };
-                    }
-                }
+        if let Ok(list) = store.list_conversations().await {
+            for conversation in list {
+                let (tx, _) = broadcast::channel(1024);
+                store.stream.write().await.insert(conversation.id(), tx);
+                store
+                    .task
+                    .write()
+                    .await
+                    .insert(conversation.id(), Arc::new(Semaphore::new(1)));
             }
         }
 
-        if let Err(_e) = store.load_cid().await {}
+        //     if path.is_dir() {
+        //         for entry in std::fs::read_dir(path)? {
+        //             let entry = entry?;
+        //             let path_inner = entry.path();
+        //             if path_inner.is_file() {
+        //                 //TODO: Check filename itself rather than the end of the path
+        //                 if path.ends_with(".messaging_queue") {
+        //                     continue;
+        //                 }
+
+        //                 // match DirectConversation::from_file(
+        //                 //     &path_inner,
+        //                 //     (!store.store_decrypted.load(Ordering::SeqCst)).then_some(&*store.did),
+        //                 // )
+        //                 // .await
+        //                 // {
+        //                 //     Ok(mut conversation) => {
+        //                 //         let stream =
+        //                 //             match store.ipfs.pubsub_subscribe(conversation.topic()).await {
+        //                 //                 Ok(stream) => stream,
+        //                 //                 Err(e) => {
+        //                 //                     error!("Unable to subscribe to conversation: {e}");
+        //                 //                     continue;
+        //                 //                 }
+        //                 //             };
+
+        //                 //         // conversation.set_path(path);
+        //                 //         // conversation.start_task(
+        //                 //         //     store.did.clone(),
+        //                 //         //     store.filesystem.clone(),
+        //                 //         //     store.store_decrypted.clone(),
+        //                 //         //     &store.spam_filter,
+        //                 //         //     stream,
+        //                 //         // );
+        //                 //         // store.direct_conversation.write().push(conversation);
+        //                 //     }
+        //                 //     Err(e) => {
+        //                 //         error!("Unable to load conversation: {e}");
+        //                 //     }
+        //                 // };
+        //             }
+        //         }
+        //     }
 
         if discovery {
             let ipfs = store.ipfs.clone();
@@ -373,34 +389,35 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let stream = store.ipfs.pubsub_subscribe(DIRECT_BROADCAST.into()).await?;
 
-        let inner = store.clone();
-        tokio::spawn(async move {
-            let store = inner;
-            let did = &*store.did;
-            futures::pin_mut!(stream);
-            let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
-            loop {
-                tokio::select! {
-                    message = stream.next() => {
-                        if let Some(message) = message {
-                            if let Ok(sata) = serde_json::from_slice::<Sata>(&message.data) {
-                                if let Ok(data) = sata.decrypt::<Vec<u8>>(did.as_ref()) {
-                                    if let Ok(events) = serde_json::from_slice::<ConversationEvents>(&data) {
-                                        if let Err(e) = store.process_conversation(sata, events).await {
-                                            error!("Error processing conversation: {e}");
+        tokio::spawn({
+            let store = store.clone();
+            async move {
+                let did = &*store.did;
+                futures::pin_mut!(stream);
+                let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
+                loop {
+                    tokio::select! {
+                        message = stream.next() => {
+                            if let Some(message) = message {
+                                if let Ok(sata) = serde_json::from_slice::<Sata>(&message.data) {
+                                    if let Ok(data) = sata.decrypt::<Vec<u8>>(did.as_ref()) {
+                                        if let Ok(events) = serde_json::from_slice::<ConversationEvents>(&data) {
+                                            if let Err(e) = store.process_conversation(sata, events).await {
+                                                error!("Error processing conversation: {e}");
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
-                    _ = interval.tick() => {
-                        if let Err(e) = store.process_queue().await {
-                            error!("Error processing queue: {e}");
+                        _ = interval.tick() => {
+                            if let Err(e) = store.process_queue().await {
+                                error!("Error processing queue: {e}");
+                            }
                         }
                     }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
                 }
-                tokio::time::sleep(Duration::from_millis(1)).await;
             }
         });
         tokio::task::yield_now().await;
@@ -728,6 +745,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let (tx, _) = broadcast::channel(1024);
 
         self.stream.write().await.insert(conversation.id(), tx);
+        self.task
+            .write()
+            .await
+            .insert(conversation.id(), Arc::new(Semaphore::new(1)));
 
         self.set_root_document(root_document).await?;
 
@@ -1021,11 +1042,28 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         })
     }
 
+    pub async fn permit(&self, conversation_id: Uuid) -> Result<OwnedSemaphorePermit, Error> {
+        let task = self
+            .task
+            .read()
+            .await
+            .get(&conversation_id)
+            .cloned()
+            .ok_or(Error::InvalidConversation)?;
+
+        task.clone()
+            .acquire_owned()
+            .await
+            .map_err(anyhow::Error::from)
+            .map_err(Error::from)
+    }
+
     pub async fn send_message(
         &mut self,
         conversation_id: Uuid,
         messages: Vec<String>,
     ) -> Result<(), Error> {
+        // let _permit = self.permit(conversation_id).await?;
         let mut conversation = self.get_conversation(conversation_id).await?;
         let tx = self.get_conversation_sender(conversation_id).await?;
 
@@ -1102,6 +1140,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         message_id: Uuid,
         messages: Vec<String>,
     ) -> Result<(), Error> {
+        let _permit = self.permit(conversation_id).await?;
         let mut conversation = self.get_conversation(conversation_id).await?;
         let tx = self.get_conversation_sender(conversation_id).await?;
 
@@ -1174,6 +1213,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         message_id: Uuid,
         messages: Vec<String>,
     ) -> Result<(), Error> {
+        let _permit = self.permit(conversation_id).await?;
         let mut conversation = self.get_conversation(conversation_id).await?;
         let tx = self.get_conversation_sender(conversation_id).await?;
         if messages.is_empty() {
@@ -1246,6 +1286,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         message_id: Uuid,
         broadcast: bool,
     ) -> Result<(), Error> {
+        let _permit = self.permit(conversation_id).await?;
         let mut conversation = self.get_conversation(conversation_id).await?;
         let tx = self.get_conversation_sender(conversation_id).await?;
         let event = MessagingEvents::Delete(conversation.id(), message_id);
@@ -1280,6 +1321,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         message_id: Uuid,
         state: PinState,
     ) -> Result<(), Error> {
+        let _permit = self.permit(conversation_id).await?;
         let mut conversation = self.get_conversation(conversation_id).await?;
         let tx = self.get_conversation_sender(conversation_id).await?;
         let own_did = &*self.did;
@@ -1323,6 +1365,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         state: ReactionState,
         emoji: String,
     ) -> Result<(), Error> {
+        let _permit = self.permit(conversation_id).await?;
         let mut conversation = self.get_conversation(conversation_id).await?;
         let tx = self.get_conversation_sender(conversation_id).await?;
         let own_did = &*self.did;
@@ -1360,6 +1403,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         files: Vec<PathBuf>,
         messages: Vec<String>,
     ) -> Result<(), Error> {
+        let _permit = self.permit(conversation_id).await?;
         let mut conversation = self.get_conversation(conversation_id).await?;
         let tx = self.get_conversation_sender(conversation_id).await?;
 
@@ -1926,8 +1970,6 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
             }
             spam_check(&mut message, filter)?;
             let conversation_id = message.conversation_id();
-
-            // messages.push(message.clone());
 
             if message.message_type() == MessageType::Attachment
                 && direction == MessageDirection::In
