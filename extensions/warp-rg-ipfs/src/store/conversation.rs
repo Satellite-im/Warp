@@ -275,10 +275,6 @@ impl MessageDocument {
             return Err(Error::InvalidMessage);
         }
 
-        if old_message == message {
-            return Err(Error::MessageFound);
-        }
-
         let mut object = Sata::default();
         for recipient in recipients.iter() {
             object.add_recipient(recipient)?;
