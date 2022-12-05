@@ -10,12 +10,12 @@ use futures::{Stream, StreamExt};
 use ipfs::libp2p::swarm::dial_opts::DialOpts;
 use ipfs::{Ipfs, IpfsPath, IpfsTypes, PeerId, SubscriptionStream};
 
+use async_broadcast::{self, Receiver as BroadcastReceiver, Sender as BroadcastSender};
 use libipld::serde::{from_ipld, to_ipld};
 use libipld::Cid;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::broadcast::{self, Sender as BroadcastSender};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
@@ -58,7 +58,9 @@ pub struct DirectMessageStore<T: IpfsTypes> {
     // filesystem instance
     filesystem: Option<Box<dyn Constellation>>,
 
-    stream: Arc<tokio::sync::RwLock<HashMap<Uuid, BroadcastSender<MessageEventKind>>>>,
+    stream_sender: Arc<tokio::sync::RwLock<HashMap<Uuid, BroadcastSender<MessageEventKind>>>>,
+
+    stream_receiver: Arc<tokio::sync::RwLock<HashMap<Uuid, BroadcastReceiver<MessageEventKind>>>>,
 
     task: Arc<tokio::sync::RwLock<HashMap<Uuid, Arc<Semaphore>>>>,
 
@@ -87,7 +89,8 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
         Self {
             ipfs: self.ipfs.clone(),
             path: self.path.clone(),
-            stream: self.stream.clone(),
+            stream_sender: self.stream_sender.clone(),
+            stream_receiver: self.stream_receiver.clone(),
             root_cid: self.root_cid.clone(),
             account: self.account.clone(),
             filesystem: self.filesystem.clone(),
@@ -141,12 +144,14 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let store_decrypted = Arc::new(AtomicBool::new(store_decrypted));
         let allowed_unsigned_message = Arc::new(AtomicBool::new(allowed_unsigned_message));
         let with_friends = Arc::new(AtomicBool::new(with_friends));
-        let stream = Arc::new(Default::default());
+        let stream_sender = Arc::new(Default::default());
+        let stream_receiver = Arc::new(Default::default());
 
         let mut store = Self {
             path,
             ipfs,
-            stream,
+            stream_sender,
+            stream_receiver,
             stream_task,
             task,
             root_cid,
@@ -168,8 +173,17 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         if let Ok(list) = store.list_conversations().await {
             for conversation in list {
-                let (tx, _) = broadcast::channel(1024);
-                store.stream.write().await.insert(conversation.id(), tx);
+                let (tx, rx) = async_broadcast::broadcast(1024);
+                store
+                    .stream_sender
+                    .write()
+                    .await
+                    .insert(conversation.id(), tx);
+                store
+                    .stream_receiver
+                    .write()
+                    .await
+                    .insert(conversation.id(), rx);
                 store
                     .task
                     .write()
@@ -224,12 +238,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         Ok(store)
     }
 
-    async fn start_task(
-        &self,
-        conversation_id: Uuid,
-        tx: BroadcastSender<MessageEventKind>,
-        stream: SubscriptionStream,
-    ) {
+    async fn start_task(&self, conversation_id: Uuid, stream: SubscriptionStream) {
         let filter = self.spam_filter.clone();
         let filesystem = self.filesystem.clone();
         let did = self.did.clone();
@@ -261,7 +270,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                     filesystem.clone(),
                                     &event,
                                     filter.clone(),
-                                    tx.clone(),
                                     MessageDirection::In,
                                     Default::default(),
                                 )
@@ -339,20 +347,25 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     }
                 };
 
-                let (tx, _) = broadcast::channel(1024);
+                let (tx, rx) = async_broadcast::broadcast(1024);
 
-                self.stream.write().await.insert(convo.id(), tx.clone());
+                self.stream_sender.write().await.insert(convo.id(), tx);
+                self.stream_receiver.write().await.insert(convo.id(), rx);
 
                 self.task
                     .write()
                     .await
                     .insert(convo.id(), Arc::new(Semaphore::new(1)));
 
-                self.start_task(convo.id(), tx, stream).await;
+                self.start_task(convo.id(), stream).await;
 
-                if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
-                    conversation_id: convo.id(),
-                }) {
+                if let Err(e) = self
+                    .event
+                    .broadcast(RayGunEventKind::ConversationCreated {
+                        conversation_id: convo.id(),
+                    })
+                    .await
+                {
                     error!("Error broadcasting event: {e}");
                 }
 
@@ -621,19 +634,22 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         self.set_root_document(root_document).await?;
 
-        let (tx, _) = broadcast::channel(1024);
+        let (tx, rx) = async_broadcast::broadcast(1024);
 
-        self.stream
+        self.stream_sender
             .write()
             .await
-            .insert(conversation.id(), tx.clone());
-
+            .insert(conversation.id(), tx);
+        self.stream_receiver
+            .write()
+            .await
+            .insert(conversation.id(), rx);
         self.task
             .write()
             .await
             .insert(conversation.id(), Arc::new(Semaphore::new(1)));
 
-        self.start_task(conversation.id(), tx, stream).await;
+        self.start_task(conversation.id(), stream).await;
 
         let peers = self
             .ipfs
@@ -698,7 +714,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         let document_type = root
             .remove_conversation(self.ipfs.clone(), conversation_id)
             .await?;
-
+        self.set_root_document(root).await?;
         // conversation.end_task();
         if broadcast {
             let recipients = document_type.recipients();
@@ -778,11 +794,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             };
         }
 
-        self.set_root_document(root).await?;
-
-        if let Err(e) = self.event.send(RayGunEventKind::ConversationDeleted {
-            conversation_id: document_type.id(),
-        }) {
+        if let Err(e) = self
+            .event
+            .broadcast(RayGunEventKind::ConversationDeleted {
+                conversation_id: document_type.id(),
+            })
+            .await
+        {
             error!("Error broadcasting event: {e}");
         }
         Ok(document_type)
@@ -892,7 +910,21 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation_id: Uuid,
     ) -> Result<BroadcastSender<MessageEventKind>, Error> {
         let tx = self
-            .stream
+            .stream_sender
+            .read()
+            .await
+            .get(&conversation_id)
+            .ok_or(Error::InvalidConversation)?
+            .clone();
+        Ok(tx)
+    }
+
+    pub async fn get_conversation_receiver(
+        &self,
+        conversation_id: Uuid,
+    ) -> Result<BroadcastReceiver<MessageEventKind>, Error> {
+        let tx = self
+            .stream_receiver
             .read()
             .await
             .get(&conversation_id)
@@ -905,16 +937,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         &self,
         conversation_id: Uuid,
     ) -> Result<impl Stream<Item = MessageEventKind>, Error> {
-        let mut rx = self
-            .get_conversation_sender(conversation_id)
-            .await?
-            .subscribe();
+        let mut rx = self.get_conversation_receiver(conversation_id).await?;
 
         Ok(async_stream::stream! {
             loop {
                 match rx.recv().await {
                     Ok(event) => yield event,
-                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(async_broadcast::RecvError::Closed) => break,
                     Err(_) => {}
                 };
             }
@@ -944,7 +973,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     ) -> Result<(), Error> {
         let _permit = self.permit(conversation_id).await?;
         let mut conversation = self.get_conversation(conversation_id).await?;
-        let tx = self.get_conversation_sender(conversation_id).await?;
 
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
@@ -999,7 +1027,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             None,
             &event,
             self.spam_filter.clone(),
-            tx,
             MessageDirection::Out,
             Default::default(),
         )
@@ -1021,7 +1048,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     ) -> Result<(), Error> {
         let _permit = self.permit(conversation_id).await?;
         let mut conversation = self.get_conversation(conversation_id).await?;
-        let tx = self.get_conversation_sender(conversation_id).await?;
 
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
@@ -1073,7 +1099,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             None,
             &event,
             self.spam_filter.clone(),
-            tx,
             MessageDirection::Out,
             Default::default(),
         )
@@ -1094,7 +1119,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     ) -> Result<(), Error> {
         let _permit = self.permit(conversation_id).await?;
         let mut conversation = self.get_conversation(conversation_id).await?;
-        let tx = self.get_conversation_sender(conversation_id).await?;
+
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
         }
@@ -1146,7 +1171,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             None,
             &event,
             self.spam_filter.clone(),
-            tx,
             MessageDirection::Out,
             Default::default(),
         )
@@ -1167,7 +1191,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     ) -> Result<(), Error> {
         let _permit = self.permit(conversation_id).await?;
         let mut conversation = self.get_conversation(conversation_id).await?;
-        let tx = self.get_conversation_sender(conversation_id).await?;
+
         let event = MessagingEvents::Delete(conversation.id(), message_id);
         direct_message_event(
             self.clone(),
@@ -1175,7 +1199,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             None,
             &event,
             self.spam_filter.clone(),
-            tx,
             MessageDirection::Out,
             Default::default(),
         )
@@ -1202,7 +1225,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     ) -> Result<(), Error> {
         let _permit = self.permit(conversation_id).await?;
         let mut conversation = self.get_conversation(conversation_id).await?;
-        let tx = self.get_conversation_sender(conversation_id).await?;
+
         let own_did = &*self.did;
 
         let event = MessagingEvents::Pin(conversation.id(), own_did.clone(), message_id, state);
@@ -1212,7 +1235,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             None,
             &event,
             self.spam_filter.clone(),
-            tx,
             MessageDirection::Out,
             Default::default(),
         )
@@ -1246,7 +1268,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     ) -> Result<(), Error> {
         let _permit = self.permit(conversation_id).await?;
         let mut conversation = self.get_conversation(conversation_id).await?;
-        let tx = self.get_conversation_sender(conversation_id).await?;
+
         let own_did = &*self.did;
 
         let event =
@@ -1258,7 +1280,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             None,
             &event,
             self.spam_filter.clone(),
-            tx,
             MessageDirection::Out,
             Default::default(),
         )
@@ -1284,7 +1305,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     ) -> Result<(), Error> {
         let _permit = self.permit(conversation_id).await?;
         let mut conversation = self.get_conversation(conversation_id).await?;
-        let tx = self.get_conversation_sender(conversation_id).await?;
 
         //TODO: Send directly if constellation isnt present
         //      this will require uploading to ipfs directly from here
@@ -1444,7 +1464,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             None,
             &event,
             self.spam_filter.clone(),
-            tx,
             MessageDirection::Out,
             Default::default(),
         )
@@ -1618,7 +1637,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         event: MessageEvent,
     ) -> Result<(), Error> {
         let mut conversation = self.get_conversation(conversation_id).await?;
-        let tx = self.get_conversation_sender(conversation_id).await?;
         let own_did = &*self.did;
 
         let event = MessagingEvents::Event(conversation.id(), own_did.clone(), event, false);
@@ -1629,7 +1647,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             None,
             &event,
             self.spam_filter.clone(),
-            tx,
             MessageDirection::Out,
             Default::default(),
         )
@@ -1645,7 +1662,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         event: MessageEvent,
     ) -> Result<(), Error> {
         let mut conversation = self.get_conversation(conversation_id).await?;
-        let tx = self.get_conversation_sender(conversation_id).await?;
         let own_did = &*self.did;
 
         let event = MessagingEvents::Event(conversation.id(), own_did.clone(), event, true);
@@ -1656,7 +1672,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             None,
             &event,
             self.spam_filter.clone(),
-            tx,
             MessageDirection::Out,
             Default::default(),
         )
@@ -1799,10 +1814,10 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
     filesystem: Option<Box<dyn Constellation>>,
     events: &'a MessagingEvents,
     filter: Arc<Option<SpamFilter>>,
-    tx: BroadcastSender<MessageEventKind>,
     direction: MessageDirection,
     opt: EventOpt,
 ) -> Result<(), Error> {
+    let tx = store.get_conversation_sender(document.id()).await?;
     match events.clone() {
         MessagingEvents::New(mut message) => {
             if document
@@ -1899,7 +1914,7 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
                 },
             };
 
-            if let Err(e) = tx.send(event) {
+            if let Err(e) = tx.broadcast(event).await {
                 error!("Error broadcasting event: {e}");
             }
         }
@@ -1975,10 +1990,13 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
 
             document.messages.replace(message_document);
 
-            if let Err(e) = tx.send(MessageEventKind::MessageEdited {
-                conversation_id: convo_id,
-                message_id,
-            }) {
+            if let Err(e) = tx
+                .broadcast(MessageEventKind::MessageEdited {
+                    conversation_id: convo_id,
+                    message_id,
+                })
+                .await
+            {
                 error!("Error broadcasting event: {e}");
             }
         }
@@ -2012,10 +2030,13 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
             }
 
             if document.messages.remove(&message_document) {
-                if let Err(e) = tx.send(MessageEventKind::MessageDeleted {
-                    conversation_id: convo_id,
-                    message_id,
-                }) {
+                if let Err(e) = tx
+                    .broadcast(MessageEventKind::MessageDeleted {
+                        conversation_id: convo_id,
+                        message_id,
+                    })
+                    .await
+                {
                     error!("Error broadcasting event: {e}");
                 }
             }
@@ -2055,7 +2076,7 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
 
             document.messages.replace(message_document);
 
-            if let Err(e) = tx.send(event) {
+            if let Err(e) = tx.broadcast(event).await {
                 error!("Error broadcasting event: {e}");
             }
         }
@@ -2085,12 +2106,15 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
                             reaction.set_emoji(&emoji);
                             reaction.set_users(vec![sender.clone()]);
                             reactions.push(reaction);
-                            if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
-                                conversation_id: convo_id,
-                                message_id,
-                                did_key: sender,
-                                reaction: emoji,
-                            }) {
+                            if let Err(e) = tx
+                                .broadcast(MessageEventKind::MessageReactionAdded {
+                                    conversation_id: convo_id,
+                                    message_id,
+                                    did_key: sender,
+                                    reaction: emoji,
+                                })
+                                .await
+                            {
                                 error!("Error broadcasting event: {e}");
                             }
                             return Ok(());
@@ -2105,12 +2129,15 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
                         .update(store.ipfs.clone(), store.did.clone(), message)
                         .await?;
                     document.messages.replace(message_document);
-                    if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
-                        conversation_id: convo_id,
-                        message_id,
-                        did_key: sender,
-                        reaction: emoji,
-                    }) {
+                    if let Err(e) = tx
+                        .broadcast(MessageEventKind::MessageReactionAdded {
+                            conversation_id: convo_id,
+                            message_id,
+                            did_key: sender,
+                            reaction: emoji,
+                        })
+                        .await
+                    {
                         error!("Error broadcasting event: {e}");
                     }
                 }
@@ -2140,12 +2167,15 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
                             .update(store.ipfs.clone(), store.did.clone(), message)
                             .await?;
                         document.messages.replace(message_document);
-                        if let Err(e) = tx.send(MessageEventKind::MessageReactionRemoved {
-                            conversation_id: convo_id,
-                            message_id,
-                            did_key: sender,
-                            reaction: emoji,
-                        }) {
+                        if let Err(e) = tx
+                            .broadcast(MessageEventKind::MessageReactionRemoved {
+                                conversation_id: convo_id,
+                                message_id,
+                                did_key: sender,
+                                reaction: emoji,
+                            })
+                            .await
+                        {
                             error!("Error broadcasting event: {e}");
                         }
                     }
@@ -2166,7 +2196,7 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
                         event,
                     },
                 };
-                if let Err(e) = tx.send(ev) {
+                if let Err(e) = tx.broadcast(ev).await {
                     error!("Error broadcasting event: {e}");
                 }
             }

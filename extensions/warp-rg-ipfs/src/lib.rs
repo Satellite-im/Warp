@@ -13,9 +13,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use store::direct::DirectMessageStore;
-use tokio::sync::broadcast;
-#[allow(unused_imports)]
-use tokio::sync::broadcast::{Receiver, Sender};
+use async_broadcast::{Receiver, Sender};
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream};
 use warp::crypto::DID;
@@ -51,6 +49,7 @@ pub struct IpfsMessaging<T: IpfsTypes> {
     constellation: Option<Box<dyn Constellation>>,
     initialize: Arc<AtomicBool>,
     tx: Sender<RayGunEventKind>,
+    rx: Receiver<RayGunEventKind>,
     //TODO: GroupManager
     //      * Create, Join, and Leave GroupChats
     //      * Send message
@@ -69,6 +68,7 @@ impl<T: IpfsTypes> Clone for IpfsMessaging<T> {
             constellation: self.constellation.clone(),
             initialize: self.initialize.clone(),
             tx: self.tx.clone(),
+            rx: self.rx.clone()
         }
     }
 }
@@ -80,7 +80,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         constellation: Option<Box<dyn Constellation>>,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
-        let (tx, _) = broadcast::channel(1024);
+        let (tx, rx) = async_broadcast::broadcast(1024);
         trace!("Initializing Raygun Extension");
         let mut messaging = IpfsMessaging {
             account,
@@ -91,6 +91,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             constellation,
             initialize: Default::default(),
             tx,
+            rx
         };
 
         if messaging.account.get_own_identity().is_err() {
@@ -384,13 +385,13 @@ impl<T: IpfsTypes> RayGunAttachment for IpfsMessaging<T> {
 #[async_trait::async_trait]
 impl<T: IpfsTypes> RayGunStream for IpfsMessaging<T> {
     async fn subscribe(&mut self) -> Result<RayGunEventStream> {
-        let mut rx = self.tx.subscribe();
+        let mut rx = self.rx.clone();
 
         let stream = async_stream::stream! {
             loop {
                 match rx.recv().await {
                     Ok(event) => yield event,
-                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(async_broadcast::RecvError::Closed) => break,
                     Err(_) => {}
                 };
             }

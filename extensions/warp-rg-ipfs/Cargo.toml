@@ -21,6 +21,8 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 
+async-broadcast = "0.4"
+
 futures = { version = "0.3" }
 async-trait = { version = "0.1" }
 async-stream = "0.3"
