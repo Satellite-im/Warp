@@ -2,9 +2,6 @@
 use futures::StreamExt;
 use ipfs::libp2p::gossipsub::GossipsubMessage;
 use ipfs::{Ipfs, IpfsTypes, PeerId};
-use warp::crypto::cipher::Cipher;
-use warp::crypto::did_key::Generate;
-use warp::crypto::zeroize::Zeroizing;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Deref;
@@ -14,14 +11,17 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::sync::RwLock as AsyncRwLock;
 use tracing::log::{error, warn};
+use warp::crypto::cipher::Cipher;
+use warp::crypto::did_key::Generate;
+use warp::crypto::zeroize::Zeroizing;
 
 use libipld::IpldCodec;
-use warp::sata::{Kind, Sata};
 use serde::{Deserialize, Serialize};
-use warp::crypto::{DID, KeyMaterial, Ed25519KeyPair};
+use warp::crypto::{Ed25519KeyPair, KeyMaterial, DID};
 use warp::error::Error;
 use warp::multipass::identity::{FriendRequest, FriendRequestStatus};
 use warp::multipass::MultiPassEventKind;
+use warp::sata::{Kind, Sata};
 use warp::sync::Arc;
 
 use warp::tesseract::Tesseract;
@@ -225,42 +225,39 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 async move {
                     let friends = match store.friends_list().await {
                         Ok(list) => list,
-                        _ => return
+                        _ => return,
                     };
 
                     for friend in friends.iter() {
                         let mut list = store.list_all_raw_request().await.unwrap_or_default();
                         // cleanup outgoing
-                        match list
-                        .iter()
-                        .find(|request| {
-                            request.request_type() == InternalRequestType::Outgoing
-                                && request.to() == friend.clone()
-                                && request.status() == FriendRequestStatus::Pending
-                        }).cloned() {
-                            Some(req) => {
-                                list.remove(&req);
-                            },
-                            None => {}
-                        };
+                        if let Some(req) = list
+                            .iter()
+                            .find(|request| {
+                                request.request_type() == InternalRequestType::Outgoing
+                                    && request.to() == friend.clone()
+                                    && request.status() == FriendRequestStatus::Pending
+                            })
+                            .cloned()
+                        {
+                            list.remove(&req);
+                        }
 
                         // cleanup incoming
-                        match list
-                        .iter()
-                        .find(|request| {
-                            request.request_type() == InternalRequestType::Incoming
-                                && request.from() == friend.clone()
-                                && request.status() == FriendRequestStatus::Pending
-                        }).cloned() {
-                            Some(req) => {
-                                list.remove(&req);
-                            },
-                            None => {}
-                        };
+                        if let Some(req) = list
+                            .iter()
+                            .find(|request| {
+                                request.request_type() == InternalRequestType::Incoming
+                                    && request.from() == friend.clone()
+                                    && request.status() == FriendRequestStatus::Pending
+                            })
+                            .cloned()
+                        {
+                            list.remove(&req);
+                        }
 
                         if let Err(_e) = store.set_request_list(list).await {}
                     }
-
                 }
             });
             tokio::task::yield_now().await;
@@ -1126,8 +1123,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
             };
 
-            let prikey = Ed25519KeyPair::from_secret_key(&self.did_key.private_key_bytes()).get_x25519();
-            let pubkey = Ed25519KeyPair::from_public_key(&self.did_key.public_key_bytes()).get_x25519();
+            let prikey =
+                Ed25519KeyPair::from_secret_key(&self.did_key.private_key_bytes()).get_x25519();
+            let pubkey =
+                Ed25519KeyPair::from_public_key(&self.did_key.public_key_bytes()).get_x25519();
 
             let prik = match std::panic::catch_unwind(|| prikey.key_exchange(&pubkey)) {
                 Ok(pri) => Zeroizing::new(pri),
@@ -1137,7 +1136,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
             };
 
-            let data = match Cipher::direct_encrypt(warp::crypto::cipher::CipherType::Aes256Gcm, &bytes, &prik) {
+            let data = match Cipher::direct_encrypt(
+                warp::crypto::cipher::CipherType::Aes256Gcm,
+                &bytes,
+                &prik,
+            ) {
                 Ok(d) => d,
                 Err(e) => {
                     error!("Error encrypting queue: {e}");
@@ -1156,14 +1159,19 @@ impl<T: IpfsTypes> FriendsStore<T> {
         if let Some(path) = self.path.as_ref() {
             let data = tokio::fs::read(path.join(".request_queue")).await?;
 
-            let prikey = Ed25519KeyPair::from_secret_key(&self.did_key.private_key_bytes()).get_x25519();
-            let pubkey = Ed25519KeyPair::from_public_key(&self.did_key.public_key_bytes()).get_x25519();
+            let prikey =
+                Ed25519KeyPair::from_secret_key(&self.did_key.private_key_bytes()).get_x25519();
+            let pubkey =
+                Ed25519KeyPair::from_public_key(&self.did_key.public_key_bytes()).get_x25519();
 
-            let prik = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey)).map(Zeroizing::new).map_err(|_| anyhow::anyhow!("Error performing key exchange"))?;
+            let prik = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
+                .map(Zeroizing::new)
+                .map_err(|_| anyhow::anyhow!("Error performing key exchange"))?;
 
-            let data = Cipher::direct_decrypt(warp::crypto::cipher::CipherType::Aes256Gcm, &data, &prik)?;
+            let data =
+                Cipher::direct_decrypt(warp::crypto::cipher::CipherType::Aes256Gcm, &data, &prik)?;
 
-            *self.queue.write().await = serde_json::from_slice(&data)?; 
+            *self.queue.write().await = serde_json::from_slice(&data)?;
         }
 
         Ok(())

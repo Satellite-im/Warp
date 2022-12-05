@@ -85,12 +85,12 @@ fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow
 #[allow(clippy::large_enum_variant)]
 pub enum PeerType {
     PeerId(PeerId),
-    DID(DID),
+    Did(DID),
 }
 
 impl From<DID> for PeerType {
     fn from(did: DID) -> Self {
-        PeerType::DID(did)
+        PeerType::Did(did)
     }
 }
 
@@ -111,7 +111,7 @@ pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
     pkey: I,
 ) -> anyhow::Result<PeerConnectionType> {
     let peer_id = match pkey.into() {
-        PeerType::DID(did) => did_to_libp2p_pub(&did)?.to_peer_id(),
+        PeerType::Did(did) => did_to_libp2p_pub(&did)?.to_peer_id(),
         PeerType::PeerId(peer) => peer,
     };
 
