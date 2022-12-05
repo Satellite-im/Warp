@@ -38,7 +38,10 @@ struct Opt {
     path: Option<PathBuf>,
     #[clap(long)]
     with_key: bool,
+    #[clap(long)]
     experimental_node: bool,
+    #[clap(long)]
+    stdout_log: bool,
 }
 
 fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
@@ -133,15 +136,22 @@ async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
     if fdlimit::raise_fd_limit().is_none() {}
 
-    let file_appender = tracing_appender::rolling::hourly(
-        opt.path.clone().unwrap_or_else(|| PathBuf::from("./")),
-        "warp_rg_ipfs_messenger.log",
-    );
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    tracing_subscriber::fmt()
-        .with_writer(non_blocking)
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    if !opt.stdout_log {
+        let file_appender = tracing_appender::rolling::hourly(
+            opt.path.clone().unwrap_or_else(|| PathBuf::from("./")),
+            "warp_rg_ipfs_messenger.log",
+        );
+        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+        tracing_subscriber::fmt()
+            .with_writer(non_blocking)
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+    }
 
     let cache = cache_setup(opt.path.as_ref().map(|p| p.join("cache")))?;
     let password = if opt.with_key {

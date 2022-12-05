@@ -620,6 +620,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .insert(conversation.to_document(self.ipfs.clone()).await?);
 
         self.set_root_document(root_document).await?;
+
         let (tx, _) = broadcast::channel(1024);
 
         self.stream
@@ -784,7 +785,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         }) {
             error!("Error broadcasting event: {e}");
         }
-        // warp::async_block_in_place_uncheck(conversation.delete())?;
         Ok(document_type)
     }
 
@@ -906,11 +906,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation_id: Uuid,
     ) -> Result<impl Stream<Item = MessageEventKind>, Error> {
         let mut rx = self
-            .stream
-            .read()
-            .await
-            .get(&conversation_id)
-            .ok_or(Error::InvalidConversation)?
+            .get_conversation_sender(conversation_id)
+            .await?
             .subscribe();
 
         Ok(async_stream::stream! {
@@ -1967,7 +1964,7 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
                 .concat();
                 verify_serde_sig(sender, &construct, &signature)?;
             }
-            
+
             message.set_signature(Some(signature));
             *message.value_mut() = val;
             message.set_modified(modified);
