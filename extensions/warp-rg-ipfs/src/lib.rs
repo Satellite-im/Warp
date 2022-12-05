@@ -4,6 +4,7 @@ mod store;
 
 use crate::spam_filter::SpamFilter;
 use config::RgIpfsConfig;
+use futures::StreamExt;
 use ipfs::IpfsTypes;
 use ipfs::{Ipfs, TestTypes, Types};
 use std::path::PathBuf;
@@ -403,7 +404,7 @@ impl<T: IpfsTypes> RayGunStream for IpfsMessaging<T> {
     ) -> Result<MessageEventStream> {
         let store = self.messaging_store()?;
         let stream = store.get_conversation_stream(conversation_id).await?;
-        Ok(MessageEventStream(Box::pin(stream)))
+        Ok(MessageEventStream(stream.boxed()))
     }
 }
 

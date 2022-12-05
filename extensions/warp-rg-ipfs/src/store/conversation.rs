@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use core::hash::Hash;
 use futures::{stream::FuturesOrdered, StreamExt};
 use ipfs::{Ipfs, IpfsTypes};
 use libipld::IpldCodec;
@@ -12,11 +13,8 @@ use warp::{
     raygun::{Conversation, ConversationType, Message, MessageOptions},
     sata::{Kind, Sata},
 };
-use core::hash::Hash;
 
-use super::{
-    document::{DocumentType, ToDocument},
-};
+use super::document::{DocumentType, ToDocument};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct ConversationDocument {
@@ -30,10 +28,6 @@ pub struct ConversationDocument {
     pub messages: BTreeSet<MessageDocument>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
-    // #[serde(skip)]
-    // task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
-    // #[serde(skip)]
-    // tx: Option<BroadcastSender<MessageEventKind>>,
 }
 
 impl Hash for ConversationDocument {
@@ -61,67 +55,6 @@ impl ConversationDocument {
         self.recipients.clone()
     }
 }
-
-// impl ConversationDocument {
-//     //TODO: Linked into DirectMessageStore
-//     pub fn start_task<T: IpfsTypes>(
-//         &mut self,
-//         store: DirectMessageStore<T>,
-//         did: Arc<DID>,
-//         filesystem: Option<Box<dyn Constellation>>,
-//         filter: &Arc<Option<SpamFilter>>,
-//         stream: SubscriptionStream,
-//     ) {
-//         let mut convo = self.clone();
-//         let filter = filter.clone();
-//         let tx = match self.tx.clone() {
-//             Some(tx) => tx,
-//             None => return,
-//         };
-
-//         let task = warp::async_spawn({
-//             let filesystem = filesystem;
-//             async move {
-//                 futures::pin_mut!(stream);
-
-//                 while let Some(stream) = stream.next().await {
-//                     if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
-//                         if let Ok(data) = data.decrypt::<Vec<u8>>(&did) {
-//                             if let Ok(event) = serde_json::from_slice::<MessagingEvents>(&data) {
-//                                 if let Err(e) = direct_message_event(
-//                                     store.clone(),
-//                                     &mut convo,
-//                                     filesystem.clone(),
-//                                     &event,
-//                                     filter.clone(),
-//                                     tx.clone(),
-//                                     MessageDirection::In,
-//                                     Default::default(),
-//                                 )
-//                                 .await
-//                                 {
-//                                     error!("Error processing message: {e}");
-//                                     continue;
-//                                 }
-//                             }
-//                         }
-//                     }
-//                 }
-//             }
-//         });
-//         *self.task.write() = Some(task);
-//     }
-
-//     pub fn end_task(&self) {
-//         if self.task.read().is_none() {
-//             return;
-//         }
-//         let task = std::mem::replace(&mut *self.task.write(), None);
-//         if let Some(task) = task {
-//             task.abort();
-//         }
-//     }
-// }
 
 impl ConversationDocument {
     pub fn new(
