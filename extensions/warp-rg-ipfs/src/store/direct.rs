@@ -173,6 +173,14 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         if let Ok(list) = store.list_conversations().await {
             for conversation in list {
+                let conversation = ConversationDocument::from(conversation);
+                let stream = match store.ipfs.pubsub_subscribe(conversation.topic()).await {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        error!("Error subscribing to conversation: {e}");
+                        continue;
+                    }
+                };
                 let (tx, rx) = async_broadcast::broadcast(1024);
                 store
                     .stream_sender
@@ -189,6 +197,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     .write()
                     .await
                     .insert(conversation.id(), Arc::new(Semaphore::new(1)));
+
+                store.start_task(conversation.id(), stream).await;
             }
         }
 
