@@ -169,7 +169,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         *self.direct_store.write() = Some(
             DirectMessageStore::new(
                 ipfs.clone(),
-                config.path.map(|p| p.join("messages")),
+                config.path,
                 self.account.clone(),
                 self.constellation.clone(),
                 discovery,
