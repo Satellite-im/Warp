@@ -263,11 +263,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
                         if let Ok(data) = data.decrypt::<Vec<u8>>(&did) {
                             if let Ok(event) = serde_json::from_slice::<MessagingEvents>(&data) {
-                                let _permit = match store.permit(conversation_id).await {
-                                    Ok(p) => p,
-                                    Err(_) => continue,
-                                };
-
                                 let mut conversation =
                                     match store.get_conversation(conversation_id).await {
                                         Ok(c) => c,
@@ -293,6 +288,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                 };
 
                                 if !skip {
+                                    let _permit = match store.permit(conversation_id).await {
+                                        Ok(p) => p,
+                                        Err(_) => continue,
+                                    };
                                     let mut root = match store.get_root_document().await {
                                         Ok(r) => r,
                                         _ => continue,
@@ -312,9 +311,9 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                     if let Err(e) = store.set_root_document(root).await {
                                         error!("Error updating root document: {e}");
                                     }
+                                    drop(_permit);
+                                    trace!("Permit for {conversation_id}:incoming been released");
                                 }
-                                drop(_permit);
-                                trace!("Permit for {conversation_id}:incoming been released");
                             }
                         }
                     }
