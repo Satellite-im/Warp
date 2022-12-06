@@ -715,6 +715,10 @@ async fn main() -> anyhow::Result<()> {
                                 None => { writeln!(stdout, "/unpin <id | all>")? }
                             }
                         }
+                        Some("/count") => {
+                            let amount = chat.get_message_count(*topic.read()).await?;
+                            writeln!(stdout, "Conversation contains {} messages", amount)?;
+                        }
                         _ => {
                             if !line.is_empty() {
                                 // Since using crossterm would not pick up every expected event here, we will just pretend we are typing
