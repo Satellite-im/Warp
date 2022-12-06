@@ -319,6 +319,12 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         self.stream_task.write().await.insert(conversation_id, task);
     }
 
+    async fn end_task(&self, conversation_id: Uuid) {
+        if let Some(task) = self.stream_task.write().await.remove(&conversation_id) {
+            task.abort();
+        }
+    }
+
     async fn process_conversation(
         &mut self,
         data: Sata,
@@ -378,8 +384,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 {
                     error!("Error broadcasting event: {e}");
                 }
-
-                // self.direct_conversation.write().push(convo);
             }
             ConversationEvents::DeleteConversation(id) => {
                 trace!("Delete conversation event received for {id}");
@@ -393,42 +397,47 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 };
 
                 match self.get_conversation(id).await {
-                    Ok(conversation) if conversation.recipients().contains(&sender) => {}
+                    Ok(conversation)
+                        if conversation.recipients().contains(&sender)
+                            && conversation.conversation_type == ConversationType::Direct =>
+                    {
+                        conversation
+                    }
                     _ => {
                         anyhow::bail!("Conversation exist but did not match condition required");
                     }
                 };
 
-                // let index = self
-                //     .direct_conversation
-                //     .read()
-                //     .iter()
-                //     .position(|convo| convo.id() == id);
+                self.end_task(id).await;
 
-                // if let Some(index) = index {
-                //     let conversation = self.direct_conversation.write().remove(index);
+                let mut root = self.get_root_document().await?;
 
-                //     // conversation.end_task();
+                let document = root.remove_conversation(self.ipfs.clone(), id).await?;
+                self.set_root_document(root).await?;
 
-                //     let topic = conversation.topic();
+                self.stream_sender.write().await.remove(&id);
+                self.stream_receiver.write().await.remove(&id);
+                self.task.write().await.remove(&id);
+                self.queue.write().await.remove(&sender);
 
-                //     //Note needed as we ran `conversation.end_task();` which would unsubscribe from the topic
-                //     //after dropping the stream, but this serves as a secondary precaution
-                //     if self.ipfs.pubsub_unsubscribe(&topic).await.is_ok() {
-                //         warn!("topic should have been unsubscribed after dropping conversation.");
-                //     }
+                if self
+                    .ipfs
+                    .pubsub_unsubscribe(&document.topic())
+                    .await
+                    .is_ok()
+                {
+                    warn!("topic should have been unsubscribed after dropping conversation.");
+                }
 
-                //     if let Err(e) = conversation.delete().await {
-                //         error!("Error deleting conversation: {e}");
-                //     }
-                //     drop(conversation);
-                //     if let Err(e) = self.event.send(RayGunEventKind::ConversationDeleted {
-                //         conversation_id: id,
-                //     }) {
-                //         error!("Error broadcasting event: {e}");
-                //     }
-                //     trace!("Conversation deleted");
-                // }
+                if let Err(e) = self
+                    .event
+                    .broadcast(RayGunEventKind::ConversationDeleted {
+                        conversation_id: id,
+                    })
+                    .await
+                {
+                    error!("Error broadcasting event: {e}");
+                }
             }
         }
         Ok(())
