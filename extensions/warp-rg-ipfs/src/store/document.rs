@@ -238,7 +238,17 @@ impl ConversationRootDocument {
             return Err(Error::InvalidConversation);
         }
 
-        document_type.resolve(ipfs, None).await
+        let conversation = document_type.resolve(ipfs.clone(), None).await?;
+        match document_type {
+            DocumentType::Cid(cid) | DocumentType::UnixFS(cid, _) => {
+                if ipfs.is_pinned(&cid).await? {
+                    ipfs.remove_pin(&cid, false).await?;
+                }
+                ipfs.remove_block(cid).await?;
+            }
+            _ => {}
+        }
+        Ok(conversation)
     }
 
     pub async fn update_conversation<T: IpfsTypes>(
@@ -258,6 +268,16 @@ impl ConversationRootDocument {
         let document = document.to_document(ipfs.clone()).await?;
 
         self.conversations.insert(document);
+
+        match document_type {
+            DocumentType::Cid(cid) | DocumentType::UnixFS(cid, _) => {
+                if ipfs.is_pinned(&cid).await? {
+                    ipfs.remove_pin(&cid, false).await?;
+                }
+                ipfs.remove_block(cid).await?;
+            }
+            _ => {}
+        }
 
         Ok(())
     }

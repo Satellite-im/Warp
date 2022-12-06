@@ -183,6 +183,33 @@ impl ConversationDocument {
             .resolve(ipfs, did)
             .await
     }
+
+    pub async fn delete_message<T: IpfsTypes>(
+        &mut self,
+        ipfs: Ipfs<T>,
+        message_id: Uuid,
+    ) -> Result<(), Error> {
+        let mut document = self
+            .messages
+            .iter()
+            .find(|document| document.id == message_id)
+            .cloned()
+            .ok_or(Error::MessageNotFound)?;
+        self.messages.remove(&document);
+        document.remove(ipfs).await
+    }
+
+    pub async fn delete_all_message<T: IpfsTypes>(
+        &mut self,
+        ipfs: Ipfs<T>,
+    ) -> Result<(), Error> {
+        let message_ids = self.messages.iter().map(|document| document.id).collect::<Vec<_>>();
+        for message_id in message_ids {
+            if let Err(_e) = self.delete_message(ipfs.clone(), message_id).await {
+            }
+        }
+        Ok(())
+    }
 }
 
 impl From<ConversationDocument> for Conversation {
@@ -254,6 +281,25 @@ impl MessageDocument {
         Ok(document)
     }
 
+    pub async fn remove<T: IpfsTypes>(
+        &mut self,
+        ipfs: Ipfs<T>,
+    ) -> Result<(), Error> {
+        let document = self.message.clone();
+
+        match document {
+            DocumentType::Cid(cid) | DocumentType::UnixFS(cid, _) => {
+                if ipfs.is_pinned(&cid).await? {
+                    ipfs.remove_pin(&cid, false).await?;
+                }
+                ipfs.remove_block(cid).await?;
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
     pub async fn update<T: IpfsTypes>(
         &mut self,
         ipfs: Ipfs<T>,
@@ -262,6 +308,7 @@ impl MessageDocument {
     ) -> Result<(), Error> {
         let recipients = self.receipients(ipfs.clone()).await?;
         let old_message = self.resolve(ipfs.clone(), did.clone()).await?;
+        let old_document = self.message.clone();
 
         if old_message.id() != message.id()
             || old_message.conversation_id() != message.conversation_id()
@@ -275,8 +322,17 @@ impl MessageDocument {
         }
 
         let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, message)?;
+        self.message = data.to_document(ipfs.clone()).await?;
 
-        self.message = data.to_document(ipfs).await?;
+        match old_document {
+            DocumentType::Cid(cid) | DocumentType::UnixFS(cid, _) => {
+                if ipfs.is_pinned(&cid).await? {
+                    ipfs.remove_pin(&cid, false).await?;
+                }
+                ipfs.remove_block(cid).await?;
+            }
+            _ => {}
+        }
 
         Ok(())
     }
