@@ -42,7 +42,7 @@ use super::{
     DIRECT_BROADCAST,
 };
 
-pub struct DirectMessageStore<T: IpfsTypes> {
+pub struct MessageStore<T: IpfsTypes> {
     // ipfs instance
     ipfs: Ipfs<T>,
 
@@ -82,7 +82,7 @@ pub struct DirectMessageStore<T: IpfsTypes> {
     with_friends: Arc<AtomicBool>,
 }
 
-impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
+impl<T: IpfsTypes> Clone for MessageStore<T> {
     fn clone(&self) -> Self {
         Self {
             ipfs: self.ipfs.clone(),
@@ -105,7 +105,7 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
 }
 
 #[allow(clippy::too_many_arguments)]
-impl<T: IpfsTypes> DirectMessageStore<T> {
+impl<T: IpfsTypes> MessageStore<T> {
     pub async fn new(
         ipfs: Ipfs<T>,
         path: Option<PathBuf>,
@@ -456,7 +456,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
     }
 }
 
-impl<T: IpfsTypes> DirectMessageStore<T> {
+impl<T: IpfsTypes> MessageStore<T> {
     pub async fn save_cid(&mut self, cid: Cid) -> Result<(), Error> {
         *self.root_cid.write().await = Some(cid);
         if let Some(path) = self.path.as_ref() {
@@ -682,7 +682,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .remove_conversation(self.ipfs.clone(), conversation_id)
             .await?;
         self.set_root_document(root).await?;
-        // conversation.end_task();
+
         if broadcast {
             let recipients = document_type.recipients();
 

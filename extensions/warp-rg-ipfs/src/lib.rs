@@ -12,7 +12,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
-use store::direct::DirectMessageStore;
+use store::message::MessageStore;
 use async_broadcast::{Receiver, Sender};
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream};
@@ -44,7 +44,7 @@ pub struct IpfsMessaging<T: IpfsTypes> {
     account: Box<dyn MultiPass>,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
-    direct_store: Arc<RwLock<Option<DirectMessageStore<T>>>>,
+    direct_store: Arc<RwLock<Option<MessageStore<T>>>>,
     config: Option<RgIpfsConfig>,
     constellation: Option<Box<dyn Constellation>>,
     initialize: Arc<AtomicBool>,
@@ -167,7 +167,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         };
 
         *self.direct_store.write() = Some(
-            DirectMessageStore::new(
+            MessageStore::new(
                 ipfs.clone(),
                 config.path,
                 self.account.clone(),
@@ -212,7 +212,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         Ok(inner)
     }
 
-    pub fn messaging_store(&self) -> std::result::Result<DirectMessageStore<T>, Error> {
+    pub fn messaging_store(&self) -> std::result::Result<MessageStore<T>, Error> {
         self.direct_store
             .read()
             .clone()

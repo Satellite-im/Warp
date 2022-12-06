@@ -1,4 +1,4 @@
-pub mod direct;
+pub mod message;
 pub mod document;
 pub mod conversation;
 

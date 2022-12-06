@@ -77,9 +77,6 @@ impl ConversationDocument {
         id: Option<Uuid>,
         conversation_type: ConversationType,
     ) -> Result<Self, Error> {
-        // let (tx, _) = broadcast::channel(1024);
-        // let tx = Some(tx);
-
         let id = id.unwrap_or_else(Uuid::new_v4);
         let name = None;
 
@@ -95,7 +92,6 @@ impl ConversationDocument {
             ));
         }
 
-        // let task = Arc::new(Default::default());
         let messages = BTreeSet::new();
         Ok(Self {
             id,
@@ -104,8 +100,6 @@ impl ConversationDocument {
             creator: None,
             conversation_type,
             messages,
-            // task,
-            // tx,
             signature: None,
         })
     }
