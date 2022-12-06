@@ -26,8 +26,8 @@ use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::group::{GroupChat, GroupChatManagement, GroupInvite};
 use warp::raygun::{
-    Conversation, Location, MessageEvent, MessageEventStream, RayGunEventStream, RayGunEvents,
-    RayGunStream,
+    Conversation, Location, MessageEvent, MessageEventStream, MessageStatus, RayGunEventStream,
+    RayGunEvents, RayGunStream,
 };
 use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
 use warp::raygun::{RayGunAttachment, RayGunEventKind};
@@ -245,13 +245,33 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         self.messaging_store()?.create_conversation(did_key).await
     }
 
+    async fn get_conversation(&self, conversation_id: Uuid) -> Result<Conversation> {
+        self.messaging_store()?
+            .get_conversation(conversation_id)
+            .map(|convo| convo.conversation())
+    }
+
     async fn list_conversations(&self) -> Result<Vec<Conversation>> {
         Ok(self.messaging_store()?.list_conversations())
+    }
+
+    async fn get_message_count(&self, conversation_id: Uuid) -> Result<usize> {
+        self.messaging_store()?.messages_count(conversation_id)
     }
 
     async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message> {
         self.messaging_store()?
             .get_message(conversation_id, message_id)
+    }
+
+    async fn message_status(
+        &self,
+        conversation_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<MessageStatus> {
+        self.messaging_store()?
+            .message_status(conversation_id, message_id)
+            .await
     }
 
     async fn get_messages(

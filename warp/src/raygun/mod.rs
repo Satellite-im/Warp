@@ -175,15 +175,17 @@ impl MessageOptions {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Hash, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
 pub enum ConversationType {
+    #[display(fmt = "direct")]
     Direct,
+    #[display(fmt = "group")]
     Group,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(Debug, Hash, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 pub struct Conversation {
     id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -277,6 +279,11 @@ pub struct Message {
     /// Timestamp of the message
     date: DateTime<Utc>,
 
+    /// Timestamp of when message was modified
+    /// Note: Only applies if the message itself was modified and not
+    ///       related to being pinned, reacted, etc.
+    modified: Option<DateTime<Utc>>,
+
     /// Pin a message over other messages
     pinned: bool,
 
@@ -310,6 +317,7 @@ impl Default for Message {
             conversation_id: Uuid::nil(),
             sender: Default::default(),
             date: Utc::now(),
+            modified: None,
             pinned: false,
             reactions: Vec::new(),
             replied: None,
@@ -318,6 +326,18 @@ impl Default for Message {
             signature: Default::default(),
             metadata: HashMap::new(),
         }
+    }
+}
+
+impl PartialOrd for Message {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        self.date.partial_cmp(&other.date)
+    }
+}
+
+impl Ord for Message {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.date.cmp(&other.date)
     }
 }
 
@@ -347,6 +367,10 @@ impl Message {
 
     pub fn date(&self) -> DateTime<Utc> {
         self.date
+    }
+
+    pub fn modified(&self) -> Option<DateTime<Utc>> {
+        self.modified
     }
 
     pub fn pinned(&self) -> bool {
@@ -397,6 +421,10 @@ impl Message {
 
     pub fn set_date(&mut self, date: DateTime<Utc>) {
         self.date = date
+    }
+
+    pub fn set_modified(&mut self, date: DateTime<Utc>) {
+        self.modified = Some(date)
     }
 
     pub fn set_pinned(&mut self, pin: bool) {
@@ -484,6 +512,23 @@ impl Reaction {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
+#[serde(rename_all="snake_case")]
+#[repr(C)]
+pub enum MessageStatus {
+    /// If a message has not been sent.
+    #[display(fmt = "not sent")]
+    NotSent,
+
+    /// If a message has been sent, either directly or through a third party service
+    #[display(fmt = "sent")]
+    Sent,
+
+    /// Confirmation of message being delivered. May be used in the future
+    #[display(fmt = "delivered")]
+    Delivered,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub enum ReactionState {
@@ -524,13 +569,28 @@ pub trait RayGun:
         Err(Error::Unimplemented)
     }
 
-    // List all active conversations
+    /// Get an active conversation
+    async fn get_conversation(&self, _: Uuid) -> Result<Conversation, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// List all active conversations
     async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
         Err(Error::Unimplemented)
     }
 
     /// Retrieve all messages from a conversation
     async fn get_message(&self, _: Uuid, _: Uuid) -> Result<Message, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Get a number of messages in a conversation
+    async fn get_message_count(&self, _: Uuid) -> Result<usize, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Get a status of a message in a conversation
+    async fn message_status(&self, _: Uuid, _: Uuid) -> Result<MessageStatus, Error> {
         Err(Error::Unimplemented)
     }
 
