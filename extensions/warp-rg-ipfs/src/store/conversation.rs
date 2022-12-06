@@ -185,7 +185,7 @@ impl ConversationDocument {
         self.messages
             .iter()
             .find(|document| document.id == message_id)
-            .ok_or(Error::InvalidMessage)?
+            .ok_or(Error::MessageNotFound)?
             .resolve(ipfs, did)
             .await
     }

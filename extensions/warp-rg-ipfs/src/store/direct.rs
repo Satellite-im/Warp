@@ -832,13 +832,11 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
     pub async fn get_message(
         &self,
-        conversation: Uuid,
+        conversation_id: Uuid,
         message_id: Uuid,
     ) -> Result<Message, Error> {
-        let document = self.get_root_document().await?;
-        let conversation = document
-            .get_conversation(self.ipfs.clone(), conversation)
-            .await?;
+        let _permit = self.permit(conversation_id).await?;
+        let conversation = self.get_conversation(conversation_id).await?;
         conversation
             .get_message(self.ipfs.clone(), self.did.clone(), message_id)
             .await
@@ -886,10 +884,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation: Uuid,
         opt: MessageOptions,
     ) -> Result<Vec<Message>, Error> {
-        let document = self.get_root_document().await?;
-        let conversation = document
-            .get_conversation(self.ipfs.clone(), conversation)
-            .await?;
+        let conversation = self.get_conversation(conversation).await?;
         conversation
             .get_messages(self.ipfs.clone(), self.did.clone(), opt)
             .await
