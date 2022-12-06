@@ -62,8 +62,6 @@ pub struct DirectMessageStore<T: IpfsTypes> {
 
     stream_receiver: Arc<tokio::sync::RwLock<HashMap<Uuid, BroadcastReceiver<MessageEventKind>>>>,
 
-    task: Arc<tokio::sync::RwLock<HashMap<Uuid, Arc<Semaphore>>>>,
-
     stream_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
 
     // Queue
@@ -94,7 +92,6 @@ impl<T: IpfsTypes> Clone for DirectMessageStore<T> {
             root_cid: self.root_cid.clone(),
             account: self.account.clone(),
             filesystem: self.filesystem.clone(),
-            task: self.task.clone(),
             stream_task: self.stream_task.clone(),
             queue: self.queue.clone(),
             did: self.did.clone(),
@@ -135,7 +132,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             }
         }
         // let direct_conversation = Arc::new(Default::default());
-        let task = Arc::new(Default::default());
         let queue = Arc::new(Default::default());
         let root_cid = Arc::new(Default::default());
         let did = Arc::new(account.decrypt_private_key(None)?);
@@ -153,7 +149,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             stream_sender,
             stream_receiver,
             stream_task,
-            task,
             root_cid,
             account,
             filesystem,
@@ -192,11 +187,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     .write()
                     .await
                     .insert(conversation.id(), rx);
-                store
-                    .task
-                    .write()
-                    .await
-                    .insert(conversation.id(), Arc::new(Semaphore::new(4)));
 
                 store.start_task(conversation.id(), stream).await;
             }
@@ -336,11 +326,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 self.stream_sender.write().await.insert(convo.id(), tx);
                 self.stream_receiver.write().await.insert(convo.id(), rx);
 
-                self.task
-                    .write()
-                    .await
-                    .insert(convo.id(), Arc::new(Semaphore::new(4)));
-
                 self.start_task(convo.id(), stream).await;
 
                 if let Err(e) = self
@@ -387,7 +372,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
                 self.stream_sender.write().await.remove(&conversation_id);
                 self.stream_receiver.write().await.remove(&conversation_id);
-                self.task.write().await.remove(&conversation_id);
                 self.queue.write().await.remove(&sender);
 
                 if self
@@ -631,10 +615,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             .write()
             .await
             .insert(conversation.id(), rx);
-        self.task
-            .write()
-            .await
-            .insert(conversation.id(), Arc::new(Semaphore::new(4)));
 
         self.start_task(conversation.id(), stream).await;
 
@@ -929,22 +909,6 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                 };
             }
         })
-    }
-
-    pub async fn permit(&self, conversation_id: Uuid) -> Result<OwnedSemaphorePermit, Error> {
-        let task = self
-            .task
-            .read()
-            .await
-            .get(&conversation_id)
-            .cloned()
-            .ok_or(Error::InvalidConversation)?;
-
-        task.clone()
-            .acquire_owned()
-            .await
-            .map_err(anyhow::Error::from)
-            .map_err(Error::from)
     }
 
     pub async fn send_message(
