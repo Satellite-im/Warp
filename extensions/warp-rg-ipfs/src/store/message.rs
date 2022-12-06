@@ -16,7 +16,6 @@ use libipld::Cid;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
@@ -1771,10 +1770,8 @@ impl<T: IpfsTypes> MessageStore<T> {
                 document.messages.insert(message_document);
 
                 let mut root = self.get_root_document().await?;
-
-                root.update_conversation(self.ipfs.clone(), conversation_id, document.clone())
+                root.update_conversation(self.ipfs.clone(), conversation_id, document)
                     .await?;
-
                 self.set_root_document(root).await?;
 
                 let event = match direction {
@@ -1868,7 +1865,7 @@ impl<T: IpfsTypes> MessageStore<T> {
 
                 let mut root = self.get_root_document().await?;
 
-                root.update_conversation(self.ipfs.clone(), convo_id, document.clone())
+                root.update_conversation(self.ipfs.clone(), convo_id, document)
                     .await?;
 
                 self.set_root_document(root).await?;
@@ -1884,7 +1881,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 }
             }
             MessagingEvents::Delete(convo_id, message_id) => {
-                let message_document = document
+                let mut message_document = document
                     .messages
                     .iter()
                     .cloned()
@@ -1917,11 +1914,13 @@ impl<T: IpfsTypes> MessageStore<T> {
                 if document.messages.remove(&message_document) {
                     let mut root = self.get_root_document().await?;
 
-                    root.update_conversation(self.ipfs.clone(), convo_id, document.clone())
+                    root.update_conversation(self.ipfs.clone(), convo_id, document)
                         .await?;
 
                     self.set_root_document(root).await?;
-
+                    if let Err(e) = message_document.remove(self.ipfs.clone()).await {
+                        error!("Unable to remove message block: {e}");
+                    }
                     if let Err(e) = tx
                         .broadcast(MessageEventKind::MessageDeleted {
                             conversation_id: convo_id,
@@ -1969,7 +1968,10 @@ impl<T: IpfsTypes> MessageStore<T> {
                     .await?;
 
                 document.messages.replace(message_document);
-
+                let mut root = self.get_root_document().await?;
+                root.update_conversation(self.ipfs.clone(), convo_id, document)
+                    .await?;
+                self.set_root_document(root).await?;
                 if let Err(e) = tx.broadcast(event).await {
                     error!("Error broadcasting event: {e}");
                 }
@@ -2025,6 +2027,12 @@ impl<T: IpfsTypes> MessageStore<T> {
                             .update(self.ipfs.clone(), self.did.clone(), message)
                             .await?;
                         document.messages.replace(message_document);
+
+                        let mut root = self.get_root_document().await?;
+                        root.update_conversation(self.ipfs.clone(), convo_id, document)
+                            .await?;
+                        self.set_root_document(root).await?;
+
                         if let Err(e) = tx
                             .broadcast(MessageEventKind::MessageReactionAdded {
                                 conversation_id: convo_id,
@@ -2063,6 +2071,12 @@ impl<T: IpfsTypes> MessageStore<T> {
                                 .update(self.ipfs.clone(), self.did.clone(), message)
                                 .await?;
                             document.messages.replace(message_document);
+
+                            let mut root = self.get_root_document().await?;
+                            root.update_conversation(self.ipfs.clone(), convo_id, document)
+                                .await?;
+                            self.set_root_document(root).await?;
+
                             if let Err(e) = tx
                                 .broadcast(MessageEventKind::MessageReactionRemoved {
                                     conversation_id: convo_id,
