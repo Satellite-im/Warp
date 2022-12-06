@@ -385,10 +385,10 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     error!("Error broadcasting event: {e}");
                 }
             }
-            ConversationEvents::DeleteConversation(id) => {
-                trace!("Delete conversation event received for {id}");
-                if !self.exist(id).await {
-                    anyhow::bail!("Conversation {id} doesnt exist");
+            ConversationEvents::DeleteConversation(conversation_id) => {
+                trace!("Delete conversation event received for {conversation_id}");
+                if !self.exist(conversation_id).await {
+                    anyhow::bail!("Conversation {conversation_id} doesnt exist");
                 }
 
                 let sender = match data.sender() {
@@ -396,7 +396,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     None => return Ok(()),
                 };
 
-                match self.get_conversation(id).await {
+                match self.get_conversation(conversation_id).await {
                     Ok(conversation)
                         if conversation.recipients().contains(&sender)
                             && conversation.conversation_type == ConversationType::Direct =>
@@ -408,16 +408,18 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                     }
                 };
 
-                self.end_task(id).await;
+                self.end_task(conversation_id).await;
 
                 let mut root = self.get_root_document().await?;
 
-                let document = root.remove_conversation(self.ipfs.clone(), id).await?;
+                let document = root
+                    .remove_conversation(self.ipfs.clone(), conversation_id)
+                    .await?;
                 self.set_root_document(root).await?;
 
-                self.stream_sender.write().await.remove(&id);
-                self.stream_receiver.write().await.remove(&id);
-                self.task.write().await.remove(&id);
+                self.stream_sender.write().await.remove(&conversation_id);
+                self.stream_receiver.write().await.remove(&conversation_id);
+                self.task.write().await.remove(&conversation_id);
                 self.queue.write().await.remove(&sender);
 
                 if self
@@ -431,9 +433,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
                 if let Err(e) = self
                     .event
-                    .broadcast(RayGunEventKind::ConversationDeleted {
-                        conversation_id: id,
-                    })
+                    .broadcast(RayGunEventKind::ConversationDeleted { conversation_id })
                     .await
                 {
                     error!("Error broadcasting event: {e}");
