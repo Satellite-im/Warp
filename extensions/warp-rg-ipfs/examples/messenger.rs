@@ -428,7 +428,7 @@ async fn main() -> anyhow::Result<()> {
                                     &message.message_type().to_string(),
                                     &message.conversation_id().to_string(),
                                     &message.date().to_string(),
-                                    &message.modified().map(|d| d.to_string()).unwrap_or("N/A".into()),
+                                    &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
                                     &username,
                                     &message.value().join("\n"),
                                     &format!("{}", message.pinned()),
