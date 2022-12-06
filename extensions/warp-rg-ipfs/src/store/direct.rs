@@ -274,7 +274,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                         Err(_) => continue,
                                     };
 
-                                if let Err(e) = direct_message_event(
+                                let skip = match direct_message_event(
                                     store.clone(),
                                     &mut conversation,
                                     filesystem.clone(),
@@ -285,28 +285,33 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                 )
                                 .await
                                 {
-                                    error!("Error processing message: {e}");
-                                    continue;
-                                }
-
-                                let mut root = match store.get_root_document().await {
-                                    Ok(r) => r,
-                                    _ => continue,
+                                    Ok(skip) => skip,
+                                    Err(e) => {
+                                        error!("Error processing message: {e}");
+                                        continue;
+                                    }
                                 };
 
-                                if let Err(e) = root
-                                    .update_conversation(
-                                        store.ipfs.clone(),
-                                        conversation_id,
-                                        conversation,
-                                    )
-                                    .await
-                                {
-                                    error!("Error updating conversation: {e}");
-                                    continue;
-                                }
-                                if let Err(e) = store.set_root_document(root).await {
-                                    error!("Error updating root document: {e}");
+                                if !skip {
+                                    let mut root = match store.get_root_document().await {
+                                        Ok(r) => r,
+                                        _ => continue,
+                                    };
+
+                                    if let Err(e) = root
+                                        .update_conversation(
+                                            store.ipfs.clone(),
+                                            conversation_id,
+                                            conversation,
+                                        )
+                                        .await
+                                    {
+                                        error!("Error updating conversation: {e}");
+                                        continue;
+                                    }
+                                    if let Err(e) = store.set_root_document(root).await {
+                                        error!("Error updating root document: {e}");
+                                    }
                                 }
                                 drop(_permit);
                                 trace!("Permit for {conversation_id}:incoming been released");
@@ -1830,7 +1835,7 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
     filter: Arc<Option<SpamFilter>>,
     direction: MessageDirection,
     opt: EventOpt,
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     let tx = store.get_conversation_sender(document.id()).await?;
     match events.clone() {
         MessagingEvents::New(mut message) => {
@@ -2131,7 +2136,7 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
                             {
                                 error!("Error broadcasting event: {e}");
                             }
-                            return Ok(());
+                            return Ok(false);
                         }
                     };
 
@@ -2213,10 +2218,11 @@ pub async fn direct_message_event<'a, T: IpfsTypes>(
                 if let Err(e) = tx.broadcast(ev).await {
                     error!("Error broadcasting event: {e}");
                 }
+                return Ok(true);
             }
         }
     }
-    Ok(())
+    Ok(false)
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]

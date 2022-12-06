@@ -718,17 +718,17 @@ async fn main() -> anyhow::Result<()> {
                         _ => {
                             if !line.is_empty() {
                                 // Since using crossterm would not pick up every expected event here, we will just pretend we are typing
-                                // if let Err(_e) = chat.send_event(*topic.read(), MessageEvent::Typing).await {
-                                //     //We wont error here although an error such as a conversation not found can easily lead
-                                //     //to an error
-                                // }
+                                if let Err(_e) = chat.send_event(*topic.read(), MessageEvent::Typing).await {
+                                    //We wont error here although an error such as a conversation not found can easily lead
+                                    //to an error
+                                }
                                 if let Err(e) = chat.send(*topic.read(), None, vec![line.to_string()]).await {
                                     writeln!(stdout, "Error sending message: {}", e)?;
                                     continue
                                 }
-                                // if let Err(_e) = chat.cancel_event(*topic.read(), MessageEvent::Typing).await {
-                                //     //ditto
-                                // }
+                                if let Err(_e) = chat.cancel_event(*topic.read(), MessageEvent::Typing).await {
+                                    //ditto
+                                }
                             }
                        }
                     }
