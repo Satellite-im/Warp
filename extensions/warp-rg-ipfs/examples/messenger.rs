@@ -715,6 +715,26 @@ async fn main() -> anyhow::Result<()> {
                                 None => { writeln!(stdout, "/unpin <id | all>")? }
                             }
                         }
+                        Some("/remove-message") => {
+                            let topic = topic.read().clone();
+                            match cmd_line.next() {
+                                Some(id) => {
+                                    let id = match Uuid::from_str(id) {
+                                        Ok(uuid) => uuid,
+                                        Err(e) => {
+                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            continue
+                                        }
+                                    };
+                                    if let Err(_e) = chat.delete(topic, Some(id)).await {
+
+                                    } else {
+                                        writeln!(stdout, "Message {} removed", id)?;
+                                    }
+                                },
+                                None => { writeln!(stdout, "/remove-message <id>")? }
+                            }
+                        }
                         Some("/count") => {
                             let amount = chat.get_message_count(*topic.read()).await?;
                             writeln!(stdout, "Conversation contains {} messages", amount)?;
