@@ -537,6 +537,16 @@ async fn main() -> anyhow::Result<()> {
                             }
                             writeln!(stdout, "{}", table)?;
                         },
+                        Some("get-last-identity") => { 
+                            let identity = match ipfs_account.clone().identity_store()?.fetch_identity_request().await {
+                                Ok(identity) => identity,
+                                Err(e) => {
+                                    writeln!(stdout, "Error obtaining identity: {}", e)?;
+                                    continue;
+                                }
+                            };
+                            writeln!(stdout, "Root Document: {:?}", identity)?;
+                        },
                         Some("show-root-document") => {
                             
                             let root = match ipfs_account.clone().identity_store()?.fetch_root_document_request().await {

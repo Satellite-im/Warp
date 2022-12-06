@@ -3,18 +3,22 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use futures::StreamExt;
-use ipfs::{Ipfs, IpfsTypes, Multiaddr};
+use ipfs::{Ipfs, IpfsTypes, Multiaddr, IpfsPath};
 use libipld::Cid;
-use libipld::serde::{to_ipld};
+use libipld::serde::{to_ipld, from_ipld};
 use sata::Sata;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{self, Sender};
 use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender};
 use tokio::sync::RwLock as AsyncRwLock;
 use uuid::Uuid;
+use warp::crypto::KeyMaterial;
+use warp::multipass::identity::Identity;
 use warp::{crypto::DID, error::Error};
+use dotenv::dotenv;
 
 use super::document::{DocumentType, RootDocument};
+use super::identity;
 
 pub struct Synchronize<T: IpfsTypes> {
     ipfs: Ipfs<T>,
@@ -71,6 +75,7 @@ pub struct SyncMessage {
 impl<T: IpfsTypes> Synchronize<T> {
     #[allow(unreachable_code)]
     pub async fn new(ipfs: Ipfs<T>, did: Arc<DID>) -> Result<Self, Error> {
+        dotenv().ok();
         let (tx, mut rx) = mpsc::channel(1);
         let sync = Self {
             ipfs,
@@ -81,7 +86,7 @@ impl<T: IpfsTypes> Synchronize<T> {
 
         tokio::spawn({
             let sync = sync.clone();
-            let did = sync.did.clone();
+            let did = sync.did;
             let request_list: AsyncRwLock<HashMap<Uuid, OneshotSender<NodeResponse>>> =
                 AsyncRwLock::new(Default::default());
             
@@ -105,14 +110,17 @@ impl<T: IpfsTypes> Synchronize<T> {
                                     let uuid = uuid::Uuid::new_v4();
                                     request_list.write().await.insert(uuid, sender);
 
-                                    let sata = Sata::default();
+                                    let mut sata = Sata::default();
                                     let message = SyncMessage {
                                         cid,
                                         id: uuid.to_string(),
                                         did: DID::from_str(did.clone().to_string().as_str()).unwrap(),
                                         type_request: Command::Send
                                     };
-                                    let data = sata.encode(libipld::IpldCodec::DagJson, sata::Kind::Static, message)?;
+                                    let did_recipient_string = std::env::var("SYNCKEY").unwrap();
+                                    let did_recipient = DID::from_str(&did_recipient_string)?;
+                                    sata.add_recipient(&did_recipient)?;
+                                    let data = sata.encrypt(libipld::IpldCodec::DagJson, &did, sata::Kind::Static, message)?;
                                     let bytes = serde_json::to_vec(&data)?;
                                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                                     ipfs.clone().pubsub_publish(format!("warp/rootdocument"), bytes).await?;
@@ -129,8 +137,12 @@ impl<T: IpfsTypes> Synchronize<T> {
                                         type_request: Command::Fetch
                                     };
 
-                                    let sata = Sata::default();
-                                    let data = sata.encode(libipld::IpldCodec::DagJson, sata::Kind::Static, message)?;
+                                    let mut sata = Sata::default();
+                                    
+                                    let did_recipient_string = std::env::var("SYNCKEY").unwrap();
+                                    let did_recipient = DID::from_str(&did_recipient_string)?;
+                                    sata.add_recipient(&did_recipient)?;
+                                    let data = sata.encrypt(libipld::IpldCodec::DagJson, &did, sata::Kind::Static, message)?;
                                     let bytes = serde_json::to_vec(&data)?;
                                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                                     ipfs.clone().pubsub_publish(format!("warp/rootdocument"), bytes).await?;
@@ -141,7 +153,7 @@ impl<T: IpfsTypes> Synchronize<T> {
                 response = response.next() => {
                             if let Some(response) = response {
                                 if let Ok(data) = serde_json::from_slice::<Sata>(&response.data) {
-                                    if let Ok(data) = data.decode::<NodeResponse>() {
+                                    if let Ok(data) = data.decrypt::<NodeResponse>(&did) {
                                         let mut request = request_list.write().await;
                                         match data {
                                             NodeResponse::DocumentOk { id } => {
@@ -158,11 +170,12 @@ impl<T: IpfsTypes> Synchronize<T> {
                                                     if let Err(_) = _tx.send(NodeResponse::FetchRootDocument { id, cid: DocumentType::Object(root) }) {
                                                         println!("the receiver dropped");
                                                     }
-                                                    
-                                                    
                                                 }
                                             }
                                         }
+                                    }
+                                    else {
+                                        return Err(Error::DecryptionError);
                                     }
                                 }
                             }
@@ -219,6 +232,34 @@ impl<T: IpfsTypes> Synchronize<T> {
 
                 let root_document = cid.resolve(self.ipfs.clone(), None).await?; 
                 Ok(root_document)
+ 
+                } else {
+                    Err(Error::ObjectNotFound)
+                }
+            },
+            Err(_) => {
+                return  Err(Error::ChannelClosed);
+            }
+        } 
+    }
+
+    pub async fn fetch_identity(&self) -> Result<Identity, Error> {
+        let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
+        let node_request = NodeRequest::FetchRootDocument(one_tx);
+        let _ = self.tx.clone().send(node_request).await; 
+        match one_rx.await {
+            Ok(res) => {
+                if let NodeResponse::FetchRootDocument { id: _, cid }  = res {
+
+                let root_document = cid.resolve(self.ipfs.clone(), None).await?;
+                let ipfs_path = IpfsPath::from(root_document.identity);
+                let timeout = std::time::Duration::from_secs(30);
+                let identity = match tokio::time::timeout(timeout, self.ipfs.get_dag(ipfs_path)).await {
+                    Ok(Ok(ipld)) => from_ipld::<Identity>(ipld).map_err(anyhow::Error::from)?,
+                    Ok(Err(e)) => return Err(Error::Any(e)),
+                    Err(e) => return Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
+                };
+                Ok(identity)
  
                 } else {
                     Err(Error::ObjectNotFound)

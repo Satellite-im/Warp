@@ -25,6 +25,7 @@ serde_json = { version = "1.0" }
 bs58 = "0.4"
 cfg-if = "1.0"
 tracing = "0.1"
+dotenv = "0.15.0"
 
 hex = "0.4"
 

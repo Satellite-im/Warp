@@ -16,7 +16,7 @@ use crate::{
 };
 use futures::{stream::BoxStream, FutureExt, StreamExt};
 use ipfs::{
-    libp2p::gossipsub::GossipsubMessage,
+    libp2p::{gossipsub::GossipsubMessage, identity},
     unixfs::ll::file::adder::{Chunker, FileAdderBuilder},
     Block, Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId,
 };
@@ -472,7 +472,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         self.save_cid(root_cid).await?;
         self.update_identity().await?;
-        self.update_sync().await?;
+        self.update_sync(did_kp).await?;
         self.enable_event();
         Ok(identity)
     }
@@ -902,9 +902,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(())
     }
 
-    pub async fn update_sync(&self) -> Result<(), Error> {
-        let ident = self.own_identity().await?;
-        let sync = Synchronize::new(self.ipfs.clone(), Arc::new(ident.did_key())).await?;
+    pub async fn update_sync(&self, kp: DID) -> Result<(), Error> {
+        let sync = Synchronize::new(self.ipfs.clone(), Arc::new(kp.into())).await?;
         *self.sync.write().await = Some(sync);
         Ok(())
     }
@@ -920,6 +919,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let root = self.sync.read().await.as_ref().unwrap().clone().fetch_root_document().await?;
         
         Ok(root)
+    }
+
+    pub async fn fetch_identity_request(&self) -> Result<Identity, Error> {
+        let identity = self.sync.read().await.as_ref().unwrap().clone().fetch_identity().await?;
+        
+        Ok(identity)
     }
 
     pub fn validate_identity(&self, identity: &Identity) -> Result<(), Error> {
