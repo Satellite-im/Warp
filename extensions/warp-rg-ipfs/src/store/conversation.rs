@@ -1,6 +1,9 @@
 use chrono::{DateTime, Utc};
 use core::hash::Hash;
-use futures::{stream::FuturesOrdered, StreamExt};
+use futures::{
+    stream::{FuturesOrdered, FuturesUnordered},
+    StreamExt,
+};
 use ipfs::{Ipfs, IpfsTypes};
 use libipld::IpldCodec;
 use serde::{Deserialize, Serialize};
@@ -202,13 +205,32 @@ impl ConversationDocument {
     pub async fn delete_all_message<T: IpfsTypes>(
         &mut self,
         ipfs: Ipfs<T>,
-    ) -> Result<(), Error> {
-        let message_ids = self.messages.iter().map(|document| document.id).collect::<Vec<_>>();
-        for message_id in message_ids {
-            if let Err(_e) = self.delete_message(ipfs.clone(), message_id).await {
-            }
-        }
-        Ok(())
+    ) -> Result<Vec<Uuid>, Error> {
+        let fut = FuturesUnordered::from_iter(
+            std::mem::take(&mut self.messages)
+                .iter()
+                .filter_map(|document| match document.message {
+                    DocumentType::Cid(cid) | DocumentType::UnixFS(cid, _) => {
+                        Some((document.id, cid))
+                    }
+                    _ => None,
+                })
+                .map(|ids| {
+                    let ipfs = ipfs.clone();
+                    async move {
+                        let (id, cid) = ids;
+                        if ipfs.is_pinned(&cid).await? {
+                            ipfs.remove_pin(&cid, false).await?;
+                        }
+                        ipfs.remove_block(cid).await?;
+                        Ok::<_, Error>(id)
+                    }
+                }),
+        )
+        .filter_map(|result| async { result.ok() })
+        .collect::<Vec<_>>()
+        .await;
+        Ok(fut)
     }
 }
 
@@ -281,10 +303,7 @@ impl MessageDocument {
         Ok(document)
     }
 
-    pub async fn remove<T: IpfsTypes>(
-        &mut self,
-        ipfs: Ipfs<T>,
-    ) -> Result<(), Error> {
+    pub async fn remove<T: IpfsTypes>(&mut self, ipfs: Ipfs<T>) -> Result<(), Error> {
         let document = self.message.clone();
 
         match document {

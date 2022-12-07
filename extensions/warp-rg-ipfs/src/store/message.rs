@@ -256,7 +256,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                                     };
 
                                 if let Err(e) = store
-                                    .direct_message_event(
+                                    .message_event(
                                         conversation,
                                         &event,
                                         MessageDirection::In,
@@ -674,7 +674,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         &mut self,
         conversation_id: Uuid,
         broadcast: bool,
-    ) -> Result<ConversationDocument, Error> {
+    ) -> Result<(), Error> {
         let mut root = self.get_root_document().await?;
 
         let document_type = root
@@ -760,16 +760,23 @@ impl<T: IpfsTypes> MessageStore<T> {
             };
         }
 
+        let conversation_id = document_type.id();
+        tokio::spawn({
+            let ipfs = self.ipfs.clone();
+            let mut document_type = document_type;
+            async move {
+                let _ = document_type.delete_all_message(ipfs).await.is_ok();
+            }
+        });
+
         if let Err(e) = self
             .event
-            .broadcast(RayGunEventKind::ConversationDeleted {
-                conversation_id: document_type.id(),
-            })
+            .broadcast(RayGunEventKind::ConversationDeleted { conversation_id })
             .await
         {
             error!("Error broadcasting event: {e}");
         }
-        Ok(document_type)
+        Ok(())
     }
 
     pub async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
@@ -964,7 +971,7 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let event = MessagingEvents::New(message);
 
-        self.direct_message_event(
+        self.message_event(
             conversation,
             &event,
             MessageDirection::Out,
@@ -1028,7 +1035,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             signature,
         );
 
-        self.direct_message_event(
+        self.message_event(
             conversation,
             &event,
             MessageDirection::Out,
@@ -1093,7 +1100,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         message.set_signature(Some(signature));
 
         let event = MessagingEvents::New(message);
-        self.direct_message_event(
+        self.message_event(
             conversation,
             &event,
             MessageDirection::Out,
@@ -1114,7 +1121,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         let conversation = self.get_conversation(conversation_id).await?;
 
         let event = MessagingEvents::Delete(conversation.id(), message_id);
-        self.direct_message_event(
+        self.message_event(
             conversation,
             &event,
             MessageDirection::Out,
@@ -1141,7 +1148,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         let own_did = &*self.did;
 
         let event = MessagingEvents::Pin(conversation.id(), own_did.clone(), message_id, state);
-        self.direct_message_event(
+        self.message_event(
             conversation,
             &event,
             MessageDirection::Out,
@@ -1177,7 +1184,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         let event =
             MessagingEvents::React(conversation.id(), own_did.clone(), message_id, state, emoji);
 
-        self.direct_message_event(
+        self.message_event(
             conversation,
             &event,
             MessageDirection::Out,
@@ -1352,7 +1359,7 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let event = MessagingEvents::New(message);
 
-        self.direct_message_event(
+        self.message_event(
             conversation,
             &event,
             MessageDirection::Out,
@@ -1527,7 +1534,7 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let event = MessagingEvents::Event(conversation.id(), own_did.clone(), event, false);
 
-        self.direct_message_event(
+        self.message_event(
             conversation,
             &event,
             MessageDirection::Out,
@@ -1549,7 +1556,7 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let event = MessagingEvents::Event(conversation.id(), own_did.clone(), event, true);
 
-        self.direct_message_event(
+        self.message_event(
             conversation,
             &event,
             MessageDirection::Out,
@@ -1676,7 +1683,7 @@ impl<T: IpfsTypes> MessageStore<T> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn direct_message_event<'a>(
+    async fn message_event<'a>(
         &mut self,
         mut document: ConversationDocument,
         events: &'a MessagingEvents,
