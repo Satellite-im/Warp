@@ -10,12 +10,12 @@ use futures::{Stream, StreamExt};
 use ipfs::libp2p::swarm::dial_opts::DialOpts;
 use ipfs::{Ipfs, IpfsPath, IpfsTypes, PeerId, SubscriptionStream};
 
-use async_broadcast::{self, Receiver as BroadcastReceiver, Sender as BroadcastSender};
 use libipld::serde::{from_ipld, to_ipld};
 use libipld::Cid;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
+use tokio::sync::broadcast::{self, Receiver as BroadcastReceiver, Sender as BroadcastSender};
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
@@ -175,7 +175,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                         continue;
                     }
                 };
-                let (tx, rx) = async_broadcast::broadcast(1024);
+                let (tx, rx) = broadcast::channel(1024);
                 store
                     .stream_sender
                     .write()
@@ -320,20 +320,16 @@ impl<T: IpfsTypes> MessageStore<T> {
                     }
                 };
 
-                let (tx, rx) = async_broadcast::broadcast(1024);
+                let (tx, rx) = broadcast::channel(1024);
 
                 self.stream_sender.write().await.insert(convo.id(), tx);
                 self.stream_receiver.write().await.insert(convo.id(), rx);
 
                 self.start_task(convo.id(), stream).await;
 
-                if let Err(e) = self
-                    .event
-                    .broadcast(RayGunEventKind::ConversationCreated {
-                        conversation_id: convo.id(),
-                    })
-                    .await
-                {
+                if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
+                    conversation_id: convo.id(),
+                }) {
                     error!("Error broadcasting event: {e}");
                 }
             }
@@ -384,8 +380,7 @@ impl<T: IpfsTypes> MessageStore<T> {
 
                 if let Err(e) = self
                     .event
-                    .broadcast(RayGunEventKind::ConversationDeleted { conversation_id })
-                    .await
+                    .send(RayGunEventKind::ConversationDeleted { conversation_id })
                 {
                     error!("Error broadcasting event: {e}");
                 }
@@ -604,7 +599,7 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         self.set_root_document(root_document).await?;
 
-        let (tx, rx) = async_broadcast::broadcast(1024);
+        let (tx, rx) = broadcast::channel(1024);
 
         self.stream_sender
             .write()
@@ -771,8 +766,7 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         if let Err(e) = self
             .event
-            .broadcast(RayGunEventKind::ConversationDeleted { conversation_id })
-            .await
+            .send(RayGunEventKind::ConversationDeleted { conversation_id })
         {
             error!("Error broadcasting event: {e}");
         }
@@ -890,14 +884,11 @@ impl<T: IpfsTypes> MessageStore<T> {
         &self,
         conversation_id: Uuid,
     ) -> Result<BroadcastReceiver<MessageEventKind>, Error> {
-        let tx = self
-            .stream_receiver
-            .read()
-            .await
-            .get(&conversation_id)
-            .ok_or(Error::InvalidConversation)?
-            .clone();
-        Ok(tx)
+        let rx = self
+            .get_conversation_sender(conversation_id)
+            .await?
+            .subscribe();
+        Ok(rx)
     }
 
     pub async fn get_conversation_stream(
@@ -910,7 +901,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             loop {
                 match rx.recv().await {
                     Ok(event) => yield event,
-                    Err(async_broadcast::RecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     Err(_) => {}
                 };
             }
@@ -1792,7 +1783,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                     },
                 };
 
-                if let Err(e) = tx.broadcast(event).await {
+                if let Err(e) = tx.send(event) {
                     error!("Error broadcasting event: {e}");
                 }
             }
@@ -1877,13 +1868,10 @@ impl<T: IpfsTypes> MessageStore<T> {
 
                 self.set_root_document(root).await?;
 
-                if let Err(e) = tx
-                    .broadcast(MessageEventKind::MessageEdited {
-                        conversation_id: convo_id,
-                        message_id,
-                    })
-                    .await
-                {
+                if let Err(e) = tx.send(MessageEventKind::MessageEdited {
+                    conversation_id: convo_id,
+                    message_id,
+                }) {
                     error!("Error broadcasting event: {e}");
                 }
             }
@@ -1928,13 +1916,10 @@ impl<T: IpfsTypes> MessageStore<T> {
                     if let Err(e) = message_document.remove(self.ipfs.clone()).await {
                         error!("Unable to remove message block: {e}");
                     }
-                    if let Err(e) = tx
-                        .broadcast(MessageEventKind::MessageDeleted {
-                            conversation_id: convo_id,
-                            message_id,
-                        })
-                        .await
-                    {
+                    if let Err(e) = tx.send(MessageEventKind::MessageDeleted {
+                        conversation_id: convo_id,
+                        message_id,
+                    }) {
                         error!("Error broadcasting event: {e}");
                     }
                 }
@@ -1979,7 +1964,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 root.update_conversation(self.ipfs.clone(), convo_id, document)
                     .await?;
                 self.set_root_document(root).await?;
-                if let Err(e) = tx.broadcast(event).await {
+                if let Err(e) = tx.send(event) {
                     error!("Error broadcasting event: {e}");
                 }
             }
@@ -2011,15 +1996,12 @@ impl<T: IpfsTypes> MessageStore<T> {
                                 reaction.set_emoji(&emoji);
                                 reaction.set_users(vec![sender.clone()]);
                                 reactions.push(reaction);
-                                if let Err(e) = tx
-                                    .broadcast(MessageEventKind::MessageReactionAdded {
-                                        conversation_id: convo_id,
-                                        message_id,
-                                        did_key: sender,
-                                        reaction: emoji,
-                                    })
-                                    .await
-                                {
+                                if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
+                                    conversation_id: convo_id,
+                                    message_id,
+                                    did_key: sender,
+                                    reaction: emoji,
+                                }) {
                                     error!("Error broadcasting event: {e}");
                                 }
                                 return Ok(false);
@@ -2040,15 +2022,12 @@ impl<T: IpfsTypes> MessageStore<T> {
                             .await?;
                         self.set_root_document(root).await?;
 
-                        if let Err(e) = tx
-                            .broadcast(MessageEventKind::MessageReactionAdded {
-                                conversation_id: convo_id,
-                                message_id,
-                                did_key: sender,
-                                reaction: emoji,
-                            })
-                            .await
-                        {
+                        if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
+                            conversation_id: convo_id,
+                            message_id,
+                            did_key: sender,
+                            reaction: emoji,
+                        }) {
                             error!("Error broadcasting event: {e}");
                         }
                     }
@@ -2084,15 +2063,12 @@ impl<T: IpfsTypes> MessageStore<T> {
                                 .await?;
                             self.set_root_document(root).await?;
 
-                            if let Err(e) = tx
-                                .broadcast(MessageEventKind::MessageReactionRemoved {
-                                    conversation_id: convo_id,
-                                    message_id,
-                                    did_key: sender,
-                                    reaction: emoji,
-                                })
-                                .await
-                            {
+                            if let Err(e) = tx.send(MessageEventKind::MessageReactionRemoved {
+                                conversation_id: convo_id,
+                                message_id,
+                                did_key: sender,
+                                reaction: emoji,
+                            }) {
                                 error!("Error broadcasting event: {e}");
                             }
                         }
@@ -2113,7 +2089,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                             event,
                         },
                     };
-                    if let Err(e) = tx.broadcast(ev).await {
+                    if let Err(e) = tx.send(ev) {
                         error!("Error broadcasting event: {e}");
                     }
                     return Ok(true);

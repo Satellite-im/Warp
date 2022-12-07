@@ -13,7 +13,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use store::message::MessageStore;
-use async_broadcast::{Receiver, Sender};
+use tokio::sync::broadcast::{Receiver, Sender};
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream};
 use warp::crypto::DID;
@@ -68,7 +68,7 @@ impl<T: IpfsTypes> Clone for IpfsMessaging<T> {
             constellation: self.constellation.clone(),
             initialize: self.initialize.clone(),
             tx: self.tx.clone(),
-            rx: self.rx.clone()
+            rx: self.tx.subscribe(),
         }
     }
 }
@@ -80,7 +80,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         constellation: Option<Box<dyn Constellation>>,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
-        let (tx, rx) = async_broadcast::broadcast(1024);
+        let (tx, rx) = tokio::sync::broadcast::channel(1024);
         trace!("Initializing Raygun Extension");
         let mut messaging = IpfsMessaging {
             account,
@@ -91,7 +91,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             constellation,
             initialize: Default::default(),
             tx,
-            rx
+            rx,
         };
 
         if messaging.account.get_own_identity().is_err() {
@@ -249,7 +249,8 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
 
     async fn get_conversation(&self, conversation_id: Uuid) -> Result<Conversation> {
         self.messaging_store()?
-            .get_conversation(conversation_id).await
+            .get_conversation(conversation_id)
+            .await
             .map(|convo| convo.into())
     }
 
@@ -258,12 +259,15 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
     }
 
     async fn get_message_count(&self, conversation_id: Uuid) -> Result<usize> {
-        self.messaging_store()?.messages_count(conversation_id).await
+        self.messaging_store()?
+            .messages_count(conversation_id)
+            .await
     }
 
     async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message> {
         self.messaging_store()?
-            .get_message(conversation_id, message_id).await
+            .get_message(conversation_id, message_id)
+            .await
     }
 
     async fn message_status(
@@ -385,13 +389,13 @@ impl<T: IpfsTypes> RayGunAttachment for IpfsMessaging<T> {
 #[async_trait::async_trait]
 impl<T: IpfsTypes> RayGunStream for IpfsMessaging<T> {
     async fn subscribe(&mut self) -> Result<RayGunEventStream> {
-        let mut rx = self.rx.clone();
+        let mut rx = self.tx.subscribe();
 
         let stream = async_stream::stream! {
             loop {
                 match rx.recv().await {
                     Ok(event) => yield event,
-                    Err(async_broadcast::RecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     Err(_) => {}
                 };
             }
