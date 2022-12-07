@@ -5,9 +5,9 @@ use libipld::{
     Cid,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::collections::HashSet;
 use std::hash::Hash;
 use std::time::Duration;
+use std::{collections::HashSet, marker::PhantomData};
 use uuid::Uuid;
 use warp::{crypto::DID, error::Error};
 
@@ -32,7 +32,7 @@ where
     async fn to_document(&self, ipfs: Ipfs<I>) -> Result<DocumentType<T>, Error> {
         let ipld = to_ipld(self.clone()).map_err(anyhow::Error::from)?;
         let cid = ipfs.put_dag(ipld).await?;
-        Ok(DocumentType::Cid(cid))
+        Ok(cid.into())
     }
 }
 
@@ -47,38 +47,22 @@ where
 }
 
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
-pub enum DocumentType<T> {
-    Object(T),
-    Cid(Cid),
-    UnixFS(Cid, Option<usize>),
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, Copy)]
+pub struct DocumentType<T> {
+    pub document: Cid,
+    #[serde(skip)]
+    _marker: PhantomData<T>,
 }
 
 impl<T: Hash> Hash for DocumentType<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            DocumentType::Cid(cid) => Hash::hash(cid, state),
-            DocumentType::Object(object) => Hash::hash(object, state),
-            DocumentType::UnixFS(cid, limit) => {
-                Hash::hash(cid, state);
-                Hash::hash(limit, state)
-            }
-        }
+        Hash::hash(&self.document, state)
     }
 }
 
 impl<T: PartialEq> PartialEq for DocumentType<T> {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (DocumentType::Object(left), DocumentType::Object(right)) => left.eq(right),
-            (DocumentType::Cid(left), DocumentType::Cid(right)) => left.eq(right),
-            (
-                DocumentType::UnixFS(left, Some(left_size)),
-                DocumentType::UnixFS(right, Some(right_size)),
-            ) => left.eq(right) && left_size.eq(right_size),
-            (DocumentType::UnixFS(left, None), DocumentType::UnixFS(right, None)) => left.eq(right),
-            _ => false,
-        }
+        self.document.eq(&other.document)
     }
 }
 
@@ -92,59 +76,13 @@ impl<T> DocumentType<T> {
         T: Clone,
         T: DeserializeOwned,
     {
-        match self {
-            DocumentType::Object(object) => Ok(object.clone()),
-            DocumentType::Cid(cid) => {
-                let timeout = timeout.unwrap_or(std::time::Duration::from_secs(30));
-                match tokio::time::timeout(timeout, ipfs.get_dag(IpfsPath::from(*cid))).await {
-                    Ok(Ok(ipld)) => from_ipld::<T>(ipld)
-                        .map_err(anyhow::Error::from)
-                        .map_err(Error::from),
-                    Ok(Err(e)) => Err(Error::Any(e)),
-                    Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
-                }
-            }
-            //Note: This wont be used here in messaging for files
-            //      but may be used for larger payloads
-            DocumentType::UnixFS(cid, limit) => {
-                let fut = async {
-                    let stream = ipfs
-                        .cat_unixfs(IpfsPath::from(*cid), None)
-                        .await
-                        .map_err(anyhow::Error::from)?;
-
-                    futures::pin_mut!(stream);
-
-                    let mut data = vec![];
-
-                    while let Some(stream) = stream.next().await {
-                        if let Some(limit) = limit {
-                            if data.len() >= *limit {
-                                return Err(Error::InvalidLength {
-                                    context: "data".into(),
-                                    current: data.len(),
-                                    minimum: None,
-                                    maximum: Some(*limit),
-                                });
-                            }
-                        }
-                        match stream {
-                            Ok(bytes) => {
-                                data.extend(bytes);
-                            }
-                            Err(e) => return Err(Error::from(anyhow::anyhow!("{e}"))),
-                        }
-                    }
-                    Ok(data)
-                };
-
-                let timeout = timeout.unwrap_or(std::time::Duration::from_secs(15));
-                match tokio::time::timeout(timeout, fut).await {
-                    Ok(Ok(data)) => serde_json::from_slice(&data).map_err(Error::from),
-                    Ok(Err(e)) => Err(e),
-                    Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
-                }
-            }
+        let timeout = timeout.unwrap_or(std::time::Duration::from_secs(30));
+        match tokio::time::timeout(timeout, ipfs.get_dag(IpfsPath::from(self.document))).await {
+            Ok(Ok(ipld)) => from_ipld::<T>(ipld)
+                .map_err(anyhow::Error::from)
+                .map_err(Error::from),
+            Ok(Err(e)) => Err(Error::Any(e)),
+            Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
         }
     }
 
@@ -163,8 +101,11 @@ impl<T> DocumentType<T> {
 }
 
 impl<T> From<Cid> for DocumentType<T> {
-    fn from(cid: Cid) -> Self {
-        DocumentType::Cid(cid)
+    fn from(document: Cid) -> Self {
+        Self {
+            document,
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -239,15 +180,11 @@ impl ConversationRootDocument {
         }
 
         let conversation = document_type.resolve(ipfs.clone(), None).await?;
-        match document_type {
-            DocumentType::Cid(cid) | DocumentType::UnixFS(cid, _) => {
-                if ipfs.is_pinned(&cid).await? {
-                    ipfs.remove_pin(&cid, false).await?;
-                }
-                ipfs.remove_block(cid).await?;
-            }
-            _ => {}
+        if ipfs.is_pinned(&document_type.document).await? {
+            ipfs.remove_pin(&document_type.document, false).await?;
         }
+        ipfs.remove_block(document_type.document).await?;
+
         Ok(conversation)
     }
 
@@ -269,15 +206,10 @@ impl ConversationRootDocument {
 
         self.conversations.insert(document);
 
-        match document_type {
-            DocumentType::Cid(cid) | DocumentType::UnixFS(cid, _) => {
-                if ipfs.is_pinned(&cid).await? {
-                    ipfs.remove_pin(&cid, false).await?;
-                }
-                ipfs.remove_block(cid).await?;
-            }
-            _ => {}
+        if ipfs.is_pinned(&document_type.document).await? {
+            ipfs.remove_pin(&document_type.document, false).await?;
         }
+        ipfs.remove_block(document_type.document).await?;
 
         Ok(())
     }

@@ -209,16 +209,10 @@ impl ConversationDocument {
         let fut = FuturesUnordered::from_iter(
             std::mem::take(&mut self.messages)
                 .iter()
-                .filter_map(|document| match document.message {
-                    DocumentType::Cid(cid) | DocumentType::UnixFS(cid, _) => {
-                        Some((document.id, cid))
-                    }
-                    _ => None,
-                })
-                .map(|ids| {
+                .map(|document| (document.id, document.message.document))
+                .map(|(id, cid)| {
                     let ipfs = ipfs.clone();
                     async move {
-                        let (id, cid) = ids;
                         if ipfs.is_pinned(&cid).await? {
                             ipfs.remove_pin(&cid, false).await?;
                         }
@@ -306,15 +300,10 @@ impl MessageDocument {
     pub async fn remove<T: IpfsTypes>(&mut self, ipfs: Ipfs<T>) -> Result<(), Error> {
         let document = self.message.clone();
 
-        match document {
-            DocumentType::Cid(cid) | DocumentType::UnixFS(cid, _) => {
-                if ipfs.is_pinned(&cid).await? {
-                    ipfs.remove_pin(&cid, false).await?;
-                }
-                ipfs.remove_block(cid).await?;
-            }
-            _ => {}
+        if ipfs.is_pinned(&document.document).await? {
+            ipfs.remove_pin(&document.document, false).await?;
         }
+        ipfs.remove_block(document.document).await?;
 
         Ok(())
     }
@@ -343,15 +332,10 @@ impl MessageDocument {
         let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, message)?;
         self.message = data.to_document(ipfs.clone()).await?;
 
-        match old_document {
-            DocumentType::Cid(cid) | DocumentType::UnixFS(cid, _) => {
-                if ipfs.is_pinned(&cid).await? {
-                    ipfs.remove_pin(&cid, false).await?;
-                }
-                ipfs.remove_block(cid).await?;
-            }
-            _ => {}
+        if ipfs.is_pinned(&old_document.document).await? {
+            ipfs.remove_pin(&old_document.document, false).await?;
         }
+        ipfs.remove_block(old_document.document).await?;
 
         Ok(())
     }
