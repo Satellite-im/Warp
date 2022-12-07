@@ -889,11 +889,31 @@ impl<T: IpfsTypes> IdentityStore<T> {
         (self.root_cid.read().await.clone()).ok_or(Error::IdentityDoesntExist)
     }
 
+    pub async fn get_sync(&self) -> Result<bool, Error>{
+        let sync = match *self.sync.read().await {
+            Some(_) => {
+                true
+            },
+            None => {
+                false
+
+            },
+        };
+        Ok(sync)  
+    }
+
     pub async fn update_identity(&self) -> Result<(), Error> {
         let ident = self.own_identity().await?;
         self.validate_identity(&ident)?;
         *self.identity.write().await = Some(ident);
         self.seen.write().await.clear();
+        /*match *self.sync.read().await {
+            Some(_) => {},
+            None => {
+                let kp = self.get_keypair_did()?;
+                self.update_sync(kp.into()).await?;
+            },
+        }*/
         Ok(())
     }
 
@@ -912,7 +932,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     pub async fn fetch_root_document_request(&self) -> Result<RootDocument, Error> {
         let root = self.sync.read().await.as_ref().unwrap().clone().fetch_root_document().await?;
-        
         Ok(root)
     }
 

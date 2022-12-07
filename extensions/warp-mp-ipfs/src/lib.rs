@@ -526,6 +526,10 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 return Err(Error::MultiPassExtensionUnavailable);
             }
             let store = self.identity_store()?;
+            if !store.get_sync().await? {
+                let kp = store.get_keypair_did()?;
+                store.update_sync(kp).await?;
+            }
             let idents = match id.get_inner() {
                 (Some(pk), None, false) => {
                     if let Ok(cache) = self.get_cache() {

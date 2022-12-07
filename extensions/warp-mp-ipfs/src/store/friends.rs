@@ -917,6 +917,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
             root_document.request = Some(new_cid.into());
         }
 
+        println!("Root Document from set request list: {:?}", root_document);
+
         self.identity.set_root_document(root_document).await?;
 
         if let Some(DocumentType::Cid(cid)) = old_document {

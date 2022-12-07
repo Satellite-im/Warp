@@ -155,9 +155,7 @@ async fn main() -> anyhow::Result<()> {
 
     let cache = None; //cache_setup(opt.path.clone()).ok();
 
-    let ipfs_account = account(None, cache, &opt).await?;
-
-   
+    let ipfs_account = account_persistent(None, "./account2", cache, &opt).await?;
 
     let mut account: Box<dyn MultiPass> = Box::new(ipfs_account.clone());
     

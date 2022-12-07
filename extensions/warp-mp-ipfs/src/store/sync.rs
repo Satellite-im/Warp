@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use futures::StreamExt;
-use ipfs::{Ipfs, IpfsTypes, Multiaddr, IpfsPath};
+use ipfs::{Ipfs, IpfsTypes, Multiaddr, IpfsPath, Keypair};
 use libipld::Cid;
 use libipld::serde::{to_ipld, from_ipld};
 use sata::Sata;
@@ -14,11 +14,12 @@ use tokio::sync::RwLock as AsyncRwLock;
 use uuid::Uuid;
 use warp::crypto::KeyMaterial;
 use warp::multipass::identity::Identity;
+use warp::sata;
 use warp::{crypto::DID, error::Error};
 use dotenv::dotenv;
 
 use super::document::{DocumentType, RootDocument};
-use super::identity;
+use super::{identity, did_to_libp2p_pub};
 
 pub struct Synchronize<T: IpfsTypes> {
     ipfs: Ipfs<T>,
@@ -90,7 +91,6 @@ impl<T: IpfsTypes> Synchronize<T> {
             let request_list: AsyncRwLock<HashMap<Uuid, OneshotSender<NodeResponse>>> =
                 AsyncRwLock::new(Default::default());
             
-
             async move {
                 let ipfs = sync.ipfs.clone();
                 let mut response = ipfs
