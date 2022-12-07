@@ -13,7 +13,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use store::message::MessageStore;
-use tokio::sync::broadcast::{Receiver, Sender};
+use tokio::sync::broadcast::Sender;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream};
 use warp::crypto::DID;
@@ -49,7 +49,6 @@ pub struct IpfsMessaging<T: IpfsTypes> {
     constellation: Option<Box<dyn Constellation>>,
     initialize: Arc<AtomicBool>,
     tx: Sender<RayGunEventKind>,
-    rx: Receiver<RayGunEventKind>,
     //TODO: GroupManager
     //      * Create, Join, and Leave GroupChats
     //      * Send message
@@ -68,7 +67,6 @@ impl<T: IpfsTypes> Clone for IpfsMessaging<T> {
             constellation: self.constellation.clone(),
             initialize: self.initialize.clone(),
             tx: self.tx.clone(),
-            rx: self.tx.subscribe(),
         }
     }
 }
@@ -80,7 +78,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         constellation: Option<Box<dyn Constellation>>,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
-        let (tx, rx) = tokio::sync::broadcast::channel(1024);
+        let (tx, _) = tokio::sync::broadcast::channel(1024);
         trace!("Initializing Raygun Extension");
         let mut messaging = IpfsMessaging {
             account,
@@ -91,7 +89,6 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             constellation,
             initialize: Default::default(),
             tx,
-            rx,
         };
 
         if messaging.account.get_own_identity().is_err() {

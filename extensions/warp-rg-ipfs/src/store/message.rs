@@ -59,8 +59,6 @@ pub struct MessageStore<T: IpfsTypes> {
 
     stream_sender: Arc<tokio::sync::RwLock<HashMap<Uuid, BroadcastSender<MessageEventKind>>>>,
 
-    stream_receiver: Arc<tokio::sync::RwLock<HashMap<Uuid, BroadcastReceiver<MessageEventKind>>>>,
-
     stream_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
 
     // Queue
@@ -87,7 +85,6 @@ impl<T: IpfsTypes> Clone for MessageStore<T> {
             ipfs: self.ipfs.clone(),
             path: self.path.clone(),
             stream_sender: self.stream_sender.clone(),
-            stream_receiver: self.stream_receiver.clone(),
             root_cid: self.root_cid.clone(),
             account: self.account.clone(),
             filesystem: self.filesystem.clone(),
@@ -140,13 +137,11 @@ impl<T: IpfsTypes> MessageStore<T> {
         let allowed_unsigned_message = Arc::new(AtomicBool::new(allowed_unsigned_message));
         let with_friends = Arc::new(AtomicBool::new(with_friends));
         let stream_sender = Arc::new(Default::default());
-        let stream_receiver = Arc::new(Default::default());
 
         let mut store = Self {
             path,
             ipfs,
             stream_sender,
-            stream_receiver,
             stream_task,
             root_cid,
             account,
@@ -175,17 +170,12 @@ impl<T: IpfsTypes> MessageStore<T> {
                         continue;
                     }
                 };
-                let (tx, rx) = broadcast::channel(1024);
+                let (tx, _) = broadcast::channel(1024);
                 store
                     .stream_sender
                     .write()
                     .await
                     .insert(conversation.id(), tx);
-                store
-                    .stream_receiver
-                    .write()
-                    .await
-                    .insert(conversation.id(), rx);
 
                 store.start_task(conversation.id(), stream).await;
             }
@@ -320,10 +310,9 @@ impl<T: IpfsTypes> MessageStore<T> {
                     }
                 };
 
-                let (tx, rx) = broadcast::channel(1024);
+                let (tx, _) = broadcast::channel(1024);
 
                 self.stream_sender.write().await.insert(convo.id(), tx);
-                self.stream_receiver.write().await.insert(convo.id(), rx);
 
                 self.start_task(convo.id(), stream).await;
 
@@ -366,7 +355,6 @@ impl<T: IpfsTypes> MessageStore<T> {
                 self.set_root_document(root).await?;
 
                 self.stream_sender.write().await.remove(&conversation_id);
-                self.stream_receiver.write().await.remove(&conversation_id);
                 self.queue.write().await.remove(&sender);
 
                 if self
@@ -599,16 +587,12 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         self.set_root_document(root_document).await?;
 
-        let (tx, rx) = broadcast::channel(1024);
+        let (tx, _) = broadcast::channel(1024);
 
         self.stream_sender
             .write()
             .await
             .insert(conversation.id(), tx);
-        self.stream_receiver
-            .write()
-            .await
-            .insert(conversation.id(), rx);
 
         self.start_task(conversation.id(), stream).await;
 
