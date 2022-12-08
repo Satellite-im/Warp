@@ -1947,41 +1947,21 @@ impl<T: IpfsTypes> MessageStore<T> {
 
                 match state {
                     ReactionState::Add => {
-                        let index = match reactions
+                        match reactions
                             .iter()
                             .position(|reaction| reaction.emoji().eq(&emoji))
+                            .and_then(|index| reactions.get_mut(index))
                         {
-                            Some(index) => index,
+                            Some(reaction) => {
+                                reaction.users_mut().push(sender.clone());
+                            }
                             None => {
                                 let mut reaction = Reaction::default();
                                 reaction.set_emoji(&emoji);
                                 reaction.set_users(vec![sender.clone()]);
                                 reactions.push(reaction);
-                                
-                                message_document
-                                    .update(self.ipfs.clone(), self.did.clone(), message)
-                                    .await?;
-                                document.messages.replace(message_document);
-
-                                let mut root = self.get_root_document().await?;
-                                root.update_conversation(self.ipfs.clone(), convo_id, document)
-                                    .await?;
-                                self.set_root_document(root).await?;
-                                if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
-                                    conversation_id: convo_id,
-                                    message_id,
-                                    did_key: sender,
-                                    reaction: emoji,
-                                }) {
-                                    error!("Error broadcasting event: {e}");
-                                }
-                                return Ok(false);
                             }
                         };
-
-                        let reaction = reactions.get_mut(index).ok_or(Error::MessageNotFound)?;
-
-                        reaction.users_mut().push(sender.clone());
 
                         message_document
                             .update(self.ipfs.clone(), self.did.clone(), message)
@@ -2023,25 +2003,24 @@ impl<T: IpfsTypes> MessageStore<T> {
                         if reaction.users().is_empty() {
                             //Since there is no users listed under the emoji, the reaction should be removed from the message
                             reactions.remove(index);
+                        }
+                        message_document
+                            .update(self.ipfs.clone(), self.did.clone(), message)
+                            .await?;
+                        document.messages.replace(message_document);
 
-                            message_document
-                                .update(self.ipfs.clone(), self.did.clone(), message)
-                                .await?;
-                            document.messages.replace(message_document);
+                        let mut root = self.get_root_document().await?;
+                        root.update_conversation(self.ipfs.clone(), convo_id, document)
+                            .await?;
+                        self.set_root_document(root).await?;
 
-                            let mut root = self.get_root_document().await?;
-                            root.update_conversation(self.ipfs.clone(), convo_id, document)
-                                .await?;
-                            self.set_root_document(root).await?;
-
-                            if let Err(e) = tx.send(MessageEventKind::MessageReactionRemoved {
-                                conversation_id: convo_id,
-                                message_id,
-                                did_key: sender,
-                                reaction: emoji,
-                            }) {
-                                error!("Error broadcasting event: {e}");
-                            }
+                        if let Err(e) = tx.send(MessageEventKind::MessageReactionRemoved {
+                            conversation_id: convo_id,
+                            message_id,
+                            did_key: sender,
+                            reaction: emoji,
+                        }) {
+                            error!("Error broadcasting event: {e}");
                         }
                     }
                 }
