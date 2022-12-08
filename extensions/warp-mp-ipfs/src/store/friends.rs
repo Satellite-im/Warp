@@ -33,10 +33,7 @@ use crate::Persistent;
 use super::document::DocumentType;
 use super::identity::IdentityStore;
 use super::phonebook::PhoneBook;
-use super::{
-    did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, PeerConnectionType,
-    FRIENDS_BROADCAST,
-};
+use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, PeerConnectionType};
 
 pub struct FriendsStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
@@ -174,7 +171,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let stream = store
             .ipfs
-            .pubsub_subscribe(FRIENDS_BROADCAST.into())
+            .pubsub_subscribe(get_inbox_topic(store.did_key.as_ref()))
             .await?;
 
         let (local_ipfs_public_key, _) = store.local().await?;
@@ -467,12 +464,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
                     let bytes = serde_json::to_vec(&payload)?;
 
-                    if self
-                        .ipfs
-                        .pubsub_publish(FRIENDS_BROADCAST.into(), bytes)
-                        .await
-                        .is_err()
-                    {
+                    let topic = get_inbox_topic(&request.to());
+
+                    if self.ipfs.pubsub_publish(topic, bytes).await.is_err() {
                         //Because we are unable to send a single request for whatever reason, kill the iteration
                         //and proceed to the next item in line
                         break;
@@ -982,7 +976,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
         store_request: bool,
         _save_to_disk: bool,
     ) -> Result<(), Error> {
-        let remote_peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
+        let recipient = &request.to();
+
+        let remote_peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
+
+        let topic = get_inbox_topic(recipient);
 
         if matches!(
             self.identity.discovery_type(),
@@ -1053,10 +1051,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             });
         }
 
-        let peers = self
-            .ipfs
-            .pubsub_peers(Some(FRIENDS_BROADCAST.into()))
-            .await?;
+        let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
         if !peers.contains(&remote_peer_id) {
             self.queue
@@ -1067,19 +1062,13 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 .push_back(InternalRequest::Out(request.clone()));
 
             self.save_queue().await;
-        } else if let Err(_e) = self
-            .ipfs
-            .pubsub_publish(FRIENDS_BROADCAST.into(), bytes)
-            .await
-        {
+        } else if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
             self.queue
                 .write()
                 .await
                 .entry(request.to())
                 .or_default()
                 .push_back(InternalRequest::Out(request.clone()));
-
-            self.save_queue().await;
         }
 
         match request.status() {
@@ -1194,5 +1183,9 @@ fn validate_request(real_request: &FriendRequest) -> Result<(), Error> {
     Ok(())
 }
 
+pub fn get_inbox_topic(did: &DID) -> String {
+    format!("/peer/{}/inbox", did.to_string())
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-struct Queue(PeerId, Sata);
+struct Queue(PeerId, Sata, DID);
