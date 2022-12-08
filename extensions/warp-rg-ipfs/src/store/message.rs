@@ -72,8 +72,6 @@ pub struct MessageStore<T: IpfsTypes> {
 
     store_decrypted: Arc<AtomicBool>,
 
-    allowed_unsigned_message: Arc<AtomicBool>,
-
     with_friends: Arc<AtomicBool>,
 }
 
@@ -92,7 +90,6 @@ impl<T: IpfsTypes> Clone for MessageStore<T> {
             event: self.event.clone(),
             spam_filter: self.spam_filter.clone(),
             with_friends: self.with_friends.clone(),
-            allowed_unsigned_message: self.allowed_unsigned_message.clone(),
             store_decrypted: self.store_decrypted.clone(),
         }
     }
@@ -108,12 +105,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         discovery: bool,
         interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
-        (check_spam, store_decrypted, allowed_unsigned_message, with_friends): (
-            bool,
-            bool,
-            bool,
-            bool,
-        ),
+        (check_spam, store_decrypted, with_friends): (bool, bool, bool),
     ) -> anyhow::Result<Self> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -132,7 +124,6 @@ impl<T: IpfsTypes> MessageStore<T> {
         let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
         let stream_task = Arc::new(Default::default());
         let store_decrypted = Arc::new(AtomicBool::new(store_decrypted));
-        let allowed_unsigned_message = Arc::new(AtomicBool::new(allowed_unsigned_message));
         let with_friends = Arc::new(AtomicBool::new(with_friends));
         let stream_sender = Arc::new(Default::default());
 
@@ -149,7 +140,6 @@ impl<T: IpfsTypes> MessageStore<T> {
             event,
             spam_filter,
             store_decrypted,
-            allowed_unsigned_message,
             with_friends,
         };
 
