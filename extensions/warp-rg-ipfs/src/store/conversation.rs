@@ -5,7 +5,7 @@ use futures::{
     StreamExt,
 };
 use ipfs::{Ipfs, IpfsTypes};
-use libipld::IpldCodec;
+use libipld::{Cid, IpldCodec};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -17,7 +17,7 @@ use warp::{
     sata::{Kind, Sata},
 };
 
-use super::document::{DocumentType, ToDocument};
+use super::document::{GetDag, ToCid};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct ConversationDocument {
@@ -209,7 +209,7 @@ impl ConversationDocument {
         let fut = FuturesUnordered::from_iter(
             std::mem::take(&mut self.messages)
                 .iter()
-                .map(|document| (document.id, document.message.document))
+                .map(|document| (document.id, document.message))
                 .map(|(id, cid)| {
                     let ipfs = ipfs.clone();
                     async move {
@@ -250,12 +250,12 @@ impl From<&ConversationDocument> for Conversation {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageDocument {
     pub id: Uuid,
     pub conversation_id: Uuid,
     pub date: DateTime<Utc>,
-    pub message: DocumentType<Sata>,
+    pub message: Cid,
 }
 
 impl PartialOrd for MessageDocument {
@@ -291,19 +291,19 @@ impl MessageDocument {
             id,
             conversation_id,
             date,
-            message: data.to_document(ipfs).await?,
+            message: data.to_cid(ipfs).await?,
         };
 
         Ok(document)
     }
 
     pub async fn remove<T: IpfsTypes>(&mut self, ipfs: Ipfs<T>) -> Result<(), Error> {
-        let document = self.message.clone();
+        let cid = self.message;
 
-        if ipfs.is_pinned(&document.document).await? {
-            ipfs.remove_pin(&document.document, false).await?;
+        if ipfs.is_pinned(&cid).await? {
+            ipfs.remove_pin(&cid, false).await?;
         }
-        ipfs.remove_block(document.document).await?;
+        ipfs.remove_block(cid).await?;
 
         Ok(())
     }
@@ -316,7 +316,7 @@ impl MessageDocument {
     ) -> Result<(), Error> {
         let recipients = self.receipients(ipfs.clone()).await?;
         let old_message = self.resolve(ipfs.clone(), did.clone()).await?;
-        let old_document = self.message.clone();
+        let old_document = self.message;
 
         if old_message.id() != message.id()
             || old_message.conversation_id() != message.conversation_id()
@@ -330,18 +330,18 @@ impl MessageDocument {
         }
 
         let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, message)?;
-        self.message = data.to_document(ipfs.clone()).await?;
+        self.message = data.to_cid(ipfs.clone()).await?;
 
-        if ipfs.is_pinned(&old_document.document).await? {
-            ipfs.remove_pin(&old_document.document, false).await?;
+        if ipfs.is_pinned(&old_document).await? {
+            ipfs.remove_pin(&old_document, false).await?;
         }
-        ipfs.remove_block(old_document.document).await?;
+        ipfs.remove_block(old_document).await?;
 
         Ok(())
     }
 
     pub async fn receipients<T: IpfsTypes>(&self, ipfs: Ipfs<T>) -> Result<Vec<DID>, Error> {
-        let data = self.message.resolve(ipfs, None).await?;
+        let data: Sata = self.message.get_dag(ipfs, None).await?;
         data.recipients()
             .map(|list| {
                 list.iter()
@@ -357,7 +357,7 @@ impl MessageDocument {
         ipfs: Ipfs<T>,
         did: Arc<DID>,
     ) -> Result<Message, Error> {
-        let data = self.message.resolve(ipfs, None).await?;
+        let data: Sata = self.message.get_dag(ipfs, None).await?;
         let message: Message = data.decrypt(&did).map_err(anyhow::Error::from)?;
         if message.id() != self.id && message.conversation_id() != self.conversation_id {
             return Err(Error::InvalidMessage);

@@ -19,6 +19,16 @@ pub(crate) trait ToDocument<T: IpfsTypes>: Sized {
 }
 
 #[async_trait::async_trait]
+pub(crate) trait ToCid<T: IpfsTypes>: Sized {
+    async fn to_cid(&self, ipfs: Ipfs<T>) -> Result<Cid, Error>;
+}
+
+#[async_trait::async_trait]
+pub(crate) trait GetDag<D, I: IpfsTypes>: Sized {
+    async fn get_dag(&self, ipfs: Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error>;
+}
+
+#[async_trait::async_trait]
 #[allow(clippy::wrong_self_convention)]
 pub(crate) trait FromDocument<T: IpfsTypes, I> {
     async fn from_document(&self, ipfs: Ipfs<T>) -> Result<I, Error>;
@@ -33,6 +43,31 @@ where
         let ipld = to_ipld(self.clone()).map_err(anyhow::Error::from)?;
         let cid = ipfs.put_dag(ipld).await?;
         Ok(cid.into())
+    }
+}
+
+#[async_trait::async_trait]
+impl<D: DeserializeOwned, I: IpfsTypes> GetDag<D, I> for Cid {
+    async fn get_dag(&self, ipfs: Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error> {
+        let timeout = timeout.unwrap_or(std::time::Duration::from_secs(30));
+        match tokio::time::timeout(timeout, ipfs.get_dag(IpfsPath::from(*self))).await {
+            Ok(Ok(ipld)) => from_ipld(ipld)
+                .map_err(anyhow::Error::from)
+                .map_err(Error::from),
+            Ok(Err(e)) => Err(Error::Any(e)),
+            Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<T, I: IpfsTypes> ToCid<I> for T
+where
+    T: Serialize + Clone + Send + Sync,
+{
+    async fn to_cid(&self, ipfs: Ipfs<I>) -> Result<Cid, Error> {
+        let ipld = to_ipld(self.clone()).map_err(anyhow::Error::from)?;
+        ipfs.put_dag(ipld).await.map_err(Error::from)
     }
 }
 
