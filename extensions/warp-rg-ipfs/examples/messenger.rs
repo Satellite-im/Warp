@@ -668,13 +668,21 @@ async fn main() -> anyhow::Result<()> {
                             let topic = topic.read().clone();
                             match cmd_line.next() {
                                 Some("all") => {
-                                   let messages = chat
-                                       .get_messages(topic, MessageOptions::default())
-                                       .await?;
-                                   for message in messages.iter() {
-                                       chat.pin(topic, message.id(), PinState::Pin).await?;
-                                       writeln!(stdout, "Pinned {}", message.id())?;
-                                   }
+                                    tokio::spawn({
+                                        let mut chat = chat.clone();
+                                        let mut stdout = stdout.clone();
+                                        async move {
+                                            let messages = chat
+                                                .get_messages(topic, MessageOptions::default())
+                                                .await.unwrap_or_default();
+                                            for message in messages.iter() {
+                                                match chat.pin(topic, message.id(), PinState::Pin).await {
+                                                    Ok(_) => writeln!(stdout, "Pinned {}", message.id()).is_ok(),
+                                                    Err(e) => writeln!(stdout, "Error Pinning {}: {}", message.id(), e).is_ok()
+                                                };
+                                            }
+                                        }
+                                    });
                                 },
                                 Some(id) => {
                                     let id = match Uuid::from_str(id) {
@@ -693,13 +701,22 @@ async fn main() -> anyhow::Result<()> {
                         Some("/unpin") => {
                             match cmd_line.next() {
                                 Some("all") => {
-                                   let messages = chat
-                                       .get_messages(*topic.read(), MessageOptions::default())
-                                       .await?;
-                                   for message in messages.iter() {
-                                       chat.pin(*topic.read(), message.id(), PinState::Unpin).await?;
-                                       writeln!(stdout, "Unpinned {}", message.id())?;
-                                   }
+                                    tokio::spawn({
+                                        let mut chat = chat.clone();
+                                        let mut stdout = stdout.clone();
+                                        let topic = topic.read().clone();
+                                        async move {
+                                            let messages = chat
+                                                .get_messages(topic, MessageOptions::default())
+                                                .await.unwrap_or_default();
+                                            for message in messages.iter() {
+                                                match chat.pin(topic, message.id(), PinState::Unpin).await {
+                                                    Ok(_) => writeln!(stdout, "Unpinned {}", message.id()).is_ok(),
+                                                    Err(e) => writeln!(stdout, "Error Uninning {}: {}", message.id(), e).is_ok()
+                                                };
+                                            }
+                                        }
+                                    });
                                 },
                                 Some(id) => {
                                     let id = match Uuid::from_str(id) {
