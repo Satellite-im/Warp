@@ -228,7 +228,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     for friend in friends.iter() {
                         let mut list = store.list_all_raw_request().await.unwrap_or_default();
                         // cleanup outgoing
-                        match list
+                        if let Some(req) = list
                             .iter()
                             .find(|request| {
                                 request.request_type() == InternalRequestType::Outgoing
@@ -237,14 +237,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
                             })
                             .cloned()
                         {
-                            Some(req) => {
-                                list.remove(&req);
-                            }
-                            None => {}
-                        };
+                            list.remove(&req);
+                        }
 
                         // cleanup incoming
-                        match list
+                        if let Some(req) = list
                             .iter()
                             .find(|request| {
                                 request.request_type() == InternalRequestType::Incoming
@@ -253,11 +250,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
                             })
                             .cloned()
                         {
-                            Some(req) => {
-                                list.remove(&req);
-                            }
-                            None => {}
-                        };
+                            list.remove(&req);
+                        }
 
                         if let Err(_e) = store.set_request_list(list).await {}
                     }

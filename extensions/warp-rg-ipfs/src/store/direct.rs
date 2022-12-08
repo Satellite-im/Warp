@@ -598,10 +598,8 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
                                     store.queue.write().await.entry(did.clone()).or_default().retain(|queue| {
                                         let Queue::Direct { sent: inner_sent, topic:inner_topic, .. } = queue;
 
-                                        if inner_topic.eq(&*topic) {
-                                            if *sent != *inner_sent {
-                                                return false
-                                            }
+                                        if inner_topic.eq(&*topic) && *sent != *inner_sent {
+                                            return false
                                         }
                                         true
 
