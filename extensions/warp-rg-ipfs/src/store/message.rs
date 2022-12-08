@@ -8,11 +8,9 @@ use std::time::Duration;
 use chrono::Utc;
 use futures::{Stream, StreamExt};
 use ipfs::libp2p::swarm::dial_opts::DialOpts;
-use ipfs::{Ipfs, IpfsPath, IpfsTypes, PeerId, SubscriptionStream};
+use ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream};
 
-use libipld::serde::{from_ipld, to_ipld};
 use libipld::Cid;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast::{self, Receiver as BroadcastReceiver, Sender as BroadcastSender};
@@ -35,7 +33,7 @@ use crate::store::connected_to_peer;
 use crate::{Persistent, SpamFilter};
 
 use super::conversation::{ConversationDocument, MessageDocument};
-use super::document::{ConversationRootDocument, ToDocument};
+use super::document::{ConversationRootDocument, GetDag, ToCid, ToDocument};
 use super::{
     did_to_libp2p_pub, topic_discovery, verify_serde_sig, ConversationEvents, MessagingEvents,
     DIRECT_BROADCAST,
@@ -479,8 +477,7 @@ impl<T: IpfsTypes> MessageStore<T> {
 
     pub async fn get_root_document(&self) -> Result<ConversationRootDocument, Error> {
         let root_cid = self.get_cid().await?;
-        let path = IpfsPath::from(root_cid);
-        self.get_dag(path, None).await
+        root_cid.get_dag(self.ipfs.clone(), None).await
     }
 
     pub async fn set_root_document(
@@ -489,7 +486,7 @@ impl<T: IpfsTypes> MessageStore<T> {
     ) -> Result<(), Error> {
         let old_cid = self.get_cid().await.ok();
 
-        let root_cid = self.put_dag(document).await?;
+        let root_cid = document.to_cid(self.ipfs.clone()).await?;
 
         self.ipfs.insert_pin(&root_cid, false).await?;
         self.save_cid(root_cid).await?;
@@ -503,26 +500,6 @@ impl<T: IpfsTypes> MessageStore<T> {
         }
 
         Ok(())
-    }
-
-    pub async fn get_dag<D: DeserializeOwned>(
-        &self,
-        path: IpfsPath,
-        timeout: Option<Duration>,
-    ) -> Result<D, Error> {
-        let timeout = timeout.unwrap_or(std::time::Duration::from_secs(30));
-        let identity = match tokio::time::timeout(timeout, self.ipfs.get_dag(path)).await {
-            Ok(Ok(ipld)) => from_ipld::<D>(ipld).map_err(anyhow::Error::from)?,
-            Ok(Err(e)) => return Err(Error::Any(e)),
-            Err(e) => return Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
-        };
-        Ok(identity)
-    }
-
-    pub async fn put_dag<S: Serialize>(&self, data: S) -> Result<Cid, Error> {
-        let ipld = to_ipld(data).map_err(anyhow::Error::from)?;
-        let cid = self.ipfs.put_dag(ipld).await?;
-        Ok(cid)
     }
 
     pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {

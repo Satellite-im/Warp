@@ -1,4 +1,7 @@
-use futures::{stream::FuturesOrdered, StreamExt};
+use futures::{
+    stream::{FuturesOrdered, FuturesUnordered},
+    StreamExt,
+};
 use ipfs::{Ipfs, IpfsPath, IpfsTypes};
 use libipld::{
     serde::{from_ipld, to_ipld},
@@ -61,6 +64,20 @@ impl<D: DeserializeOwned, I: IpfsTypes> GetDag<D, I> for Cid {
 }
 
 #[async_trait::async_trait]
+impl<D: DeserializeOwned, I: IpfsTypes> GetDag<D, I> for IpfsPath {
+    async fn get_dag(&self, ipfs: Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error> {
+        let timeout = timeout.unwrap_or(std::time::Duration::from_secs(30));
+        match tokio::time::timeout(timeout, ipfs.get_dag(self.clone())).await {
+            Ok(Ok(ipld)) => from_ipld(ipld)
+                .map_err(anyhow::Error::from)
+                .map_err(Error::from),
+            Ok(Err(e)) => Err(Error::Any(e)),
+            Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
+        }
+    }
+}
+
+#[async_trait::async_trait]
 impl<T, I: IpfsTypes> ToCid<I> for T
 where
     T: Serialize + Clone + Send + Sync,
@@ -111,14 +128,7 @@ impl<T> DocumentType<T> {
         T: Clone,
         T: DeserializeOwned,
     {
-        let timeout = timeout.unwrap_or(std::time::Duration::from_secs(30));
-        match tokio::time::timeout(timeout, ipfs.get_dag(IpfsPath::from(self.document))).await {
-            Ok(Ok(ipld)) => from_ipld::<T>(ipld)
-                .map_err(anyhow::Error::from)
-                .map_err(Error::from),
-            Ok(Err(e)) => Err(Error::Any(e)),
-            Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
-        }
+        self.document.get_dag(ipfs, timeout).await
     }
 
     pub async fn resolve_or_default<P: IpfsTypes>(
@@ -176,13 +186,27 @@ impl ConversationRootDocument {
         ipfs: Ipfs<T>,
         conversation_id: Uuid,
     ) -> Result<DocumentType<ConversationDocument>, Error> {
-        for document_type in self.conversations.iter() {
-            match document_type.resolve(ipfs.clone(), None).await {
-                Ok(document) if document.id == conversation_id => return Ok(document_type.clone()),
-                _ => continue,
+        FuturesUnordered::from_iter(self.conversations.iter().map(|document| {
+            let ipfs = ipfs.clone();
+            async move {
+                let document_type = document.clone();
+                document
+                    .resolve(ipfs.clone(), None)
+                    .await
+                    .map(|document| (document_type, document))
             }
-        }
-        Err(Error::InvalidConversation)
+        }))
+        .filter_map(|result| async { result.ok() })
+        .filter(|(_, document)| {
+            let id = document.id;
+            async move { id == conversation_id }
+        })
+        .map(|(document_type, _)| document_type)
+        .collect::<Vec<_>>()
+        .await
+        .first()
+        .cloned()
+        .ok_or(Error::InvalidConversation)
     }
 
     pub async fn list_conversations<T: IpfsTypes>(
