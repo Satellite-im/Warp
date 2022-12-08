@@ -1625,11 +1625,10 @@ impl<T: IpfsTypes> MessageStore<T> {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn message_event<'a>(
+    async fn message_event(
         &mut self,
         mut document: ConversationDocument,
-        events: &'a MessagingEvents,
+        events: &MessagingEvents,
         direction: MessageDirection,
         opt: EventOpt,
     ) -> Result<bool, Error> {
