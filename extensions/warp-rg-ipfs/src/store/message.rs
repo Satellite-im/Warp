@@ -1957,6 +1957,16 @@ impl<T: IpfsTypes> MessageStore<T> {
                                 reaction.set_emoji(&emoji);
                                 reaction.set_users(vec![sender.clone()]);
                                 reactions.push(reaction);
+                                
+                                message_document
+                                    .update(self.ipfs.clone(), self.did.clone(), message)
+                                    .await?;
+                                document.messages.replace(message_document);
+
+                                let mut root = self.get_root_document().await?;
+                                root.update_conversation(self.ipfs.clone(), convo_id, document)
+                                    .await?;
+                                self.set_root_document(root).await?;
                                 if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
                                     conversation_id: convo_id,
                                     message_id,
