@@ -134,7 +134,7 @@ impl ConversationDocument {
         ipfs: Ipfs<T>,
         did: Arc<DID>,
         option: MessageOptions,
-    ) -> Result<Vec<Message>, Error> {
+    ) -> Result<BTreeSet<Message>, Error> {
         if self.messages.is_empty() {
             return Err(Error::EmptyMessage);
         }
@@ -167,7 +167,7 @@ impl ConversationDocument {
                 .map(|document| async { document.resolve(ipfs.clone(), did.clone()).await }),
         )
         .filter_map(|res| async { res.ok() })
-        .collect::<Vec<Message>>()
+        .collect::<BTreeSet<Message>>()
         .await;
 
         Ok(list)

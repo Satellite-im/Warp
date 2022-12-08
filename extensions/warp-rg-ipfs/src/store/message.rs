@@ -805,6 +805,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         conversation
             .get_messages(self.ipfs.clone(), self.did.clone(), opt)
             .await
+            .map(Vec::from_iter)
     }
 
     pub async fn exist(&self, conversation: Uuid) -> bool {

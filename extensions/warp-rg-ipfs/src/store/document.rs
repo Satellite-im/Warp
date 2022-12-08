@@ -43,23 +43,14 @@ where
     T: Serialize + Clone + Send + Sync,
 {
     async fn to_document(&self, ipfs: Ipfs<I>) -> Result<DocumentType<T>, Error> {
-        let ipld = to_ipld(self.clone()).map_err(anyhow::Error::from)?;
-        let cid = ipfs.put_dag(ipld).await?;
-        Ok(cid.into())
+        self.clone().to_cid(ipfs).await.map(|cid| cid.into())
     }
 }
 
 #[async_trait::async_trait]
 impl<D: DeserializeOwned, I: IpfsTypes> GetDag<D, I> for Cid {
     async fn get_dag(&self, ipfs: Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error> {
-        let timeout = timeout.unwrap_or(std::time::Duration::from_secs(30));
-        match tokio::time::timeout(timeout, ipfs.get_dag(IpfsPath::from(*self))).await {
-            Ok(Ok(ipld)) => from_ipld(ipld)
-                .map_err(anyhow::Error::from)
-                .map_err(Error::from),
-            Ok(Err(e)) => Err(Error::Any(e)),
-            Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
-        }
+        IpfsPath::from(*self).get_dag(ipfs, timeout).await
     }
 }
 
