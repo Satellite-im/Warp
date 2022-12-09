@@ -47,6 +47,20 @@ impl From<Conversation> for ConversationDocument {
     }
 }
 
+impl From<&Conversation> for ConversationDocument {
+    fn from(conversation: &Conversation) -> Self {
+        ConversationDocument {
+            id: conversation.id(),
+            name: conversation.name(),
+            creator: None,
+            conversation_type: conversation.conversation_type(),
+            recipients: conversation.recipients(),
+            messages: Default::default(),
+            signature: None,
+        }
+    }
+}
+
 impl Hash for ConversationDocument {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state)
