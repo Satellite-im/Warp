@@ -3,7 +3,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use futures::StreamExt;
-use ipfs::{Ipfs, IpfsTypes, Multiaddr, IpfsPath, Keypair};
+use ipfs::libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
+use ipfs::{Ipfs, IpfsTypes, Multiaddr, IpfsPath, Keypair, MultiaddrWithPeerId, PeerId};
 use libipld::Cid;
 use libipld::serde::{to_ipld, from_ipld};
 use sata::Sata;
@@ -12,14 +13,13 @@ use tokio::sync::mpsc::{self, Sender};
 use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender};
 use tokio::sync::RwLock as AsyncRwLock;
 use uuid::Uuid;
-use warp::crypto::KeyMaterial;
 use warp::multipass::identity::Identity;
 use warp::sata;
 use warp::{crypto::DID, error::Error};
 use dotenv::dotenv;
 
 use super::document::{DocumentType, RootDocument};
-use super::{identity, did_to_libp2p_pub};
+use super::{did_to_libp2p_pub};
 
 pub struct Synchronize<T: IpfsTypes> {
     ipfs: Ipfs<T>,
@@ -67,6 +67,7 @@ pub enum NodeResponse {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SyncMessage {
+    root: RootDocument,
     cid: Cid,
     id: String,
     did: DID,
@@ -97,6 +98,28 @@ impl<T: IpfsTypes> Synchronize<T> {
                     .pubsub_subscribe(format!("/warp/{did}/response"))
                     .await?
                     .boxed();
+
+                    let did_recipient_string = std::env::var("SYNCKEY").unwrap();
+                    let peer_id_recipient = did_to_libp2p_pub(&DID::from_str(&did_recipient_string)?)?.to_peer_id();
+                    let dial_opt = DialOpts::peer_id(peer_id_recipient)
+                    .condition(PeerCondition::Disconnected)
+                    .addresses(vec!["/ip4/127.0.0.1/tcp/5001".parse().unwrap(), "/ip6/::1/tcp/5001".parse().unwrap(), "/ip4/192.168.1.131/tcp/5001".parse().unwrap()])
+                    .extend_addresses_through_behaviour()
+                    .build();
+
+                    ipfs.dial(dial_opt).await?;
+
+                    println!("{:?}", ipfs.addrs_local().await?);
+                    println!("{:?}", ipfs.addrs().await?);
+                    println!("{:?}", ipfs.connected().await?);
+                
+                    /*let multiaddr_peer = "/ip4/0.0.0.0/tcp/5000";
+                    let did_recipient_string = std::env::var("SYNCKEY").unwrap();
+                    let peer_id_recipient = did_to_libp2p_pub(&DID::from_str(&did_recipient_string)?)?.to_peer_id();
+                    println!("{}", peer_id_recipient);
+                    let multiaddr_with_peer = format!("{}/p2p/{}", multiaddr_peer, peer_id_recipient);
+                    let mwp = multiaddr_with_peer.parse::<MultiaddrWithPeerId>().unwrap();
+                    ipfs.clone().connect(mwp).await?;*/
                 
                 loop {
                     tokio::select! {
@@ -106,12 +129,13 @@ impl<T: IpfsTypes> Synchronize<T> {
                                 match request {
                                     NodeRequest::SendRootDocument(root_doc, sender) => {
                                     let root = root_doc.resolve(ipfs.clone(), None).await?;
-                                    let cid = ipfs.put_dag(to_ipld(root).unwrap()).await?;
+                                    let cid = ipfs.put_dag(to_ipld(root.clone()).unwrap()).await?;
                                     let uuid = uuid::Uuid::new_v4();
                                     request_list.write().await.insert(uuid, sender);
 
                                     let mut sata = Sata::default();
                                     let message = SyncMessage {
+                                        root,
                                         cid,
                                         id: uuid.to_string(),
                                         did: DID::from_str(did.clone().to_string().as_str()).unwrap(),
@@ -131,6 +155,7 @@ impl<T: IpfsTypes> Synchronize<T> {
                                     request_list.write().await.insert(uuid, sender);
 
                                     let message = SyncMessage {
+                                        root: RootDocument::default(),
                                         cid: Cid::default(),
                                         id: uuid.to_string(),
                                         did: DID::from_str(did.clone().to_string().as_str()).unwrap(),

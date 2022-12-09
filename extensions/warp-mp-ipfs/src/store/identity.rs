@@ -5,7 +5,7 @@ use std::{
     collections::HashSet,
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
-    time::Duration,
+    time::Duration, str::FromStr,
 };
 
 use crate::{
@@ -688,9 +688,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
             self.ipfs.remove_pin(&old_cid, true).await?;
         }
         self.ipfs.insert_pin(&root_cid, true).await?;
-        println!("Root CID is Pinned? {}", root_cid);
-        println!("Root CID is Pinned? {}", self.ipfs.is_pinned(&root_cid).await?);
-        //self.send_sync_request().await?;
         self.save_cid(root_cid).await?;
         Ok(())
     }
@@ -907,13 +904,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
         self.validate_identity(&ident)?;
         *self.identity.write().await = Some(ident);
         self.seen.write().await.clear();
-        /*match *self.sync.read().await {
-            Some(_) => {},
-            None => {
-                let kp = self.get_keypair_did()?;
-                self.update_sync(kp.into()).await?;
-            },
-        }*/
         Ok(())
     }
 

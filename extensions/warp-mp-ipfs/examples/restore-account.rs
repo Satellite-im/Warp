@@ -158,7 +158,6 @@ async fn main() -> anyhow::Result<()> {
     let ipfs_account = account_persistent(None, "./account2", cache, &opt).await?;
 
     let mut account: Box<dyn MultiPass> = Box::new(ipfs_account.clone());
-    
 
     println!("Obtaining identity....");
     let own_identity = account.get_own_identity()?;
@@ -560,7 +559,9 @@ async fn main() -> anyhow::Result<()> {
                         Some("send-root-document") => {
                             
                             match ipfs_account.clone().identity_store()?.send_sync_request().await {
-                                Ok(root) => root,
+                                Ok(root) => {
+                                root
+                                },
                                 Err(e) => {
                                     writeln!(stdout, "Error obtaining root document: {}", e)?;
                                     continue;
