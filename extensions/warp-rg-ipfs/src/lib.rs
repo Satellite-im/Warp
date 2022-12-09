@@ -229,8 +229,6 @@ impl<T: IpfsTypes> Extension for IpfsMessaging<T> {
     }
 }
 
-// pub fn message_task(conversation: Arc<Mutex<Vec<Message>>>) {}
-
 impl<T: IpfsTypes> SingleHandle for IpfsMessaging<T> {
     fn handle(&self) -> std::result::Result<Box<dyn core::any::Any>, warp::error::Error> {
         Ok(Box::new(self.ipfs.read().clone()))

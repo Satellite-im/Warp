@@ -12,7 +12,7 @@ use std::hash::Hash;
 use std::time::Duration;
 use std::{collections::HashSet, marker::PhantomData};
 use uuid::Uuid;
-use warp::{crypto::DID, error::Error};
+use warp::{crypto::DID, error::Error, logging::tracing::log::{debug, info, error}};
 
 use super::conversation::ConversationDocument;
 
@@ -182,7 +182,7 @@ impl ConversationRootDocument {
             async move {
                 let document_type = document.clone();
                 document
-                    .resolve(ipfs.clone(), None)
+                    .resolve(ipfs, None)
                     .await
                     .map(|document| (document_type, document))
             }
@@ -204,6 +204,7 @@ impl ConversationRootDocument {
         &self,
         ipfs: Ipfs<T>,
     ) -> Result<Vec<ConversationDocument>, Error> {
+        debug!("Loading conversations");
         let list = FuturesOrdered::from_iter(
             self.conversations
                 .iter()
@@ -212,7 +213,7 @@ impl ConversationRootDocument {
         .filter_map(|res| async { res.ok() })
         .collect::<Vec<_>>()
         .await;
-
+        info!("Conversations loaded");
         Ok(list)
     }
 
@@ -221,19 +222,24 @@ impl ConversationRootDocument {
         ipfs: Ipfs<T>,
         conversation_id: Uuid,
     ) -> Result<ConversationDocument, Error> {
+        info!("Removing conversation");
         let document_type = self
             .get_conversation_document(ipfs.clone(), conversation_id)
             .await?;
 
         if !self.conversations.remove(&document_type) {
+            error!("Conversation doesnt exist");
             return Err(Error::InvalidConversation);
         }
 
         let conversation = document_type.resolve(ipfs.clone(), None).await?;
         if ipfs.is_pinned(&document_type.document).await? {
+            info!("Unpinning document");
             ipfs.remove_pin(&document_type.document, false).await?;
+            info!("Document unpinned");
         }
         ipfs.remove_block(document_type.document).await?;
+        info!("Block removed");
 
         Ok(conversation)
     }

@@ -19,7 +19,7 @@ use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
 use warp::crypto::DID;
 use warp::error::Error;
-use warp::logging::tracing::log::{error, trace};
+use warp::logging::tracing::log::{error, info, trace};
 use warp::logging::tracing::warn;
 use warp::multipass::MultiPass;
 use warp::raygun::{
@@ -107,6 +107,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         event: BroadcastSender<RayGunEventKind>,
         (check_spam, store_decrypted, with_friends): (bool, bool, bool),
     ) -> anyhow::Result<Self> {
+        info!("Initializing MessageStore");
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
             false => None,
@@ -117,7 +118,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 tokio::fs::create_dir_all(path).await?;
             }
         }
-        // let direct_conversation = Arc::new(Default::default());
+
         let queue = Arc::new(Default::default());
         let root_cid = Arc::new(Default::default());
         let did = Arc::new(account.decrypt_private_key(None)?);
@@ -143,12 +144,16 @@ impl<T: IpfsTypes> MessageStore<T> {
             with_friends,
         };
 
+        info!("Checking for root document");
         if let Err(_e) = store.new_cid().await {}
-
+        info!("Loading root document");
         if let Err(_e) = store.load_cid().await {}
+        info!("Loading queue");
         if let Err(_e) = store.load_queue().await {}
 
+        info!("Loading existing conversations task");
         if let Ok(list) = store.list_conversations().await {
+            info!("Loading conversations");
             for conversation in list {
                 let conversation = ConversationDocument::from(conversation);
                 let stream = match store.ipfs.pubsub_subscribe(conversation.topic()).await {
@@ -183,6 +188,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         tokio::spawn({
             let mut store = store.clone();
             async move {
+                info!("MessagingStore task created");
                 let did = &*(store.did.clone());
                 futures::pin_mut!(stream);
                 let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
@@ -216,6 +222,7 @@ impl<T: IpfsTypes> MessageStore<T> {
     }
 
     async fn start_task(&self, conversation_id: Uuid, stream: SubscriptionStream) {
+        info!("Task started for {conversation_id}");
         let did = self.did.clone();
 
         let task = warp::async_spawn({
@@ -256,7 +263,9 @@ impl<T: IpfsTypes> MessageStore<T> {
 
     async fn end_task(&self, conversation_id: Uuid) {
         if let Some(task) = self.stream_task.write().await.remove(&conversation_id) {
+            info!("Attempting to end task for {conversation_id}");
             task.abort();
+            info!("Task for {conversation_id} has ended");
         }
     }
 
@@ -268,7 +277,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         match event {
             ConversationEvents::NewConversation(peer) => {
                 let did = &*self.did;
-                trace!("New conversation event received from {peer}");
+                info!("New conversation event received from {peer}");
                 let id = super::generate_shared_topic(did, &peer, Some("direct-conversation"))?;
 
                 if self.exist(id).await {
@@ -282,8 +291,13 @@ impl<T: IpfsTypes> MessageStore<T> {
                 }
 
                 let list = [did.clone(), peer];
+                info!("Creating conversation");
                 let convo = ConversationDocument::new_direct(did, list)?;
-
+                info!(
+                    "{} conversation created: {}",
+                    convo.conversation_type,
+                    convo.id()
+                );
                 let mut root_document = self.get_root_document().await?;
                 root_document
                     .conversations
@@ -459,6 +473,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 .await
                 .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
             {
+                info!("{cid_str} is loaded");
                 *self.root_cid.write().await = cid_str.parse().ok()
             }
         }
@@ -477,8 +492,9 @@ impl<T: IpfsTypes> MessageStore<T> {
         let old_cid = self.get_cid().await.ok();
 
         let root_cid = document.to_cid(self.ipfs.clone()).await?;
-
+        info!("Root document is now at {root_cid}");
         self.ipfs.insert_pin(&root_cid, false).await?;
+        info!("Document pinned");
         self.save_cid(root_cid).await?;
         if let Some(old_cid) = old_cid {
             if self.ipfs.is_pinned(&old_cid).await? {
@@ -813,7 +829,6 @@ impl<T: IpfsTypes> MessageStore<T> {
         conversation_id: Uuid,
     ) -> Result<ConversationDocument, Error> {
         let root = self.get_root_document().await?;
-
         root.get_conversation(self.ipfs.clone(), conversation_id)
             .await
     }
@@ -879,6 +894,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             .sum();
 
         if lines_value_length == 0 || lines_value_length > 4096 {
+            error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
             return Err(Error::InvalidLength {
                 context: "message".into(),
                 current: lines_value_length,
@@ -946,6 +962,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             .sum();
 
         if lines_value_length == 0 || lines_value_length > 4096 {
+            error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
             return Err(Error::InvalidLength {
                 context: "message".into(),
                 current: lines_value_length,
@@ -1010,6 +1027,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             .sum();
 
         if lines_value_length == 0 || lines_value_length > 4096 {
+            error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
             return Err(Error::InvalidLength {
                 context: "message".into(),
                 current: lines_value_length,
@@ -1651,7 +1669,8 @@ impl<T: IpfsTypes> MessageStore<T> {
                     .map(|s| s.chars().count())
                     .sum();
 
-                if lines_value_length >= 4096 {
+                if lines_value_length == 0 && lines_value_length > 4096 {
+                    error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
                     return Err(Error::InvalidLength {
                         context: "message".into(),
                         current: lines_value_length,
@@ -1759,7 +1778,8 @@ impl<T: IpfsTypes> MessageStore<T> {
                     .map(|s| s.chars().count())
                     .sum();
 
-                if lines_value_length >= 4096 {
+                if lines_value_length == 0 && lines_value_length > 4096 {
+                    error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
                     return Err(Error::InvalidLength {
                         context: "message".into(),
                         current: lines_value_length,

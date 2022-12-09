@@ -169,8 +169,10 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
+    println!("Initializing Constellation");
     let fs = create_fs(new_account.clone(), opt.path.clone()).await?;
 
+    println!("Initializing RayGun");
     let mut chat = create_rg(
         opt.path.clone(),
         new_account.clone(),
