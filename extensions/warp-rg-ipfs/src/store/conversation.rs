@@ -82,6 +82,18 @@ impl ConversationDocument {
         format!("{}/{}", self.conversation_type, self.id())
     }
 
+    pub fn event_topic(&self) -> String {
+        format!("{}/events", self.topic())
+    }
+
+    pub fn files_topic(&self) -> String {
+        format!("{}/files", self.topic())
+    }
+
+    pub fn files_transfer(&self, id: Uuid) -> String {
+        format!("{}/{id}", self.files_topic())
+    }
+
     pub fn recipients(&self) -> Vec<DID> {
         self.recipients.clone()
     }
