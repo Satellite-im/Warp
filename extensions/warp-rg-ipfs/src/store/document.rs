@@ -205,7 +205,7 @@ impl ConversationRootDocument {
         ipfs: Ipfs<T>,
     ) -> Result<Vec<ConversationDocument>, Error> {
         debug!("Loading conversations");
-        let list = FuturesOrdered::from_iter(
+        let list = FuturesUnordered::from_iter(
             self.conversations
                 .iter()
                 .map(|document| async { document.resolve(ipfs.clone(), None).await }),
