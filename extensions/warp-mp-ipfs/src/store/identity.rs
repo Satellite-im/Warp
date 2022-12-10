@@ -477,6 +477,26 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(identity)
     }
 
+    pub async fn set_sync_identity(&mut self, identity: &Identity) -> Result<(), Error>{
+            let ident_cid = self.put_dag(identity.clone()).await?;
+
+            let mut root_document = self.fetch_root_document_request().await?;
+            root_document.identity = ident_cid;
+
+            let did_kp = self.get_keypair_did()?;
+            root_document.sign(&did_kp)?;
+
+            let root_cid = self.put_dag(root_document).await?;
+
+            // Pin the dag
+            self.ipfs.insert_pin(&root_cid, true).await?;
+
+            self.save_cid(root_cid).await?;
+            self.update_identity().await?;
+            self.enable_event();
+            Ok(())
+    }
+
     //Note: We are calling `IdentityStore::cache` multiple times, but shouldnt have any impact on performance.
     pub async fn lookup(&self, lookup: LookupBy) -> Result<Vec<Identity>, Error> {
         let own_did = self

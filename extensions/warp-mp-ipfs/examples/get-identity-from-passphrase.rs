@@ -86,7 +86,7 @@ async fn account(
 }
 
 async fn account_persistent<P: AsRef<Path>>(
-    username: Option<&str>,
+    passphrase: &str,
     path: P,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     opt: &Opt,
@@ -127,9 +127,9 @@ async fn account_persistent<P: AsRef<Path>>(
 
     config.ipfs_setting.mdns.enable = opt.mdns;
     let mut account = ipfs_identity_persistent(config, tesseract, cache).await?;
-    if account.get_own_identity().is_err() {
-        account.create_identity(username, Some("online bunker blood network business amazing gaze green used rude attract point"))?;
-    }
+    
+    account.get_sync_identity(passphrase)?;
+    
     Ok(account)
 }
 
@@ -155,10 +155,12 @@ async fn main() -> anyhow::Result<()> {
 
     let cache = None; //cache_setup(opt.path.clone()).ok();
 
-    let ipfs_account = account_persistent(None, "./account2", cache, &opt).await?;
+    let passphrase = "online bunker blood network business amazing gaze green used rude attract point";
+
+    let ipfs_account = account_persistent(passphrase, "./account2", cache, &opt).await?;
 
     let mut account: Box<dyn MultiPass> = Box::new(ipfs_account.clone());
-
+    
     println!("Obtaining identity....");
     let own_identity = account.get_own_identity()?;
     println!(
@@ -173,7 +175,7 @@ async fn main() -> anyhow::Result<()> {
         own_identity.short_id()
     ))?;
 
-    let mut event_stream = account.subscribe()?;
+    /*let mut event_stream = account.subscribe()?;
     loop {
         tokio::select! {
             event = event_stream.next() => {
@@ -715,7 +717,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             },
         }
-    }
+    }*/
 
     Ok(())
 }

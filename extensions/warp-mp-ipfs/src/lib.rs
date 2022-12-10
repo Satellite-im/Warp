@@ -29,10 +29,10 @@ use warp::tesseract::Tesseract;
 use warp::{async_block_in_place_uncheck, Extension, SingleHandle};
 
 use ipfs::{Ipfs, IpfsOptions, IpfsTypes, Keypair, Protocol, TestTypes, Types, UninitializedIpfs};
-use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
+use warp::crypto::{DIDKey, Ed25519KeyPair, DID, Fingerprint};
 use warp::error::Error;
 use warp::multipass::identity::{
-    FriendRequest, Identifier, Identity, IdentityUpdate, Relationship,
+    FriendRequest, Identifier, Identity, IdentityUpdate, Relationship, SHORT_ID_SIZE, Graphics,
 };
 use warp::multipass::{
     identity, Friends, FriendsEvent, IdentityInformation, MultiPass, MultiPassEventKind,
@@ -40,7 +40,7 @@ use warp::multipass::{
 };
 
 use crate::config::Bootstrap;
-use crate::store::document::DocumentType;
+use crate::store::document::{DocumentType, RootDocument};
 
 pub type Temporary = TestTypes;
 pub type Persistent = Types;
@@ -519,6 +519,45 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
         })
     }
 
+    fn get_sync_identity(
+        &mut self,
+        passphrase: &str,
+    ) -> Result<Identity, Error> {
+        async_block_in_place_uncheck(async {
+            let mut tesseract = self.tesseract.clone();
+            warp::crypto::keypair::mnemonic_into_tesseract(&mut tesseract, passphrase, None)?;
+
+            info!("Initializing stores");
+            self.initialize_store(true).await?;
+            info!("Stores initialized. Creating identity");
+            let mut identity = self.identity_store()?.create_identity(None).await?;
+            let updated_identity = self.identity_store()?.fetch_identity_request().await?;
+            let raw_kp = self.identity_store()?.get_raw_keypair()?;
+            let public_key =
+            DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().encode()));
+
+
+            identity.set_username(&updated_identity.username());
+            let fingerprint = public_key.fingerprint();
+            let bytes = fingerprint.as_bytes();
+
+            identity.set_short_id(
+            bytes[bytes.len() - SHORT_ID_SIZE..]
+                .try_into()
+                .map_err(anyhow::Error::from)?,
+            );
+
+            identity.set_status_message(updated_identity.status_message());
+            let mut graphics = identity.graphics();
+            graphics.set_profile_picture(&updated_identity.graphics().profile_picture());
+            graphics.set_profile_banner(&updated_identity.graphics().profile_banner());
+            identity.set_graphics(graphics);
+            self.identity_store()?.set_sync_identity(&identity).await?;
+
+            Ok(identity)
+        })
+    }
+
     fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
         async_block_in_place_uncheck(async {
             if !self.is_store_initialized().await {
@@ -755,6 +794,11 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
         let mut store = self.identity_store()?;
         store.clear_internal_cache();
         self.get_cache_mut()?.empty(DataType::from(self.module()))
+    }
+
+    fn get_own_identity(&self) -> Result<Identity, Error> {
+        self.get_identity(Identifier::own())
+            .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))
     }
 }
 

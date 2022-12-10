@@ -64,6 +64,8 @@ pub trait MultiPass:
     /// Obtain an [`Identity`] using [`Identifier`]
     fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error>;
 
+    fn get_sync_identity(&mut self, passphrase: &str) -> Result<Identity, Error>;
+
     /// Obtain your own [`Identity`]
     fn get_own_identity(&self) -> Result<Identity, Error> {
         self.get_identity(Identifier::own())
@@ -94,6 +96,10 @@ where
 
     fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
         self.read().get_identity(id)
+    }
+
+    fn get_sync_identity(&mut self, passphrase: &str) -> Result<Identity, Error> {
+        self.write().get_sync_identity(passphrase)
     }
 
     fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
