@@ -49,6 +49,9 @@ pub struct MessageStore<T: IpfsTypes> {
     // conversation root cid
     root_cid: Arc<tokio::sync::RwLock<Option<Cid>>>,
 
+    // conversation cid
+    conversation_cid: Arc<tokio::sync::RwLock<HashMap<Uuid, Cid>>>,
+
     // account instance
     account: Box<dyn MultiPass>,
 
@@ -82,6 +85,7 @@ impl<T: IpfsTypes> Clone for MessageStore<T> {
             path: self.path.clone(),
             stream_sender: self.stream_sender.clone(),
             root_cid: self.root_cid.clone(),
+            conversation_cid: self.conversation_cid.clone(),
             account: self.account.clone(),
             filesystem: self.filesystem.clone(),
             stream_task: self.stream_task.clone(),
@@ -121,6 +125,7 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let queue = Arc::new(Default::default());
         let root_cid = Arc::new(Default::default());
+        let conversation_cid = Arc::new(Default::default());
         let did = Arc::new(account.decrypt_private_key(None)?);
         let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
         let stream_task = Arc::new(Default::default());
@@ -134,6 +139,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             stream_sender,
             stream_task,
             root_cid,
+            conversation_cid,
             account,
             filesystem,
             queue,
