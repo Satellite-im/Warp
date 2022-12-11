@@ -287,8 +287,7 @@ impl<T: IpfsTypes> Synchronize<T> {
     pub async fn fetch_root_document(&self) -> Result<RootDocument, Error> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchRootDocument(one_tx);
-        let err = self.tx.clone().send(node_request).await; 
-        println!("{}", err.is_ok());
+        let _ = self.tx.clone().send(node_request).await; 
         match one_rx.await {
             Ok(res) => {
                 if let NodeResponse::FetchRootDocument { id: _, cid }  = res {
@@ -315,7 +314,8 @@ impl<T: IpfsTypes> Synchronize<T> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchIdentity(one_tx);
         println!("{:?}", node_request);
-        let _ = self.tx.clone().send(node_request).await; 
+        let err = self.tx.clone().send(node_request).await; 
+        println!("{}", err.is_ok());
         println!("fetch");
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         match one_rx.await {
