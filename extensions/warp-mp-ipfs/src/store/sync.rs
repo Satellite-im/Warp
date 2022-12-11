@@ -178,7 +178,7 @@ impl<T: IpfsTypes> Synchronize<T> {
                                     ipfs.clone().pubsub_publish(format!("warp/rootdocument"), bytes).await?;
                             },
                             NodeRequest::FetchIdentity(sender) => {
-
+                                println!("hello2");
                                 let uuid = uuid::Uuid::new_v4();
                                 request_list.write().await.insert(uuid, sender);
                                 let message = SyncMessage {
@@ -198,7 +198,6 @@ impl<T: IpfsTypes> Synchronize<T> {
                                 let bytes = serde_json::to_vec(&data)?;
                                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                                 ipfs.clone().pubsub_publish(format!("warp/rootdocument"), bytes).await?;
-                                println!("hello1");
                         }   
                         }
                     }
