@@ -132,6 +132,7 @@ impl<T: IpfsTypes> Synchronize<T> {
                     tokio::select! {
                         request = rx.recv() => {
                             if let Some(request) = request {
+                                println!("ricevuto");
                                 //if let NodeRequest::SendRootDocument(root_doc, sender) = request {
                                 match request {
                                     NodeRequest::SendRootDocument(root_doc, sender) => {
@@ -178,6 +179,7 @@ impl<T: IpfsTypes> Synchronize<T> {
                                     ipfs.clone().pubsub_publish(format!("warp/rootdocument"), bytes).await?;
                             },
                             NodeRequest::FetchIdentity(sender) => {
+                                println!("identity");
                                 let uuid = uuid::Uuid::new_v4();
                                 request_list.write().await.insert(uuid, sender);
                                 let message = SyncMessage {
@@ -309,11 +311,9 @@ impl<T: IpfsTypes> Synchronize<T> {
     pub async fn fetch_identity(&self) -> Result<Identity, Error> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchIdentity(one_tx);
-        let req = self.tx.clone().send(node_request).await; 
-        println!("{:?}", req.err());
+        let _ = self.tx.clone().send(node_request).await; 
         match one_rx.await {
             Ok(res) => {
-                println!("ora, qui");
                 if let NodeResponse::FetchIdentity { id: _, cid }  = res {
 
                 let identity = cid.resolve(self.ipfs.clone(), None).await?;
