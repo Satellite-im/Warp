@@ -330,7 +330,8 @@ impl<T: IpfsTypes> Synchronize<T> {
                     Err(Error::ObjectNotFound)
                 }
             },
-            Err(_) => {
+            Err(e) => {
+                println!("{}", e);
                 return  Err(Error::ChannelClosed);
             }
         } 
