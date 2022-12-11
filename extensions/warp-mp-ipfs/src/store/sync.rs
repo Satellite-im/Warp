@@ -309,7 +309,8 @@ impl<T: IpfsTypes> Synchronize<T> {
     pub async fn fetch_identity(&self) -> Result<Identity, Error> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchIdentity(one_tx);
-        let _ = self.tx.clone().send(node_request).await; 
+        let req = self.tx.clone().send(node_request).await; 
+        println!("{:?}", req.err());
         match one_rx.await {
             Ok(res) => {
                 if let NodeResponse::FetchIdentity { id: _, cid }  = res {
