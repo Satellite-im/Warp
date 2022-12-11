@@ -289,7 +289,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         let (one_tx, mut one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchRootDocument(one_tx);
         let _ = self.tx.clone().send(node_request).await; 
-        match one_rx.try_recv() {
+        match one_rx.await {
             Ok(res) => {
                 if let NodeResponse::FetchRootDocument { id: _, cid }  = res {
 
@@ -305,12 +305,9 @@ impl<T: IpfsTypes> Synchronize<T> {
                     Err(Error::ObjectNotFound)
                 }
             },
-            Err(TryRecvError::Closed) => {
+            Err(_) => {
                 return  Err(Error::ChannelClosed);
             },
-            Err(TryRecvError::Empty) => {
-                return  Err(Error::EmptyMessage);
-            }
         } 
     }
 
@@ -320,7 +317,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         let _ = self.tx.clone().send(node_request).await; 
         println!("fetch");
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        match one_rx.try_recv() {
+        match one_rx.await {
             Ok(res) => {
                 if let NodeResponse::FetchIdentity { id: _, cid }  = res {
 
@@ -336,11 +333,8 @@ impl<T: IpfsTypes> Synchronize<T> {
                     Err(Error::ObjectNotFound)
                 }
             },
-            Err(TryRecvError::Closed) => {
+            Err(_) => {
                 return  Err(Error::ChannelClosed);
-            },
-            Err(TryRecvError::Empty) => {
-                return  Err(Error::EmptyMessage);
             }
         } 
     }
