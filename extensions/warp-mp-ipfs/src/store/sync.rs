@@ -86,7 +86,7 @@ impl<T: IpfsTypes> Synchronize<T> {
     #[allow(unreachable_code)]
     pub async fn new(ipfs: Ipfs<T>, did: Arc<DID>) -> Result<Self, Error> {
         dotenv().ok();
-        let (tx, mut rx) = mpsc::channel(10);
+        let (tx, mut rx) = mpsc::channel(1);
         let sync = Self {
             ipfs,
             did,
@@ -287,7 +287,8 @@ impl<T: IpfsTypes> Synchronize<T> {
     pub async fn fetch_root_document(&self) -> Result<RootDocument, Error> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchRootDocument(one_tx);
-        let _ = self.tx.clone().send(node_request).await; 
+        let err = self.tx.clone().send(node_request).await; 
+        println!("{}", err.is_ok());
         match one_rx.await {
             Ok(res) => {
                 if let NodeResponse::FetchRootDocument { id: _, cid }  = res {
