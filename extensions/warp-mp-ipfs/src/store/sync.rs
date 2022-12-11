@@ -313,6 +313,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         println!("{:?}", req.err());
         match one_rx.await {
             Ok(res) => {
+                println!("ora, qui");
                 if let NodeResponse::FetchIdentity { id: _, cid }  = res {
 
                 let identity = cid.resolve(self.ipfs.clone(), None).await?;
