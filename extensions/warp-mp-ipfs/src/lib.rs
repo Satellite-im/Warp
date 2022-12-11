@@ -529,30 +529,8 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
 
             info!("Initializing stores");
             self.initialize_store(true).await?;
-            info!("Stores initialized. Creating identity");
-            let mut identity = self.identity_store()?.create_identity(None).await?;
             let updated_identity = self.identity_store()?.fetch_identity_request().await?;
-            let raw_kp = self.identity_store()?.get_raw_keypair()?;
-            let public_key =
-            DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().encode()));
-
-
-            identity.set_username(&updated_identity.username());
-            let fingerprint = public_key.fingerprint();
-            let bytes = fingerprint.as_bytes();
-
-            identity.set_short_id(
-            bytes[bytes.len() - SHORT_ID_SIZE..]
-                .try_into()
-                .map_err(anyhow::Error::from)?,
-            );
-
-            identity.set_status_message(updated_identity.status_message());
-            let mut graphics = identity.graphics();
-            graphics.set_profile_picture(&updated_identity.graphics().profile_picture());
-            graphics.set_profile_banner(&updated_identity.graphics().profile_banner());
-            identity.set_graphics(graphics);
-            self.identity_store()?.set_sync_identity(&identity).await?;
+            let identity = self.identity_store()?.set_sync_identity(&updated_identity).await?;
 
             Ok(identity)
         })

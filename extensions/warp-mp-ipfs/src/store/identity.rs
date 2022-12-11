@@ -477,7 +477,28 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(identity)
     }
 
-    pub async fn set_sync_identity(&mut self, identity: &Identity) -> Result<(), Error>{
+    pub async fn set_sync_identity(&mut self, updated_identity: &Identity) -> Result<Identity, Error>{
+            let raw_kp = self.get_raw_keypair()?;
+            let mut identity = Identity::default();
+            let public_key =
+                DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().encode()));
+
+            identity.set_username(&updated_identity.username());
+            let fingerprint = public_key.fingerprint();
+            let bytes = fingerprint.as_bytes();
+
+            identity.set_short_id(
+            bytes[bytes.len() - SHORT_ID_SIZE..]
+                .try_into()
+                .map_err(anyhow::Error::from)?,
+            );
+
+            identity.set_status_message(updated_identity.status_message());
+            let mut graphics = identity.graphics();
+            graphics.set_profile_picture(&updated_identity.graphics().profile_picture());
+            graphics.set_profile_banner(&updated_identity.graphics().profile_banner());
+            identity.set_graphics(graphics);
+
             let ident_cid = self.put_dag(identity.clone()).await?;
 
             let mut root_document = self.fetch_root_document_request().await?;
@@ -494,7 +515,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             self.save_cid(root_cid).await?;
             self.update_identity().await?;
             self.enable_event();
-            Ok(())
+            Ok(identity)
     }
 
     //Note: We are calling `IdentityStore::cache` multiple times, but shouldnt have any impact on performance.
