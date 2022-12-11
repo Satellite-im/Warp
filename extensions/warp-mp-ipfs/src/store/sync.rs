@@ -10,6 +10,7 @@ use libipld::serde::{to_ipld, from_ipld};
 use sata::Sata;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{self, Sender};
+use tokio::sync::oneshot::error::TryRecvError;
 use tokio::sync::oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender};
 use tokio::sync::RwLock as AsyncRwLock;
 use uuid::Uuid;
@@ -284,10 +285,10 @@ impl<T: IpfsTypes> Synchronize<T> {
     }
 
     pub async fn fetch_root_document(&self) -> Result<RootDocument, Error> {
-        let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
+        let (one_tx, mut one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchRootDocument(one_tx);
         let _ = self.tx.clone().send(node_request).await; 
-        match one_rx.await {
+        match one_rx.try_recv() {
             Ok(res) => {
                 if let NodeResponse::FetchRootDocument { id: _, cid }  = res {
 
@@ -303,19 +304,22 @@ impl<T: IpfsTypes> Synchronize<T> {
                     Err(Error::ObjectNotFound)
                 }
             },
-            Err(_) => {
+            Err(TryRecvError::Closed) => {
                 return  Err(Error::ChannelClosed);
+            },
+            Err(TryRecvError::Empty) => {
+                return  Err(Error::EmptyMessage);
             }
         } 
     }
 
     pub async fn fetch_identity(&self) -> Result<Identity, Error> {
-        let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
+        let (one_tx, mut one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchIdentity(one_tx);
         let _ = self.tx.clone().send(node_request).await; 
         println!("fetch");
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        match one_rx.await {
+        match one_rx.try_recv() {
             Ok(res) => {
                 if let NodeResponse::FetchIdentity { id: _, cid }  = res {
 
@@ -331,8 +335,11 @@ impl<T: IpfsTypes> Synchronize<T> {
                     Err(Error::ObjectNotFound)
                 }
             },
-            Err(e) => {
+            Err(TryRecvError::Closed) => {
                 return  Err(Error::ChannelClosed);
+            },
+            Err(TryRecvError::Empty) => {
+                return  Err(Error::EmptyMessage);
             }
         } 
     }
