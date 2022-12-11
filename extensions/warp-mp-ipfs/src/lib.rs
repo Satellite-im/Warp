@@ -531,7 +531,9 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
             self.initialize_store(true).await?;
             info!("Stores initialized. Creating identity");
             let mut identity = self.identity_store()?.create_identity(None).await?;
+            println!("sono qui");
             let updated_identity = self.identity_store()?.fetch_identity_request().await?;
+            println!("pure qui");
             let raw_kp = self.identity_store()?.get_raw_keypair()?;
             let public_key =
             DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().encode()));
