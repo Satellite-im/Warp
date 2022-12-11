@@ -312,6 +312,8 @@ impl<T: IpfsTypes> Synchronize<T> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchIdentity(one_tx);
         let _ = self.tx.clone().send(node_request).await; 
+        println!("fetch");
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         match one_rx.await {
             Ok(res) => {
                 if let NodeResponse::FetchIdentity { id: _, cid }  = res {
