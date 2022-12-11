@@ -178,7 +178,7 @@ impl<T: IpfsTypes> Synchronize<T> {
                                     ipfs.clone().pubsub_publish(format!("warp/rootdocument"), bytes).await?;
                             },
                             NodeRequest::FetchIdentity(sender) => {
-                                println!("hello2");
+                                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                                 let uuid = uuid::Uuid::new_v4();
                                 request_list.write().await.insert(uuid, sender);
                                 let message = SyncMessage {
