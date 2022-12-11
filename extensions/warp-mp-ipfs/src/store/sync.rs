@@ -86,7 +86,7 @@ impl<T: IpfsTypes> Synchronize<T> {
     #[allow(unreachable_code)]
     pub async fn new(ipfs: Ipfs<T>, did: Arc<DID>) -> Result<Self, Error> {
         dotenv().ok();
-        let (tx, mut rx) = mpsc::channel(1);
+        let (tx, mut rx) = mpsc::channel(10);
         let sync = Self {
             ipfs,
             did,
