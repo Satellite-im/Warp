@@ -218,7 +218,6 @@ impl<T: IpfsTypes> Synchronize<T> {
                                                 }
                                             },
                                             NodeResponse::FetchRootDocument {id, cid} => {
-                                                println!("boh");
                                                 if let Some(_tx) = request.remove(&Uuid::from_str(id.as_str())?) {
                                                     let root = cid.resolve(ipfs.clone(), None).await?;
                                                     if let Err(_) = _tx.send(NodeResponse::FetchRootDocument { id, cid: DocumentType::Object(root) }) {
@@ -227,6 +226,7 @@ impl<T: IpfsTypes> Synchronize<T> {
                                                 }
                                             }
                                             NodeResponse::FetchIdentity {id, cid} => {
+                                                println!("boh");
                                                 if let Some(_tx) = request.remove(&Uuid::from_str(id.as_str())?) {
                                                     let root = cid.resolve(ipfs.clone(), None).await?;
                                                     if let Err(_) = _tx.send(NodeResponse::FetchIdentity { id, cid: DocumentType::Object(root) }) {
