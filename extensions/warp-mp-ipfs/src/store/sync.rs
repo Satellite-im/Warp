@@ -198,7 +198,8 @@ impl<T: IpfsTypes> Synchronize<T> {
                                 let bytes = serde_json::to_vec(&data)?;
                                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                                 ipfs.clone().pubsub_publish(format!("warp/rootdocument"), bytes).await?;
-                        }
+                                println!("hello1");
+                        }   
                         }
                     }
                 }
