@@ -1,12 +1,8 @@
 use clap::Parser;
-use comfy_table::Table;
-use futures::prelude::*;
-use ipfs::{Types, TestTypes};
-use rustyline_async::{Readline, ReadlineError};
-use std::io::Write;
+use ipfs::{TestTypes, Types};
+use rustyline_async::Readline;
 use std::path::{Path, PathBuf};
 use tracing_subscriber::EnvFilter;
-use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, RwLock};
@@ -127,9 +123,9 @@ async fn account_persistent<P: AsRef<Path>>(
 
     config.ipfs_setting.mdns.enable = opt.mdns;
     let mut account = ipfs_identity_persistent(config, tesseract, cache).await?;
-    
-    account.get_sync_identity(passphrase)?;
-    
+
+    account.restore_identity_from_mnemonic(passphrase)?;
+
     Ok(account)
 }
 
@@ -155,12 +151,13 @@ async fn main() -> anyhow::Result<()> {
 
     let cache = None; //cache_setup(opt.path.clone()).ok();
 
-    let passphrase = "online bunker blood network business amazing gaze green used rude attract point";
+    let passphrase =
+        "online bunker blood network business amazing gaze green used rude attract point";
 
     let ipfs_account = account_persistent(passphrase, "./account2", cache, &opt).await?;
 
-    let mut account: Box<dyn MultiPass> = Box::new(ipfs_account.clone());
-    
+    let account: Box<dyn MultiPass> = Box::new(ipfs_account.clone());
+
     println!("Obtaining identity....");
     let own_identity = account.get_own_identity()?;
     println!(
@@ -536,7 +533,7 @@ async fn main() -> anyhow::Result<()> {
                             }
                             writeln!(stdout, "{}", table)?;
                         },
-                        Some("get-last-identity") => { 
+                        Some("get-last-identity") => {
                             let identity = match ipfs_account.clone().identity_store()?.fetch_identity_request().await {
                                 Ok(identity) => identity,
                                 Err(e) => {
@@ -547,7 +544,7 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "Root Document: {:?}", identity)?;
                         },
                         Some("show-root-document") => {
-                            
+
                             let root = match ipfs_account.clone().identity_store()?.fetch_root_document_request().await {
                                 Ok(root) => root,
                                 Err(e) => {
@@ -556,10 +553,10 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             writeln!(stdout, "Root Document: {:?}", root)?;
-    
+
                         },
                         Some("send-root-document") => {
-                            
+
                             match ipfs_account.clone().identity_store()?.send_sync_request().await {
                                 Ok(root) => {
                                 root
@@ -570,7 +567,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             writeln!(stdout, "Document Stored on Sync Node")?;
-    
+
                         },
                         Some("update-status") => {
                             let mut status = vec![];
@@ -601,7 +598,7 @@ async fn main() -> anyhow::Result<()> {
                             }
 
                             writeln!(stdout, "Username updated")?;
-                           
+
                         },
                         Some("update-picture") => {
                             let picture = match cmd_line.next() {

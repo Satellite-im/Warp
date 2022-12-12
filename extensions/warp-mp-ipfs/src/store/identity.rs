@@ -5,18 +5,18 @@ use std::{
     collections::HashSet,
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
-    time::Duration, str::FromStr,
+    time::Duration,
 };
 
 use crate::{
     config::Discovery,
+    store::sync::Synchronize,
     store::{did_to_libp2p_pub, IdentityPayload},
     Persistent,
-    store::sync::Synchronize,
 };
 use futures::{stream::BoxStream, FutureExt, StreamExt};
 use ipfs::{
-    libp2p::{gossipsub::GossipsubMessage, identity},
+    libp2p::gossipsub::GossipsubMessage,
     unixfs::ll::file::adder::{Chunker, FileAdderBuilder},
     Block, Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId,
 };
@@ -24,10 +24,10 @@ use libipld::{
     serde::{from_ipld, to_ipld},
     Cid,
 };
-use warp::sata::Sata;
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::broadcast;
 use tracing::log::error;
+use warp::sata::Sata;
 use warp::{
     crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
@@ -244,19 +244,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         let root = self.get_root_document().await?;
 
-        let identity = self
-            .get_dag::<Identity>(IpfsPath::from(root.identity), None)
-            .await?;
+        let identity = self.own_identity().await?;
 
         let did = identity.did_key();
 
         let picture = root.picture;
         let banner = root.banner;
 
-        let payload = match self.override_ipld.load(Ordering::Relaxed) {
-            true => DocumentType::Object(identity),
-            false => DocumentType::Cid(root.identity),
-        };
+        let payload = root.identity;
 
         let payload = IdentityPayload {
             did: did.clone(),
@@ -265,7 +260,11 @@ impl<T: IpfsTypes> IdentityStore<T> {
             banner,
         };
 
-        let res = data.encode(libipld::IpldCodec::DagJson, warp::sata::Kind::Static, payload)?;
+        let res = data.encode(
+            libipld::IpldCodec::DagJson,
+            warp::sata::Kind::Static,
+            payload,
+        )?;
 
         //TODO: Maybe use bincode instead
         let bytes = serde_json::to_vec(&res)?;
@@ -276,8 +275,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         Ok(())
     }
-
-    
 
     async fn process_message(&mut self, message: Arc<GossipsubMessage>) -> anyhow::Result<()> {
         let data = serde_json::from_slice::<Sata>(&message.data)?;
@@ -455,10 +452,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
         );
         identity.set_did_key(public_key.into());
 
-        let ident_cid = self.put_dag(identity.clone()).await?;
-
         let mut root_document = RootDocument {
-            identity: ident_cid,
+            identity: DocumentType::Object(identity.clone()),
             ..Default::default()
         };
 
@@ -475,26 +470,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
         self.update_sync(did_kp).await?;
         self.enable_event();
         Ok(identity)
-    }
-
-    pub async fn set_sync_identity(&mut self, identity: &Identity) -> Result<(), Error>{
-            let ident_cid = self.put_dag(identity.clone()).await?;
-
-            let mut root_document = self.fetch_root_document_request().await?;
-            root_document.identity = ident_cid;
-
-            let did_kp = self.get_keypair_did()?;
-            root_document.sign(&did_kp)?;
-
-            let root_cid = self.put_dag(root_document).await?;
-
-            // Pin the dag
-            self.ipfs.insert_pin(&root_cid, true).await?;
-
-            self.save_cid(root_cid).await?;
-            self.update_identity().await?;
-            self.enable_event();
-            Ok(())
     }
 
     //Note: We are calling `IdentityStore::cache` multiple times, but shouldnt have any impact on performance.
@@ -640,10 +615,13 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     pub async fn identity_update(&mut self, identity: Identity) -> Result<(), Error> {
         let mut root_document = self.get_root_document().await?;
-        let ident_cid = self.put_dag(identity.clone()).await?;
-        root_document.identity = ident_cid;
 
-        self.set_root_document(root_document).await
+        root_document.identity = DocumentType::Object(identity);
+
+        self.set_root_document(root_document).await?;
+
+        // Send a sync request every time we update our identity
+        self.send_sync_request().await
     }
 
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
@@ -739,8 +717,11 @@ impl<T: IpfsTypes> IdentityStore<T> {
     pub async fn own_identity(&self) -> Result<Identity, Error> {
         let root_document = self.get_root_document().await?;
         let ipfs = self.ipfs.clone();
-        let path = IpfsPath::from(root_document.identity);
-        let mut identity = self.get_dag::<Identity>(path, None).await?;
+
+        let mut identity = root_document
+            .identity
+            .resolve_or_default(ipfs.clone(), None)
+            .await;
 
         if let Some(document) = root_document.banner {
             let banner = document.resolve_or_default(ipfs.clone(), None).await;
@@ -906,17 +887,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
         (self.root_cid.read().await.clone()).ok_or(Error::IdentityDoesntExist)
     }
 
-    pub async fn get_sync(&self) -> Result<bool, Error>{
+    pub async fn get_sync(&self) -> Result<bool, Error> {
         let sync = match *self.sync.read().await {
-            Some(_) => {
-                true
-            },
-            None => {
-                false
-
-            },
+            Some(_) => true,
+            None => false,
         };
-        Ok(sync)  
+        Ok(sync)
     }
 
     pub async fn update_identity(&self) -> Result<(), Error> {
@@ -935,19 +911,42 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     pub async fn send_sync_request(&self) -> Result<(), Error> {
         let root_doc = self.get_root_document().await?;
-        self.sync.read().await.as_ref().unwrap().clone().send_request(root_doc).await?;
-        
+        self.sync
+            .read()
+            .await
+            .as_ref()
+            .unwrap()
+            .clone()
+            .send_request(root_doc)
+            .await?;
+
         Ok(())
     }
 
     pub async fn fetch_root_document_request(&self) -> Result<RootDocument, Error> {
-        let root = self.sync.read().await.as_ref().unwrap().clone().fetch_root_document().await?;
+        let root = self
+            .sync
+            .read()
+            .await
+            .as_ref()
+            .unwrap()
+            .clone()
+            .fetch_root_document()
+            .await?;
         Ok(root)
     }
 
     pub async fn fetch_identity_request(&self) -> Result<Identity, Error> {
-        let identity = self.sync.read().await.as_ref().unwrap().clone().fetch_identity().await?;
-        
+        let identity = self
+            .sync
+            .read()
+            .await
+            .as_ref()
+            .unwrap()
+            .clone()
+            .fetch_identity()
+            .await?;
+
         Ok(identity)
     }
 

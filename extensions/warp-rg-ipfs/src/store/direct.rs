@@ -903,7 +903,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             }
         }
 
-        //Not a guarantee that it been sent but for now since the message exist locally and not marked in queue, we will assume it have been sent 
+        //Not a guarantee that it been sent but for now since the message exist locally and not marked in queue, we will assume it have been sent
         Ok(MessageStatus::Sent)
     }
 
@@ -974,6 +974,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
         conversation: Uuid,
         messages: Vec<String>,
     ) -> Result<(), Error> {
+        println!("Sending message from IPFS extension");
         let mut conversation = self.get_conversation(conversation)?;
         let tx = conversation.event_handle()?;
         if messages.is_empty() {
@@ -1085,7 +1086,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let signature = super::sign_serde(&self.did, &construct)?;
 
-        let event = MessagingEvents::Edit(conversation.id(), message_id, Utc::now(), messages, signature);
+        let event = MessagingEvents::Edit(
+            conversation.id(),
+            message_id,
+            Utc::now(),
+            messages,
+            signature,
+        );
 
         direct_message_event(
             &mut conversation.messages_mut(),

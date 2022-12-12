@@ -42,7 +42,7 @@ impl<T> DocumentType<T> {
                 }
             }
             //This will resolve into a buffer that can be deserialize into T.
-            //Best not to use this to resolve a large file. 
+            //Best not to use this to resolve a large file.
             DocumentType::UnixFS(cid, limit) => {
                 let fut = async {
                     let stream = ipfs
@@ -105,11 +105,17 @@ impl<T> From<Cid> for DocumentType<T> {
     }
 }
 
+impl Default for DocumentType<Identity> {
+    fn default() -> Self {
+        DocumentType::Object(Identity::default())
+    }
+}
+
 /// node root document for their identity, friends, blocks, etc, along with previous cid (if we wish to track that)
 #[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RootDocument {
     //TODO: Maybe use DocumentType<Identity>?
-    pub identity: Cid,
+    pub identity: DocumentType<Identity>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub picture: Option<DocumentType<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -164,21 +170,10 @@ impl RootDocument {
         ),
         Error,
     > {
-        let identity = {
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                ipfs.get_dag(IpfsPath::from(self.identity)),
-            )
-            .await
-            {
-                Ok(Ok(ipld)) => from_ipld::<Identity>(ipld)
-                    .map_err(anyhow::Error::from)
-                    .map_err(Error::from)?,
-                Ok(Err(e)) => return Err(Error::Any(e)),
-                Err(e) => return Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
-            }
-        };
-
+        let identity = self
+            .identity
+            .resolve_or_default(ipfs.clone(), timeout)
+            .await;
         let mut friends = Default::default();
         let mut picture = Default::default();
         let mut banner = Default::default();

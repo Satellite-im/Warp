@@ -8,7 +8,6 @@ use ipfs::libp2p::mplex::MplexConfig;
 use ipfs::libp2p::swarm::ConnectionLimits;
 use ipfs::libp2p::yamux::{WindowUpdateMode, YamuxConfig};
 use ipfs::p2p::{IdentifyConfiguration, TransportConfig};
-use warp::sata::Sata;
 use std::any::Any;
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,6 +20,7 @@ use warp::crypto::did_key::Generate;
 use warp::data::DataType;
 use warp::hooks::Hooks;
 use warp::pocket_dimension::query::QueryBuilder;
+use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::module::Module;
@@ -29,10 +29,10 @@ use warp::tesseract::Tesseract;
 use warp::{async_block_in_place_uncheck, Extension, SingleHandle};
 
 use ipfs::{Ipfs, IpfsOptions, IpfsTypes, Keypair, Protocol, TestTypes, Types, UninitializedIpfs};
-use warp::crypto::{DIDKey, Ed25519KeyPair, DID, Fingerprint};
+use warp::crypto::{DIDKey, Ed25519KeyPair, Fingerprint, DID};
 use warp::error::Error;
 use warp::multipass::identity::{
-    FriendRequest, Identifier, Identity, IdentityUpdate, Relationship, SHORT_ID_SIZE, Graphics,
+    FriendRequest, Graphics, Identifier, Identity, IdentityUpdate, Relationship, SHORT_ID_SIZE,
 };
 use warp::multipass::{
     identity, Friends, FriendsEvent, IdentityInformation, MultiPass, MultiPassEventKind,
@@ -344,7 +344,6 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 .collect()
         });
 
-        
         let identity_store = IdentityStore::new(
             ipfs.clone(),
             config.path.clone(),
@@ -502,8 +501,8 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
             let identity = self.identity_store()?.create_identity(username).await?;
             info!("Identity with {} has been created", identity.did_key());
 
-            let identity_store = self.identity_store()?.clone();
-            
+            // let identity_store = self.identity_store()?.clone();
+
             //identity_store.send_sync_request().await?;
             //identity_store.send_sync_request(Command::Fetch).await?;
 
@@ -519,10 +518,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
         })
     }
 
-    fn get_sync_identity(
-        &mut self,
-        passphrase: &str,
-    ) -> Result<Identity, Error> {
+    fn restore_identity_from_mnemonic(&mut self, passphrase: &str) -> Result<Identity, Error> {
         async_block_in_place_uncheck(async {
             let mut tesseract = self.tesseract.clone();
             warp::crypto::keypair::mnemonic_into_tesseract(&mut tesseract, passphrase, None)?;
@@ -530,29 +526,16 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
             info!("Initializing stores");
             self.initialize_store(true).await?;
             info!("Stores initialized. Creating identity");
-            let mut identity = self.identity_store()?.create_identity(None).await?;
-            let updated_identity = self.identity_store()?.fetch_identity_request().await?;
-            let raw_kp = self.identity_store()?.get_raw_keypair()?;
-            let public_key =
-            DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().encode()));
 
+            self.identity_store()?.create_identity(None).await?;
 
-            identity.set_username(&updated_identity.username());
-            let fingerprint = public_key.fingerprint();
-            let bytes = fingerprint.as_bytes();
+            let root_document = self.identity_store()?.fetch_root_document_request().await?;
 
-            identity.set_short_id(
-            bytes[bytes.len() - SHORT_ID_SIZE..]
-                .try_into()
-                .map_err(anyhow::Error::from)?,
-            );
+            self.identity_store()?
+                .set_root_document(root_document)
+                .await?;
 
-            identity.set_status_message(updated_identity.status_message());
-            let mut graphics = identity.graphics();
-            graphics.set_profile_picture(&updated_identity.graphics().profile_picture());
-            graphics.set_profile_banner(&updated_identity.graphics().profile_banner());
-            identity.set_graphics(graphics);
-            self.identity_store()?.set_sync_identity(&identity).await?;
+            let identity = self.identity_store()?.own_identity().await?;
 
             Ok(identity)
         })
@@ -678,8 +661,9 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                         .store_photo(
                             futures::stream::once(async move {
                                 serde_json::to_vec(&data).unwrap_or_default()
-                            }).boxed(),
-                            Some(2 * 1024 * 1024)
+                            })
+                            .boxed(),
+                            Some(2 * 1024 * 1024),
                         )
                         .await?;
 
@@ -712,8 +696,9 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                         .store_photo(
                             futures::stream::once(async move {
                                 serde_json::to_vec(&data).unwrap_or_default()
-                            }).boxed(),
-                            Some(2 * 1024 * 1024)
+                            })
+                            .boxed(),
+                            Some(2 * 1024 * 1024),
                         )
                         .await?;
 
