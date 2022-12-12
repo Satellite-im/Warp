@@ -283,32 +283,23 @@ impl<T: IpfsTypes> Synchronize<T> {
         Ok(())
     }
 
-    pub async fn fetch_root_document(&self) -> Result<RootDocument, Error> {
+    pub async fn fetch_root_document(&self) -> anyhow::Result<RootDocument> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchRootDocument(one_tx);
         println!("fetch root document {:?}", node_request);
-        let _ = self.tx.clone().send(node_request).await;
+        let _ = self.tx.clone().send(node_request).await?;
         println!("{}", self.tx.clone().is_closed());
-        match one_rx.await {
-            Ok(res) => {
-                if let NodeResponse::FetchRootDocument { id: _, cid } = res {
-                    let root_document = cid.resolve(self.ipfs.clone(), None).await?;
-                    let ipld = match to_ipld(root_document.clone()) {
-                        Ok(ipld) => ipld,
-                        Err(_) => return Err(Error::ObjectNotFound),
-                    };
+        let node_response = one_rx.await?; 
+        if let NodeResponse::FetchRootDocument { id: _, cid } = node_response {
+            let root_document = cid.resolve(self.ipfs.clone(), None).await?;
+                    let ipld =to_ipld(root_document.clone())?;
                     self.ipfs.put_dag(ipld).await?;
                     Ok(root_document)
-                } else {
-                    Err(Error::ObjectNotFound)
-                }
-            }
-            Err(e) => {
-                println!("fetch root document error {:?}", e);
-                return Err(Error::ChannelClosed);
-            }
-        }
-    }
+        } else {
+            Ok(RootDocument::default())
+        }    
+    
+}
 
     pub async fn fetch_identity(&self) -> Result<Identity, Error> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
