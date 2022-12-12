@@ -1,7 +1,4 @@
-use futures::{
-    stream::{FuturesOrdered, FuturesUnordered},
-    StreamExt,
-};
+use futures::{stream::FuturesUnordered, StreamExt};
 use ipfs::{Ipfs, IpfsPath, IpfsTypes};
 use libipld::{
     serde::{from_ipld, to_ipld},
@@ -12,7 +9,11 @@ use std::hash::Hash;
 use std::time::Duration;
 use std::{collections::HashSet, marker::PhantomData};
 use uuid::Uuid;
-use warp::{crypto::DID, error::Error, logging::tracing::log::{debug, info, error}};
+use warp::{
+    crypto::DID,
+    error::Error,
+    logging::tracing::log::{debug, error, info},
+};
 
 use super::conversation::ConversationDocument;
 
@@ -57,7 +58,7 @@ impl<D: DeserializeOwned, I: IpfsTypes> GetDag<D, I> for Cid {
 #[async_trait::async_trait]
 impl<D: DeserializeOwned, I: IpfsTypes> GetDag<D, I> for IpfsPath {
     async fn get_dag(&self, ipfs: Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error> {
-        let timeout = timeout.unwrap_or(std::time::Duration::from_secs(30));
+        let timeout = timeout.unwrap_or(std::time::Duration::from_secs(10));
         match tokio::time::timeout(timeout, ipfs.get_dag(self.clone())).await {
             Ok(Ok(ipld)) => from_ipld(ipld)
                 .map_err(anyhow::Error::from)
