@@ -314,6 +314,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         let node_request = NodeRequest::FetchIdentity(one_tx);
         println!("NODE REQUEST {:?}", node_request);
         let _ = self.tx.clone().send(node_request).await;
+        println!("{}", self.tx.clone().is_closed());
         match one_rx.await {
             Ok(res) => {
                 if let NodeResponse::FetchIdentity { id: _, cid } = res {
