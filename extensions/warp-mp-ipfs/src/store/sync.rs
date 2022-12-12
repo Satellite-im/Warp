@@ -288,6 +288,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         let node_request = NodeRequest::FetchRootDocument(one_tx);
         println!("fetch root document {:?}", node_request);
         let _ = self.tx.clone().send(node_request).await;
+        println!("{}", self.tx.clone().is_closed());
         match one_rx.await {
             Ok(res) => {
                 if let NodeResponse::FetchRootDocument { id: _, cid } = res {
