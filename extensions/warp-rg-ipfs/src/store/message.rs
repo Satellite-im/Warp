@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast::{self, Receiver as BroadcastReceiver, Sender as BroadcastSender};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio_stream::wrappers::ReadDirStream;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
@@ -778,7 +779,9 @@ impl<T: IpfsTypes> MessageStore<T> {
             return Err(Error::InvalidDirectory);
         }
 
-        for entry in std::fs::read_dir(path)? {
+        let mut entry_stream = ReadDirStream::new(tokio::fs::read_dir(path).await?);
+
+        while let Some(entry) = entry_stream.next().await {
             let entry = entry?;
             let entry_path = entry.path();
             if entry_path.is_file() && !entry_path.ends_with(".messaging_queue") {
@@ -786,15 +789,15 @@ impl<T: IpfsTypes> MessageStore<T> {
                     continue
                 };
                 let Ok(cid_str) = tokio::fs::read(entry_path).await.map(|bytes| String::from_utf8_lossy(&bytes).to_string()) else {
-                    continue;
+                    continue
                 };
                 if let Ok(cid) = cid_str.parse::<Cid>() {
                     self.conversation_cid.write().await.insert(id, cid);
+                    self.conversation_lock
+                        .write()
+                        .await
+                        .insert(id, Arc::new(Semaphore::new(1)));
                 }
-                self.conversation_lock
-                    .write()
-                    .await
-                    .insert(id, Arc::new(Semaphore::new(1)));
             }
         }
 
