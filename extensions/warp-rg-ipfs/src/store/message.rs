@@ -329,7 +329,9 @@ impl<T: IpfsTypes> MessageStore<T> {
                 );
 
                 let cid = convo.to_cid(self.ipfs.clone()).await?;
-
+                if !self.ipfs.is_pinned(&cid).await? {
+                    self.ipfs.insert_pin(&cid, false).await?;
+                }
                 self.conversation_cid.write().await.insert(convo.id(), cid);
                 self.conversation_lock
                     .write()
@@ -394,11 +396,15 @@ impl<T: IpfsTypes> MessageStore<T> {
                     }
                 }
 
-                let document: ConversationDocument =
+                let mut document: ConversationDocument =
                     conversation_cid.get_dag(self.ipfs.clone(), None).await?;
 
                 self.stream_sender.write().await.remove(&conversation_id);
                 self.queue.write().await.remove(&sender);
+
+                document.delete_all_message(self.ipfs.clone()).await?;
+
+                self.ipfs.remove_block(conversation_cid).await?;
 
                 if self
                     .ipfs
@@ -407,6 +413,14 @@ impl<T: IpfsTypes> MessageStore<T> {
                     .is_ok()
                 {
                     warn!("topic should have been unsubscribed after dropping conversation.");
+                }
+
+                if let Some(path) = self.path.as_ref() {
+                    if let Err(e) =
+                        tokio::fs::remove_file(path.join(conversation_id.to_string())).await
+                    {
+                        error!("Unable to remove conversation: {e}");
+                    }
                 }
 
                 if let Err(e) = self
@@ -624,8 +638,16 @@ impl<T: IpfsTypes> MessageStore<T> {
             .await
             .remove(&conversation_id)
             .ok_or(Error::InvalidConversation)?;
-        let document_type: ConversationDocument =
+
+        if self.ipfs.is_pinned(&conversation_cid).await? {
+            if let Err(e) = self.ipfs.remove_pin(&conversation_cid, false).await {
+                error!("Unable to remove pin from {conversation_cid}: {e}");
+            }
+        }
+        let mut document_type: ConversationDocument =
             conversation_cid.get_dag(self.ipfs.clone(), None).await?;
+
+        self.ipfs.remove_block(conversation_cid).await?;
 
         if broadcast {
             let recipients = document_type.recipients();
@@ -708,11 +730,16 @@ impl<T: IpfsTypes> MessageStore<T> {
         let conversation_id = document_type.id();
         tokio::spawn({
             let ipfs = self.ipfs.clone();
-            let mut document_type = document_type;
             async move {
                 let _ = document_type.delete_all_message(ipfs).await.is_ok();
             }
         });
+
+        if let Some(path) = self.path.as_ref() {
+            if let Err(e) = tokio::fs::remove_file(path.join(conversation_id.to_string())).await {
+                error!("Unable to remove conversation: {e}");
+            }
+        }
 
         if let Err(e) = self
             .event
@@ -905,9 +932,7 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         if let Some(path) = self.path.as_ref() {
             let cid = new_cid.to_string();
-            if let Err(e) =
-                tokio::fs::write(path.join(conversation_id.to_string()), cid).await
-            {
+            if let Err(e) = tokio::fs::write(path.join(conversation_id.to_string()), cid).await {
                 error!("Unable to save info to file: {e}");
             }
         }

@@ -313,11 +313,18 @@ impl MessageDocument {
         }
 
         let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, message)?;
+
+        let message = data.to_cid(ipfs.clone()).await?;
+
+        if !ipfs.is_pinned(&message).await? {
+            ipfs.insert_pin(&message, false).await?;
+        }
+
         let document = MessageDocument {
             id,
             conversation_id,
             date,
-            message: data.to_cid(ipfs).await?,
+            message,
         };
 
         Ok(document)
