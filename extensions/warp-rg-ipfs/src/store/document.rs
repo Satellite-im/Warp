@@ -36,7 +36,7 @@ where
     T: Serialize + Clone + Send + Sync,
 {
     async fn to_document(&self, ipfs: Ipfs<I>) -> Result<DocumentType<T>, Error> {
-        self.clone().to_cid(ipfs).await.map(|cid| cid.into())
+        ToCid::to_cid(self, ipfs).await.map(|cid| cid.into())
     }
 }
 
