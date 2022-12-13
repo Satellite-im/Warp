@@ -157,7 +157,7 @@ impl ConversationDocument {
 impl ConversationDocument {
     pub async fn get_messages<T: IpfsTypes>(
         &self,
-        ipfs: Ipfs<T>,
+        ipfs: &Ipfs<T>,
         did: Arc<DID>,
         option: MessageOptions,
     ) -> Result<BTreeSet<Message>, Error> {
@@ -190,7 +190,7 @@ impl ConversationDocument {
         let list = FuturesOrdered::from_iter(
             sorted
                 .iter()
-                .map(|document| async { document.resolve(ipfs.clone(), did.clone()).await }),
+                .map(|document| async { document.resolve(ipfs, did.clone()).await }),
         )
         .filter_map(|res| async { res.ok() })
         .collect::<BTreeSet<Message>>()
@@ -201,7 +201,7 @@ impl ConversationDocument {
 
     pub async fn get_message<T: IpfsTypes>(
         &self,
-        ipfs: Ipfs<T>,
+        ipfs: &Ipfs<T>,
         did: Arc<DID>,
         message_id: Uuid,
     ) -> Result<Message, Error> {
@@ -298,7 +298,7 @@ impl Ord for MessageDocument {
 
 impl MessageDocument {
     pub async fn new<T: IpfsTypes>(
-        ipfs: Ipfs<T>,
+        ipfs: &Ipfs<T>,
         did: Arc<DID>,
         recipients: Vec<DID>,
         message: Message,
@@ -314,7 +314,7 @@ impl MessageDocument {
 
         let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, message)?;
 
-        let message = data.to_cid(ipfs.clone()).await?;
+        let message = data.to_cid(ipfs).await?;
 
         if !ipfs.is_pinned(&message).await? {
             ipfs.insert_pin(&message, false).await?;
@@ -343,12 +343,12 @@ impl MessageDocument {
 
     pub async fn update<T: IpfsTypes>(
         &mut self,
-        ipfs: Ipfs<T>,
+        ipfs: &Ipfs<T>,
         did: Arc<DID>,
         message: Message,
     ) -> Result<(), Error> {
-        let recipients = self.receipients(ipfs.clone()).await?;
-        let old_message = self.resolve(ipfs.clone(), did.clone()).await?;
+        let recipients = self.receipients(ipfs).await?;
+        let old_message = self.resolve(ipfs, did.clone()).await?;
         let old_document = self.message;
 
         if old_message.id() != message.id()
@@ -363,7 +363,7 @@ impl MessageDocument {
         }
 
         let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, message)?;
-        self.message = data.to_cid(ipfs.clone()).await?;
+        self.message = data.to_cid(ipfs).await?;
 
         if ipfs.is_pinned(&old_document).await? {
             ipfs.remove_pin(&old_document, false).await?;
@@ -373,7 +373,7 @@ impl MessageDocument {
         Ok(())
     }
 
-    pub async fn receipients<T: IpfsTypes>(&self, ipfs: Ipfs<T>) -> Result<Vec<DID>, Error> {
+    pub async fn receipients<T: IpfsTypes>(&self, ipfs: &Ipfs<T>) -> Result<Vec<DID>, Error> {
         let data: Sata = self.message.get_dag(ipfs, None).await?;
         data.recipients()
             .map(|list| {
@@ -387,7 +387,7 @@ impl MessageDocument {
 
     pub async fn resolve<T: IpfsTypes>(
         &self,
-        ipfs: Ipfs<T>,
+        ipfs: &Ipfs<T>,
         did: Arc<DID>,
     ) -> Result<Message, Error> {
         let data: Sata = self.message.get_dag(ipfs, None).await?;

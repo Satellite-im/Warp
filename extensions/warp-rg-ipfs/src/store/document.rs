@@ -11,23 +11,23 @@ use warp::error::Error;
 
 #[async_trait::async_trait]
 pub(crate) trait ToDocument<T: IpfsTypes>: Sized {
-    async fn to_document(&self, ipfs: Ipfs<T>) -> Result<DocumentType<Self>, Error>;
+    async fn to_document(&self, ipfs: &Ipfs<T>) -> Result<DocumentType<Self>, Error>;
 }
 
 #[async_trait::async_trait]
 pub(crate) trait ToCid<T: IpfsTypes>: Sized {
-    async fn to_cid(&self, ipfs: Ipfs<T>) -> Result<Cid, Error>;
+    async fn to_cid(&self, ipfs: &Ipfs<T>) -> Result<Cid, Error>;
 }
 
 #[async_trait::async_trait]
 pub(crate) trait GetDag<D, I: IpfsTypes>: Sized {
-    async fn get_dag(&self, ipfs: Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error>;
+    async fn get_dag(&self, ipfs: &Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error>;
 }
 
 #[async_trait::async_trait]
 #[allow(clippy::wrong_self_convention)]
 pub(crate) trait FromDocument<T: IpfsTypes, I> {
-    async fn from_document(&self, ipfs: Ipfs<T>) -> Result<I, Error>;
+    async fn from_document(&self, ipfs: &Ipfs<T>) -> Result<I, Error>;
 }
 
 #[async_trait::async_trait]
@@ -35,21 +35,21 @@ impl<T, I: IpfsTypes> ToDocument<I> for T
 where
     T: Serialize + Clone + Send + Sync,
 {
-    async fn to_document(&self, ipfs: Ipfs<I>) -> Result<DocumentType<T>, Error> {
+    async fn to_document(&self, ipfs: &Ipfs<I>) -> Result<DocumentType<T>, Error> {
         ToCid::to_cid(self, ipfs).await.map(|cid| cid.into())
     }
 }
 
 #[async_trait::async_trait]
 impl<D: DeserializeOwned, I: IpfsTypes> GetDag<D, I> for Cid {
-    async fn get_dag(&self, ipfs: Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error> {
+    async fn get_dag(&self, ipfs: &Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error> {
         IpfsPath::from(*self).get_dag(ipfs, timeout).await
     }
 }
 
 #[async_trait::async_trait]
 impl<D: DeserializeOwned, I: IpfsTypes> GetDag<D, I> for IpfsPath {
-    async fn get_dag(&self, ipfs: Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error> {
+    async fn get_dag(&self, ipfs: &Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error> {
         let timeout = timeout.unwrap_or(std::time::Duration::from_secs(10));
         match tokio::time::timeout(timeout, ipfs.get_dag(self.clone())).await {
             Ok(Ok(ipld)) => from_ipld(ipld)
@@ -66,7 +66,7 @@ impl<T, I: IpfsTypes> ToCid<I> for T
 where
     T: Serialize + Clone + Send + Sync,
 {
-    async fn to_cid(&self, ipfs: Ipfs<I>) -> Result<Cid, Error> {
+    async fn to_cid(&self, ipfs: &Ipfs<I>) -> Result<Cid, Error> {
         let ipld = to_ipld(self.clone()).map_err(anyhow::Error::from)?;
         ipfs.put_dag(ipld).await.map_err(Error::from)
     }
@@ -77,7 +77,7 @@ impl<T, I: IpfsTypes> FromDocument<I, T> for DocumentType<T>
 where
     T: Sized + Send + Sync + Clone + DeserializeOwned,
 {
-    async fn from_document(&self, ipfs: Ipfs<I>) -> Result<T, Error> {
+    async fn from_document(&self, ipfs: &Ipfs<I>) -> Result<T, Error> {
         self.resolve(ipfs, None).await
     }
 }
@@ -105,7 +105,7 @@ impl<T: PartialEq> PartialEq for DocumentType<T> {
 impl<T> DocumentType<T> {
     pub async fn resolve<P: IpfsTypes>(
         &self,
-        ipfs: Ipfs<P>,
+        ipfs: &Ipfs<P>,
         timeout: Option<Duration>,
     ) -> Result<T, Error>
     where
@@ -118,7 +118,7 @@ impl<T> DocumentType<T> {
     #[allow(dead_code)]
     pub async fn resolve_or_default<P: IpfsTypes>(
         &self,
-        ipfs: Ipfs<P>,
+        ipfs: &Ipfs<P>,
         timeout: Option<Duration>,
     ) -> T
     where

@@ -328,7 +328,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                     convo.id()
                 );
 
-                let cid = convo.to_cid(self.ipfs.clone()).await?;
+                let cid = convo.to_cid(&self.ipfs).await?;
                 if !self.ipfs.is_pinned(&cid).await? {
                     self.ipfs.insert_pin(&cid, false).await?;
                 }
@@ -397,7 +397,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 }
 
                 let mut document: ConversationDocument =
-                    conversation_cid.get_dag(self.ipfs.clone(), None).await?;
+                    conversation_cid.get_dag(&self.ipfs, None).await?;
 
                 self.stream_sender.write().await.remove(&conversation_id);
                 self.queue.write().await.remove(&sender);
@@ -546,7 +546,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         let conversation =
             ConversationDocument::new_direct(own_did, [own_did.clone(), did_key.clone()])?;
 
-        let cid = conversation.to_cid(self.ipfs.clone()).await?;
+        let cid = conversation.to_cid(&self.ipfs).await?;
 
         let convo_id = conversation.id();
         let topic = conversation.topic();
@@ -645,7 +645,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             }
         }
         let mut document_type: ConversationDocument =
-            conversation_cid.get_dag(self.ipfs.clone(), None).await?;
+            conversation_cid.get_dag(&self.ipfs, None).await?;
 
         self.ipfs.remove_block(conversation_cid).await?;
 
@@ -805,7 +805,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         let list = FuturesUnordered::from_iter(self.conversation_cid.read().await.values().map(
             |cid| async {
                 (*cid)
-                    .get_dag(self.ipfs.clone(), Some(Duration::from_secs(10)))
+                    .get_dag(&self.ipfs, Some(Duration::from_secs(10)))
                     .await
             },
         ))
@@ -833,7 +833,7 @@ impl<T: IpfsTypes> MessageStore<T> {
     ) -> Result<Message, Error> {
         let conversation = self.get_conversation(conversation_id).await?;
         conversation
-            .get_message(self.ipfs.clone(), self.did.clone(), message_id)
+            .get_message(&self.ipfs, self.did.clone(), message_id)
             .await
     }
 
@@ -881,7 +881,7 @@ impl<T: IpfsTypes> MessageStore<T> {
     ) -> Result<Vec<Message>, Error> {
         let conversation = self.get_conversation(conversation).await?;
         conversation
-            .get_messages(self.ipfs.clone(), self.did.clone(), opt)
+            .get_messages(&self.ipfs, self.did.clone(), opt)
             .await
             .map(Vec::from_iter)
     }
@@ -904,7 +904,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             .get(&conversation_id)
             .cloned()
             .ok_or(Error::InvalidConversation)?;
-        cid.get_dag(self.ipfs.clone(), None).await
+        cid.get_dag(&self.ipfs, None).await
     }
 
     pub async fn get_conversation_mut<F: FnOnce(&mut ConversationDocument)>(
@@ -916,7 +916,7 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         func(document);
 
-        let new_cid = document.to_cid(self.ipfs.clone()).await?;
+        let new_cid = document.to_cid(&self.ipfs).await?;
 
         let old_cid = self
             .conversation_cid
@@ -1835,7 +1835,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 let message_id = message.id();
 
                 let message_document = MessageDocument::new(
-                    self.ipfs.clone(),
+                    &self.ipfs,
                     self.did.clone(),
                     document.recipients(),
                     message,
@@ -1873,7 +1873,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                     .ok_or(Error::MessageNotFound)?;
 
                 let mut message = message_document
-                    .resolve(self.ipfs.clone(), self.did.clone())
+                    .resolve(&self.ipfs, self.did.clone())
                     .await?;
 
                 let lines_value_length: usize = val
@@ -1932,7 +1932,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 message.set_modified(modified);
 
                 message_document
-                    .update(self.ipfs.clone(), self.did.clone(), message)
+                    .update(&self.ipfs, self.did.clone(), message)
                     .await?;
 
                 self.get_conversation_mut(document.id(), |conversation_document| {
@@ -1959,7 +1959,7 @@ impl<T: IpfsTypes> MessageStore<T> {
 
                 if opt.keep_if_owned.load(Ordering::SeqCst) {
                     let message = message_document
-                        .resolve(self.ipfs.clone(), self.did.clone())
+                        .resolve(&self.ipfs, self.did.clone())
                         .await?;
                     let signature = message.signature();
                     let sender = message.sender();
@@ -2001,7 +2001,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                     .ok_or(Error::MessageNotFound)?;
 
                 let mut message = message_document
-                    .resolve(self.ipfs.clone(), self.did.clone())
+                    .resolve(&self.ipfs, self.did.clone())
                     .await?;
 
                 let event = match state {
@@ -2022,7 +2022,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 };
 
                 message_document
-                    .update(self.ipfs.clone(), self.did.clone(), message)
+                    .update(&self.ipfs, self.did.clone(), message)
                     .await?;
 
                 self.get_conversation_mut(document.id(), |conversation_document| {
@@ -2045,7 +2045,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                     .ok_or(Error::MessageNotFound)?;
 
                 let mut message = message_document
-                    .resolve(self.ipfs.clone(), self.did.clone())
+                    .resolve(&self.ipfs, self.did.clone())
                     .await?;
 
                 let reactions = message.reactions_mut();
@@ -2069,7 +2069,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                         };
 
                         message_document
-                            .update(self.ipfs.clone(), self.did.clone(), message)
+                            .update(&self.ipfs, self.did.clone(), message)
                             .await?;
 
                         self.get_conversation_mut(document.id(), |conversation_document| {
@@ -2109,7 +2109,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                             reactions.remove(index);
                         }
                         message_document
-                            .update(self.ipfs.clone(), self.did.clone(), message)
+                            .update(&self.ipfs, self.did.clone(), message)
                             .await?;
 
                         self.get_conversation_mut(document.id(), |conversation_document| {
