@@ -166,7 +166,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         *self.direct_store.write() = Some(
             MessageStore::new(
                 ipfs.clone(),
-                config.path,
+                config.path.map(|path| path.join("messages")),
                 self.account.clone(),
                 self.constellation.clone(),
                 discovery,

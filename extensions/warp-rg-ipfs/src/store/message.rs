@@ -2,10 +2,12 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use chrono::Utc;
+use futures::stream::FuturesUnordered;
 use futures::{Stream, StreamExt};
 use ipfs::libp2p::swarm::dial_opts::DialOpts;
 use ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream};
@@ -14,6 +16,7 @@ use libipld::Cid;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast::{self, Receiver as BroadcastReceiver, Sender as BroadcastSender};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
@@ -33,7 +36,7 @@ use crate::store::connected_to_peer;
 use crate::{Persistent, SpamFilter};
 
 use super::conversation::{ConversationDocument, MessageDocument};
-use super::document::{ConversationRootDocument, GetDag, ToCid, ToDocument};
+use super::document::{GetDag, ToCid};
 use super::{
     did_to_libp2p_pub, topic_discovery, verify_serde_sig, ConversationEvents, MessagingEvents,
     DIRECT_BROADCAST,
@@ -46,11 +49,10 @@ pub struct MessageStore<T: IpfsTypes> {
     // Write handler
     path: Option<PathBuf>,
 
-    // conversation root cid
-    root_cid: Arc<tokio::sync::RwLock<Option<Cid>>>,
-
     // conversation cid
     conversation_cid: Arc<tokio::sync::RwLock<HashMap<Uuid, Cid>>>,
+
+    conversation_lock: Arc<tokio::sync::RwLock<HashMap<Uuid, Arc<Semaphore>>>>,
 
     // account instance
     account: Box<dyn MultiPass>,
@@ -84,8 +86,8 @@ impl<T: IpfsTypes> Clone for MessageStore<T> {
             ipfs: self.ipfs.clone(),
             path: self.path.clone(),
             stream_sender: self.stream_sender.clone(),
-            root_cid: self.root_cid.clone(),
             conversation_cid: self.conversation_cid.clone(),
+            conversation_lock: self.conversation_lock.clone(),
             account: self.account.clone(),
             filesystem: self.filesystem.clone(),
             stream_task: self.stream_task.clone(),
@@ -124,7 +126,6 @@ impl<T: IpfsTypes> MessageStore<T> {
         }
 
         let queue = Arc::new(Default::default());
-        let root_cid = Arc::new(Default::default());
         let conversation_cid = Arc::new(Default::default());
         let did = Arc::new(account.decrypt_private_key(None)?);
         let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
@@ -132,14 +133,15 @@ impl<T: IpfsTypes> MessageStore<T> {
         let store_decrypted = Arc::new(AtomicBool::new(store_decrypted));
         let with_friends = Arc::new(AtomicBool::new(with_friends));
         let stream_sender = Arc::new(Default::default());
+        let conversation_lock = Arc::new(Default::default());
 
-        let mut store = Self {
+        let store = Self {
             path,
             ipfs,
             stream_sender,
             stream_task,
-            root_cid,
             conversation_cid,
+            conversation_lock,
             account,
             filesystem,
             queue,
@@ -150,18 +152,12 @@ impl<T: IpfsTypes> MessageStore<T> {
             with_friends,
         };
 
-        info!("Checking for root document");
-        if let Err(_e) = store.new_cid().await {}
-        info!("Loading root document");
-        if let Err(_e) = store.load_cid().await {}
-        info!("Loading queue");
-        if let Err(_e) = store.load_queue().await {}
+        if let Err(_e) = store.load_conversations().await {}
 
         info!("Loading existing conversations task");
-        if let Ok(list) = store.list_conversations().await {
+        if let Ok(list) = store.list_conversation_documents().await {
             info!("Loading conversations");
             for conversation in list {
-                let conversation = ConversationDocument::from(conversation);
                 let stream = match store.ipfs.pubsub_subscribe(conversation.topic()).await {
                     Ok(stream) => stream,
                     Err(e) => {
@@ -180,22 +176,28 @@ impl<T: IpfsTypes> MessageStore<T> {
             }
         }
 
-        if discovery {
-            let ipfs = store.ipfs.clone();
-            tokio::spawn(async {
-                if let Err(e) = topic_discovery(ipfs, DIRECT_BROADCAST).await {
-                    error!("Unable to perform topic discovery: {e}");
-                }
-            });
-        }
-
-        let stream = store.ipfs.pubsub_subscribe(DIRECT_BROADCAST.into()).await?;
-
         tokio::spawn({
             let mut store = store.clone();
             async move {
                 info!("MessagingStore task created");
+
+                tokio::spawn({
+                    let store = store.clone();
+                    async move {
+                        info!("Loading queue");
+                        // Load the queue in a separate task in case it is large
+                        // Note: In the future this will not be needed once a req/res system
+                        //       is implemented
+                        if let Err(_e) = store.load_queue().await {}
+                    }
+                });
+
                 let did = &*(store.did.clone());
+                let Ok(stream) = store.ipfs.pubsub_subscribe(DIRECT_BROADCAST.into()).await else {
+                    error!("Unable to create subscription stream. Terminating task");
+                    //TODO: Maybe panic? 
+                    return;
+                };
                 futures::pin_mut!(stream);
                 let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
                 loop {
@@ -223,15 +225,27 @@ impl<T: IpfsTypes> MessageStore<T> {
                 }
             }
         });
+        if discovery {
+            let ipfs = store.ipfs.clone();
+            tokio::spawn(async {
+                if let Err(e) = topic_discovery(ipfs, DIRECT_BROADCAST).await {
+                    error!("Unable to perform topic discovery: {e}");
+                }
+            });
+        }
         tokio::task::yield_now().await;
         Ok(store)
     }
 
     async fn start_task(&self, conversation_id: Uuid, stream: SubscriptionStream) {
+        self.conversation_lock
+            .write()
+            .await
+            .insert(conversation_id, Arc::new(Semaphore::new(1)));
         info!("Task started for {conversation_id}");
         let did = self.did.clone();
 
-        let task = warp::async_spawn({
+        let task = tokio::spawn({
             let mut store = self.clone();
             async move {
                 futures::pin_mut!(stream);
@@ -272,6 +286,15 @@ impl<T: IpfsTypes> MessageStore<T> {
             info!("Attempting to end task for {conversation_id}");
             task.abort();
             info!("Task for {conversation_id} has ended");
+            if let Some(permit) = self
+                .conversation_lock
+                .write()
+                .await
+                .remove(&conversation_id)
+            {
+                permit.close();
+                drop(permit);
+            }
         }
     }
 
@@ -304,11 +327,14 @@ impl<T: IpfsTypes> MessageStore<T> {
                     convo.conversation_type,
                     convo.id()
                 );
-                let mut root_document = self.get_root_document().await?;
-                root_document
-                    .conversations
-                    .insert(convo.to_document(self.ipfs.clone()).await?);
-                self.set_root_document(root_document).await?;
+
+                let cid = convo.to_cid(self.ipfs.clone()).await?;
+
+                self.conversation_cid.write().await.insert(convo.id(), cid);
+                self.conversation_lock
+                    .write()
+                    .await
+                    .insert(convo.id(), Arc::new(Semaphore::new(1)));
 
                 let stream = match self.ipfs.pubsub_subscribe(convo.topic()).await {
                     Ok(stream) => stream,
@@ -355,12 +381,21 @@ impl<T: IpfsTypes> MessageStore<T> {
 
                 self.end_task(conversation_id).await;
 
-                let mut root = self.get_root_document().await?;
+                let conversation_cid = self
+                    .conversation_cid
+                    .write()
+                    .await
+                    .remove(&conversation_id)
+                    .ok_or(Error::InvalidConversation)?;
 
-                let document = root
-                    .remove_conversation(self.ipfs.clone(), conversation_id)
-                    .await?;
-                self.set_root_document(root).await?;
+                if self.ipfs.is_pinned(&conversation_cid).await? {
+                    if let Err(e) = self.ipfs.remove_pin(&conversation_cid, false).await {
+                        error!("Unable to remove pin from {conversation_cid}: {e}");
+                    }
+                }
+
+                let document: ConversationDocument =
+                    conversation_cid.get_dag(self.ipfs.clone(), None).await?;
 
                 self.stream_sender.write().await.remove(&conversation_id);
                 self.queue.write().await.remove(&sender);
@@ -447,73 +482,6 @@ impl<T: IpfsTypes> MessageStore<T> {
 }
 
 impl<T: IpfsTypes> MessageStore<T> {
-    pub async fn save_cid(&mut self, cid: Cid) -> Result<(), Error> {
-        *self.root_cid.write().await = Some(cid);
-        if let Some(path) = self.path.as_ref() {
-            let cid = cid.to_string();
-            tokio::fs::write(path.join(".conversation_id"), cid).await?;
-        }
-        Ok(())
-    }
-
-    #[allow(clippy::clone_on_copy)]
-    pub async fn get_cid(&self) -> Result<Cid, Error> {
-        (self.root_cid.read().await.clone()).ok_or(Error::Other)
-    }
-
-    pub async fn new_cid(&mut self) -> Result<(), Error> {
-        if let Some(path) = self.path.as_ref() {
-            if path.join(".conversation_id").is_file() {
-                return Ok(());
-            }
-        }
-
-        let new_root = ConversationRootDocument::new((*self.did).clone());
-        self.set_root_document(new_root).await?;
-        Ok(())
-    }
-
-    pub async fn load_cid(&self) -> Result<(), Error> {
-        if let Some(path) = self.path.as_ref() {
-            if let Ok(cid_str) = tokio::fs::read(path.join(".conversation_id"))
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-            {
-                info!("{cid_str} is loaded");
-                *self.root_cid.write().await = cid_str.parse().ok()
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn get_root_document(&self) -> Result<ConversationRootDocument, Error> {
-        let root_cid = self.get_cid().await?;
-        root_cid.get_dag(self.ipfs.clone(), None).await
-    }
-
-    pub async fn set_root_document(
-        &mut self,
-        document: ConversationRootDocument,
-    ) -> Result<(), Error> {
-        let old_cid = self.get_cid().await.ok();
-
-        let root_cid = document.to_cid(self.ipfs.clone()).await?;
-        info!("Root document is now at {root_cid}");
-        self.ipfs.insert_pin(&root_cid, false).await?;
-        info!("Document pinned");
-        self.save_cid(root_cid).await?;
-        if let Some(old_cid) = old_cid {
-            if self.ipfs.is_pinned(&old_cid).await? {
-                self.ipfs.remove_pin(&old_cid, false).await?;
-            }
-            if let Err(_e) = self.ipfs.remove_block(old_cid).await {
-                error!("Error removing root block: {_e}");
-            }
-        }
-
-        Ok(())
-    }
-
     pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
         if self.with_friends.load(Ordering::SeqCst) {
             self.account.has_friend(did_key)?;
@@ -564,17 +532,17 @@ impl<T: IpfsTypes> MessageStore<T> {
         let conversation =
             ConversationDocument::new_direct(own_did, [own_did.clone(), did_key.clone()])?;
 
+        let cid = conversation.to_cid(self.ipfs.clone()).await?;
+
         let convo_id = conversation.id();
         let topic = conversation.topic();
 
+        self.conversation_cid.write().await.insert(convo_id, cid);
+        self.conversation_lock
+            .write()
+            .await
+            .insert(convo_id, Arc::new(Semaphore::new(1)));
         let stream = self.ipfs.pubsub_subscribe(topic).await?;
-
-        let mut root_document = self.get_root_document().await?;
-        root_document
-            .conversations
-            .insert(conversation.to_document(self.ipfs.clone()).await?);
-
-        self.set_root_document(root_document).await?;
 
         let (tx, _) = broadcast::channel(1024);
 
@@ -643,12 +611,21 @@ impl<T: IpfsTypes> MessageStore<T> {
         conversation_id: Uuid,
         broadcast: bool,
     ) -> Result<(), Error> {
-        let mut root = self.get_root_document().await?;
+        // let mut root = self.get_root_document().await?;
 
-        let document_type = root
-            .remove_conversation(self.ipfs.clone(), conversation_id)
-            .await?;
-        self.set_root_document(root).await?;
+        // let document_type = root
+        //     .remove_conversation(self.ipfs.clone(), conversation_id)
+        //     .await?;
+        // self.set_root_document(root).await?;
+
+        let conversation_cid = self
+            .conversation_cid
+            .write()
+            .await
+            .remove(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        let document_type: ConversationDocument =
+            conversation_cid.get_dag(self.ipfs.clone(), None).await?;
 
         if broadcast {
             let recipients = document_type.recipients();
@@ -746,17 +723,79 @@ impl<T: IpfsTypes> MessageStore<T> {
         Ok(())
     }
 
-    pub async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
-        let root = self.get_root_document().await?;
-        let list = root.list_conversations(self.ipfs.clone()).await?;
-        Ok(list.iter().map(|document| document.into()).collect())
+    async fn conversation_queue(
+        &self,
+        conversation_id: Uuid,
+    ) -> Result<OwnedSemaphorePermit, Error> {
+        let permit = self
+            .conversation_lock
+            .read()
+            .await
+            .get(&conversation_id)
+            .cloned()
+            .ok_or(Error::InvalidConversation)?;
+
+        permit
+            .acquire_owned()
+            .await
+            .map_err(anyhow::Error::from)
+            .map_err(Error::from)
     }
 
-    pub async fn messages_count(&self, conversation: Uuid) -> Result<usize, Error> {
-        let document = self.get_root_document().await?;
-        let conversation = document
-            .get_conversation(self.ipfs.clone(), conversation)
-            .await?;
+    pub async fn load_conversations(&self) -> Result<(), Error> {
+        let Some(path) = self.path.as_ref() else {
+            return Ok(())
+        };
+
+        if !path.is_dir() {
+            return Err(Error::InvalidDirectory);
+        }
+
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            let entry_path = entry.path();
+            if entry_path.is_file() && !entry_path.ends_with(".messaging_queue") {
+                let Some(id) = entry_path.file_name().map(|file| file.to_string_lossy().to_string()).and_then(|id| Uuid::from_str(&id).ok()) else {
+                    continue
+                };
+                let Ok(cid_str) = tokio::fs::read(entry_path).await.map(|bytes| String::from_utf8_lossy(&bytes).to_string()) else {
+                    continue;
+                };
+                if let Ok(cid) = cid_str.parse::<Cid>() {
+                    self.conversation_cid.write().await.insert(id, cid);
+                }
+                self.conversation_lock
+                    .write()
+                    .await
+                    .insert(id, Arc::new(Semaphore::new(1)));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn list_conversation_documents(&self) -> Result<Vec<ConversationDocument>, Error> {
+        let list = FuturesUnordered::from_iter(self.conversation_cid.read().await.values().map(
+            |cid| async {
+                (*cid)
+                    .get_dag(self.ipfs.clone(), Some(Duration::from_secs(10)))
+                    .await
+            },
+        ))
+        .filter_map(|res| async { res.ok() })
+        .collect::<Vec<_>>()
+        .await;
+        Ok(list)
+    }
+
+    pub async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
+        self.list_conversation_documents()
+            .await
+            .map(|list| list.iter().map(|document| document.into()).collect())
+    }
+
+    pub async fn messages_count(&self, conversation_id: Uuid) -> Result<usize, Error> {
+        let conversation = self.get_conversation(conversation_id).await?;
         Ok(conversation.messages.len())
     }
 
@@ -821,22 +860,58 @@ impl<T: IpfsTypes> MessageStore<T> {
     }
 
     pub async fn exist(&self, conversation: Uuid) -> bool {
-        if let Ok(document) = self.get_root_document().await {
-            return document
-                .get_conversation(self.ipfs.clone(), conversation)
-                .await
-                .is_ok();
-        }
-        false
+        self.conversation_cid
+            .read()
+            .await
+            .contains_key(&conversation)
     }
 
     pub async fn get_conversation(
         &self,
         conversation_id: Uuid,
     ) -> Result<ConversationDocument, Error> {
-        let root = self.get_root_document().await?;
-        root.get_conversation(self.ipfs.clone(), conversation_id)
+        let cid = self
+            .conversation_cid
+            .read()
             .await
+            .get(&conversation_id)
+            .cloned()
+            .ok_or(Error::InvalidConversation)?;
+        cid.get_dag(self.ipfs.clone(), None).await
+    }
+
+    pub async fn get_conversation_mut<F: FnOnce(&mut ConversationDocument)>(
+        &self,
+        conversation_id: Uuid,
+        func: F,
+    ) -> Result<(), Error> {
+        let document = &mut self.get_conversation(conversation_id).await?;
+
+        func(document);
+
+        let new_cid = document.to_cid(self.ipfs.clone()).await?;
+
+        let old_cid = self
+            .conversation_cid
+            .write()
+            .await
+            .insert(conversation_id, new_cid);
+
+        if let Some(old_cid) = old_cid {
+            if self.ipfs.is_pinned(&old_cid).await? {
+                if let Err(_e) = self.ipfs.remove_pin(&old_cid, false).await {}
+            }
+        }
+
+        if let Some(path) = self.path.as_ref() {
+            let cid = new_cid.to_string();
+            if let Err(e) =
+                tokio::fs::write(path.join(conversation_id.to_string()), cid).await
+            {
+                error!("Unable to save info to file: {e}");
+            }
+        }
+        Ok(())
     }
 
     pub async fn get_conversation_sender(
@@ -1651,11 +1726,12 @@ impl<T: IpfsTypes> MessageStore<T> {
 
     async fn message_event(
         &mut self,
-        mut document: ConversationDocument,
+        document: ConversationDocument,
         events: &MessagingEvents,
         direction: MessageDirection,
         opt: EventOpt,
     ) -> Result<bool, Error> {
+        let _guard = self.conversation_queue(document.id()).await?;
         let tx = self.get_conversation_sender(document.id()).await?;
         match events.clone() {
             MessagingEvents::New(mut message) => {
@@ -1741,12 +1817,10 @@ impl<T: IpfsTypes> MessageStore<T> {
                 )
                 .await?;
 
-                document.messages.insert(message_document);
-
-                let mut root = self.get_root_document().await?;
-                root.update_conversation(self.ipfs.clone(), conversation_id, document)
-                    .await?;
-                self.set_root_document(root).await?;
+                self.get_conversation_mut(document.id(), |conversation_document| {
+                    conversation_document.messages.insert(message_document);
+                })
+                .await?;
 
                 let event = match direction {
                     MessageDirection::In => MessageEventKind::MessageReceived {
@@ -1836,14 +1910,10 @@ impl<T: IpfsTypes> MessageStore<T> {
                     .update(self.ipfs.clone(), self.did.clone(), message)
                     .await?;
 
-                document.messages.replace(message_document);
-
-                let mut root = self.get_root_document().await?;
-
-                root.update_conversation(self.ipfs.clone(), convo_id, document)
-                    .await?;
-
-                self.set_root_document(root).await?;
+                self.get_conversation_mut(document.id(), |conversation_document| {
+                    conversation_document.messages.replace(message_document);
+                })
+                .await?;
 
                 if let Err(e) = tx.send(MessageEventKind::MessageEdited {
                     conversation_id: convo_id,
@@ -1853,7 +1923,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 }
             }
             MessagingEvents::Delete(convo_id, message_id) => {
-                let mut message_document = document
+                let message_document = document
                     .messages
                     .iter()
                     .cloned()
@@ -1883,23 +1953,17 @@ impl<T: IpfsTypes> MessageStore<T> {
                     verify_serde_sig(sender, &construct, &signature)?;
                 }
 
-                if document.messages.remove(&message_document) {
-                    let mut root = self.get_root_document().await?;
+                self.get_conversation_mut(document.id(), |conversation_document| {
+                    conversation_document.messages.remove(&message_document);
 
-                    root.update_conversation(self.ipfs.clone(), convo_id, document)
-                        .await?;
-
-                    self.set_root_document(root).await?;
-                    if let Err(e) = message_document.remove(self.ipfs.clone()).await {
-                        error!("Unable to remove message block: {e}");
-                    }
                     if let Err(e) = tx.send(MessageEventKind::MessageDeleted {
                         conversation_id: convo_id,
                         message_id,
                     }) {
                         error!("Error broadcasting event: {e}");
                     }
-                }
+                })
+                .await?;
             }
             MessagingEvents::Pin(convo_id, _, message_id, state) => {
                 let mut message_document = document
@@ -1936,11 +2000,11 @@ impl<T: IpfsTypes> MessageStore<T> {
                     .update(self.ipfs.clone(), self.did.clone(), message)
                     .await?;
 
-                document.messages.replace(message_document);
-                let mut root = self.get_root_document().await?;
-                root.update_conversation(self.ipfs.clone(), convo_id, document)
-                    .await?;
-                self.set_root_document(root).await?;
+                self.get_conversation_mut(document.id(), |conversation_document| {
+                    conversation_document.messages.replace(message_document);
+                })
+                .await?;
+
                 if let Err(e) = tx.send(event) {
                     error!("Error broadcasting event: {e}");
                 }
@@ -1982,12 +2046,11 @@ impl<T: IpfsTypes> MessageStore<T> {
                         message_document
                             .update(self.ipfs.clone(), self.did.clone(), message)
                             .await?;
-                        document.messages.replace(message_document);
 
-                        let mut root = self.get_root_document().await?;
-                        root.update_conversation(self.ipfs.clone(), convo_id, document)
-                            .await?;
-                        self.set_root_document(root).await?;
+                        self.get_conversation_mut(document.id(), |conversation_document| {
+                            conversation_document.messages.replace(message_document);
+                        })
+                        .await?;
 
                         if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
                             conversation_id: convo_id,
@@ -2023,12 +2086,11 @@ impl<T: IpfsTypes> MessageStore<T> {
                         message_document
                             .update(self.ipfs.clone(), self.did.clone(), message)
                             .await?;
-                        document.messages.replace(message_document);
 
-                        let mut root = self.get_root_document().await?;
-                        root.update_conversation(self.ipfs.clone(), convo_id, document)
-                            .await?;
-                        self.set_root_document(root).await?;
+                        self.get_conversation_mut(document.id(), |conversation_document| {
+                            conversation_document.messages.replace(message_document);
+                        })
+                        .await?;
 
                         if let Err(e) = tx.send(MessageEventKind::MessageReactionRemoved {
                             conversation_id: convo_id,
