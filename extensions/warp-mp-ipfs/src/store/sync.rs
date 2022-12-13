@@ -283,30 +283,39 @@ impl<T: IpfsTypes> Synchronize<T> {
         Ok(())
     }
 
-    pub async fn fetch_root_document(&self) -> anyhow::Result<RootDocument> {
+    pub async fn fetch_root_document(&self) -> Result<RootDocument, Error> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchRootDocument(one_tx);
         println!("fetch root document {:?}", node_request);
-        let _ = self.tx.clone().send(node_request).await?;
-        println!("{}", self.tx.clone().is_closed());
-        let node_response = one_rx.await?; 
-        if let NodeResponse::FetchRootDocument { id: _, cid } = node_response {
-            let root_document = cid.resolve(self.ipfs.clone(), None).await?;
-                    let ipld =to_ipld(root_document.clone())?;
+        let req = self.tx.clone().try_send(node_request);
+        println!("{:?}", req.err());
+        match one_rx.await {
+            Ok(res) => {
+                if let NodeResponse::FetchRootDocument { id: _, cid } = res {
+                    let root_document = cid.resolve(self.ipfs.clone(), None).await?;
+                    let ipld = match to_ipld(root_document.clone()) {
+                        Ok(ipld) => ipld,
+                        Err(_) => return Err(Error::ObjectNotFound),
+                    };
                     self.ipfs.put_dag(ipld).await?;
                     Ok(root_document)
-        } else {
-            Ok(RootDocument::default())
-        }    
-    
-}
+                } else {
+                    Err(Error::ObjectNotFound)
+                }
+            }
+            Err(e) => {
+                println!("fetch root document error {:?}", e);
+                return Err(Error::ChannelClosed);
+            }
+        }
+    }
 
     pub async fn fetch_identity(&self) -> Result<Identity, Error> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchIdentity(one_tx);
         println!("NODE REQUEST {:?}", node_request);
         let _ = self.tx.clone().send(node_request).await;
-        println!("{}", self.tx.clone().is_closed());
+        self.tx.clone().is_closed();
         match one_rx.await {
             Ok(res) => {
                 if let NodeResponse::FetchIdentity { id: _, cid } = res {
