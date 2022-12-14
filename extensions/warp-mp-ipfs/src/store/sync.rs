@@ -136,6 +136,7 @@ impl<T: IpfsTypes> Synchronize<T> {
                 loop {
                     tokio::select! {
                             request = rx.recv() => {
+                                println!("{:?}", request);
                                 if let Some(request) = request {
                                     println!("Received request: {:?}", request);
                                     //if let NodeRequest::SendRootDocument(root_doc, sender) = request {
@@ -207,10 +208,6 @@ impl<T: IpfsTypes> Synchronize<T> {
                                     ipfs.clone().pubsub_publish(format!("warp/rootdocument"), bytes).await?;
                             }
                             }
-                        }
-                        else {
-                            println!("Request: {:?}", request);
-                            println!("Is closed? {:?}", tx.is_closed());
                         }
                     }
                     response = response.next() => {
