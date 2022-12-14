@@ -1,9 +1,6 @@
 use chrono::{DateTime, Utc};
 use core::hash::Hash;
-use futures::{
-    stream::{FuturesOrdered, FuturesUnordered},
-    StreamExt,
-};
+use futures::{stream::FuturesOrdered, StreamExt};
 use ipfs::{Ipfs, IpfsTypes};
 use libipld::{Cid, IpldCodec};
 use serde::{Deserialize, Serialize};
@@ -232,21 +229,24 @@ impl ConversationDocument {
         &mut self,
         ipfs: Ipfs<T>,
     ) -> Result<Vec<Uuid>, Error> {
-        let fut = FuturesUnordered::from_iter(
-            std::mem::take(&mut self.messages)
-                .iter()
-                .map(|document| (document.id, document.message))
-                .map(|(id, cid)| {
-                    let ipfs = ipfs.clone();
-                    async move {
-                        if ipfs.is_pinned(&cid).await? {
-                            ipfs.remove_pin(&cid, false).await?;
-                        }
-                        ipfs.remove_block(cid).await?;
-                        Ok::<_, Error>(id)
-                    }
-                }),
-        )
+        let messages = std::mem::take(&mut self.messages);
+
+        let mut ids = vec![];
+
+        for document in messages {
+            if ipfs.is_pinned(&document.message).await? {
+                ipfs.remove_pin(&document.message, false).await?;
+            }
+            ids.push((document.id, document.message));
+        }
+
+        let fut = FuturesOrdered::from_iter(ids.iter().map(|(id, cid)| {
+            let ipfs = ipfs.clone();
+            async move {
+                ipfs.remove_block(*cid).await?;
+                Ok::<_, Error>(*id)
+            }
+        }))
         .filter_map(|result| async { result.ok() })
         .collect::<Vec<_>>()
         .await;

@@ -626,12 +626,6 @@ impl<T: IpfsTypes> MessageStore<T> {
         conversation_id: Uuid,
         broadcast: bool,
     ) -> Result<(), Error> {
-        // let mut root = self.get_root_document().await?;
-
-        // let document_type = root
-        //     .remove_conversation(self.ipfs.clone(), conversation_id)
-        //     .await?;
-        // self.set_root_document(root).await?;
 
         let conversation_cid = self
             .conversation_cid
