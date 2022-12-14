@@ -390,17 +390,8 @@ async fn main() -> anyhow::Result<()> {
                         Some("/list") => {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
-                            let local_topic = match cmd_line.next() {
-                                Some(id) => match Uuid::from_str(id) {
-                                    Ok(uuid) => uuid,
-                                    Err(e) => {
-                                        writeln!(stdout, "Error parsing ID: {}", e)?;
-                                        continue
-                                    }
-                                },
-                                None => *topic.read()
-                            };
-
+                            let local_topic = *topic.read();
+                        
                             let opt = match cmd_line.next() {
                                 Some(id) => match id.parse() {
                                     Ok(last) => MessageOptions::default().set_range(0..last),
@@ -419,6 +410,109 @@ async fn main() -> anyhow::Result<()> {
                                     continue;
                                 }
                             };
+                            for message in messages.iter() {
+                                let username = get_username(new_account.clone(), message.sender()).unwrap_or_else(|_| message.sender().to_string());
+                                let mut emojis = vec![];
+                                for reaction in message.reactions() {
+                                    emojis.push(reaction.emoji());
+                                }
+                                table.add_row(vec![
+                                    &message.id().to_string(),
+                                    &message.message_type().to_string(),
+                                    &message.conversation_id().to_string(),
+                                    &message.date().to_string(),
+                                    &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
+                                    &username,
+                                    &message.value().join("\n"),
+                                    &format!("{}", message.pinned()),
+                                    &emojis.join(" ")
+                                ]);
+                            }
+                            writeln!(stdout, "{}", table)?;
+                        },
+                        Some("/get-first") => {
+                            let mut table = Table::new();
+                            table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
+                            let local_topic = *topic.read();
+                            let messages = match chat.get_messages(local_topic, MessageOptions::default().set_first_message()).await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    writeln!(stdout, "Error: {e}")?;
+                                    continue;
+                                }
+                            };
+                            for message in messages.iter() {
+                                let username = get_username(new_account.clone(), message.sender()).unwrap_or_else(|_| message.sender().to_string());
+                                let mut emojis = vec![];
+                                for reaction in message.reactions() {
+                                    emojis.push(reaction.emoji());
+                                }
+                                table.add_row(vec![
+                                    &message.id().to_string(),
+                                    &message.message_type().to_string(),
+                                    &message.conversation_id().to_string(),
+                                    &message.date().to_string(),
+                                    &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
+                                    &username,
+                                    &message.value().join("\n"),
+                                    &format!("{}", message.pinned()),
+                                    &emojis.join(" ")
+                                ]);
+                            }
+                            writeln!(stdout, "{}", table)?;
+                        },
+                        Some("/get-last") => {
+                            let mut table = Table::new();
+                            table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
+                            let local_topic = *topic.read();
+
+                            let messages = match chat.get_messages(local_topic, MessageOptions::default().set_last_message()).await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    writeln!(stdout, "Error: {e}")?;
+                                    continue;
+                                }
+                            };
+                            for message in messages.iter() {
+                                let username = get_username(new_account.clone(), message.sender()).unwrap_or_else(|_| message.sender().to_string());
+                                let mut emojis = vec![];
+                                for reaction in message.reactions() {
+                                    emojis.push(reaction.emoji());
+                                }
+                                table.add_row(vec![
+                                    &message.id().to_string(),
+                                    &message.message_type().to_string(),
+                                    &message.conversation_id().to_string(),
+                                    &message.date().to_string(),
+                                    &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
+                                    &username,
+                                    &message.value().join("\n"),
+                                    &format!("{}", message.pinned()),
+                                    &emojis.join(" ")
+                                ]);
+                            }
+                            writeln!(stdout, "{}", table)?;
+                        },
+                        Some("/search") => {
+                            let mut table = Table::new();
+                            table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
+                            let local_topic = *topic.read();
+
+                            let mut keywords = vec![];
+
+                            for item in cmd_line.by_ref() {
+                                keywords.push(item.to_string());
+                            }
+
+                            let keywords = keywords.join(" ").to_string();
+                            let messages = match chat.get_messages(local_topic, MessageOptions::default().set_keyword(&keywords)).await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    writeln!(stdout, "Error: {e}")?;
+                                    continue;
+                                }
+                            };
+  
                             for message in messages.iter() {
                                 let username = get_username(new_account.clone(), message.sender()).unwrap_or_else(|_| message.sender().to_string());
                                 let mut emojis = vec![];
