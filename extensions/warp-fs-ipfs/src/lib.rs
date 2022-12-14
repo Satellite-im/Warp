@@ -2,7 +2,7 @@ pub mod config;
 use config::FsIpfsConfig;
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
-use ipfs::unixfs::ll::file::adder::{Chunker, FileAdderBuilder};
+use ipfs::unixfs::UnixfsStatus;
 use libipld::serde::{from_ipld, to_ipld};
 use libipld::Cid;
 use rust_ipfs as ipfs;
@@ -11,16 +11,14 @@ use std::collections::HashSet;
 use std::io::Cursor;
 use std::path::PathBuf;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio_util::io::ReaderStream;
 use warp::constellation::{ConstellationDataType, ConstellationProgressStream, Progression};
 use warp::logging::tracing::{debug, error};
 use warp::multipass::MultiPass;
 use warp::sata::{Kind, Sata};
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
-// use warp_common::futures::TryStreamExt;
-use warp::module::Module;
 
-use ipfs::{unixfs::ll::file::adder::FileAdder, Block};
+use warp::module::Module;
 
 use chrono::{DateTime, Utc};
 use ipfs::{Ipfs, IpfsPath, IpfsTypes, TestTypes, Types};
@@ -303,49 +301,31 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             return Err(Error::FileNotFound);
         }
 
-        let mut adder = FileAdder::default();
-        let file = tokio::fs::File::open(&path).await?;
+        let mut total_written = 0;
+        let mut returned_path = None;
 
-        //TODO: use a larger buffer(?)
-        let mut reader = BufReader::with_capacity(adder.size_hint(), file);
-        let mut written = 0;
-        let mut last_cid = None;
+        let mut stream = ipfs.add_file_unixfs(path.clone()).await?;
 
-        {
-            let ipfs = ipfs.clone();
-            loop {
-                match reader.fill_buf().await? {
-                    buffer if buffer.is_empty() => {
-                        let blocks = adder.finish();
-                        for (cid, block) in blocks {
-                            let block = Block::new(cid, block)?;
-                            let cid = ipfs.put_block(block).await?;
-                            last_cid = Some(cid);
-                        }
-                        break;
-                    }
-                    buffer => {
-                        let mut total = 0;
-
-                        while total < buffer.len() {
-                            let (blocks, consumed) = adder.push(&buffer[total..]);
-                            for (cid, block) in blocks {
-                                let block = Block::new(cid, block)?;
-                                let _cid = ipfs.put_block(block).await?;
-                            }
-                            total += consumed;
-                            written += consumed;
-                        }
-                        reader.consume(total);
-                    }
+        while let Some(status) = stream.next().await {
+            match status {
+                UnixfsStatus::CompletedStatus { path, written, .. } => {
+                    returned_path = Some(path);
+                    total_written = written;
                 }
+                UnixfsStatus::FailedStatus { error, .. } => {
+                    return Err(error.map(Error::Any).unwrap_or(Error::Other))
+                }
+                _ => {}
             }
         }
-        let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
-        ipfs.insert_pin(&cid, true).await?;
+
+        let ipfs_path = returned_path.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
+        let cid = ipfs_path.root().cid().ok_or(Error::Other)?;
+
+        ipfs.insert_pin(cid, true).await?;
         let file = warp::constellation::file::File::new(name);
-        file.set_size(written);
-        file.set_reference(&format!("/ipfs/{cid}"));
+        file.set_size(total_written);
+        file.set_reference(&format!("{}", ipfs_path));
         let f = file.clone();
         tokio::task::spawn_blocking(move || f.hash_mut().hash_from_file(&path))
             .await
@@ -360,20 +340,21 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         //Used to enter the tokio context
         let handle = warp::async_handle();
         let _g = handle.enter();
+
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
         let reference = file.reference().ok_or(Error::Other)?; //Reference not found
-        let stream = ipfs
-            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
-            .await
-            .map_err(anyhow::Error::from)?;
-        pin_mut!(stream);
-        let mut file = tokio::fs::File::create(path).await?;
-        while let Some(data) = stream.next().await {
-            let bytes = data.map_err(anyhow::Error::from)?;
-            file.write_all(&bytes).await?;
-            file.flush().await?;
+
+        let mut stream = ipfs
+            .get_unixfs(reference.parse::<IpfsPath>()?, path)
+            .await?;
+
+        while let Some(status) = stream.next().await {
+            if let UnixfsStatus::FailedStatus { error, .. } = status {
+                return Err(error.map(Error::Any).unwrap_or(Error::Other));
+            }
         }
+
         //TODO: Validate file against the hashed reference
         Ok(())
     }
@@ -388,50 +369,41 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             return Err(Error::FileExist);
         }
 
-        let mut adder = FileAdder::default();
-        //Maybe write directly to avoid reallocation?
-        let mut reader =
-            BufReader::with_capacity(adder.size_hint(), Cursor::new(buffer.as_slice()));
-        let mut written = 0;
-        let mut last_cid = None;
+        let reader = ReaderStream::new(Cursor::new(buffer.clone()))
+            .filter_map(|x| async { x.ok() })
+            .map(|x| x.into())
+            .boxed();
 
-        {
-            let ipfs = ipfs.clone();
-            loop {
-                match reader.fill_buf().await? {
-                    buffer if buffer.is_empty() => {
-                        let blocks = adder.finish();
-                        for (cid, block) in blocks {
-                            let block = Block::new(cid, block)?;
-                            let cid = ipfs.put_block(block).await?;
-                            last_cid = Some(cid);
-                        }
-                        break;
-                    }
-                    buffer => {
-                        let mut total = 0;
+        let mut total_written = 0;
+        let mut returned_path = None;
 
-                        while total < buffer.len() {
-                            let (blocks, consumed) = adder.push(&buffer[total..]);
-                            for (cid, block) in blocks {
-                                let block = Block::new(cid, block)?;
-                                let _cid = ipfs.put_block(block).await?;
-                            }
-                            total += consumed;
-                            written += consumed;
-                        }
-                        reader.consume(total);
-                    }
+        let mut stream = ipfs.add_unixfs(reader).await?;
+
+        while let Some(status) = stream.next().await {
+            match status {
+                UnixfsStatus::CompletedStatus { path, written, .. } => {
+                    returned_path = Some(path);
+                    total_written = written;
                 }
+                UnixfsStatus::FailedStatus { error, .. } => {
+                    return Err(error.map(Error::Any).unwrap_or(Error::Other))
+                }
+                _ => {}
             }
         }
-        let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
 
-        ipfs.insert_pin(&cid, true).await?;
+        let ipfs_path = returned_path.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
+
+        let cid = ipfs_path
+            .root()
+            .cid()
+            .ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
+
+        ipfs.insert_pin(cid, true).await?;
 
         let file = warp::constellation::file::File::new(name);
-        file.set_size(written);
-        file.set_reference(&format!("/ipfs/{cid}"));
+        file.set_size(total_written);
+        file.set_reference(&format!("{ipfs_path}"));
         file.hash_mut().hash_from_slice(buffer)?;
         self.current_directory()?.add_item(file)?;
         if let Err(_e) = self.export_index().await {}
@@ -468,7 +440,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         &mut self,
         name: &str,
         total_size: Option<usize>,
-        mut stream: BoxStream<'static, Vec<u8>>,
+        stream: BoxStream<'static, Vec<u8>>,
     ) -> Result<ConstellationProgressStream> {
         let ipfs = self.ipfs()?;
         //Used to enter the tokio context
@@ -482,61 +454,68 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         }
 
         let (tx, mut rx) = tokio::sync::broadcast::channel(50000);
-        let config = self.config.clone().unwrap_or_default();
+
         tokio::spawn({
             let name = name.to_string();
             let fs = self.clone();
             async move {
                 let mut last_written = 0;
                 let result = {
-                    let mut adder = FileAdderBuilder::default()
-                        .with_chunker(Chunker::Size(config.chunking.unwrap_or(256 * 1024)))
-                        .build();
+                    let mut total_written = 0;
+                    let mut returned_path = None;
 
-                    let mut written = 0;
-                    let mut last_cid = None;
+                    let mut stream = ipfs.add_unixfs(stream).await?;
 
-                    while let Some(buffer) = stream.next().await {
-                        let mut total = 0;
-
-                        while total < buffer.len() {
-                            let (blocks, consumed) = adder.push(&buffer[total..]);
-                            for (cid, block) in blocks {
-                                let block = Block::new(cid, block)?;
-                                let _cid = ipfs.put_block(block).await?;
+                    while let Some(status) = stream.next().await {
+                        let name = name.clone();
+                        match status {
+                            UnixfsStatus::CompletedStatus { path, written, .. } => {
+                                returned_path = Some(path);
+                                total_written = written;
+                                last_written = written;
+                                let _ = tx.send(Progression::CurrentProgress {
+                                    name,
+                                    current: written,
+                                    total: total_size,
+                                });
                             }
-                            total += consumed;
-                            written += consumed;
-                            last_written += consumed;
+                            UnixfsStatus::FailedStatus {
+                                written, error: _, ..
+                            } => {
+                                last_written = written;
+                                // return Err(error.map(Error::Any).unwrap_or(Error::Other));
+                            }
+                            UnixfsStatus::ProgressStatus { written, .. } => {
+                                last_written = written;
+                                let _ = tx.send(Progression::CurrentProgress {
+                                    name,
+                                    current: written,
+                                    total: total_size,
+                                });
+                            }
                         }
-                        let _ = tx.send(Progression::CurrentProgress {
-                            name: name.to_string(),
-                            current: written,
-                            total: total_size,
-                        });
                     }
 
-                    let blocks = adder.finish();
-                    for (cid, block) in blocks {
-                        let block = Block::new(cid, block)?;
-                        let cid = ipfs.put_block(block).await?;
-                        last_cid = Some(cid);
-                    }
+                    let ipfs_path =
+                        returned_path.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
 
-                    let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
+                    let cid = ipfs_path
+                        .root()
+                        .cid()
+                        .ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
 
-                    ipfs.insert_pin(&cid, true).await?;
+                    ipfs.insert_pin(cid, true).await?;
 
                     let file = warp::constellation::file::File::new(&name);
-                    file.set_size(written);
-                    file.set_reference(&format!("/ipfs/{cid}"));
+                    file.set_size(total_written);
+                    file.set_reference(&format!("{ipfs_path}"));
                     // file.hash_mut().hash_from_slice(buffer)?;
                     current_directory.add_item(file)?;
                     if let Err(_e) = fs.export_index().await {}
 
                     let _ = tx.send(Progression::ProgressComplete {
                         name: name.to_string(),
-                        total: Some(written),
+                        total: Some(total_written),
                     });
 
                     Ok::<_, Error>(())
