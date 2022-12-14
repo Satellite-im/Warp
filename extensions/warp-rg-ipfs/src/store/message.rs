@@ -9,8 +9,8 @@ use std::time::Duration;
 use chrono::Utc;
 use futures::stream::FuturesUnordered;
 use futures::{Stream, StreamExt};
-use ipfs::libp2p::swarm::dial_opts::DialOpts;
-use ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream};
+use rust_ipfs::libp2p::swarm::dial_opts::DialOpts;
+use rust_ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream};
 
 use libipld::Cid;
 use serde::{Deserialize, Serialize};
@@ -1561,7 +1561,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 let did = message.sender();
                 if !did.eq(&own_did) {
                     if let Ok(peer_id) = did_to_libp2p_pub(&did).map(|pk| pk.to_peer_id()) {
-                        match ipfs.find_peer_info(peer_id).await {
+                        match ipfs.identity(Some(peer_id)).await {
                             Ok(info) => {
                                 //This is done to insure we can successfully exchange blocks
                                 let opt = DialOpts::peer_id(peer_id)

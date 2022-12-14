@@ -1,4 +1,4 @@
-use ipfs::{Ipfs, IpfsPath, IpfsTypes};
+use rust_ipfs::{Ipfs, IpfsPath, IpfsTypes};
 use libipld::{
     serde::{from_ipld, to_ipld},
     Cid,

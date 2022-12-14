@@ -1,5 +1,7 @@
+
 #![allow(clippy::await_holding_lock)]
 use futures::StreamExt;
+use rust_ipfs as ipfs;
 use ipfs::libp2p::gossipsub::GossipsubMessage;
 use ipfs::{Ipfs, IpfsTypes, PeerId};
 use std::collections::hash_map::Entry;
@@ -498,9 +500,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
     async fn local(&self) -> anyhow::Result<(ipfs::libp2p::identity::PublicKey, PeerId)> {
         let (local_ipfs_public_key, local_peer_id) = self
             .ipfs
-            .identity()
+            .identity(None)
             .await
-            .map(|(p, _)| (p.clone(), p.to_peer_id()))?;
+            .map(|info| (info.public_key.clone(), info.peer_id))?;
         Ok((local_ipfs_public_key, local_peer_id))
     }
 }
@@ -993,7 +995,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             if connected != PeerConnectionType::Connected {
                 let res = match tokio::time::timeout(
                     Duration::from_secs(2),
-                    self.ipfs.find_peer_info(peer_id),
+                    self.ipfs.identity(Some(peer_id)),
                 )
                 .await
                 {

@@ -11,9 +11,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 [dependencies]
 warp = { path = "../../warp" }
 
-ipfs = { git = "https://github.com/Satellite-im/rust-ipfs", rev = "5b7f68e975a338b350a6991c1e507f1d5f22a939", features = [
-    "external-gossipsub-stream",
-] }
+rust-ipfs = "0.3.0-alpha"
 libipld = { version = "0.15", features = ["serde-codec"] }
 
 uuid = { version = "1.0", features = ["serde", "v4"] }

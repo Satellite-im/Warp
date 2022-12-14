@@ -1,8 +1,10 @@
 use std::time::Duration;
 
+use futures::StreamExt;
+use rust_ipfs as ipfs;
+
 use ipfs::{IpfsTypes, Multiaddr, PeerId, Protocol};
 use serde::{Deserialize, Serialize};
-use tracing::log::error;
 use warp::{
     crypto::{
         did_key::{CoreSign, Generate},
@@ -145,10 +147,8 @@ pub async fn discovery<T: IpfsTypes, S: AsRef<str>>(
     ipfs.provide(cid).await?;
 
     loop {
-        match ipfs.get_providers(cid).await {
-            Ok(_) => {}
-            Err(e) => error!("Error getting providers: {e}"),
-        };
+        let mut stream = ipfs.get_providers(cid).await?;
+        while let Some(_providers) = stream.next().await {}
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
@@ -222,7 +222,7 @@ pub async fn discover_peer<T: IpfsTypes>(
         Discovery::Provider(_) => {}
         //We are checking DHT for the peerid
         Discovery::Direct => loop {
-            if ipfs.find_peer_info(peer_id).await.is_ok() {
+            if ipfs.identity(Some(peer_id)).await.is_ok() {
                 break;
             }
             tokio::time::sleep(Duration::from_secs(1)).await;

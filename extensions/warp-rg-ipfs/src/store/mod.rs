@@ -1,11 +1,11 @@
 pub mod message;
 pub mod document;
 pub mod conversation;
-
+use rust_ipfs as ipfs;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use ipfs::{IpfsTypes, PeerId};
+use rust_ipfs::{IpfsTypes, PeerId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp::{

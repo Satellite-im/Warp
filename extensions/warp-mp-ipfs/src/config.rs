@@ -1,3 +1,4 @@
+use rust_ipfs as ipfs;
 use ipfs::Multiaddr;
 use serde::{Deserialize, Serialize};
 use std::{
