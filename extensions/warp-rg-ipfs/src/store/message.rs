@@ -929,7 +929,12 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         if let Some(old_cid) = old_cid {
             if self.ipfs.is_pinned(&old_cid).await? {
-                if let Err(_e) = self.ipfs.remove_pin(&old_cid, false).await {}
+                if let Err(e) = self.ipfs.remove_pin(&old_cid, false).await {
+                    error!("Unable to remove pin on {old_cid}: {e}");
+                }
+            }
+            if let Err(e) = self.ipfs.remove_block(old_cid).await {
+                error!("Unable to remove {old_cid}: {e}");
             }
         }
 
