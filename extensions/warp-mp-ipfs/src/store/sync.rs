@@ -268,7 +268,6 @@ impl<T: IpfsTypes> Synchronize<T> {
         if peers.is_empty() {
             unreachable!()
         }
-        println!("ciao");
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::SendRootDocument(DocumentType::Object(root_doc), one_tx);
         if let Err(_err) = self.tx.clone().send(node_request).await {
@@ -277,7 +276,6 @@ impl<T: IpfsTypes> Synchronize<T> {
         match one_rx.await {
             Ok(_res) => {}
             Err(_) => {
-                println!("ciao");
                 return Err(Error::ChannelClosed);
             }
         }
@@ -291,7 +289,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         println!("fetch root document {:?}", node_request);
         let sync = self.clone();
         tokio::spawn(async move {
-            if let Err(_) =  sync.tx.clone().send(node_request).await {
+            if let Err(_) =  sync.tx.send(node_request).await {
                 println!("the receiver dropped");
             };
         });
