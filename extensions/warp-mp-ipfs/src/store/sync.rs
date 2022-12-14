@@ -209,7 +209,8 @@ impl<T: IpfsTypes> Synchronize<T> {
                             }
                         }
                         else {
-                            println!("{:?}", request);
+                            println!("Request: {:?}", request);
+                            println!("Is closed? {:?}", tx.is_closed());
                         }
                     }
                     response = response.next() => {
