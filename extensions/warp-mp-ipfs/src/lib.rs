@@ -534,8 +534,17 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
             self.identity_store()?
                 .set_root_document(root_document)
                 .await?;
-                
+
             let identity = self.identity_store()?.own_identity().await?;
+
+            if let Ok(mut cache) = self.get_cache_mut() {
+                let object = Sata::default().encode(
+                    warp::sata::libipld::IpldCodec::DagCbor,
+                    warp::sata::Kind::Reference,
+                    identity.clone(),
+                )?;
+                cache.add_data(DataType::from(Module::Accounts), &object)?;
+            }
 
             Ok(identity)
         })
