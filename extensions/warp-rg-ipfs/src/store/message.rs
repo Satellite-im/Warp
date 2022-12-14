@@ -67,6 +67,7 @@ pub struct MessageStore<T: IpfsTypes> {
 
     stream_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
 
+    stream_event_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
     // Queue
     queue: Arc<tokio::sync::RwLock<HashMap<DID, Vec<Queue>>>>,
 
@@ -94,6 +95,7 @@ impl<T: IpfsTypes> Clone for MessageStore<T> {
             account: self.account.clone(),
             filesystem: self.filesystem.clone(),
             stream_task: self.stream_task.clone(),
+            stream_event_task: self.stream_event_task.clone(),
             queue: self.queue.clone(),
             did: self.did.clone(),
             event: self.event.clone(),
@@ -133,6 +135,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         let did = Arc::new(account.decrypt_private_key(None)?);
         let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
         let stream_task = Arc::new(Default::default());
+        let stream_event_task = Arc::new(Default::default());
         let store_decrypted = Arc::new(AtomicBool::new(store_decrypted));
         let with_friends = Arc::new(AtomicBool::new(with_friends));
         let stream_sender = Arc::new(Default::default());
@@ -143,6 +146,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             ipfs,
             stream_sender,
             stream_task,
+            stream_event_task,
             conversation_cid,
             conversation_lock,
             account,
@@ -240,6 +244,62 @@ impl<T: IpfsTypes> MessageStore<T> {
         Ok(store)
     }
 
+    async fn start_event_task(&self, conversation_id: Uuid) {
+        info!("Task started for {conversation_id}");
+        let did = self.did.clone();
+        let Ok(conversation) = self.get_conversation(conversation_id).await else {
+            return
+        };
+
+        let Ok(tx) = self.get_conversation_sender(conversation_id).await else {
+            return
+        };
+
+        let Ok(stream) = self.ipfs.pubsub_subscribe(conversation.event_topic()).await else {
+            return
+        };
+
+        let task = tokio::spawn({
+            async move {
+                futures::pin_mut!(stream);
+
+                while let Some(stream) = stream.next().await {
+                    if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
+                        if let Ok(data) = data.decrypt::<Vec<u8>>(&did) {
+                            if let Ok(MessagingEvents::Event(
+                                conversation_id,
+                                did_key,
+                                event,
+                                cancelled,
+                            )) = serde_json::from_slice::<MessagingEvents>(&data)
+                            {
+                                let ev = match cancelled {
+                                    true => MessageEventKind::EventCancelled {
+                                        conversation_id,
+                                        did_key,
+                                        event,
+                                    },
+                                    false => MessageEventKind::EventReceived {
+                                        conversation_id,
+                                        did_key,
+                                        event,
+                                    },
+                                };
+                                if let Err(e) = tx.send(ev) {
+                                    error!("Error broadcasting event: {e}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        self.stream_event_task
+            .write()
+            .await
+            .insert(conversation_id, task);
+    }
+
     async fn start_task(&self, conversation_id: Uuid, stream: SubscriptionStream) {
         self.conversation_lock
             .write()
@@ -282,9 +342,18 @@ impl<T: IpfsTypes> MessageStore<T> {
             }
         });
         self.stream_task.write().await.insert(conversation_id, task);
+        self.start_event_task(conversation_id).await;
     }
 
     async fn end_task(&self, conversation_id: Uuid) {
+        if let Some(task) = self
+            .stream_event_task
+            .write()
+            .await
+            .remove(&conversation_id)
+        {
+            task.abort();
+        }
         if let Some(task) = self.stream_task.write().await.remove(&conversation_id) {
             info!("Attempting to end task for {conversation_id}");
             task.abort();
@@ -628,7 +697,6 @@ impl<T: IpfsTypes> MessageStore<T> {
         conversation_id: Uuid,
         broadcast: bool,
     ) -> Result<(), Error> {
-
         let conversation_cid = self
             .conversation_cid
             .write()
@@ -1604,17 +1672,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         let own_did = &*self.did;
 
         let event = MessagingEvents::Event(conversation.id(), own_did.clone(), event, false);
-
-        self.message_event(
-            conversation,
-            &event,
-            MessageDirection::Out,
-            Default::default(),
-        )
-        .await?;
-
-        self.send_raw_event(conversation_id, None, event, false)
-            .await
+        self.send_message_event(conversation_id, event).await
     }
 
     pub async fn cancel_event(
@@ -1626,17 +1684,52 @@ impl<T: IpfsTypes> MessageStore<T> {
         let own_did = &*self.did;
 
         let event = MessagingEvents::Event(conversation.id(), own_did.clone(), event, true);
+        self.send_message_event(conversation_id, event).await
+    }
 
-        self.message_event(
-            conversation,
-            &event,
-            MessageDirection::Out,
-            Default::default(),
-        )
-        .await?;
+    pub async fn send_message_event(
+        &mut self,
+        conversation_id: Uuid,
+        event: MessagingEvents,
+    ) -> Result<(), Error> {
+        let conversation = self.get_conversation(conversation_id).await?;
+        let recipients = conversation.recipients();
 
-        self.send_raw_event(conversation_id, None, event, false)
-            .await
+        let own_did = &*self.did;
+
+        let recipient = recipients
+            .iter()
+            .filter(|did| own_did.ne(did))
+            .last()
+            .ok_or(Error::PublicKeyInvalid)?;
+
+        let mut data = Sata::default();
+        data.add_recipient(recipient.as_ref())?;
+
+        let payload = data.encrypt(
+            libipld::IpldCodec::DagJson,
+            own_did.as_ref(),
+            warp::sata::Kind::Reference,
+            serde_json::to_vec(&event)?,
+        )?;
+
+        let bytes = serde_json::to_vec(&payload)?;
+
+        let peers = self
+            .ipfs
+            .pubsub_peers(Some(conversation.event_topic()))
+            .await?;
+
+        if !peers.is_empty() {
+            if let Err(e) = self
+                .ipfs
+                .pubsub_publish(conversation.event_topic(), bytes)
+                .await
+            {
+                error!("Unable to send event: {e}");
+            }
+        }
+        Ok(())
     }
 
     pub async fn send_raw_event<S: Serialize + Send + Sync>(
@@ -2132,26 +2225,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                     }
                 }
             }
-            MessagingEvents::Event(conversation_id, did_key, event, cancelled) => {
-                if direction == MessageDirection::In {
-                    let ev = match cancelled {
-                        true => MessageEventKind::EventCancelled {
-                            conversation_id,
-                            did_key,
-                            event,
-                        },
-                        false => MessageEventKind::EventReceived {
-                            conversation_id,
-                            did_key,
-                            event,
-                        },
-                    };
-                    if let Err(e) = tx.send(ev) {
-                        error!("Error broadcasting event: {e}");
-                    }
-                    return Ok(true);
-                }
-            }
+            _ => {}
         }
         Ok(false)
     }
