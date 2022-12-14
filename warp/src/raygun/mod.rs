@@ -127,8 +127,10 @@ impl core::ops::DerefMut for MessageEventStream {
 
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct MessageOptions {
-    smart: Option<bool>,
     date_range: Option<Range<DateTime<Utc>>>,
+    first_message: bool,
+    last_message: bool,
+    keyword: Option<String>,
     range: Option<Range<usize>>,
     limit: Option<i64>,
     skip: Option<i64>,
@@ -149,6 +151,23 @@ impl MessageOptions {
         self.limit = Some(limit);
         self
     }
+
+    pub fn set_keyword(mut self, keyword: &str) -> MessageOptions {
+        self.keyword = Some(keyword.to_string());
+        self
+    }
+
+    pub fn set_first_message(mut self) -> MessageOptions {
+        self.first_message = true;
+        self.last_message = false;
+        self
+    }
+
+    pub fn set_last_message(mut self) -> MessageOptions {
+        self.first_message = false;
+        self.last_message = true;
+        self
+    }
 }
 
 impl MessageOptions {
@@ -162,10 +181,6 @@ impl MessageOptions {
 }
 
 impl MessageOptions {
-    pub fn smart(&self) -> Option<bool> {
-        self.smart
-    }
-
     pub fn limit(&self) -> Option<i64> {
         self.limit
     }
@@ -173,8 +188,19 @@ impl MessageOptions {
     pub fn skip(&self) -> Option<i64> {
         self.skip
     }
-}
 
+    pub fn keyword(&self) -> Option<String> {
+        self.keyword.clone()
+    }
+
+    pub fn first_message(&self) -> bool {
+        self.first_message
+    }
+
+    pub fn last_message(&self) -> bool {
+        self.last_message
+    }
+}
 
 #[derive(Debug, Hash, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
@@ -186,11 +212,14 @@ pub enum ConversationType {
     Group,
 }
 
-#[derive(Debug, Hash, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(
+    Debug, Hash, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
+)]
 pub struct Conversation {
     id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
+    creator: Option<DID>,
     conversation_type: ConversationType,
     recipients: Vec<DID>,
 }
@@ -199,11 +228,13 @@ impl Default for Conversation {
     fn default() -> Self {
         let id = Uuid::new_v4();
         let name = None;
+        let creator = None;
         let conversation_type = ConversationType::Direct;
         let recipients = Vec::new();
         Self {
             id,
             name,
+            creator,
             conversation_type,
             recipients,
         }
@@ -217,6 +248,10 @@ impl Conversation {
 
     pub fn name(&self) -> Option<String> {
         self.name.clone()
+    }
+
+    pub fn creator(&self) -> Option<DID> {
+        self.creator.clone()
     }
 
     pub fn conversation_type(&self) -> ConversationType {
@@ -514,7 +549,7 @@ impl Reaction {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
-#[serde(rename_all="snake_case")]
+#[serde(rename_all = "snake_case")]
 #[repr(C)]
 pub enum MessageStatus {
     /// If a message has not been sent.

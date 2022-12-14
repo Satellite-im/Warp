@@ -167,9 +167,10 @@ impl ConversationDocument {
             Some(range) => Vec::from_iter(
                 self.messages
                     .iter()
-                    .filter(|message| message.date >= range.start && message.date <= range.end),
+                    .filter(|message| message.date >= range.start && message.date <= range.end)
+                    .copied(),
             ),
-            None => Vec::from_iter(self.messages.iter()),
+            None => Vec::from_iter(self.messages.iter().copied()),
         };
 
         let sorted = option
@@ -183,7 +184,25 @@ impl ConversationDocument {
             })
             .and_then(|range| messages.get(range))
             .map(|messages| messages.to_vec())
-            .unwrap_or(messages);
+            .unwrap_or_else(|| messages.clone());
+
+        let sorted = {
+            if option.first_message() && !option.last_message() {
+                sorted
+                    .first()
+                    .copied()
+                    .map(|item| vec![item])
+                    .ok_or(Error::MessageNotFound)?
+            } else if !option.first_message() && option.last_message() {
+                sorted
+                    .last()
+                    .copied()
+                    .map(|item| vec![item])
+                    .ok_or(Error::MessageNotFound)?
+            } else {
+                sorted
+            }
+        };
 
         let list = FuturesOrdered::from_iter(
             sorted
@@ -191,6 +210,17 @@ impl ConversationDocument {
                 .map(|document| async { document.resolve(ipfs, did.clone()).await }),
         )
         .filter_map(|res| async { res.ok() })
+        .filter_map(|message| async {
+            if let Some(keyword) = option.keyword() {
+                if message.value().iter().any(|line| line.to_lowercase().contains(&keyword.to_lowercase())) {
+                    Some(message)
+                } else {
+                    None
+                }
+            } else {
+                Some(message)
+            }
+        })
         .collect::<BTreeSet<Message>>()
         .await;
 
