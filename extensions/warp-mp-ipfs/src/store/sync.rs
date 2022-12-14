@@ -277,7 +277,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         match one_rx.await {
             Ok(_res) => {}
             Err(_) => {
-                println!("ciao")
+                println!("ciao");
                 return Err(Error::ChannelClosed);
             }
         }
