@@ -287,12 +287,8 @@ impl<T: IpfsTypes> Synchronize<T> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchRootDocument(one_tx);
         println!("fetch root document {:?}", node_request);
-        let sync = self.clone();
-        tokio::spawn(async move {
-            if let Err(_) =  sync.tx.send(node_request).await {
-                println!("the receiver dropped");
-            };
-        });
+        let _ = self.tx.send(node_request).await;        
+        println!("The sender is closed? {}", self.tx.is_closed());
         match one_rx.await {
             Ok(res) => {
                 if let NodeResponse::FetchRootDocument { id: _, cid } = res {
