@@ -136,8 +136,6 @@ impl<T: IpfsTypes> Synchronize<T> {
                 loop {
                     tokio::select! {
                             request = rx.recv() => {
-                                println!("{:?}", request);
-                                println!("{}", tx.is_closed());
                                 if let Some(request) = request {
                                     println!("Received request: {:?}", request);
                                     //if let NodeRequest::SendRootDocument(root_doc, sender) = request {
@@ -287,6 +285,7 @@ impl<T: IpfsTypes> Synchronize<T> {
 
     pub async fn fetch_root_document(&self) -> Result<RootDocument, Error> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
+        println!("{}", one_tx.is_closed());
         let node_request = NodeRequest::FetchRootDocument(one_tx);
         println!("fetch root document {:?}", node_request);
         let _ = self.tx.send(node_request).await;        

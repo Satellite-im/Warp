@@ -534,8 +534,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
             self.identity_store()?
                 .set_root_document(root_document)
                 .await?;
-
-            self.identity_store()?.send_sync_request().await?;
+                
             let identity = self.identity_store()?.own_identity().await?;
 
             Ok(identity)
