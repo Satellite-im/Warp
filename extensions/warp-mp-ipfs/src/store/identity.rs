@@ -1,3 +1,4 @@
+
 //We are cloning the Cid rather than dereferencing to be sure that we are not holding
 //onto the lock.
 #![allow(clippy::clone_on_copy)]
@@ -7,7 +8,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
-
+use rust_ipfs as ipfs;
 use crate::{
     config::Discovery,
     store::{did_to_libp2p_pub, IdentityPayload},

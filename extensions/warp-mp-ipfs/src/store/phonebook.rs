@@ -1,3 +1,4 @@
+use rust_ipfs as ipfs;
 use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;

@@ -1,3 +1,4 @@
+use rust_ipfs as ipfs;
 use futures::StreamExt;
 use ipfs::{Ipfs, IpfsPath, IpfsTypes};
 use libipld::{serde::from_ipld, Cid};

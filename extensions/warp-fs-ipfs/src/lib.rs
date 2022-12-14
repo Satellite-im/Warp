@@ -5,6 +5,7 @@ use futures::{pin_mut, StreamExt};
 use ipfs::unixfs::ll::file::adder::{Chunker, FileAdderBuilder};
 use libipld::serde::{from_ipld, to_ipld};
 use libipld::Cid;
+use rust_ipfs as ipfs;
 use std::any::Any;
 use std::collections::HashSet;
 use std::io::Cursor;

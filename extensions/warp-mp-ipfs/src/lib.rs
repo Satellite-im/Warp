@@ -3,6 +3,7 @@ pub mod store;
 
 use config::MpIpfsConfig;
 use futures::StreamExt;
+use rust_ipfs as ipfs;
 use ipfs::libp2p::kad::protocol::DEFAULT_PROTO_NAME;
 use ipfs::libp2p::mplex::MplexConfig;
 use ipfs::libp2p::swarm::ConnectionLimits;

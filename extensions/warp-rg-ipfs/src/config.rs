@@ -1,4 +1,4 @@
-use ipfs::Multiaddr;
+use rust_ipfs::Multiaddr;
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, str::FromStr};
 

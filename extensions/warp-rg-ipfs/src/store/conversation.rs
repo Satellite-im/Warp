@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use core::hash::Hash;
 use futures::{stream::FuturesOrdered, StreamExt};
-use ipfs::{Ipfs, IpfsTypes};
+use rust_ipfs::{Ipfs, IpfsTypes};
 use libipld::{Cid, IpldCodec};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
