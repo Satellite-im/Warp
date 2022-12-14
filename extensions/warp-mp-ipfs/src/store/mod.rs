@@ -5,7 +5,6 @@ use rust_ipfs as ipfs;
 
 use ipfs::{IpfsTypes, Multiaddr, PeerId, Protocol};
 use serde::{Deserialize, Serialize};
-use tracing::log::error;
 use warp::{
     crypto::{
         did_key::{CoreSign, Generate},
