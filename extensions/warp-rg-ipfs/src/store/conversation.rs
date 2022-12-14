@@ -10,6 +10,7 @@ use uuid::Uuid;
 use warp::{
     crypto::{Fingerprint, DID},
     error::Error,
+    logging::tracing::log::info,
     raygun::{Conversation, ConversationType, Message, MessageOptions},
     sata::{Kind, Sata},
 };
@@ -332,7 +333,6 @@ impl MessageDocument {
 
     pub async fn remove<T: IpfsTypes>(&mut self, ipfs: Ipfs<T>) -> Result<(), Error> {
         let cid = self.message;
-
         if ipfs.is_pinned(&cid).await? {
             ipfs.remove_pin(&cid, false).await?;
         }
@@ -347,6 +347,7 @@ impl MessageDocument {
         did: Arc<DID>,
         message: Message,
     ) -> Result<(), Error> {
+        info!("Updating message {} for {}", self.id, self.conversation_id);
         let recipients = self.receipients(ipfs).await?;
         let old_message = self.resolve(ipfs, did.clone()).await?;
         let old_document = self.message;
@@ -354,6 +355,8 @@ impl MessageDocument {
         if old_message.id() != message.id()
             || old_message.conversation_id() != message.conversation_id()
         {
+            info!("Message does not match document");
+            //TODO: Maybe remove message from this point?
             return Err(Error::InvalidMessage);
         }
 
@@ -363,9 +366,11 @@ impl MessageDocument {
         }
 
         let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, message)?;
+        info!("Setting Message to document");
         self.message = data.to_cid(ipfs).await?;
-
+        info!("Message is updated");
         if ipfs.is_pinned(&old_document).await? {
+            info!("Removing pin for {old_document}");
             ipfs.remove_pin(&old_document, false).await?;
         }
         ipfs.remove_block(old_document).await?;
