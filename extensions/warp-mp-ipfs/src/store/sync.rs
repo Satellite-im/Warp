@@ -136,6 +136,10 @@ impl<T: IpfsTypes> Synchronize<T> {
                 loop {
                     tokio::select! {
                             request = rx.recv() => { 
+                                println!("{:?}", request);
+                                if request.is_none() {
+                                    return Err(Error::MessageNotFound);
+                                }
                                 if let Some(request) = request {
                                     println!("Received request: {:?}", request);
                                     //if let NodeRequest::SendRootDocument(root_doc, sender) = request {
