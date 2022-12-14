@@ -294,6 +294,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         println!("fetch root document {:?}", node_request);
         let _ = self.tx.send(node_request).await;        
         println!("The sender is closed? {}", self.tx.is_closed());
+        println!("{:?}", one_rx.await.err());
         /*match one_rx.await {
             Ok(res) => {
                 if let NodeResponse::FetchRootDocument { id: _, cid } = res {
