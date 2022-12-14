@@ -10,7 +10,7 @@ use libipld::serde::to_ipld;
 use libipld::Cid;
 use sata::Sata;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::{self, Sender};
+use tokio::sync::mpsc::{self, Sender, UnboundedSender};
 use tokio::sync::oneshot::Sender as OneshotSender;
 use tokio::sync::RwLock as AsyncRwLock;
 use uuid::Uuid;
@@ -25,7 +25,7 @@ pub struct Synchronize<T: IpfsTypes> {
     ipfs: Ipfs<T>,
     did: Arc<DID>,
     nodes: Arc<AsyncRwLock<Vec<Multiaddr>>>,
-    tx: Sender<NodeRequest>,
+    tx: UnboundedSender<NodeRequest>,
 }
 
 impl<T: IpfsTypes> Clone for Synchronize<T> {
@@ -85,14 +85,13 @@ impl<T: IpfsTypes> Synchronize<T> {
     #[allow(unreachable_code)]
     pub async fn new(ipfs: Ipfs<T>, did: Arc<DID>) -> Result<Self, Error> {
         dotenv().ok();
-        let (tx, mut rx) = mpsc::channel(1);
+        let (tx, mut rx) = mpsc::unbounded_channel();
         let sync = Self {
             ipfs,
             did,
             nodes: Arc::new(AsyncRwLock::new(Vec::new())),
             tx: tx.clone(),
         };
-
         tokio::spawn({
             let sync = sync.clone();
             let did = sync.did;
@@ -271,7 +270,7 @@ impl<T: IpfsTypes> Synchronize<T> {
 
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::SendRootDocument(DocumentType::Object(root_doc), one_tx);
-        if let Err(_err) = self.tx.clone().send(node_request).await {
+        if let Err(_err) = self.tx.clone().send(node_request) {
             return Err(Error::ChannelClosed);
         }
         match one_rx.await {
@@ -290,7 +289,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         println!("fetch root document {:?}", node_request);
         let sync = self.clone();
         tokio::spawn(async move {
-            if let Err(_) =  sync.tx.clone().send(node_request).await {
+            if let Err(_) =  sync.tx.clone().send(node_request) {
                 println!("the receiver dropped");
             };
         });
@@ -319,7 +318,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchIdentity(one_tx);
         println!("NODE REQUEST {:?}", node_request);
-        let _ = self.tx.clone().send(node_request).await;
+        let _ = self.tx.clone().send(node_request);
         self.tx.clone().is_closed();
         match one_rx.await {
             Ok(res) => {
