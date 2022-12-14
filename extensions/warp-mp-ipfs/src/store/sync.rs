@@ -208,6 +208,9 @@ impl<T: IpfsTypes> Synchronize<T> {
                             }
                             }
                         }
+                        else {
+                            println!("{:?}", request);
+                        }
                     }
                     response = response.next() => {
                                 if let Some(response) = response {
