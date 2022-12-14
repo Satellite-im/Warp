@@ -43,6 +43,8 @@ use super::{
     DIRECT_BROADCAST,
 };
 
+const PERMIT_AMOUNT: usize = 1;
+
 pub struct MessageStore<T: IpfsTypes> {
     // ipfs instance
     ipfs: Ipfs<T>,
@@ -242,7 +244,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         self.conversation_lock
             .write()
             .await
-            .insert(conversation_id, Arc::new(Semaphore::new(1)));
+            .insert(conversation_id, Arc::new(Semaphore::new(PERMIT_AMOUNT)));
         info!("Task started for {conversation_id}");
         let did = self.did.clone();
 
@@ -337,7 +339,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 self.conversation_lock
                     .write()
                     .await
-                    .insert(convo.id(), Arc::new(Semaphore::new(1)));
+                    .insert(convo.id(), Arc::new(Semaphore::new(PERMIT_AMOUNT)));
 
                 let stream = match self.ipfs.pubsub_subscribe(convo.topic()).await {
                     Ok(stream) => stream,
@@ -556,7 +558,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         self.conversation_lock
             .write()
             .await
-            .insert(convo_id, Arc::new(Semaphore::new(1)));
+            .insert(convo_id, Arc::new(Semaphore::new(PERMIT_AMOUNT)));
         let stream = self.ipfs.pubsub_subscribe(topic).await?;
 
         let (tx, _) = broadcast::channel(1024);
@@ -790,7 +792,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                     self.conversation_lock
                         .write()
                         .await
-                        .insert(id, Arc::new(Semaphore::new(1)));
+                        .insert(id, Arc::new(Semaphore::new(PERMIT_AMOUNT)));
                 }
             }
         }
