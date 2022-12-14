@@ -1184,7 +1184,7 @@ fn validate_request(real_request: &FriendRequest) -> Result<(), Error> {
 }
 
 pub fn get_inbox_topic(did: &DID) -> String {
-    format!("/peer/{}/inbox", did.to_string())
+    format!("/peer/{}/inbox", did)
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]

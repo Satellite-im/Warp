@@ -86,7 +86,6 @@ pub struct StoreSetting {
     pub sync: Vec<Multiaddr>,
     pub sync_interval: u64,
     pub check_spam: bool,
-    pub allow_unsigned_message: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,7 +138,6 @@ impl Default for RgIpfsConfig {
                 check_spam: true,
                 with_friends: false,
                 store_decrypted: false,
-                allow_unsigned_message: false,
                 ..Default::default()
             },
             debug: false,

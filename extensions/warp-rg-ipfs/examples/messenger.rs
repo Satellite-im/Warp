@@ -38,7 +38,10 @@ struct Opt {
     path: Option<PathBuf>,
     #[clap(long)]
     with_key: bool,
+    #[clap(long)]
     experimental_node: bool,
+    #[clap(long)]
+    stdout_log: bool,
 }
 
 fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
@@ -133,15 +136,22 @@ async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
     if fdlimit::raise_fd_limit().is_none() {}
 
-    let file_appender = tracing_appender::rolling::hourly(
-        opt.path.clone().unwrap_or_else(|| PathBuf::from("./")),
-        "warp_rg_ipfs_messenger.log",
-    );
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    tracing_subscriber::fmt()
-        .with_writer(non_blocking)
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    if !opt.stdout_log {
+        let file_appender = tracing_appender::rolling::hourly(
+            opt.path.clone().unwrap_or_else(|| PathBuf::from("./")),
+            "warp_rg_ipfs_messenger.log",
+        );
+        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+        tracing_subscriber::fmt()
+            .with_writer(non_blocking)
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+    }
 
     let cache = cache_setup(opt.path.as_ref().map(|p| p.join("cache")))?;
     let password = if opt.with_key {
@@ -159,8 +169,10 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
+    println!("Initializing Constellation");
     let fs = create_fs(new_account.clone(), opt.path.clone()).await?;
 
+    println!("Initializing RayGun");
     let mut chat = create_rg(
         opt.path.clone(),
         new_account.clone(),
@@ -214,7 +226,7 @@ async fn main() -> anyhow::Result<()> {
     writeln!(stdout, "{message}")?;
 
     // loads all conversations into their own task to process events
-    for conversation in chat.list_conversations().await? {
+    for conversation in chat.list_conversations().await.unwrap_or_default() {
         {
             let topic = topic.clone();
             let id = conversation.id();
@@ -658,13 +670,21 @@ async fn main() -> anyhow::Result<()> {
                             let topic = topic.read().clone();
                             match cmd_line.next() {
                                 Some("all") => {
-                                   let messages = chat
-                                       .get_messages(topic, MessageOptions::default())
-                                       .await?;
-                                   for message in messages.iter() {
-                                       chat.pin(topic, message.id(), PinState::Pin).await?;
-                                       writeln!(stdout, "Pinned {}", message.id())?;
-                                   }
+                                    tokio::spawn({
+                                        let mut chat = chat.clone();
+                                        let mut stdout = stdout.clone();
+                                        async move {
+                                            let messages = chat
+                                                .get_messages(topic, MessageOptions::default())
+                                                .await.unwrap_or_default();
+                                            for message in messages.iter() {
+                                                match chat.pin(topic, message.id(), PinState::Pin).await {
+                                                    Ok(_) => writeln!(stdout, "Pinned {}", message.id()).is_ok(),
+                                                    Err(e) => writeln!(stdout, "Error Pinning {}: {}", message.id(), e).is_ok()
+                                                };
+                                            }
+                                        }
+                                    });
                                 },
                                 Some(id) => {
                                     let id = match Uuid::from_str(id) {
@@ -683,13 +703,22 @@ async fn main() -> anyhow::Result<()> {
                         Some("/unpin") => {
                             match cmd_line.next() {
                                 Some("all") => {
-                                   let messages = chat
-                                       .get_messages(*topic.read(), MessageOptions::default())
-                                       .await?;
-                                   for message in messages.iter() {
-                                       chat.pin(*topic.read(), message.id(), PinState::Unpin).await?;
-                                       writeln!(stdout, "Unpinned {}", message.id())?;
-                                   }
+                                    tokio::spawn({
+                                        let mut chat = chat.clone();
+                                        let mut stdout = stdout.clone();
+                                        let topic = topic.read().clone();
+                                        async move {
+                                            let messages = chat
+                                                .get_messages(topic, MessageOptions::default())
+                                                .await.unwrap_or_default();
+                                            for message in messages.iter() {
+                                                match chat.pin(topic, message.id(), PinState::Unpin).await {
+                                                    Ok(_) => writeln!(stdout, "Unpinned {}", message.id()).is_ok(),
+                                                    Err(e) => writeln!(stdout, "Error Uninning {}: {}", message.id(), e).is_ok()
+                                                };
+                                            }
+                                        }
+                                    });
                                 },
                                 Some(id) => {
                                     let id = match Uuid::from_str(id) {
@@ -704,6 +733,30 @@ async fn main() -> anyhow::Result<()> {
                                 },
                                 None => { writeln!(stdout, "/unpin <id | all>")? }
                             }
+                        }
+                        Some("/remove-message") => {
+                            let topic = topic.read().clone();
+                            match cmd_line.next() {
+                                Some(id) => {
+                                    let id = match Uuid::from_str(id) {
+                                        Ok(uuid) => uuid,
+                                        Err(e) => {
+                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            continue
+                                        }
+                                    };
+                                    if let Err(_e) = chat.delete(topic, Some(id)).await {
+
+                                    } else {
+                                        writeln!(stdout, "Message {} removed", id)?;
+                                    }
+                                },
+                                None => { writeln!(stdout, "/remove-message <id>")? }
+                            }
+                        }
+                        Some("/count") => {
+                            let amount = chat.get_message_count(*topic.read()).await?;
+                            writeln!(stdout, "Conversation contains {} messages", amount)?;
                         }
                         _ => {
                             if !line.is_empty() {
