@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::Write;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -132,11 +133,11 @@ impl<T: IpfsTypes> Synchronize<T> {
                 let multiaddr_with_peer = format!("{}/p2p/{}", multiaddr_peer, peer_id_recipient);
                 let mwp = multiaddr_with_peer.parse::<MultiaddrWithPeerId>().unwrap();
                 ipfs.clone().connect(mwp).await?;*/
-
+                let mut file = std::fs::OpenOptions::new().write(true).append(true).open("log.txt").unwrap();
                 loop {
                     tokio::select! {
                             request = rx.recv() => {
-                                println!("{:?}", request);
+                                file.write_all(request.is_none().to_string().as_bytes()).unwrap();
                                 if let Some(request) = request {
                                     println!("Received request: {:?}", request);
                                     //if let NodeRequest::SendRootDocument(root_doc, sender) = request {
