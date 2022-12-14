@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use dotenv::dotenv;
-use futures::StreamExt;
+use futures::{StreamExt};
 use ipfs::libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use ipfs::{Ipfs, IpfsTypes, Multiaddr};
 use libipld::serde::to_ipld;
@@ -79,6 +79,7 @@ pub struct SyncMessage {
     did: DID,
     type_request: Command,
 }
+
 
 impl<T: IpfsTypes> Synchronize<T> {
     #[allow(unreachable_code)]
@@ -287,9 +288,12 @@ impl<T: IpfsTypes> Synchronize<T> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchRootDocument(one_tx);
         println!("fetch root document {:?}", node_request);
-        async move {
-            let _ = self.tx.clone().send(node_request).await;
-        }.await;
+        let sync = self.clone();
+        tokio::spawn(async move {
+            if let Err(_) =  sync.tx.clone().send(node_request).await {
+                println!("the receiver dropped");
+            };
+        });
         match one_rx.await {
             Ok(res) => {
                 if let NodeResponse::FetchRootDocument { id: _, cid } = res {
@@ -301,7 +305,7 @@ impl<T: IpfsTypes> Synchronize<T> {
                     self.ipfs.put_dag(ipld).await?;
                     Ok(root_document)
                 } else {
-                    Err(Error::ObjectNotFound)
+                    return Err(Error::ObjectNotFound);
                 }
             }
             Err(e) => {
