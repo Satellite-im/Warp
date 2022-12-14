@@ -268,7 +268,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         if peers.is_empty() {
             unreachable!()
         }
-
+        println!("ciao");
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::SendRootDocument(DocumentType::Object(root_doc), one_tx);
         if let Err(_err) = self.tx.clone().send(node_request).await {
