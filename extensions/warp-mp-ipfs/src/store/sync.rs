@@ -294,7 +294,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         println!("fetch root document {:?}", node_request);
         let _ = self.tx.send(node_request).await;        
         println!("The sender is closed? {}", self.tx.is_closed());
-        match one_rx.await {
+        /*match one_rx.await {
             Ok(res) => {
                 if let NodeResponse::FetchRootDocument { id: _, cid } = res {
                     let root_document = cid.resolve(self.ipfs.clone(), None).await?;
@@ -312,7 +312,8 @@ impl<T: IpfsTypes> Synchronize<T> {
                 println!("fetch root document error {:?}", e);
                 return Err(Error::ChannelClosed);
             }
-        }
+        }*/
+        Ok(RootDocument::default())
     }
 
     pub async fn fetch_identity(&self) -> Result<Identity, Error> {
