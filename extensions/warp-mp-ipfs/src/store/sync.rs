@@ -275,7 +275,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         }
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::SendRootDocument(DocumentType::Object(root_doc), one_tx);
-        if let Err(_err) = self.tx.clone().send(node_request).await {
+        if let Err(_err) = self.tx.send(node_request).await {
             return Err(Error::ChannelClosed);
         }
         match one_rx.await {
@@ -294,8 +294,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         println!("fetch root document {:?}", node_request);
         let _ = self.tx.send(node_request).await;        
         println!("The sender is closed? {}", self.tx.is_closed());
-        println!("{:?}", one_rx.await.err());
-        /*match one_rx.await {
+        match one_rx.await {
             Ok(res) => {
                 if let NodeResponse::FetchRootDocument { id: _, cid } = res {
                     let root_document = cid.resolve(self.ipfs.clone(), None).await?;
@@ -313,16 +312,15 @@ impl<T: IpfsTypes> Synchronize<T> {
                 println!("fetch root document error {:?}", e);
                 return Err(Error::ChannelClosed);
             }
-        }*/
-        Ok(RootDocument::default())
+        }
     }
 
     pub async fn fetch_identity(&self) -> Result<Identity, Error> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchIdentity(one_tx);
         println!("NODE REQUEST {:?}", node_request);
-        let _ = self.tx.clone().send(node_request).await;
-        self.tx.clone().is_closed();
+        let _ = self.tx.send(node_request).await;
+        self.tx.is_closed();
         match one_rx.await {
             Ok(res) => {
                 if let NodeResponse::FetchIdentity { id: _, cid } = res {
