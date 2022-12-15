@@ -1,5 +1,5 @@
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -430,6 +430,53 @@ impl<T: IpfsTypes> MessageStore<T> {
                     error!("Error broadcasting event: {e}");
                 }
             }
+            ConversationEvents::NewGroupConversation(conversation_id, initial_recipients) => {
+                let did = &*self.did;
+                info!("New group conversation event received");
+
+                if self.exist(conversation_id).await {
+                    warn!("Conversation with {conversation_id} exist");
+                    return Ok(());
+                }
+
+                info!("Creating conversation");
+                let convo = ConversationDocument::new(did, initial_recipients, Some(conversation_id), ConversationType::Group)?;
+                info!(
+                    "{} conversation created: {}",
+                    convo.conversation_type,
+                    convo.id()
+                );
+
+                let cid = convo.to_cid(&self.ipfs).await?;
+                if !self.ipfs.is_pinned(&cid).await? {
+                    self.ipfs.insert_pin(&cid, false).await?;
+                }
+                self.conversation_cid.write().await.insert(convo.id(), cid);
+                self.conversation_lock
+                    .write()
+                    .await
+                    .insert(convo.id(), Arc::new(Semaphore::new(PERMIT_AMOUNT)));
+
+                let stream = match self.ipfs.pubsub_subscribe(convo.topic()).await {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        error!("Error subscribing to conversation: {e}");
+                        return Ok(());
+                    }
+                };
+
+                let (tx, _) = broadcast::channel(1024);
+
+                self.stream_sender.write().await.insert(convo.id(), tx);
+
+                self.start_task(convo.id(), stream).await;
+
+                if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
+                    conversation_id: convo.id(),
+                }) {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
             ConversationEvents::DeleteConversation(conversation_id) => {
                 trace!("Delete conversation event received for {conversation_id}");
                 if !self.exist(conversation_id).await {
@@ -688,6 +735,152 @@ impl<T: IpfsTypes> MessageStore<T> {
                 }
             }
         };
+
+        Ok(Conversation::from(&conversation))
+    }
+
+    pub async fn create_group_conversation(
+        &mut self,
+        did_key: HashSet<DID>,
+    ) -> Result<Conversation, Error> {
+        if self.with_friends.load(Ordering::SeqCst) {
+            for did in did_key.iter() {
+                self.account.has_friend(did)?;
+            }
+        }
+
+        for did in did_key.iter() {
+            if let Ok(true) = self.account.is_blocked(did) {
+                return Err(Error::PublicKeyIsBlocked);
+            }
+        }
+
+        let own_did = &*(self.did.clone());
+
+        if did_key.contains(own_did) {
+            return Err(Error::CannotCreateConversation);
+        }
+
+        //Temporary limit
+        if self.list_conversations().await.unwrap_or_default().len() >= 32 {
+            return Err(Error::ConversationLimitReached);
+        }
+
+        tokio::spawn({
+            let account = self.account.clone();
+            let did_list = did_key.clone();
+            async move {
+                for did in did_list {
+                    if let Ok(list) = account.get_identity(did.into()) {
+                        if list.is_empty() {
+                            warn!("Unable to find identity. Creating conversation anyway");
+                        }
+                    }
+                }
+            }
+        });
+
+        let receipient = Vec::from_iter(did_key);
+
+        let conversation = ConversationDocument::new_group(own_did, &receipient)?;
+
+        let cid = conversation.to_cid(&self.ipfs).await?;
+
+        let convo_id = conversation.id();
+        let topic = conversation.topic();
+
+        self.conversation_cid.write().await.insert(convo_id, cid);
+        self.conversation_lock
+            .write()
+            .await
+            .insert(convo_id, Arc::new(Semaphore::new(PERMIT_AMOUNT)));
+
+        let stream = self.ipfs.pubsub_subscribe(topic).await?;
+
+        let (tx, _) = broadcast::channel(1024);
+
+        self.stream_sender
+            .write()
+            .await
+            .insert(conversation.id(), tx);
+
+        self.start_task(conversation.id(), stream).await;
+
+        let peers = self
+            .ipfs
+            .pubsub_peers(Some(DIRECT_BROADCAST.into()))
+            .await?;
+
+        let peer_id_list = receipient
+            .clone()
+            .iter()
+            .filter(|did| own_did.ne(did))
+            .map(|did| (did.clone(), did))
+            .filter_map(|(a, b)| did_to_libp2p_pub(b).map(|pk| (a, pk)).ok())
+            .map(|(did, pk)| (did, pk.to_peer_id()))
+            .collect::<Vec<_>>();
+
+        let mut data = Sata::default();
+        for did in receipient.iter() {
+            data.add_recipient(did.as_ref())?;
+        }
+
+        let data = data.encrypt(
+            libipld::IpldCodec::DagJson,
+            own_did.as_ref(),
+            warp::sata::Kind::Reference,
+            serde_json::to_vec(&ConversationEvents::NewGroupConversation(
+                conversation.id(),
+                receipient,
+            ))?,
+        )?;
+
+        for (did, peer_id) in peer_id_list {
+            match peers.contains(&peer_id) {
+                true => {
+                    let bytes = serde_json::to_vec(&data)?;
+                    if let Err(_e) = self
+                        .ipfs
+                        .pubsub_publish(DIRECT_BROADCAST.into(), bytes)
+                        .await
+                    {
+                        warn!("Unable to publish to topic. Queuing event");
+                        if let Err(e) = self
+                            .queue_event(
+                                did,
+                                Queue::direct(
+                                    convo_id,
+                                    None,
+                                    peer_id,
+                                    DIRECT_BROADCAST.into(),
+                                    data.clone(),
+                                ),
+                            )
+                            .await
+                        {
+                            error!("Error submitting event to queue: {e}");
+                        }
+                    }
+                }
+                false => {
+                    if let Err(e) = self
+                        .queue_event(
+                            did,
+                            Queue::direct(
+                                convo_id,
+                                None,
+                                peer_id,
+                                DIRECT_BROADCAST.into(),
+                                data.clone(),
+                            ),
+                        )
+                        .await
+                    {
+                        error!("Error submitting event to queue: {e}");
+                    }
+                }
+            };
+        }
 
         Ok(Conversation::from(&conversation))
     }
@@ -2253,6 +2446,14 @@ pub enum Queue {
         data: Sata,
         sent: bool,
     },
+    // Group {
+    //     id: Uuid,
+    //     m_id: Option<Uuid>,
+    //     peer: HashSet<PeerId>,
+    //     topic: String,
+    //     data: Sata,
+    //     sent: bool,
+    // },
 }
 
 impl Queue {

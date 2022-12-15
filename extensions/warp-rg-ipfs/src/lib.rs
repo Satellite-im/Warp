@@ -7,6 +7,7 @@ use config::RgIpfsConfig;
 use futures::StreamExt;
 use rust_ipfs::IpfsTypes;
 use rust_ipfs::{Ipfs, TestTypes, Types};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -239,6 +240,12 @@ impl<T: IpfsTypes> SingleHandle for IpfsMessaging<T> {
 impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
     async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation> {
         self.messaging_store()?.create_conversation(did_key).await
+    }
+
+    async fn create_group_conversation(&mut self, recipients: Vec<DID>) -> Result<Conversation> {
+        self.messaging_store()?
+            .create_group_conversation(HashSet::from_iter(recipients))
+            .await
     }
 
     async fn get_conversation(&self, conversation_id: Uuid) -> Result<Conversation> {

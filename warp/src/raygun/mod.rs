@@ -605,6 +605,10 @@ pub trait RayGun:
         Err(Error::Unimplemented)
     }
 
+    async fn create_group_conversation(&mut self, _: Vec<DID>) -> Result<Conversation, Error> {
+        Err(Error::Unimplemented)
+    }
+
     /// Get an active conversation
     async fn get_conversation(&self, _: Uuid) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
@@ -686,6 +690,17 @@ pub trait RayGun:
 }
 
 dyn_clone::clone_trait_object!(RayGun);
+
+#[async_trait::async_trait]
+pub trait RayGunGroupConversation: Sync + Send {
+    async fn add_recipient(&mut self, _: Uuid, _: &DID) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    async fn remove_recipient(&mut self, _: Uuid, _: &DID) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+}
 
 #[async_trait::async_trait]
 pub trait RayGunAttachment: Sync + Send {

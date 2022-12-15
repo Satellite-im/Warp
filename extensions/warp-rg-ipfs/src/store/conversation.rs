@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use core::hash::Hash;
 use futures::{stream::FuturesOrdered, StreamExt};
-use rust_ipfs::{Ipfs, IpfsTypes};
 use libipld::{Cid, IpldCodec};
+use rust_ipfs::{Ipfs, IpfsTypes};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -150,6 +150,11 @@ impl ConversationDocument {
             ConversationType::Direct,
         )
     }
+
+    pub fn new_group(did: &DID, recipients: &[DID]) -> Result<Self, Error> {
+        let conversation_id = Some(Uuid::new_v4());
+        Self::new(did, recipients.to_vec(), conversation_id, ConversationType::Group)
+    }
 }
 
 impl ConversationDocument {
@@ -212,7 +217,11 @@ impl ConversationDocument {
         .filter_map(|res| async { res.ok() })
         .filter_map(|message| async {
             if let Some(keyword) = option.keyword() {
-                if message.value().iter().any(|line| line.to_lowercase().contains(&keyword.to_lowercase())) {
+                if message
+                    .value()
+                    .iter()
+                    .any(|line| line.to_lowercase().contains(&keyword.to_lowercase()))
+                {
                     Some(message)
                 } else {
                     None

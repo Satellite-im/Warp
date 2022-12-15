@@ -1,6 +1,6 @@
-pub mod message;
-pub mod document;
 pub mod conversation;
+pub mod document;
+pub mod message;
 use rust_ipfs as ipfs;
 use std::time::Duration;
 
@@ -16,7 +16,7 @@ use warp::{
     },
     error::Error,
     logging::tracing::log::{error, trace},
-    raygun::{Message, PinState, ReactionState, MessageEvent},
+    raygun::{Message, MessageEvent, PinState, ReactionState},
 };
 
 pub const DIRECT_BROADCAST: &str = "direct/broadcast";
@@ -24,9 +24,11 @@ pub const DIRECT_BROADCAST: &str = "direct/broadcast";
 pub const GROUP_BROADCAST: &str = "group/broadcast";
 
 #[allow(clippy::large_enum_variant)]
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConversationEvents {
     NewConversation(DID),
+    NewGroupConversation(Uuid, Vec<DID>),
     DeleteConversation(Uuid),
 }
 
@@ -82,7 +84,6 @@ fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow
         .map_err(|e| anyhow::anyhow!("{:?}", e))?;
     Ok(())
 }
-
 
 #[allow(clippy::large_enum_variant)]
 pub enum PeerType {
