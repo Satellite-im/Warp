@@ -157,6 +157,8 @@ async fn main() -> anyhow::Result<()> {
 
     let ipfs_account = account_persistent(None, "./account2", cache, &opt).await?;
 
+    ipfs_account.clone().identity_store()?.send_sync_request().await?; 
+
     let mut account: Box<dyn MultiPass> = Box::new(ipfs_account.clone());
 
     println!("Obtaining identity....");
