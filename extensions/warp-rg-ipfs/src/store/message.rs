@@ -832,7 +832,6 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let mut data = Sata::default();
 
-        data.add_recipient(own_did.as_ref())?;
         for did in recipient.iter() {
             data.add_recipient(did.as_ref())?;
         }
