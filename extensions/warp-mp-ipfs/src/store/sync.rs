@@ -136,7 +136,6 @@ impl<T: IpfsTypes> Synchronize<T> {
                 loop {
                     tokio::select! {
                             request = rx.recv() => { 
-                                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                                 println!("{:?}", request);
                                 if request.is_none() {
                                     return Err(Error::MessageNotFound);

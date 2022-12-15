@@ -930,7 +930,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
             .await
             .as_ref()
             .unwrap()
-            .clone()
             .fetch_root_document()
             .await?;
         Ok(root)
@@ -943,7 +942,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
             .await
             .as_ref()
             .unwrap()
-            .clone()
             .fetch_identity()
             .await?;
 
