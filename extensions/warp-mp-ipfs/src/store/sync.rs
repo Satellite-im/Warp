@@ -270,7 +270,7 @@ impl<T: IpfsTypes> Synchronize<T> {
             .await?;
 
         if peers.is_empty() {
-            unreachable!()
+            return Err(Error::Other);
         }
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::SendRootDocument(DocumentType::Object(root_doc), one_tx);
@@ -291,7 +291,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchRootDocument(one_tx);
         println!("fetch root document {:?}", node_request);
-        let _ = self.tx.send(node_request).await;        
+        self.tx.send(node_request).await.map_err(anyhow::Error::from)?;        
         println!("The sender is closed? {}", self.tx.is_closed());
         match one_rx.await {
             Ok(res) => {
@@ -318,7 +318,7 @@ impl<T: IpfsTypes> Synchronize<T> {
         let (one_tx, one_rx) = tokio::sync::oneshot::channel::<NodeResponse>();
         let node_request = NodeRequest::FetchIdentity(one_tx);
         println!("NODE REQUEST {:?}", node_request);
-        let _ = self.tx.send(node_request).await;
+        self.tx.send(node_request).await.map_err(anyhow::Error::from)?;
         self.tx.is_closed();
         match one_rx.await {
             Ok(res) => {
