@@ -430,7 +430,11 @@ impl<T: IpfsTypes> MessageStore<T> {
                     error!("Error broadcasting event: {e}");
                 }
             }
-            ConversationEvents::NewGroupConversation(conversation_id, initial_recipients) => {
+            ConversationEvents::NewGroupConversation(
+                creator,
+                conversation_id,
+                initial_recipients,
+            ) => {
                 let did = &*self.did;
                 info!("New group conversation event received");
 
@@ -440,7 +444,13 @@ impl<T: IpfsTypes> MessageStore<T> {
                 }
 
                 info!("Creating conversation");
-                let convo = ConversationDocument::new(did, initial_recipients, Some(conversation_id), ConversationType::Group)?;
+                let convo = ConversationDocument::new(
+                    did,
+                    initial_recipients,
+                    Some(conversation_id),
+                    ConversationType::Group,
+                    Some(creator),
+                )?;
                 info!(
                     "{} conversation created: {}",
                     convo.conversation_type,
@@ -780,9 +790,9 @@ impl<T: IpfsTypes> MessageStore<T> {
             }
         });
 
-        let receipient = Vec::from_iter(did_key);
+        let conversation = ConversationDocument::new_group(own_did, &Vec::from_iter(did_key))?;
 
-        let conversation = ConversationDocument::new_group(own_did, &receipient)?;
+        let recipient = conversation.recipients();
 
         let cid = conversation.to_cid(&self.ipfs).await?;
 
@@ -811,7 +821,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             .pubsub_peers(Some(DIRECT_BROADCAST.into()))
             .await?;
 
-        let peer_id_list = receipient
+        let peer_id_list = recipient
             .clone()
             .iter()
             .filter(|did| own_did.ne(did))
@@ -821,7 +831,9 @@ impl<T: IpfsTypes> MessageStore<T> {
             .collect::<Vec<_>>();
 
         let mut data = Sata::default();
-        for did in receipient.iter() {
+
+        data.add_recipient(own_did.as_ref())?;
+        for did in recipient.iter() {
             data.add_recipient(did.as_ref())?;
         }
 
@@ -830,8 +842,9 @@ impl<T: IpfsTypes> MessageStore<T> {
             own_did.as_ref(),
             warp::sata::Kind::Reference,
             serde_json::to_vec(&ConversationEvents::NewGroupConversation(
+                own_did.clone(),
                 conversation.id(),
-                receipient,
+                recipient,
             ))?,
         )?;
 
@@ -1890,14 +1903,11 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let own_did = &*self.did;
 
-        let recipient = recipients
-            .iter()
-            .filter(|did| own_did.ne(did))
-            .last()
-            .ok_or(Error::PublicKeyInvalid)?;
-
         let mut data = Sata::default();
-        data.add_recipient(recipient.as_ref())?;
+
+        for recipient in recipients.iter().filter(|did| own_did.ne(did)) {
+            data.add_recipient(recipient.as_ref())?;
+        }
 
         let payload = data.encrypt(
             libipld::IpldCodec::DagJson,
@@ -1938,14 +1948,13 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let own_did = &*self.did;
 
-        let recipient = recipients
-            .iter()
-            .filter(|did| own_did.ne(did))
-            .last()
-            .ok_or(Error::PublicKeyInvalid)?;
-
         let mut data = Sata::default();
-        data.add_recipient(recipient.as_ref())?;
+
+        for recipient in recipients.iter().filter(|did| own_did.ne(did)) {
+            if let Err(e) = data.add_recipient(recipient.as_ref()) {
+                error!("Unable to add recipient: {e}");
+            }
+        }
 
         let payload = data.encrypt(
             libipld::IpldCodec::DagJson,
@@ -1958,13 +1967,42 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let peers = self.ipfs.pubsub_peers(Some(conversation.topic())).await?;
 
-        let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
+        for recipient in conversation
+            .recipients()
+            .iter()
+            .filter(|did| own_did.ne(did))
+        {
+            let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
 
-        match peers.contains(&peer_id) {
-            true => {
-                if let Err(e) = self.ipfs.pubsub_publish(conversation.topic(), bytes).await {
+            match peers.contains(&peer_id) {
+                true => {
+                    if let Err(e) = self
+                        .ipfs
+                        .pubsub_publish(conversation.topic(), bytes.clone())
+                        .await
+                    {
+                        if queue {
+                            warn!("Unable to publish to topic due to error: {e}... Queuing event");
+                            if let Err(e) = self
+                                .queue_event(
+                                    recipient.clone(),
+                                    Queue::direct(
+                                        conversation.id(),
+                                        message_id,
+                                        peer_id,
+                                        conversation.topic(),
+                                        payload.clone(),
+                                    ),
+                                )
+                                .await
+                            {
+                                error!("Error submitting event to queue: {e}");
+                            }
+                        }
+                    }
+                }
+                false => {
                     if queue {
-                        warn!("Unable to publish to topic due to error: {e}... Queuing event");
                         if let Err(e) = self
                             .queue_event(
                                 recipient.clone(),
@@ -1973,7 +2011,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                                     message_id,
                                     peer_id,
                                     conversation.topic(),
-                                    payload,
+                                    payload.clone(),
                                 ),
                             )
                             .await
@@ -1982,32 +2020,13 @@ impl<T: IpfsTypes> MessageStore<T> {
                         }
                     }
                 }
-            }
-            false => {
-                if queue {
-                    if let Err(e) = self
-                        .queue_event(
-                            recipient.clone(),
-                            Queue::direct(
-                                conversation.id(),
-                                message_id,
-                                peer_id,
-                                conversation.topic(),
-                                payload,
-                            ),
-                        )
-                        .await
-                    {
-                        error!("Error submitting event to queue: {e}");
-                    }
-                }
-            }
-        };
+            };
+        }
 
         Ok(())
     }
 
-    async fn queue_event(&mut self, did: DID, queue: Queue) -> Result<(), Error> {
+    async fn queue_event(&self, did: DID, queue: Queue) -> Result<(), Error> {
         self.queue.write().await.entry(did).or_default().push(queue);
         self.save_queue().await;
 

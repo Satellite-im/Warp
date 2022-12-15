@@ -103,20 +103,17 @@ impl ConversationDocument {
         mut recipients: Vec<DID>,
         id: Option<Uuid>,
         conversation_type: ConversationType,
+        creator: Option<DID>,
     ) -> Result<Self, Error> {
         let id = id.unwrap_or_else(Uuid::new_v4);
         let name = None;
 
-        if !recipients.contains(did) && recipients.len() == 1 {
+        if !recipients.contains(did) {
             recipients.push(did.clone());
-        } else if recipients.contains(did) && recipients.len() == 1 {
+        } 
+        
+        if recipients.is_empty() {
             return Err(Error::CannotCreateConversation);
-        }
-
-        if recipients.len() < 2 {
-            return Err(Error::OtherWithContext(
-                "Conversation requires a min of 2 recipients".into(),
-            ));
         }
 
         let messages = BTreeSet::new();
@@ -124,7 +121,7 @@ impl ConversationDocument {
             id,
             name,
             recipients,
-            creator: None,
+            creator,
             conversation_type,
             messages,
             signature: None,
@@ -148,12 +145,13 @@ impl ConversationDocument {
             recipients.to_vec(),
             conversation_id,
             ConversationType::Direct,
+            None,
         )
     }
 
     pub fn new_group(did: &DID, recipients: &[DID]) -> Result<Self, Error> {
         let conversation_id = Some(Uuid::new_v4());
-        Self::new(did, recipients.to_vec(), conversation_id, ConversationType::Group)
+        Self::new(did, recipients.to_vec(), conversation_id, ConversationType::Group, Some(did.clone()))
     }
 }
 

@@ -344,6 +344,50 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             });
                         },
+                        Some("/create-group") => {
+
+                            let mut did_keys = vec![];
+
+                            for item in cmd_line.by_ref() {
+                                let Ok(did) = DID::try_from(item.to_string()) else {
+                                    continue;
+                                };
+                                did_keys.push(did);
+                            }
+
+                            if did_keys.is_empty() || did_keys.len() < 2 {
+                                writeln!(stdout, "Group chat requires 2 did keys")?;
+                                continue
+                            }
+
+                            let id = match chat.create_group_conversation(did_keys).await {
+                                Ok(id) => id,
+                                Err(e) => {
+                                    writeln!(stdout, "Error creating conversation: {e}")?;
+                                    continue
+                                }
+                            };
+
+                            *topic.write() = id.id();
+                            writeln!(stdout, "Set conversation to {}", topic.read())?;
+                            let mut stdout = stdout.clone();
+                            let account = new_account.clone();
+                            let stream = chat.get_conversation_stream(id.id()).await?;
+                            let chat = chat.clone();
+                            let topic = topic.clone();
+
+                            tokio::spawn(async move {
+                                if let Err(e) = message_event_handle(
+                                    stdout.clone(),
+                                    account.clone(),
+                                    chat.clone(),
+                                    stream,
+                                    topic.clone(),
+                                ).await {
+                                    writeln!(stdout, ">> Error processing event task: {e}").unwrap();
+                                }
+                            });
+                        },
                         Some("/remove-conversation") => {
                             let conversation_id = match cmd_line.next() {
                                 Some(id) => id.parse()?,
@@ -391,7 +435,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
                             let local_topic = *topic.read();
-                        
+
                             let opt = match cmd_line.next() {
                                 Some(id) => match id.parse() {
                                     Ok(last) => MessageOptions::default().set_range(0..last),
@@ -512,7 +556,7 @@ async fn main() -> anyhow::Result<()> {
                                     continue;
                                 }
                             };
-  
+
                             for message in messages.iter() {
                                 let username = get_username(new_account.clone(), message.sender()).unwrap_or_else(|_| message.sender().to_string());
                                 let mut emojis = vec![];
