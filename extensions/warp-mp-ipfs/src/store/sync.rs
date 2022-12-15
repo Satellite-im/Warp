@@ -92,7 +92,7 @@ impl<T: IpfsTypes> Synchronize<T> {
             ipfs,
             did,
             nodes: Arc::new(AsyncRwLock::new(Vec::new())),
-            tx: tx.clone(),
+            tx: tx,
         };
         tokio::spawn({
             let sync = sync.clone();
