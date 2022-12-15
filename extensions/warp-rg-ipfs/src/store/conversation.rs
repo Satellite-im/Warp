@@ -104,14 +104,15 @@ impl ConversationDocument {
         id: Option<Uuid>,
         conversation_type: ConversationType,
         creator: Option<DID>,
+        signature: Option<String>,
     ) -> Result<Self, Error> {
         let id = id.unwrap_or_else(Uuid::new_v4);
         let name = None;
 
         if !recipients.contains(did) {
             recipients.push(did.clone());
-        } 
-        
+        }
+
         if recipients.is_empty() {
             return Err(Error::CannotCreateConversation);
         }
@@ -124,7 +125,7 @@ impl ConversationDocument {
             creator,
             conversation_type,
             messages,
-            signature: None,
+            signature,
         })
     }
 
@@ -146,12 +147,20 @@ impl ConversationDocument {
             conversation_id,
             ConversationType::Direct,
             None,
+            None,
         )
     }
 
     pub fn new_group(did: &DID, recipients: &[DID]) -> Result<Self, Error> {
         let conversation_id = Some(Uuid::new_v4());
-        Self::new(did, recipients.to_vec(), conversation_id, ConversationType::Group, Some(did.clone()))
+        Self::new(
+            did,
+            recipients.to_vec(),
+            conversation_id,
+            ConversationType::Group,
+            Some(did.clone()),
+            None,
+        )
     }
 }
 

@@ -450,6 +450,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                     Some(conversation_id),
                     ConversationType::Group,
                     Some(creator),
+                    None,
                 )?;
                 info!(
                     "{} conversation created: {}",
