@@ -205,35 +205,39 @@ impl ConversationDocument {
     }
 
     pub fn verify(&self) -> Result<(), Error> {
-        let Some(creator) = self.creator.clone() else {
-            return Err(Error::PublicKeyInvalid)
-        };
+        if matches!(self.conversation_type, ConversationType::Group) {
+            let Some(creator) = self.creator.clone() else {
+                return Err(Error::PublicKeyInvalid)
+            };
 
-        let Some(signature) = self.signature.clone() else {
-            return Err(Error::InvalidSignature)
-        };
+            let Some(signature) = self.signature.clone() else {
+                return Err(Error::InvalidSignature)
+            };
 
-        let signature = bs58::decode(signature).into_vec()?;
+            let signature = bs58::decode(signature).into_vec()?;
 
-        let construct = vec![
-            self.id().into_bytes().to_vec(),
-            if self.conversation_type == ConversationType::Direct {
-                vec![0]
-            } else {
-                vec![1]
-            },
-            creator.to_string().as_bytes().to_vec(),
-            self.recipients()
-                .iter()
-                .flat_map(|rec| rec.to_string().as_bytes().to_vec())
-                .collect::<Vec<_>>(),
-        ]
-        .concat();
+            let construct = vec![
+                self.id().into_bytes().to_vec(),
+                if self.conversation_type == ConversationType::Direct {
+                    vec![0]
+                } else {
+                    vec![1]
+                },
+                creator.to_string().as_bytes().to_vec(),
+                self.recipients()
+                    .iter()
+                    .flat_map(|rec| rec.to_string().as_bytes().to_vec())
+                    .collect::<Vec<_>>(),
+            ]
+            .concat();
 
-        creator
-            .verify(&construct, &signature)
-            .map_err(|e| anyhow::anyhow!("{:?}", e))
-            .map_err(Error::from)
+            creator
+                .verify(&construct, &signature)
+                .map_err(|e| anyhow::anyhow!("{:?}", e))
+                .map_err(Error::from)
+        } else {
+            Ok(())
+        }
     }
 
     pub async fn get_messages<T: IpfsTypes>(
