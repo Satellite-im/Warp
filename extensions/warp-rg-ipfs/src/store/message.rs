@@ -434,6 +434,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 creator,
                 conversation_id,
                 initial_recipients,
+                signature,
             ) => {
                 let did = &*self.did;
                 info!("New group conversation event received");
@@ -450,13 +451,16 @@ impl<T: IpfsTypes> MessageStore<T> {
                     Some(conversation_id),
                     ConversationType::Group,
                     Some(creator),
-                    None,
+                    signature,
                 )?;
                 info!(
                     "{} conversation created: {}",
                     convo.conversation_type,
                     convo.id()
                 );
+
+                //Although we verify internally, this is just as a precaution
+                convo.verify()?;
 
                 let cid = convo.to_cid(&self.ipfs).await?;
                 if !self.ipfs.is_pinned(&cid).await? {
@@ -845,6 +849,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 own_did.clone(),
                 conversation.id(),
                 recipient,
+                conversation.signature.clone()
             ))?,
         )?;
 

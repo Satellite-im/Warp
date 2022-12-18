@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use uuid::Uuid;
 use warp::{
-    crypto::{Fingerprint, DID},
+    crypto::{did_key::CoreSign, Fingerprint, DID},
     error::Error,
     logging::tracing::log::info,
     raygun::{Conversation, ConversationType, Message, MessageOptions},
@@ -118,7 +118,7 @@ impl ConversationDocument {
         }
 
         let messages = BTreeSet::new();
-        Ok(Self {
+        let mut document = Self {
             id,
             name,
             recipients,
@@ -126,7 +126,19 @@ impl ConversationDocument {
             conversation_type,
             messages,
             signature,
-        })
+        };
+
+        if document.signature.is_some() {
+            document.verify()?;
+        }
+
+        if let Some(creator) = document.creator.as_ref() {
+            if creator.eq(did) {
+                document.sign(did)?;
+            }
+        }
+
+        Ok(document)
     }
 
     pub fn new_direct(did: &DID, recipients: [DID; 2]) -> Result<Self, Error> {
@@ -165,6 +177,69 @@ impl ConversationDocument {
 }
 
 impl ConversationDocument {
+    pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
+        let Some(creator) = self.creator.clone() else {
+            return Err(Error::PublicKeyInvalid)
+        };
+
+        if !creator.eq(did) {
+            return Err(Error::PublicKeyInvalid);
+        }
+
+        let construct = vec![
+            self.id().into_bytes().to_vec(),
+            if self.conversation_type == ConversationType::Direct {
+                vec![0]
+            } else {
+                vec![1]
+            },
+            creator.to_string().as_bytes().to_vec(),
+            self.recipients()
+                .iter()
+                .flat_map(|rec| rec.to_string().as_bytes().to_vec())
+                .collect::<Vec<_>>(),
+        ]
+        .concat();
+
+        self.signature = Some(bs58::encode(did.sign(&construct)).into_string());
+
+        Ok(())
+    }
+
+    pub fn verify(&self) -> Result<(), Error> {
+        let Some(creator) = self.creator.clone() else {
+            return Err(Error::PublicKeyInvalid)
+        };
+
+        let Some(signature) = self.signature.clone() else {
+            return Err(Error::InvalidSignature)
+        };
+
+        let signature = bs58::decode(signature).into_vec()?;
+
+        
+
+        let construct = vec![
+            self.id().into_bytes().to_vec(),
+            if self.conversation_type == ConversationType::Direct {
+                vec![0]
+            } else {
+                vec![1]
+            },
+            creator.to_string().as_bytes().to_vec(),
+            self.recipients()
+                .iter()
+                .flat_map(|rec| rec.to_string().as_bytes().to_vec())
+                .collect::<Vec<_>>(),
+        ]
+        .concat();
+
+        creator
+            .verify(&construct, &signature)
+            .map_err(|e| anyhow::anyhow!("{:?}", e))
+            .map_err(Error::from)
+    }
+
     pub async fn get_messages<T: IpfsTypes>(
         &self,
         ipfs: &Ipfs<T>,
