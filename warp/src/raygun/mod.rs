@@ -86,6 +86,14 @@ pub enum MessageEventKind {
         did_key: DID,
         reaction: String,
     },
+    RecipientAdded {
+        conversation_id: Uuid,
+        recipient: DID,
+    },
+    RecipientRemoved {
+        conversation_id: Uuid,
+        recipient: DID,
+    },
     EventReceived {
         conversation_id: Uuid,
         did_key: DID,

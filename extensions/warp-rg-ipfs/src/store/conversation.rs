@@ -4,7 +4,7 @@ use futures::{stream::FuturesOrdered, StreamExt};
 use libipld::{Cid, IpldCodec};
 use rust_ipfs::{Ipfs, IpfsTypes};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 use warp::{
@@ -25,7 +25,7 @@ pub struct ConversationDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub creator: Option<DID>,
     pub conversation_type: ConversationType,
-    pub recipients: Vec<DID>,
+    pub recipients: HashSet<DID>,
     pub messages: BTreeSet<MessageDocument>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
@@ -38,7 +38,7 @@ impl From<Conversation> for ConversationDocument {
             name: conversation.name(),
             creator: None,
             conversation_type: conversation.conversation_type(),
-            recipients: conversation.recipients(),
+            recipients: HashSet::from_iter(conversation.recipients()),
             messages: Default::default(),
             signature: None,
         }
@@ -52,7 +52,7 @@ impl From<&Conversation> for ConversationDocument {
             name: conversation.name(),
             creator: None,
             conversation_type: conversation.conversation_type(),
-            recipients: conversation.recipients(),
+            recipients: HashSet::from_iter(conversation.recipients()),
             messages: Default::default(),
             signature: None,
         }
@@ -92,7 +92,7 @@ impl ConversationDocument {
         format!("{}/{id}", self.files_topic())
     }
 
-    pub fn recipients(&self) -> Vec<DID> {
+    pub fn recipients(&self) -> HashSet<DID> {
         self.recipients.clone()
     }
 }
@@ -100,7 +100,7 @@ impl ConversationDocument {
 impl ConversationDocument {
     pub fn new(
         did: &DID,
-        mut recipients: Vec<DID>,
+        mut recipients: HashSet<DID>,
         id: Option<Uuid>,
         conversation_type: ConversationType,
         creator: Option<DID>,
@@ -109,9 +109,7 @@ impl ConversationDocument {
         let id = id.unwrap_or_else(Uuid::new_v4);
         let name = None;
 
-        if !recipients.contains(did) {
-            recipients.push(did.clone());
-        }
+        recipients.insert(did.clone());
 
         if recipients.is_empty() {
             return Err(Error::CannotCreateConversation);
@@ -155,7 +153,7 @@ impl ConversationDocument {
 
         Self::new(
             did,
-            recipients.to_vec(),
+            HashSet::from_iter(recipients.into_iter()),
             conversation_id,
             ConversationType::Direct,
             None,
@@ -167,7 +165,7 @@ impl ConversationDocument {
         let conversation_id = Some(Uuid::new_v4());
         Self::new(
             did,
-            recipients.to_vec(),
+            HashSet::from_iter(recipients.iter().cloned()),
             conversation_id,
             ConversationType::Group,
             Some(did.clone()),
@@ -216,8 +214,6 @@ impl ConversationDocument {
         };
 
         let signature = bs58::decode(signature).into_vec()?;
-
-        
 
         let construct = vec![
             self.id().into_bytes().to_vec(),
@@ -382,7 +378,7 @@ impl From<ConversationDocument> for Conversation {
         conversation.set_id(document.id);
         conversation.set_name(document.name);
         conversation.set_conversation_type(document.conversation_type);
-        conversation.set_recipients(document.recipients);
+        conversation.set_recipients(Vec::from_iter(document.recipients));
         conversation
     }
 }
@@ -393,7 +389,7 @@ impl From<&ConversationDocument> for Conversation {
         conversation.set_id(document.id);
         conversation.set_name(document.name.clone());
         conversation.set_conversation_type(document.conversation_type);
-        conversation.set_recipients(document.recipients.clone());
+        conversation.set_recipients(Vec::from_iter(document.recipients.iter().cloned()));
         conversation
     }
 }
@@ -422,7 +418,7 @@ impl MessageDocument {
     pub async fn new<T: IpfsTypes>(
         ipfs: &Ipfs<T>,
         did: Arc<DID>,
-        recipients: Vec<DID>,
+        recipients: HashSet<DID>,
         message: Message,
     ) -> Result<Self, Error> {
         let id = message.id();

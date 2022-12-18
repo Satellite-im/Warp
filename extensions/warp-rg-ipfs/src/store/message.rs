@@ -165,6 +165,11 @@ impl<T: IpfsTypes> MessageStore<T> {
         if let Ok(list) = store.list_conversation_documents().await {
             info!("Loading conversations");
             for conversation in list {
+                //TODO: Maybe eject the conversation from the list if it cannot be verified?
+                if conversation.verify().is_err() {
+                    continue;
+                }
+
                 let stream = match store.ipfs.pubsub_subscribe(conversation.topic()).await {
                     Ok(stream) => stream,
                     Err(e) => {
@@ -849,7 +854,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 own_did.clone(),
                 conversation.id(),
                 recipient,
-                conversation.signature.clone()
+                conversation.signature.clone(),
             ))?,
         )?;
 
@@ -1182,7 +1187,8 @@ impl<T: IpfsTypes> MessageStore<T> {
             .get(&conversation_id)
             .cloned()
             .ok_or(Error::InvalidConversation)?;
-        cid.get_dag(&self.ipfs, None).await
+        let conversation: ConversationDocument = cid.get_dag(&self.ipfs, None).await?;
+        conversation.verify().map(|_| conversation)
     }
 
     pub async fn get_conversation_mut<F: FnOnce(&mut ConversationDocument)>(
@@ -1192,7 +1198,17 @@ impl<T: IpfsTypes> MessageStore<T> {
     ) -> Result<(), Error> {
         let document = &mut self.get_conversation(conversation_id).await?;
 
+        let own_did = &*self.did;
+
         func(document);
+
+        if let Some(creator) = document.creator.as_ref() {
+            if creator.eq(own_did) {
+                document.sign(own_did)?;
+            }
+        }
+
+        document.verify()?;
 
         let new_cid = document.to_cid(&self.ipfs).await?;
 
@@ -1262,6 +1278,39 @@ impl<T: IpfsTypes> MessageStore<T> {
                 };
             }
         })
+    }
+
+    pub async fn add_recipient(
+        &mut self,
+        conversation_id: Uuid,
+        did_key: &DID,
+    ) -> Result<(), Error> {
+
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        if matches!(conversation.conversation_type, ConversationType::Direct) {
+            return Err(Error::InvalidConversation);
+        }
+
+        let own_did = &*self.did;
+        if !conversation.recipients.insert(did_key.clone()) {
+            return Err(Error::IdentityExist);
+        }
+
+        
+
+        Ok(())
+    }
+
+    pub async fn remove_recipient(
+        &mut self,
+        conversation_id: Uuid,
+        did_key: &DID,
+    ) -> Result<(), Error> {
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        if matches!(conversation.conversation_type, ConversationType::Direct) {
+            return Err(Error::InvalidConversation);
+        }
+        Ok(())
     }
 
     pub async fn send_message(
@@ -2442,6 +2491,81 @@ impl<T: IpfsTypes> MessageStore<T> {
                     }
                 }
             }
+            // MessagingEvents::AddRecipient(conversation_id, recipient, signature) => {
+
+            //     if !document.recipients.insert(recipient.clone()) {
+            //         anyhow::bail!("Recipient already exist");
+            //     }
+
+            //     self.get_conversation_mut(document.id(), |conversation| {
+
+            //     }).await?;
+
+
+
+            //     document.signature = Some(signature);
+
+            //     // verify that the update correspond with the signature
+            //     document.verify()?;
+
+
+
+            //     if self.ipfs.is_pinned(&old_cid).await? {
+            //         if let Err(e) = self.ipfs.remove_pin(&old_cid, false).await {
+            //             error!("Unable to remove pin from {old_cid}: {e}");
+            //         }
+            //     }
+
+            //     self.ipfs.remove_block(old_cid).await?;
+
+            //     if let Err(e) = self.event.send(RayGunEventKind::RecipientAdded {
+            //         conversation_id,
+            //         recipient,
+            //     }) {
+            //         error!("Error broadcasting event: {e}");
+            //     }
+            // }
+            // MessagingEvents::RemoveRecipient(conversation_id, recipient, signature) => {
+            //     let mut conversation = self.get_conversation(conversation_id).await?;
+
+            //     if !conversation.recipients.remove(&recipient) {
+            //         anyhow::bail!("Recipient doesnt exist");
+            //     }
+
+            //     conversation.signature = Some(signature);
+
+            //     // verify that the update correspond with the signature
+            //     conversation.verify()?;
+
+            //     let cid = conversation.to_cid(&self.ipfs).await?;
+            //     if !self.ipfs.is_pinned(&cid).await? {
+            //         self.ipfs.insert_pin(&cid, false).await?;
+            //     }
+
+            //     let old_cid = self
+            //         .conversation_cid
+            //         .write()
+            //         .await
+            //         .insert(conversation.id(), cid)
+            //         .ok_or_else(|| {
+            //             Error::OtherWithContext("Conversation should have existed".into())
+            //         })?;
+
+            //     if self.ipfs.is_pinned(&old_cid).await? {
+            //         if let Err(e) = self.ipfs.remove_pin(&old_cid, false).await {
+            //             error!("Unable to remove pin from {old_cid}: {e}");
+            //         }
+            //     }
+
+            //     self.ipfs.remove_block(old_cid).await?;
+
+            //     if let Err(e) = self.event.send(RayGunEventKind::RecipientRemoved {
+            //         conversation_id,
+            //         recipient,
+            //     }) {
+            //         error!("Error broadcasting event: {e}");
+            //     }
+            // }
             _ => {}
         }
         Ok(false)

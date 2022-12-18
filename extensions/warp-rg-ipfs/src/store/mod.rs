@@ -2,7 +2,7 @@ pub mod conversation;
 pub mod document;
 pub mod message;
 use rust_ipfs as ipfs;
-use std::time::Duration;
+use std::{time::Duration, collections::HashSet};
 
 use chrono::{DateTime, Utc};
 use rust_ipfs::{IpfsTypes, PeerId};
@@ -28,7 +28,7 @@ pub const GROUP_BROADCAST: &str = "group/broadcast";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConversationEvents {
     NewConversation(DID),
-    NewGroupConversation(DID, Uuid, Vec<DID>, Option<String>),
+    NewGroupConversation(DID, Uuid, HashSet<DID>, Option<String>),
     DeleteConversation(Uuid),
 }
 
@@ -39,6 +39,8 @@ pub enum MessagingEvents {
     Delete(Uuid, Uuid),
     Pin(Uuid, DID, Uuid, PinState),
     React(Uuid, DID, Uuid, ReactionState, String),
+    AddRecipient(Uuid, DID, String),
+    RemoveRecipient(Uuid, DID, String),
     Event(Uuid, DID, MessageEvent, bool),
 }
 
