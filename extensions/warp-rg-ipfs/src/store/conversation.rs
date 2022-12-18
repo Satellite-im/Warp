@@ -378,7 +378,7 @@ impl From<ConversationDocument> for Conversation {
         conversation.set_id(document.id);
         conversation.set_name(document.name);
         conversation.set_conversation_type(document.conversation_type);
-        conversation.set_recipients(Vec::from_iter(document.recipients));
+        conversation.set_recipients(document.recipients);
         conversation
     }
 }
@@ -389,7 +389,7 @@ impl From<&ConversationDocument> for Conversation {
         conversation.set_id(document.id);
         conversation.set_name(document.name.clone());
         conversation.set_conversation_type(document.conversation_type);
-        conversation.set_recipients(Vec::from_iter(document.recipients.iter().cloned()));
+        conversation.set_recipients(document.recipients.clone());
         conversation
     }
 }

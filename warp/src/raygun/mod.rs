@@ -17,7 +17,7 @@ use wasm_bindgen::prelude::*;
 use chrono::{DateTime, Utc};
 use core::ops::Range;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -220,16 +220,26 @@ pub enum ConversationType {
     Group,
 }
 
-#[derive(
-    Debug, Hash, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, warp_derive::FFIVec, FFIFree)]
 pub struct Conversation {
     id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
     creator: Option<DID>,
     conversation_type: ConversationType,
-    recipients: Vec<DID>,
+    recipients: HashSet<DID>,
+}
+
+impl core::hash::Hash for Conversation {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl PartialEq for Conversation {
+    fn eq(&self, other: &Self) -> bool {
+        self.id.eq(&other.id)
+    }
 }
 
 impl Default for Conversation {
@@ -238,7 +248,7 @@ impl Default for Conversation {
         let name = None;
         let creator = None;
         let conversation_type = ConversationType::Direct;
-        let recipients = Vec::new();
+        let recipients = HashSet::new();
         Self {
             id,
             name,
@@ -266,7 +276,7 @@ impl Conversation {
         self.conversation_type
     }
 
-    pub fn recipients(&self) -> Vec<DID> {
+    pub fn recipients(&self) -> HashSet<DID> {
         self.recipients.clone()
     }
 }
@@ -284,7 +294,7 @@ impl Conversation {
         self.conversation_type = conversation_type;
     }
 
-    pub fn set_recipients(&mut self, recipients: Vec<DID>) {
+    pub fn set_recipients(&mut self, recipients: HashSet<DID>) {
         self.recipients = recipients;
     }
 }
@@ -1583,7 +1593,9 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
 
-        Box::into_raw(Box::new(Conversation::recipients(&*conversation).into()))
+        Box::into_raw(Box::new(
+            Vec::from_iter(Conversation::recipients(&*conversation)).into(),
+        ))
     }
 
     #[allow(clippy::missing_safety_doc)]
