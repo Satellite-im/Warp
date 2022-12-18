@@ -176,31 +176,32 @@ impl ConversationDocument {
 
 impl ConversationDocument {
     pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
-        let Some(creator) = self.creator.clone() else {
+        if matches!(self.conversation_type, ConversationType::Group) {
+            let Some(creator) = self.creator.clone() else {
             return Err(Error::PublicKeyInvalid)
         };
 
-        if !creator.eq(did) {
-            return Err(Error::PublicKeyInvalid);
+            if !creator.eq(did) {
+                return Err(Error::PublicKeyInvalid);
+            }
+
+            let construct = vec![
+                self.id().into_bytes().to_vec(),
+                if self.conversation_type == ConversationType::Direct {
+                    vec![0]
+                } else {
+                    vec![1]
+                },
+                creator.to_string().as_bytes().to_vec(),
+                self.recipients()
+                    .iter()
+                    .flat_map(|rec| rec.to_string().as_bytes().to_vec())
+                    .collect::<Vec<_>>(),
+            ]
+            .concat();
+
+            self.signature = Some(bs58::encode(did.sign(&construct)).into_string());
         }
-
-        let construct = vec![
-            self.id().into_bytes().to_vec(),
-            if self.conversation_type == ConversationType::Direct {
-                vec![0]
-            } else {
-                vec![1]
-            },
-            creator.to_string().as_bytes().to_vec(),
-            self.recipients()
-                .iter()
-                .flat_map(|rec| rec.to_string().as_bytes().to_vec())
-                .collect::<Vec<_>>(),
-        ]
-        .concat();
-
-        self.signature = Some(bs58::encode(did.sign(&construct)).into_string());
-
         Ok(())
     }
 
@@ -233,11 +234,9 @@ impl ConversationDocument {
 
             creator
                 .verify(&construct, &signature)
-                .map_err(|e| anyhow::anyhow!("{:?}", e))
-                .map_err(Error::from)
-        } else {
-            Ok(())
+                .map_err(|e| anyhow::anyhow!("{:?}", e))?;
         }
+        Ok(())
     }
 
     pub async fn get_messages<T: IpfsTypes>(
