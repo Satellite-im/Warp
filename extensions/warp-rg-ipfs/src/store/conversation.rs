@@ -4,7 +4,7 @@ use futures::{stream::FuturesOrdered, StreamExt};
 use libipld::{Cid, IpldCodec};
 use rust_ipfs::{Ipfs, IpfsTypes};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use uuid::Uuid;
 use warp::{
@@ -25,10 +25,34 @@ pub struct ConversationDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub creator: Option<DID>,
     pub conversation_type: ConversationType,
-    pub recipients: HashSet<DID>,
+    pub recipients: Vec<DID>,
     pub messages: BTreeSet<MessageDocument>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
+pub struct ConversationRecipient {
+    pub date: DateTime<Utc>,
+    pub did: DID,
+}
+
+impl PartialOrd for ConversationRecipient {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.date.partial_cmp(&other.date)
+    }
+}
+
+impl Ord for ConversationRecipient {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.date.cmp(&other.date)
+    }
+}
+
+impl PartialEq for ConversationRecipient {
+    fn eq(&self, other: &Self) -> bool {
+        self.date.eq(&other.date) && self.did.eq(&other.did)
+    }
 }
 
 impl From<Conversation> for ConversationDocument {
@@ -38,7 +62,7 @@ impl From<Conversation> for ConversationDocument {
             name: conversation.name(),
             creator: None,
             conversation_type: conversation.conversation_type(),
-            recipients: HashSet::from_iter(conversation.recipients()),
+            recipients: conversation.recipients(),
             messages: Default::default(),
             signature: None,
         }
@@ -52,7 +76,7 @@ impl From<&Conversation> for ConversationDocument {
             name: conversation.name(),
             creator: None,
             conversation_type: conversation.conversation_type(),
-            recipients: HashSet::from_iter(conversation.recipients()),
+            recipients: conversation.recipients(),
             messages: Default::default(),
             signature: None,
         }
@@ -92,7 +116,7 @@ impl ConversationDocument {
         format!("{}/{id}", self.files_topic())
     }
 
-    pub fn recipients(&self) -> HashSet<DID> {
+    pub fn recipients(&self) -> Vec<DID> {
         self.recipients.clone()
     }
 }
@@ -100,7 +124,7 @@ impl ConversationDocument {
 impl ConversationDocument {
     pub fn new(
         did: &DID,
-        mut recipients: HashSet<DID>,
+        mut recipients: Vec<DID>,
         id: Option<Uuid>,
         conversation_type: ConversationType,
         creator: Option<DID>,
@@ -109,7 +133,9 @@ impl ConversationDocument {
         let id = id.unwrap_or_else(Uuid::new_v4);
         let name = None;
 
-        recipients.insert(did.clone());
+        if !recipients.contains(did) {
+            recipients.push(did.clone());
+        }
 
         if recipients.is_empty() {
             return Err(Error::CannotCreateConversation);
@@ -153,7 +179,7 @@ impl ConversationDocument {
 
         Self::new(
             did,
-            HashSet::from_iter(recipients.into_iter()),
+            recipients.to_vec(),
             conversation_id,
             ConversationType::Direct,
             None,
@@ -165,7 +191,7 @@ impl ConversationDocument {
         let conversation_id = Some(Uuid::new_v4());
         Self::new(
             did,
-            HashSet::from_iter(recipients.iter().cloned()),
+            recipients.to_vec(),
             conversation_id,
             ConversationType::Group,
             Some(did.clone()),
@@ -178,8 +204,8 @@ impl ConversationDocument {
     pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
         if matches!(self.conversation_type, ConversationType::Group) {
             let Some(creator) = self.creator.clone() else {
-            return Err(Error::PublicKeyInvalid)
-        };
+                return Err(Error::PublicKeyInvalid)
+            };
 
             if !creator.eq(did) {
                 return Err(Error::PublicKeyInvalid);
@@ -187,20 +213,18 @@ impl ConversationDocument {
 
             let construct = vec![
                 self.id().into_bytes().to_vec(),
-                if self.conversation_type == ConversationType::Direct {
-                    vec![0]
-                } else {
-                    vec![1]
+                match self.conversation_type {
+                    ConversationType::Direct => vec![0x1c, 0xff],
+                    ConversationType::Group => vec![0xdc, 0xfc],
                 },
                 creator.to_string().as_bytes().to_vec(),
-                self.recipients()
-                    .iter()
-                    .flat_map(|rec| rec.to_string().as_bytes().to_vec())
-                    .collect::<Vec<_>>(),
-            ]
-            .concat();
-
-            self.signature = Some(bs58::encode(did.sign(&construct)).into_string());
+                Vec::from_iter(
+                    self.recipients()
+                        .iter()
+                        .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                ),
+            ];
+            self.signature = Some(bs58::encode(did.sign(&construct.concat())).into_string());
         }
         Ok(())
     }
@@ -219,21 +243,20 @@ impl ConversationDocument {
 
             let construct = vec![
                 self.id().into_bytes().to_vec(),
-                if self.conversation_type == ConversationType::Direct {
-                    vec![0]
-                } else {
-                    vec![1]
+                match self.conversation_type {
+                    ConversationType::Direct => vec![0x1c, 0xff],
+                    ConversationType::Group => vec![0xdc, 0xfc],
                 },
                 creator.to_string().as_bytes().to_vec(),
-                self.recipients()
-                    .iter()
-                    .flat_map(|rec| rec.to_string().as_bytes().to_vec())
-                    .collect::<Vec<_>>(),
-            ]
-            .concat();
+                Vec::from_iter(
+                    self.recipients()
+                        .iter()
+                        .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                ),
+            ];
 
             creator
-                .verify(&construct, &signature)
+                .verify(&construct.concat(), &signature)
                 .map_err(|e| anyhow::anyhow!("{:?}", e))?;
         }
         Ok(())
@@ -421,7 +444,7 @@ impl MessageDocument {
     pub async fn new<T: IpfsTypes>(
         ipfs: &Ipfs<T>,
         did: Arc<DID>,
-        recipients: HashSet<DID>,
+        recipients: Vec<DID>,
         message: Message,
     ) -> Result<Self, Error> {
         let id = message.id();

@@ -17,7 +17,7 @@ use wasm_bindgen::prelude::*;
 use chrono::{DateTime, Utc};
 use core::ops::Range;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -227,7 +227,7 @@ pub struct Conversation {
     name: Option<String>,
     creator: Option<DID>,
     conversation_type: ConversationType,
-    recipients: HashSet<DID>,
+    recipients: Vec<DID>,
 }
 
 impl core::hash::Hash for Conversation {
@@ -248,7 +248,7 @@ impl Default for Conversation {
         let name = None;
         let creator = None;
         let conversation_type = ConversationType::Direct;
-        let recipients = HashSet::new();
+        let recipients = Vec::new();
         Self {
             id,
             name,
@@ -276,7 +276,7 @@ impl Conversation {
         self.conversation_type
     }
 
-    pub fn recipients(&self) -> HashSet<DID> {
+    pub fn recipients(&self) -> Vec<DID> {
         self.recipients.clone()
     }
 }
@@ -294,7 +294,7 @@ impl Conversation {
         self.conversation_type = conversation_type;
     }
 
-    pub fn set_recipients(&mut self, recipients: HashSet<DID>) {
+    pub fn set_recipients(&mut self, recipients: Vec<DID>) {
         self.recipients = recipients;
     }
 }

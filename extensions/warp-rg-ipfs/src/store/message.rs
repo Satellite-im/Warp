@@ -1292,9 +1292,9 @@ impl<T: IpfsTypes> MessageStore<T> {
         }
 
         let own_did = &*self.did;
-        if !conversation.recipients.insert(did_key.clone()) {
-            return Err(Error::IdentityExist);
-        }
+        // if !conversation.recipients.insert(did_key.clone()) {
+        //     return Err(Error::IdentityExist);
+        // }
 
         
 
