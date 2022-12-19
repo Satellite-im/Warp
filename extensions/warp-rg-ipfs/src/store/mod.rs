@@ -39,8 +39,8 @@ pub enum MessagingEvents {
     Delete(Uuid, Uuid),
     Pin(Uuid, DID, Uuid, PinState),
     React(Uuid, DID, Uuid, ReactionState, String),
-    AddRecipient(Uuid, DID, String),
-    RemoveRecipient(Uuid, DID, String),
+    AddRecipient(Uuid, DID, Vec<DID>, String),
+    RemoveRecipient(Uuid, DID, Vec<DID>, String),
     Event(Uuid, DID, MessageEvent, bool),
 }
 

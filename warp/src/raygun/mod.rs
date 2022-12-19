@@ -616,7 +616,15 @@ pub enum Location {
 
 #[async_trait::async_trait]
 pub trait RayGun:
-    RayGunStream + RayGunAttachment + RayGunEvents + Extension + Sync + Send + SingleHandle + DynClone
+    RayGunStream
+    + RayGunGroupConversation
+    + RayGunAttachment
+    + RayGunEvents
+    + Extension
+    + Sync
+    + Send
+    + SingleHandle
+    + DynClone
 {
     // Start a new conversation.
     async fn create_conversation(&mut self, _: &DID) -> Result<Conversation, Error> {
@@ -935,6 +943,21 @@ where
         event: MessageEvent,
     ) -> Result<(), Error> {
         self.write().cancel_event(conversation_id, event).await
+    }
+}
+
+#[allow(clippy::await_holding_lock)]
+#[async_trait::async_trait]
+impl<T: ?Sized> RayGunGroupConversation for Arc<RwLock<Box<T>>>
+where
+    T: RayGunGroupConversation,
+{
+    async fn add_recipient(&mut self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
+        self.write().add_recipient(conversation_id, did).await
+    }
+
+    async fn remove_recipient(&mut self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
+        self.write().remove_recipient(conversation_id, did).await
     }
 }
 

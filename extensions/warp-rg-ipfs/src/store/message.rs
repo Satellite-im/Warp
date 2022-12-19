@@ -1109,6 +1109,80 @@ impl<T: IpfsTypes> MessageStore<T> {
         Ok(conversation.messages.len())
     }
 
+    async fn send_single_conversation_event(
+        &mut self,
+        did_key: &DID,
+        conversation_id: Uuid,
+        event: ConversationEvents,
+    ) -> Result<(), Error> {
+        let peers = self
+            .ipfs
+            .pubsub_peers(Some(DIRECT_BROADCAST.into()))
+            .await?;
+
+        let own_did = &*self.did;
+
+        let mut data = Sata::default();
+
+        data.add_recipient(did_key.as_ref())?;
+
+        let data = data.encrypt(
+            libipld::IpldCodec::DagJson,
+            own_did.as_ref(),
+            warp::sata::Kind::Reference,
+            serde_json::to_vec(&event)?,
+        )?;
+
+        let peer_id = did_to_libp2p_pub(did_key)?.to_peer_id();
+
+        match peers.contains(&peer_id) {
+            true => {
+                let bytes = serde_json::to_vec(&data)?;
+                if let Err(_e) = self
+                    .ipfs
+                    .pubsub_publish(DIRECT_BROADCAST.into(), bytes)
+                    .await
+                {
+                    warn!("Unable to publish to topic. Queuing event");
+                    if let Err(e) = self
+                        .queue_event(
+                            did_key.clone(),
+                            Queue::direct(
+                                conversation_id,
+                                None,
+                                peer_id,
+                                DIRECT_BROADCAST.into(),
+                                data.clone(),
+                            ),
+                        )
+                        .await
+                    {
+                        error!("Error submitting event to queue: {e}");
+                    }
+                }
+            }
+            false => {
+                if let Err(e) = self
+                    .queue_event(
+                        did_key.clone(),
+                        Queue::direct(
+                            conversation_id,
+                            None,
+                            peer_id,
+                            DIRECT_BROADCAST.into(),
+                            data.clone(),
+                        ),
+                    )
+                    .await
+                {
+                    error!("Error submitting event to queue: {e}");
+                }
+            }
+        };
+
+        Ok(())
+    }
+
     pub async fn get_message(
         &self,
         conversation_id: Uuid,
@@ -1285,20 +1359,61 @@ impl<T: IpfsTypes> MessageStore<T> {
         conversation_id: Uuid,
         did_key: &DID,
     ) -> Result<(), Error> {
+        let conversation = self.get_conversation(conversation_id).await?;
+        let _guard = self.conversation_queue(conversation_id).await?;
 
-        let mut conversation = self.get_conversation(conversation_id).await?;
         if matches!(conversation.conversation_type, ConversationType::Direct) {
             return Err(Error::InvalidConversation);
         }
 
+        let Some(creator) = conversation.creator.clone() else {
+            return Err(Error::InvalidConversation);
+        };
+
         let own_did = &*self.did;
-        // if !conversation.recipients.insert(did_key.clone()) {
-        //     return Err(Error::IdentityExist);
-        // }
 
-        
+        if creator.ne(own_did) {
+            return Err(Error::PublicKeyInvalid);
+        }
 
-        Ok(())
+        if creator.eq(did_key) {
+            return Err(Error::PublicKeyInvalid);
+        }
+
+        if self.account.is_blocked(did_key)? {
+            return Err(Error::PublicKeyIsBlocked);
+        }
+
+        if conversation.recipients.contains(did_key) {
+            return Err(Error::IdentityExist);
+        }
+
+        self.get_conversation_mut(conversation_id, |conversation| {
+            conversation.recipients.push(did_key.clone());
+        })
+        .await?;
+        drop(_guard);
+
+        let conversation = self.get_conversation(conversation_id).await?;
+
+        let Some(signature) = conversation.signature.clone() else {
+            return Err(Error::InvalidSignature);
+        };
+
+        let event =
+            MessagingEvents::AddRecipient(conversation_id, did_key.clone(), conversation.recipients(), signature.clone());
+
+        self.send_raw_event(conversation_id, None, event, true)
+            .await?;
+
+        let new_event = ConversationEvents::NewGroupConversation(
+            did_key.clone(),
+            conversation_id,
+            conversation.recipients(),
+            Some(signature),
+        );
+
+        self.send_single_conversation_event(did_key, conversation_id, new_event).await
     }
 
     pub async fn remove_recipient(
@@ -1341,7 +1456,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             });
         }
 
-        let own_did = &*self.did.clone();
+        let own_did = &*self.did;
 
         let mut message = Message::default();
         message.set_conversation_id(conversation.id());
@@ -2491,40 +2606,18 @@ impl<T: IpfsTypes> MessageStore<T> {
                     }
                 }
             }
-            // MessagingEvents::AddRecipient(conversation_id, recipient, signature) => {
-
-            //     if !document.recipients.insert(recipient.clone()) {
-            //         anyhow::bail!("Recipient already exist");
-            //     }
-
-            //     self.get_conversation_mut(document.id(), |conversation| {
-
-            //     }).await?;
-
-
-
-            //     document.signature = Some(signature);
-
-            //     // verify that the update correspond with the signature
-            //     document.verify()?;
-
-
-
-            //     if self.ipfs.is_pinned(&old_cid).await? {
-            //         if let Err(e) = self.ipfs.remove_pin(&old_cid, false).await {
-            //             error!("Unable to remove pin from {old_cid}: {e}");
-            //         }
-            //     }
-
-            //     self.ipfs.remove_block(old_cid).await?;
-
-            //     if let Err(e) = self.event.send(RayGunEventKind::RecipientAdded {
-            //         conversation_id,
-            //         recipient,
-            //     }) {
-            //         error!("Error broadcasting event: {e}");
-            //     }
-            // }
+            MessagingEvents::AddRecipient(conversation_id, recipient, list, signature) => {
+                self.get_conversation_mut(document.id(), |conversation| {
+                    conversation.recipients = list;
+                    conversation.signature = Some(signature);
+                }).await?;
+                if let Err(e) = tx.send(MessageEventKind::RecipientAdded {
+                    conversation_id,
+                    recipient,
+                }) {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
             // MessagingEvents::RemoveRecipient(conversation_id, recipient, signature) => {
             //     let mut conversation = self.get_conversation(conversation_id).await?;
 
