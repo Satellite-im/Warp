@@ -68,7 +68,7 @@ pub struct MessageStore<T: IpfsTypes> {
     stream_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
 
     stream_event_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
-    
+
     // Queue
     queue: Arc<tokio::sync::RwLock<HashMap<DID, Vec<Queue>>>>,
 
@@ -2631,11 +2631,16 @@ impl<T: IpfsTypes> MessageStore<T> {
                 }
             }
             MessagingEvents::AddRecipient(conversation_id, recipient, list, signature) => {
+                if document.recipients.contains(&recipient) {
+                    return Err(Error::IdentityExist);
+                }
+
                 self.get_conversation_mut(document.id(), |conversation| {
                     conversation.recipients = list;
                     conversation.signature = Some(signature);
                 })
                 .await?;
+                
                 if let Err(e) = tx.send(MessageEventKind::RecipientAdded {
                     conversation_id,
                     recipient,
