@@ -344,6 +344,50 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             });
                         },
+                        Some("/add-recipient") => {
+                            let did: DID = match cmd_line.next() {
+                                Some(did) => match DID::try_from(did.to_string()) {
+                                    Ok(did) => did,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing DID Key: {e}")?;
+                                        continue
+                                    }
+                                },
+                                None => {
+                                    writeln!(stdout, "/add-recipient <DID>")?;
+                                    continue
+                                }
+                            };
+                            let local_topic = *topic.read();
+                            if let Err(e) = chat.add_recipient(local_topic, &did).await {
+                                writeln!(stdout, "Error adding recipient: {e}")?;
+                                continue
+                            }
+                            writeln!(stdout, "{} has been added", did)?;
+
+                        },
+                        Some("/remove-recipient") => {
+                            let did: DID = match cmd_line.next() {
+                                Some(did) => match DID::try_from(did.to_string()) {
+                                    Ok(did) => did,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing DID Key: {e}")?;
+                                        continue
+                                    }
+                                },
+                                None => {
+                                    writeln!(stdout, "/remove-recipient <DID>")?;
+                                    continue
+                                }
+                            };
+                            let local_topic = *topic.read();
+                            if let Err(e) = chat.remove_recipient(local_topic, &did).await {
+                                writeln!(stdout, "Error removing recipient: {e}")?;
+                                continue
+                            }
+                            writeln!(stdout, "{} has been removed", did)?;
+
+                        },
                         Some("/create-group") => {
 
                             let mut did_keys = vec![];
@@ -392,7 +436,7 @@ async fn main() -> anyhow::Result<()> {
                             let conversation_id = match cmd_line.next() {
                                 Some(id) => id.parse()?,
                                 None => {
-                                    writeln!(stdout, "/edit <conversation-id> <message-id> <message>")?;
+                                    writeln!(stdout, "/remove-conversation <conversation-id>")?;
                                     continue
                                 }
                             };
@@ -1118,7 +1162,32 @@ async fn message_event_handle(
                     }
                 }
             }
-            _ => {}
+            MessageEventKind::RecipientAdded {
+                conversation_id,
+                recipient,
+            } => {
+                if *topic.read() == conversation_id {
+                    let username = get_username(multipass.clone(), recipient.clone())
+                        .unwrap_or_else(|_| recipient.to_string());
+
+                    writeln!(stdout, ">>> {} was added to {conversation_id}", username)?;
+                }
+            }
+            MessageEventKind::RecipientRemoved {
+                conversation_id,
+                recipient,
+            } => {
+                if *topic.read() == conversation_id {
+                    let username = get_username(multipass.clone(), recipient.clone())
+                        .unwrap_or_else(|_| recipient.to_string());
+
+                    writeln!(
+                        stdout,
+                        ">>> {} was removed from {conversation_id}",
+                        username
+                    )?;
+                }
+            }
         }
     }
     Ok(())
