@@ -509,15 +509,17 @@ impl MessageDocument {
         }
 
         let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, message)?;
+        let message_cid = data.to_cid(ipfs).await?;
         info!("Setting Message to document");
-        self.message = data.to_cid(ipfs).await?;
+        self.message = message_cid;
         info!("Message is updated");
-        if ipfs.is_pinned(&old_document).await? {
-            info!("Removing pin for {old_document}");
-            ipfs.remove_pin(&old_document, false).await?;
+        if old_document != message_cid {
+            if ipfs.is_pinned(&old_document).await? {
+                info!("Removing pin for {old_document}");
+                ipfs.remove_pin(&old_document, false).await?;
+            }
+            ipfs.remove_block(old_document).await?;
         }
-        ipfs.remove_block(old_document).await?;
-
         Ok(())
     }
 
