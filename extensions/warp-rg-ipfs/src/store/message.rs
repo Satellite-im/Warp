@@ -2337,6 +2337,10 @@ impl<T: IpfsTypes> MessageStore<T> {
                     return Err(Error::MessageFound);
                 }
 
+                if !document.recipients().contains(&message.sender()) {
+                    return Err(Error::IdentityDoesntExist);
+                }
+
                 let lines_value_length: usize = message
                     .value()
                     .iter()
