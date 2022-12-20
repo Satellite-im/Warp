@@ -234,7 +234,6 @@ impl<T: IpfsTypes> MessageStore<T> {
                             }
                         }
                     }
-                    tokio::time::sleep(Duration::from_millis(1)).await;
                 }
             }
         });
@@ -1434,7 +1433,11 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         self.send_raw_event(conversation_id, None, event, true)
             .await?;
-
+        let tx = self.get_conversation_sender(conversation_id).await?;
+        let _ = tx.send(MessageEventKind::RecipientAdded {
+            conversation_id,
+            recipient: did_key.clone(),
+        });
         let own_did = &*self.did;
         let new_event = ConversationEvents::NewGroupConversation(
             own_did.clone(),
@@ -1500,6 +1503,11 @@ impl<T: IpfsTypes> MessageStore<T> {
         self.send_raw_event(conversation_id, None, event, true)
             .await?;
 
+        let tx = self.get_conversation_sender(conversation_id).await?;
+        let _ = tx.send(MessageEventKind::RecipientRemoved {
+            conversation_id,
+            recipient: did_key.clone(),
+        });
         let new_event = ConversationEvents::DeleteConversation(conversation.id());
 
         self.send_single_conversation_event(did_key, conversation.id(), new_event)
