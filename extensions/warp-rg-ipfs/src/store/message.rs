@@ -68,6 +68,7 @@ pub struct MessageStore<T: IpfsTypes> {
     stream_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
 
     stream_event_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
+    
     // Queue
     queue: Arc<tokio::sync::RwLock<HashMap<DID, Vec<Queue>>>>,
 
@@ -428,7 +429,12 @@ impl<T: IpfsTypes> MessageStore<T> {
                 self.stream_sender.write().await.insert(convo.id(), tx);
 
                 self.start_task(convo.id(), stream).await;
-
+                if let Some(path) = self.path.as_ref() {
+                    let cid = cid.to_string();
+                    if let Err(e) = tokio::fs::write(path.join(convo.id().to_string()), cid).await {
+                        error!("Unable to save info to file: {e}");
+                    }
+                }
                 if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
                     conversation_id: convo.id(),
                 }) {
@@ -490,7 +496,12 @@ impl<T: IpfsTypes> MessageStore<T> {
                 self.stream_sender.write().await.insert(convo.id(), tx);
 
                 self.start_task(convo.id(), stream).await;
-
+                if let Some(path) = self.path.as_ref() {
+                    let cid = cid.to_string();
+                    if let Err(e) = tokio::fs::write(path.join(convo.id().to_string()), cid).await {
+                        error!("Unable to save info to file: {e}");
+                    }
+                }
                 if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
                     conversation_id: convo.id(),
                 }) {
@@ -857,6 +868,13 @@ impl<T: IpfsTypes> MessageStore<T> {
                 conversation.signature.clone(),
             ))?,
         )?;
+
+        if let Some(path) = self.path.as_ref() {
+            let cid = cid.to_string();
+            if let Err(e) = tokio::fs::write(path.join(conversation.id().to_string()), cid).await {
+                error!("Unable to save info to file: {e}");
+            }
+        }
 
         for (did, peer_id) in peer_id_list {
             match peers.contains(&peer_id) {
@@ -1400,20 +1418,26 @@ impl<T: IpfsTypes> MessageStore<T> {
             return Err(Error::InvalidSignature);
         };
 
-        let event =
-            MessagingEvents::AddRecipient(conversation_id, did_key.clone(), conversation.recipients(), signature.clone());
+        let event = MessagingEvents::AddRecipient(
+            conversation_id,
+            did_key.clone(),
+            conversation.recipients(),
+            signature.clone(),
+        );
 
         self.send_raw_event(conversation_id, None, event, true)
             .await?;
 
+        let own_did = &*self.did;
         let new_event = ConversationEvents::NewGroupConversation(
-            did_key.clone(),
-            conversation_id,
+            own_did.clone(),
+            conversation.id(),
             conversation.recipients(),
             Some(signature),
         );
 
-        self.send_single_conversation_event(did_key, conversation_id, new_event).await
+        self.send_single_conversation_event(did_key, conversation_id, new_event)
+            .await
     }
 
     pub async fn remove_recipient(
@@ -2610,7 +2634,8 @@ impl<T: IpfsTypes> MessageStore<T> {
                 self.get_conversation_mut(document.id(), |conversation| {
                     conversation.recipients = list;
                     conversation.signature = Some(signature);
-                }).await?;
+                })
+                .await?;
                 if let Err(e) = tx.send(MessageEventKind::RecipientAdded {
                     conversation_id,
                     recipient,
