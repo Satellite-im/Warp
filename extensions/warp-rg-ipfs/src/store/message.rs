@@ -522,7 +522,14 @@ impl<T: IpfsTypes> MessageStore<T> {
                 match self.get_conversation(conversation_id).await {
                     Ok(conversation)
                         if conversation.recipients().contains(&sender)
-                            && conversation.conversation_type == ConversationType::Direct =>
+                            && matches!(
+                                conversation.conversation_type,
+                                ConversationType::Direct
+                            )
+                            || matches!(
+                                conversation.conversation_type,
+                                ConversationType::Group
+                            ) && matches!(conversation.creator.clone(), Some(creator) if creator.eq(&sender)) =>
                     {
                         conversation
                     }
