@@ -471,7 +471,7 @@ async fn main() -> anyhow::Result<()> {
                                     let username = get_username(new_account.clone(), recipient.clone()).unwrap_or_else(|_| recipient.to_string());
                                     recipients.push(username);
                                 }
-                                table.add_row(vec![convo.id().to_string(), recipients.join("/").to_string()]);
+                                table.add_row(vec![convo.id().to_string(), recipients.join(",").to_string()]);
                             }
                             writeln!(stdout, "{}", table)?;
                         },
