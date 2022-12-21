@@ -14,8 +14,8 @@ mod test {
         tesseract.unlock(b"internal pass").unwrap();
         let config = warp_mp_ipfs::config::MpIpfsConfig::development();
         let mut account = ipfs_identity_temporary(Some(config), tesseract, None).await?;
-        let did = account.create_identity(username, passphrase)?;
-        let identity = account.get_own_identity()?;
+        let did = account.create_identity(username, passphrase).await?;
+        let identity = account.get_own_identity().await?;
         Ok((Box::new(account), did, identity))
     }
 
@@ -66,7 +66,7 @@ mod test {
         tokio::time::sleep(std::time::Duration::from_millis(600)).await;
 
         let identity_b = account_a
-            .get_identity(did_b.clone().into())
+            .get_identity(did_b.clone().into()).await
             .map(|s| s.first().cloned())?;
 
         assert!(identity_b.is_some());
@@ -88,7 +88,7 @@ mod test {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
         let identity_b = account_a
-            .get_identity(String::from("JaneDoe").into())?
+            .get_identity(String::from("JaneDoe").into()).await?
             .first()
             .cloned();
 
@@ -109,13 +109,13 @@ mod test {
         account.create_identity(
             Some("JohnDoe"),
             Some("morning caution dose lab six actress pond humble pause enact virtual train"),
-        )?;
+        ).await?;
 
-        let old_identity = account.get_own_identity()?;
+        let old_identity = account.get_own_identity().await?;
 
-        account.update_identity(IdentityUpdate::set_username("JohnDoe2.0".into()))?;
+        account.update_identity(IdentityUpdate::set_username("JohnDoe2.0".into())).await?;
 
-        let updated_identity = account.get_own_identity()?;
+        let updated_identity = account.get_own_identity().await?;
 
         assert_ne!(old_identity.username(), updated_identity.username());
 
@@ -131,13 +131,13 @@ mod test {
         account.create_identity(
             Some("JohnDoe"),
             Some("morning caution dose lab six actress pond humble pause enact virtual train"),
-        )?;
+        ).await?;
 
-        let old_identity = account.get_own_identity()?;
+        let old_identity = account.get_own_identity().await?;
 
-        account.update_identity(IdentityUpdate::set_status_message(Some("Blast off".into())))?;
+        account.update_identity(IdentityUpdate::set_status_message(Some("Blast off".into()))).await?;
 
-        let updated_identity = account.get_own_identity()?;
+        let updated_identity = account.get_own_identity().await?;
 
         assert_eq!(old_identity.status_message(), None);
 

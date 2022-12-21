@@ -391,7 +391,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                     return Ok(());
                 }
 
-                if let Ok(true) = self.account.is_blocked(&peer) {
+                if let Ok(true) = self.account.is_blocked(&peer).await {
                     warn!("{peer} is blocked");
                     return Ok(());
                 }
@@ -654,10 +654,10 @@ impl<T: IpfsTypes> MessageStore<T> {
 impl<T: IpfsTypes> MessageStore<T> {
     pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
         if self.with_friends.load(Ordering::SeqCst) {
-            self.account.has_friend(did_key)?;
+            self.account.has_friend(did_key).await?;
         }
 
-        if let Ok(true) = self.account.is_blocked(did_key) {
+        if let Ok(true) = self.account.is_blocked(did_key).await {
             return Err(Error::PublicKeyIsBlocked);
         }
 
@@ -691,7 +691,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             let account = self.account.clone();
             let did = did_key.clone();
             async move {
-                if let Ok(list) = account.get_identity(did.into()) {
+                if let Ok(list) = account.get_identity(did.into()).await {
                     if list.is_empty() {
                         warn!("Unable to find identity. Creating conversation anyway");
                     }
@@ -782,12 +782,12 @@ impl<T: IpfsTypes> MessageStore<T> {
     ) -> Result<Conversation, Error> {
         if self.with_friends.load(Ordering::SeqCst) {
             for did in did_key.iter() {
-                self.account.has_friend(did)?;
+                self.account.has_friend(did).await?;
             }
         }
 
         for did in did_key.iter() {
-            if let Ok(true) = self.account.is_blocked(did) {
+            if let Ok(true) = self.account.is_blocked(did).await {
                 return Err(Error::PublicKeyIsBlocked);
             }
         }
@@ -808,7 +808,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             let did_list = did_key.clone();
             async move {
                 for did in did_list {
-                    if let Ok(list) = account.get_identity(did.into()) {
+                    if let Ok(list) = account.get_identity(did.into()).await {
                         if list.is_empty() {
                             warn!("Unable to find identity. Creating conversation anyway");
                         }
@@ -1412,7 +1412,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             return Err(Error::PublicKeyInvalid);
         }
 
-        if self.account.is_blocked(did_key)? {
+        if self.account.is_blocked(did_key).await? {
             return Err(Error::PublicKeyIsBlocked);
         }
 

@@ -79,7 +79,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
         *filesystem.account.write().await = Some(account);
 
         if let Some(account) = filesystem.account.read().await.clone() {
-            if account.get_own_identity().is_err() {
+            if account.get_own_identity().await.is_err() {
                 debug!("Identity doesnt exist. Waiting for it to load or to be created");
                 let mut filesystem = filesystem.clone();
 
@@ -87,7 +87,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
                     let account = account.clone();
                     async move {
                         loop {
-                            match account.get_own_identity() {
+                            match account.get_own_identity().await {
                                 Ok(_) => break,
                                 _ => {
                                     //TODO: have a flag that would tell is it been an error other than it not being available

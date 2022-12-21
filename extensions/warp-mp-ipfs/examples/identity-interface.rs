@@ -80,7 +80,7 @@ async fn account(
 
     config.ipfs_setting.mdns.enable = opt.mdns;
     let mut account = ipfs_identity_temporary(Some(config), tesseract, cache).await?;
-    account.create_identity(username, None)?;
+    account.create_identity(username, None).await?;
     Ok(Box::new(account))
 }
 
@@ -126,8 +126,8 @@ async fn account_persistent<P: AsRef<Path>>(
 
     config.ipfs_setting.mdns.enable = opt.mdns;
     let mut account = ipfs_identity_persistent(config, tesseract, cache).await?;
-    if account.get_own_identity().is_err() {
-        account.create_identity(username, None)?;
+    if account.get_own_identity().await.is_err() {
+        account.create_identity(username, None).await?;
     }
     Ok(Box::new(account))
 }
@@ -160,7 +160,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     println!("Obtaining identity....");
-    let own_identity = account.get_own_identity()?;
+    let own_identity = account.get_own_identity().await?;
     println!(
         "Registered user {}#{}",
         own_identity.username(),
@@ -172,7 +172,7 @@ async fn main() -> anyhow::Result<()> {
         own_identity.short_id()
     ))?;
 
-    let mut event_stream = account.subscribe()?;
+    let mut event_stream = account.subscribe().await?;
     loop {
         tokio::select! {
             event = event_stream.next() => {
@@ -180,7 +180,7 @@ async fn main() -> anyhow::Result<()> {
                     match event {
                         warp::multipass::MultiPassEventKind::FriendRequestReceived { from: did } => {
                             let username = account
-                                .get_identity(Identifier::did_key(did.clone()))
+                                .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
                                 .map(|ident| ident.username())
@@ -190,7 +190,7 @@ async fn main() -> anyhow::Result<()> {
                         },
                         warp::multipass::MultiPassEventKind::FriendRequestSent { to: did } => {
                             let username = account
-                                .get_identity(Identifier::did_key(did.clone()))
+                                .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
                                 .map(|ident| ident.username())
@@ -200,7 +200,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                         warp::multipass::MultiPassEventKind::IncomingFriendRequestRejected { did } => {
                             let username = account
-                                .get_identity(Identifier::did_key(did.clone()))
+                                .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
                                 .map(|ident| ident.username())
@@ -210,7 +210,7 @@ async fn main() -> anyhow::Result<()> {
                         },
                         warp::multipass::MultiPassEventKind::OutgoingFriendRequestRejected { did } => {
                             let username = account
-                                .get_identity(Identifier::did_key(did.clone()))
+                                .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
                                 .map(|ident| ident.username())
@@ -220,7 +220,7 @@ async fn main() -> anyhow::Result<()> {
                         },
                         warp::multipass::MultiPassEventKind::IncomingFriendRequestClosed { did } => {
                             let username = account
-                                .get_identity(Identifier::did_key(did.clone()))
+                                .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
                                 .map(|ident| ident.username())
@@ -230,7 +230,7 @@ async fn main() -> anyhow::Result<()> {
                         },
                         warp::multipass::MultiPassEventKind::OutgoingFriendRequestClosed { did } => {
                             let username = account
-                                .get_identity(Identifier::did_key(did.clone()))
+                                .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
                                 .map(|ident| ident.username())
@@ -240,7 +240,7 @@ async fn main() -> anyhow::Result<()> {
                         },
                         warp::multipass::MultiPassEventKind::FriendAdded { did } => {
                             let username = account
-                                .get_identity(Identifier::did_key(did.clone()))
+                                .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
                                 .map(|ident| ident.username())
@@ -250,7 +250,7 @@ async fn main() -> anyhow::Result<()> {
                         },
                         warp::multipass::MultiPassEventKind::FriendRemoved { did } => {
                             let username = account
-                                .get_identity(Identifier::did_key(did.clone()))
+                                .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
                                 .map(|ident| ident.username())
@@ -260,7 +260,7 @@ async fn main() -> anyhow::Result<()> {
                         },
                         warp::multipass::MultiPassEventKind::IdentityOnline { did } => {
                             let username = account
-                                .get_identity(Identifier::did_key(did.clone()))
+                                .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
                                 .map(|ident| ident.username())
@@ -270,7 +270,7 @@ async fn main() -> anyhow::Result<()> {
                         },
                         warp::multipass::MultiPassEventKind::IdentityOffline { did } => {
                             let username = account
-                                .get_identity(Identifier::did_key(did.clone()))
+                                .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
                                 .map(|ident| ident.username())
@@ -288,7 +288,7 @@ async fn main() -> anyhow::Result<()> {
                         Some("friends-list") => {
                             let mut table = Table::new();
                             table.set_header(vec!["Username", "Public Key"]);
-                            let friends = match account.list_friends() {
+                            let friends = match account.list_friends().await {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error obtaining friends list: {}", e)?;
@@ -296,7 +296,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for friend in friends.iter() {
-                                let username = match account.get_identity(Identifier::did_key(friend.clone())) {
+                                let username = match account.get_identity(Identifier::did_key(friend.clone())).await {
                                     Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(friend)).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
                                     Err(_) => String::from("N/A")
                                 };
@@ -310,7 +310,7 @@ async fn main() -> anyhow::Result<()> {
                         Some("block-list") => {
                             let mut table = Table::new();
                             table.set_header(vec!["Username", "Public Key"]);
-                            let block_list = match account.block_list() {
+                            let block_list = match account.block_list().await {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error obtaining block list: {}", e)?;
@@ -318,7 +318,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for item in block_list.iter() {
-                                let username = match account.get_identity(Identifier::did_key(item.clone())) {
+                                let username = match account.get_identity(Identifier::did_key(item.clone())).await {
                                     Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(item)).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
                                     Err(_) => String::from("N/A")
                                 };
@@ -344,7 +344,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = account.remove_friend(&pk) {
+                            if let Err(e) = account.remove_friend(&pk).await {
                                 writeln!(stdout, "Error Removing Friend: {}", e)?;
                                 continue;
                             }
@@ -365,7 +365,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = account.block(&pk) {
+                            if let Err(e) = account.block(&pk).await {
                                 writeln!(stdout, "Error Blocking Key: {}", e)?;
                                 continue;
                             }
@@ -386,7 +386,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = account.unblock(&pk) {
+                            if let Err(e) = account.unblock(&pk).await {
                                 writeln!(stdout, "Error Unblocking Key: {}", e)?;
                                 continue;
                             }
@@ -409,7 +409,7 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     };
 
-                                    if let Err(e) = account.send_request(&pk) {
+                                    if let Err(e) = account.send_request(&pk).await {
                                         writeln!(stdout, "Error sending request: {}", e)?;
                                         continue;
                                     }
@@ -430,7 +430,7 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     };
 
-                                    if let Err(e) = account.accept_request(&pk) {
+                                    if let Err(e) = account.accept_request(&pk).await {
                                         writeln!(stdout, "Error Accepting request: {}", e)?;
                                         continue;
                                     }
@@ -452,7 +452,7 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     };
 
-                                    if let Err(e) = account.deny_request(&pk) {
+                                    if let Err(e) = account.deny_request(&pk).await {
                                         writeln!(stdout, "Error Denying request: {}", e)?;
                                         continue;
                                     }
@@ -474,7 +474,7 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     };
 
-                                    if let Err(e) = account.close_request(&pk) {
+                                    if let Err(e) = account.close_request(&pk).await {
                                         writeln!(stdout, "Error Closing request: {}", e)?;
                                         continue;
                                     }
@@ -490,7 +490,7 @@ async fn main() -> anyhow::Result<()> {
                         Some("list-incoming-request") => {
                             let mut table = Table::new();
                             table.set_header(vec!["From", "Status", "Date"]);
-                            let list = match account.list_incoming_request() {
+                            let list = match account.list_incoming_request().await {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error obtaining request list: {}", e)?;
@@ -498,7 +498,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for request in list.iter() {
-                                let username = match account.get_identity(Identifier::did_key(request.from())) {
+                                let username = match account.get_identity(Identifier::did_key(request.from())).await {
                                     Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(&request.from())).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
                                     Err(_) => String::from("N/A")
                                 };
@@ -513,7 +513,7 @@ async fn main() -> anyhow::Result<()> {
                         Some("list-outgoing-request") => {
                             let mut table = Table::new();
                             table.set_header(vec!["To", "Status", "Date"]);
-                            let list = match account.list_outgoing_request() {
+                            let list = match account.list_outgoing_request().await {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error obtaining request list: {}", e)?;
@@ -521,7 +521,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for request in list.iter() {
-                                let username = match account.get_identity(Identifier::did_key(request.to())) {
+                                let username = match account.get_identity(Identifier::did_key(request.to())).await {
                                     Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(&request.to())).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
                                     Err(_) => String::from("N/A")
                                 };
@@ -541,7 +541,7 @@ async fn main() -> anyhow::Result<()> {
                             }
 
                             let status = status.join(" ").to_string();
-                            if let Err(e) = account.update_identity(IdentityUpdate::set_status_message(Some(status))) {
+                            if let Err(e) = account.update_identity(IdentityUpdate::set_status_message(Some(status))).await {
                                 writeln!(stdout, "Error updating status: {}", e)?;
                                 continue
                             }
@@ -556,7 +556,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = account.update_identity(IdentityUpdate::set_username(username.to_string())) {
+                            if let Err(e) = account.update_identity(IdentityUpdate::set_username(username.to_string())).await {
                                 writeln!(stdout, "Error updating username: {}", e)?;
                                 continue;
                             }
@@ -572,7 +572,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = account.update_identity(IdentityUpdate::set_graphics_picture(picture.to_string())) {
+                            if let Err(e) = account.update_identity(IdentityUpdate::set_graphics_picture(picture.to_string())).await {
                                 writeln!(stdout, "Error updating picture: {}", e)?;
                                 continue;
                             }
@@ -588,7 +588,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = account.update_identity(IdentityUpdate::set_graphics_banner(banner.to_string())) {
+                            if let Err(e) = account.update_identity(IdentityUpdate::set_graphics_banner(banner.to_string())).await {
                                 writeln!(stdout, "Error updating banner: {}", e)?;
                                 continue;
                             }
@@ -605,7 +605,7 @@ async fn main() -> anyhow::Result<()> {
                                             continue;
                                         }
                                     };
-                                    match account.get_identity(Identifier::user_name(username)) {
+                                    match account.get_identity(Identifier::user_name(username)).await {
                                         Ok(identity) => identity,
                                         Err(e) => {
                                             writeln!(stdout, "Error obtaining identity by username: {}", e)?;
@@ -627,7 +627,7 @@ async fn main() -> anyhow::Result<()> {
                                             continue;
                                         }
                                     };
-                                    match account.get_identity(Identifier::did_key(pk)) {
+                                    match account.get_identity(Identifier::did_key(pk)).await {
                                         Ok(identity) => identity,
                                         Err(e) => {
                                             writeln!(stdout, "Error obtaining identity by public key: {}", e)?;
@@ -636,7 +636,7 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                 },
                                 Some("own") | None => {
-                                    match account.get_identity(Identifier::own()) {
+                                    match account.get_identity(Identifier::own()).await {
                                         Ok(identity) => identity,
                                         Err(e) => {
                                             writeln!(stdout, "Error obtaining own identity: {}", e)?;
@@ -654,7 +654,7 @@ async fn main() -> anyhow::Result<()> {
                             for identity in idents {
                                 let status = match identity.did_key() == own_identity.did_key() {
                                     true => IdentityStatus::Online,
-                                    false => account.identity_status(&identity.did_key()).unwrap_or(IdentityStatus::Offline)
+                                    false => account.identity_status(&identity.did_key()).await.unwrap_or(IdentityStatus::Offline)
                                 };
                                 table.add_row(vec![
                                     identity.username(),

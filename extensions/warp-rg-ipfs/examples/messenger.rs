@@ -82,8 +82,8 @@ async fn create_account<P: AsRef<Path>>(
         false => Box::new(ipfs_identity_temporary(Some(config), tesseract, Some(cache)).await?),
     };
 
-    if account.get_own_identity().is_err() {
-        account.create_identity(None, None)?;
+    if account.get_own_identity().await.is_err() {
+        account.create_identity(None, None).await?;
     }
     Ok(account)
 }
@@ -182,7 +182,7 @@ async fn main() -> anyhow::Result<()> {
     .await?;
 
     println!("Obtaining identity....");
-    let identity = new_account.get_own_identity()?;
+    let identity = new_account.get_own_identity().await?;
     println!(
         "Registered user {}#{}",
         identity.username(),
@@ -468,7 +468,7 @@ async fn main() -> anyhow::Result<()> {
                                     if convo.conversation_type() == ConversationType::Direct && recipient == identity.did_key() {
                                         continue
                                     }
-                                    let username = get_username(new_account.clone(), recipient.clone()).unwrap_or_else(|_| recipient.to_string());
+                                    let username = get_username(new_account.clone(), recipient.clone()).await.unwrap_or_else(|_| recipient.to_string());
                                     recipients.push(username);
                                 }
                                 table.add_row(vec![convo.id().to_string(), recipients.join(",").to_string()]);
@@ -499,7 +499,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for message in messages.iter() {
-                                let username = get_username(new_account.clone(), message.sender()).unwrap_or_else(|_| message.sender().to_string());
+                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
                                     emojis.push(reaction.emoji());
@@ -530,7 +530,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for message in messages.iter() {
-                                let username = get_username(new_account.clone(), message.sender()).unwrap_or_else(|_| message.sender().to_string());
+                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
                                     emojis.push(reaction.emoji());
@@ -562,7 +562,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for message in messages.iter() {
-                                let username = get_username(new_account.clone(), message.sender()).unwrap_or_else(|_| message.sender().to_string());
+                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
                                     emojis.push(reaction.emoji());
@@ -602,7 +602,7 @@ async fn main() -> anyhow::Result<()> {
                             };
 
                             for message in messages.iter() {
-                                let username = get_username(new_account.clone(), message.sender()).unwrap_or_else(|_| message.sender().to_string());
+                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
                                     emojis.push(reaction.emoji());
@@ -962,9 +962,10 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn get_username(account: Box<dyn MultiPass>, did: DID) -> anyhow::Result<String> {
+async fn get_username(account: Box<dyn MultiPass>, did: DID) -> anyhow::Result<String> {
     let identity = account
         .get_identity(Identifier::did_key(did))
+        .await
         .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
     Ok(format!("{}#{}", identity.username(), identity.short_id()))
 }
@@ -976,7 +977,7 @@ async fn message_event_handle(
     mut stream: MessageEventStream,
     conversation_id: Arc<RwLock<Uuid>>,
 ) -> anyhow::Result<()> {
-    let identity = multipass.get_own_identity()?;
+    let identity = multipass.get_own_identity().await?;
     let topic = conversation_id.clone();
     while let Some(event) = stream.next().await {
         match event {
@@ -991,6 +992,7 @@ async fn message_event_handle(
                 if *topic.read() == conversation_id {
                     if let Ok(message) = raygun.get_message(conversation_id, message_id).await {
                         let username = get_username(multipass.clone(), message.sender())
+                            .await
                             .unwrap_or_else(|_| message.sender().to_string());
 
                         match message.message_type() {
@@ -1099,6 +1101,7 @@ async fn message_event_handle(
             } => {
                 if *topic.read() == conversation_id {
                     let username = get_username(multipass.clone(), did_key.clone())
+                        .await
                         .unwrap_or_else(|_| did_key.to_string());
                     writeln!(
                         stdout,
@@ -1115,6 +1118,7 @@ async fn message_event_handle(
             } => {
                 if *topic.read() == conversation_id {
                     let username = get_username(multipass.clone(), did_key.clone())
+                        .await
                         .unwrap_or_else(|_| did_key.to_string());
                     writeln!(
                         stdout,
@@ -1130,6 +1134,7 @@ async fn message_event_handle(
             } => {
                 if *topic.read() == conversation_id {
                     let username = get_username(multipass.clone(), did_key.clone())
+                        .await
                         .unwrap_or_else(|_| did_key.to_string());
                     match event {
                         MessageEvent::Typing => {
@@ -1145,6 +1150,7 @@ async fn message_event_handle(
             } => {
                 if *topic.read() == conversation_id {
                     let username = get_username(multipass.clone(), did_key.clone())
+                        .await
                         .unwrap_or_else(|_| did_key.to_string());
 
                     match event {
@@ -1160,6 +1166,7 @@ async fn message_event_handle(
             } => {
                 if *topic.read() == conversation_id {
                     let username = get_username(multipass.clone(), recipient.clone())
+                        .await
                         .unwrap_or_else(|_| recipient.to_string());
 
                     writeln!(stdout, ">>> {} was added to {conversation_id}", username)?;
@@ -1171,6 +1178,7 @@ async fn message_event_handle(
             } => {
                 if *topic.read() == conversation_id {
                     let username = get_username(multipass.clone(), recipient.clone())
+                        .await
                         .unwrap_or_else(|_| recipient.to_string());
 
                     writeln!(
