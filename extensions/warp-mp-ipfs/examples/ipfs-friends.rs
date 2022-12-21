@@ -163,7 +163,7 @@ async fn main() -> anyhow::Result<()> {
 //Note: Because of the internal nature of this extension and not reliant on a central confirmation, this will be used to add delays to allow the separate
 //      background task to complete its action
 async fn delay() {
-    fixed_delay(600).await;
+    fixed_delay(1200).await;
 }
 
 async fn fixed_delay(millis: u64) {

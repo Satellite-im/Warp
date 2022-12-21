@@ -27,7 +27,7 @@ use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use warp::module::Module;
 use warp::pocket_dimension::PocketDimension;
 use warp::tesseract::Tesseract;
-use warp::{async_block_in_place_uncheck, Extension, SingleHandle};
+use warp::{Extension, SingleHandle};
 
 use ipfs::{Ipfs, IpfsOptions, IpfsTypes, Keypair, Protocol, TestTypes, Types, UninitializedIpfs};
 use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
