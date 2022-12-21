@@ -332,7 +332,7 @@ pub mod ffi {
             Err(e) => return FFIResult_Null::err(Error::from(e)),
         };
 
-        std::fs::write(file, &config).map_err(Error::from).into()
+        std::fs::write(file, config).map_err(Error::from).into()
     }
 
     #[allow(clippy::missing_safety_doc)]

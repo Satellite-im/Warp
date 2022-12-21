@@ -86,6 +86,14 @@ pub enum MessageEventKind {
         did_key: DID,
         reaction: String,
     },
+    RecipientAdded {
+        conversation_id: Uuid,
+        recipient: DID,
+    },
+    RecipientRemoved {
+        conversation_id: Uuid,
+        recipient: DID,
+    },
     EventReceived {
         conversation_id: Uuid,
         did_key: DID,
@@ -212,9 +220,7 @@ pub enum ConversationType {
     Group,
 }
 
-#[derive(
-    Debug, Hash, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, warp_derive::FFIVec, FFIFree)]
 pub struct Conversation {
     id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -222,6 +228,18 @@ pub struct Conversation {
     creator: Option<DID>,
     conversation_type: ConversationType,
     recipients: Vec<DID>,
+}
+
+impl core::hash::Hash for Conversation {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl PartialEq for Conversation {
+    fn eq(&self, other: &Self) -> bool {
+        self.id.eq(&other.id)
+    }
 }
 
 impl Default for Conversation {
@@ -598,10 +616,22 @@ pub enum Location {
 
 #[async_trait::async_trait]
 pub trait RayGun:
-    RayGunStream + RayGunAttachment + RayGunEvents + Extension + Sync + Send + SingleHandle + DynClone
+    RayGunStream
+    + RayGunGroupConversation
+    + RayGunAttachment
+    + RayGunEvents
+    + Extension
+    + Sync
+    + Send
+    + SingleHandle
+    + DynClone
 {
     // Start a new conversation.
     async fn create_conversation(&mut self, _: &DID) -> Result<Conversation, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    async fn create_group_conversation(&mut self, _: Vec<DID>) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -686,6 +716,17 @@ pub trait RayGun:
 }
 
 dyn_clone::clone_trait_object!(RayGun);
+
+#[async_trait::async_trait]
+pub trait RayGunGroupConversation: Sync + Send {
+    async fn add_recipient(&mut self, _: Uuid, _: &DID) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    async fn remove_recipient(&mut self, _: Uuid, _: &DID) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+}
 
 #[async_trait::async_trait]
 pub trait RayGunAttachment: Sync + Send {
@@ -902,6 +943,21 @@ where
         event: MessageEvent,
     ) -> Result<(), Error> {
         self.write().cancel_event(conversation_id, event).await
+    }
+}
+
+#[allow(clippy::await_holding_lock)]
+#[async_trait::async_trait]
+impl<T: ?Sized> RayGunGroupConversation for Arc<RwLock<Box<T>>>
+where
+    T: RayGunGroupConversation,
+{
+    async fn add_recipient(&mut self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
+        self.write().add_recipient(conversation_id, did).await
+    }
+
+    async fn remove_recipient(&mut self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
+        self.write().remove_recipient(conversation_id, did).await
     }
 }
 
@@ -1560,7 +1616,9 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
 
-        Box::into_raw(Box::new(Conversation::recipients(&*conversation).into()))
+        Box::into_raw(Box::new(
+            Vec::from_iter(Conversation::recipients(&*conversation)).into(),
+        ))
     }
 
     #[allow(clippy::missing_safety_doc)]

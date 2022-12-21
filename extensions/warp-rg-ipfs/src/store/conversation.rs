@@ -1,14 +1,14 @@
 use chrono::{DateTime, Utc};
 use core::hash::Hash;
 use futures::{stream::FuturesOrdered, StreamExt};
-use rust_ipfs::{Ipfs, IpfsTypes};
 use libipld::{Cid, IpldCodec};
+use rust_ipfs::{Ipfs, IpfsTypes};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use uuid::Uuid;
 use warp::{
-    crypto::{Fingerprint, DID},
+    crypto::{did_key::CoreSign, Fingerprint, DID},
     error::Error,
     logging::tracing::log::info,
     raygun::{Conversation, ConversationType, Message, MessageOptions},
@@ -29,6 +29,30 @@ pub struct ConversationDocument {
     pub messages: BTreeSet<MessageDocument>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
+pub struct ConversationRecipient {
+    pub date: DateTime<Utc>,
+    pub did: DID,
+}
+
+impl PartialOrd for ConversationRecipient {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.date.partial_cmp(&other.date)
+    }
+}
+
+impl Ord for ConversationRecipient {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.date.cmp(&other.date)
+    }
+}
+
+impl PartialEq for ConversationRecipient {
+    fn eq(&self, other: &Self) -> bool {
+        self.date.eq(&other.date) && self.did.eq(&other.did)
+    }
 }
 
 impl From<Conversation> for ConversationDocument {
@@ -103,32 +127,42 @@ impl ConversationDocument {
         mut recipients: Vec<DID>,
         id: Option<Uuid>,
         conversation_type: ConversationType,
+        creator: Option<DID>,
+        signature: Option<String>,
     ) -> Result<Self, Error> {
         let id = id.unwrap_or_else(Uuid::new_v4);
         let name = None;
 
-        if !recipients.contains(did) && recipients.len() == 1 {
+        if !recipients.contains(did) {
             recipients.push(did.clone());
-        } else if recipients.contains(did) && recipients.len() == 1 {
+        }
+
+        if recipients.is_empty() {
             return Err(Error::CannotCreateConversation);
         }
 
-        if recipients.len() < 2 {
-            return Err(Error::OtherWithContext(
-                "Conversation requires a min of 2 recipients".into(),
-            ));
-        }
-
         let messages = BTreeSet::new();
-        Ok(Self {
+        let mut document = Self {
             id,
             name,
             recipients,
-            creator: None,
+            creator,
             conversation_type,
             messages,
-            signature: None,
-        })
+            signature,
+        };
+
+        if document.signature.is_some() {
+            document.verify()?;
+        }
+
+        if let Some(creator) = document.creator.as_ref() {
+            if creator.eq(did) {
+                document.sign(did)?;
+            }
+        }
+
+        Ok(document)
     }
 
     pub fn new_direct(did: &DID, recipients: [DID; 2]) -> Result<Self, Error> {
@@ -148,11 +182,86 @@ impl ConversationDocument {
             recipients.to_vec(),
             conversation_id,
             ConversationType::Direct,
+            None,
+            None,
+        )
+    }
+
+    pub fn new_group(did: &DID, recipients: &[DID]) -> Result<Self, Error> {
+        let conversation_id = Some(Uuid::new_v4());
+        Self::new(
+            did,
+            recipients.to_vec(),
+            conversation_id,
+            ConversationType::Group,
+            Some(did.clone()),
+            None,
         )
     }
 }
 
 impl ConversationDocument {
+    pub fn sign(&mut self, did: &DID) -> Result<(), Error> {
+        if matches!(self.conversation_type, ConversationType::Group) {
+            let Some(creator) = self.creator.clone() else {
+                return Err(Error::PublicKeyInvalid)
+            };
+
+            if !creator.eq(did) {
+                return Err(Error::PublicKeyInvalid);
+            }
+
+            let construct = vec![
+                self.id().into_bytes().to_vec(),
+                match self.conversation_type {
+                    ConversationType::Direct => vec![0x1c, 0xff],
+                    ConversationType::Group => vec![0xdc, 0xfc],
+                },
+                creator.to_string().as_bytes().to_vec(),
+                Vec::from_iter(
+                    self.recipients()
+                        .iter()
+                        .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                ),
+            ];
+            self.signature = Some(bs58::encode(did.sign(&construct.concat())).into_string());
+        }
+        Ok(())
+    }
+
+    pub fn verify(&self) -> Result<(), Error> {
+        if matches!(self.conversation_type, ConversationType::Group) {
+            let Some(creator) = self.creator.clone() else {
+                return Err(Error::PublicKeyInvalid)
+            };
+
+            let Some(signature) = self.signature.clone() else {
+                return Err(Error::InvalidSignature)
+            };
+
+            let signature = bs58::decode(signature).into_vec()?;
+
+            let construct = vec![
+                self.id().into_bytes().to_vec(),
+                match self.conversation_type {
+                    ConversationType::Direct => vec![0x1c, 0xff],
+                    ConversationType::Group => vec![0xdc, 0xfc],
+                },
+                creator.to_string().as_bytes().to_vec(),
+                Vec::from_iter(
+                    self.recipients()
+                        .iter()
+                        .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
+                ),
+            ];
+
+            creator
+                .verify(&construct.concat(), &signature)
+                .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+        }
+        Ok(())
+    }
+
     pub async fn get_messages<T: IpfsTypes>(
         &self,
         ipfs: &Ipfs<T>,
@@ -212,7 +321,11 @@ impl ConversationDocument {
         .filter_map(|res| async { res.ok() })
         .filter_map(|message| async {
             if let Some(keyword) = option.keyword() {
-                if message.value().iter().any(|line| line.to_lowercase().contains(&keyword.to_lowercase())) {
+                if message
+                    .value()
+                    .iter()
+                    .any(|line| line.to_lowercase().contains(&keyword.to_lowercase()))
+                {
                     Some(message)
                 } else {
                     None
@@ -396,15 +509,17 @@ impl MessageDocument {
         }
 
         let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, message)?;
+        let message_cid = data.to_cid(ipfs).await?;
         info!("Setting Message to document");
-        self.message = data.to_cid(ipfs).await?;
+        self.message = message_cid;
         info!("Message is updated");
-        if ipfs.is_pinned(&old_document).await? {
-            info!("Removing pin for {old_document}");
-            ipfs.remove_pin(&old_document, false).await?;
+        if old_document != message_cid {
+            if ipfs.is_pinned(&old_document).await? {
+                info!("Removing pin for {old_document}");
+                ipfs.remove_pin(&old_document, false).await?;
+            }
+            ipfs.remove_block(old_document).await?;
         }
-        ipfs.remove_block(old_document).await?;
-
         Ok(())
     }
 

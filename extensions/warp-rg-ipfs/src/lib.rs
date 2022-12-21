@@ -7,6 +7,7 @@ use config::RgIpfsConfig;
 use futures::StreamExt;
 use rust_ipfs::IpfsTypes;
 use rust_ipfs::{Ipfs, TestTypes, Types};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -26,7 +27,7 @@ use warp::pocket_dimension::PocketDimension;
 use warp::raygun::group::{GroupChat, GroupChatManagement, GroupInvite};
 use warp::raygun::{
     Conversation, Location, MessageEvent, MessageEventStream, MessageStatus, RayGunEventStream,
-    RayGunEvents, RayGunStream,
+    RayGunEvents, RayGunGroupConversation, RayGunStream,
 };
 use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
 use warp::raygun::{RayGunAttachment, RayGunEventKind};
@@ -241,6 +242,12 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
         self.messaging_store()?.create_conversation(did_key).await
     }
 
+    async fn create_group_conversation(&mut self, recipients: Vec<DID>) -> Result<Conversation> {
+        self.messaging_store()?
+            .create_group_conversation(HashSet::from_iter(recipients))
+            .await
+    }
+
     async fn get_conversation(&self, conversation_id: Uuid) -> Result<Conversation> {
         self.messaging_store()?
             .get_conversation(conversation_id)
@@ -376,6 +383,21 @@ impl<T: IpfsTypes> RayGunAttachment for IpfsMessaging<T> {
     ) -> Result<ConstellationProgressStream> {
         self.messaging_store()?
             .download(conversation_id, message_id, &file, path, false)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl<T: IpfsTypes> RayGunGroupConversation for IpfsMessaging<T> {
+    async fn add_recipient(&mut self, conversation_id: Uuid, did_key: &DID) -> Result<()> {
+        self.messaging_store()?
+            .add_recipient(conversation_id, did_key)
+            .await
+    }
+
+    async fn remove_recipient(&mut self, conversation_id: Uuid, did_key: &DID) -> Result<()> {
+        self.messaging_store()?
+            .remove_recipient(conversation_id, did_key)
             .await
     }
 }

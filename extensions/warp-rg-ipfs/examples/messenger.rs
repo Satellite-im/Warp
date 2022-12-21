@@ -344,11 +344,99 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             });
                         },
+                        Some("/add-recipient") => {
+                            let did: DID = match cmd_line.next() {
+                                Some(did) => match DID::try_from(did.to_string()) {
+                                    Ok(did) => did,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing DID Key: {e}")?;
+                                        continue
+                                    }
+                                },
+                                None => {
+                                    writeln!(stdout, "/add-recipient <DID>")?;
+                                    continue
+                                }
+                            };
+                            let local_topic = *topic.read();
+                            if let Err(e) = chat.add_recipient(local_topic, &did).await {
+                                writeln!(stdout, "Error adding recipient: {e}")?;
+                                continue
+                            }
+                            writeln!(stdout, "{} has been added", did)?;
+
+                        },
+                        Some("/remove-recipient") => {
+                            let did: DID = match cmd_line.next() {
+                                Some(did) => match DID::try_from(did.to_string()) {
+                                    Ok(did) => did,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing DID Key: {e}")?;
+                                        continue
+                                    }
+                                },
+                                None => {
+                                    writeln!(stdout, "/remove-recipient <DID>")?;
+                                    continue
+                                }
+                            };
+                            let local_topic = *topic.read();
+                            if let Err(e) = chat.remove_recipient(local_topic, &did).await {
+                                writeln!(stdout, "Error removing recipient: {e}")?;
+                                continue
+                            }
+                            writeln!(stdout, "{} has been removed", did)?;
+
+                        },
+                        Some("/create-group") => {
+
+                            let mut did_keys = vec![];
+
+                            for item in cmd_line.by_ref() {
+                                let Ok(did) = DID::try_from(item.to_string()) else {
+                                    continue;
+                                };
+                                did_keys.push(did);
+                            }
+
+                            if did_keys.is_empty() || did_keys.len() < 2 {
+                                writeln!(stdout, "Group chat requires 2 did keys")?;
+                                continue
+                            }
+
+                            let id = match chat.create_group_conversation(did_keys).await {
+                                Ok(id) => id,
+                                Err(e) => {
+                                    writeln!(stdout, "Error creating conversation: {e}")?;
+                                    continue
+                                }
+                            };
+
+                            *topic.write() = id.id();
+                            writeln!(stdout, "Set conversation to {}", topic.read())?;
+                            let mut stdout = stdout.clone();
+                            let account = new_account.clone();
+                            let stream = chat.get_conversation_stream(id.id()).await?;
+                            let chat = chat.clone();
+                            let topic = topic.clone();
+
+                            tokio::spawn(async move {
+                                if let Err(e) = message_event_handle(
+                                    stdout.clone(),
+                                    account.clone(),
+                                    chat.clone(),
+                                    stream,
+                                    topic.clone(),
+                                ).await {
+                                    writeln!(stdout, ">> Error processing event task: {e}").unwrap();
+                                }
+                            });
+                        },
                         Some("/remove-conversation") => {
                             let conversation_id = match cmd_line.next() {
                                 Some(id) => id.parse()?,
                                 None => {
-                                    writeln!(stdout, "/edit <conversation-id> <message-id> <message>")?;
+                                    writeln!(stdout, "/remove-conversation <conversation-id>")?;
                                     continue
                                 }
                             };
@@ -383,7 +471,7 @@ async fn main() -> anyhow::Result<()> {
                                     let username = get_username(new_account.clone(), recipient.clone()).unwrap_or_else(|_| recipient.to_string());
                                     recipients.push(username);
                                 }
-                                table.add_row(vec![convo.id().to_string(), recipients.join("/").to_string()]);
+                                table.add_row(vec![convo.id().to_string(), recipients.join(",").to_string()]);
                             }
                             writeln!(stdout, "{}", table)?;
                         },
@@ -391,7 +479,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
                             let local_topic = *topic.read();
-                        
+
                             let opt = match cmd_line.next() {
                                 Some(id) => match id.parse() {
                                     Ok(last) => MessageOptions::default().set_range(0..last),
@@ -512,7 +600,7 @@ async fn main() -> anyhow::Result<()> {
                                     continue;
                                 }
                             };
-  
+
                             for message in messages.iter() {
                                 let username = get_username(new_account.clone(), message.sender()).unwrap_or_else(|_| message.sender().to_string());
                                 let mut emojis = vec![];
@@ -854,17 +942,9 @@ async fn main() -> anyhow::Result<()> {
                         }
                         _ => {
                             if !line.is_empty() {
-                                // Since using crossterm would not pick up every expected event here, we will just pretend we are typing
-                                if let Err(_e) = chat.send_event(*topic.read(), MessageEvent::Typing).await {
-                                    //We wont error here although an error such as a conversation not found can easily lead
-                                    //to an error
-                                }
                                 if let Err(e) = chat.send(*topic.read(), None, vec![line.to_string()]).await {
                                     writeln!(stdout, "Error sending message: {}", e)?;
                                     continue
-                                }
-                                if let Err(_e) = chat.cancel_event(*topic.read(), MessageEvent::Typing).await {
-                                    //ditto
                                 }
                             }
                        }
@@ -1072,6 +1152,32 @@ async fn message_event_handle(
                             writeln!(stdout, ">>> {} is no longer typing", username,)?;
                         }
                     }
+                }
+            }
+            MessageEventKind::RecipientAdded {
+                conversation_id,
+                recipient,
+            } => {
+                if *topic.read() == conversation_id {
+                    let username = get_username(multipass.clone(), recipient.clone())
+                        .unwrap_or_else(|_| recipient.to_string());
+
+                    writeln!(stdout, ">>> {} was added to {conversation_id}", username)?;
+                }
+            }
+            MessageEventKind::RecipientRemoved {
+                conversation_id,
+                recipient,
+            } => {
+                if *topic.read() == conversation_id {
+                    let username = get_username(multipass.clone(), recipient.clone())
+                        .unwrap_or_else(|_| recipient.to_string());
+
+                    writeln!(
+                        stdout,
+                        ">>> {} was removed from {conversation_id}",
+                        username
+                    )?;
                 }
             }
         }
