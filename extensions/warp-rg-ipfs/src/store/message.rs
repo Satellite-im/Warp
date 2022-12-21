@@ -959,16 +959,19 @@ impl<T: IpfsTypes> MessageStore<T> {
 
             let own_did = &*self.did;
 
-            let recipient = recipients
+            let peer_id_list = recipients
+                .clone()
                 .iter()
                 .filter(|did| own_did.ne(did))
-                .last()
-                .ok_or(Error::PublicKeyInvalid)?;
-
-            let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
+                .map(|did| (did.clone(), did))
+                .filter_map(|(a, b)| did_to_libp2p_pub(b).map(|pk| (a, pk)).ok())
+                .map(|(did, pk)| (did, pk.to_peer_id()))
+                .collect::<Vec<_>>();
 
             let mut data = Sata::default();
-            data.add_recipient(recipient.as_ref())?;
+            for recipient in recipients {
+                data.add_recipient(recipient.as_ref())?;
+            }
 
             let data = data.encrypt(
                 libipld::IpldCodec::DagJson,
@@ -982,19 +985,39 @@ impl<T: IpfsTypes> MessageStore<T> {
                 .pubsub_peers(Some(DIRECT_BROADCAST.into()))
                 .await?;
 
-            match peers.contains(&peer_id) {
-                true => {
-                    let bytes = serde_json::to_vec(&data)?;
-                    if let Err(e) = self
-                        .ipfs
-                        .pubsub_publish(DIRECT_BROADCAST.into(), bytes)
-                        .await
-                    {
-                        warn!("Unable to publish to topic: {e}. Queuing event");
-                        //Note: If the error is related to peer not available then we should push this to queue but if
-                        //      its due to the message limit being reached we should probably break up the message to fix into
-                        //      "max_transmit_size" within rust-libp2p gossipsub
-                        //      For now we will queue the message if we hit an error
+            let bytes = serde_json::to_vec(&data)?;
+
+            for (recipient, peer_id) in peer_id_list {
+                match peers.contains(&peer_id) {
+                    true => {
+                        if let Err(e) = self
+                            .ipfs
+                            .pubsub_publish(DIRECT_BROADCAST.into(), bytes.clone())
+                            .await
+                        {
+                            warn!("Unable to publish to topic: {e}. Queuing event");
+                            //Note: If the error is related to peer not available then we should push this to queue but if
+                            //      its due to the message limit being reached we should probably break up the message to fix into
+                            //      "max_transmit_size" within rust-libp2p gossipsub
+                            //      For now we will queue the message if we hit an error
+                            if let Err(e) = self
+                                .queue_event(
+                                    recipient.clone(),
+                                    Queue::direct(
+                                        document_type.id(),
+                                        None,
+                                        peer_id,
+                                        DIRECT_BROADCAST.into(),
+                                        data.clone(),
+                                    ),
+                                )
+                                .await
+                            {
+                                error!("Error submitting event to queue: {e}");
+                            }
+                        }
+                    }
+                    false => {
                         if let Err(e) = self
                             .queue_event(
                                 recipient.clone(),
@@ -1003,7 +1026,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                                     None,
                                     peer_id,
                                     DIRECT_BROADCAST.into(),
-                                    data,
+                                    data.clone(),
                                 ),
                             )
                             .await
@@ -1011,25 +1034,8 @@ impl<T: IpfsTypes> MessageStore<T> {
                             error!("Error submitting event to queue: {e}");
                         }
                     }
-                }
-                false => {
-                    if let Err(e) = self
-                        .queue_event(
-                            recipient.clone(),
-                            Queue::direct(
-                                document_type.id(),
-                                None,
-                                peer_id,
-                                DIRECT_BROADCAST.into(),
-                                data,
-                            ),
-                        )
-                        .await
-                    {
-                        error!("Error submitting event to queue: {e}");
-                    }
-                }
-            };
+                };
+            }
         }
 
         let conversation_id = document_type.id();
