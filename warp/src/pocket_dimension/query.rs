@@ -120,7 +120,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn querybuilder_new() -> *mut QueryBuilder {
-        Box::into_raw(Box::new(QueryBuilder::default())) as *mut QueryBuilder
+        Box::into_raw(Box::default()) as *mut QueryBuilder
     }
 
     #[allow(clippy::missing_safety_doc)]

@@ -1624,7 +1624,7 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn messageoptions_new() -> *mut MessageOptions {
-        Box::into_raw(Box::new(MessageOptions::default()))
+        Box::into_raw(Box::default())
     }
 
     #[allow(clippy::missing_safety_doc)]
