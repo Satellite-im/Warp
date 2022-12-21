@@ -19,7 +19,7 @@ mod test {
         Ok((Box::new(account), did, identity))
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn create_identity() -> anyhow::Result<()> {
         let (_, did, _) = create_account(
             None,
@@ -52,7 +52,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[tokio::test]
     async fn get_identity() -> anyhow::Result<()> {
         let (account_a, _, _) = create_account(
             Some("JohnDoe"),
@@ -63,7 +63,7 @@ mod test {
         let (_, did_b, _) = create_account(Some("JaneDoe"), None).await?;
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
-        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
 
         let identity_b = account_a
             .get_identity(did_b.clone().into()).await
@@ -78,7 +78,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[tokio::test]
     async fn get_identity_by_username() -> anyhow::Result<()> {
         let (account_a, _, _) = create_account(Some("JohnDoe"), None).await?;
 
@@ -100,7 +100,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn update_identity_username() -> anyhow::Result<()> {
         let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
@@ -122,7 +122,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn update_identity_status() -> anyhow::Result<()> {
         let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
