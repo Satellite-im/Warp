@@ -17,7 +17,7 @@ use identity::Identity;
 use crate::crypto::DID;
 use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate};
 
-use self::identity::{IdentityStatus, Relationship};
+use self::identity::{IdentityStatus, Relationship, Platform};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 #[serde(rename_all = "snake_case")]
@@ -296,8 +296,14 @@ pub trait IdentityInformation: Send + Sync {
     fn identity_status(&self, _: &DID) -> Result<IdentityStatus, Error> {
         Err(Error::Unimplemented)
     }
+    
     /// Find the relationship with an existing identity.
     fn identity_relationship(&self, _: &DID) -> Result<Relationship, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Returns the identity platform while online. 
+    fn identity_platform(&self, _: &DID) -> Result<Platform, Error> {
         Err(Error::Unimplemented)
     }
 }
@@ -310,9 +316,14 @@ where
     fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
         self.read().identity_status(did)
     }
+
     /// Find the relationship with an existing identity.
     fn identity_relationship(&self, did: &DID) -> Result<Relationship, Error> {
         self.read().identity_relationship(did)
+    }
+
+    fn identity_platform(&self, did: &DID) -> Result<Platform, Error> {
+        self.read().identity_platform(did)
     }
 }
 
