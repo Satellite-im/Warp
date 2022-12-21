@@ -7,7 +7,7 @@ use crate::tesseract::Tesseract;
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
 pub unsafe extern "C" fn tesseract_new() -> *mut Tesseract {
-    Box::into_raw(Box::new(Tesseract::default())) as *mut Tesseract
+    Box::into_raw(Box::default()) as *mut Tesseract
 }
 
 #[allow(clippy::missing_safety_doc)]
