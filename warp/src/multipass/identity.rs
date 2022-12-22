@@ -102,8 +102,28 @@ impl Graphics {
 pub enum IdentityStatus {
     #[display(fmt = "online")]
     Online,
+    #[display(fmt = "away")]
+    Away,
+    #[display(fmt = "busy")]
+    Busy,
     #[display(fmt = "offline")]
     Offline,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone, Copy, PartialEq, Eq, Display, FFIFree)]
+#[serde(rename_all = "lowercase")]
+#[repr(C)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub enum Platform {
+    #[display(fmt = "desktop")]
+    Desktop,
+    #[display(fmt = "mobile")]
+    Mobile,
+    #[display(fmt = "web")]
+    Web,
+    #[display(fmt = "unknown")]
+    #[default]
+    Unknown,
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, FFIFree)]

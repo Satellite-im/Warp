@@ -1,13 +1,13 @@
-use rust_ipfs as ipfs;
 use futures::StreamExt;
 use ipfs::{Ipfs, IpfsPath, IpfsTypes};
 use libipld::{serde::from_ipld, Cid};
+use rust_ipfs as ipfs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::HashSet, hash::Hash, time::Duration};
 use warp::{
     crypto::{did_key::CoreSign, DID},
     error::Error,
-    multipass::identity::Identity,
+    multipass::identity::{Identity, IdentityStatus, Platform},
 };
 
 use super::friends::InternalRequest;
@@ -43,7 +43,7 @@ impl<T> DocumentType<T> {
                 }
             }
             //This will resolve into a buffer that can be deserialize into T.
-            //Best not to use this to resolve a large file. 
+            //Best not to use this to resolve a large file.
             DocumentType::UnixFS(cid, limit) => {
                 let fut = async {
                     let stream = ipfs
@@ -121,6 +121,8 @@ pub struct RootDocument {
     pub blocks: Option<DocumentType<HashSet<DID>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<DocumentType<HashSet<InternalRequest>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<IdentityStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
 }
@@ -220,6 +222,10 @@ pub struct CacheDocument {
     pub picture: Option<DocumentType<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub banner: Option<DocumentType<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<IdentityStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform: Option<Platform>,
     pub identity: DocumentType<Identity>,
 }
 
