@@ -155,6 +155,8 @@ pub struct StoreSetting {
     pub sync_interval: u64,
     /// Use objects directly rather than a cid
     pub override_ipld: bool,
+    
+    pub share_platform: bool,
 }
 
 impl Default for StoreSetting {
@@ -165,6 +167,7 @@ impl Default for StoreSetting {
             sync: Vec::new(),
             sync_interval: 100,
             override_ipld: true,
+            share_platform: false,
         }
     }
 }

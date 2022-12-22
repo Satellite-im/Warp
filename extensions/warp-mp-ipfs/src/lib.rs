@@ -19,7 +19,6 @@ use tokio::sync::broadcast;
 use tracing::log::{error, info, trace, warn};
 use warp::crypto::did_key::Generate;
 use warp::data::DataType;
-use warp::hooks::Hooks;
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -49,7 +48,6 @@ pub type Persistent = Types;
 pub struct IpfsIdentity<T: IpfsTypes> {
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     config: MpIpfsConfig,
-    hooks: Option<Hooks>,
     ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
     tesseract: Tesseract,
     friend_store: Arc<RwLock<Option<FriendsStore<T>>>>,
@@ -63,7 +61,6 @@ impl<T: IpfsTypes> Clone for IpfsIdentity<T> {
         Self {
             cache: self.cache.clone(),
             config: self.config.clone(),
-            hooks: self.hooks.clone(),
             ipfs: self.ipfs.clone(),
             tesseract: self.tesseract.clone(),
             friend_store: self.friend_store.clone(),
@@ -105,12 +102,10 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
     ) -> anyhow::Result<IpfsIdentity<T>> {
         let (tx, _) = broadcast::channel(1024);
         trace!("Initializing Multipass");
-        let hooks = None;
 
         let mut identity = IpfsIdentity {
             cache,
             config,
-            hooks,
             tesseract,
             ipfs: Default::default(),
             friend_store: Default::default(),
@@ -355,6 +350,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 config.store_setting.discovery,
                 relays,
                 config.store_setting.override_ipld,
+                config.store_setting.share_platform,
             ),
         )
         .await?;
@@ -419,12 +415,6 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
         let inner = cache.write();
         Ok(inner)
-    }
-
-    pub fn get_hooks(&self) -> anyhow::Result<&Hooks> {
-        let hooks = self.hooks.as_ref().ok_or(Error::Other)?;
-
-        Ok(hooks)
     }
 
     async fn is_store_initialized(&self) -> bool {
@@ -849,6 +839,16 @@ impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
     async fn identity_status(&self, did: &DID) -> Result<identity::IdentityStatus, Error> {
         let store = self.identity_store()?;
         store.identity_status(did).await
+    }
+
+    async fn set_identity_status(&mut self, status: identity::IdentityStatus) -> Result<(), Error> {
+        let mut store = self.identity_store()?;
+        store.set_identity_status(status).await
+    }
+
+    async fn identity_platform(&self, did: &DID) -> Result<identity::Platform, Error> {
+        let store = self.identity_store()?;
+        store.identity_platform(did).await
     }
 
     async fn identity_relationship(&self, did: &DID) -> Result<identity::Relationship, Error> {
