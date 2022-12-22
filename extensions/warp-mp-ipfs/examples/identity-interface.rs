@@ -5,7 +5,7 @@ use rustyline_async::{Readline, ReadlineError};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use tracing_subscriber::EnvFilter;
-use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
+use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate, Platform};
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, RwLock};
@@ -371,6 +371,34 @@ async fn main() -> anyhow::Result<()> {
                             }
                             writeln!(stdout, "Account is blocked")?;
                         }
+                        Some("set-status-online") => {
+                            if let Err(e) = account.set_identity_status(IdentityStatus::Online) {
+                                writeln!(stdout, "Error setting identity status: {}", e)?;
+                                continue;
+                            }
+                            writeln!(stdout, "You are online")?;
+                        }
+                        Some("set-status-away") => {
+                            if let Err(e) = account.set_identity_status(IdentityStatus::Away) {
+                                writeln!(stdout, "Error setting identity status: {}", e)?;
+                                continue;
+                            }
+                            writeln!(stdout, "You are away")?;
+                        }
+                        Some("set-status-busy") => {
+                            if let Err(e) = account.set_identity_status(IdentityStatus::Busy) {
+                                writeln!(stdout, "Error setting identity status: {}", e)?;
+                                continue;
+                            }
+                            writeln!(stdout, "You are busy")?;
+                        }
+                        Some("set-status-offline") => {
+                            if let Err(e) = account.set_identity_status(IdentityStatus::Offline) {
+                                writeln!(stdout, "Error setting identity status: {}", e)?;
+                                continue;
+                            }
+                            writeln!(stdout, "You are offline")?;
+                        }
                         Some("unblock") => {
                             let pk = match cmd_line.next() {
                                 Some(pk) => match pk.to_string().try_into() {
@@ -650,11 +678,15 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             let mut table = Table::new();
-                            table.set_header(vec!["Username", "Public Key", "Status Message", "Banner", "Picture", "Status"]);
+                            table.set_header(vec!["Username", "Public Key", "Status Message", "Banner", "Picture", "Platform", "Status"]);
                             for identity in idents {
                                 let status = match identity.did_key() == own_identity.did_key() {
                                     true => IdentityStatus::Online,
                                     false => account.identity_status(&identity.did_key()).unwrap_or(IdentityStatus::Offline)
+                                };
+                                let platform = match identity.did_key() == own_identity.did_key() {
+                                    true => Platform::Desktop,
+                                    false => account.identity_platform(&identity.did_key()).unwrap_or_default(),
                                 };
                                 table.add_row(vec![
                                     identity.username(),
@@ -662,6 +694,7 @@ async fn main() -> anyhow::Result<()> {
                                     identity.status_message().unwrap_or_default(),
                                     (!identity.graphics().profile_banner().is_empty()).to_string(),
                                     (!identity.graphics().profile_picture().is_empty()).to_string(),
+                                    platform.to_string(),
                                     format!("{:?}", status),
                                 ]);
                             }
