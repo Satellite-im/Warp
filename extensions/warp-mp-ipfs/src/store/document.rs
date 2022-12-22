@@ -7,7 +7,7 @@ use std::{collections::HashSet, hash::Hash, time::Duration};
 use warp::{
     crypto::{did_key::CoreSign, DID},
     error::Error,
-    multipass::identity::Identity,
+    multipass::identity::{Identity, IdentityStatus, Platform},
 };
 
 use super::friends::InternalRequest;
@@ -220,6 +220,10 @@ pub struct CacheDocument {
     pub picture: Option<DocumentType<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub banner: Option<DocumentType<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<IdentityStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform: Option<Platform>,
     pub identity: DocumentType<Identity>,
 }
 

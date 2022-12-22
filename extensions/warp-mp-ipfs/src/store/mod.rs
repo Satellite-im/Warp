@@ -11,7 +11,7 @@ use warp::{
         DIDKey, Ed25519KeyPair, KeyMaterial, DID,
     },
     error::Error,
-    multipass::identity::{Identity, IdentityStatus},
+    multipass::identity::{Identity, IdentityStatus, Platform},
     tesseract::Tesseract,
 };
 
@@ -85,6 +85,12 @@ pub struct IdentityPayload {
     /// Type that represents profile banner
     #[serde(skip_serializing_if = "Option::is_none")]
     pub banner: Option<DocumentType<String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<IdentityStatus>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform: Option<Platform>,
 
     /// Type that represents identity or cid
     pub payload: DocumentType<Identity>,

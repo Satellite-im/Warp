@@ -20,7 +20,6 @@ use tokio::sync::broadcast;
 use tracing::log::{error, info, trace, warn};
 use warp::crypto::did_key::Generate;
 use warp::data::DataType;
-use warp::hooks::Hooks;
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -351,6 +350,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 config.store_setting.discovery,
                 relays,
                 config.store_setting.override_ipld,
+                config.store_setting.share_platform,
             ),
         )
         .await?;

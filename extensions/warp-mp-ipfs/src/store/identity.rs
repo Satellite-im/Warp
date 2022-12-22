@@ -1,14 +1,6 @@
-
 //We are cloning the Cid rather than dereferencing to be sure that we are not holding
 //onto the lock.
 #![allow(clippy::clone_on_copy)]
-use std::{
-    collections::HashSet,
-    path::PathBuf,
-    sync::atomic::{AtomicBool, Ordering},
-    time::Duration,
-};
-use rust_ipfs as ipfs;
 use crate::{
     config::Discovery,
     store::{did_to_libp2p_pub, IdentityPayload},
@@ -24,8 +16,14 @@ use libipld::{
     serde::{from_ipld, to_ipld},
     Cid,
 };
-use warp::sata::Sata;
+use rust_ipfs as ipfs;
 use serde::{de::DeserializeOwned, Serialize};
+use std::{
+    collections::HashSet,
+    path::PathBuf,
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 use tokio::sync::broadcast;
 use tracing::log::error;
 use warp::{
@@ -38,6 +36,7 @@ use warp::{
     sync::Arc,
     tesseract::Tesseract,
 };
+use warp::{multipass::identity::Platform, sata::Sata};
 
 use super::{
     connected_to_peer,
@@ -56,6 +55,8 @@ pub struct IdentityStore<T: IpfsTypes> {
 
     identity: Arc<tokio::sync::RwLock<Option<Identity>>>,
 
+    online_status: Arc<tokio::sync::RwLock<Option<IdentityStatus>>>,
+
     seen: Arc<tokio::sync::RwLock<HashSet<PeerId>>>,
 
     discovering: Arc<tokio::sync::RwLock<HashSet<DID>>>,
@@ -65,6 +66,8 @@ pub struct IdentityStore<T: IpfsTypes> {
     relay: Option<Vec<Multiaddr>>,
 
     override_ipld: Arc<AtomicBool>,
+
+    share_platform: Arc<AtomicBool>,
 
     start_event: Arc<AtomicBool>,
 
@@ -81,11 +84,13 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
             root_cid: self.root_cid.clone(),
             cache_cid: self.cache_cid.clone(),
             identity: self.identity.clone(),
+            online_status: self.online_status.clone(),
             seen: self.seen.clone(),
             start_event: self.start_event.clone(),
             end_event: self.end_event.clone(),
             discovering: self.discovering.clone(),
             discovery: self.discovery.clone(),
+            share_platform: self.share_platform.clone(),
             relay: self.relay.clone(),
             override_ipld: self.override_ipld.clone(),
             tesseract: self.tesseract.clone(),
@@ -108,7 +113,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         tesseract: Tesseract,
         interval: u64,
         _tx: broadcast::Sender<MultiPassEventKind>,
-        (discovery, relay, override_ipld): (Discovery, Option<Vec<Multiaddr>>, bool),
+        (discovery, relay, override_ipld, share_platform): (Discovery, Option<Vec<Multiaddr>>, bool, bool),
     ) -> Result<Self, Error> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -128,6 +133,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let seen = Arc::new(Default::default());
         let override_ipld = Arc::new(AtomicBool::new(override_ipld));
         let discovering = Arc::new(Default::default());
+        let online_status = Arc::default();
+        let share_platform = Arc::new(AtomicBool::new(share_platform));
 
         let store = Self {
             ipfs,
@@ -135,8 +142,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
             root_cid,
             cache_cid,
             identity,
+            online_status,
             seen,
             start_event,
+            share_platform,
             end_event,
             discovering,
             discovery,
@@ -253,14 +262,43 @@ impl<T: IpfsTypes> IdentityStore<T> {
             false => DocumentType::Cid(root.identity),
         };
 
+        let share_platform = self.share_platform.load(Ordering::SeqCst);
+
+        // Note: We use the target_os because targetting the `unix` family would cover ios and android as well
+        #[cfg(any(
+            target_os = "windows",
+            target_os = "macos",
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd"
+        ))]
+        let platform = Platform::Desktop;
+
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        let platform = Platform::Mobile;
+
+        //TODO: any other platform should be Platform::Unknown
+
+        let platform = share_platform.then_some(platform);
+
+        let status = self.online_status.read().await.clone();
+
         let payload = IdentityPayload {
             did,
             payload,
             picture,
             banner,
+            platform,
+            status,
         };
 
-        let res = data.encode(libipld::IpldCodec::DagJson, warp::sata::Kind::Static, payload)?;
+        let res = data.encode(
+            libipld::IpldCodec::DagJson,
+            warp::sata::Kind::Static,
+            payload,
+        )?;
 
         //TODO: Maybe use bincode instead
         let bytes = serde_json::to_vec(&res)?;
@@ -326,6 +364,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 let picture = raw_object.picture.clone();
                 let banner = raw_object.banner.clone();
                 let identity = payload.clone();
+                let status = raw_object.status;
+                let platform = raw_object.platform;
                 CacheDocument {
                     username,
                     did,
@@ -333,6 +373,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     banner,
                     short_id,
                     identity,
+                    status,
+                    platform,
                 }
             }
         };
