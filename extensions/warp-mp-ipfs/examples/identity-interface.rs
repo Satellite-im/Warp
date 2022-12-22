@@ -372,28 +372,28 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "Account is blocked")?;
                         }
                         Some("set-status-online") => {
-                            if let Err(e) = account.set_identity_status(IdentityStatus::Online) {
+                            if let Err(e) = account.set_identity_status(IdentityStatus::Online).await {
                                 writeln!(stdout, "Error setting identity status: {}", e)?;
                                 continue;
                             }
                             writeln!(stdout, "You are online")?;
                         }
                         Some("set-status-away") => {
-                            if let Err(e) = account.set_identity_status(IdentityStatus::Away) {
+                            if let Err(e) = account.set_identity_status(IdentityStatus::Away).await {
                                 writeln!(stdout, "Error setting identity status: {}", e)?;
                                 continue;
                             }
                             writeln!(stdout, "You are away")?;
                         }
                         Some("set-status-busy") => {
-                            if let Err(e) = account.set_identity_status(IdentityStatus::Busy) {
+                            if let Err(e) = account.set_identity_status(IdentityStatus::Busy).await {
                                 writeln!(stdout, "Error setting identity status: {}", e)?;
                                 continue;
                             }
                             writeln!(stdout, "You are busy")?;
                         }
                         Some("set-status-offline") => {
-                            if let Err(e) = account.set_identity_status(IdentityStatus::Offline) {
+                            if let Err(e) = account.set_identity_status(IdentityStatus::Offline).await {
                                 writeln!(stdout, "Error setting identity status: {}", e)?;
                                 continue;
                             }
@@ -686,7 +686,7 @@ async fn main() -> anyhow::Result<()> {
                                 };
                                 let platform = match identity.did_key() == own_identity.did_key() {
                                     true => Platform::Desktop,
-                                    false => account.identity_platform(&identity.did_key()).unwrap_or_default(),
+                                    false => account.identity_platform(&identity.did_key()).await.unwrap_or_default(),
                                 };
                                 table.add_row(vec![
                                     identity.username(),
