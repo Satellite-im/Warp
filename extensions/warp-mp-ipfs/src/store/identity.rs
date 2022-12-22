@@ -400,6 +400,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     document.banner = raw_object.banner;
                     change = true;
                 }
+                if document.status != raw_object.status {
+                    document.status = raw_object.status;
+                    change = true;
+                }
+                if document.platform != raw_object.platform {
+                    document.platform = raw_object.platform;
+                    change = true;
+                }
                 if object != &payload {
                     document.identity = payload;
                     change = true;
