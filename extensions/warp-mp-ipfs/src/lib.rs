@@ -49,7 +49,6 @@ pub type Persistent = Types;
 pub struct IpfsIdentity<T: IpfsTypes> {
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     config: MpIpfsConfig,
-    hooks: Option<Hooks>,
     ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
     tesseract: Tesseract,
     friend_store: Arc<RwLock<Option<FriendsStore<T>>>>,
@@ -63,7 +62,6 @@ impl<T: IpfsTypes> Clone for IpfsIdentity<T> {
         Self {
             cache: self.cache.clone(),
             config: self.config.clone(),
-            hooks: self.hooks.clone(),
             ipfs: self.ipfs.clone(),
             tesseract: self.tesseract.clone(),
             friend_store: self.friend_store.clone(),
@@ -105,12 +103,10 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
     ) -> anyhow::Result<IpfsIdentity<T>> {
         let (tx, _) = broadcast::channel(1024);
         trace!("Initializing Multipass");
-        let hooks = None;
 
         let mut identity = IpfsIdentity {
             cache,
             config,
-            hooks,
             tesseract,
             ipfs: Default::default(),
             friend_store: Default::default(),
@@ -419,12 +415,6 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
 
         let inner = cache.write();
         Ok(inner)
-    }
-
-    pub fn get_hooks(&self) -> anyhow::Result<&Hooks> {
-        let hooks = self.hooks.as_ref().ok_or(Error::Other)?;
-
-        Ok(hooks)
     }
 
     async fn is_store_initialized(&self) -> bool {
