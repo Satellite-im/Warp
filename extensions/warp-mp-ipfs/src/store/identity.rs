@@ -113,7 +113,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
         tesseract: Tesseract,
         interval: u64,
         _tx: broadcast::Sender<MultiPassEventKind>,
-        (discovery, relay, override_ipld, share_platform): (Discovery, Option<Vec<Multiaddr>>, bool, bool),
+        (discovery, relay, override_ipld, share_platform): (
+            Discovery,
+            Option<Vec<Multiaddr>>,
+            bool,
+            bool,
+        ),
     ) -> Result<Self, Error> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -167,45 +172,46 @@ impl<T: IpfsTypes> IdentityStore<T> {
             .ipfs
             .pubsub_subscribe(IDENTITY_BROADCAST.into())
             .await?;
-        let store_inner = store.clone();
 
-        tokio::spawn(async move {
-            // let mut peer_annoyance = HashMap::<PeerId, usize>::new();
-            let mut store = store_inner;
+        tokio::spawn({
+            let mut store = store.clone();
+            async move {
+                // let mut peer_annoyance = HashMap::<PeerId, usize>::new();
 
-            futures::pin_mut!(id_broadcast_stream);
+                futures::pin_mut!(id_broadcast_stream);
 
-            let mut tick = tokio::time::interval(Duration::from_millis(interval));
-            //Use to update the seen list
-            // let mut update_seen = tokio::time::interval(Duration::from_secs(10));
-            // let mut clear_seen = tokio::time::interval(Duration::from_secs(15));
-            loop {
-                if store.end_event.load(Ordering::SeqCst) {
-                    break;
-                }
-                if !store.start_event.load(Ordering::SeqCst) {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                    continue;
-                }
-                tokio::select! {
-                    message = id_broadcast_stream.next() => {
-                        if let Some(message) = message {
-                            if let Err(e) = store.process_message(message).await {
-                                error!("Error: {e}");
+                let mut tick = tokio::time::interval(Duration::from_millis(interval));
+                //Use to update the seen list
+                // let mut update_seen = tokio::time::interval(Duration::from_secs(10));
+                // let mut clear_seen = tokio::time::interval(Duration::from_secs(15));
+                loop {
+                    if store.end_event.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    if !store.start_event.load(Ordering::SeqCst) {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                        continue;
+                    }
+                    tokio::select! {
+                        message = id_broadcast_stream.next() => {
+                            if let Some(message) = message {
+                                if let Err(e) = store.process_message(message).await {
+                                    error!("Error: {e}");
+                                }
                             }
                         }
-                    }
-                    // _ = update_seen.tick() => {
-                    //     if let Err(e) = store.update_pubsub_peers_list().await {
-                    //         error!("Error: {e}");
-                    //     }
-                    // }
-                    // _ = clear_seen.tick() => {
-                    //     store.seen.write().clear();
-                    // }
-                    _ = tick.tick() => {
-                        if let Err(e) = store.broadcast_identity().await {
-                            error!("Error broadcasting identity: {e}");
+                        // _ = update_seen.tick() => {
+                        //     if let Err(e) = store.update_pubsub_peers_list().await {
+                        //         error!("Error: {e}");
+                        //     }
+                        // }
+                        // _ = clear_seen.tick() => {
+                        //     store.seen.write().clear();
+                        // }
+                        _ = tick.tick() => {
+                            if let Err(e) = store.broadcast_identity().await {
+                                error!("Error broadcasting identity: {e}");
+                            }
                         }
                     }
                 }
@@ -662,10 +668,39 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 .ok_or(Error::IdentityDoesntExist)?;
         }
 
-        connected_to_peer(self.ipfs.clone(), did.clone())
+        let status: IdentityStatus = connected_to_peer(self.ipfs.clone(), did.clone())
             .await
             .map(|ctype| ctype.into())
-            .map_err(Error::from)
+            .map_err(Error::from)?;
+
+        if matches!(status, IdentityStatus::Offline) {
+            return Ok(status);
+        }
+
+        self.cache()
+            .await
+            .iter()
+            .find(|cache| cache.did.eq(did))
+            .and_then(|cache| cache.status)
+            .or(Some(status))
+            .ok_or(Error::IdentityDoesntExist)
+    }
+
+    pub async fn set_identity_status(&mut self, status: IdentityStatus) -> Result<(), Error> {
+        let mut root_document = self.get_root_document().await?;
+        root_document.status = Some(status);
+        self.set_root_document(root_document).await?;
+        *self.online_status.write().await = Some(status);
+        Ok(())
+    }
+
+    pub async fn identity_platform(&self, did: &DID) -> Result<Platform, Error> {
+        self.cache()
+            .await
+            .iter()
+            .find(|cache| cache.did.eq(did))
+            .and_then(|cache| cache.platform)
+            .ok_or(Error::IdentityDoesntExist)
     }
 
     pub fn get_keypair(&self) -> anyhow::Result<Keypair> {
@@ -741,6 +776,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     pub async fn own_identity(&self) -> Result<Identity, Error> {
         let root_document = self.get_root_document().await?;
+
         let ipfs = self.ipfs.clone();
         let path = IpfsPath::from(root_document.identity);
         let mut identity = self.get_dag::<Identity>(path, None).await?;
@@ -766,6 +802,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             return Err(Error::IdentityDoesntExist);
         }
 
+        *self.online_status.write().await = root_document.status;
         Ok(identity)
     }
 

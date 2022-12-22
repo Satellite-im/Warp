@@ -845,6 +845,16 @@ impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
         async_block_in_place_uncheck(store.identity_status(did))
     }
 
+    fn set_identity_status(&mut self, status: identity::IdentityStatus) -> Result<(), Error> {
+        let mut store = self.identity_store()?;
+        async_block_in_place_uncheck(store.set_identity_status(status))
+    }
+
+    fn identity_platform(&self, did: &DID) -> Result<identity::Platform, Error> {
+        let store = self.identity_store()?;
+        async_block_in_place_uncheck(store.identity_platform(did))
+    }
+
     fn identity_relationship(&self, did: &DID) -> Result<identity::Relationship, Error> {
         self.get_identity(Identifier::did_key(did.clone()))?
             .first()
