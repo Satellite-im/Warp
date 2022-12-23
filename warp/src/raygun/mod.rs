@@ -4,7 +4,7 @@ use crate::constellation::file::File;
 use crate::constellation::ConstellationProgressStream;
 use crate::crypto::DID;
 use crate::error::Error;
-use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use crate::sync::{Arc, RwLock};
 use crate::{Extension, SingleHandle};
 
 use derive_more::Display;
@@ -964,24 +964,25 @@ where
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(FFIFree)]
 pub struct RayGunAdapter {
-    object: Arc<RwLock<Box<dyn RayGun>>>,
+    object: Box<dyn RayGun>,
 }
 
 impl RayGunAdapter {
-    pub fn new(object: Arc<RwLock<Box<dyn RayGun>>>) -> Self {
+    pub fn new(object: Box<dyn RayGun>) -> Self {
         RayGunAdapter { object }
     }
+}
 
-    pub fn inner(&self) -> Arc<RwLock<Box<dyn RayGun>>> {
-        self.object.clone()
+impl core::ops::Deref for RayGunAdapter {
+    type Target = Box<dyn RayGun>;
+    fn deref(&self) -> &Self::Target {
+        &self.object
     }
+}
 
-    pub fn read_guard(&self) -> RwLockReadGuard<Box<dyn RayGun>> {
-        self.object.read()
-    }
-
-    pub fn write_guard(&mut self) -> RwLockWriteGuard<Box<dyn RayGun>> {
-        self.object.write()
+impl core::ops::DerefMut for RayGunAdapter {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.object
     }
 }
 
@@ -1023,7 +1024,7 @@ pub mod ffi {
 
         let adapter = &mut *ctx;
 
-        async_on_block(adapter.write_guard().create_conversation(&*did_key)).into()
+        async_on_block(adapter.create_conversation(&*did_key)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1040,7 +1041,7 @@ pub mod ffi {
 
         let adapter = &*ctx;
 
-        async_on_block(adapter.read_guard().list_conversations()).into()
+        async_on_block(adapter.list_conversations()).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1078,7 +1079,7 @@ pub mod ffi {
         };
 
         let adapter = &*ctx;
-        async_on_block(adapter.read_guard().get_message(convo_id, message_id)).into()
+        async_on_block(adapter.get_message(convo_id, message_id)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1112,7 +1113,7 @@ pub mod ffi {
         };
 
         let adapter = &*ctx;
-        async_on_block(adapter.read_guard().get_messages(convo_id, option)).into()
+        async_on_block(adapter.get_messages(convo_id, option)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1166,7 +1167,7 @@ pub mod ffi {
         };
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().send(convo_id, msg_id, messages)).into()
+        async_on_block(adapter.send(convo_id, msg_id, messages)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1201,7 +1202,7 @@ pub mod ffi {
         };
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().delete(convo_id, msg_id)).into()
+        async_on_block(adapter.delete(convo_id, msg_id)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1245,7 +1246,7 @@ pub mod ffi {
         let emoji = CStr::from_ptr(emoji).to_string_lossy().to_string();
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().react(convo_id, msg_id, state, emoji)).into()
+        async_on_block(adapter.react(convo_id, msg_id, state, emoji)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1282,7 +1283,7 @@ pub mod ffi {
         };
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().pin(convo_id, msg_id, state)).into()
+        async_on_block(adapter.pin(convo_id, msg_id, state)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1329,7 +1330,7 @@ pub mod ffi {
         };
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().reply(convo_id, msg_id, messages)).into()
+        async_on_block(adapter.reply(convo_id, msg_id, messages)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1366,7 +1367,7 @@ pub mod ffi {
         };
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().embeds(convo_id, msg_id, state)).into()
+        async_on_block(adapter.embeds(convo_id, msg_id, state)).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -1380,7 +1381,7 @@ pub mod ffi {
 
         let rg = &mut *(ctx);
 
-        async_on_block(rg.write_guard().subscribe()).into()
+        async_on_block(rg.subscribe()).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -1424,7 +1425,7 @@ pub mod ffi {
 
         let rg = &mut *(ctx);
 
-        async_on_block(rg.write_guard().get_conversation_stream(conversation_id)).into()
+        async_on_block(rg.get_conversation_stream(conversation_id)).into()
     }
 
     #[allow(clippy::missing_safety_doc)]

@@ -9,7 +9,6 @@ use warp_derive::FFIFree;
 use wasm_bindgen::prelude::*;
 
 use crate::error::Error;
-use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::{Extension, SingleHandle};
 use identity::Identity;
@@ -201,24 +200,25 @@ pub trait IdentityInformation: Send + Sync {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(FFIFree)]
 pub struct MultiPassAdapter {
-    object: Arc<RwLock<Box<dyn MultiPass>>>,
+    object: Box<dyn MultiPass>,
 }
 
 impl MultiPassAdapter {
-    pub fn new(object: Arc<RwLock<Box<dyn MultiPass>>>) -> Self {
+    pub fn new(object: Box<dyn MultiPass>) -> Self {
         MultiPassAdapter { object }
     }
+}
 
-    pub fn inner(&self) -> Arc<RwLock<Box<dyn MultiPass>>> {
-        self.object.clone()
+impl core::ops::Deref for MultiPassAdapter {
+    type Target = Box<dyn MultiPass>;
+    fn deref(&self) -> &Self::Target {
+        &self.object
     }
+}
 
-    pub fn read_guard(&self) -> RwLockReadGuard<Box<dyn MultiPass>> {
-        self.object.read()
-    }
-
-    pub fn write_guard(&mut self) -> RwLockWriteGuard<Box<dyn MultiPass>> {
-        self.object.write()
+impl core::ops::DerefMut for MultiPassAdapter {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.object
     }
 }
 
@@ -274,7 +274,7 @@ pub mod ffi {
         let mp = &mut *(ctx);
 
         match async_on_block(async {
-            mp.write_guard()
+            mp
                 .create_identity(username.as_deref(), passphrase.as_deref()).await
         }) {
             Ok(pkey) => FFIResult::ok(pkey),
@@ -300,7 +300,7 @@ pub mod ffi {
 
         let mp = &*(ctx);
         let id = &*(identifier);
-        async_on_block(async { mp.read_guard().get_identity(id.clone()).await }).into()
+        async_on_block(async { mp.get_identity(id.clone()).await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -313,7 +313,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        match async_on_block(async { mp.read_guard().get_own_identity().await }) {
+        match async_on_block(async { mp.get_own_identity().await }) {
             Ok(identity) => FFIResult::ok(identity),
             Err(e) => FFIResult::err(e),
         }
@@ -331,7 +331,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let option = &*option;
-        async_on_block(async { mp.write_guard().update_identity(option.clone()).await }).into()
+        async_on_block(async { mp.update_identity(option.clone()).await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -351,7 +351,7 @@ pub mod ffi {
             true => None,
         };
         let mp = &*(ctx);
-        match async_on_block(async { mp.read_guard().decrypt_private_key(passphrase.as_deref()) }) {
+        match async_on_block(async { mp.decrypt_private_key(passphrase.as_deref()) }) {
             Ok(key) => FFIResult::ok(key),
             Err(e) => FFIResult::err(e),
         }
@@ -365,7 +365,7 @@ pub mod ffi {
         }
 
         let mp = &mut *(ctx);
-        async_on_block(async { mp.write_guard().refresh_cache() }).into()
+        async_on_block(async { mp.refresh_cache() }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -383,7 +383,7 @@ pub mod ffi {
         }
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        async_on_block(async { mp.write_guard().send_request(pk).await }).into()
+        async_on_block(async { mp.send_request(pk).await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -402,7 +402,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        async_on_block(async { mp.write_guard().accept_request(pk).await }).into()
+        async_on_block(async { mp.accept_request(pk).await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -421,7 +421,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        async_on_block(async { mp.write_guard().deny_request(pk).await }).into()
+        async_on_block(async { mp.deny_request(pk).await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -440,7 +440,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        async_on_block(async { mp.write_guard().close_request(pk).await }).into()
+        async_on_block(async { mp.close_request(pk).await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -455,7 +455,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        async_on_block(async { mp.read_guard().list_incoming_request().await }).into()
+        async_on_block(async { mp.list_incoming_request().await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -470,7 +470,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        async_on_block(async { mp.read_guard().list_outgoing_request().await }).into()
+        async_on_block(async { mp.list_outgoing_request().await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -485,7 +485,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        async_on_block(async { mp.read_guard().list_all_request().await }).into()
+        async_on_block(async { mp.list_all_request().await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -504,7 +504,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        async_on_block(async { mp.write_guard().remove_friend(pk).await }).into()
+        async_on_block(async { mp.remove_friend(pk).await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -523,7 +523,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        async_on_block(async { mp.write_guard().block(pk).await }).into()
+        async_on_block(async { mp.block(pk).await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -542,7 +542,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
         let pk = &*pubkey;
-        async_on_block(async { mp.write_guard().unblock(pk).await }).into()
+        async_on_block(async { mp.unblock(pk).await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -557,7 +557,7 @@ pub mod ffi {
         }
 
         let mp = &mut *ctx;
-        async_on_block(async { mp.read_guard().block_list().await }).into()
+        async_on_block(async { mp.block_list().await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -572,7 +572,7 @@ pub mod ffi {
         }
 
         let mp = &*(ctx);
-        async_on_block(async { mp.read_guard().list_friends().await }).into()
+        async_on_block(async { mp.list_friends().await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -592,7 +592,7 @@ pub mod ffi {
         let mp = &*(ctx);
         let pk = &*pubkey;
 
-        async_on_block(async { mp.read_guard().has_friend(pk).await }).into()
+        async_on_block(async { mp.has_friend(pk).await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -612,7 +612,7 @@ pub mod ffi {
         let mp = &*(ctx);
         let pk = &*pubkey;
 
-        async_on_block(async { mp.read_guard().received_friend_request_from(pk).await }).into()
+        async_on_block(async { mp.received_friend_request_from(pk).await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -632,7 +632,7 @@ pub mod ffi {
         let mp = &*(ctx);
         let pk = &*pubkey;
 
-        async_on_block(async { mp.read_guard().sent_friend_request_to(pk).await }).into()
+        async_on_block(async { mp.sent_friend_request_to(pk).await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -652,7 +652,7 @@ pub mod ffi {
         let mp = &*(ctx);
         let pk = &*pubkey;
 
-        async_on_block(async { mp.read_guard().is_blocked(pk).await }).into()
+        async_on_block(async { mp.is_blocked(pk).await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -672,7 +672,7 @@ pub mod ffi {
         let mp = &*(ctx);
         let pk = &*pubkey;
 
-        async_on_block(async { mp.read_guard().identity_status(pk).await }).into()
+        async_on_block(async { mp.identity_status(pk).await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -692,7 +692,7 @@ pub mod ffi {
         let mp = &*(ctx);
         let pk = &*pubkey;
 
-        async_on_block(async { mp.read_guard().identity_relationship(pk).await }).into()
+        async_on_block(async { mp.identity_relationship(pk).await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -706,7 +706,7 @@ pub mod ffi {
 
         let mp = &mut *(ctx);
 
-        async_on_block(async { mp.write_guard().subscribe().await }).into()
+        async_on_block(async { mp.subscribe().await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
