@@ -34,6 +34,8 @@ struct Opt {
     r#override: Option<bool>,
     #[clap(long)]
     bootstrap: Option<bool>,
+    #[clap(long)]
+    provide_platform_info: bool,
 }
 
 //Note: Cache can be enabled but the internals may need a little rework but since extension handles caching itself, this isnt needed for now
@@ -70,6 +72,9 @@ async fn account(
         config.store_setting.discovery = Discovery::None;
         config.ipfs_setting.bootstrap = false;
     }
+
+    config.store_setting.share_platform = opt.provide_platform_info;
+    
     if let Some(oride) = opt.r#override {
         config.store_setting.override_ipld = oride;
     }
