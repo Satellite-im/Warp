@@ -270,24 +270,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         let share_platform = self.share_platform.load(Ordering::SeqCst);
 
-        // Note: We use the target_os because targetting the `unix` family would cover ios and android as well
-        #[cfg(any(
-            target_os = "windows",
-            target_os = "macos",
-            target_os = "linux",
-            target_os = "freebsd",
-            target_os = "dragonfly",
-            target_os = "openbsd",
-            target_os = "netbsd"
-        ))]
-        let platform = Platform::Desktop;
-
-        #[cfg(any(target_os = "android", target_os = "ios"))]
-        let platform = Platform::Mobile;
-
-        //TODO: any other platform should be Platform::Unknown
-
-        let platform = share_platform.then_some(platform);
+        let platform = share_platform.then_some(self.own_platform());
 
         let status = self.online_status.read().await.clone();
 
@@ -446,6 +429,37 @@ impl<T: IpfsTypes> IdentityStore<T> {
             }
         };
         Ok(())
+    }
+
+    fn own_platform(&self) -> Platform {
+        #[cfg(any(
+            target_os = "windows",
+            target_os = "macos",
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd"
+        ))]
+        let platform = Platform::Desktop;
+
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        let platform = Platform::Mobile;
+
+        #[cfg(not(any(any(
+            target_os = "windows",
+            target_os = "macos",
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "android",
+            target_os = "ios"
+        ))))]
+        let platform = Platform::Unknown;
+
+        platform
     }
 
     pub fn discovery_type(&self) -> Discovery {
@@ -666,6 +680,25 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
     pub async fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
+        let own_did = self
+            .identity
+            .read()
+            .await
+            .clone()
+            .map(|identity| identity.did_key())
+            .ok_or_else(|| {
+                Error::OtherWithContext("Identity store may not be initialized".into())
+            })?;
+
+        if own_did.eq(did) {
+            return self
+                .online_status
+                .read()
+                .await
+                .or(Some(IdentityStatus::Online))
+                .ok_or(Error::MultiPassExtensionUnavailable);
+        }
+
         //Note: This is checked because we may not be connected to those peers with the 2 options below
         //      while with `Discovery::Provider`, they at some point should have been connected or discovered
         if !matches!(self.discovery_type(), Discovery::Direct | Discovery::None) {
@@ -703,6 +736,24 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn identity_platform(&self, did: &DID) -> Result<Platform, Error> {
+        let own_did = self
+            .identity
+            .read()
+            .await
+            .clone()
+            .map(|identity| identity.did_key())
+            .ok_or_else(|| {
+                Error::OtherWithContext("Identity store may not be initialized".into())
+            })?;
+
+        if own_did.eq(did) {
+            return Ok(self.own_platform());
+        }
+
+        let identity_status = self.identity_status(did).await?;
+        if matches!(identity_status, IdentityStatus::Offline) {
+            return Ok(Platform::Unknown);
+        }
         self.cache()
             .await
             .iter()
