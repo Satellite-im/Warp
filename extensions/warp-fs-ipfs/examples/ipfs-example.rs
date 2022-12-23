@@ -12,7 +12,7 @@ async fn account() -> anyhow::Result<Box<dyn MultiPass>> {
 
     let config = MpIpfsConfig::development();
     let mut account = ipfs_identity_temporary(Some(config), tesseract, None).await?;
-    account.create_identity(None, None)?;
+    account.create_identity(None, None).await?;
     Ok(Box::new(account))
 }
 

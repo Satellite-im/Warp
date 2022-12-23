@@ -14,12 +14,12 @@ mod test {
         tesseract.unlock(b"internal pass").unwrap();
         let config = warp_mp_ipfs::config::MpIpfsConfig::development();
         let mut account = ipfs_identity_temporary(Some(config), tesseract, None).await?;
-        let did = account.create_identity(username, passphrase)?;
-        let identity = account.get_own_identity()?;
+        let did = account.create_identity(username, passphrase).await?;
+        let identity = account.get_own_identity().await?;
         Ok((Box::new(account), did, identity))
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn create_identity() -> anyhow::Result<()> {
         let (_, did, _) = create_account(
             None,
@@ -52,7 +52,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[tokio::test]
     async fn get_identity() -> anyhow::Result<()> {
         let (account_a, _, _) = create_account(
             Some("JohnDoe"),
@@ -63,10 +63,10 @@ mod test {
         let (_, did_b, _) = create_account(Some("JaneDoe"), None).await?;
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
-        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
 
         let identity_b = account_a
-            .get_identity(did_b.clone().into())
+            .get_identity(did_b.clone().into()).await
             .map(|s| s.first().cloned())?;
 
         assert!(identity_b.is_some());
@@ -78,7 +78,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[tokio::test]
     async fn get_identity_by_username() -> anyhow::Result<()> {
         let (account_a, _, _) = create_account(Some("JohnDoe"), None).await?;
 
@@ -88,7 +88,7 @@ mod test {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
         let identity_b = account_a
-            .get_identity(String::from("JaneDoe").into())?
+            .get_identity(String::from("JaneDoe").into()).await?
             .first()
             .cloned();
 
@@ -100,7 +100,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn update_identity_username() -> anyhow::Result<()> {
         let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
@@ -109,20 +109,20 @@ mod test {
         account.create_identity(
             Some("JohnDoe"),
             Some("morning caution dose lab six actress pond humble pause enact virtual train"),
-        )?;
+        ).await?;
 
-        let old_identity = account.get_own_identity()?;
+        let old_identity = account.get_own_identity().await?;
 
-        account.update_identity(IdentityUpdate::set_username("JohnDoe2.0".into()))?;
+        account.update_identity(IdentityUpdate::set_username("JohnDoe2.0".into())).await?;
 
-        let updated_identity = account.get_own_identity()?;
+        let updated_identity = account.get_own_identity().await?;
 
         assert_ne!(old_identity.username(), updated_identity.username());
 
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn update_identity_status() -> anyhow::Result<()> {
         let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
@@ -131,13 +131,13 @@ mod test {
         account.create_identity(
             Some("JohnDoe"),
             Some("morning caution dose lab six actress pond humble pause enact virtual train"),
-        )?;
+        ).await?;
 
-        let old_identity = account.get_own_identity()?;
+        let old_identity = account.get_own_identity().await?;
 
-        account.update_identity(IdentityUpdate::set_status_message(Some("Blast off".into())))?;
+        account.update_identity(IdentityUpdate::set_status_message(Some("Blast off".into()))).await?;
 
-        let updated_identity = account.get_own_identity()?;
+        let updated_identity = account.get_own_identity().await?;
 
         assert_eq!(old_identity.status_message(), None);
 
