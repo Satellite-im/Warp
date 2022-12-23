@@ -198,7 +198,7 @@ pub trait IdentityInformation: Send + Sync {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-#[derive(FFIFree)]
+#[derive(Clone, FFIFree)]
 pub struct MultiPassAdapter {
     object: Box<dyn MultiPass>,
 }
@@ -206,6 +206,10 @@ pub struct MultiPassAdapter {
 impl MultiPassAdapter {
     pub fn new(object: Box<dyn MultiPass>) -> Self {
         MultiPassAdapter { object }
+    }
+
+    pub fn object(&self) -> Box<dyn MultiPass> {
+        self.object.clone()
     }
 }
 

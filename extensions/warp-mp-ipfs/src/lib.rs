@@ -879,7 +879,6 @@ pub mod ffi {
     use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::sync::{Arc, RwLock};
     use warp::tesseract::Tesseract;
 
     #[allow(clippy::missing_safety_doc)]
@@ -916,9 +915,9 @@ pub mod ffi {
             Err(e) => return FFIResult::err(Error::from(e)),
         };
 
-        FFIResult::ok(MultiPassAdapter::new(Arc::new(RwLock::new(Box::new(
+        FFIResult::ok(MultiPassAdapter::new(Box::new(
             account,
-        )))))
+        )))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -957,8 +956,8 @@ pub mod ffi {
             Err(e) => return FFIResult::err(Error::from(e)),
         };
 
-        FFIResult::ok(MultiPassAdapter::new(Arc::new(RwLock::new(Box::new(
+        FFIResult::ok(MultiPassAdapter::new(Box::new(
             account,
-        )))))
+        )))
     }
 }

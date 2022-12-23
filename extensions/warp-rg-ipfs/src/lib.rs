@@ -460,7 +460,6 @@ pub mod ffi {
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::raygun::RayGunAdapter;
-    use warp::sync::{Arc, RwLock};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -487,11 +486,11 @@ pub mod ffi {
 
         match async_on_block(IpfsMessaging::<Temporary>::new(
             config,
-            account.inner().read().clone(),
+            account.object(),
             None,
             cache.map(|p| p.inner()),
         )) {
-            Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(RwLock::new(Box::new(a))))),
+            Ok(a) => FFIResult::ok(RayGunAdapter::new(Box::new(a))),
             Err(e) => FFIResult::err(Error::from(e)),
         }
     }
@@ -521,11 +520,11 @@ pub mod ffi {
 
         match async_on_block(IpfsMessaging::<Persistent>::new(
             config,
-            account.inner().read().clone(),
+            account.object(),
             None,
             cache.map(|p| p.inner()),
         )) {
-            Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(RwLock::new(Box::new(a))))),
+            Ok(a) => FFIResult::ok(RayGunAdapter::new(Box::new(a))),
             Err(e) => FFIResult::err(Error::from(e)),
         }
     }

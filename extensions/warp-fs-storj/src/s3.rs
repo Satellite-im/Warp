@@ -532,7 +532,6 @@ pub mod ffi {
     use std::os::raw::c_char;
     use warp::constellation::ConstellationAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::sync::{Arc, RwLock};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -560,9 +559,9 @@ pub mod ffi {
             client.set_cache(pd.inner().clone());
         }
 
-        let obj = Box::new(ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(
+        let obj = Box::new(ConstellationAdapter::new(Box::new(
             client,
-        )))));
+        )));
         Box::into_raw(obj) as *mut ConstellationAdapter
     }
 }
