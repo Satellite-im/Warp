@@ -5,7 +5,7 @@ use rustyline_async::{Readline, ReadlineError};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use tracing_subscriber::EnvFilter;
-use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate, Platform};
+use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, RwLock};
@@ -34,6 +34,8 @@ struct Opt {
     r#override: Option<bool>,
     #[clap(long)]
     bootstrap: Option<bool>,
+    #[clap(long)]
+    provide_platform_info: bool,
 }
 
 //Note: Cache can be enabled but the internals may need a little rework but since extension handles caching itself, this isnt needed for now
@@ -70,6 +72,9 @@ async fn account(
         config.store_setting.discovery = Discovery::None;
         config.ipfs_setting.bootstrap = false;
     }
+
+    config.store_setting.share_platform = opt.provide_platform_info;
+    
     if let Some(oride) = opt.r#override {
         config.store_setting.override_ipld = oride;
     }
@@ -680,14 +685,8 @@ async fn main() -> anyhow::Result<()> {
                             let mut table = Table::new();
                             table.set_header(vec!["Username", "Public Key", "Status Message", "Banner", "Picture", "Platform", "Status"]);
                             for identity in idents {
-                                let status = match identity.did_key() == own_identity.did_key() {
-                                    true => IdentityStatus::Online,
-                                    false => account.identity_status(&identity.did_key()).await.unwrap_or(IdentityStatus::Offline)
-                                };
-                                let platform = match identity.did_key() == own_identity.did_key() {
-                                    true => Platform::Desktop,
-                                    false => account.identity_platform(&identity.did_key()).await.unwrap_or_default(),
-                                };
+                                let status = account.identity_status(&identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
+                                let platform = account.identity_platform(&identity.did_key()).await.unwrap_or_default();
                                 table.add_row(vec![
                                     identity.username(),
                                     identity.did_key().to_string(),

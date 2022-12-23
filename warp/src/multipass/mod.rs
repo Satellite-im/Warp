@@ -223,6 +223,7 @@ impl MultiPassAdapter {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::await_holding_lock)]
 pub mod ffi {
     use futures::StreamExt;
 
