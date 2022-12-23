@@ -432,34 +432,38 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     fn own_platform(&self) -> Platform {
-        #[cfg(any(
-            target_os = "windows",
-            target_os = "macos",
-            target_os = "linux",
-            target_os = "freebsd",
-            target_os = "dragonfly",
-            target_os = "openbsd",
-            target_os = "netbsd"
-        ))]
-        let platform = Platform::Desktop;
+        if self.share_platform.load(Ordering::Relaxed) {
+            #[cfg(any(
+                target_os = "windows",
+                target_os = "macos",
+                target_os = "linux",
+                target_os = "freebsd",
+                target_os = "dragonfly",
+                target_os = "openbsd",
+                target_os = "netbsd"
+            ))]
+            let platform = Platform::Desktop;
 
-        #[cfg(any(target_os = "android", target_os = "ios"))]
-        let platform = Platform::Mobile;
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            let platform = Platform::Mobile;
 
-        #[cfg(not(any(any(
-            target_os = "windows",
-            target_os = "macos",
-            target_os = "linux",
-            target_os = "freebsd",
-            target_os = "dragonfly",
-            target_os = "openbsd",
-            target_os = "netbsd",
-            target_os = "android",
-            target_os = "ios"
-        ))))]
-        let platform = Platform::Unknown;
+            #[cfg(not(any(any(
+                target_os = "windows",
+                target_os = "macos",
+                target_os = "linux",
+                target_os = "freebsd",
+                target_os = "dragonfly",
+                target_os = "openbsd",
+                target_os = "netbsd",
+                target_os = "android",
+                target_os = "ios"
+            ))))]
+            let platform = Platform::Unknown;
 
-        platform
+            platform
+        } else {
+            Platform::Unknown
+        }
     }
 
     pub fn discovery_type(&self) -> Discovery {
