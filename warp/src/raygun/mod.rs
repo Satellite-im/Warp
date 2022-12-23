@@ -4,7 +4,6 @@ use crate::constellation::file::File;
 use crate::constellation::ConstellationProgressStream;
 use crate::crypto::DID;
 use crate::error::Error;
-use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::{Extension, SingleHandle};
 
 use derive_more::Display;
@@ -775,213 +774,28 @@ pub trait RayGunEvents: Sync + Send {
     }
 }
 
-#[allow(clippy::await_holding_lock)]
-#[async_trait::async_trait]
-impl<T: ?Sized> RayGun for Arc<RwLock<Box<T>>>
-where
-    T: RayGun,
-{
-    // Start a new conversation.
-    async fn create_conversation(&mut self, key: &DID) -> Result<Conversation, Error> {
-        self.write().create_conversation(key).await
-    }
-
-    // List all active conversations
-    async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
-        self.read().list_conversations().await
-    }
-
-    /// Retrieve all messages from a conversation
-    async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message, Error> {
-        self.read().get_message(conversation_id, message_id).await
-    }
-
-    /// Retrieve all messages from a conversation
-    async fn get_messages(
-        &self,
-        conversation_id: Uuid,
-        options: MessageOptions,
-    ) -> Result<Vec<Message>, Error> {
-        self.read().get_messages(conversation_id, options).await
-    }
-
-    /// Sends a message to a conversation. If `message_id` is provided, it will override the selected message
-    async fn send(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Option<Uuid>,
-        message: Vec<String>,
-    ) -> Result<(), Error> {
-        self.write()
-            .send(conversation_id, message_id, message)
-            .await
-    }
-
-    /// Delete message from a conversation
-    async fn delete(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Option<Uuid>,
-    ) -> Result<(), Error> {
-        self.write().delete(conversation_id, message_id).await
-    }
-
-    /// React to a message
-    async fn react(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: ReactionState,
-        emoji: String,
-    ) -> Result<(), Error> {
-        self.write()
-            .react(conversation_id, message_id, state, emoji)
-            .await
-    }
-
-    /// Pin a message within a conversation
-    async fn pin(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: PinState,
-    ) -> Result<(), Error> {
-        self.write().pin(conversation_id, message_id, state).await
-    }
-
-    /// Reply to a message within a conversation
-    async fn reply(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        message: Vec<String>,
-    ) -> Result<(), Error> {
-        self.write()
-            .reply(conversation_id, message_id, message)
-            .await
-    }
-
-    async fn embeds(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: EmbedState,
-    ) -> Result<(), Error> {
-        self.write()
-            .embeds(conversation_id, message_id, state)
-            .await
-    }
-}
-
-#[allow(clippy::await_holding_lock)]
-#[async_trait::async_trait]
-impl<T: ?Sized> RayGunAttachment for Arc<RwLock<Box<T>>>
-where
-    T: RayGunAttachment,
-{
-    async fn attach(
-        &mut self,
-        conversation_id: Uuid,
-        files: Vec<PathBuf>,
-        message: Vec<String>,
-    ) -> Result<(), Error> {
-        self.write().attach(conversation_id, files, message).await
-    }
-
-    async fn download(
-        &self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        file: String,
-        path: PathBuf,
-    ) -> Result<ConstellationProgressStream, Error> {
-        self.read()
-            .download(conversation_id, message_id, file, path)
-            .await
-    }
-}
-
-#[allow(clippy::await_holding_lock)]
-#[async_trait::async_trait]
-impl<T: ?Sized> RayGunStream for Arc<RwLock<Box<T>>>
-where
-    T: RayGunStream,
-{
-    async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
-        self.write().subscribe().await
-    }
-
-    async fn get_conversation_stream(
-        &mut self,
-        conversation_id: Uuid,
-    ) -> Result<MessageEventStream, Error> {
-        self.write().get_conversation_stream(conversation_id).await
-    }
-}
-
-#[allow(clippy::await_holding_lock)]
-#[async_trait::async_trait]
-impl<T: ?Sized> RayGunEvents for Arc<RwLock<Box<T>>>
-where
-    T: RayGunEvents,
-{
-    /// Send an event to a conversation
-    async fn send_event(
-        &mut self,
-        conversation_id: Uuid,
-        event: MessageEvent,
-    ) -> Result<(), Error> {
-        self.write().send_event(conversation_id, event).await
-    }
-
-    /// Cancel event that was sent, if any.
-    /// Note: This would only send the cancel event
-    ///       Unless an event is continuious internally until it times out
-    async fn cancel_event(
-        &mut self,
-        conversation_id: Uuid,
-        event: MessageEvent,
-    ) -> Result<(), Error> {
-        self.write().cancel_event(conversation_id, event).await
-    }
-}
-
-#[allow(clippy::await_holding_lock)]
-#[async_trait::async_trait]
-impl<T: ?Sized> RayGunGroupConversation for Arc<RwLock<Box<T>>>
-where
-    T: RayGunGroupConversation,
-{
-    async fn add_recipient(&mut self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
-        self.write().add_recipient(conversation_id, did).await
-    }
-
-    async fn remove_recipient(&mut self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
-        self.write().remove_recipient(conversation_id, did).await
-    }
-}
-
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(FFIFree)]
 pub struct RayGunAdapter {
-    object: Arc<RwLock<Box<dyn RayGun>>>,
+    object: Box<dyn RayGun>,
 }
 
 impl RayGunAdapter {
-    pub fn new(object: Arc<RwLock<Box<dyn RayGun>>>) -> Self {
+    pub fn new(object: Box<dyn RayGun>) -> Self {
         RayGunAdapter { object }
     }
+}
 
-    pub fn inner(&self) -> Arc<RwLock<Box<dyn RayGun>>> {
-        self.object.clone()
+impl core::ops::Deref for RayGunAdapter {
+    type Target = Box<dyn RayGun>;
+    fn deref(&self) -> &Self::Target {
+        &self.object
     }
+}
 
-    pub fn read_guard(&self) -> RwLockReadGuard<Box<dyn RayGun>> {
-        self.object.read()
-    }
-
-    pub fn write_guard(&mut self) -> RwLockWriteGuard<Box<dyn RayGun>> {
-        self.object.write()
+impl core::ops::DerefMut for RayGunAdapter {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.object
     }
 }
 
@@ -1023,7 +837,7 @@ pub mod ffi {
 
         let adapter = &mut *ctx;
 
-        async_on_block(adapter.write_guard().create_conversation(&*did_key)).into()
+        async_on_block(adapter.create_conversation(&*did_key)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1040,7 +854,7 @@ pub mod ffi {
 
         let adapter = &*ctx;
 
-        async_on_block(adapter.read_guard().list_conversations()).into()
+        async_on_block(adapter.list_conversations()).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1078,7 +892,7 @@ pub mod ffi {
         };
 
         let adapter = &*ctx;
-        async_on_block(adapter.read_guard().get_message(convo_id, message_id)).into()
+        async_on_block(adapter.get_message(convo_id, message_id)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1112,7 +926,7 @@ pub mod ffi {
         };
 
         let adapter = &*ctx;
-        async_on_block(adapter.read_guard().get_messages(convo_id, option)).into()
+        async_on_block(adapter.get_messages(convo_id, option)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1166,7 +980,7 @@ pub mod ffi {
         };
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().send(convo_id, msg_id, messages)).into()
+        async_on_block(adapter.send(convo_id, msg_id, messages)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1201,7 +1015,7 @@ pub mod ffi {
         };
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().delete(convo_id, msg_id)).into()
+        async_on_block(adapter.delete(convo_id, msg_id)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1245,7 +1059,7 @@ pub mod ffi {
         let emoji = CStr::from_ptr(emoji).to_string_lossy().to_string();
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().react(convo_id, msg_id, state, emoji)).into()
+        async_on_block(adapter.react(convo_id, msg_id, state, emoji)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1282,7 +1096,7 @@ pub mod ffi {
         };
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().pin(convo_id, msg_id, state)).into()
+        async_on_block(adapter.pin(convo_id, msg_id, state)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1329,7 +1143,7 @@ pub mod ffi {
         };
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().reply(convo_id, msg_id, messages)).into()
+        async_on_block(adapter.reply(convo_id, msg_id, messages)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1366,7 +1180,7 @@ pub mod ffi {
         };
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().embeds(convo_id, msg_id, state)).into()
+        async_on_block(adapter.embeds(convo_id, msg_id, state)).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -1380,7 +1194,7 @@ pub mod ffi {
 
         let rg = &mut *(ctx);
 
-        async_on_block(rg.write_guard().subscribe()).into()
+        async_on_block(rg.subscribe()).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -1424,7 +1238,7 @@ pub mod ffi {
 
         let rg = &mut *(ctx);
 
-        async_on_block(rg.write_guard().get_conversation_stream(conversation_id)).into()
+        async_on_block(rg.get_conversation_stream(conversation_id)).into()
     }
 
     #[allow(clippy::missing_safety_doc)]

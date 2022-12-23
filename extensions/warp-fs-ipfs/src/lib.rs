@@ -728,7 +728,6 @@ pub mod ffi {
     use warp::error::Error;
     use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
-    use warp::sync::{Arc, RwLock};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -742,14 +741,14 @@ pub mod ffi {
                     pointer: "multipass".into(),
                 })
             }
-            false => (*multipass).inner().read().clone(),
+            false => (*multipass).object(),
         };
         let config = match config.is_null() {
             true => None,
             false => Some((*config).clone()),
         };
         warp::async_on_block(IpfsFileSystem::<Temporary>::new(account, config))
-            .map(|account| ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(account)))))
+            .map(|fs| ConstellationAdapter::new(Box::new(fs)))
             .map_err(Error::from)
             .into()
     }
@@ -766,7 +765,7 @@ pub mod ffi {
                     pointer: "multipass".into(),
                 })
             }
-            false => (*multipass).inner().read().clone(),
+            false => (*multipass).object(),
         };
         let config = match config.is_null() {
             true => None,
@@ -774,7 +773,7 @@ pub mod ffi {
         };
 
         warp::async_on_block(IpfsFileSystem::<Persistent>::new(account, config))
-            .map(|account| ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(account)))))
+            .map(|fs| ConstellationAdapter::new(Box::new(fs)))
             .map_err(Error::from)
             .into()
     }

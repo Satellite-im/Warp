@@ -4,8 +4,6 @@ pub mod item;
 
 use std::path::{Path, PathBuf};
 
-use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
-
 use crate::error::Error;
 use crate::{Extension, SingleHandle};
 use anyhow::anyhow;
@@ -230,127 +228,6 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle + DynClone {
     }
 }
 
-//TODO: This would require a refactor to remove returned references
-#[allow(clippy::await_holding_lock)]
-#[async_trait::async_trait]
-impl<T: ?Sized> Constellation for Arc<RwLock<Box<T>>>
-where
-    T: Constellation,
-{
-    /// Provides the timestamp of when the file system was modified
-    fn modified(&self) -> DateTime<Utc> {
-        self.read().modified()
-    }
-
-    /// Get root directory
-    fn root_directory(&self) -> Directory {
-        self.read().root_directory()
-    }
-
-    /// Get current directory
-    fn current_directory(&self) -> Result<Directory, Error> {
-        self.read().current_directory()
-    }
-
-    /// Select a directory within the filesystem
-    fn select(&mut self, path: &str) -> Result<(), Error> {
-        self.write().select(path)
-    }
-
-    /// Set path to current directory
-    fn set_path(&mut self, path: PathBuf) {
-        self.write().set_path(path)
-    }
-
-    /// Get path of current directory
-    fn get_path(&self) -> PathBuf {
-        self.read().get_path()
-    }
-
-    /// Go back to the previous directory
-    fn go_back(&mut self) -> Result<(), Error> {
-        self.write().go_back()
-    }
-
-    /// Returns a mutable directory from the filesystem
-    fn open_directory(&self, path: &str) -> Result<Directory, Error> {
-        self.write().open_directory(path)
-    }
-
-    /// Used to upload file to the filesystem
-    async fn put(&mut self, dest: &str, src: &str) -> Result<(), Error> {
-        self.write().put(dest, src).await
-    }
-
-    /// Used to download a file from the filesystem
-    async fn get(&self, src: &str, dest: &str) -> Result<(), Error> {
-        self.read().get(src, dest).await
-    }
-
-    /// Used to upload file to the filesystem with data from buffer
-    #[allow(clippy::ptr_arg)]
-    async fn put_buffer(&mut self, dest: &str, src: &Vec<u8>) -> Result<(), Error> {
-        self.write().put_buffer(dest, src).await
-    }
-
-    /// Used to download data from the filesystem into a buffer
-    async fn get_buffer(&self, src: &str) -> Result<Vec<u8>, Error> {
-        self.read().get_buffer(src).await
-    }
-
-    /// Used to upload file to the filesystem with data from a stream
-    async fn put_stream(
-        &mut self,
-        dest: &str,
-        total_size: Option<usize>,
-        stream: BoxStream<'static, Vec<u8>>,
-    ) -> Result<ConstellationProgressStream, Error> {
-        self.write().put_stream(dest, total_size, stream).await
-    }
-
-    /// Used to download data from the filesystem using a stream
-    async fn get_stream(
-        &self,
-        src: &str,
-    ) -> Result<BoxStream<'static, Result<Vec<u8>, Error>>, Error> {
-        self.read().get_stream(src).await
-    }
-
-    /// Used to remove data from the filesystem
-    async fn remove(&mut self, path: &str, recursive: bool) -> Result<(), Error> {
-        self.write().remove(path, recursive).await
-    }
-
-    async fn rename(&mut self, old: &str, new: &str) -> Result<(), Error> {
-        self.write().rename(old, new).await
-    }
-
-    /// Used to move data within the filesystem
-    async fn move_item(&mut self, path: &str, dest: &str) -> Result<(), Error> {
-        self.write().move_item(path, dest).await
-    }
-
-    /// Used to create a directory within the filesystem.
-    async fn create_directory(&mut self, path: &str, recursive: bool) -> Result<(), Error> {
-        self.write().create_directory(path, recursive).await
-    }
-
-    /// Used to sync references within the filesystem for a file
-    async fn sync_ref(&mut self, path: &str) -> Result<(), Error> {
-        self.write().sync_ref(path).await
-    }
-
-    /// Used to export the filesystem to a specific structure. Currently supports `Json`, `Toml`, and `Yaml`
-    fn export(&self, r#type: ConstellationDataType) -> Result<String, Error> {
-        self.read().export(r#type)
-    }
-
-    /// Used to import data into the filesystem. This would override current contents.
-    fn import(&mut self, r#type: ConstellationDataType, data: String) -> Result<(), Error> {
-        self.write().import(r#type, data)
-    }
-}
-
 dyn_clone::clone_trait_object!(Constellation);
 
 /// Types that would be used for import and export
@@ -380,209 +257,210 @@ impl<S: AsRef<str>> From<S> for ConstellationDataType {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(FFIFree)]
 pub struct ConstellationAdapter {
-    object: Arc<RwLock<Box<dyn Constellation>>>,
+    object: Box<dyn Constellation>,
 }
 
 impl ConstellationAdapter {
-    pub fn new(object: Arc<RwLock<Box<dyn Constellation>>>) -> ConstellationAdapter {
+    pub fn new(object: Box<dyn Constellation>) -> ConstellationAdapter {
         ConstellationAdapter { object }
     }
+}
 
-    pub fn inner(&self) -> Arc<RwLock<Box<dyn Constellation>>> {
-        self.object.clone()
-    }
-
-    pub fn read_guard(&self) -> RwLockReadGuard<Box<dyn Constellation>> {
-        self.object.read()
-    }
-
-    pub fn write_guard(&mut self) -> RwLockWriteGuard<Box<dyn Constellation>> {
-        self.object.write()
+impl core::ops::Deref for ConstellationAdapter {
+    type Target = Box<dyn Constellation>;
+    fn deref(&self) -> &Self::Target {
+        &self.object
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl ConstellationAdapter {
-    #[wasm_bindgen]
-    pub fn modified(&self) -> i64 {
-        self.object.read().modified().timestamp()
-    }
-
-    #[wasm_bindgen]
-    pub fn version(&self) -> String {
-        self.object.read().version().to_string()
-    }
-
-    #[wasm_bindgen]
-    pub fn root_directory(&self) -> Directory {
-        self.object.read().root_directory().clone()
-    }
-
-    #[wasm_bindgen]
-    pub fn current_directory(&self) -> Directory {
-        self.object.read().current_directory().clone()
-    }
-
-    #[wasm_bindgen]
-    pub fn select(&mut self, path: &str) -> Result<(), Error> {
-        self.object.write().select(path)
-    }
-
-    #[wasm_bindgen]
-    pub fn go_back(&mut self) -> Result<(), Error> {
-        self.object.write().go_back()
-    }
-
-    #[wasm_bindgen]
-    pub fn export(&self, data_type: ConstellationDataType) -> Result<String, Error> {
-        self.object.read().export(data_type)
-    }
-
-    #[wasm_bindgen]
-    pub fn import(&mut self, data_type: ConstellationDataType, data: String) -> Result<(), Error> {
-        self.object.write().import(data_type, data)
-    }
-
-    #[wasm_bindgen]
-    pub fn put(&mut self, remote: String, local: String) -> Promise {
-        let inner = self.object.clone();
-        future_to_promise(async move {
-            let mut inner = inner
-                .write()
-                .put(&remote, &local)
-                .await
-                .map_err(crate::error::into_error)
-                .map_err(JsValue::from)?;
-
-            Ok(JsValue::from_bool(true))
-        })
-    }
-
-    #[wasm_bindgen]
-    pub fn get(&self, remote: String, local: String) -> Promise {
-        let inner = self.object.clone();
-        future_to_promise(async move {
-            let inner = inner
-                .read()
-                .get(&remote, &local)
-                .await
-                .map_err(crate::error::into_error)
-                .map_err(JsValue::from)?;
-
-            Ok(JsValue::from_bool(true))
-        })
-    }
-
-    #[wasm_bindgen]
-    pub fn put_buffer(&mut self, remote: String, data: Vec<u8>) -> Promise {
-        let inner = self.object.clone();
-        future_to_promise(async move {
-            let mut inner = inner
-                .write()
-                .put_buffer(&remote, &data)
-                .await
-                .map_err(crate::error::into_error)
-                .map_err(JsValue::from)?;
-
-            Ok(JsValue::from_bool(true))
-        })
-    }
-
-    #[wasm_bindgen]
-    pub fn get_buffer(&self, remote: String) -> Promise {
-        let inner = self.object.clone();
-        future_to_promise(async move {
-            let inner = inner.read();
-            let data = inner
-                .get_buffer(&remote)
-                .await
-                .map_err(crate::error::into_error)?;
-            let val = serde_wasm_bindgen::to_value(&data).unwrap();
-            Ok(val)
-        })
-    }
-
-    #[wasm_bindgen]
-    pub fn remove(&mut self, remote: String, recursive: bool) -> Promise {
-        let inner = self.object.clone();
-        future_to_promise(async move {
-            let mut inner = inner.write();
-            inner
-                .remove(&remote, recursive)
-                .await
-                .map_err(crate::error::into_error)
-                .map_err(JsValue::from)?;
-
-            Ok(JsValue::from_bool(true))
-        })
-    }
-
-    #[wasm_bindgen]
-    pub fn move_item(&mut self, from: String, to: String) -> Promise {
-        let inner = self.object.clone();
-        future_to_promise(async move {
-            let mut inner = inner
-                .write()
-                .move_item(&from, &to)
-                .await
-                .map_err(crate::error::into_error)
-                .map_err(JsValue::from)?;
-
-            Ok(JsValue::from_bool(true))
-        })
-    }
-
-    #[wasm_bindgen]
-    pub fn create_directory(&mut self, remote: String, recursive: bool) -> Promise {
-        let inner = self.object.clone();
-        future_to_promise(async move {
-            let mut inner = inner.write();
-            inner
-                .create_directory(&remote, recursive)
-                .await
-                .map_err(crate::error::into_error)
-                .map_err(JsValue::from)?;
-
-            Ok(JsValue::from_bool(true))
-        })
-    }
-
-    #[wasm_bindgen]
-    pub fn sync_ref(&mut self, remote: String) -> Promise {
-        let inner = self.object.clone();
-        future_to_promise(async move {
-            let mut inner = inner.write();
-            inner
-                .sync_ref(&remote)
-                .await
-                .map_err(crate::error::into_error)
-                .map_err(JsValue::from)?;
-
-            Ok(JsValue::from_bool(true))
-        })
-    }
-
-    #[wasm_bindgen]
-    pub fn id(&self) -> String {
-        self.object.read().id()
-    }
-
-    #[wasm_bindgen]
-    pub fn name(&self) -> String {
-        self.object.read().name()
-    }
-
-    #[wasm_bindgen]
-    pub fn description(&self) -> String {
-        self.object.read().description()
-    }
-
-    #[wasm_bindgen]
-    pub fn module(&self) -> crate::module::Module {
-        self.object.read().module()
+impl core::ops::DerefMut for ConstellationAdapter {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.object
     }
 }
+
+// #[cfg(target_arch = "wasm32")]
+// #[wasm_bindgen]
+// impl ConstellationAdapter {
+//     #[wasm_bindgen]
+//     pub fn modified(&self) -> i64 {
+//         self.object.modified().timestamp()
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn version(&self) -> String {
+//         self.object.version().to_string()
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn root_directory(&self) -> Directory {
+//         self.object.root_directory().clone()
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn current_directory(&self) -> Directory {
+//         self.object.current_directory().clone()
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn select(&mut self, path: &str) -> Result<(), Error> {
+//         self.object.write().select(path)
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn go_back(&mut self) -> Result<(), Error> {
+//         self.object.write().go_back()
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn export(&self, data_type: ConstellationDataType) -> Result<String, Error> {
+//         self.object.read().export(data_type)
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn import(&mut self, data_type: ConstellationDataType, data: String) -> Result<(), Error> {
+//         self.object.write().import(data_type, data)
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn put(&mut self, remote: String, local: String) -> Promise {
+//         let inner = self.object.clone();
+//         future_to_promise(async move {
+//             let mut inner = inner
+//                 .write()
+//                 .put(&remote, &local)
+//                 .await
+//                 .map_err(crate::error::into_error)
+//                 .map_err(JsValue::from)?;
+
+//             Ok(JsValue::from_bool(true))
+//         })
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn get(&self, remote: String, local: String) -> Promise {
+//         let inner = self.object.clone();
+//         future_to_promise(async move {
+//             let inner = inner
+//                 .read()
+//                 .get(&remote, &local)
+//                 .await
+//                 .map_err(crate::error::into_error)
+//                 .map_err(JsValue::from)?;
+
+//             Ok(JsValue::from_bool(true))
+//         })
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn put_buffer(&mut self, remote: String, data: Vec<u8>) -> Promise {
+//         let inner = self.object.clone();
+//         future_to_promise(async move {
+//             let mut inner = inner
+//                 .write()
+//                 .put_buffer(&remote, &data)
+//                 .await
+//                 .map_err(crate::error::into_error)
+//                 .map_err(JsValue::from)?;
+
+//             Ok(JsValue::from_bool(true))
+//         })
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn get_buffer(&self, remote: String) -> Promise {
+//         let inner = self.object.clone();
+//         future_to_promise(async move {
+//             let inner = inner.read();
+//             let data = inner
+//                 .get_buffer(&remote)
+//                 .await
+//                 .map_err(crate::error::into_error)?;
+//             let val = serde_wasm_bindgen::to_value(&data).unwrap();
+//             Ok(val)
+//         })
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn remove(&mut self, remote: String, recursive: bool) -> Promise {
+//         let inner = self.object.clone();
+//         future_to_promise(async move {
+//             let mut inner = inner.write();
+//             inner
+//                 .remove(&remote, recursive)
+//                 .await
+//                 .map_err(crate::error::into_error)
+//                 .map_err(JsValue::from)?;
+
+//             Ok(JsValue::from_bool(true))
+//         })
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn move_item(&mut self, from: String, to: String) -> Promise {
+//         let inner = self.object.clone();
+//         future_to_promise(async move {
+//             let mut inner = inner
+//                 .write()
+//                 .move_item(&from, &to)
+//                 .await
+//                 .map_err(crate::error::into_error)
+//                 .map_err(JsValue::from)?;
+
+//             Ok(JsValue::from_bool(true))
+//         })
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn create_directory(&mut self, remote: String, recursive: bool) -> Promise {
+//         let inner = self.object.clone();
+//         future_to_promise(async move {
+//             let mut inner = inner.write();
+//             inner
+//                 .create_directory(&remote, recursive)
+//                 .await
+//                 .map_err(crate::error::into_error)
+//                 .map_err(JsValue::from)?;
+
+//             Ok(JsValue::from_bool(true))
+//         })
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn sync_ref(&mut self, remote: String) -> Promise {
+//         let inner = self.object.clone();
+//         future_to_promise(async move {
+//             let mut inner = inner.write();
+//             inner
+//                 .sync_ref(&remote)
+//                 .await
+//                 .map_err(crate::error::into_error)
+//                 .map_err(JsValue::from)?;
+
+//             Ok(JsValue::from_bool(true))
+//         })
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn id(&self) -> String {
+//         self.object.read().id()
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn name(&self) -> String {
+//         self.object.read().name()
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn description(&self) -> String {
+//         self.object.read().description()
+//     }
+
+//     #[wasm_bindgen]
+//     pub fn module(&self) -> crate::module::Module {
+//         self.object.read().module()
+//     }
+// }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
@@ -612,7 +490,7 @@ pub mod ffi {
         let cname = CStr::from_ptr(name).to_string_lossy().to_string();
 
         let constellation = &mut *(ctx);
-        constellation.write_guard().select(&cname).into()
+        constellation.select(&cname).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -625,7 +503,7 @@ pub mod ffi {
         }
 
         let constellation = &mut *(ctx);
-        constellation.write_guard().go_back().into()
+        constellation.go_back().into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -645,7 +523,7 @@ pub mod ffi {
         let cname = CStr::from_ptr(name).to_string_lossy().to_string();
 
         let constellation = &mut *(ctx);
-        match constellation.read_guard().open_directory(&cname) {
+        match constellation.open_directory(&cname) {
             Ok(directory) => FFIResult::ok(directory),
             Err(e) => FFIResult::err(e),
         }
@@ -660,7 +538,7 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
         let constellation = &*(ctx);
-        let directory = constellation.read_guard().root_directory();
+        let directory = constellation.root_directory();
         Box::into_raw(Box::new(directory)) as *mut Directory
     }
 
@@ -675,7 +553,7 @@ pub mod ffi {
             });
         }
         let constellation = &*(ctx);
-        constellation.read_guard().current_directory().into()
+        constellation.current_directory().into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -702,7 +580,7 @@ pub mod ffi {
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let local = CStr::from_ptr(local).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async { constellation.write_guard().put(&remote, &local).await })
+        rt.block_on(async { constellation.put(&remote, &local).await })
             .into()
     }
 
@@ -735,7 +613,6 @@ pub mod ffi {
 
         rt.block_on(async move {
             constellation
-                .write_guard()
                 .put_buffer(&remote.to_string_lossy(), &slice.to_vec())
                 .await
         })
@@ -767,7 +644,7 @@ pub mod ffi {
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let local = CStr::from_ptr(local).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async move { constellation.read_guard().get(&remote, &local).await })
+        rt.block_on(async move { constellation.get(&remote, &local).await })
             .into()
     }
 
@@ -790,7 +667,7 @@ pub mod ffi {
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let rt = runtime_handle();
         rt.block_on(async move {
-            match constellation.read_guard().get_buffer(&remote).await {
+            match constellation.get_buffer(&remote).await {
                 Ok(temp_buf) => FFIResult::ok(FFIVec::from(temp_buf)),
                 Err(e) => FFIResult::err(e),
             }
@@ -816,7 +693,7 @@ pub mod ffi {
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async move { constellation.write_guard().remove(&remote, recursive).await })
+        rt.block_on(async move { constellation.remove(&remote, recursive).await })
             .into()
     }
 
@@ -839,13 +716,8 @@ pub mod ffi {
         let constellation = &mut *(ctx);
         let remote = CStr::from_ptr(remote).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async move {
-            constellation
-                .write_guard()
-                .create_directory(&remote, recursive)
-                .await
-        })
-        .into()
+        rt.block_on(async move { constellation.create_directory(&remote, recursive).await })
+            .into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -872,7 +744,7 @@ pub mod ffi {
         let src = CStr::from_ptr(src).to_string_lossy().to_string();
         let dst = CStr::from_ptr(dst).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async move { constellation.write_guard().move_item(&src, &dst).await })
+        rt.block_on(async move { constellation.move_item(&src, &dst).await })
             .into()
     }
 
@@ -900,8 +772,7 @@ pub mod ffi {
         let path = CStr::from_ptr(path).to_string_lossy().to_string();
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(constellation.write_guard().rename(&path, &name))
-            .into()
+        rt.block_on(constellation.rename(&path, &name)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -922,7 +793,7 @@ pub mod ffi {
         let constellation = &mut *(ctx);
         let src = CStr::from_ptr(src).to_string_lossy().to_string();
         let rt = runtime_handle();
-        rt.block_on(async move { constellation.write_guard().sync_ref(&src).await })
+        rt.block_on(async move { constellation.sync_ref(&src).await })
             .into()
     }
 
@@ -938,7 +809,7 @@ pub mod ffi {
 
         let constellation = &*(ctx);
 
-        FFIResult_String::from(constellation.read_guard().export(datatype))
+        FFIResult_String::from(constellation.export(datatype))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -958,6 +829,6 @@ pub mod ffi {
 
         let constellation = &mut *(ctx);
         let data = CStr::from_ptr(data).to_string_lossy().to_string();
-        constellation.write_guard().import(datatype, data).into()
+        constellation.import(datatype, data).into()
     }
 }
