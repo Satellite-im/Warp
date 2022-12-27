@@ -19,11 +19,11 @@ pub fn generate_name() -> String {
     let adj_length = adj().len();
     let nouns_length = nouns().len();
     loop {
-        let first = match adj().get(crate::crypto::rand::thread_rng().gen_range(0, adj_length)) {
+        let first = match adj().get(crate::crypto::rand::thread_rng().gen_range(0..adj_length)) {
             Some(s) => capitalize_first_letter(s),
             None => continue,
         };
-        let second = match nouns().get(crate::crypto::rand::thread_rng().gen_range(0, nouns_length))
+        let second = match nouns().get(crate::crypto::rand::thread_rng().gen_range(0..nouns_length))
         {
             Some(s) => capitalize_first_letter(s),
             None => continue,
