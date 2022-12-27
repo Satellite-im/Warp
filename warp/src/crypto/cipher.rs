@@ -3,16 +3,13 @@
 use std::io::{ErrorKind, Read, Write};
 
 use crate::crypto::hash::sha256_hash;
-
-use aead::{Aead, KeyInit};
-
-#[cfg(not(target_arch = "wasm32"))]
-use aead::stream::{DecryptorBE32, EncryptorBE32};
 use zeroize::Zeroize;
 
 use crate::error::Error;
-use aes_gcm::Aes256Gcm;
-use chacha20poly1305::XChaCha20Poly1305;
+
+#[cfg(not(target_arch = "wasm32"))]
+use aes_gcm::aead::stream::{DecryptorBE32, EncryptorBE32};
+use aes_gcm::{Aes256Gcm, aead::{Aead, KeyInit}};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -51,9 +48,6 @@ impl<U: AsRef<[u8]>> From<U> for Cipher {
 pub enum CipherType {
     /// AES256-GCM
     Aes256Gcm,
-
-    /// Xchacha20poly1305
-    Xchacha20poly1305,
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -113,7 +107,6 @@ impl Cipher {
     pub fn encrypt(&self, cipher_type: CipherType, data: &[u8]) -> Result<Vec<u8>> {
         let nonce = match cipher_type {
             CipherType::Aes256Gcm => crate::crypto::generate(12),
-            CipherType::Xchacha20poly1305 => crate::crypto::generate(24),
         };
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
@@ -128,12 +121,6 @@ impl Cipher {
                     .encrypt(nonce.as_slice().into(), data)
                     .map_err(|_| Error::EncryptionError)?
             }
-            CipherType::Xchacha20poly1305 => {
-                let chacha = XChaCha20Poly1305::new(key.as_slice().into());
-                chacha
-                    .encrypt(nonce.as_slice().into(), data)
-                    .map_err(|_| Error::EncryptionError)?
-            }
         };
         cipher_data.extend(nonce);
 
@@ -145,7 +132,6 @@ impl Cipher {
     pub fn decrypt(&self, cipher_type: CipherType, data: &[u8]) -> Result<Vec<u8>> {
         let (nonce, payload) = match cipher_type {
             CipherType::Aes256Gcm => extract_data_slice(data, 12),
-            CipherType::Xchacha20poly1305 => extract_data_slice(data, 24),
         };
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
@@ -156,12 +142,6 @@ impl Cipher {
         let decrypted_data = match cipher_type {
             CipherType::Aes256Gcm => {
                 let cipher = Aes256Gcm::new(key.as_slice().into());
-                cipher
-                    .decrypt(nonce.into(), payload)
-                    .map_err(|_| Error::DecryptionError)?
-            }
-            CipherType::Xchacha20poly1305 => {
-                let cipher = XChaCha20Poly1305::new(key.as_slice().into());
                 cipher
                     .decrypt(nonce.into(), payload)
                     .map_err(|_| Error::DecryptionError)?
@@ -205,7 +185,6 @@ impl Cipher {
     ) -> Result<()> {
         let nonce = match cipher_type {
             CipherType::Aes256Gcm => crate::crypto::generate(7),
-            CipherType::Xchacha20poly1305 => crate::crypto::generate(19),
         };
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
@@ -242,34 +221,6 @@ impl Cipher {
                 }
                 writer.flush()?;
             }
-            CipherType::Xchacha20poly1305 => {
-                let chacha = XChaCha20Poly1305::new(key.as_slice().into());
-
-                let mut stream = EncryptorBE32::from_aead(chacha, nonce.as_slice().into());
-                // write nonce to the beginning of the stream
-                writer.write_all(&nonce)?;
-
-                loop {
-                    match reader.read(&mut buffer) {
-                        Ok(512) => {
-                            let ciphertext = stream
-                                .encrypt_next(buffer.as_slice())
-                                .map_err(|_| Error::EncryptionStreamError)?;
-                            writer.write_all(&ciphertext)?;
-                        }
-                        Ok(read_count) => {
-                            let ciphertext = stream
-                                .encrypt_last(&buffer[..read_count])
-                                .map_err(|_| Error::EncryptionStreamError)?;
-                            writer.write_all(&ciphertext)?;
-                            break;
-                        }
-                        Err(e) if e.kind() == ErrorKind::Interrupted => continue,
-                        Err(e) => return Err(Error::from(e)),
-                    }
-                }
-                writer.flush()?;
-            }
         };
         Ok(())
     }
@@ -282,7 +233,6 @@ impl Cipher {
     ) -> Result<()> {
         let mut nonce = match cipher_type {
             CipherType::Aes256Gcm => vec![0u8; 7],
-            CipherType::Xchacha20poly1305 => vec![0u8; 19],
         };
 
         reader.read_exact(&mut nonce)?;
@@ -299,31 +249,6 @@ impl Cipher {
                 let cipher = Aes256Gcm::new(key.as_slice().into());
                 let mut stream = DecryptorBE32::from_aead(cipher, nonce.as_slice().into());
 
-                loop {
-                    match reader.read(&mut buffer) {
-                        Ok(528) => {
-                            let plaintext = stream
-                                .decrypt_next(buffer.as_slice())
-                                .map_err(|_| Error::DecryptionStreamError)?;
-
-                            writer.write_all(&plaintext)?
-                        }
-                        Ok(read_count) if read_count == 0 => break,
-                        Ok(read_count) => {
-                            let plaintext = stream
-                                .decrypt_last(&buffer[..read_count])
-                                .map_err(|_| Error::DecryptionStreamError)?;
-                            writer.write_all(&plaintext)?;
-                            break;
-                        }
-                        Err(e) if e.kind() == ErrorKind::Interrupted => continue,
-                        Err(e) => return Err(Error::from(e)),
-                    };
-                }
-            }
-            CipherType::Xchacha20poly1305 => {
-                let chacha = XChaCha20Poly1305::new(key.as_slice().into());
-                let mut stream = DecryptorBE32::from_aead(chacha, nonce.as_slice().into());
                 loop {
                     match reader.read(&mut buffer) {
                         Ok(528) => {
@@ -516,23 +441,6 @@ mod test {
     }
 
     #[test]
-    fn cipher_xchacha20poly1305_self_encrypt_decrypt() -> anyhow::Result<()> {
-        let message = b"Hello, World!";
-
-        let cipher_data = Cipher::self_encrypt(CipherType::Xchacha20poly1305, message)?;
-
-        let plaintext = Cipher::self_decrypt(CipherType::Xchacha20poly1305, &cipher_data)?;
-
-        assert_ne!(cipher_data, plaintext);
-
-        assert_eq!(
-            String::from_utf8_lossy(&plaintext),
-            String::from_utf8_lossy(message)
-        );
-        Ok(())
-    }
-
-    #[test]
     fn cipher_aes256gcm_stream_self_encrypt_decrypt() -> anyhow::Result<()> {
         let base = b"this is my message";
         let mut cipher = Vec::<u8>::new();
@@ -577,81 +485,6 @@ mod test {
         )?;
 
         assert_ne!(cipher_data, plaintext);
-
-        assert_eq!(
-            String::from_utf8_lossy(&plaintext),
-            String::from_utf8_lossy(base)
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn cipher_xchacha20poly1305_encrypt_decrypt() -> anyhow::Result<()> {
-        let cipher = Cipher::from(b"this is my secret cipher key!");
-        let message = b"Hello, World!";
-
-        let cipher_data = cipher.encrypt(CipherType::Xchacha20poly1305, message)?;
-
-        let plaintext = cipher.decrypt(CipherType::Xchacha20poly1305, &cipher_data)?;
-
-        assert_ne!(cipher_data, plaintext);
-
-        assert_eq!(
-            String::from_utf8_lossy(&plaintext),
-            String::from_utf8_lossy(message)
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn xchacha20poly1305_stream_encrypt_decrypt() -> anyhow::Result<()> {
-        let cipher = Cipher::from(b"this is my key");
-        let base = b"this is my message";
-        let mut cipher_data = Vec::<u8>::new();
-
-        let mut plaintext = Vec::<u8>::new();
-
-        cipher.encrypt_stream(
-            CipherType::Xchacha20poly1305,
-            &mut base.as_slice(),
-            &mut cipher_data,
-        )?;
-
-        cipher.decrypt_stream(
-            CipherType::Xchacha20poly1305,
-            &mut cipher_data.as_slice(),
-            &mut plaintext,
-        )?;
-
-        assert_ne!(cipher_data, plaintext);
-
-        assert_eq!(
-            String::from_utf8_lossy(&plaintext),
-            String::from_utf8_lossy(base)
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn cipher_xchacha20poly1305_stream_self_encrypt_decrypt() -> anyhow::Result<()> {
-        let base = b"this is my message";
-        let mut cipher = Vec::<u8>::new();
-
-        let mut plaintext = Vec::<u8>::new();
-
-        Cipher::self_encrypt_stream(
-            CipherType::Xchacha20poly1305,
-            &mut base.as_slice(),
-            &mut cipher,
-        )?;
-
-        Cipher::self_decrypt_stream(
-            CipherType::Xchacha20poly1305,
-            &mut cipher.as_slice(),
-            &mut plaintext,
-        )?;
-
-        assert_ne!(cipher, plaintext);
 
         assert_eq!(
             String::from_utf8_lossy(&plaintext),

@@ -1,9 +1,7 @@
 use std::{fmt::Display, str::FromStr};
 
-pub use aead;
 pub use aes_gcm;
 pub use blake2;
-pub use chacha20poly1305;
 pub use curve25519_dalek;
 pub use did_key::{self, DIDKey, Ed25519KeyPair, Fingerprint, KeyMaterial};
 use did_key::{Generate, P256KeyPair, Secp256k1KeyPair, X25519KeyPair};

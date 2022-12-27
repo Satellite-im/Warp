@@ -22,15 +22,13 @@ async-trait = { version = "0.1" }
 x25519-dalek = { version = "1" }
 ed25519-dalek = { version = "1" }
 curve25519-dalek = "3.2"
-chacha20poly1305 = { version = "0.10", features = ["stream"] }
 blake2 = { version = "0.10" }
 sha1 = { version = "0.10" }
 sha2 = { version = "0.10" }
 sha3 = { version = "0.10" }
 hmac = { version = "0.12.0", default-features = false }
 digest = { version = "0.10" }
-aes-gcm = { version = "0.10" }
-aead = { version = "0.5", default-features = false }
+aes-gcm = { version = "0.10", features = ["stream"] }
 zeroize = "1"
 rand = { version = "0.7" }
 multihash = { version = "0.18", features = ["sha1"] }
