@@ -30,7 +30,7 @@ hmac = { version = "0.12.0", default-features = false }
 digest = { version = "0.10" }
 aes-gcm = { version = "0.10", features = ["stream"] }
 zeroize = "1"
-rand = { version = "0.7" }
+rand = { version = "0.8" }
 multihash = { version = "0.18", features = ["sha1"] }
 did-key = { git = "https://github.com/Satellite-im/did-key.rs", branch = "backport-patch" }
 tiny-bip39 = "1.0"

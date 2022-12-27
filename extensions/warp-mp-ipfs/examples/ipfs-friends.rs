@@ -46,10 +46,12 @@ async fn main() -> anyhow::Result<()> {
 
     for outgoing in account_a.list_outgoing_request().await? {
         let ident_from = account_a
-            .get_identity(Identifier::from(outgoing.from())).await
+            .get_identity(Identifier::from(outgoing.from()))
+            .await
             .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
         let ident_to = account_a
-            .get_identity(Identifier::from(outgoing.to())).await
+            .get_identity(Identifier::from(outgoing.to()))
+            .await
             .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
         println!("From: {}", username(&ident_from));
         println!("To: {}", username(&ident_to));
@@ -60,10 +62,12 @@ async fn main() -> anyhow::Result<()> {
     println!("{} Incoming request:", username(&ident_b));
     for incoming in account_b.list_incoming_request().await? {
         let ident_from = account_b
-            .get_identity(Identifier::from(incoming.from())).await
+            .get_identity(Identifier::from(incoming.from()))
+            .await
             .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
         let ident_to = account_b
-            .get_identity(Identifier::from(incoming.to())).await
+            .get_identity(Identifier::from(incoming.to()))
+            .await
             .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
         println!("From: {}", username(&ident_from));
         println!("To: {}", username(&ident_to));
@@ -71,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
         println!();
     }
 
-    let coin = rng.gen_range(0, 2);
+    let coin = rng.gen_range(0..2);
     match coin {
         0 => {
             println!("Denying {} friend request", username(&ident_a));
@@ -91,7 +95,8 @@ async fn main() -> anyhow::Result<()> {
             println!("{} Friends:", username(&ident_a));
             for friend in account_a.list_friends().await? {
                 let friend = account_a
-                    .get_identity(Identifier::did_key(friend)).await
+                    .get_identity(Identifier::did_key(friend))
+                    .await
                     .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
                 println!("Username: {}", username(&friend));
                 println!("Public Key: {}", friend.did_key());
@@ -101,7 +106,8 @@ async fn main() -> anyhow::Result<()> {
             println!("{} Friends:", username(&ident_b));
             for friend in account_b.list_friends().await? {
                 let friend = account_b
-                    .get_identity(Identifier::did_key(friend)).await
+                    .get_identity(Identifier::did_key(friend))
+                    .await
                     .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
                 println!("Username: {}", username(&friend));
                 println!("Public Key: {}", friend.did_key());
@@ -143,10 +149,12 @@ async fn main() -> anyhow::Result<()> {
     if !requests.is_empty() {
         for request in requests {
             let ident_from = account_a
-                .get_identity(Identifier::from(request.from())).await
+                .get_identity(Identifier::from(request.from()))
+                .await
                 .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
             let ident_to = account_a
-                .get_identity(Identifier::from(request.to())).await
+                .get_identity(Identifier::from(request.to()))
+                .await
                 .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
             println!("From: {}", username(&ident_from));
             println!("To: {}", username(&ident_to));
