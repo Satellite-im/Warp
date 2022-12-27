@@ -234,8 +234,6 @@ pub enum Error {
     TomlDeserializeError(#[from] toml::de::Error),
     #[error("Cannot serialize: {0}")]
     TomlSerializeError(#[from] toml::ser::Error),
-    #[error("{0}")]
-    RegexError(#[from] regex::Error),
     #[error(transparent)]
     SataError(#[from] sata::error::Error),
     #[error(transparent)]
@@ -292,7 +290,6 @@ impl Error {
             Error::SerdeYamlError(_) => String::from("SerdeYamlError"),
             Error::TomlDeserializeError(_) => String::from("TomlDeserializeError"),
             Error::TomlSerializeError(_) => String::from("TomlSerializeError"),
-            Error::RegexError(_) => String::from("RegexError"),
             Error::UuidError(_) => String::from("UuidError"),
             Error::Any(_) => String::from("Any"),
             Error::NullPointerContext { .. } => String::from("NullPointerContext"),
