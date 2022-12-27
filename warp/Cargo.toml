@@ -33,7 +33,7 @@ aes-gcm = { version = "0.9" }
 aead = { version = "0.4", default-features = false }
 zeroize = "1"
 rand = { version = "0.7" }
-multihash = { version = "0.16", features = ["sha1"] }
+multihash = { version = "0.18", features = ["sha1"] }
 did-key = { git = "https://github.com/Satellite-im/did-key.rs", branch = "backport-patch" }
 tiny-bip39 = "1.0"
 
@@ -44,16 +44,15 @@ thiserror = "1.0"
 # Sync crates
 parking_lot = { version = "0.12", features = ["send_guard", "serde"] }
 cfg-if = "1.0"
-once_cell = "1.11"
+once_cell = "1.16"
 
 # Time crate
 chrono = { version = "0.4", features = ["serde", "wasmbind"] }
 
 # Encoding and Serializing Crates
-base64 = { version = "0.13" }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = { version = "1.0" }
-serde_yaml = "0.8"
+serde_yaml = "0.9"
 toml = "0.5"
 bs58 = "0.4"
 hex = "0.4"
@@ -61,7 +60,7 @@ libipld = { version = "0.15", features = ["serde-codec"] }
 
 # Misc
 dyn-clone = "1.0"
-uuid = { version = "1.0", features = ["serde", "v4"] }
+uuid = { version = "1", features = ["serde", "v4"] }
 regex = "1.5"
 derive_more = "0.99"
 paste = "1.0"

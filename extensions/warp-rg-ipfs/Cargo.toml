@@ -14,7 +14,7 @@ warp = { path = "../../warp" }
 rust-ipfs = "0.3.0-alpha"
 libipld = { version = "0.15", features = ["serde-codec"] }
 
-uuid = { version = "1.0", features = ["serde", "v4"] }
+uuid = { version = "1", features = ["serde", "v4"] }
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["net"] }
@@ -23,13 +23,10 @@ futures = { version = "0.3" }
 async-trait = { version = "0.1" }
 async-stream = "0.3"
 anyhow = { version = "1" }
-thiserror = "1.0"
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = { version = "1.0" }
 bs58 = "0.4"
-cfg-if = "1.0"
 
-hex = "0.4"
 bayespam = "1.1.0"
 
 chrono = { version = "0.4", features = ["serde"] }
@@ -40,12 +37,12 @@ warp-pd-stretto = { path = "../warp-pd-stretto" }
 warp-pd-flatfile = { path = "../warp-pd-flatfile" }
 warp-mp-ipfs = { path = "../warp-mp-ipfs" }
 warp-fs-ipfs = { path = "../warp-fs-ipfs" }
-rustyline-async = "0.2"
-comfy-table = "6.0"
+rustyline-async = "0.3"
+comfy-table = "6.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
-clap = { version = "3.2", features = ["derive"] }
-rpassword = "7.0"
+clap = { version = "4.0", features = ["derive"] }
+rpassword = "7.2"
 
 [features]
 default = []
