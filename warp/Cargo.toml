@@ -98,7 +98,3 @@ force-install = []
 
 [build-dependencies]
 cbindgen = "0.23"
-
-[dev-dependencies]
-lazy_static = "1.4"
-libloading = "0.7"
