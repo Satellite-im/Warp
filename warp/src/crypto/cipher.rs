@@ -4,14 +4,14 @@ use std::io::{ErrorKind, Read, Write};
 
 use crate::crypto::hash::sha256_hash;
 
-use aead::{Aead, NewAead};
+use aead::{Aead, KeyInit};
 
 #[cfg(not(target_arch = "wasm32"))]
 use aead::stream::{DecryptorBE32, EncryptorBE32};
 use zeroize::Zeroize;
 
 use crate::error::Error;
-use aes_gcm::{Aes256Gcm, Key, Nonce};
+use aes_gcm::Aes256Gcm;
 use chacha20poly1305::XChaCha20Poly1305;
 
 #[cfg(target_arch = "wasm32")]
@@ -121,17 +121,15 @@ impl Cipher {
             _ => sha256_hash(&self.private_key, Some(nonce.clone())),
         });
 
-        let key = Key::from_slice(&key);
-
         let mut cipher_data = match cipher_type {
             CipherType::Aes256Gcm => {
-                let cipher = Aes256Gcm::new(key);
+                let cipher = Aes256Gcm::new(key.as_slice().into());
                 cipher
-                    .encrypt(Nonce::from_slice(&nonce), data)
+                    .encrypt(nonce.as_slice().into(), data)
                     .map_err(|_| Error::EncryptionError)?
             }
             CipherType::Xchacha20poly1305 => {
-                let chacha = XChaCha20Poly1305::new(key);
+                let chacha = XChaCha20Poly1305::new(key.as_slice().into());
                 chacha
                     .encrypt(nonce.as_slice().into(), data)
                     .map_err(|_| Error::EncryptionError)?
@@ -155,19 +153,17 @@ impl Cipher {
             _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
         });
 
-        let key = Key::from_slice(&key);
-
         let decrypted_data = match cipher_type {
             CipherType::Aes256Gcm => {
-                let cipher = Aes256Gcm::new(key);
+                let cipher = Aes256Gcm::new(key.as_slice().into());
                 cipher
-                    .decrypt(Nonce::from_slice(nonce), payload)
+                    .decrypt(nonce.into(), payload)
                     .map_err(|_| Error::DecryptionError)?
             }
             CipherType::Xchacha20poly1305 => {
-                let cipher = XChaCha20Poly1305::new(key);
+                let cipher = XChaCha20Poly1305::new(key.as_slice().into());
                 cipher
-                    .decrypt(Nonce::from_slice(nonce), payload)
+                    .decrypt(nonce.into(), payload)
                     .map_err(|_| Error::DecryptionError)?
             }
         };
@@ -217,12 +213,10 @@ impl Cipher {
             _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
         });
 
-        let key = Key::from_slice(&key);
-
         let mut buffer = [0u8; 512];
         match cipher_type {
             CipherType::Aes256Gcm => {
-                let cipher = Aes256Gcm::new(key);
+                let cipher = Aes256Gcm::new(key.as_slice().into());
 
                 let mut stream = EncryptorBE32::from_aead(cipher, nonce.as_slice().into());
                 writer.write_all(&nonce)?;
@@ -249,7 +243,7 @@ impl Cipher {
                 writer.flush()?;
             }
             CipherType::Xchacha20poly1305 => {
-                let chacha = XChaCha20Poly1305::new(key);
+                let chacha = XChaCha20Poly1305::new(key.as_slice().into());
 
                 let mut stream = EncryptorBE32::from_aead(chacha, nonce.as_slice().into());
                 // write nonce to the beginning of the stream
@@ -298,13 +292,11 @@ impl Cipher {
             _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
         });
 
-        let key = Key::from_slice(&key);
-
         let mut buffer = [0u8; 528];
 
         match cipher_type {
             CipherType::Aes256Gcm => {
-                let cipher = Aes256Gcm::new(key);
+                let cipher = Aes256Gcm::new(key.as_slice().into());
                 let mut stream = DecryptorBE32::from_aead(cipher, nonce.as_slice().into());
 
                 loop {
@@ -330,7 +322,7 @@ impl Cipher {
                 }
             }
             CipherType::Xchacha20poly1305 => {
-                let chacha = XChaCha20Poly1305::new(key);
+                let chacha = XChaCha20Poly1305::new(key.as_slice().into());
                 let mut stream = DecryptorBE32::from_aead(chacha, nonce.as_slice().into());
                 loop {
                     match reader.read(&mut buffer) {
