@@ -160,34 +160,8 @@ impl<T: IpfsTypes> MessageStore<T> {
             with_friends,
         };
 
-        if let Err(_e) = store.load_conversations().await {}
-
         info!("Loading existing conversations task");
-        if let Ok(list) = store.list_conversation_documents().await {
-            info!("Loading conversations");
-            for conversation in list {
-                //TODO: Maybe eject the conversation from the list if it cannot be verified?
-                if conversation.verify().is_err() {
-                    continue;
-                }
-
-                let stream = match store.ipfs.pubsub_subscribe(conversation.topic()).await {
-                    Ok(stream) => stream,
-                    Err(e) => {
-                        error!("Error subscribing to conversation: {e}");
-                        continue;
-                    }
-                };
-                let (tx, _) = broadcast::channel(1024);
-                store
-                    .stream_sender
-                    .write()
-                    .await
-                    .insert(conversation.id(), tx);
-
-                store.start_task(conversation.id(), stream).await;
-            }
-        }
+        if let Err(_e) = store.load_conversations(false).await {}
 
         tokio::spawn({
             let mut store = store.clone();
@@ -306,10 +280,15 @@ impl<T: IpfsTypes> MessageStore<T> {
     }
 
     async fn start_task(&self, conversation_id: Uuid, stream: SubscriptionStream) {
+        let (tx, _) = broadcast::channel(1024);
+
+        self.stream_sender.write().await.insert(conversation_id, tx);
+
         self.conversation_lock
             .write()
             .await
             .insert(conversation_id, Arc::new(Semaphore::new(PERMIT_AMOUNT)));
+
         info!("Task started for {conversation_id}");
         let did = self.did.clone();
 
@@ -359,6 +338,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         {
             task.abort();
         }
+        self.stream_sender.write().await.remove(&conversation_id);
         if let Some(task) = self.stream_task.write().await.remove(&conversation_id) {
             info!("Attempting to end task for {conversation_id}");
             task.abort();
@@ -409,11 +389,8 @@ impl<T: IpfsTypes> MessageStore<T> {
                 if !self.ipfs.is_pinned(&cid).await? {
                     self.ipfs.insert_pin(&cid, false).await?;
                 }
+
                 self.conversation_cid.write().await.insert(convo.id(), cid);
-                self.conversation_lock
-                    .write()
-                    .await
-                    .insert(convo.id(), Arc::new(Semaphore::new(PERMIT_AMOUNT)));
 
                 let stream = match self.ipfs.pubsub_subscribe(convo.topic()).await {
                     Ok(stream) => stream,
@@ -423,11 +400,8 @@ impl<T: IpfsTypes> MessageStore<T> {
                     }
                 };
 
-                let (tx, _) = broadcast::channel(1024);
-
-                self.stream_sender.write().await.insert(convo.id(), tx);
-
                 self.start_task(convo.id(), stream).await;
+
                 if let Some(path) = self.path.as_ref() {
                     let cid = cid.to_string();
                     if let Err(e) = tokio::fs::write(path.join(convo.id().to_string()), cid).await {
@@ -477,10 +451,6 @@ impl<T: IpfsTypes> MessageStore<T> {
                     self.ipfs.insert_pin(&cid, false).await?;
                 }
                 self.conversation_cid.write().await.insert(convo.id(), cid);
-                self.conversation_lock
-                    .write()
-                    .await
-                    .insert(convo.id(), Arc::new(Semaphore::new(PERMIT_AMOUNT)));
 
                 let stream = match self.ipfs.pubsub_subscribe(convo.topic()).await {
                     Ok(stream) => stream,
@@ -489,10 +459,6 @@ impl<T: IpfsTypes> MessageStore<T> {
                         return Ok(());
                     }
                 };
-
-                let (tx, _) = broadcast::channel(1024);
-
-                self.stream_sender.write().await.insert(convo.id(), tx);
 
                 self.start_task(convo.id(), stream).await;
                 if let Some(path) = self.path.as_ref() {
@@ -555,7 +521,6 @@ impl<T: IpfsTypes> MessageStore<T> {
                 let mut document: ConversationDocument =
                     conversation_cid.get_dag(&self.ipfs, None).await?;
 
-                self.stream_sender.write().await.remove(&conversation_id);
                 self.queue.write().await.remove(&sender);
 
                 document.delete_all_message(self.ipfs.clone()).await?;
@@ -708,18 +673,8 @@ impl<T: IpfsTypes> MessageStore<T> {
         let topic = conversation.topic();
 
         self.conversation_cid.write().await.insert(convo_id, cid);
-        self.conversation_lock
-            .write()
-            .await
-            .insert(convo_id, Arc::new(Semaphore::new(PERMIT_AMOUNT)));
+
         let stream = self.ipfs.pubsub_subscribe(topic).await?;
-
-        let (tx, _) = broadcast::channel(1024);
-
-        self.stream_sender
-            .write()
-            .await
-            .insert(conversation.id(), tx);
 
         self.start_task(conversation.id(), stream).await;
 
@@ -827,19 +782,8 @@ impl<T: IpfsTypes> MessageStore<T> {
         let topic = conversation.topic();
 
         self.conversation_cid.write().await.insert(convo_id, cid);
-        self.conversation_lock
-            .write()
-            .await
-            .insert(convo_id, Arc::new(Semaphore::new(PERMIT_AMOUNT)));
 
         let stream = self.ipfs.pubsub_subscribe(topic).await?;
-
-        let (tx, _) = broadcast::channel(1024);
-
-        self.stream_sender
-            .write()
-            .await
-            .insert(conversation.id(), tx);
 
         self.start_task(conversation.id(), stream).await;
 
@@ -1080,7 +1024,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             .map_err(Error::from)
     }
 
-    pub async fn load_conversations(&self) -> Result<(), Error> {
+    pub async fn load_conversations(&self, background: bool) -> Result<(), Error> {
         let Some(path) = self.path.as_ref() else {
             return Ok(())
         };
@@ -1102,11 +1046,28 @@ impl<T: IpfsTypes> MessageStore<T> {
                     continue
                 };
                 if let Ok(cid) = cid_str.parse::<Cid>() {
-                    self.conversation_cid.write().await.insert(id, cid);
-                    self.conversation_lock
-                        .write()
-                        .await
-                        .insert(id, Arc::new(Semaphore::new(PERMIT_AMOUNT)));
+                    let task = {
+                        let store = self.clone();
+                        async move {
+                            let conversation: ConversationDocument = cid
+                                .get_dag(&store.ipfs, Some(Duration::from_secs(10)))
+                                .await?;
+                            conversation.verify()?;
+                            store.conversation_cid.write().await.insert(id, cid);
+
+                            let stream = store.ipfs.pubsub_subscribe(conversation.topic()).await?;
+
+                            store.start_task(conversation.id(), stream).await;
+
+                            Ok::<_, Error>(())
+                        }
+                    };
+
+                    if background {
+                        tokio::spawn(task);
+                    } else if let Err(e) = task.await {
+                        error!("Error loading conversation: {e}");
+                    }
                 }
             }
         }
