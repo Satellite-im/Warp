@@ -520,16 +520,20 @@ impl<T: IpfsTypes> MessageStore<T> {
 
                 let mut document: ConversationDocument =
                     conversation_cid.get_dag(&self.ipfs, None).await?;
-
+                let topic = document.topic();
                 self.queue.write().await.remove(&sender);
 
-                document.delete_all_message(self.ipfs.clone()).await?;
-
-                self.ipfs.remove_block(conversation_cid).await?;
+                tokio::spawn({
+                    let ipfs = self.ipfs.clone();
+                    async move {
+                        let _ = document.delete_all_message(ipfs.clone()).await.ok();
+                        ipfs.remove_block(conversation_cid).await.ok();
+                    }
+                });
 
                 if self
                     .ipfs
-                    .pubsub_unsubscribe(&document.topic())
+                    .pubsub_unsubscribe(&topic)
                     .await
                     .is_ok()
                 {
