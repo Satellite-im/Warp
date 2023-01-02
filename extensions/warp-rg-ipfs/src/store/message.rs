@@ -117,7 +117,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         discovery: bool,
         interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
-        (check_spam, store_decrypted, with_friends): (bool, bool, bool),
+        (check_spam, store_decrypted, with_friends, conversation_load_task): (bool, bool, bool, bool),
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
@@ -161,7 +161,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         };
 
         info!("Loading existing conversations task");
-        if let Err(_e) = store.load_conversations(false).await {}
+        if let Err(_e) = store.load_conversations(conversation_load_task).await {}
 
         tokio::spawn({
             let mut store = store.clone();

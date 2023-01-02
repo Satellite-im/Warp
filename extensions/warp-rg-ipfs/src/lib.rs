@@ -177,6 +177,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
                     config.store_setting.check_spam,
                     config.store_setting.store_decrypted,
                     config.store_setting.with_friends,
+                    config.store_setting.conversation_load_task
                 ),
             )
             .await?,
