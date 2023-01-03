@@ -86,6 +86,7 @@ pub struct StoreSetting {
     pub sync: Vec<Multiaddr>,
     pub sync_interval: u64,
     pub check_spam: bool,
+    pub conversation_load_task: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

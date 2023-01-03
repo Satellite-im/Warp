@@ -2,6 +2,7 @@ use anyhow::{anyhow, bail};
 use aws_endpoint::partition::endpoint;
 use aws_endpoint::{CredentialScope, Partition, PartitionResolver};
 use aws_sdk_s3::presigning::config::PresigningConfig;
+use warp::constellation::ConstellationEvent;
 use std::path::PathBuf;
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -465,6 +466,9 @@ impl Constellation for StorjFilesystem {
         Ok(())
     }
 }
+
+#[async_trait::async_trait]
+impl ConstellationEvent for StorjFilesystem {}
 
 fn split_for<S: AsRef<str>>(name: S) -> anyhow::Result<(String, String)> {
     let name = name.as_ref();
