@@ -472,91 +472,106 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             return Err(Error::FileExist);
         }
 
-        let (tx, mut rx) = tokio::sync::broadcast::channel(50000);
-
-        tokio::spawn({
-            let name = name.to_string();
-            let fs = self.clone();
-            async move {
-                let mut last_written = 0;
-                let result = {
-                    let mut total_written = 0;
-                    let mut returned_path = None;
-
-                    let mut stream = ipfs.add_unixfs(stream).await?;
-
-                    while let Some(status) = stream.next().await {
-                        let name = name.clone();
-                        match status {
-                            UnixfsStatus::CompletedStatus { path, written, .. } => {
-                                returned_path = Some(path);
-                                total_written = written;
-                                last_written = written;
-                                let _ = tx.send(Progression::CurrentProgress {
-                                    name,
-                                    current: written,
-                                    total: total_size,
-                                });
-                            }
-                            UnixfsStatus::FailedStatus {
-                                written, error: _, ..
-                            } => {
-                                last_written = written;
-                                // return Err(error.map(Error::Any).unwrap_or(Error::Other));
-                            }
-                            UnixfsStatus::ProgressStatus { written, .. } => {
-                                last_written = written;
-                                let _ = tx.send(Progression::CurrentProgress {
-                                    name,
-                                    current: written,
-                                    total: total_size,
-                                });
-                            }
-                        }
-                    }
-
-                    let ipfs_path =
-                        returned_path.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
-
-                    let cid = ipfs_path
-                        .root()
-                        .cid()
-                        .ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
-
-                    ipfs.insert_pin(cid, true).await?;
-
-                    let file = warp::constellation::file::File::new(&name);
-                    file.set_size(total_written);
-                    file.set_reference(&format!("{ipfs_path}"));
-                    // file.hash_mut().hash_from_slice(buffer)?;
-                    current_directory.add_item(file)?;
-                    if let Err(_e) = fs.export_index().await {}
-
-                    let _ = tx.send(Progression::ProgressComplete {
-                        name: name.to_string(),
-                        total: Some(total_written),
-                    });
-
-                    Ok::<_, Error>(())
-                };
-                if let Err(e) = result {
-                    let _ = tx.send(Progression::ProgressFailed {
-                        name,
-                        last_size: Some(last_written),
-                        error: Some(e.to_string()),
-                    });
-                }
-                Ok::<_, Error>(())
-            }
-        });
+        let fs = self.clone();
+        let name = name.to_string();
 
         let progress_stream = async_stream::stream! {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => yield event,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    Err(_) => {}
+
+            let mut last_written = 0;
+
+            let mut total_written = 0;
+            let mut returned_path = None;
+
+            let mut stream = match ipfs.add_unixfs(stream).await {
+                Ok(ste) => ste,
+                Err(e) => {
+                    yield Progression::ProgressFailed {
+                            name,
+                            last_size: Some(last_written),
+                            error: Some(e.to_string()),
+                    };
+                    return;
+                }
+            };
+
+            while let Some(status) = stream.next().await {
+                let name = name.clone();
+                match status {
+                    UnixfsStatus::CompletedStatus { path, written, .. } => {
+                        returned_path = Some(path);
+                        total_written = written;
+                        last_written = written;
+                        yield Progression::CurrentProgress {
+                            name,
+                            current: written,
+                            total: total_size,
+                        };
+                    }
+                    UnixfsStatus::FailedStatus {
+                        written, error: _, ..
+                    } => {
+                        last_written = written;
+                        // return Err(error.map(Error::Any).unwrap_or(Error::Other));
+                    }
+                    UnixfsStatus::ProgressStatus { written, .. } => {
+                        last_written = written;
+                        yield Progression::CurrentProgress {
+                            name,
+                            current: written,
+                            total: total_size,
+                        };
+                    }
+                }
+            }
+            let ipfs_path = match
+                returned_path {
+                    Some(path) => path,
+                    None => {
+                        yield Progression::ProgressFailed {
+                            name,
+                            last_size: Some(last_written),
+                            error: Some("IpfsPath not set".into()),
+                        };
+                        return;
+                    }
                 };
+            let cid = match ipfs_path
+                .root()
+                .cid() {
+                    Some(cid) => cid,
+                    None => {
+                        yield Progression::ProgressFailed {
+                            name,
+                            last_size: Some(last_written),
+                            error: Some("Cid not set".into()),
+                        };
+                        return;
+                    }
+                };
+            if let Err(e) = ipfs.insert_pin(cid, true).await {
+                yield Progression::ProgressFailed {
+                    name,
+                    last_size: Some(last_written),
+                    error: Some(e.to_string()),
+                };
+                return;
+            }
+            let file = warp::constellation::file::File::new(&name);
+            file.set_size(total_written);
+            file.set_reference(&format!("{ipfs_path}"));
+            // file.hash_mut().hash_from_slice(buffer)?;
+            if let Err(e) = current_directory.add_item(file) {
+                yield Progression::ProgressFailed {
+                    name,
+                    last_size: Some(last_written),
+                    error: Some(e.to_string()),
+                };
+                return;
+            }
+            if let Err(_e) = fs.export_index().await {}
+            yield Progression::ProgressComplete {
+                name: name.to_string(),
+                total: Some(total_written),
             }
         };
 
