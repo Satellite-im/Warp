@@ -178,10 +178,12 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
         let last_cid = self.index_cid.read().clone();
         *self.index_cid.write() = Some(cid);
         if let Some(last_cid) = last_cid {
-            if ipfs.is_pinned(&last_cid).await? {
-                ipfs.remove_pin(&last_cid, false).await?;
+            if cid != last_cid {
+                if ipfs.is_pinned(&last_cid).await? {
+                    ipfs.remove_pin(&last_cid, false).await?;
+                }
+                ipfs.remove_block(last_cid).await?;
             }
-            ipfs.remove_block(last_cid).await?;
         }
 
         if let Some(config) = &self.config {
