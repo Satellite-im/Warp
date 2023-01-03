@@ -10,7 +10,7 @@ use warp::sata::Sata;
 use crate::item::Item;
 use crate::{item, MemorySystem, Result};
 use warp::constellation::directory::Directory;
-use warp::constellation::Constellation;
+use warp::constellation::{Constellation, ConstellationEvent};
 use warp::module::Module;
 
 #[async_trait::async_trait]
@@ -237,3 +237,6 @@ impl Constellation for MemorySystem {
         Ok(())
     }
 }
+
+#[async_trait::async_trait]
+impl ConstellationEvent for MemorySystem {}
