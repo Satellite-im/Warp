@@ -572,7 +572,12 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             yield Progression::ProgressComplete {
                 name: name.to_string(),
                 total: Some(total_written),
-            }
+            };
+
+            if let Err(_e) = fs.broadcast.send(ConstellationEventKind::Uploaded {
+                filename: name.to_string(),
+                size: Some(total_written)
+            }) {}
         };
 
         Ok(ConstellationProgressStream(progress_stream.boxed()))
