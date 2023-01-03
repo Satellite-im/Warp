@@ -26,6 +26,41 @@ use js_sys::Promise;
 use wasm_bindgen_futures::future_to_promise;
 
 #[derive(Debug, Clone)]
+pub enum ConstellationEventKind {
+    Uploaded {
+        filename: String,
+        size: Option<usize>,
+    },
+    Downloaded {
+        filename: String,
+        size: Option<usize>,
+        location: Option<PathBuf>,
+    },
+    Deleted {
+        item_name: String,
+    },
+    Renamed {
+        old_item_name: String,
+        new_item_name: String,
+    },
+}
+
+pub struct ConstellationEventStream(pub BoxStream<'static, ConstellationEventKind>);
+
+impl core::ops::Deref for ConstellationEventStream {
+    type Target = BoxStream<'static, ConstellationEventKind>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for ConstellationEventStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Progression {
     CurrentProgress {
         /// name of the file
@@ -73,7 +108,9 @@ impl core::ops::DerefMut for ConstellationProgressStream {
 
 /// Interface that would provide functionality around the filesystem.
 #[async_trait::async_trait]
-pub trait Constellation: Extension + Sync + Send + SingleHandle + DynClone {
+pub trait Constellation:
+    ConstellationEvent + Extension + Sync + Send + SingleHandle + DynClone
+{
     /// Provides the timestamp of when the file system was modified
     fn modified(&self) -> DateTime<Utc>;
 
@@ -229,6 +266,14 @@ pub trait Constellation: Extension + Sync + Send + SingleHandle + DynClone {
 }
 
 dyn_clone::clone_trait_object!(Constellation);
+
+#[async_trait::async_trait]
+pub trait ConstellationEvent: Sync + Send {
+    /// Subscribe to an stream of events
+    async fn subscribe(&mut self) -> Result<ConstellationEventStream, Error> {
+        Err(Error::Unimplemented)
+    }
+}
 
 /// Types that would be used for import and export
 /// Currently only support `Json`, `Yaml`, and `Toml`.

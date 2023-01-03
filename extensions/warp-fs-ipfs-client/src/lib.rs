@@ -1,6 +1,7 @@
 pub mod config;
 
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
+use warp::constellation::ConstellationEvent;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use warp::sata::Sata;
@@ -543,6 +544,9 @@ impl Constellation for IpfsFileSystem {
     }
 }
 
+#[async_trait::async_trait]
+impl ConstellationEvent for IpfsFileSystem {}
+
 fn affix_root<S: AsRef<str>>(name: S) -> String {
     let name = String::from(name.as_ref());
     match name.starts_with('/') {
@@ -601,9 +605,7 @@ pub mod ffi {
             ipfs.set_cache(pd.inner().clone());
         }
 
-        let obj = Box::new(ConstellationAdapter::new(Box::new(
-            ipfs,
-        )));
+        let obj = Box::new(ConstellationAdapter::new(Box::new(ipfs)));
         Box::into_raw(obj) as *mut ConstellationAdapter
     }
 
@@ -629,8 +631,6 @@ pub mod ffi {
             ipfs.set_cache(pd.inner().clone());
         }
 
-        FFIResult::ok(ConstellationAdapter::new(Box::new(
-            ipfs,
-        )))
+        FFIResult::ok(ConstellationAdapter::new(Box::new(ipfs)))
     }
 }

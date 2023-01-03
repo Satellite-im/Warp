@@ -12,7 +12,10 @@ use std::io::Cursor;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio_util::io::ReaderStream;
-use warp::constellation::{ConstellationDataType, ConstellationProgressStream, Progression};
+use warp::constellation::{
+    ConstellationDataType, ConstellationEvent, ConstellationEventKind, ConstellationEventStream,
+    ConstellationProgressStream, Progression,
+};
 use warp::logging::tracing::{debug, error};
 use warp::multipass::MultiPass;
 use warp::sata::{Kind, Sata};
@@ -42,6 +45,7 @@ pub struct IpfsFileSystem<T: IpfsTypes> {
     ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
     index_cid: Arc<RwLock<Option<Cid>>>,
     account: Arc<tokio::sync::RwLock<Option<Box<dyn MultiPass>>>>,
+    broadcast: tokio::sync::broadcast::Sender<ConstellationEventKind>,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
 }
 
@@ -55,6 +59,7 @@ impl<T: IpfsTypes> Clone for IpfsFileSystem<T> {
             ipfs: self.ipfs.clone(),
             index_cid: self.index_cid.clone(),
             account: self.account.clone(),
+            broadcast: self.broadcast.clone(),
             cache: self.cache.clone(),
         }
     }
@@ -65,6 +70,8 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
         account: Box<dyn MultiPass>,
         config: Option<FsIpfsConfig>,
     ) -> anyhow::Result<Self> {
+        let (tx, _) = tokio::sync::broadcast::channel(1024);
+
         let filesystem = IpfsFileSystem {
             index: Directory::new("root"),
             path: Arc::new(Default::default()),
@@ -73,6 +80,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
             index_cid: Default::default(),
             account: Default::default(),
             ipfs: Default::default(),
+            broadcast: tx,
             cache: None,
         };
 
@@ -356,6 +364,11 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         }
 
         //TODO: Validate file against the hashed reference
+        if let Err(_e) = self.broadcast.send(ConstellationEventKind::Downloaded {
+            filename: file.name(),
+            size: Some(file.size()),
+            location: Some(PathBuf::from(path)),
+        }) {}
         Ok(())
     }
 
@@ -407,6 +420,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         file.hash_mut().hash_from_slice(buffer)?;
         self.current_directory()?.add_item(file)?;
         if let Err(_e) = self.export_index().await {}
+
         Ok(())
     }
 
@@ -432,6 +446,11 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         }
 
         //TODO: Validate file against the hashed reference
+        if let Err(_e) = self.broadcast.send(ConstellationEventKind::Downloaded {
+            filename: file.name(),
+            size: Some(file.size()),
+            location: None,
+        }) {}
         Ok(buffer)
     }
 
@@ -553,7 +572,10 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
+        let size = file.size();
         let reference = file.reference().ok_or(Error::Other)?; //Reference not found
+
+        let tx = self.broadcast.clone();
 
         let stream = async_stream::stream! {
             let cat_stream = ipfs
@@ -567,6 +589,8 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
                     Err(e) => yield Err(Error::from(anyhow::anyhow!("{e}"))),
                 }
             }
+
+            if let Err(_e) = tx.send(ConstellationEventKind::Downloaded { filename: file.name(), size: Some(size), location: None }) {}
         };
 
         //TODO: Validate file against the hashed reference
@@ -637,6 +661,11 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 
         directory.remove_item(&item.name())?;
         if let Err(_e) = self.export_index().await {}
+
+        if let Err(_e) = self.broadcast.send(ConstellationEventKind::Deleted {
+            item_name: name.to_string(),
+        }) {}
+
         Ok(())
     }
 
@@ -656,6 +685,10 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 
         directory.rename_item(current, new)?;
         if let Err(_e) = self.export_index().await {}
+        if let Err(_e) = self.broadcast.send(ConstellationEventKind::Renamed {
+            old_item_name: current.to_string(),
+            new_item_name: new.to_string(),
+        }) {}
         Ok(())
     }
 
@@ -718,6 +751,25 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 
     fn get_path(&self) -> PathBuf {
         self.path.read().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl<T: IpfsTypes> ConstellationEvent for IpfsFileSystem<T> {
+    async fn subscribe(&mut self) -> Result<ConstellationEventStream> {
+        let mut rx = self.broadcast.subscribe();
+
+        let stream = async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        };
+
+        Ok(ConstellationEventStream(stream.boxed()))
     }
 }
 
