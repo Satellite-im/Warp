@@ -121,7 +121,12 @@ impl<T: IpfsTypes> MessageStore<T> {
         discovery: bool,
         interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
-        (check_spam, store_decrypted, with_friends, conversation_load_task): (bool, bool, bool, bool),
+        (check_spam, store_decrypted, with_friends, conversation_load_task): (
+            bool,
+            bool,
+            bool,
+            bool,
+        ),
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
@@ -286,7 +291,6 @@ impl<T: IpfsTypes> MessageStore<T> {
     }
 
     async fn start_task(&self, conversation_id: Uuid, stream: SubscriptionStream) {
-
         let (tx, mut rx) = unbounded();
         self.conversation_sender
             .write()
@@ -365,7 +369,12 @@ impl<T: IpfsTypes> MessageStore<T> {
             info!("Attempting to end task for {conversation_id}");
             task.abort();
             info!("Task for {conversation_id} has ended");
-            if let Some(tx) = self.conversation_sender.write().await.remove(&conversation_id) {
+            if let Some(tx) = self
+                .conversation_sender
+                .write()
+                .await
+                .remove(&conversation_id)
+            {
                 tx.close_channel();
             }
             if let Some(permit) = self
@@ -556,12 +565,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                     }
                 });
 
-                if self
-                    .ipfs
-                    .pubsub_unsubscribe(&topic)
-                    .await
-                    .is_ok()
-                {
+                if self.ipfs.pubsub_unsubscribe(&topic).await.is_ok() {
                     warn!("topic should have been unsubscribed after dropping conversation.");
                 }
 
