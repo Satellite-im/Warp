@@ -317,10 +317,13 @@ impl<T: IpfsTypes> MessageStore<T> {
             let mut store = self.clone();
             async move {
                 futures::pin_mut!(stream);
-                let mut stream = stream.fuse();
                 loop {
                     let (direction, event, ret) = tokio::select! {
-                        event = stream.select_next_some() => {
+                        event = stream.next() => {
+                            let Some(event) = event else {
+                                continue;
+                            };
+
                             let Ok(data) = serde_json::from_slice::<Sata>(&event.data) else {
                                 continue;
                             };
@@ -335,7 +338,13 @@ impl<T: IpfsTypes> MessageStore<T> {
 
                             (MessageDirection::In, event, None)
                         },
-                        (event, ret) = rx.select_next_some() => (MessageDirection::Out, event, ret)
+                        event = rx.next() => {
+                            let Some((event, ret)) = event else {
+                                continue;
+                            };
+
+                            (MessageDirection::Out, event, ret)
+                        }
                     };
 
                     let conversation = match store.get_conversation(conversation_id).await {
