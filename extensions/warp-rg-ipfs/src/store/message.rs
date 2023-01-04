@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
-use futures::channel::oneshot::{self, Sender as OneshotSender};
+use futures::channel::oneshot::{Sender as OneshotSender};
 use futures::stream::FuturesUnordered;
 use futures::{SinkExt, Stream, StreamExt};
 use rust_ipfs::libp2p::swarm::dial_opts::DialOpts;
