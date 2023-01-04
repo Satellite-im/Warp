@@ -1278,14 +1278,11 @@ impl<T: IpfsTypes> MessageStore<T> {
         &self,
         conversation_id: Uuid,
     ) -> Result<ConversationDocument, Error> {
-        let cid = self
-            .conversation_cid
-            .read()
-            .await
+        let map = self.conversation_cid.read().await;
+        let cid = map
             .get(&conversation_id)
-            .cloned()
             .ok_or(Error::InvalidConversation)?;
-        let conversation: ConversationDocument = cid.get_dag(&self.ipfs, None).await?;
+        let conversation: ConversationDocument = (*cid).get_dag(&self.ipfs, None).await?;
         conversation.verify().map(|_| conversation)
     }
 
