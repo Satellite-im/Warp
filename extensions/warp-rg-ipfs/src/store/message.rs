@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
-use futures::channel::oneshot::{Sender as OneshotSender};
+use futures::channel::oneshot::Sender as OneshotSender;
 use futures::stream::FuturesUnordered;
 use futures::{SinkExt, Stream, StreamExt};
 use rust_ipfs::libp2p::swarm::dial_opts::DialOpts;
@@ -252,7 +252,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         let Ok(stream) = self.ipfs.pubsub_subscribe(conversation.event_topic()).await else {
             return
         };
-
+        drop(conversation);
         let task = tokio::spawn({
             async move {
                 futures::pin_mut!(stream);
