@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
+use futures::channel::oneshot::{self, Sender as OneshotSender};
 use futures::stream::FuturesUnordered;
 use futures::{SinkExt, Stream, StreamExt};
 use rust_ipfs::libp2p::swarm::dial_opts::DialOpts;
@@ -46,6 +47,9 @@ use super::{
 
 const PERMIT_AMOUNT: usize = 1;
 
+type ConversationSender =
+    UnboundedSender<(MessagingEvents, Option<OneshotSender<Result<(), Error>>>)>;
+
 pub struct MessageStore<T: IpfsTypes> {
     // ipfs instance
     ipfs: Ipfs<T>,
@@ -58,7 +62,7 @@ pub struct MessageStore<T: IpfsTypes> {
 
     conversation_lock: Arc<tokio::sync::RwLock<HashMap<Uuid, Arc<Semaphore>>>>,
 
-    conversation_sender: Arc<tokio::sync::RwLock<HashMap<Uuid, UnboundedSender<MessagingEvents>>>>,
+    conversation_sender: Arc<tokio::sync::RwLock<HashMap<Uuid, ConversationSender>>>,
 
     // account instance
     account: Box<dyn MultiPass>,
@@ -315,7 +319,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 futures::pin_mut!(stream);
                 let mut stream = stream.fuse();
                 loop {
-                    let (direction, event) = tokio::select! {
+                    let (direction, event, ret) = tokio::select! {
                         event = stream.select_next_some() => {
                             let Ok(data) = serde_json::from_slice::<Sata>(&event.data) else {
                                 continue;
@@ -329,14 +333,19 @@ impl<T: IpfsTypes> MessageStore<T> {
                                 continue;
                             };
 
-                            (MessageDirection::In, event)
+                            (MessageDirection::In, event, None)
                         },
-                        event = rx.select_next_some() => (MessageDirection::Out, event)
+                        (event, ret) = rx.select_next_some() => (MessageDirection::Out, event, ret)
                     };
 
                     let conversation = match store.get_conversation(conversation_id).await {
                         Ok(c) => c,
-                        Err(_) => continue,
+                        Err(e) => {
+                            if let Some(ret) = ret {
+                                let _ = ret.send(Err(e)).ok();
+                            }
+                            continue;
+                        }
                     };
 
                     if let Err(e) = store
@@ -344,7 +353,13 @@ impl<T: IpfsTypes> MessageStore<T> {
                         .await
                     {
                         error!("Error processing message: {e}");
+                        if let Some(ret) = ret {
+                            let _ = ret.send(Err(e)).ok();
+                        }
                         continue;
+                    }
+                    if let Some(ret) = ret {
+                        let _ = ret.send(Ok(())).ok();
                     }
                 }
             }
@@ -1519,7 +1534,7 @@ impl<T: IpfsTypes> MessageStore<T> {
     pub async fn conversation_tx(
         &self,
         conversation_id: Uuid,
-    ) -> Result<UnboundedSender<MessagingEvents>, Error> {
+    ) -> Result<ConversationSender, Error> {
         self.conversation_sender
             .read()
             .await
@@ -1584,7 +1599,9 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let event = MessagingEvents::New(message);
 
-        tx.send(event.clone()).await.map_err(anyhow::Error::from)?;
+        tx.send((event.clone(), None))
+            .await
+            .map_err(anyhow::Error::from)?;
 
         self.send_raw_event(conversation_id, Some(message_id), event, true)
             .await
@@ -1643,7 +1660,9 @@ impl<T: IpfsTypes> MessageStore<T> {
             signature,
         );
 
-        tx.send(event.clone()).await.map_err(anyhow::Error::from)?;
+        tx.send((event.clone(), None))
+            .await
+            .map_err(anyhow::Error::from)?;
 
         self.send_raw_event(conversation_id, None, event, true)
             .await
@@ -1705,7 +1724,9 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let event = MessagingEvents::New(message);
 
-        tx.send(event.clone()).await.map_err(anyhow::Error::from)?;
+        tx.send((event.clone(), None))
+            .await
+            .map_err(anyhow::Error::from)?;
 
         self.send_raw_event(conversation_id, None, event, true)
             .await
@@ -1722,7 +1743,9 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let event = MessagingEvents::Delete(conversation.id(), message_id);
 
-        tx.send(event.clone()).await.map_err(anyhow::Error::from)?;
+        tx.send((event.clone(), None))
+            .await
+            .map_err(anyhow::Error::from)?;
 
         if broadcast {
             self.send_raw_event(conversation_id, None, event, true)
@@ -1745,7 +1768,9 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let event = MessagingEvents::Pin(conversation.id(), own_did.clone(), message_id, state);
 
-        tx.send(event.clone()).await.map_err(anyhow::Error::from)?;
+        tx.send((event.clone(), None))
+            .await
+            .map_err(anyhow::Error::from)?;
 
         self.send_raw_event(conversation_id, None, event, true)
             .await
@@ -1776,7 +1801,9 @@ impl<T: IpfsTypes> MessageStore<T> {
         let event =
             MessagingEvents::React(conversation.id(), own_did.clone(), message_id, state, emoji);
 
-        tx.send(event.clone()).await.map_err(anyhow::Error::from)?;
+        tx.send((event.clone(), None))
+            .await
+            .map_err(anyhow::Error::from)?;
 
         self.send_raw_event(conversation_id, None, event, true)
             .await
@@ -1945,7 +1972,9 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let event = MessagingEvents::New(message);
 
-        tx.send(event.clone()).await.map_err(anyhow::Error::from)?;
+        tx.send((event.clone(), None))
+            .await
+            .map_err(anyhow::Error::from)?;
 
         self.send_raw_event(conversation_id, None, event, true)
             .await
