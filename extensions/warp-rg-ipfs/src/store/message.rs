@@ -9,7 +9,7 @@ use std::time::Duration;
 use chrono::Utc;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
 use futures::stream::FuturesUnordered;
-use futures::{Future, SinkExt, Stream, StreamExt};
+use futures::{SinkExt, Stream, StreamExt};
 use rust_ipfs::libp2p::swarm::dial_opts::DialOpts;
 use rust_ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream};
 
@@ -121,12 +121,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         discovery: bool,
         interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
-        (check_spam, store_decrypted, with_friends, conversation_load_task): (
-            bool,
-            bool,
-            bool,
-            bool,
-        ),
+        (check_spam, store_decrypted, with_friends, conversation_load_task): (bool, bool, bool, bool),
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
@@ -291,6 +286,7 @@ impl<T: IpfsTypes> MessageStore<T> {
     }
 
     async fn start_task(&self, conversation_id: Uuid, stream: SubscriptionStream) {
+
         let (tx, mut rx) = unbounded();
         self.conversation_sender
             .write()
@@ -369,12 +365,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             info!("Attempting to end task for {conversation_id}");
             task.abort();
             info!("Task for {conversation_id} has ended");
-            if let Some(tx) = self
-                .conversation_sender
-                .write()
-                .await
-                .remove(&conversation_id)
-            {
+            if let Some(tx) = self.conversation_sender.write().await.remove(&conversation_id) {
                 tx.close_channel();
             }
             if let Some(permit) = self
@@ -565,7 +556,12 @@ impl<T: IpfsTypes> MessageStore<T> {
                     }
                 });
 
-                if self.ipfs.pubsub_unsubscribe(&topic).await.is_ok() {
+                if self
+                    .ipfs
+                    .pubsub_unsubscribe(&topic)
+                    .await
+                    .is_ok()
+                {
                     warn!("topic should have been unsubscribed after dropping conversation.");
                 }
 
@@ -1289,19 +1285,16 @@ impl<T: IpfsTypes> MessageStore<T> {
         conversation.verify().map(|_| conversation)
     }
 
-    pub async fn get_conversation_mut<Fut, F: FnOnce(ConversationDocument) -> Fut>(
+    pub async fn get_conversation_mut<F: FnOnce(&mut ConversationDocument)>(
         &self,
         conversation_id: Uuid,
         func: F,
-    ) -> Result<(), Error>
-    where
-        Fut: futures::Future<Output=ConversationDocument>
-    {
-        let document = self.get_conversation(conversation_id).await?;
+    ) -> Result<(), Error> {
+        let document = &mut self.get_conversation(conversation_id).await?;
 
         let own_did = &*self.did;
 
-        let mut document = func(document).await;
+        func(document);
 
         if let Some(creator) = document.creator.as_ref() {
             if creator.eq(own_did) {
@@ -1417,11 +1410,8 @@ impl<T: IpfsTypes> MessageStore<T> {
             return Err(Error::IdentityExist);
         }
 
-        let recipient = did_key.clone();
-
-        self.get_conversation_mut(conversation_id, |mut conversation| async move {
-            conversation.recipients.push(recipient);
-            conversation
+        self.get_conversation_mut(conversation_id, |conversation| {
+            conversation.recipients.push(did_key.clone());
         })
         .await?;
         drop(_guard);
@@ -1490,10 +1480,9 @@ impl<T: IpfsTypes> MessageStore<T> {
             return Err(Error::IdentityDoesntExist);
         }
 
-        self.get_conversation_mut(conversation_id, |mut conversation| async {
+        self.get_conversation_mut(conversation_id, |conversation| {
             // conversation.recipients.push(did_key.clone());
             conversation.recipients.retain(|did| did.ne(did_key));
-            conversation
         })
         .await?;
         drop(_guard);
@@ -2400,9 +2389,8 @@ impl<T: IpfsTypes> MessageStore<T> {
                 )
                 .await?;
 
-                self.get_conversation_mut(document.id(), |mut conversation_document| async move {
+                self.get_conversation_mut(document.id(), |conversation_document| {
                     conversation_document.messages.insert(message_document);
-                    conversation_document
                 })
                 .await?;
 
@@ -2494,9 +2482,8 @@ impl<T: IpfsTypes> MessageStore<T> {
                     .update(&self.ipfs, self.did.clone(), message)
                     .await?;
 
-                self.get_conversation_mut(document.id(), |mut conversation_document| async {
+                self.get_conversation_mut(document.id(), |conversation_document| {
                     conversation_document.messages.replace(message_document);
-                    conversation_document
                 })
                 .await?;
 
@@ -2538,7 +2525,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                     verify_serde_sig(sender, &construct, &signature)?;
                 }
 
-                self.get_conversation_mut(document.id(), |mut conversation_document| async {
+                self.get_conversation_mut(document.id(), |conversation_document| {
                     conversation_document.messages.remove(&message_document);
 
                     if let Err(e) = tx.send(MessageEventKind::MessageDeleted {
@@ -2547,7 +2534,6 @@ impl<T: IpfsTypes> MessageStore<T> {
                     }) {
                         error!("Error broadcasting event: {e}");
                     }
-                    conversation_document
                 })
                 .await?;
             }
@@ -2586,9 +2572,8 @@ impl<T: IpfsTypes> MessageStore<T> {
                     .update(&self.ipfs, self.did.clone(), message)
                     .await?;
 
-                self.get_conversation_mut(document.id(), |mut conversation_document| async {
+                self.get_conversation_mut(document.id(), |conversation_document| {
                     conversation_document.messages.replace(message_document);
-                    conversation_document
                 })
                 .await?;
 
@@ -2634,9 +2619,8 @@ impl<T: IpfsTypes> MessageStore<T> {
                             .update(&self.ipfs, self.did.clone(), message)
                             .await?;
 
-                        self.get_conversation_mut(document.id(), |mut conversation_document| async {
+                        self.get_conversation_mut(document.id(), |conversation_document| {
                             conversation_document.messages.replace(message_document);
-                            conversation_document
                         })
                         .await?;
 
@@ -2675,9 +2659,8 @@ impl<T: IpfsTypes> MessageStore<T> {
                             .update(&self.ipfs, self.did.clone(), message)
                             .await?;
 
-                        self.get_conversation_mut(document.id(), |mut conversation_document| async {
+                        self.get_conversation_mut(document.id(), |conversation_document| {
                             conversation_document.messages.replace(message_document);
-                            conversation_document
                         })
                         .await?;
 
@@ -2697,10 +2680,9 @@ impl<T: IpfsTypes> MessageStore<T> {
                     return Err(Error::IdentityExist);
                 }
 
-                self.get_conversation_mut(document.id(), |mut conversation| async {
+                self.get_conversation_mut(document.id(), |conversation| {
                     conversation.recipients = list;
                     conversation.signature = Some(signature);
-                    conversation
                 })
                 .await?;
 
@@ -2716,10 +2698,9 @@ impl<T: IpfsTypes> MessageStore<T> {
                     return Err(Error::IdentityDoesntExist);
                 }
 
-                self.get_conversation_mut(document.id(), |mut conversation| async {
+                self.get_conversation_mut(document.id(), |conversation| {
                     conversation.recipients = list;
                     conversation.signature = Some(signature);
-                    conversation
                 })
                 .await?;
 
