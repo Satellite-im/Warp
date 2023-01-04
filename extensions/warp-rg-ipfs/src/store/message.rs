@@ -7,8 +7,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use chrono::Utc;
+use futures::channel::mpsc::{unbounded, UnboundedSender};
+use futures::channel::oneshot::Sender as OneshotSender;
 use futures::stream::FuturesUnordered;
-use futures::{Stream, StreamExt};
+use futures::{SinkExt, Stream, StreamExt};
 use rust_ipfs::libp2p::swarm::dial_opts::DialOpts;
 use rust_ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream};
 
@@ -45,6 +47,9 @@ use super::{
 
 const PERMIT_AMOUNT: usize = 1;
 
+type ConversationSender =
+    UnboundedSender<(MessagingEvents, Option<OneshotSender<Result<(), Error>>>)>;
+
 pub struct MessageStore<T: IpfsTypes> {
     // ipfs instance
     ipfs: Ipfs<T>,
@@ -56,6 +61,8 @@ pub struct MessageStore<T: IpfsTypes> {
     conversation_cid: Arc<tokio::sync::RwLock<HashMap<Uuid, Cid>>>,
 
     conversation_lock: Arc<tokio::sync::RwLock<HashMap<Uuid, Arc<Semaphore>>>>,
+
+    conversation_sender: Arc<tokio::sync::RwLock<HashMap<Uuid, ConversationSender>>>,
 
     // account instance
     account: Box<dyn MultiPass>,
@@ -92,6 +99,7 @@ impl<T: IpfsTypes> Clone for MessageStore<T> {
             path: self.path.clone(),
             stream_sender: self.stream_sender.clone(),
             conversation_cid: self.conversation_cid.clone(),
+            conversation_sender: self.conversation_sender.clone(),
             conversation_lock: self.conversation_lock.clone(),
             account: self.account.clone(),
             filesystem: self.filesystem.clone(),
@@ -117,7 +125,12 @@ impl<T: IpfsTypes> MessageStore<T> {
         discovery: bool,
         interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
-        (check_spam, store_decrypted, with_friends, conversation_load_task): (bool, bool, bool, bool),
+        (check_spam, store_decrypted, with_friends, conversation_load_task): (
+            bool,
+            bool,
+            bool,
+            bool,
+        ),
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
@@ -141,6 +154,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         let with_friends = Arc::new(AtomicBool::new(with_friends));
         let stream_sender = Arc::new(Default::default());
         let conversation_lock = Arc::new(Default::default());
+        let conversation_sender = Arc::default();
 
         let store = Self {
             path,
@@ -150,6 +164,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             stream_event_task,
             conversation_cid,
             conversation_lock,
+            conversation_sender,
             account,
             filesystem,
             queue,
@@ -237,7 +252,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         let Ok(stream) = self.ipfs.pubsub_subscribe(conversation.event_topic()).await else {
             return
         };
-
+        drop(conversation);
         let task = tokio::spawn({
             async move {
                 futures::pin_mut!(stream);
@@ -280,6 +295,12 @@ impl<T: IpfsTypes> MessageStore<T> {
     }
 
     async fn start_task(&self, conversation_id: Uuid, stream: SubscriptionStream) {
+        let (tx, mut rx) = unbounded();
+        self.conversation_sender
+            .write()
+            .await
+            .insert(conversation_id, tx);
+
         let (tx, _) = broadcast::channel(1024);
 
         self.stream_sender.write().await.insert(conversation_id, tx);
@@ -296,31 +317,58 @@ impl<T: IpfsTypes> MessageStore<T> {
             let mut store = self.clone();
             async move {
                 futures::pin_mut!(stream);
+                loop {
+                    let (direction, event, ret) = tokio::select! {
+                        event = stream.next() => {
+                            let Some(event) = event else {
+                                continue;
+                            };
 
-                while let Some(stream) = stream.next().await {
-                    if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
-                        if let Ok(data) = data.decrypt::<Vec<u8>>(&did) {
-                            if let Ok(event) = serde_json::from_slice::<MessagingEvents>(&data) {
-                                let conversation =
-                                    match store.get_conversation(conversation_id).await {
-                                        Ok(c) => c,
-                                        Err(_) => continue,
-                                    };
+                            let Ok(data) = serde_json::from_slice::<Sata>(&event.data) else {
+                                continue;
+                            };
 
-                                if let Err(e) = store
-                                    .message_event(
-                                        conversation,
-                                        &event,
-                                        MessageDirection::In,
-                                        Default::default(),
-                                    )
-                                    .await
-                                {
-                                    error!("Error processing message: {e}");
-                                    continue;
-                                }
-                            }
+                            let Ok(data) = data.decrypt::<Vec<u8>>(&did) else {
+                                continue;
+                            };
+
+                            let Ok(event) = serde_json::from_slice::<MessagingEvents>(&data) else {
+                                continue;
+                            };
+
+                            (MessageDirection::In, event, None)
+                        },
+                        event = rx.next() => {
+                            let Some((event, ret)) = event else {
+                                continue;
+                            };
+
+                            (MessageDirection::Out, event, ret)
                         }
+                    };
+
+                    let conversation = match store.get_conversation(conversation_id).await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            if let Some(ret) = ret {
+                                let _ = ret.send(Err(e)).ok();
+                            }
+                            continue;
+                        }
+                    };
+
+                    if let Err(e) = store
+                        .message_event(conversation, &event, direction, Default::default())
+                        .await
+                    {
+                        error!("Error processing message: {e}");
+                        if let Some(ret) = ret {
+                            let _ = ret.send(Err(e)).ok();
+                        }
+                        continue;
+                    }
+                    if let Some(ret) = ret {
+                        let _ = ret.send(Ok(())).ok();
                     }
                 }
             }
@@ -338,11 +386,21 @@ impl<T: IpfsTypes> MessageStore<T> {
         {
             task.abort();
         }
+
         self.stream_sender.write().await.remove(&conversation_id);
+
         if let Some(task) = self.stream_task.write().await.remove(&conversation_id) {
             info!("Attempting to end task for {conversation_id}");
             task.abort();
             info!("Task for {conversation_id} has ended");
+            if let Some(tx) = self
+                .conversation_sender
+                .write()
+                .await
+                .remove(&conversation_id)
+            {
+                tx.close_channel();
+            }
             if let Some(permit) = self
                 .conversation_lock
                 .write()
@@ -531,12 +589,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                     }
                 });
 
-                if self
-                    .ipfs
-                    .pubsub_unsubscribe(&topic)
-                    .await
-                    .is_ok()
-                {
+                if self.ipfs.pubsub_unsubscribe(&topic).await.is_ok() {
                     warn!("topic should have been unsubscribed after dropping conversation.");
                 }
 
@@ -1249,14 +1302,11 @@ impl<T: IpfsTypes> MessageStore<T> {
         &self,
         conversation_id: Uuid,
     ) -> Result<ConversationDocument, Error> {
-        let cid = self
-            .conversation_cid
-            .read()
-            .await
+        let map = self.conversation_cid.read().await;
+        let cid = map
             .get(&conversation_id)
-            .cloned()
             .ok_or(Error::InvalidConversation)?;
-        let conversation: ConversationDocument = cid.get_dag(&self.ipfs, None).await?;
+        let conversation: ConversationDocument = (*cid).get_dag(&self.ipfs, None).await?;
         conversation.verify().map(|_| conversation)
     }
 
@@ -1490,12 +1540,25 @@ impl<T: IpfsTypes> MessageStore<T> {
             .await
     }
 
+    pub async fn conversation_tx(
+        &self,
+        conversation_id: Uuid,
+    ) -> Result<ConversationSender, Error> {
+        self.conversation_sender
+            .read()
+            .await
+            .get(&conversation_id)
+            .cloned()
+            .ok_or(Error::InvalidConversation)
+    }
+
     pub async fn send_message(
         &mut self,
         conversation_id: Uuid,
         messages: Vec<String>,
     ) -> Result<(), Error> {
         let conversation = self.get_conversation(conversation_id).await?;
+        let mut tx = self.conversation_tx(conversation_id).await?;
 
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
@@ -1545,13 +1608,9 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let event = MessagingEvents::New(message);
 
-        self.message_event(
-            conversation,
-            &event,
-            MessageDirection::Out,
-            Default::default(),
-        )
-        .await?;
+        tx.send((event.clone(), None))
+            .await
+            .map_err(anyhow::Error::from)?;
 
         self.send_raw_event(conversation_id, Some(message_id), event, true)
             .await
@@ -1564,7 +1623,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         messages: Vec<String>,
     ) -> Result<(), Error> {
         let conversation = self.get_conversation(conversation_id).await?;
-
+        let mut tx = self.conversation_tx(conversation_id).await?;
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
         }
@@ -1610,13 +1669,9 @@ impl<T: IpfsTypes> MessageStore<T> {
             signature,
         );
 
-        self.message_event(
-            conversation,
-            &event,
-            MessageDirection::Out,
-            Default::default(),
-        )
-        .await?;
+        tx.send((event.clone(), None))
+            .await
+            .map_err(anyhow::Error::from)?;
 
         self.send_raw_event(conversation_id, None, event, true)
             .await
@@ -1629,6 +1684,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         messages: Vec<String>,
     ) -> Result<(), Error> {
         let conversation = self.get_conversation(conversation_id).await?;
+        let mut tx = self.conversation_tx(conversation_id).await?;
 
         if messages.is_empty() {
             return Err(Error::EmptyMessage);
@@ -1676,13 +1732,10 @@ impl<T: IpfsTypes> MessageStore<T> {
         message.set_signature(Some(signature));
 
         let event = MessagingEvents::New(message);
-        self.message_event(
-            conversation,
-            &event,
-            MessageDirection::Out,
-            Default::default(),
-        )
-        .await?;
+
+        tx.send((event.clone(), None))
+            .await
+            .map_err(anyhow::Error::from)?;
 
         self.send_raw_event(conversation_id, None, event, true)
             .await
@@ -1695,15 +1748,13 @@ impl<T: IpfsTypes> MessageStore<T> {
         broadcast: bool,
     ) -> Result<(), Error> {
         let conversation = self.get_conversation(conversation_id).await?;
+        let mut tx = self.conversation_tx(conversation_id).await?;
 
         let event = MessagingEvents::Delete(conversation.id(), message_id);
-        self.message_event(
-            conversation,
-            &event,
-            MessageDirection::Out,
-            Default::default(),
-        )
-        .await?;
+
+        tx.send((event.clone(), None))
+            .await
+            .map_err(anyhow::Error::from)?;
 
         if broadcast {
             self.send_raw_event(conversation_id, None, event, true)
@@ -1720,17 +1771,15 @@ impl<T: IpfsTypes> MessageStore<T> {
         state: PinState,
     ) -> Result<(), Error> {
         let conversation = self.get_conversation(conversation_id).await?;
+        let mut tx = self.conversation_tx(conversation_id).await?;
 
         let own_did = &*self.did;
 
         let event = MessagingEvents::Pin(conversation.id(), own_did.clone(), message_id, state);
-        self.message_event(
-            conversation,
-            &event,
-            MessageDirection::Out,
-            Default::default(),
-        )
-        .await?;
+
+        tx.send((event.clone(), None))
+            .await
+            .map_err(anyhow::Error::from)?;
 
         self.send_raw_event(conversation_id, None, event, true)
             .await
@@ -1754,19 +1803,16 @@ impl<T: IpfsTypes> MessageStore<T> {
         emoji: String,
     ) -> Result<(), Error> {
         let conversation = self.get_conversation(conversation_id).await?;
+        let mut tx = self.conversation_tx(conversation_id).await?;
 
         let own_did = &*self.did;
 
         let event =
             MessagingEvents::React(conversation.id(), own_did.clone(), message_id, state, emoji);
 
-        self.message_event(
-            conversation,
-            &event,
-            MessageDirection::Out,
-            Default::default(),
-        )
-        .await?;
+        tx.send((event.clone(), None))
+            .await
+            .map_err(anyhow::Error::from)?;
 
         self.send_raw_event(conversation_id, None, event, true)
             .await
@@ -1782,7 +1828,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         messages: Vec<String>,
     ) -> Result<(), Error> {
         let conversation = self.get_conversation(conversation_id).await?;
-
+        let mut tx = self.conversation_tx(conversation_id).await?;
         //TODO: Send directly if constellation isnt present
         //      this will require uploading to ipfs directly from here
         //      or setting up a seperate stream channel related to
@@ -1935,13 +1981,9 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let event = MessagingEvents::New(message);
 
-        self.message_event(
-            conversation,
-            &event,
-            MessageDirection::Out,
-            Default::default(),
-        )
-        .await?;
+        tx.send((event.clone(), None))
+            .await
+            .map_err(anyhow::Error::from)?;
 
         self.send_raw_event(conversation_id, None, event, true)
             .await
