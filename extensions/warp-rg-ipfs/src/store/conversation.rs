@@ -57,15 +57,7 @@ impl PartialEq for ConversationRecipient {
 
 impl From<Conversation> for ConversationDocument {
     fn from(conversation: Conversation) -> Self {
-        ConversationDocument {
-            id: conversation.id(),
-            name: conversation.name(),
-            creator: None,
-            conversation_type: conversation.conversation_type(),
-            recipients: conversation.recipients(),
-            messages: Default::default(),
-            signature: None,
-        }
+        ConversationDocument::from(&conversation)
     }
 }
 
@@ -74,7 +66,7 @@ impl From<&Conversation> for ConversationDocument {
         ConversationDocument {
             id: conversation.id(),
             name: conversation.name(),
-            creator: None,
+            creator: conversation.creator(),
             conversation_type: conversation.conversation_type(),
             recipients: conversation.recipients(),
             messages: Default::default(),
