@@ -289,6 +289,10 @@ impl Conversation {
         self.name = name;
     }
 
+    pub fn set_creator(&mut self, creator: Option<DID>) {
+        self.creator = creator;
+    }
+
     pub fn set_conversation_type(&mut self, conversation_type: ConversationType) {
         self.conversation_type = conversation_type;
     }
