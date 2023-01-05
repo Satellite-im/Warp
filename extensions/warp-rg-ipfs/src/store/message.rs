@@ -938,6 +938,9 @@ impl<T: IpfsTypes> MessageStore<T> {
         conversation_id: Uuid,
         broadcast: bool,
     ) -> Result<(), Error> {
+
+        self.end_task(conversation_id).await;
+
         let conversation_cid = self
             .conversation_cid
             .write()
@@ -945,6 +948,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             .remove(&conversation_id)
             .ok_or(Error::InvalidConversation)?;
 
+            
         if self.ipfs.is_pinned(&conversation_cid).await? {
             if let Err(e) = self.ipfs.remove_pin(&conversation_cid, false).await {
                 error!("Unable to remove pin from {conversation_cid}: {e}");
