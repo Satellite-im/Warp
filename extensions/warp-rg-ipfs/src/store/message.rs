@@ -2427,7 +2427,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 let message_document = MessageDocument::new(
                     &self.ipfs,
                     self.did.clone(),
-                    document.recipients(),
+                    None,
                     message,
                 )
                 .await?;
