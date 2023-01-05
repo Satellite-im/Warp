@@ -42,7 +42,6 @@ use super::conversation::{ConversationDocument, MessageDocument};
 use super::document::{GetDag, ToCid};
 use super::{
     did_to_libp2p_pub, topic_discovery, verify_serde_sig, ConversationEvents, MessagingEvents,
-    DIRECT_BROADCAST,
 };
 
 const PERMIT_AMOUNT: usize = 1;
@@ -90,6 +89,8 @@ pub struct MessageStore<T: IpfsTypes> {
     store_decrypted: Arc<AtomicBool>,
 
     with_friends: Arc<AtomicBool>,
+
+    receiving_topic: String,
 }
 
 impl<T: IpfsTypes> Clone for MessageStore<T> {
@@ -111,6 +112,7 @@ impl<T: IpfsTypes> Clone for MessageStore<T> {
             spam_filter: self.spam_filter.clone(),
             with_friends: self.with_friends.clone(),
             store_decrypted: self.store_decrypted.clone(),
+            receiving_topic: self.receiving_topic.clone(),
         }
     }
 }
@@ -155,6 +157,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         let stream_sender = Arc::new(Default::default());
         let conversation_lock = Arc::new(Default::default());
         let conversation_sender = Arc::default();
+        let receiving_topic = format!("{did}/messaging");
 
         let store = Self {
             path,
@@ -173,6 +176,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             spam_filter,
             store_decrypted,
             with_friends,
+            receiving_topic,
         };
 
         info!("Loading existing conversations task");
@@ -195,7 +199,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 });
 
                 let did = &*(store.did.clone());
-                let Ok(stream) = store.ipfs.pubsub_subscribe(DIRECT_BROADCAST.into()).await else {
+                let Ok(stream) = store.ipfs.pubsub_subscribe(store.receiving_topic.clone()).await else {
                     error!("Unable to create subscription stream. Terminating task");
                     //TODO: Maybe panic? 
                     return;
@@ -228,8 +232,9 @@ impl<T: IpfsTypes> MessageStore<T> {
         });
         if discovery {
             let ipfs = store.ipfs.clone();
-            tokio::spawn(async {
-                if let Err(e) = topic_discovery(ipfs, DIRECT_BROADCAST).await {
+            let topic = store.receiving_topic.clone();
+            tokio::spawn(async move {
+                if let Err(e) = topic_discovery(ipfs, topic).await {
                     error!("Unable to perform topic discovery: {e}");
                 }
             });
@@ -735,11 +740,6 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         self.start_task(conversation.id(), stream).await;
 
-        let peers = self
-            .ipfs
-            .pubsub_peers(Some(DIRECT_BROADCAST.into()))
-            .await?;
-
         let peer_id = did_to_libp2p_pub(did_key)?.to_peer_id();
 
         let mut data = Sata::default();
@@ -752,19 +752,17 @@ impl<T: IpfsTypes> MessageStore<T> {
             serde_json::to_vec(&ConversationEvents::NewConversation(own_did.clone()))?,
         )?;
 
+        let topic = format!("{did_key}/messaging");
+        let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
         match peers.contains(&peer_id) {
             true => {
                 let bytes = serde_json::to_vec(&data)?;
-                if let Err(_e) = self
-                    .ipfs
-                    .pubsub_publish(DIRECT_BROADCAST.into(), bytes)
-                    .await
-                {
+                if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
                     warn!("Unable to publish to topic. Queuing event");
                     if let Err(e) = self
                         .queue_event(
                             did_key.clone(),
-                            Queue::direct(convo_id, None, peer_id, DIRECT_BROADCAST.into(), data),
+                            Queue::direct(convo_id, None, peer_id, topic.clone(), data),
                         )
                         .await
                     {
@@ -776,7 +774,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 if let Err(e) = self
                     .queue_event(
                         did_key.clone(),
-                        Queue::direct(convo_id, None, peer_id, DIRECT_BROADCAST.into(), data),
+                        Queue::direct(convo_id, None, peer_id, topic.clone(), data),
                     )
                     .await
                 {
@@ -844,11 +842,6 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         self.start_task(conversation.id(), stream).await;
 
-        let peers = self
-            .ipfs
-            .pubsub_peers(Some(DIRECT_BROADCAST.into()))
-            .await?;
-
         let peer_id_list = recipient
             .clone()
             .iter()
@@ -884,25 +877,17 @@ impl<T: IpfsTypes> MessageStore<T> {
         }
 
         for (did, peer_id) in peer_id_list {
+            let topic = format!("{did}/messaging");
+            let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
             match peers.contains(&peer_id) {
                 true => {
                     let bytes = serde_json::to_vec(&data)?;
-                    if let Err(_e) = self
-                        .ipfs
-                        .pubsub_publish(DIRECT_BROADCAST.into(), bytes)
-                        .await
-                    {
+                    if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
                         warn!("Unable to publish to topic. Queuing event");
                         if let Err(e) = self
                             .queue_event(
                                 did,
-                                Queue::direct(
-                                    convo_id,
-                                    None,
-                                    peer_id,
-                                    DIRECT_BROADCAST.into(),
-                                    data.clone(),
-                                ),
+                                Queue::direct(convo_id, None, peer_id, topic.clone(), data.clone()),
                             )
                             .await
                         {
@@ -914,13 +899,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                     if let Err(e) = self
                         .queue_event(
                             did,
-                            Queue::direct(
-                                convo_id,
-                                None,
-                                peer_id,
-                                DIRECT_BROADCAST.into(),
-                                data.clone(),
-                            ),
+                            Queue::direct(convo_id, None, peer_id, topic.clone(), data.clone()),
                         )
                         .await
                     {
@@ -938,7 +917,6 @@ impl<T: IpfsTypes> MessageStore<T> {
         conversation_id: Uuid,
         broadcast: bool,
     ) -> Result<(), Error> {
-
         self.end_task(conversation_id).await;
 
         let conversation_cid = self
@@ -948,7 +926,6 @@ impl<T: IpfsTypes> MessageStore<T> {
             .remove(&conversation_id)
             .ok_or(Error::InvalidConversation)?;
 
-            
         if self.ipfs.is_pinned(&conversation_cid).await? {
             if let Err(e) = self.ipfs.remove_pin(&conversation_cid, false).await {
                 error!("Unable to remove pin from {conversation_cid}: {e}");
@@ -985,20 +962,16 @@ impl<T: IpfsTypes> MessageStore<T> {
                 serde_json::to_vec(&ConversationEvents::DeleteConversation(document_type.id()))?,
             )?;
 
-            let peers = self
-                .ipfs
-                .pubsub_peers(Some(DIRECT_BROADCAST.into()))
-                .await?;
-
             let bytes = serde_json::to_vec(&data)?;
 
             for (recipient, peer_id) in peer_id_list {
+                let topic = format!("{recipient}/messaging");
+
+                let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
+
                 match peers.contains(&peer_id) {
                     true => {
-                        if let Err(e) = self
-                            .ipfs
-                            .pubsub_publish(DIRECT_BROADCAST.into(), bytes.clone())
-                            .await
+                        if let Err(e) = self.ipfs.pubsub_publish(topic.clone(), bytes.clone()).await
                         {
                             warn!("Unable to publish to topic: {e}. Queuing event");
                             //Note: If the error is related to peer not available then we should push this to queue but if
@@ -1012,7 +985,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                                         document_type.id(),
                                         None,
                                         peer_id,
-                                        DIRECT_BROADCAST.into(),
+                                        topic.clone(),
                                         data.clone(),
                                     ),
                                 )
@@ -1030,7 +1003,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                                     document_type.id(),
                                     None,
                                     peer_id,
-                                    DIRECT_BROADCAST.into(),
+                                    topic.clone(),
                                     data.clone(),
                                 ),
                             )
@@ -1167,11 +1140,6 @@ impl<T: IpfsTypes> MessageStore<T> {
         conversation_id: Uuid,
         event: ConversationEvents,
     ) -> Result<(), Error> {
-        let peers = self
-            .ipfs
-            .pubsub_peers(Some(DIRECT_BROADCAST.into()))
-            .await?;
-
         let own_did = &*self.did;
 
         let mut data = Sata::default();
@@ -1186,15 +1154,12 @@ impl<T: IpfsTypes> MessageStore<T> {
         )?;
 
         let peer_id = did_to_libp2p_pub(did_key)?.to_peer_id();
-
+        let topic = format!("{did_key}/messaging");
+        let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
         match peers.contains(&peer_id) {
             true => {
                 let bytes = serde_json::to_vec(&data)?;
-                if let Err(_e) = self
-                    .ipfs
-                    .pubsub_publish(DIRECT_BROADCAST.into(), bytes)
-                    .await
-                {
+                if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
                     warn!("Unable to publish to topic. Queuing event");
                     if let Err(e) = self
                         .queue_event(
@@ -1203,7 +1168,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                                 conversation_id,
                                 None,
                                 peer_id,
-                                DIRECT_BROADCAST.into(),
+                                topic.clone(),
                                 data.clone(),
                             ),
                         )
@@ -1217,13 +1182,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 if let Err(e) = self
                     .queue_event(
                         did_key.clone(),
-                        Queue::direct(
-                            conversation_id,
-                            None,
-                            peer_id,
-                            DIRECT_BROADCAST.into(),
-                            data.clone(),
-                        ),
+                        Queue::direct(conversation_id, None, peer_id, topic.clone(), data.clone()),
                     )
                     .await
                 {
