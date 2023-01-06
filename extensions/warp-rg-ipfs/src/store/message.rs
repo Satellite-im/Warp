@@ -2305,8 +2305,12 @@ impl<T: IpfsTypes> MessageStore<T> {
 
     async fn queue_event(&self, did: DID, queue: Queue) -> Result<(), Error> {
         self.queue.write().await.entry(did).or_default().push(queue);
-        self.save_queue().await;
-
+        tokio::spawn({
+            let store = self.clone();
+            async move {
+                store.save_queue().await;
+            }
+        });
         Ok(())
     }
 
