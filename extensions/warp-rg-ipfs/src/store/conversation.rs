@@ -438,7 +438,7 @@ impl MessageDocument {
     pub async fn new<T: IpfsTypes>(
         ipfs: &Ipfs<T>,
         did: Arc<DID>,
-        recipients: Vec<DID>,
+        recipients: Option<Vec<DID>>,
         message: Message,
     ) -> Result<Self, Error> {
         let id = message.id();
@@ -446,8 +446,13 @@ impl MessageDocument {
         let date = message.date();
 
         let mut object = Sata::default();
-        for recipient in recipients.iter() {
-            object.add_recipient(recipient)?;
+
+        if let Some(list) = recipients.as_ref() {
+            for recipient in list {
+                object.add_recipient(recipient)?;
+            }
+        } else {
+            object.add_recipient(&did)?;
         }
 
         let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, message)?;
