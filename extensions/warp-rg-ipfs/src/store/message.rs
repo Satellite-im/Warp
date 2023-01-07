@@ -90,6 +90,8 @@ pub struct MessageStore<T: IpfsTypes> {
     store_decrypted: Arc<AtomicBool>,
 
     with_friends: Arc<AtomicBool>,
+
+    attach_recipients_on_storing: Arc<AtomicBool>,
 }
 
 impl<T: IpfsTypes> Clone for MessageStore<T> {
@@ -111,6 +113,7 @@ impl<T: IpfsTypes> Clone for MessageStore<T> {
             spam_filter: self.spam_filter.clone(),
             with_friends: self.with_friends.clone(),
             store_decrypted: self.store_decrypted.clone(),
+            attach_recipients_on_storing: self.attach_recipients_on_storing.clone()
         }
     }
 }
@@ -125,7 +128,8 @@ impl<T: IpfsTypes> MessageStore<T> {
         discovery: bool,
         interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
-        (check_spam, store_decrypted, with_friends, conversation_load_task): (
+        (check_spam, store_decrypted, with_friends, conversation_load_task, attach_recipients_on_storing): (
+            bool,
             bool,
             bool,
             bool,
@@ -152,6 +156,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         let stream_event_task = Arc::new(Default::default());
         let store_decrypted = Arc::new(AtomicBool::new(store_decrypted));
         let with_friends = Arc::new(AtomicBool::new(with_friends));
+        let attach_recipients_on_storing = Arc::new(AtomicBool::new(attach_recipients_on_storing));
         let stream_sender = Arc::new(Default::default());
         let conversation_lock = Arc::new(Default::default());
         let conversation_sender = Arc::default();
@@ -173,6 +178,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             spam_filter,
             store_decrypted,
             with_friends,
+            attach_recipients_on_storing,
         };
 
         info!("Loading existing conversations task");
@@ -2427,7 +2433,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 let message_document = MessageDocument::new(
                     &self.ipfs,
                     self.did.clone(),
-                    None,
+                    self.attach_recipients_on_storing.load(Ordering::Relaxed).then_some(document.recipients()),
                     message,
                 )
                 .await?;
