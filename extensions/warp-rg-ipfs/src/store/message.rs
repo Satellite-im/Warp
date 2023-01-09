@@ -90,7 +90,6 @@ pub struct MessageStore<T: IpfsTypes> {
 
     with_friends: Arc<AtomicBool>,
 
-    receiving_topic: String,
 }
 
 impl<T: IpfsTypes> Clone for MessageStore<T> {
@@ -112,7 +111,6 @@ impl<T: IpfsTypes> Clone for MessageStore<T> {
             spam_filter: self.spam_filter.clone(),
             with_friends: self.with_friends.clone(),
             store_decrypted: self.store_decrypted.clone(),
-            receiving_topic: self.receiving_topic.clone(),
         }
     }
 }
@@ -157,7 +155,6 @@ impl<T: IpfsTypes> MessageStore<T> {
         let stream_sender = Arc::new(Default::default());
         let conversation_lock = Arc::new(Default::default());
         let conversation_sender = Arc::default();
-        let receiving_topic = format!("{did}/messaging");
 
         let store = Self {
             path,
@@ -176,7 +173,6 @@ impl<T: IpfsTypes> MessageStore<T> {
             spam_filter,
             store_decrypted,
             with_friends,
-            receiving_topic,
         };
 
         info!("Loading existing conversations task");
@@ -199,7 +195,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 });
 
                 let did = &*(store.did.clone());
-                let Ok(stream) = store.ipfs.pubsub_subscribe(store.receiving_topic.clone()).await else {
+                let Ok(stream) = store.ipfs.pubsub_subscribe(format!("{did}/messaging")).await else {
                     error!("Unable to create subscription stream. Terminating task");
                     //TODO: Maybe panic? 
                     return;
@@ -232,7 +228,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         });
         if discovery {
             let ipfs = store.ipfs.clone();
-            let topic = store.receiving_topic.clone();
+            let topic = format!("{}/messaging", store.did);
             tokio::spawn(async move {
                 if let Err(e) = topic_discovery(ipfs, topic).await {
                     error!("Unable to perform topic discovery: {e}");
