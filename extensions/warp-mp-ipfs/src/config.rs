@@ -95,14 +95,6 @@ impl Default for Swarm {
     }
 }
 
-/*
-    experimental connection limits:
-                max_pending_incoming: Some(512),
-                max_pending_outgoing: Some(512),
-                max_established_incoming: Some(512),
-                max_established_outgoing: Some(512),
-*/
-
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionLimit {
     pub max_pending_incoming: Option<u32>,
@@ -114,13 +106,56 @@ pub struct ConnectionLimit {
 }
 
 impl ConnectionLimit {
-    //Note: Further testing needs to be done for connection limits and impact on hole punching
-    pub fn production() -> Self {
+    pub fn testing() -> Self {
+        Self {
+            max_pending_incoming: Some(10),
+            max_pending_outgoing: Some(10),
+            max_established_incoming: Some(32),
+            max_established_outgoing: Some(32),
+            max_established: None,
+            max_established_per_peer: None,
+        }
+    }
+
+    pub fn minimial() -> Self {
+        Self {
+            max_pending_incoming: Some(128),
+            max_pending_outgoing: Some(128),
+            max_established_incoming: Some(128),
+            max_established_outgoing: Some(128),
+            max_established: None,
+            max_established_per_peer: None,
+        }
+    }
+
+    pub fn recommended() -> Self {
         Self {
             max_pending_incoming: Some(512),
             max_pending_outgoing: Some(512),
             max_established_incoming: Some(512),
             max_established_outgoing: Some(512),
+            max_established: None,
+            max_established_per_peer: None,
+        }
+    }
+
+    pub fn maximum() -> Self {
+        Self {
+            max_pending_incoming: Some(512),
+            max_pending_outgoing: Some(512),
+            max_established_incoming: Some(1024),
+            max_established_outgoing: Some(1024),
+            max_established: None,
+            max_established_per_peer: None,
+        }
+    }
+
+    pub fn unrestricted() -> Self {
+        Self {
+            max_pending_incoming: None,
+            max_pending_outgoing: None,
+            max_established_incoming: None,
+            max_established_outgoing: None,
             max_established: None,
             max_established_per_peer: None,
         }
