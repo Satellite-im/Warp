@@ -533,6 +533,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(identity)
     }
 
+    pub async fn local_id_created(&self) -> bool {
+        self.identity.read().await.is_some()
+    }
+
     //Note: We are calling `IdentityStore::cache` multiple times, but shouldnt have any impact on performance.
     pub async fn lookup(&self, lookup: LookupBy) -> Result<Vec<Identity>, Error> {
         let own_did = self

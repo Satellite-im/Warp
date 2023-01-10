@@ -57,6 +57,8 @@ pub enum Error {
     //MultiPass Errors
     #[error("MultiPass extension is unavailable")]
     MultiPassExtensionUnavailable,
+    #[error("Identity has not been created")]
+    IdentityNotCreated,
     #[error("Identity exist with the same information")]
     IdentityExist,
     #[error("Identity does not exist")]

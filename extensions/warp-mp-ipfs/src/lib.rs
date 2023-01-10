@@ -376,14 +376,29 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         Ok(())
     }
 
-    pub fn friend_store(&self) -> Result<FriendsStore<T>, Error> {
+    pub async fn friend_store(&self) -> Result<FriendsStore<T>, Error> {
+        self.identity_store(true).await?;
         self.friend_store
             .read()
             .clone()
             .ok_or(Error::MultiPassExtensionUnavailable)
     }
 
-    pub fn identity_store(&self) -> Result<IdentityStore<T>, Error> {
+    pub async fn identity_store(&self, created: bool) -> Result<IdentityStore<T>, Error> {
+        let store = self.identity_store_sync()?;
+        if created && !store.local_id_created().await {
+            return Err(Error::IdentityNotCreated);
+        }
+        Ok(store)
+    }
+
+    pub fn identity_store_sync(&self) -> Result<IdentityStore<T>, Error> {
+        if !self.tesseract.is_unlock() {
+            return Err(Error::TesseractLocked);
+        }
+        if !self.tesseract.exist("keypair") {
+            return Err(Error::IdentityNotCreated);
+        }
         self.identity_store
             .read()
             .clone()
@@ -489,7 +504,11 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
         info!("Initializing stores");
         self.initialize_store(true).await?;
         info!("Stores initialized. Creating identity");
-        let identity = self.identity_store()?.create_identity(username).await?;
+        let identity = self
+            .identity_store(false)
+            .await?
+            .create_identity(username)
+            .await?;
         info!("Identity with {} has been created", identity.did_key());
 
         if let Ok(mut cache) = self.get_cache_mut() {
@@ -504,11 +523,8 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
     }
 
     async fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
-        if !self.is_store_initialized().await {
-            error!("Store is not initialized. Either tesseract is not unlocked or an identity has not been created");
-            return Err(Error::MultiPassExtensionUnavailable);
-        }
-        let store = self.identity_store()?;
+        let store = self.identity_store(true).await?;
+
         let idents = match id.get_inner() {
             (Some(pk), None, false) => {
                 if let Ok(cache) = self.get_cache() {
@@ -576,7 +592,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
     }
 
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
-        let mut store = self.identity_store()?;
+        let mut store = self.identity_store(true).await?;
         let mut identity = self.get_own_identity().await?;
         let old_identity = identity.clone();
         match (
@@ -718,7 +734,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
     }
 
     fn decrypt_private_key(&self, _: Option<&str>) -> Result<DID, Error> {
-        let store = self.identity_store()?;
+        let store = self.identity_store_sync()?;
         let kp = store.get_raw_keypair()?.encode();
         let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
         let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
@@ -726,7 +742,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
     }
 
     fn refresh_cache(&mut self) -> Result<(), Error> {
-        let mut store = self.identity_store()?;
+        let mut store = self.identity_store_sync()?;
         store.clear_internal_cache();
         self.get_cache_mut()?.empty(DataType::from(self.module()))
     }
@@ -735,82 +751,82 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
 #[async_trait::async_trait]
 impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store()?;
+        let mut store = self.friend_store().await?;
         store.send_request(pubkey).await
     }
 
     async fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store()?;
+        let mut store = self.friend_store().await?;
         store.accept_request(pubkey).await
     }
 
     async fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store()?;
+        let mut store = self.friend_store().await?;
         store.reject_request(pubkey).await
     }
 
     async fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store()?;
+        let mut store = self.friend_store().await?;
         store.close_request(pubkey).await
     }
 
     async fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        let store = self.friend_store()?;
+        let store = self.friend_store().await?;
         store.list_incoming_request().await
     }
 
     async fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        let store = self.friend_store()?;
+        let store = self.friend_store().await?;
         store.list_outgoing_request().await
     }
 
     async fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
-        let store = self.friend_store()?;
+        let store = self.friend_store().await?;
         store.received_friend_request_from(did).await
     }
 
     async fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
-        let store = self.friend_store()?;
+        let store = self.friend_store().await?;
         store.sent_friend_request_to(did).await
     }
 
     async fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        let store = self.friend_store()?;
+        let store = self.friend_store().await?;
         store.list_all_request().await
     }
 
     async fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store()?;
+        let mut store = self.friend_store().await?;
         store.remove_friend(pubkey, true, true).await
     }
 
     async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store()?;
+        let mut store = self.friend_store().await?;
         store.block(pubkey).await
     }
 
     async fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
-        let store = self.friend_store()?;
+        let store = self.friend_store().await?;
         store.is_blocked(did).await
     }
 
     async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store()?;
+        let mut store = self.friend_store().await?;
         store.unblock(pubkey).await
     }
 
     async fn block_list(&self) -> Result<Vec<DID>, Error> {
-        let store = self.friend_store()?;
+        let store = self.friend_store().await?;
         store.block_list().await.map(Vec::from_iter)
     }
 
     async fn list_friends(&self) -> Result<Vec<DID>, Error> {
-        let store = self.friend_store()?;
+        let store = self.friend_store().await?;
         store.friends_list().await.map(Vec::from_iter)
     }
 
     async fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
-        let store = self.friend_store()?;
+        let store = self.friend_store().await?;
         store.is_friend(pubkey).await
     }
 }
@@ -837,17 +853,17 @@ impl<T: IpfsTypes> FriendsEvent for IpfsIdentity<T> {
 #[async_trait::async_trait]
 impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
     async fn identity_status(&self, did: &DID) -> Result<identity::IdentityStatus, Error> {
-        let store = self.identity_store()?;
+        let store = self.identity_store(true).await?;
         store.identity_status(did).await
     }
 
     async fn set_identity_status(&mut self, status: identity::IdentityStatus) -> Result<(), Error> {
-        let mut store = self.identity_store()?;
+        let mut store = self.identity_store(true).await?;
         store.set_identity_status(status).await
     }
 
     async fn identity_platform(&self, did: &DID) -> Result<identity::Platform, Error> {
-        let store = self.identity_store()?;
+        let store = self.identity_store(true).await?;
         store.identity_platform(did).await
     }
 
@@ -915,9 +931,7 @@ pub mod ffi {
             Err(e) => return FFIResult::err(Error::from(e)),
         };
 
-        FFIResult::ok(MultiPassAdapter::new(Box::new(
-            account,
-        )))
+        FFIResult::ok(MultiPassAdapter::new(Box::new(account)))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -956,8 +970,6 @@ pub mod ffi {
             Err(e) => return FFIResult::err(Error::from(e)),
         };
 
-        FFIResult::ok(MultiPassAdapter::new(Box::new(
-            account,
-        )))
+        FFIResult::ok(MultiPassAdapter::new(Box::new(account)))
     }
 }
