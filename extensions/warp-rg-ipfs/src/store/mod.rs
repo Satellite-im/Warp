@@ -19,10 +19,6 @@ use warp::{
     raygun::{Message, MessageEvent, PinState, ReactionState},
 };
 
-pub const DIRECT_BROADCAST: &str = "direct/broadcast";
-#[allow(dead_code)]
-pub const GROUP_BROADCAST: &str = "group/broadcast";
-
 #[allow(clippy::large_enum_variant)]
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
