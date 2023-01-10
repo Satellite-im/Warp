@@ -87,6 +87,7 @@ pub struct StoreSetting {
     pub sync_interval: u64,
     pub check_spam: bool,
     pub conversation_load_task: bool,
+    pub attach_recipients_on_storing: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
