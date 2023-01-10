@@ -1795,7 +1795,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         let mut tx = self.conversation_tx(conversation_id).await?;
         //TODO: Send directly if constellation isnt present
         //      this will require uploading to ipfs directly from here
-        //      or setting up a seperate stream channel related to
+        //      or setting up a separate stream channel related to
         //      the subscribed topic possibly as a configuration option
         let mut constellation = self
             .filesystem
