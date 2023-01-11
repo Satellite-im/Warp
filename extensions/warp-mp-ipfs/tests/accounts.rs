@@ -18,6 +18,7 @@ mod test {
         tesseract.unlock(b"internal pass").unwrap();
         let mut config = warp_mp_ipfs::config::MpIpfsConfig::development();
         config.store_setting.discovery = Discovery::Provider(context);
+        config.store_setting.broadcast_interval = 50;
         let mut account = ipfs_identity_temporary(Some(config), tesseract, None).await?;
         let did = account.create_identity(username, passphrase).await?;
         let identity = account.get_own_identity().await?;
@@ -71,7 +72,7 @@ mod test {
         let (_, did_b, _) = create_account(Some("JaneDoe"), None, Some("test::get_identity".into())).await?;
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
-        let identity_b = tokio::time::timeout(Duration::from_secs(1), async {
+        let identity_b = tokio::time::timeout(Duration::from_millis(200), async {
             loop {
                 if let Ok(Some(id)) = account_a
                     .get_identity(did_b.clone().into())
@@ -97,7 +98,7 @@ mod test {
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
 
-        let identity_b = tokio::time::timeout(Duration::from_secs(1), async {
+        let identity_b = tokio::time::timeout(Duration::from_millis(200), async {
             loop {
                 if let Some(id) = account_a
                     .get_identity(String::from("JaneDoe").into())
