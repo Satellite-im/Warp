@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod test {
+    use std::time::Duration;
+
     use warp::crypto::DID;
     use warp::multipass::identity::{Identity, IdentityUpdate};
     use warp::multipass::MultiPass;
@@ -35,7 +37,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn get_own_identity() -> anyhow::Result<()> {
         let (_, _, identity) = create_account(
             Some("JohnDoe"),
@@ -63,15 +65,18 @@ mod test {
         let (_, did_b, _) = create_account(Some("JaneDoe"), None).await?;
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
-        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
-
-        let identity_b = account_a
-            .get_identity(did_b.clone().into()).await
-            .map(|s| s.first().cloned())?;
-
-        assert!(identity_b.is_some());
-
-        let identity_b = identity_b.unwrap();
+        let identity_b = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if let Ok(Some(id)) = account_a
+                    .get_identity(did_b.clone().into())
+                    .await
+                    .map(|s| s.first().cloned())
+                {
+                    break id;
+                }
+            }
+        })
+        .await?;
 
         assert_eq!(identity_b.username(), "JaneDoe");
 
@@ -85,16 +90,21 @@ mod test {
         let (_account_b, _, _) = create_account(Some("JaneDoe"), None).await?;
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-        let identity_b = account_a
-            .get_identity(String::from("JaneDoe").into()).await?
-            .first()
-            .cloned();
-
-        assert!(identity_b.is_some());
-
-        let identity_b = identity_b.unwrap();
+        let identity_b = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if let Some(id) = account_a
+                    .get_identity(String::from("JaneDoe").into())
+                    .await
+                    .expect("Should not fail")
+                    .first()
+                    .cloned()
+                {
+                    break id;
+                }
+            }
+        })
+        .await?;
 
         assert_eq!(identity_b.username(), "JaneDoe");
         Ok(())
@@ -106,14 +116,18 @@ mod test {
         tesseract.unlock(b"internal pass").unwrap();
 
         let mut account = ipfs_identity_temporary(None, tesseract, None).await?;
-        account.create_identity(
-            Some("JohnDoe"),
-            Some("morning caution dose lab six actress pond humble pause enact virtual train"),
-        ).await?;
+        account
+            .create_identity(
+                Some("JohnDoe"),
+                Some("morning caution dose lab six actress pond humble pause enact virtual train"),
+            )
+            .await?;
 
         let old_identity = account.get_own_identity().await?;
 
-        account.update_identity(IdentityUpdate::set_username("JohnDoe2.0".into())).await?;
+        account
+            .update_identity(IdentityUpdate::set_username("JohnDoe2.0".into()))
+            .await?;
 
         let updated_identity = account.get_own_identity().await?;
 
@@ -128,14 +142,18 @@ mod test {
         tesseract.unlock(b"internal pass").unwrap();
 
         let mut account = ipfs_identity_temporary(None, tesseract, None).await?;
-        account.create_identity(
-            Some("JohnDoe"),
-            Some("morning caution dose lab six actress pond humble pause enact virtual train"),
-        ).await?;
+        account
+            .create_identity(
+                Some("JohnDoe"),
+                Some("morning caution dose lab six actress pond humble pause enact virtual train"),
+            )
+            .await?;
 
         let old_identity = account.get_own_identity().await?;
 
-        account.update_identity(IdentityUpdate::set_status_message(Some("Blast off".into()))).await?;
+        account
+            .update_identity(IdentityUpdate::set_status_message(Some("Blast off".into())))
+            .await?;
 
         let updated_identity = account.get_own_identity().await?;
 
