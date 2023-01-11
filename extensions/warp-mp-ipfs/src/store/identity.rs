@@ -759,9 +759,11 @@ impl<T: IpfsTypes> IdentityStore<T> {
         }
 
         let identity_status = self.identity_status(did).await?;
+
         if matches!(identity_status, IdentityStatus::Offline) {
             return Ok(Platform::Unknown);
         }
+        
         self.cache()
             .await
             .iter()

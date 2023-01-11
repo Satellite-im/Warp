@@ -1,9 +1,8 @@
-
 #![allow(clippy::await_holding_lock)]
 use futures::StreamExt;
-use rust_ipfs as ipfs;
 use ipfs::libp2p::gossipsub::GossipsubMessage;
 use ipfs::{Ipfs, IpfsTypes, PeerId};
+use rust_ipfs as ipfs;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Deref;
@@ -60,7 +59,7 @@ pub struct FriendsStore<T: IpfsTypes> {
     // Tesseract
     tesseract: Tesseract,
 
-    phonebook: PhoneBook<T>,
+    phonebook: Option<PhoneBook<T>>,
 
     tx: broadcast::Sender<MultiPassEventKind>,
 }
@@ -141,7 +140,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         path: Option<PathBuf>,
         tesseract: Tesseract,
         interval: u64,
-        (tx, override_ipld): (broadcast::Sender<MultiPassEventKind>, bool),
+        (tx, override_ipld, use_phonebook): (broadcast::Sender<MultiPassEventKind>, bool, bool),
     ) -> anyhow::Result<Self> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -154,6 +153,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let override_ipld = Arc::new(AtomicBool::new(override_ipld));
 
         let (phonebook, fut) = PhoneBook::new(ipfs.clone(), tx.clone());
+        let phonebook = use_phonebook.then_some(phonebook);
         tokio::spawn(fut);
 
         let store = Self {
@@ -184,20 +184,21 @@ impl<T: IpfsTypes> FriendsStore<T> {
             let mut store = store_inner;
 
             let discovery = store.identity.discovery_type();
+            if let Some(phonebook) = store.phonebook.as_ref() {
+                if let Err(_e) = phonebook.set_discovery(discovery).await {}
 
-            if let Err(_e) = store.phonebook.set_discovery(discovery).await {}
+                for addr in store.identity.relays() {
+                    if let Err(_e) = phonebook.add_relay(addr).await {}
+                }
 
-            for addr in store.identity.relays() {
-                if let Err(_e) = store.phonebook.add_relay(addr).await {}
-            }
+                if let Err(e) = store.load_queue().await {
+                    error!("Error loading queue: {e}");
+                }
 
-            if let Err(e) = store.load_queue().await {
-                error!("Error loading queue: {e}");
-            }
-
-            if let Ok(friends) = store.friends_list().await {
-                if let Err(_e) = store.phonebook.add_friend_list(friends).await {
-                    error!("Error adding friends in phonebook: {_e}");
+                if let Ok(friends) = store.friends_list().await {
+                    if let Err(_e) = phonebook.add_friend_list(friends).await {
+                        error!("Error adding friends in phonebook: {_e}");
+                    }
                 }
             }
 
@@ -828,9 +829,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
         if list.insert(pubkey.clone()) {
             self.set_friends_list(list).await?;
         }
-
-        if let Err(_e) = self.phonebook.add_friend(pubkey).await {
-            error!("Error: {_e}");
+        if let Some(phonebook) = self.phonebook.as_ref() {
+            if let Err(_e) = phonebook.add_friend(pubkey).await {
+                error!("Error: {_e}");
+            }
         }
 
         if let Err(e) = self.tx.send(MultiPassEventKind::FriendAdded {
@@ -856,8 +858,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
             self.set_friends_list(list).await?;
         }
 
-        if let Err(_e) = self.phonebook.remove_friend(pubkey).await {
-            error!("Error: {_e}");
+        if let Some(phonebook) = self.phonebook.as_ref() {
+            if let Err(_e) = phonebook.remove_friend(pubkey).await {
+                error!("Error: {_e}");
+            }
         }
 
         if broadcast {
