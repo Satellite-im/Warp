@@ -34,13 +34,14 @@ mod test {
         let (mut account_b, did_b, _) =
             create_account(Some("JaneDoe"), None, Some("test::add_friend".into())).await?;
 
-        let mut subscribe = account_b.subscribe().await?;
+        let mut subscribe_a = account_a.subscribe().await?;
+        let mut subscribe_b = account_b.subscribe().await?;
         account_a.send_request(&did_b).await?;
 
         tokio::time::timeout(Duration::from_secs(5), async {
             let did = loop {
                 if let Some(MultiPassEventKind::FriendRequestReceived { from }) =
-                    subscribe.next().await
+                    subscribe_b.next().await
                 {
                     break from;
                 }
@@ -48,8 +49,6 @@ mod test {
             account_b.accept_request(&did).await
         })
         .await??;
-
-        let mut subscribe_a = account_a.subscribe().await?;
 
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -133,13 +132,15 @@ mod test {
         let (mut account_b, did_b, _) =
             create_account(Some("JaneDoe"), None, Some("test::reject_friend".into())).await?;
 
-        let mut subscribe = account_b.subscribe().await?;
+        let mut subscribe_a = account_a.subscribe().await?;
+        let mut subscribe_b = account_b.subscribe().await?;
+
         account_a.send_request(&did_b).await?;
 
         tokio::time::timeout(Duration::from_secs(5), async {
             let did = loop {
                 if let Some(MultiPassEventKind::FriendRequestReceived { from }) =
-                    subscribe.next().await
+                    subscribe_b.next().await
                 {
                     break from;
                 }
@@ -148,14 +149,61 @@ mod test {
         })
         .await??;
 
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(MultiPassEventKind::OutgoingFriendRequestRejected { .. }) =
+                    subscribe_a.next().await
+                {
+                    break;
+                }
+            }
+        })
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn close_request() -> anyhow::Result<()> {
+        let (mut account_a, _, _) =
+            create_account(Some("JohnDoe"), None, Some("test::close_request".into())).await?;
+
+        let (mut account_b, did_b, _) =
+            create_account(Some("JaneDoe"), None, Some("test::close_request".into())).await?;
         let mut subscribe_a = account_a.subscribe().await?;
+        let mut subscribe_b = account_b.subscribe().await?;
+
+        account_a.send_request(&did_b).await?;
 
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                match subscribe_a.next().await {
-                    Some(MultiPassEventKind::OutgoingFriendRequestRejected { .. })
-                    | Some(MultiPassEventKind::IncomingFriendRequestRejected { .. }) => break,
-                    _ => {}
+                if let Some(MultiPassEventKind::FriendRequestReceived { .. }) =
+                    subscribe_b.next().await
+                {
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        account_a.close_request(&did_b).await?;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(MultiPassEventKind::IncomingFriendRequestClosed { .. }) =
+                    subscribe_b.next().await
+                {
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(MultiPassEventKind::OutgoingFriendRequestClosed { .. }) =
+                    subscribe_a.next().await
+                {
+                    break;
                 }
             }
         })
