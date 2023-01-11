@@ -210,4 +210,92 @@ mod test {
         .await?;
         Ok(())
     }
+
+    #[tokio::test]
+    async fn incoming_request() -> anyhow::Result<()> {
+        let (mut account_a, did_a, _) =
+            create_account(Some("JohnDoe"), None, Some("test::incoming_request".into())).await?;
+
+        let (mut account_b, did_b, _) =
+            create_account(Some("JaneDoe"), None, Some("test::incoming_request".into())).await?;
+        let mut subscribe_a = account_a.subscribe().await?;
+        let mut subscribe_b = account_b.subscribe().await?;
+
+        account_a.send_request(&did_b).await?;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(MultiPassEventKind::FriendRequestSent { .. }) = subscribe_a.next().await
+                {
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(MultiPassEventKind::FriendRequestReceived { .. }) =
+                    subscribe_b.next().await
+                {
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        let list = account_b.list_incoming_request().await?;
+
+        assert!(list.iter().any(|req| req.from() == did_a));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn outgoing_request() -> anyhow::Result<()> {
+        let (mut account_a, _, _) =
+            create_account(Some("JohnDoe"), None, Some("test::outgoing_request".into())).await?;
+
+        let (_account_b, did_b, _) =
+            create_account(Some("JaneDoe"), None, Some("test::outgoing_request".into())).await?;
+        let mut subscribe_a = account_a.subscribe().await?;
+
+        account_a.send_request(&did_b).await?;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(MultiPassEventKind::FriendRequestSent { .. }) = subscribe_a.next().await
+                {
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        let list = account_a.list_outgoing_request().await?;
+
+        assert!(list.iter().any(|req| req.to() == did_b));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_unblock_identity() -> anyhow::Result<()> {
+        let (mut account_a, did_a, _) =
+            create_account(Some("JohnDoe"), None, Some("test::block_unblock_identity".into())).await?;
+
+        let (mut account_b, did_b, _) =
+            create_account(Some("JaneDoe"), None, Some("test::block_unblock_identity".into())).await?;
+
+        account_a.block(&did_b).await?;
+        account_b.block(&did_a).await?;
+
+        assert!(account_a.is_blocked(&did_b).await?);
+        assert!(account_b.is_blocked(&did_a).await?);
+
+        account_a.unblock(&did_b).await?;
+        account_b.unblock(&did_a).await?;
+
+        assert!(!account_a.is_blocked(&did_b).await?);
+        assert!(!account_b.is_blocked(&did_a).await?);
+        Ok(())
+    }
 }
