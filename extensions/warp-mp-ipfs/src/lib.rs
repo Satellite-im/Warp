@@ -362,7 +362,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             config.path,
             tesseract.clone(),
             config.store_setting.broadcast_interval,
-            (self.tx.clone(), config.store_setting.override_ipld),
+            (self.tx.clone(), config.store_setting.override_ipld, config.store_setting.use_phonebook),
         )
         .await?;
         info!("friends store initialized");

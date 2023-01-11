@@ -192,6 +192,8 @@ pub struct StoreSetting {
     pub override_ipld: bool,
     
     pub share_platform: bool,
+
+    pub use_phonebook: bool,
 }
 
 impl Default for StoreSetting {
@@ -203,6 +205,7 @@ impl Default for StoreSetting {
             sync_interval: 100,
             override_ipld: true,
             share_platform: false,
+            use_phonebook: true,
         }
     }
 }

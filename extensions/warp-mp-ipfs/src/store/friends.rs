@@ -140,7 +140,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         path: Option<PathBuf>,
         tesseract: Tesseract,
         interval: u64,
-        (tx, override_ipld): (broadcast::Sender<MultiPassEventKind>, bool),
+        (tx, override_ipld, use_phonebook): (broadcast::Sender<MultiPassEventKind>, bool, bool),
     ) -> anyhow::Result<Self> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -153,7 +153,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let override_ipld = Arc::new(AtomicBool::new(override_ipld));
 
         let (phonebook, fut) = PhoneBook::new(ipfs.clone(), tx.clone());
-        let phonebook = false.then_some(phonebook);
+        let phonebook = use_phonebook.then_some(phonebook);
         tokio::spawn(fut);
 
         let store = Self {
