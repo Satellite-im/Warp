@@ -6,15 +6,18 @@ mod test {
     use warp::multipass::identity::{Identity, IdentityUpdate};
     use warp::multipass::MultiPass;
     use warp::tesseract::Tesseract;
+    use warp_mp_ipfs::config::Discovery;
     use warp_mp_ipfs::ipfs_identity_temporary;
 
     async fn create_account(
         username: Option<&str>,
         passphrase: Option<&str>,
+        context: Option<String>,
     ) -> anyhow::Result<(Box<dyn MultiPass>, DID, Identity)> {
         let tesseract = Tesseract::default();
         tesseract.unlock(b"internal pass").unwrap();
-        let config = warp_mp_ipfs::config::MpIpfsConfig::development();
+        let mut config = warp_mp_ipfs::config::MpIpfsConfig::development();
+        config.store_setting.discovery = Discovery::Provider(context);
         let mut account = ipfs_identity_temporary(Some(config), tesseract, None).await?;
         let did = account.create_identity(username, passphrase).await?;
         let identity = account.get_own_identity().await?;
@@ -26,6 +29,7 @@ mod test {
         let (_, did, _) = create_account(
             None,
             Some("morning caution dose lab six actress pond humble pause enact virtual train"),
+            None
         )
         .await?;
 
@@ -42,6 +46,7 @@ mod test {
         let (_, _, identity) = create_account(
             Some("JohnDoe"),
             Some("morning caution dose lab six actress pond humble pause enact virtual train"),
+            None
         )
         .await?;
 
@@ -59,10 +64,11 @@ mod test {
         let (account_a, _, _) = create_account(
             Some("JohnDoe"),
             Some("morning caution dose lab six actress pond humble pause enact virtual train"),
+            Some("test::get_identity".into())
         )
         .await?;
 
-        let (_, did_b, _) = create_account(Some("JaneDoe"), None).await?;
+        let (_, did_b, _) = create_account(Some("JaneDoe"), None, Some("test::get_identity".into())).await?;
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
         let identity_b = tokio::time::timeout(Duration::from_secs(1), async {
@@ -85,9 +91,9 @@ mod test {
 
     #[tokio::test]
     async fn get_identity_by_username() -> anyhow::Result<()> {
-        let (account_a, _, _) = create_account(Some("JohnDoe"), None).await?;
+        let (account_a, _, _) = create_account(Some("JohnDoe"), None, Some("test::get_identity_by_username".into())).await?;
 
-        let (_account_b, _, _) = create_account(Some("JaneDoe"), None).await?;
+        let (_account_b, _, _) = create_account(Some("JaneDoe"), None, Some("test::get_identity_by_username".into())).await?;
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
 
