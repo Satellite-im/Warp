@@ -152,9 +152,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let did_key = Arc::new(did_keypair(&tesseract)?);
         let override_ipld = Arc::new(AtomicBool::new(override_ipld));
 
-        let (phonebook, fut) = PhoneBook::new(ipfs.clone(), tx.clone());
+        let phonebook = PhoneBook::new(ipfs.clone(), tx.clone());
         let phonebook = use_phonebook.then_some(phonebook);
-        tokio::spawn(fut);
 
         let store = Self {
             ipfs,
