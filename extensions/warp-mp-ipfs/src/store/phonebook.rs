@@ -2,6 +2,8 @@ use futures::SinkExt;
 use futures::StreamExt;
 use rust_ipfs as ipfs;
 use std::collections::HashSet;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -44,6 +46,7 @@ impl<T: IpfsTypes> PhoneBook<T> {
         let friends: Arc<RwLock<Vec<(DID, Option<PeerConnectionType>, bool)>>> = Default::default();
         let discovery = Arc::new(RwLock::new(Discovery::None));
         let relays: Arc<RwLock<Vec<Multiaddr>>> = Default::default();
+        let emit_event = Arc::new(AtomicBool::new(false));
 
         let book = PhoneBook {
             ipfs: ipfs.clone(),
@@ -54,6 +57,7 @@ impl<T: IpfsTypes> PhoneBook<T> {
             let friends = friends.clone();
             let discovery = discovery.clone();
             let relays = relays.clone();
+            let emit_event = emit_event.clone();
 
             async move {
                 while let Some(event) = rx.next().await {
@@ -79,6 +83,14 @@ impl<T: IpfsTypes> PhoneBook<T> {
                                 }
                             }
                             let _ = ret.send(offline);
+                        }
+                        PhoneBookEvents::EnableEventEmitter(ret) => {
+                            emit_event.store(true, Ordering::Relaxed);
+                            let _ = ret.send(Ok(()));
+                        }
+                        PhoneBookEvents::DisableEventEmitter(ret) => {
+                            emit_event.store(false, Ordering::Relaxed);
+                            let _ = ret.send(Ok(()));
                         }
                         PhoneBookEvents::AddFriend(did, ret) => {
                             friends.write().await.push((did, None, false));
@@ -118,6 +130,7 @@ impl<T: IpfsTypes> PhoneBook<T> {
             let friends = friends;
             let discovery = discovery;
             let relays = relays;
+            let emit_event = emit_event;
             async move {
                 loop {
                     let discovery = discovery.read().await.clone();
@@ -126,13 +139,17 @@ impl<T: IpfsTypes> PhoneBook<T> {
                         for (did, status, discovering) in friends.write().await.iter_mut() {
                             let discovery = discovery.clone();
                             match connected_to_peer(ipfs.clone(), did.clone()).await {
-                                Ok(inner_status) => match (inner_status, *discovering) {
-                                    (PeerConnectionType::NotConnected, false) => {
+                                Ok(inner_status) => match (
+                                    inner_status,
+                                    *discovering,
+                                    emit_event.load(Ordering::Relaxed),
+                                ) {
+                                    (PeerConnectionType::NotConnected, false, emit) => {
                                         let ipfs = ipfs.clone();
                                         let relays = relays.clone();
                                         let did = did.clone();
                                         if let Some(status) = status {
-                                            if *status != PeerConnectionType::NotConnected {
+                                            if *status != PeerConnectionType::NotConnected && emit {
                                                 if let Err(e) = event.send(
                                                     MultiPassEventKind::IdentityOffline {
                                                         did: did.clone(),
@@ -156,12 +173,12 @@ impl<T: IpfsTypes> PhoneBook<T> {
                                         *discovering = true;
                                         *status = Some(PeerConnectionType::NotConnected);
                                     }
-                                    (PeerConnectionType::NotConnected, true)
+                                    (PeerConnectionType::NotConnected, true, _)
                                         if (*status).is_none() =>
                                     {
                                         *status = Some(PeerConnectionType::NotConnected);
                                     }
-                                    (PeerConnectionType::NotConnected, true)
+                                    (PeerConnectionType::NotConnected, true, _)
                                         if (*status).is_some() =>
                                     {
                                         if let Some(PeerConnectionType::NotConnected) = *status {
@@ -169,20 +186,24 @@ impl<T: IpfsTypes> PhoneBook<T> {
                                         }
                                         *status = Some(PeerConnectionType::NotConnected);
                                     }
-                                    (PeerConnectionType::Connected, true) => {
-                                        if let Err(e) =
-                                            event.send(MultiPassEventKind::IdentityOnline {
-                                                did: did.clone(),
-                                            })
-                                        {
-                                            error!("Error broadcasting event: {e}");
+                                    (PeerConnectionType::Connected, true, emit) => {
+                                        if emit {
+                                            if let Err(e) =
+                                                event.send(MultiPassEventKind::IdentityOnline {
+                                                    did: did.clone(),
+                                                })
+                                            {
+                                                error!("Error broadcasting event: {e}");
+                                            }
                                         }
                                         *discovering = false;
                                         *status = Some(inner_status)
                                     }
-                                    (PeerConnectionType::Connected, false) => {
+                                    (PeerConnectionType::Connected, false, emit) => {
                                         if let Some(inner_status2) = *status {
-                                            if inner_status2 == PeerConnectionType::NotConnected {
+                                            if inner_status2 == PeerConnectionType::NotConnected
+                                                && emit
+                                            {
                                                 if let Err(e) =
                                                     event.send(MultiPassEventKind::IdentityOnline {
                                                         did: did.clone(),
@@ -193,12 +214,14 @@ impl<T: IpfsTypes> PhoneBook<T> {
                                                 *status = Some(inner_status);
                                             }
                                         } else {
-                                            if let Err(e) =
-                                                event.send(MultiPassEventKind::IdentityOnline {
-                                                    did: did.clone(),
-                                                })
-                                            {
-                                                error!("Error broadcasting event: {e}");
+                                            if emit {
+                                                if let Err(e) =
+                                                    event.send(MultiPassEventKind::IdentityOnline {
+                                                        did: did.clone(),
+                                                    })
+                                                {
+                                                    error!("Error broadcasting event: {e}");
+                                                }
                                             }
                                             *status = Some(inner_status);
                                         }
@@ -268,6 +291,8 @@ impl<T: IpfsTypes> PhoneBook<T> {
 pub enum PhoneBookEvents {
     Online(oneshot::Sender<Vec<DID>>),
     Offline(oneshot::Sender<Vec<DID>>),
+    EnableEventEmitter(oneshot::Sender<Result<(), Error>>),
+    DisableEventEmitter(oneshot::Sender<Result<(), Error>>),
     AddFriend(DID, oneshot::Sender<Result<(), Error>>),
     SetDiscovery(Discovery, oneshot::Sender<Result<(), Error>>),
     AddRelays(Multiaddr, oneshot::Sender<Result<(), Error>>),
