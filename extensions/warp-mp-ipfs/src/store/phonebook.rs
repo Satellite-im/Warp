@@ -1,5 +1,3 @@
-use futures::SinkExt;
-use futures::StreamExt;
 use rust_ipfs as ipfs;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
@@ -7,8 +5,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::channel::mpsc;
-use futures::channel::oneshot;
 use ipfs::Multiaddr;
 use tokio::sync::broadcast;
 use tokio::sync::RwLock;
@@ -25,133 +21,64 @@ use super::connected_to_peer;
 use super::PeerConnectionType;
 
 /// Used to handle friends connectivity status
+#[allow(clippy::type_complexity)]
 pub struct PhoneBook<T: IpfsTypes> {
     ipfs: Ipfs<T>,
-    tx: mpsc::Sender<PhoneBookEvents>,
+    friends: Arc<
+        RwLock<
+            Vec<(
+                DID,
+                Arc<RwLock<Option<PeerConnectionType>>>,
+                Arc<AtomicBool>,
+            )>,
+        >,
+    >,
+    discovery: Arc<RwLock<Discovery>>,
+    relays: Arc<RwLock<Vec<Multiaddr>>>,
+    emit_event: Arc<AtomicBool>,
 }
 
 impl<T: IpfsTypes> Clone for PhoneBook<T> {
     fn clone(&self) -> Self {
         Self {
             ipfs: self.ipfs.clone(),
-            tx: self.tx.clone(),
+            friends: self.friends.clone(),
+            discovery: self.discovery.clone(),
+            relays: self.relays.clone(),
+            emit_event: self.emit_event.clone(),
         }
     }
 }
 
-#[allow(clippy::type_complexity)]
 impl<T: IpfsTypes> PhoneBook<T> {
     pub fn new(ipfs: Ipfs<T>, event: broadcast::Sender<MultiPassEventKind>) -> Self {
-        let (tx, mut rx) = mpsc::channel(64);
-        let friends: Arc<
-            RwLock<
-                Vec<(
-                    DID,
-                    Arc<RwLock<Option<PeerConnectionType>>>,
-                    Arc<AtomicBool>,
-                )>,
-            >,
-        > = Default::default();
+        let friends = Default::default();
         let discovery = Arc::new(RwLock::new(Discovery::None));
-        let relays: Arc<RwLock<Vec<Multiaddr>>> = Default::default();
+        let relays = Default::default();
         let emit_event = Arc::new(AtomicBool::new(false));
 
         let book = PhoneBook {
+            friends,
+            discovery,
+            relays,
+            emit_event,
             ipfs: ipfs.clone(),
-            tx,
         };
 
         tokio::spawn({
-            let friends = friends.clone();
-            let discovery = discovery.clone();
-            let relays = relays.clone();
-            let emit_event = emit_event.clone();
-
-            async move {
-                while let Some(event) = rx.next().await {
-                    match event {
-                        PhoneBookEvents::Online(ret) => {
-                            let mut online = vec![];
-                            for (friend, status, _) in friends.read().await.iter() {
-                                if let Some(PeerConnectionType::Connected) = *status.read().await {
-                                    online.push(friend.clone())
-                                }
-                            }
-                            let _ = ret.send(online);
-                        }
-                        PhoneBookEvents::Offline(ret) => {
-                            let mut offline = vec![];
-                            for (friend, status, _) in friends.read().await.iter() {
-                                if let Some(PeerConnectionType::NotConnected) = *status.read().await
-                                {
-                                    offline.push(friend.clone());
-                                }
-                            }
-                            let _ = ret.send(offline);
-                        }
-                        PhoneBookEvents::EnableEventEmitter(ret) => {
-                            emit_event.store(true, Ordering::Relaxed);
-                            let _ = ret.send(Ok(()));
-                        }
-                        PhoneBookEvents::DisableEventEmitter(ret) => {
-                            emit_event.store(false, Ordering::Relaxed);
-                            let _ = ret.send(Ok(()));
-                        }
-                        PhoneBookEvents::AddFriend(did, ret) => {
-                            friends.write().await.push((
-                                did,
-                                Default::default(),
-                                Default::default(),
-                            ));
-                            let _ = ret.send(Ok(()));
-                        }
-                        PhoneBookEvents::SetDiscovery(disc, ret) => {
-                            *discovery.write().await = disc;
-                            let _ = ret.send(Ok(()));
-                        }
-                        PhoneBookEvents::AddRelays(addr, ret) => {
-                            relays.write().await.push(addr);
-                            let _ = ret.send(Ok(()));
-                        }
-                        PhoneBookEvents::RemoveFriend(did, ret) => {
-                            let mut friends = friends.write().await;
-                            match friends
-                                .iter()
-                                .map(|(d, _, _)| d)
-                                .position(|inner_did| did.eq(inner_did))
-                            {
-                                Some(index) => {
-                                    friends.remove(index);
-                                    let _ = ret.send(Ok(()));
-                                }
-                                None => {
-                                    let _ = ret.send(Err(Error::FriendDoesntExist));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        tokio::spawn({
-            let ipfs = ipfs;
-            let friends = friends;
-            let discovery = discovery;
-            let relays = relays;
-            let emit_event = emit_event;
+            let book = book.clone();
             async move {
                 loop {
-                    let discovery = discovery.read().await.clone();
-                    let relays = relays.read().await.clone();
-                    if !friends.read().await.is_empty() {
-                        for (did, status, discovering) in friends.read().await.iter() {
+                    let discovery = book.discovery.read().await.clone();
+                    let relays = book.relays.read().await.clone();
+                    if !book.friends.read().await.is_empty() {
+                        for (did, status, discovering) in book.friends.read().await.iter() {
                             let discovery = discovery.clone();
                             match connected_to_peer(ipfs.clone(), did.clone()).await {
                                 Ok(inner_status) => match (
                                     inner_status,
                                     discovering.load(Ordering::Relaxed),
-                                    emit_event.load(Ordering::Relaxed),
+                                    book.emit_event.load(Ordering::Relaxed),
                                 ) {
                                     (PeerConnectionType::NotConnected, false, emit) => {
                                         let ipfs = ipfs.clone();
@@ -214,10 +141,10 @@ impl<T: IpfsTypes> PhoneBook<T> {
                                         *status.write().await = Some(inner_status)
                                     }
                                     (PeerConnectionType::Connected, false, emit) => {
-                                        if let Some(inner_status2) = *status.read().await {
-                                            if inner_status2 == PeerConnectionType::NotConnected
-                                                && emit
-                                            {
+                                        if let Some(PeerConnectionType::NotConnected) =
+                                            *status.read().await
+                                        {
+                                            if emit {
                                                 if let Err(e) =
                                                     event.send(MultiPassEventKind::IdentityOnline {
                                                         did: did.clone(),
@@ -261,54 +188,65 @@ impl<T: IpfsTypes> PhoneBook<T> {
     }
 
     pub async fn add_friend(&self, did: &DID) -> anyhow::Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .clone()
-            .send(PhoneBookEvents::AddFriend(did.clone(), tx))
-            .await?;
-        rx.await??;
+        self.friends
+            .write()
+            .await
+            .push((did.clone(), Default::default(), Default::default()));
         Ok(())
     }
 
-    pub async fn remove_friend(&self, did: &DID) -> anyhow::Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .clone()
-            .send(PhoneBookEvents::RemoveFriend(did.clone(), tx))
-            .await?;
-        rx.await??;
+    pub async fn online_friends(&self) -> Result<Vec<DID>, Error> {
+        let mut online = vec![];
+        for (friend, status, _) in self.friends.read().await.iter() {
+            if let Some(PeerConnectionType::Connected) = *status.read().await {
+                online.push(friend.clone())
+            }
+        }
+        Ok(online)
+    }
+
+    pub async fn offline_friends(&self) -> Result<Vec<DID>, Error> {
+        let mut offline = vec![];
+        for (friend, status, _) in self.friends.read().await.iter() {
+            if let Some(PeerConnectionType::NotConnected) = *status.read().await {
+                offline.push(friend.clone());
+            }
+        }
+        Ok(offline)
+    }
+
+    pub async fn remove_friend(&self, did: &DID) -> Result<(), Error> {
+        let mut friends = self.friends.write().await;
+        match friends
+            .iter()
+            .map(|(d, _, _)| d)
+            .position(|inner_did| did.eq(inner_did))
+        {
+            Some(index) => {
+                friends.remove(index);
+                Ok(())
+            }
+            None => Err(Error::FriendDoesntExist),
+        }
+    }
+
+    pub async fn enable_events(&self) -> anyhow::Result<()> {
+        self.emit_event.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
+    pub async fn disable_events(&self) -> anyhow::Result<()> {
+        self.emit_event.store(false, Ordering::Relaxed);
         Ok(())
     }
 
     pub async fn set_discovery(&self, discovery: Discovery) -> anyhow::Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .clone()
-            .send(PhoneBookEvents::SetDiscovery(discovery, tx))
-            .await?;
-        rx.await??;
+        *self.discovery.write().await = discovery;
         Ok(())
     }
 
     pub async fn add_relay(&self, addr: Multiaddr) -> anyhow::Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .clone()
-            .send(PhoneBookEvents::AddRelays(addr, tx))
-            .await?;
-        rx.await??;
+        self.relays.write().await.push(addr);
         Ok(())
     }
-}
-
-#[derive(Debug)]
-pub enum PhoneBookEvents {
-    Online(oneshot::Sender<Vec<DID>>),
-    Offline(oneshot::Sender<Vec<DID>>),
-    EnableEventEmitter(oneshot::Sender<Result<(), Error>>),
-    DisableEventEmitter(oneshot::Sender<Result<(), Error>>),
-    AddFriend(DID, oneshot::Sender<Result<(), Error>>),
-    SetDiscovery(Discovery, oneshot::Sender<Result<(), Error>>),
-    AddRelays(Multiaddr, oneshot::Sender<Result<(), Error>>),
-    RemoveFriend(DID, oneshot::Sender<Result<(), Error>>),
 }
