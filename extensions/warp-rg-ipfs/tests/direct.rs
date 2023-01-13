@@ -7,7 +7,7 @@ mod test {
     use warp::multipass::identity::Identity;
     use warp::multipass::MultiPass;
     use warp::raygun::{
-        ConversationType, MessageEventKind, PinState, RayGun, RayGunEventKind, ReactionState,
+        ConversationType, MessageEventKind, PinState, RayGun, RayGunEventKind, ReactionState, MessageEvent,
     };
     use warp::tesseract::Tesseract;
     use warp_mp_ipfs::config::Discovery;
@@ -716,6 +716,85 @@ mod test {
                         .expect("Message exist");
                     assert!(!message.pinned());
                     break;
+                }
+            }
+        })
+        .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn event_in_conversation() -> anyhow::Result<()> {
+        let (_account_a, mut chat_a, did_a, _) =
+            create_account_and_chat(None, None, Some("test::event_in_conversation".into()))
+                .await?;
+        let (_account_b, mut chat_b, did_b, _) =
+            create_account_and_chat(None, None, Some("test::event_in_conversation".into()))
+                .await?;
+
+        let mut chat_subscribe_a = chat_a.subscribe().await?;
+        let mut chat_subscribe_b = chat_b.subscribe().await?;
+
+        chat_a.create_conversation(&did_b).await?;
+
+        let id_a = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_a.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let id_b = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_b.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
+
+        chat_a.send_event(id_a, MessageEvent::Typing).await?;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(MessageEventKind::EventReceived {
+                    conversation_id,
+                    did_key,
+                    event
+                }) = conversation_b.next().await
+                {   
+                    assert_eq!(conversation_id, id_b);
+                    assert_eq!(did_key, did_a);
+                    assert_eq!(event, MessageEvent::Typing);
+                    break
+                }
+            }
+        })
+        .await?;
+
+        chat_a.cancel_event(id_a, MessageEvent::Typing).await?;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(MessageEventKind::EventCancelled {
+                    conversation_id,
+                    did_key,
+                    event
+                }) = conversation_b.next().await
+                {   
+                    assert_eq!(conversation_id, id_b);
+                    assert_eq!(did_key, did_a);
+                    assert_eq!(event, MessageEvent::Typing);
+                    break
                 }
             }
         })
