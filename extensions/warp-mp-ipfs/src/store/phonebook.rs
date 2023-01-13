@@ -1,14 +1,15 @@
 use rust_ipfs as ipfs;
+use std::collections::HashMap;
 use std::collections::HashSet;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::task::JoinHandle;
 
 use ipfs::Multiaddr;
 use tokio::sync::broadcast;
-use tokio::sync::mpsc;
-use tokio::sync::oneshot;
+use tokio::sync::RwLock;
 
 use ipfs::{Ipfs, IpfsTypes};
 use tracing::log::error;
@@ -22,40 +23,45 @@ use super::connected_to_peer;
 use super::PeerConnectionType;
 
 /// Used to handle friends connectivity status
+#[allow(clippy::type_complexity)]
 pub struct PhoneBook<T: IpfsTypes> {
     ipfs: Ipfs<T>,
-    tx: mpsc::Sender<PhoneBookEvents>,
+    discovery: Arc<RwLock<Discovery>>,
+    relays: Arc<RwLock<Vec<Multiaddr>>>,
+    emit_event: Arc<AtomicBool>,
+    entries: Arc<RwLock<HashMap<DID, PhoneBookEntry<T>>>>,
+    event: broadcast::Sender<MultiPassEventKind>,
 }
 
 impl<T: IpfsTypes> Clone for PhoneBook<T> {
     fn clone(&self) -> Self {
         Self {
             ipfs: self.ipfs.clone(),
-            tx: self.tx.clone(),
+            discovery: self.discovery.clone(),
+            relays: self.relays.clone(),
+            emit_event: self.emit_event.clone(),
+            entries: self.entries.clone(),
+            event: self.event.clone(),
         }
     }
 }
 
 impl<T: IpfsTypes> PhoneBook<T> {
-    pub fn new(
-        ipfs: Ipfs<T>,
-        event: broadcast::Sender<MultiPassEventKind>,
-    ) -> (Self, PhoneBookFuture<T>) {
-        let (tx, rx) = mpsc::channel(64);
-        let book = PhoneBook {
-            ipfs: ipfs.clone(),
-            tx,
-        };
-        let fut = PhoneBookFuture {
-            ipfs,
-            friends: Default::default(),
-            discovery: Discovery::None,
-            relays: Vec::new(),
-            rx,
-            event,
-        };
+    pub fn new(ipfs: Ipfs<T>, event: broadcast::Sender<MultiPassEventKind>) -> Self {
+        let discovery = Arc::new(RwLock::new(Discovery::None));
+        let relays = Default::default();
+        let emit_event = Arc::new(AtomicBool::new(false));
 
-        (book, fut)
+        let entries = Default::default();
+
+        PhoneBook {
+            discovery,
+            relays,
+            emit_event,
+            ipfs,
+            entries,
+            event,
+        }
     }
 
     pub async fn add_friend_list(&self, list: HashSet<DID>) -> anyhow::Result<()> {
@@ -66,211 +72,217 @@ impl<T: IpfsTypes> PhoneBook<T> {
     }
 
     pub async fn add_friend(&self, did: &DID) -> anyhow::Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(PhoneBookEvents::AddFriend(did.clone(), tx))
-            .await?;
-        rx.await??;
+        let entry = PhoneBookEntry::new(
+            self.ipfs.clone(),
+            did.clone(),
+            self.event.clone(),
+            self.emit_event.clone(),
+            self.discovery.clone(),
+            self.relays.clone(),
+        )
+        .await?;
+
+        let old = self.entries.write().await.insert(did.clone(), entry);
+        if let Some(old) = old {
+            old.cancel_entry().await;
+        }
         Ok(())
     }
 
-    pub async fn remove_friend(&self, did: &DID) -> anyhow::Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(PhoneBookEvents::RemoveFriend(did.clone(), tx))
-            .await?;
-        rx.await??;
+    pub async fn online_friends(&self) -> Result<Vec<DID>, Error> {
+        let mut online = vec![];
+        for (did, entry) in &*self.entries.read().await {
+            if matches!(entry.status().await, PeerConnectionType::Connected) {
+                online.push(did.clone())
+            }
+        }
+        Ok(online)
+    }
+
+    pub async fn offline_friends(&self) -> Result<Vec<DID>, Error> {
+        let mut offline = vec![];
+        for (did, entry) in &*self.entries.read().await {
+            if matches!(entry.status().await, PeerConnectionType::NotConnected) {
+                offline.push(did.clone())
+            }
+        }
+        Ok(offline)
+    }
+
+    pub async fn remove_friend(&self, did: &DID) -> Result<(), Error> {
+        if let Some(entry) = self.entries.write().await.remove(did) {
+            entry.cancel_entry().await;
+            return Ok(());
+        }
+        Err(Error::FriendDoesntExist)
+    }
+
+    pub async fn enable_events(&self) -> anyhow::Result<()> {
+        self.emit_event.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
+    pub async fn disable_events(&self) -> anyhow::Result<()> {
+        self.emit_event.store(false, Ordering::Relaxed);
         Ok(())
     }
 
     pub async fn set_discovery(&self, discovery: Discovery) -> anyhow::Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(PhoneBookEvents::SetDiscovery(discovery, tx))
-            .await?;
-        rx.await??;
+        *self.discovery.write().await = discovery;
         Ok(())
     }
 
     pub async fn add_relay(&self, addr: Multiaddr) -> anyhow::Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx.send(PhoneBookEvents::AddRelays(addr, tx)).await?;
-        rx.await??;
+        self.relays.write().await.push(addr);
         Ok(())
     }
 }
 
-#[derive(Debug)]
-pub enum PhoneBookEvents {
-    Online(oneshot::Sender<Vec<DID>>),
-    Offline(oneshot::Sender<Vec<DID>>),
-    AddFriend(DID, oneshot::Sender<Result<(), Error>>),
-    SetDiscovery(Discovery, oneshot::Sender<Result<(), Error>>),
-    AddRelays(Multiaddr, oneshot::Sender<Result<(), Error>>),
-    RemoveFriend(DID, oneshot::Sender<Result<(), Error>>),
-}
-
-pub struct PhoneBookFuture<T: IpfsTypes> {
+pub struct PhoneBookEntry<T: IpfsTypes> {
     ipfs: Ipfs<T>,
-    friends: Vec<(DID, Option<PeerConnectionType>, bool)>,
-    discovery: Discovery,
-    relays: Vec<Multiaddr>,
-    rx: mpsc::Receiver<PhoneBookEvents>,
+    did: DID,
+    connection_type: Arc<RwLock<PeerConnectionType>>,
+    task: Arc<RwLock<Option<JoinHandle<()>>>>,
     event: broadcast::Sender<MultiPassEventKind>,
+    discovery: Arc<RwLock<Discovery>>,
+    relays: Arc<RwLock<Vec<Multiaddr>>>,
+    emit_event: Arc<AtomicBool>,
 }
 
-impl<T: IpfsTypes> Future for PhoneBookFuture<T> {
-    type Output = ();
+impl<T: IpfsTypes> PartialEq for PhoneBookEntry<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.did.eq(&other.did)
+    }
+}
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let ipfs = self.ipfs.clone();
-        let relays = self.relays.clone();
-        let event = self.event.clone();
-        loop {
-            let event = match Pin::new(&mut self.rx).poll_recv(cx) {
-                Poll::Ready(Some(event)) => event,
-                Poll::Ready(None) => return Poll::Ready(()),
-                Poll::Pending => break,
-            };
-            match event {
-                PhoneBookEvents::Online(ret) => {
-                    let mut online = vec![];
-                    for (friend, status, _) in self.friends.iter() {
-                        if let Some(status) = status {
-                            if *status == PeerConnectionType::Connected {
-                                online.push(friend.clone())
-                            }
-                        }
-                    }
-                    let _ = ret.send(online);
-                }
-                PhoneBookEvents::Offline(ret) => {
-                    let mut offline = vec![];
-                    for (friend, status, _) in self.friends.iter() {
-                        if let Some(status) = status {
-                            if *status == PeerConnectionType::NotConnected {
-                                offline.push(friend.clone());
-                            }
-                        }
-                    }
-                    let _ = ret.send(offline);
-                }
-                PhoneBookEvents::AddFriend(did, ret) => {
-                    self.friends.push((did, None, false));
-                    let _ = ret.send(Ok(()));
-                }
-                PhoneBookEvents::RemoveFriend(did, ret) => {
-                    match self
-                        .friends
-                        .iter()
-                        .map(|(d, _, _)| d)
-                        .position(|inner_did| did.eq(inner_did))
-                    {
-                        Some(index) => {
-                            self.friends.remove(index);
-                            let _ = ret.send(Ok(()));
-                        }
-                        None => {
-                            let _ = ret.send(Err(Error::FriendDoesntExist));
-                        }
-                    }
-                }
-                PhoneBookEvents::SetDiscovery(disc, ret) => {
-                    self.discovery = disc;
-                    let _ = ret.send(Ok(()));
-                }
-                PhoneBookEvents::AddRelays(addr, ret) => {
-                    self.relays.push(addr);
-                    let _ = ret.send(Ok(()));
-                }
-            };
+impl<T: IpfsTypes> Eq for PhoneBookEntry<T> {}
+
+impl<T: IpfsTypes> core::hash::Hash for PhoneBookEntry<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.did.hash(state);
+    }
+}
+
+impl<T: IpfsTypes> Clone for PhoneBookEntry<T> {
+    fn clone(&self) -> Self {
+        Self {
+            ipfs: self.ipfs.clone(),
+            did: self.did.clone(),
+            connection_type: self.connection_type.clone(),
+            task: self.task.clone(),
+            event: self.event.clone(),
+            discovery: self.discovery.clone(),
+            relays: self.relays.clone(),
+            emit_event: self.emit_event.clone(),
         }
-        let discovery = self.discovery.clone();
-        for (did, status, discovering) in self.friends.iter_mut() {
-            let discovery = discovery.clone();
-            //Note: We are using this to get the results from the function because it continues to show `Poll::Pending`
-            //TODO: Switch back to manually polling and loop back over until it doesnt return `Poll::Pending`
-            match warp::async_block_in_place_uncheck(connected_to_peer(ipfs.clone(), did.clone())) {
-                Ok(inner_status) => match (inner_status, *discovering) {
-                    (PeerConnectionType::NotConnected, false) => {
-                        let ipfs = ipfs.clone();
-                        let relays = relays.clone();
-                        let did = did.clone();
-                        if let Some(status) = status {
-                            if *status != PeerConnectionType::NotConnected {
-                                if let Err(e) = event
-                                    .send(MultiPassEventKind::IdentityOffline { did: did.clone() })
-                                {
-                                    error!("Error broadcasting event: {e}");
-                                }
-                            }
-                        }
+    }
+}
 
-                        tokio::spawn(async move {
-                            if let Err(_e) =
-                                super::discover_peer(ipfs.clone(), &did, discovery, relays.clone())
-                                    .await
-                            {}
-                        });
-                        *discovering = true;
-                        *status = Some(PeerConnectionType::NotConnected);
-                    }
-                    (PeerConnectionType::NotConnected, true) if (*status).is_none() => {
-                        *status = Some(PeerConnectionType::NotConnected);
-                    }
-                    (PeerConnectionType::NotConnected, true) if (*status).is_some() => {
-                        if let Some(PeerConnectionType::NotConnected) = *status {
-                            continue;
-                        }
-                        *status = Some(PeerConnectionType::NotConnected);
-                    }
-                    (PeerConnectionType::Connected, true) => {
-                        if let Err(e) =
-                            event.send(MultiPassEventKind::IdentityOnline { did: did.clone() })
-                        {
-                            error!("Error broadcasting event: {e}");
-                        }
-                        *discovering = false;
-                        *status = Some(inner_status)
-                    }
-                    (PeerConnectionType::Connected, false) => {
-                        if let Some(inner_status2) = *status {
-                            if inner_status2 == PeerConnectionType::NotConnected {
-                                if let Err(e) = event
-                                    .send(MultiPassEventKind::IdentityOnline { did: did.clone() })
-                                {
-                                    error!("Error broadcasting event: {e}");
-                                }
-                                *status = Some(inner_status);
-                            }
-                        } else {
-                            if let Err(e) =
-                                event.send(MultiPassEventKind::IdentityOnline { did: did.clone() })
+impl<T: IpfsTypes> PhoneBookEntry<T> {
+    pub async fn new(
+        ipfs: Ipfs<T>,
+        did: DID,
+        event: broadcast::Sender<MultiPassEventKind>,
+        emit_event: Arc<AtomicBool>,
+        discovery: Arc<RwLock<Discovery>>,
+        relays: Arc<RwLock<Vec<Multiaddr>>>,
+    ) -> Result<Self, Error> {
+        let connection_type = connected_to_peer(ipfs.clone(), did.clone())
+            .await
+            .map(RwLock::new)
+            .map(Arc::new)?;
+
+        let task = Default::default();
+
+        let entry = Self {
+            ipfs,
+            did,
+            connection_type,
+            task,
+            event,
+            emit_event,
+            discovery,
+            relays,
+        };
+
+        let task = tokio::spawn({
+            let entry = entry.clone();
+            async move {
+                let mut discovering = false;
+                let previous_status = entry.connection_type.clone();
+                loop {
+                    let Ok(connection_status) =  connected_to_peer(entry.ipfs.clone(), entry.did.clone()).await else {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        continue;
+                    };
+                    match (connection_status, discovering) {
+                        (PeerConnectionType::Connected, true) => {
+                            if matches!(
+                                *previous_status.read().await,
+                                PeerConnectionType::NotConnected
+                            ) && entry.emit_event.load(Ordering::Relaxed)
                             {
-                                error!("Error broadcasting event: {e}");
+                                let did = entry.did.clone();
+                                if let Err(e) =
+                                    entry.event.send(MultiPassEventKind::IdentityOnline { did })
+                                {
+                                    error!("Error broadcasting event: {e}");
+                                }
+                                *previous_status.write().await = PeerConnectionType::Connected;
                             }
-                            *status = Some(inner_status);
+                            discovering = false;
+                        }
+                        (PeerConnectionType::Connected, false) => {
+                            *previous_status.write().await = PeerConnectionType::Connected;
+                        }
+                        (PeerConnectionType::NotConnected, true) => {
+                            let did = entry.did.clone();
+                            let discovery = entry.discovery.read().await.clone();
+                            let relays = entry.relays.read().await.clone();
+                            let ipfs = entry.ipfs.clone();
+                            if matches!(
+                                *previous_status.read().await,
+                                PeerConnectionType::Connected
+                            ) && entry.emit_event.load(Ordering::Relaxed)
+                            {
+                                let did = did.clone();
+                                if let Err(e) = entry
+                                    .event
+                                    .send(MultiPassEventKind::IdentityOffline { did })
+                                {
+                                    error!("Error broadcasting event: {e}");
+                                }
+                                *previous_status.write().await = PeerConnectionType::NotConnected;
+                            }
+                            tokio::spawn(async move {
+                                if let Err(_e) =
+                                    super::discover_peer(ipfs, &did, discovery, relays).await
+                                {
+                                }
+                            });
+                            discovering = true;
+                        }
+                        (PeerConnectionType::NotConnected, false) => {
+                            *previous_status.write().await = PeerConnectionType::NotConnected;
                         }
                     }
-                    _ => {}
-                },
-                Err(_) => continue,
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
             }
-        }
+        });
 
-        if !self.friends.is_empty() {
-            let waker = cx.waker().clone();
-            tokio::spawn(async move {
-                //Although we could use a timer from tokio or futures, it might be best for now to sleep in a separate task (or thread if we go that route) then wake up the context
-                //so it would start the future again since it would almost always be pending (except for if the receiver is dropped or returns
-                //`Poll::Ready(None)`)
-                //This might get pushed to be apart of `PhoneBook` and we could just execute a function to awake the future, either in tokio/future/? select or
-                //maybe at a random interval
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                waker.wake();
-            });
-        }
+        *entry.task.write().await = Some(task);
 
-        Poll::Pending
+        Ok(entry)
+    }
+
+    pub async fn status(&self) -> PeerConnectionType {
+        *self.connection_type.read().await
+    }
+
+    pub async fn cancel_entry(&self) {
+        if let Some(task) = std::mem::take(&mut *self.task.write().await) {
+            task.abort()
+        }
     }
 }
