@@ -315,34 +315,38 @@ async fn main() -> anyhow::Result<()> {
                                     continue
                                 }
                             };
+                            // Note: This is one way to handle it outside of the event stream
+                            // let id = match chat.create_conversation(&did).await {
+                            //     Ok(id) => id,
+                            //     Err(e) => {
+                            //         writeln!(stdout, "Error creating conversation: {e}")?;
+                            //         continue
+                            //     }
+                            // };
 
-                            let id = match chat.create_conversation(&did).await {
-                                Ok(id) => id,
-                                Err(e) => {
-                                    writeln!(stdout, "Error creating conversation: {e}")?;
-                                    continue
-                                }
-                            };
+                            // *topic.write() = id.id();
+                            // writeln!(stdout, "Set conversation to {}", topic.read())?;
+                            // let mut stdout = stdout.clone();
+                            // let account = new_account.clone();
+                            // let stream = chat.get_conversation_stream(id.id()).await?;
+                            // let chat = chat.clone();
+                            // let topic = topic.clone();
 
-                            *topic.write() = id.id();
-                            writeln!(stdout, "Set conversation to {}", topic.read())?;
-                            let mut stdout = stdout.clone();
-                            let account = new_account.clone();
-                            let stream = chat.get_conversation_stream(id.id()).await?;
-                            let chat = chat.clone();
-                            let topic = topic.clone();
-
-                            tokio::spawn(async move {
-                                if let Err(e) = message_event_handle(
-                                    stdout.clone(),
-                                    account.clone(),
-                                    chat.clone(),
-                                    stream,
-                                    topic.clone(),
-                                ).await {
-                                    writeln!(stdout, ">> Error processing event task: {e}").unwrap();
-                                }
-                            });
+                            // tokio::spawn(async move {
+                            //     if let Err(e) = message_event_handle(
+                            //         stdout.clone(),
+                            //         account.clone(),
+                            //         chat.clone(),
+                            //         stream,
+                            //         topic.clone(),
+                            //     ).await {
+                            //         writeln!(stdout, ">> Error processing event task: {e}").unwrap();
+                            //     }
+                            // });
+                            if let Err(e) = chat.create_conversation(&did).await {
+                                writeln!(stdout, "Error creating conversation: {e}")?;
+                                continue
+                            }
                         },
                         Some("/add-recipient") => {
                             let did: DID = match cmd_line.next() {
