@@ -6,7 +6,9 @@ mod test {
     use warp::crypto::DID;
     use warp::multipass::identity::Identity;
     use warp::multipass::MultiPass;
-    use warp::raygun::{MessageEventKind, PinState, RayGun, RayGunEventKind, ReactionState};
+    use warp::raygun::{
+        ConversationType, MessageEventKind, PinState, RayGun, RayGunEventKind, ReactionState,
+    };
     use warp::tesseract::Tesseract;
     use warp_mp_ipfs::config::Discovery;
     use warp_mp_ipfs::ipfs_identity_temporary;
@@ -36,7 +38,7 @@ mod test {
 
     #[tokio::test]
     async fn create_conversation() -> anyhow::Result<()> {
-        let (_account_a, mut chat_a, _did_a, _) =
+        let (_account_a, mut chat_a, did_a, _) =
             create_account_and_chat(None, None, Some("test::create_conversation".into())).await?;
         let (_account_b, mut chat_b, did_b, _) =
             create_account_and_chat(None, None, Some("test::create_conversation".into())).await?;
@@ -69,6 +71,12 @@ mod test {
         .await?;
 
         assert_eq!(id_a, id_b);
+
+        let conversation = chat_a.get_conversation(id_a).await?;
+        assert_eq!(conversation.conversation_type(), ConversationType::Direct);
+        assert_eq!(conversation.recipients().len(), 2);
+        assert!(conversation.recipients().contains(&did_a));
+        assert!(conversation.recipients().contains(&did_b));
         Ok(())
     }
 
