@@ -784,6 +784,12 @@ impl<T: IpfsTypes> MessageStore<T> {
             }
         };
 
+        if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
+            conversation_id: conversation.id(),
+        }) {
+            error!("Error broadcasting event: {e}");
+        }
+
         Ok(Conversation::from(&conversation))
     }
 
@@ -908,6 +914,12 @@ impl<T: IpfsTypes> MessageStore<T> {
                     }
                 }
             };
+        }
+
+        if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
+            conversation_id: conversation.id(),
+        }) {
+            error!("Error broadcasting event: {e}");
         }
 
         Ok(Conversation::from(&conversation))
