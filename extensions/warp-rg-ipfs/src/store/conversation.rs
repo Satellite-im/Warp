@@ -260,10 +260,6 @@ impl ConversationDocument {
         did: Arc<DID>,
         option: MessageOptions,
     ) -> Result<BTreeSet<Message>, Error> {
-        if self.messages.is_empty() {
-            return Err(Error::EmptyMessage);
-        }
-
         let messages = match option.date_range() {
             Some(range) => Vec::from_iter(
                 self.messages
@@ -293,13 +289,13 @@ impl ConversationDocument {
                     .first()
                     .copied()
                     .map(|item| vec![item])
-                    .ok_or(Error::MessageNotFound)?
+                    .unwrap_or_default()
             } else if !option.first_message() && option.last_message() {
                 sorted
                     .last()
                     .copied()
                     .map(|item| vec![item])
-                    .ok_or(Error::MessageNotFound)?
+                    .unwrap_or_default()
             } else {
                 sorted
             }

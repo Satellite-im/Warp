@@ -755,6 +755,14 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let topic = format!("{did_key}/messaging");
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
+
+        if let Some(path) = self.path.as_ref() {
+            let cid = cid.to_string();
+            if let Err(e) = tokio::fs::write(path.join(conversation.id().to_string()), cid).await {
+                error!("Unable to save info to file: {e}");
+            }
+        }
+        
         match peers.contains(&peer_id) {
             true => {
                 let bytes = serde_json::to_vec(&data)?;
