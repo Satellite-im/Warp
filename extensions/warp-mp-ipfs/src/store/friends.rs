@@ -401,7 +401,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
                 Event::Remove => {
                     self.is_friend(&data.sender).await?;
-                    self.remove_friend(&data.sender, false, false).await?;
+                    self.remove_friend(&data.sender, false).await?;
                 }
                 Event::Retract => {
                     let mut list = self.list_all_raw_request().await?;
@@ -699,7 +699,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         }
 
         if self.is_friend(pubkey).await.is_ok() {
-            if let Err(e) = self.remove_friend(pubkey, true, false).await {
+            if let Err(e) = self.remove_friend(pubkey, true).await {
                 error!("Error removing item from friend list: {e}");
             }
         }
@@ -798,7 +798,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
         &mut self,
         pubkey: &DID,
         broadcast: bool,
-        save: bool,
     ) -> Result<(), Error> {
         self.is_friend(pubkey).await?;
 
@@ -825,7 +824,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 event: Event::Remove,
             };
 
-            self.broadcast_request((pubkey, &payload), save, save)
+            self.broadcast_request((pubkey, &payload), false, false)
                 .await?;
         }
 

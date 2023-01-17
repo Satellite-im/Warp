@@ -792,7 +792,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
     
     async fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
-        store.remove_friend(pubkey, true, true).await
+        store.remove_friend(pubkey, true).await
     }
 
     async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
