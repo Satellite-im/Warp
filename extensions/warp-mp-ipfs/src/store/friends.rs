@@ -4,7 +4,7 @@ use ipfs::libp2p::gossipsub::GossipsubMessage;
 use ipfs::{Ipfs, IpfsTypes, PeerId};
 use rust_ipfs as ipfs;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -52,7 +52,7 @@ pub struct FriendsStore<T: IpfsTypes> {
     override_ipld: Arc<AtomicBool>,
 
     // Used to broadcast request
-    queue: Arc<AsyncRwLock<HashMap<DID, VecDeque<PayloadEvent>>>>,
+    queue: Arc<AsyncRwLock<HashMap<DID, PayloadEvent>>>,
 
     // Tesseract
     tesseract: Tesseract,
@@ -434,49 +434,35 @@ impl<T: IpfsTypes> FriendsStore<T> {
     //TODO: Implement checks to determine if request been accepted, etc.
     async fn check_queue(&self) -> anyhow::Result<()> {
         let list = self.queue.read().await.clone();
-        for (did, requests) in list.iter() {
+        for (did, payload) in list.iter() {
             if let Ok(crate::store::PeerConnectionType::Connected) =
                 connected_to_peer(&self.ipfs, did.clone()).await
             {
-                for (index, request) in requests.iter().enumerate() {
-                    let mut data = Sata::default();
-                    data.add_recipient(did).map_err(anyhow::Error::from)?;
+                let mut data = Sata::default();
+                data.add_recipient(did).map_err(anyhow::Error::from)?;
 
-                    let kp = &*self.did_key;
-                    let payload = data
-                        .encrypt(
-                            IpldCodec::DagJson,
-                            kp.as_ref(),
-                            Kind::Reference,
-                            request.clone(),
-                        )
-                        .map_err(anyhow::Error::from)?;
+                let kp = &*self.did_key;
+                let payload = data
+                    .encrypt(
+                        IpldCodec::DagJson,
+                        kp.as_ref(),
+                        Kind::Reference,
+                        payload.clone(),
+                    )
+                    .map_err(anyhow::Error::from)?;
 
-                    let bytes = serde_json::to_vec(&payload)?;
+                let bytes = serde_json::to_vec(&payload)?;
 
-                    let topic = get_inbox_topic(did);
+                let topic = get_inbox_topic(did);
 
-                    if self.ipfs.pubsub_publish(topic, bytes).await.is_err() {
-                        //Because we are unable to send a single request for whatever reason, kill the iteration
-                        //and proceed to the next item in line
-                        break;
-                    }
-
-                    if let Entry::Occupied(mut entry) = self.queue.write().await.entry(did.clone())
-                    {
-                        let _ = entry.get_mut().remove(index);
-                        if entry.get().is_empty() {
-                            entry.remove();
-                        }
-                    }
-
-                    self.save_queue().await;
+                if self.ipfs.pubsub_publish(topic, bytes).await.is_err() {
+                    //Because we are unable to send a single request for whatever reason, kill the iteration
+                    //and proceed to the next item in line
+                    break;
                 }
 
                 if let Entry::Occupied(entry) = self.queue.write().await.entry(did.clone()) {
-                    if entry.get().is_empty() {
-                        entry.remove();
-                    }
+                    entry.remove();
                 }
 
                 self.save_queue().await;
@@ -794,17 +780,13 @@ impl<T: IpfsTypes> FriendsStore<T> {
         Ok(())
     }
 
-    pub async fn remove_friend(
-        &mut self,
-        pubkey: &DID,
-        broadcast: bool,
-    ) -> Result<(), Error> {
+    pub async fn remove_friend(&mut self, pubkey: &DID, broadcast: bool) -> Result<(), Error> {
         self.is_friend(pubkey).await?;
 
         let mut list = self.friends_list().await?;
 
         if !list.remove(pubkey) {
-            return Err(Error::FriendDoesntExist)
+            return Err(Error::FriendDoesntExist);
         }
 
         self.set_friends_list(list).await?;
@@ -993,22 +975,19 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
-        if !peers.contains(&remote_peer_id) {
+        if !peers.contains(&remote_peer_id)
+            || (peers.contains(&remote_peer_id) && self
+                .ipfs
+                .pubsub_publish(topic.clone(), bytes)
+                .await
+                .is_err())
+        {
             self.queue
                 .write()
                 .await
-                .entry(recipient.clone())
-                .or_default()
-                .push_back(payload.clone());
+                .insert(recipient.clone(), payload.clone());
 
             self.save_queue().await;
-        } else if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
-            self.queue
-                .write()
-                .await
-                .entry(recipient.clone())
-                .or_default()
-                .push_back(payload.clone());
         }
 
         match payload.event {
