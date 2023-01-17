@@ -680,9 +680,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let mut list = self.block_list().await?;
 
-        if list.insert(pubkey.clone()) {
-            self.set_block_list(list).await?;
+        if !list.insert(pubkey.clone()) {
+            return Err(Error::PublicKeyIsBlocked)
         }
+
+        self.set_block_list(list).await?;
 
         if self.is_friend(pubkey).await.is_ok() {
             if let Err(e) = self.remove_friend(pubkey, true).await {
@@ -708,9 +710,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let mut list = self.block_list().await?;
 
-        if list.remove(pubkey) {
-            self.set_block_list(list).await?;
+        if !list.remove(pubkey) {
+            return Err(Error::PublicKeyIsntBlocked)
         }
+
+        self.set_block_list(list).await?;
 
         let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
         self.ipfs.unban_peer(peer_id).await?;
