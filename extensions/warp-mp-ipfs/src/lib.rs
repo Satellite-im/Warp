@@ -32,7 +32,7 @@ use ipfs::{Ipfs, IpfsOptions, IpfsTypes, Keypair, Protocol, TestTypes, Types, Un
 use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
 use warp::error::Error;
 use warp::multipass::identity::{
-    FriendRequest, Identifier, Identity, IdentityUpdate, Relationship,
+     Identifier, Identity, IdentityUpdate, Relationship,
 };
 use warp::multipass::{
     identity, Friends, FriendsEvent, IdentityInformation, MultiPass, MultiPassEventKind,
@@ -770,12 +770,12 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         store.close_request(pubkey).await
     }
 
-    async fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
+    async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store().await?;
         store.list_incoming_request().await
     }
 
-    async fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
+    async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store().await?;
         store.list_outgoing_request().await
     }
@@ -789,15 +789,10 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         let store = self.friend_store().await?;
         store.sent_friend_request_to(did).await
     }
-
-    async fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        let store = self.friend_store().await?;
-        store.list_all_request().await
-    }
-
+    
     async fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
-        store.remove_friend(pubkey, true, true).await
+        store.remove_friend(pubkey, true).await
     }
 
     async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {

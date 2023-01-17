@@ -40,40 +40,29 @@ async fn main() -> anyhow::Result<()> {
 
     account_a.send_request(&ident_b.did_key()).await?;
 
-    delay().await;
 
     println!("{} Outgoing request:", username(&ident_a));
 
     for outgoing in account_a.list_outgoing_request().await? {
-        let ident_from = account_a
-            .get_identity(Identifier::from(outgoing.from()))
+        let ident = account_a
+            .get_identity(Identifier::from(outgoing))
             .await
             .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
-        let ident_to = account_a
-            .get_identity(Identifier::from(outgoing.to()))
-            .await
-            .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
-        println!("From: {}", username(&ident_from));
-        println!("To: {}", username(&ident_to));
-        println!("Status: {:?}", outgoing.status());
+        println!("To: {}", username(&ident));
         println!();
     }
 
     println!("{} Incoming request:", username(&ident_b));
     for incoming in account_b.list_incoming_request().await? {
-        let ident_from = account_b
-            .get_identity(Identifier::from(incoming.from()))
+        let ident = account_b
+            .get_identity(Identifier::from(incoming))
             .await
             .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
-        let ident_to = account_b
-            .get_identity(Identifier::from(incoming.to()))
-            .await
-            .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
-        println!("From: {}", username(&ident_from));
-        println!("To: {}", username(&ident_to));
-        println!("Status: {:?}", incoming.status());
+
+        println!("From: {}", username(&ident));
         println!();
     }
+
 
     let coin = rng.gen_range(0..2);
     match coin {
@@ -142,36 +131,13 @@ async fn main() -> anyhow::Result<()> {
 
     println!();
 
-    delay().await;
-
-    println!("Request List for {}:", username(&ident_a));
-    let requests = account_a.list_all_request().await?;
-    if !requests.is_empty() {
-        for request in requests {
-            let ident_from = account_a
-                .get_identity(Identifier::from(request.from()))
-                .await
-                .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
-            let ident_to = account_a
-                .get_identity(Identifier::from(request.to()))
-                .await
-                .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
-            println!("From: {}", username(&ident_from));
-            println!("To: {}", username(&ident_to));
-            println!("Status: {:?}", request.status());
-            println!();
-        }
-    } else {
-        println!("- is empty")
-    }
-
     Ok(())
 }
 
 //Note: Because of the internal nature of this extension and not reliant on a central confirmation, this will be used to add delays to allow the separate
 //      background task to complete its action
 async fn delay() {
-    fixed_delay(1200).await;
+    fixed_delay(1500).await;
 }
 
 async fn fixed_delay(millis: u64) {

@@ -17,7 +17,7 @@ use warp::{
 
 use crate::config::Discovery;
 
-use self::{document::DocumentType, friends::InternalRequest};
+use self::document::DocumentType;
 
 pub mod document;
 pub mod friends;
@@ -27,51 +27,6 @@ pub mod phonebook;
 pub const IDENTITY_BROADCAST: &str = "identity/broadcast";
 pub const FRIENDS_BROADCAST: &str = "friends/broadcast";
 pub const SYNC_BROADCAST: &str = "/identity/sync/broadcast";
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase", tag = "type")]
-pub enum PayloadEvent {
-    Received(Payload),
-    Sent(Payload),
-}
-
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase", tag = "type")]
-pub enum Payload {
-    Identity {
-        identity: Identity,
-        signature: Vec<u8>,
-    },
-    Friends {
-        identity_did: DID,
-        list: Vec<DID>,
-        signature: Vec<u8>,
-    },
-    Request {
-        identity_did: DID,
-        list: Vec<InternalRequest>,
-        signature: Vec<u8>,
-    },
-    Block {
-        identity_did: DID,
-        list: Vec<DID>,
-        signature: Vec<u8>,
-    },
-    Package {
-        total_size: usize,
-        parts: usize,
-        parts_size: usize,
-        signature: Vec<u8>,
-    },
-    PackageStreamStart,
-    PackageStreamData {
-        part: usize,
-        data: Vec<u8>,
-        signature: Vec<u8>,
-    },
-    PackageStreamEnd,
-}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IdentityPayload {
@@ -123,6 +78,7 @@ fn did_keypair(tesseract: &Tesseract) -> anyhow::Result<DID> {
 }
 
 // Note that this are temporary
+#[allow(dead_code)]
 fn sign_serde<D: Serialize>(tesseract: &Tesseract, data: &D) -> anyhow::Result<Vec<u8>> {
     let did = did_keypair(tesseract)?;
     let bytes = serde_json::to_vec(data)?;
@@ -130,6 +86,7 @@ fn sign_serde<D: Serialize>(tesseract: &Tesseract, data: &D) -> anyhow::Result<V
 }
 
 // Note that this are temporary
+#[allow(dead_code)]
 fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow::Result<()> {
     let bytes = serde_json::to_vec(data)?;
     pk.as_ref()
@@ -193,7 +150,7 @@ impl From<PeerConnectionType> for IdentityStatus {
 }
 
 pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
-    ipfs: ipfs::Ipfs<T>,
+    ipfs: &ipfs::Ipfs<T>,
     pkey: I,
 ) -> anyhow::Result<PeerConnectionType> {
     let peer_id = match pkey.into() {
@@ -210,14 +167,14 @@ pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
 }
 
 pub async fn discover_peer<T: IpfsTypes>(
-    ipfs: ipfs::Ipfs<T>,
+    ipfs: &ipfs::Ipfs<T>,
     did: &DID,
     discovery: Discovery,
     relay: Vec<Multiaddr>,
 ) -> anyhow::Result<()> {
     let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
 
-    if connected_to_peer(ipfs.clone(), PeerType::PeerId(peer_id)).await?
+    if connected_to_peer(ipfs, PeerType::PeerId(peer_id)).await?
         != PeerConnectionType::NotConnected
     {
         return Ok(());
@@ -243,7 +200,7 @@ pub async fn discover_peer<T: IpfsTypes>(
                 tokio::time::sleep(Duration::from_millis(300)).await;
             }
             loop {
-                if connected_to_peer(ipfs.clone(), PeerType::PeerId(peer_id)).await?
+                if connected_to_peer(ipfs, PeerType::PeerId(peer_id)).await?
                     == PeerConnectionType::Connected
                 {
                     break;
