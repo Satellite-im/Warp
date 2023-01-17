@@ -14,7 +14,7 @@ use crate::{Extension, SingleHandle};
 use identity::Identity;
 
 use crate::crypto::DID;
-use crate::multipass::identity::{FriendRequest, Identifier, IdentityUpdate};
+use crate::multipass::identity::{Identifier, IdentityUpdate};
 
 use self::identity::{IdentityStatus, Platform, Relationship};
 
@@ -110,7 +110,7 @@ pub trait Friends: Sync + Send {
     }
 
     /// List the incoming friend request
-    async fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
+    async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -120,12 +120,7 @@ pub trait Friends: Sync + Send {
     }
 
     /// List the outgoing friend request
-    async fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        Err(Error::Unimplemented)
-    }
-
-    /// List all the friend request that been sent or received
-    async fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
+    async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -236,7 +231,7 @@ pub mod ffi {
     use crate::ffi::{FFIResult, FFIResult_Null, FFIResult_String};
     use crate::multipass::{
         identity::{
-            FFIResult_FFIVec_FriendRequest, FFIResult_FFIVec_Identity, Identifier, Identity,
+             FFIResult_FFIVec_Identity, Identifier, Identity,
             IdentityUpdate,
         },
         MultiPassAdapter,
@@ -450,9 +445,9 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_incoming_request(
         ctx: *const MultiPassAdapter,
-    ) -> FFIResult_FFIVec_FriendRequest {
+    ) -> FFIResult_FFIVec_DID {
         if ctx.is_null() {
-            return FFIResult_FFIVec_FriendRequest::err(Error::Any(anyhow::anyhow!(
+            return FFIResult_FFIVec_DID::err(Error::Any(anyhow::anyhow!(
                 "Context cannot be null"
             )));
         }
@@ -465,30 +460,15 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn multipass_list_outgoing_request(
         ctx: *const MultiPassAdapter,
-    ) -> FFIResult_FFIVec_FriendRequest {
+    ) -> FFIResult_FFIVec_DID {
         if ctx.is_null() {
-            return FFIResult_FFIVec_FriendRequest::err(Error::Any(anyhow::anyhow!(
+            return FFIResult_FFIVec_DID::err(Error::Any(anyhow::anyhow!(
                 "Context cannot be null"
             )));
         }
 
         let mp = &*(ctx);
         async_on_block(async { mp.list_outgoing_request().await }).into()
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_list_all_request(
-        ctx: *const MultiPassAdapter,
-    ) -> FFIResult_FFIVec_FriendRequest {
-        if ctx.is_null() {
-            return FFIResult_FFIVec_FriendRequest::err(Error::Any(anyhow::anyhow!(
-                "Context cannot be null"
-            )));
-        }
-
-        let mp = &*(ctx);
-        async_on_block(async { mp.list_all_request().await }).into()
     }
 
     #[allow(clippy::missing_safety_doc)]

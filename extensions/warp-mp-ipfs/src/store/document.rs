@@ -10,7 +10,7 @@ use warp::{
     multipass::identity::{Identity, IdentityStatus, Platform},
 };
 
-use super::friends::InternalRequest;
+use super::friends::Request;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -120,7 +120,7 @@ pub struct RootDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blocks: Option<DocumentType<HashSet<DID>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub request: Option<DocumentType<HashSet<InternalRequest>>>,
+    pub request: Option<DocumentType<HashSet<Request>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<IdentityStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -163,7 +163,7 @@ impl RootDocument {
             String,
             HashSet<DID>,
             HashSet<DID>,
-            HashSet<InternalRequest>,
+            HashSet<Request>,
         ),
         Error,
     > {

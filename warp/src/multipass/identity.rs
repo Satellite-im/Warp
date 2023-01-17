@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -313,136 +312,6 @@ impl Identity {
     }
 }
 
-#[derive(
-    Serialize, Deserialize, Debug, Clone, Hash, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
-)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct FriendRequest {
-    /// The account where the request came from
-    from: DID,
-
-    /// The account where the request was sent to
-    to: DID,
-
-    /// Status of the request
-    status: FriendRequestStatus,
-
-    /// Date of the request
-    date: DateTime<Utc>,
-
-    /// Signature of request
-    #[serde(skip_serializing_if = "Option::is_none")]
-    signature: Option<String>,
-}
-
-impl Default for FriendRequest {
-    fn default() -> Self {
-        Self {
-            from: Default::default(),
-            to: Default::default(),
-            status: Default::default(),
-            date: Utc::now(),
-            signature: None,
-        }
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl FriendRequest {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_from(&mut self, key: DID) {
-        self.from = key
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_to(&mut self, key: DID) {
-        self.to = key
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_status(&mut self, status: FriendRequestStatus) {
-        self.status = status
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_signature(&mut self, signature: String) {
-        self.signature = Some(signature);
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl FriendRequest {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn from(&self) -> DID {
-        self.from.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn to(&self) -> DID {
-        self.to.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn status(&self) -> FriendRequestStatus {
-        self.status
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn signature(&self) -> Option<String> {
-        self.signature.clone()
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl FriendRequest {
-    pub fn set_date(&mut self, date: DateTime<Utc>) {
-        self.date = date
-    }
-
-    pub fn date(&self) -> DateTime<Utc> {
-        self.date
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl FriendRequest {
-    #[wasm_bindgen]
-    pub fn set_date(&mut self) {
-        //TODO: Use timestamp and convert it to Datetime
-        self.date = Utc::now()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn date(&self) -> i64 {
-        self.date.timestamp()
-    }
-}
-
-#[derive(Hash, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
-#[repr(C)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub enum FriendRequestStatus {
-    #[display(fmt = "uninitialized")]
-    Uninitialized,
-    #[display(fmt = "pending")]
-    Pending,
-    #[display(fmt = "accepted")]
-    Accepted,
-    #[display(fmt = "denied")]
-    Denied,
-    #[display(fmt = "friend removed")]
-    FriendRemoved,
-    #[display(fmt = "request removed")]
-    RequestRemoved,
-}
-
-impl Default for FriendRequestStatus {
-    fn default() -> Self {
-        Self::Uninitialized
-    }
-}
-
 #[derive(Default, Debug, Clone, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Identifier {
@@ -603,7 +472,7 @@ impl IdentityUpdate {
 pub mod ffi {
     use crate::crypto::DID;
     use crate::multipass::identity::{
-        Badge, FFIVec_Badge, FFIVec_Role, FriendRequest, FriendRequestStatus, Graphics, Identifier,
+        Badge, FFIVec_Badge, FFIVec_Role, Graphics, Identifier,
         Identity, IdentityUpdate, Role,
     };
     use std::ffi::{CStr, CString};
@@ -830,45 +699,6 @@ pub mod ffi {
         let _identity = &*identity;
         //TODO
         std::ptr::null_mut()
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_friend_request_from(
-        request: *const FriendRequest,
-    ) -> *mut DID {
-        if request.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let request = &*request;
-        Box::into_raw(Box::new(request.from()))
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_friend_request_to(
-        request: *const FriendRequest,
-    ) -> *mut DID {
-        if request.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let request = &*request;
-        Box::into_raw(Box::new(request.to()))
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_friend_request_status(
-        request: *const FriendRequest,
-    ) -> FriendRequestStatus {
-        if request.is_null() {
-            return FriendRequestStatus::Uninitialized;
-        }
-
-        let request = &*request;
-        request.status()
     }
 
     #[allow(clippy::missing_safety_doc)]

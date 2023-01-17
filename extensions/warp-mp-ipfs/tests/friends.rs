@@ -246,7 +246,7 @@ mod test {
 
         let list = account_b.list_incoming_request().await?;
 
-        assert!(list.iter().any(|req| req.from() == did_a));
+        assert!(list.contains(&did_a));
 
         Ok(())
     }
@@ -273,7 +273,7 @@ mod test {
 
         let list = account_a.list_outgoing_request().await?;
 
-        assert!(list.iter().any(|req| req.to() == did_b));
+        assert!(list.contains(&did_b));
 
         Ok(())
     }

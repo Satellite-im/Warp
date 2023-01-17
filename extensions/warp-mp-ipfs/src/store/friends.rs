@@ -5,7 +5,6 @@ use ipfs::{Ipfs, IpfsTypes, PeerId};
 use rust_ipfs as ipfs;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -20,7 +19,6 @@ use libipld::IpldCodec;
 use serde::{Deserialize, Serialize};
 use warp::crypto::{Ed25519KeyPair, KeyMaterial, DID};
 use warp::error::Error;
-use warp::multipass::identity::{FriendRequest, FriendRequestStatus};
 use warp::multipass::MultiPassEventKind;
 use warp::sata::{Kind, Sata};
 use warp::sync::Arc;
@@ -28,13 +26,13 @@ use warp::sync::Arc;
 use warp::tesseract::Tesseract;
 
 use crate::config::Discovery;
-use crate::store::{connected_to_peer, verify_serde_sig};
+use crate::store::connected_to_peer;
 use crate::Persistent;
 
 use super::document::DocumentType;
 use super::identity::IdentityStore;
 use super::phonebook::PhoneBook;
-use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, PeerConnectionType};
+use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType};
 
 pub struct FriendsStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
@@ -54,7 +52,7 @@ pub struct FriendsStore<T: IpfsTypes> {
     override_ipld: Arc<AtomicBool>,
 
     // Used to broadcast request
-    queue: Arc<AsyncRwLock<HashMap<DID, VecDeque<InternalRequest>>>>,
+    queue: Arc<AsyncRwLock<HashMap<DID, VecDeque<PayloadEvent>>>>,
 
     // Tesseract
     tesseract: Tesseract,
@@ -64,56 +62,67 @@ pub struct FriendsStore<T: IpfsTypes> {
     tx: broadcast::Sender<MultiPassEventKind>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Request {
+    In(DID),
+    Out(DID),
+}
+
+impl From<Request> for RequestType {
+    fn from(request: Request) -> Self {
+        RequestType::from(&request)
+    }
+}
+
+impl From<&Request> for RequestType {
+    fn from(request: &Request) -> Self {
+        match request {
+            Request::In(_) => RequestType::Incoming,
+            Request::Out(_) => RequestType::Outgoing,
+        }
+    }
+}
+
+impl Request {
+    pub fn r#type(&self) -> RequestType {
+        self.into()
+    }
+
+    pub fn did(&self) -> &DID {
+        match self {
+            Request::In(did) => did,
+            Request::Out(did) => did,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Hash, Eq)]
 #[serde(rename_all = "lowercase", tag = "type")]
-pub enum InternalRequest {
-    In(FriendRequest),
-    Out(FriendRequest),
+pub enum Event {
+    /// Event indicating a friend request
+    Request,
+    /// Event accepting the request
+    Accept,
+    /// Remove identity as a friend
+    Remove,
+    /// Reject friend request, if any
+    Reject,
+    /// Retract a sent friend request
+    Retract,
+    /// Block user
+    Block,
 }
 
-impl Deref for InternalRequest {
-    type Target = FriendRequest;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            InternalRequest::In(req) => req,
-            InternalRequest::Out(req) => req,
-        }
-    }
-}
-
-impl InternalRequest {
-    pub fn request_type(&self) -> InternalRequestType {
-        match self {
-            InternalRequest::In(_) => InternalRequestType::Incoming,
-            InternalRequest::Out(_) => InternalRequestType::Outgoing,
-        }
-    }
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Eq)]
+pub struct PayloadEvent {
+    pub sender: DID,
+    pub event: Event,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InternalRequestType {
+pub enum RequestType {
     Incoming,
     Outgoing,
-}
-
-impl InternalRequest {
-    pub fn valid(&self) -> Result<(), Error> {
-        let mut request = FriendRequest::default();
-        request.set_from(self.from());
-        request.set_to(self.to());
-        request.set_status(self.status());
-        request.set_date(self.date());
-
-        let signature = match self.signature() {
-            Some(s) => bs58::decode(s).into_vec()?,
-            None => return Err(Error::InvalidSignature),
-        };
-
-        verify_serde_sig(self.from(), &request, &signature)?;
-
-        Ok(())
-    }
 }
 
 impl<T: IpfsTypes> Clone for FriendsStore<T> {
@@ -233,9 +242,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         if let Some(req) = list
                             .iter()
                             .find(|request| {
-                                request.request_type() == InternalRequestType::Outgoing
-                                    && request.to() == friend.clone()
-                                    && request.status() == FriendRequestStatus::Pending
+                                request.r#type() == RequestType::Outgoing
+                                    && request.did().eq(friend)
                             })
                             .cloned()
                         {
@@ -246,9 +254,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         if let Some(req) = list
                             .iter()
                             .find(|request| {
-                                request.request_type() == InternalRequestType::Incoming
-                                    && request.from() == friend.clone()
-                                    && request.status() == FriendRequestStatus::Pending
+                                request.r#type() == RequestType::Incoming
+                                    && request.did().eq(friend)
                             })
                             .cloned()
                         {
@@ -291,27 +298,18 @@ impl<T: IpfsTypes> FriendsStore<T> {
     //TODO: Implement Errors
     async fn check_request_message(
         &mut self,
-        local_public_key: &DID,
+        _local_public_key: &DID,
         message: Arc<GossipsubMessage>,
     ) -> anyhow::Result<()> {
         if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
-            let data = data.decrypt::<FriendRequest>(&self.did_key)?;
-
-            if data.to().ne(local_public_key) {
-                warn!("Request is not meant for identity. Skipping");
-                return Ok(());
-            }
+            let data = data.decrypt::<PayloadEvent>(&self.did_key)?;
 
             if self
-                .list_outgoing_request()
+                .list_incoming_request()
                 .await
                 .unwrap_or_default()
-                .contains(&data)
-                || self
-                    .list_incoming_request()
-                    .await
-                    .unwrap_or_default()
-                    .contains(&data)
+                .contains(&data.sender)
+                && data.event == Event::Request
             {
                 warn!("Request exist locally. Skipping");
                 return Ok(());
@@ -319,37 +317,32 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
             // Before we validate the request, we should check to see if the key is blocked
             // If it is, skip the request so we dont wait resources storing it.
-            if self.is_blocked(&data.from()).await? {
+            if self.is_blocked(&data.sender).await? {
+                //TODO: Send event back indicating that they were block if was sent directly from the peer
                 return Ok(());
             }
 
-            //first verify the request before processing it
-            validate_request(&data)?;
-
-            match data.status() {
-                FriendRequestStatus::Accepted => {
+            match data.event {
+                Event::Accept => {
                     let mut list = self.list_all_raw_request().await?;
-                    let internal_request = list
-                        .iter()
-                        .find(|request| {
-                            request.request_type() == InternalRequestType::Outgoing
-                                && request.to() == data.from()
-                                && request.status() == FriendRequestStatus::Pending
-                        })
-                        .cloned()
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
+
+                    let Some(item) = list.iter().filter(|req| req.r#type() == RequestType::Outgoing).find(|req| data.sender.eq(req.did())).cloned() else {
+                        anyhow::bail!(
                             "Unable to locate pending request. Already been accepted or rejected?"
                         )
-                        })?;
+                    };
 
-                    list.remove(&internal_request);
+                    if !list.remove(&item) {
+                        anyhow::bail!(
+                            "Unable to locate pending request. Already been accepted or rejected?"
+                        )
+                    }
                     self.set_request_list(list).await?;
 
-                    self.add_friend(&data.from()).await?;
+                    self.add_friend(item.did()).await?;
                 }
-                FriendRequestStatus::Pending => {
-                    if self.is_friend(&data.from()).await.is_ok() {
+                Event::Request => {
+                    if self.is_friend(&data.sender).await.is_ok() {
                         error!("Friend already exist");
                         anyhow::bail!(Error::FriendExist);
                     }
@@ -359,9 +352,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     if let Some(inner_req) = list
                         .iter()
                         .find(|request| {
-                            request.request_type() == InternalRequestType::Outgoing
-                                && request.to() == data.from()
-                                && request.status() == FriendRequestStatus::Pending
+                            request.r#type() == RequestType::Outgoing
+                                && data.sender.eq(request.did())
                         })
                         .cloned()
                     {
@@ -369,30 +361,28 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         //we can automatically add them
                         list.remove(&inner_req);
                         self.set_request_list(list).await?;
-
-                        self.add_friend(&data.from()).await?;
+                        self.add_friend(inner_req.did()).await?;
                     } else {
                         //TODO: Perform check to see if request already exist
-                        list.insert(InternalRequest::In(data.clone()));
+                        list.insert(Request::In(data.sender.clone()));
 
                         self.set_request_list(list).await?;
 
                         if let Err(e) = self
                             .tx
-                            .send(MultiPassEventKind::FriendRequestReceived { from: data.from() })
+                            .send(MultiPassEventKind::FriendRequestReceived { from: data.sender })
                         {
                             error!("Error broadcasting event: {e}");
                         }
                     }
                 }
-                FriendRequestStatus::Denied => {
+                Event::Reject => {
                     let mut list = self.list_all_raw_request().await?;
                     let internal_request = list
                         .iter()
                         .find(|request| {
-                            request.request_type() == InternalRequestType::Outgoing
-                                && request.to() == data.from()
-                                && request.status() == FriendRequestStatus::Pending
+                            request.r#type() == RequestType::Outgoing
+                                && data.sender.eq(request.did())
                         })
                         .cloned()
                         .ok_or(Error::FriendRequestDoesntExist)?;
@@ -403,24 +393,23 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     if let Err(e) =
                         self.tx
                             .send(MultiPassEventKind::OutgoingFriendRequestRejected {
-                                did: data.from(),
+                                did: data.sender,
                             })
                     {
                         error!("Error broadcasting event: {e}");
                     }
                 }
-                FriendRequestStatus::FriendRemoved => {
-                    self.is_friend(&data.from()).await?;
-                    self.remove_friend(&data.from(), false, false).await?;
+                Event::Remove => {
+                    self.is_friend(&data.sender).await?;
+                    self.remove_friend(&data.sender, false, false).await?;
                 }
-                FriendRequestStatus::RequestRemoved => {
+                Event::Retract => {
                     let mut list = self.list_all_raw_request().await?;
                     let internal_request = list
                         .iter()
                         .find(|request| {
-                            request.request_type() == InternalRequestType::Incoming
-                                && request.to() == data.to()
-                                && request.status() == FriendRequestStatus::Pending
+                            request.r#type() == RequestType::Incoming
+                                && data.sender.eq(request.did())
                         })
                         .cloned()
                         .ok_or(Error::FriendRequestDoesntExist)?;
@@ -431,7 +420,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
                     if let Err(e) = self
                         .tx
-                        .send(MultiPassEventKind::IncomingFriendRequestClosed { did: data.from() })
+                        .send(MultiPassEventKind::IncomingFriendRequestClosed { did: data.sender })
                     {
                         error!("Error broadcasting event: {e}");
                     }
@@ -451,8 +440,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             {
                 for (index, request) in requests.iter().enumerate() {
                     let mut data = Sata::default();
-                    data.add_recipient(&request.to())
-                        .map_err(anyhow::Error::from)?;
+                    data.add_recipient(did).map_err(anyhow::Error::from)?;
 
                     let kp = &*self.did_key;
                     let payload = data
@@ -466,7 +454,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
                     let bytes = serde_json::to_vec(&payload)?;
 
-                    let topic = get_inbox_topic(&request.to());
+                    let topic = get_inbox_topic(did);
 
                     if self.ipfs.pubsub_publish(topic, bytes).await.is_err() {
                         //Because we are unable to send a single request for whatever reason, kill the iteration
@@ -533,25 +521,18 @@ impl<T: IpfsTypes> FriendsStore<T> {
         //TODO: Use the iterator instead
         for request in list.iter() {
             // checking the from and status is just a precaution and not required
-            if request.request_type() == InternalRequestType::Outgoing
-                && request.from() == local_public_key
-                && request.to().eq(pubkey)
-                && request.status() == FriendRequestStatus::Pending
-            {
+            if request.r#type() == RequestType::Outgoing && request.did().eq(pubkey) {
                 // since the request has already been sent, we should not be sending it again
                 return Err(Error::FriendRequestExist);
             }
         }
 
-        let mut request = FriendRequest::default();
-        request.set_from(local_public_key);
-        request.set_to(pubkey.clone());
-        request.set_status(FriendRequestStatus::Pending);
-        let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
+        let payload = PayloadEvent {
+            sender: local_public_key,
+            event: Event::Request,
+        };
 
-        request.set_signature(signature);
-
-        self.broadcast_request(&request, true, true).await
+        self.broadcast_request((pubkey, &payload), true, true).await
     }
 
     pub async fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
@@ -572,20 +553,15 @@ impl<T: IpfsTypes> FriendsStore<T> {
         // Although the request been validated before storing, we should validate again just to be safe
         let internal_request = list
             .iter()
-            .find(|request| {
-                request.request_type() == InternalRequestType::Incoming
-                    && request.from().eq(pubkey)
-                    && request.to() == local_public_key
-                    && request.status() == FriendRequestStatus::Pending
-            })
+            .find(|request| request.r#type() == RequestType::Incoming && request.did().eq(pubkey))
             .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        if let Err(e) = internal_request.valid() {
-            list.remove(&internal_request);
-            self.set_request_list(list).await?;
-            return Err(e);
-        }
+        // if let Err(e) = internal_request.valid() {
+        //     list.remove(&internal_request);
+        //     self.set_request_list(list).await?;
+        //     return Err(e);
+        // }
 
         if self.is_friend(pubkey).await.is_ok() {
             warn!("Already friends. Removing request");
@@ -594,13 +570,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
             return Ok(());
         }
 
-        let mut request = FriendRequest::default();
-        request.set_from(local_public_key);
-        request.set_to(pubkey.clone());
-        request.set_status(FriendRequestStatus::Accepted);
-
-        let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
-        request.set_signature(signature);
+        let payload = PayloadEvent {
+            event: Event::Accept,
+            sender: local_public_key,
+        };
 
         self.add_friend(pubkey).await?;
 
@@ -608,7 +581,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         self.set_request_list(list).await?;
 
-        self.broadcast_request(&request, false, true).await
+        self.broadcast_request((pubkey, &payload), false, true)
+            .await
     }
 
     pub async fn reject_request(&mut self, pubkey: &DID) -> Result<(), Error> {
@@ -629,34 +603,21 @@ impl<T: IpfsTypes> FriendsStore<T> {
         // Although the request been validated before storing, we should validate again just to be safe
         let internal_request = list
             .iter()
-            .find(|request| {
-                request.request_type() == InternalRequestType::Incoming
-                    && request.from().eq(pubkey)
-                    && request.to() == local_public_key
-                    && request.status() == FriendRequestStatus::Pending
-            })
+            .find(|request| request.r#type() == RequestType::Incoming && request.did().eq(pubkey))
             .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        if let Err(e) = internal_request.valid() {
-            list.remove(&internal_request);
-            self.set_request_list(list).await?;
-            return Err(e);
-        }
-
-        let mut request = FriendRequest::default();
-        request.set_from(local_public_key);
-        request.set_to(pubkey.clone());
-        request.set_status(FriendRequestStatus::Denied);
-
-        let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
-        request.set_signature(signature);
+        let payload = PayloadEvent {
+            sender: local_public_key,
+            event: Event::Reject,
+        };
 
         list.remove(&internal_request);
 
         self.set_request_list(list).await?;
 
-        self.broadcast_request(&request, false, true).await
+        self.broadcast_request((pubkey, &payload), false, true)
+            .await
     }
 
     pub async fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
@@ -668,39 +629,27 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let internal_request = list
             .iter()
-            .find(|request| {
-                request.request_type() == InternalRequestType::Outgoing
-                    && request.to().eq(pubkey)
-                    && request.from().eq(&local_public_key)
-                    && request.status() == FriendRequestStatus::Pending
-            })
+            .find(|request| request.r#type() == RequestType::Outgoing && request.did().eq(pubkey))
             .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        let mut request = FriendRequest::default();
-        request.set_from(local_public_key);
-        request.set_to(pubkey.clone());
-        request.set_status(FriendRequestStatus::RequestRemoved);
-
-        let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
-        request.set_signature(signature);
+        let payload = PayloadEvent {
+            sender: local_public_key,
+            event: Event::Retract,
+        };
 
         list.remove(&internal_request);
 
         self.set_request_list(list).await?;
 
-        self.broadcast_request(&request, false, true).await
+        self.broadcast_request((pubkey, &payload), false, true)
+            .await
     }
 
     pub async fn has_request_from(&self, pubkey: &DID) -> Result<bool, Error> {
-        self.list_incoming_request().await.map(|list| {
-            list.iter()
-                .filter(|request| {
-                    request.from().eq(pubkey) && request.status() == FriendRequestStatus::Pending
-                })
-                .count()
-                != 0
-        })
+        self.list_incoming_request()
+            .await
+            .map(|list| list.contains(pubkey))
     }
 }
 
@@ -865,17 +814,15 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         if broadcast {
             let (local_ipfs_public_key, _) = self.local().await?;
-
             let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
-            let mut request = FriendRequest::default();
-            request.set_from(local_public_key);
-            request.set_to(pubkey.clone());
-            request.set_status(FriendRequestStatus::FriendRemoved);
-            let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
 
-            request.set_signature(signature);
+            let payload = PayloadEvent {
+                sender: local_public_key,
+                event: Event::Remove,
+            };
 
-            self.broadcast_request(&request, save, save).await?;
+            self.broadcast_request((pubkey, &payload), save, save)
+                .await?;
         }
 
         if let Err(e) = self.tx.send(MultiPassEventKind::FriendRemoved {
@@ -897,7 +844,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 }
 
 impl<T: IpfsTypes> FriendsStore<T> {
-    pub async fn list_all_raw_request(&self) -> Result<HashSet<InternalRequest>, Error> {
+    pub async fn list_all_raw_request(&self) -> Result<HashSet<Request>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.request {
             Some(object) => object.resolve(self.ipfs.clone(), None).await,
@@ -905,7 +852,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         }
     }
 
-    pub async fn set_request_list(&mut self, list: HashSet<InternalRequest>) -> Result<(), Error> {
+    pub async fn set_request_list(&mut self, list: HashSet<Request>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
         let old_document = root_document.request.clone();
         if matches!(old_document, Some(DocumentType::Object(_)) | None) {
@@ -926,31 +873,19 @@ impl<T: IpfsTypes> FriendsStore<T> {
         Ok(())
     }
 
-    pub async fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        self.list_all_raw_request().await.map(|list| {
-            list.iter()
-                .map(|request| match request {
-                    InternalRequest::In(request) | InternalRequest::Out(request) => request,
-                })
-                .cloned()
-                .collect()
-        })
-    }
-
     pub async fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
         self.list_incoming_request()
             .await
-            .map(|list| list.iter().any(|request| request.from().eq(did)))
+            .map(|list| list.iter().any(|request| request.eq(did)))
     }
 
-    pub async fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
+    pub async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
         self.list_all_raw_request().await.map(|list| {
             list.iter()
                 .filter_map(|request| match request {
-                    InternalRequest::In(request) => Some(request),
+                    Request::In(request) => Some(request),
                     _ => None,
                 })
-                .filter(|request| request.status() == FriendRequestStatus::Pending)
                 .cloned()
                 .collect::<Vec<_>>()
         })
@@ -959,17 +894,16 @@ impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
         self.list_outgoing_request()
             .await
-            .map(|list| list.iter().any(|request| request.to().eq(did)))
+            .map(|list| list.iter().any(|request| request.eq(did)))
     }
 
-    pub async fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
+    pub async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
         self.list_all_raw_request().await.map(|list| {
             list.iter()
                 .filter_map(|request| match request {
-                    InternalRequest::Out(request) => Some(request),
+                    Request::Out(request) => Some(request),
                     _ => None,
                 })
-                .filter(|request| request.status() == FriendRequestStatus::Pending)
                 .cloned()
                 .collect::<Vec<_>>()
         })
@@ -977,12 +911,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
     pub async fn broadcast_request(
         &mut self,
-        request: &FriendRequest,
+        (recipient, payload): (&DID, &PayloadEvent),
         store_request: bool,
         _save_to_disk: bool,
     ) -> Result<(), Error> {
-        let recipient = &request.to();
-
         let remote_peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
 
         let topic = get_inbox_topic(recipient);
@@ -991,7 +923,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             self.identity.discovery_type(),
             Discovery::Direct | Discovery::None
         ) {
-            let peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
+            let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
 
             let connected = super::connected_to_peer(self.ipfs.clone(), remote_peer_id).await?;
 
@@ -1008,7 +940,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
                 if let Err(_e) = res {
                     let ipfs = self.ipfs.clone();
-                    let pubkey = request.to();
+                    let pubkey = recipient.clone();
                     let relay = self.identity.relays();
                     let discovery = self.identity.discovery_type();
                     tokio::spawn(async move {
@@ -1023,7 +955,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         }
 
         if store_request {
-            let outgoing_request = InternalRequest::Out(request.clone());
+            let outgoing_request = Request::Out(recipient.clone());
             let mut list = self.list_all_raw_request().await?;
             if !list.contains(&outgoing_request) {
                 list.insert(outgoing_request);
@@ -1032,19 +964,19 @@ impl<T: IpfsTypes> FriendsStore<T> {
         }
 
         let mut data = Sata::default();
-        data.add_recipient(&request.to())
-            .map_err(anyhow::Error::from)?;
+        data.add_recipient(recipient).map_err(anyhow::Error::from)?;
+
         let kp = &*self.did_key;
-        let payload = data
+        let e_payload = data
             .encrypt(
                 IpldCodec::DagJson,
                 kp.as_ref(),
                 Kind::Static,
-                request.clone(),
+                payload.clone(),
             )
             .map_err(anyhow::Error::from)?;
 
-        let bytes = serde_json::to_vec(&payload)?;
+        let bytes = serde_json::to_vec(&e_payload)?;
 
         //Check to make sure the payload itself doesnt exceed 256kb
         if bytes.len() >= 256 * 1024 {
@@ -1062,41 +994,44 @@ impl<T: IpfsTypes> FriendsStore<T> {
             self.queue
                 .write()
                 .await
-                .entry(request.to())
+                .entry(recipient.clone())
                 .or_default()
-                .push_back(InternalRequest::Out(request.clone()));
+                .push_back(payload.clone());
 
             self.save_queue().await;
         } else if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
             self.queue
                 .write()
                 .await
-                .entry(request.to())
+                .entry(recipient.clone())
                 .or_default()
-                .push_back(InternalRequest::Out(request.clone()));
+                .push_back(payload.clone());
         }
 
-        match request.status() {
-            FriendRequestStatus::Pending => {
+        match payload.event {
+            Event::Request => {
+                if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestSent {
+                    to: recipient.clone(),
+                }) {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            Event::Retract => {
                 if let Err(e) = self
                     .tx
-                    .send(MultiPassEventKind::FriendRequestSent { to: request.to() })
+                    .send(MultiPassEventKind::OutgoingFriendRequestClosed {
+                        did: recipient.clone(),
+                    })
                 {
                     error!("Error broadcasting event: {e}");
                 }
             }
-            FriendRequestStatus::RequestRemoved => {
+            Event::Reject => {
                 if let Err(e) = self
                     .tx
-                    .send(MultiPassEventKind::OutgoingFriendRequestClosed { did: request.to() })
-                {
-                    error!("Error broadcasting event: {e}");
-                }
-            }
-            FriendRequestStatus::Denied => {
-                if let Err(e) = self
-                    .tx
-                    .send(MultiPassEventKind::IncomingFriendRequestRejected { did: request.to() })
+                    .send(MultiPassEventKind::IncomingFriendRequestRejected {
+                        did: recipient.clone(),
+                    })
                 {
                     error!("Error broadcasting event: {e}");
                 }
@@ -1170,22 +1105,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         Ok(())
     }
-}
-
-fn validate_request(real_request: &FriendRequest) -> Result<(), Error> {
-    let mut request = FriendRequest::default();
-    request.set_from(real_request.from());
-    request.set_to(real_request.to());
-    request.set_status(real_request.status());
-    request.set_date(real_request.date());
-
-    let signature = match real_request.signature() {
-        Some(s) => bs58::decode(s).into_vec()?,
-        None => return Err(Error::InvalidSignature),
-    };
-
-    verify_serde_sig(real_request.from(), &request, &signature)?;
-    Ok(())
 }
 
 pub fn get_inbox_topic(did: &DID) -> String {

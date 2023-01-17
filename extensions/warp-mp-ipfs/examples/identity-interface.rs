@@ -522,7 +522,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                         Some("list-incoming-request") => {
                             let mut table = Table::new();
-                            table.set_header(vec!["From", "Status", "Date"]);
+                            table.set_header(vec!["From"]);
                             let list = match account.list_incoming_request().await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -531,21 +531,19 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for request in list.iter() {
-                                let username = match account.get_identity(Identifier::did_key(request.from())).await {
-                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(&request.from())).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
+                                let username = match account.get_identity(Identifier::did_key(request.clone())).await {
+                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(request)).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
                                     username.to_string(),
-                                    request.status().to_string(),
-                                    request.date().to_string(),
                                 ]);
                             }
                             writeln!(stdout, "{}", table)?;
                         },
                         Some("list-outgoing-request") => {
                             let mut table = Table::new();
-                            table.set_header(vec!["To", "Status", "Date"]);
+                            table.set_header(vec!["To"]);
                             let list = match account.list_outgoing_request().await {
                                 Ok(list) => list,
                                 Err(e) => {
@@ -554,14 +552,12 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             for request in list.iter() {
-                                let username = match account.get_identity(Identifier::did_key(request.to())).await {
-                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(&request.to())).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
+                                let username = match account.get_identity(Identifier::did_key(request.clone())).await {
+                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(request)).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
                                     username.to_string(),
-                                    request.status().to_string(),
-                                    request.date().to_string()
                                 ]);
                             }
                             writeln!(stdout, "{}", table)?;
