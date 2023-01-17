@@ -518,13 +518,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let list = self.list_all_raw_request().await?;
 
-        //TODO: Use the iterator instead
-        for request in list.iter() {
-            // checking the from and status is just a precaution and not required
-            if request.r#type() == RequestType::Outgoing && request.did().eq(pubkey) {
-                // since the request has already been sent, we should not be sending it again
-                return Err(Error::FriendRequestExist);
-            }
+        if list
+            .iter()
+            .any(|request| request.r#type() == RequestType::Outgoing && request.did().eq(pubkey))
+        {
+            // since the request has already been sent, we should not be sending it again
+            return Err(Error::FriendRequestExist);
         }
 
         let payload = PayloadEvent {
