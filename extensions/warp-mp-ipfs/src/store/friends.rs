@@ -535,18 +535,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let mut list = self.list_all_raw_request().await?;
 
-        // Although the request been validated before storing, we should validate again just to be safe
         let internal_request = list
             .iter()
             .find(|request| request.r#type() == RequestType::Incoming && request.did().eq(pubkey))
             .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
-
-        // if let Err(e) = internal_request.valid() {
-        //     list.remove(&internal_request);
-        //     self.set_request_list(list).await?;
-        //     return Err(e);
-        // }
 
         if self.is_friend(pubkey).await.is_ok() {
             warn!("Already friends. Removing request");
@@ -627,6 +620,21 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         self.set_request_list(list).await?;
 
+        if let Entry::Occupied(entry) = self.queue.write().await.entry(pubkey.clone()) {
+            if entry.get().event == Event::Request {
+                entry.remove();
+                if let Err(e) = self
+                    .tx
+                    .send(MultiPassEventKind::OutgoingFriendRequestClosed {
+                        did: pubkey.clone(),
+                    })
+                {
+                    error!("Error broadcasting event: {e}");
+                }
+                return Ok(());
+            }
+        }
+
         self.broadcast_request((pubkey, &payload), false, true)
             .await
     }
@@ -681,10 +689,13 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let mut list = self.block_list().await?;
 
         if !list.insert(pubkey.clone()) {
-            return Err(Error::PublicKeyIsBlocked)
+            return Err(Error::PublicKeyIsBlocked);
         }
 
         self.set_block_list(list).await?;
+
+        // Remove anything from queue related to the key
+        self.queue.write().await.remove(pubkey);
 
         if self.is_friend(pubkey).await.is_ok() {
             if let Err(e) = self.remove_friend(pubkey, true).await {
@@ -711,7 +722,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let mut list = self.block_list().await?;
 
         if !list.remove(pubkey) {
-            return Err(Error::PublicKeyIsntBlocked)
+            return Err(Error::PublicKeyIsntBlocked);
         }
 
         self.set_block_list(list).await?;
@@ -980,11 +991,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
         if !peers.contains(&remote_peer_id)
-            || (peers.contains(&remote_peer_id) && self
-                .ipfs
-                .pubsub_publish(topic.clone(), bytes)
-                .await
-                .is_err())
+            || (peers.contains(&remote_peer_id)
+                && self
+                    .ipfs
+                    .pubsub_publish(topic.clone(), bytes)
+                    .await
+                    .is_err())
         {
             self.queue
                 .write()
