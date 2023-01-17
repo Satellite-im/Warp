@@ -560,7 +560,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
                 let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
-                let connected = connected_to_peer(self.ipfs.clone(), peer_id).await?;
+                let connected = connected_to_peer(&self.ipfs, peer_id).await?;
                 if connected == PeerConnectionType::NotConnected
                     && self.discovering.write().await.insert(pubkey.clone())
                 {
@@ -581,7 +581,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                 Ok(_) => {}
                                 Err(_) => {
                                     if let Err(e) =
-                                        super::discover_peer(ipfs, &pubkey, discovery, relay).await
+                                        super::discover_peer(&ipfs, &pubkey, discovery, relay).await
                                     {
                                         error!("Error discovering peer: {e}");
                                     }
@@ -595,7 +595,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                         async move {
                             loop {
                                 if let Ok(PeerConnectionType::Connected) =
-                                    connected_to_peer(ipfs.clone(), peer_id).await
+                                    connected_to_peer(&ipfs, peer_id).await
                                 {
                                     discovering.write().await.remove(&pubkey);
                                     break;
@@ -717,7 +717,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 .ok_or(Error::IdentityDoesntExist)?;
         }
 
-        let status: IdentityStatus = connected_to_peer(self.ipfs.clone(), did.clone())
+        let status: IdentityStatus = connected_to_peer(&self.ipfs, did.clone())
             .await
             .map(|ctype| ctype.into())
             .map_err(Error::from)?;

@@ -150,7 +150,7 @@ impl From<PeerConnectionType> for IdentityStatus {
 }
 
 pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
-    ipfs: ipfs::Ipfs<T>,
+    ipfs: &ipfs::Ipfs<T>,
     pkey: I,
 ) -> anyhow::Result<PeerConnectionType> {
     let peer_id = match pkey.into() {
@@ -167,14 +167,14 @@ pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
 }
 
 pub async fn discover_peer<T: IpfsTypes>(
-    ipfs: ipfs::Ipfs<T>,
+    ipfs: &ipfs::Ipfs<T>,
     did: &DID,
     discovery: Discovery,
     relay: Vec<Multiaddr>,
 ) -> anyhow::Result<()> {
     let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
 
-    if connected_to_peer(ipfs.clone(), PeerType::PeerId(peer_id)).await?
+    if connected_to_peer(ipfs, PeerType::PeerId(peer_id)).await?
         != PeerConnectionType::NotConnected
     {
         return Ok(());
@@ -200,7 +200,7 @@ pub async fn discover_peer<T: IpfsTypes>(
                 tokio::time::sleep(Duration::from_millis(300)).await;
             }
             loop {
-                if connected_to_peer(ipfs.clone(), PeerType::PeerId(peer_id)).await?
+                if connected_to_peer(ipfs, PeerType::PeerId(peer_id)).await?
                     == PeerConnectionType::Connected
                 {
                     break;

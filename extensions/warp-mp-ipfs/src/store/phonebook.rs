@@ -187,7 +187,7 @@ impl<T: IpfsTypes> PhoneBookEntry<T> {
         discovery: Arc<RwLock<Discovery>>,
         relays: Arc<RwLock<Vec<Multiaddr>>>,
     ) -> Result<Self, Error> {
-        let connection_type = connected_to_peer(ipfs.clone(), did.clone())
+        let connection_type = connected_to_peer(&ipfs, did.clone())
             .await
             .map(RwLock::new)
             .map(Arc::new)?;
@@ -211,7 +211,7 @@ impl<T: IpfsTypes> PhoneBookEntry<T> {
                 let mut discovering = false;
                 let previous_status = entry.connection_type.clone();
                 loop {
-                    let Ok(connection_status) =  connected_to_peer(entry.ipfs.clone(), entry.did.clone()).await else {
+                    let Ok(connection_status) =  connected_to_peer(&entry.ipfs, entry.did.clone()).await else {
                         tokio::time::sleep(Duration::from_secs(1)).await;
                         continue;
                     };
@@ -256,7 +256,7 @@ impl<T: IpfsTypes> PhoneBookEntry<T> {
                             }
                             tokio::spawn(async move {
                                 if let Err(_e) =
-                                    super::discover_peer(ipfs, &did, discovery, relays).await
+                                    super::discover_peer(&ipfs, &did, discovery, relays).await
                                 {
                                 }
                             });

@@ -436,7 +436,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let list = self.queue.read().await.clone();
         for (did, requests) in list.iter() {
             if let Ok(crate::store::PeerConnectionType::Connected) =
-                connected_to_peer(self.ipfs.clone(), did.clone()).await
+                connected_to_peer(&self.ipfs, did.clone()).await
             {
                 for (index, request) in requests.iter().enumerate() {
                     let mut data = Sata::default();
@@ -925,7 +925,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         ) {
             let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
 
-            let connected = super::connected_to_peer(self.ipfs.clone(), remote_peer_id).await?;
+            let connected = super::connected_to_peer(&self.ipfs, remote_peer_id).await?;
 
             if connected != PeerConnectionType::Connected {
                 let res = match tokio::time::timeout(
@@ -944,7 +944,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     let relay = self.identity.relays();
                     let discovery = self.identity.discovery_type();
                     tokio::spawn(async move {
-                        if let Err(e) = super::discover_peer(ipfs, &pubkey, discovery, relay).await
+                        if let Err(e) = super::discover_peer(&ipfs, &pubkey, discovery, relay).await
                         {
                             error!("Error discoverying peer: {e}");
                         }
