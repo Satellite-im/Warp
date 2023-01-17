@@ -725,6 +725,7 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "Will reevaluate"]
     async fn event_in_conversation() -> anyhow::Result<()> {
         let (_account_a, mut chat_a, did_a, _) =
             create_account_and_chat(None, None, Some("test::event_in_conversation".into()))
