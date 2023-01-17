@@ -773,9 +773,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let mut list = self.friends_list().await?;
 
-        if list.insert(pubkey.clone()) {
-            self.set_friends_list(list).await?;
+        if !list.insert(pubkey.clone()) {
+            return Err(Error::FriendExist);
         }
+
+        self.set_friends_list(list).await?;
+
         if let Some(phonebook) = self.phonebook.as_ref() {
             if let Err(_e) = phonebook.add_friend(pubkey).await {
                 error!("Error: {_e}");
@@ -801,9 +804,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let mut list = self.friends_list().await?;
 
-        if list.remove(pubkey) {
-            self.set_friends_list(list).await?;
+        if !list.remove(pubkey) {
+            return Err(Error::FriendDoesntExist)
         }
+
+        self.set_friends_list(list).await?;
 
         if let Some(phonebook) = self.phonebook.as_ref() {
             if let Err(_e) = phonebook.remove_friend(pubkey).await {
