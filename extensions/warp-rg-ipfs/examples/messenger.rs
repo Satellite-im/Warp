@@ -42,6 +42,8 @@ struct Opt {
     experimental_node: bool,
     #[clap(long)]
     stdout_log: bool,
+    #[clap(long)]
+    disable_sender_emitter: bool,
 }
 
 fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
@@ -111,17 +113,24 @@ async fn create_rg(
     account: Box<dyn MultiPass>,
     filesystem: Option<Box<dyn Constellation>>,
     cache: Arc<RwLock<Box<dyn PocketDimension>>>,
+    disable_sender_emitter: bool,
 ) -> anyhow::Result<Box<dyn RayGun>> {
+    let mut config = match path.as_ref() {
+        None => RgIpfsConfig::testing(),
+        Some(path) => RgIpfsConfig::production(path)
+    };
+
+    config.store_setting.disable_sender_event_emit = disable_sender_emitter;
+
     let chat = match path.as_ref() {
-        Some(path) => {
-            let config = RgIpfsConfig::production(path);
+        Some(_) => {
             Box::new(
                 IpfsMessaging::<Persistent>::new(Some(config), account, filesystem, Some(cache))
                     .await?,
             ) as Box<dyn RayGun>
         }
         None => {
-            Box::new(IpfsMessaging::<Temporary>::new(None, account, filesystem, Some(cache)).await?)
+            Box::new(IpfsMessaging::<Temporary>::new(Some(config), account, filesystem, Some(cache)).await?)
                 as Box<dyn RayGun>
         }
     };
@@ -178,6 +187,7 @@ async fn main() -> anyhow::Result<()> {
         new_account.clone(),
         Some(fs.clone()),
         cache,
+        opt.disable_sender_emitter
     )
     .await?;
 
@@ -316,36 +326,39 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             // Note: This is one way to handle it outside of the event stream
-                            // let id = match chat.create_conversation(&did).await {
-                            //     Ok(id) => id,
-                            //     Err(e) => {
-                            //         writeln!(stdout, "Error creating conversation: {e}")?;
-                            //         continue
-                            //     }
-                            // };
+                            if opt.disable_sender_emitter {
+                                let id = match chat.create_conversation(&did).await {
+                                    Ok(id) => id,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error creating conversation: {e}")?;
+                                        continue
+                                    }
+                                };
 
-                            // *topic.write() = id.id();
-                            // writeln!(stdout, "Set conversation to {}", topic.read())?;
-                            // let mut stdout = stdout.clone();
-                            // let account = new_account.clone();
-                            // let stream = chat.get_conversation_stream(id.id()).await?;
-                            // let chat = chat.clone();
-                            // let topic = topic.clone();
+                                *topic.write() = id.id();
+                                writeln!(stdout, "Set conversation to {}", topic.read())?;
+                                let mut stdout = stdout.clone();
+                                let account = new_account.clone();
+                                let stream = chat.get_conversation_stream(id.id()).await?;
+                                let chat = chat.clone();
+                                let topic = topic.clone();
 
-                            // tokio::spawn(async move {
-                            //     if let Err(e) = message_event_handle(
-                            //         stdout.clone(),
-                            //         account.clone(),
-                            //         chat.clone(),
-                            //         stream,
-                            //         topic.clone(),
-                            //     ).await {
-                            //         writeln!(stdout, ">> Error processing event task: {e}").unwrap();
-                            //     }
-                            // });
-                            if let Err(e) = chat.create_conversation(&did).await {
-                                writeln!(stdout, "Error creating conversation: {e}")?;
-                                continue
+                                tokio::spawn(async move {
+                                    if let Err(e) = message_event_handle(
+                                        stdout.clone(),
+                                        account.clone(),
+                                        chat.clone(),
+                                        stream,
+                                        topic.clone(),
+                                    ).await {
+                                        writeln!(stdout, ">> Error processing event task: {e}").unwrap();
+                                    }
+                                });
+                            } else {
+                                if let Err(e) = chat.create_conversation(&did).await {
+                                    writeln!(stdout, "Error creating conversation: {e}")?;
+                                    continue
+                                }
                             }
                         },
                         Some("/add-recipient") => {
