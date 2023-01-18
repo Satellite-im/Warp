@@ -86,11 +86,11 @@ pub struct MessageStore<T: IpfsTypes> {
 
     spam_filter: Arc<Option<SpamFilter>>,
 
-    store_decrypted: Arc<AtomicBool>,
-
     with_friends: Arc<AtomicBool>,
 
     attach_recipients_on_storing: Arc<AtomicBool>,
+
+    disable_sender_event_emit: Arc<AtomicBool>,
 }
 
 impl<T: IpfsTypes> Clone for MessageStore<T> {
@@ -111,8 +111,8 @@ impl<T: IpfsTypes> Clone for MessageStore<T> {
             event: self.event.clone(),
             spam_filter: self.spam_filter.clone(),
             with_friends: self.with_friends.clone(),
-            store_decrypted: self.store_decrypted.clone(),
-            attach_recipients_on_storing: self.attach_recipients_on_storing.clone()
+            attach_recipients_on_storing: self.attach_recipients_on_storing.clone(),
+            disable_sender_event_emit: self.disable_sender_event_emit.clone(),
         }
     }
 }
@@ -127,13 +127,13 @@ impl<T: IpfsTypes> MessageStore<T> {
         discovery: bool,
         interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
-        (check_spam, store_decrypted, with_friends, conversation_load_task, attach_recipients_on_storing): (
-            bool,
-            bool,
-            bool,
-            bool,
-            bool,
-        ),
+        (
+            check_spam,
+            disable_sender_event_emit,
+            with_friends,
+            conversation_load_task,
+            attach_recipients_on_storing,
+        ): (bool, bool, bool, bool, bool),
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
@@ -153,7 +153,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
         let stream_task = Arc::new(Default::default());
         let stream_event_task = Arc::new(Default::default());
-        let store_decrypted = Arc::new(AtomicBool::new(store_decrypted));
+        let disable_sender_event_emit = Arc::new(AtomicBool::new(disable_sender_event_emit));
         let with_friends = Arc::new(AtomicBool::new(with_friends));
         let attach_recipients_on_storing = Arc::new(AtomicBool::new(attach_recipients_on_storing));
         let stream_sender = Arc::new(Default::default());
@@ -175,7 +175,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             did,
             event,
             spam_filter,
-            store_decrypted,
+            disable_sender_event_emit,
             with_friends,
             attach_recipients_on_storing,
         };
@@ -762,7 +762,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 error!("Unable to save info to file: {e}");
             }
         }
-        
+
         match peers.contains(&peer_id) {
             true => {
                 let bytes = serde_json::to_vec(&data)?;
@@ -792,12 +792,13 @@ impl<T: IpfsTypes> MessageStore<T> {
             }
         };
 
-        if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
-            conversation_id: conversation.id(),
-        }) {
-            error!("Error broadcasting event: {e}");
+        if !self.disable_sender_event_emit.load(Ordering::Relaxed) {
+            if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
+                conversation_id: conversation.id(),
+            }) {
+                error!("Error broadcasting event: {e}");
+            }
         }
-
         Ok(Conversation::from(&conversation))
     }
 
@@ -924,10 +925,12 @@ impl<T: IpfsTypes> MessageStore<T> {
             };
         }
 
-        if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
-            conversation_id: conversation.id(),
-        }) {
-            error!("Error broadcasting event: {e}");
+        if !self.disable_sender_event_emit.load(Ordering::Relaxed) {
+            if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
+                conversation_id: conversation.id(),
+            }) {
+                error!("Error broadcasting event: {e}");
+            }
         }
 
         Ok(Conversation::from(&conversation))
@@ -2407,7 +2410,9 @@ impl<T: IpfsTypes> MessageStore<T> {
                 let message_document = MessageDocument::new(
                     &self.ipfs,
                     self.did.clone(),
-                    self.attach_recipients_on_storing.load(Ordering::Relaxed).then_some(document.recipients()),
+                    self.attach_recipients_on_storing
+                        .load(Ordering::Relaxed)
+                        .then_some(document.recipients()),
                     message,
                 )
                 .await?;
