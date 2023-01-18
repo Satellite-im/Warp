@@ -2,22 +2,16 @@
 use futures::StreamExt;
 use ipfs::libp2p::gossipsub::GossipsubMessage;
 use ipfs::{Ipfs, IpfsTypes, PeerId};
+use libipld::IpldCodec;
 use rust_ipfs as ipfs;
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use tokio::sync::broadcast;
-use tokio::sync::RwLock as AsyncRwLock;
 use tracing::log::{error, warn};
-use warp::crypto::cipher::Cipher;
-use warp::crypto::did_key::Generate;
-use warp::crypto::zeroize::Zeroizing;
-
-use libipld::IpldCodec;
-use serde::{Deserialize, Serialize};
-use warp::crypto::{Ed25519KeyPair, KeyMaterial, DID};
+use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::MultiPassEventKind;
 use warp::sata::{Kind, Sata};
@@ -26,12 +20,12 @@ use warp::sync::Arc;
 use warp::tesseract::Tesseract;
 
 use crate::config::Discovery;
-use crate::store::connected_to_peer;
 use crate::Persistent;
 
 use super::document::DocumentType;
 use super::identity::IdentityStore;
 use super::phonebook::PhoneBook;
+use super::queue::Queue;
 use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType};
 
 pub struct FriendsStore<T: IpfsTypes> {
@@ -51,8 +45,7 @@ pub struct FriendsStore<T: IpfsTypes> {
 
     override_ipld: Arc<AtomicBool>,
 
-    // Used to broadcast request
-    queue: Arc<AsyncRwLock<HashMap<DID, PayloadEvent>>>,
+    queue: Queue<T>,
 
     // Tesseract
     tesseract: Tesseract,
@@ -148,7 +141,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         identity: IdentityStore<T>,
         path: Option<PathBuf>,
         tesseract: Tesseract,
-        interval: u64,
+        _interval: u64,
         (tx, override_ipld, use_phonebook): (broadcast::Sender<MultiPassEventKind>, bool, bool),
     ) -> anyhow::Result<Self> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
@@ -157,8 +150,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
         };
 
         let end_event = Arc::new(AtomicBool::new(false));
-        let queue = Arc::new(Default::default());
+
         let did_key = Arc::new(did_keypair(&tesseract)?);
+        let queue = Queue::new(ipfs.clone(), did_key.clone(), path.clone());
         let override_ipld = Arc::new(AtomicBool::new(override_ipld));
 
         let phonebook = PhoneBook::new(ipfs.clone(), tx.clone());
@@ -177,8 +171,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
             override_ipld,
         };
 
-        let store_inner = store.clone();
-
         let stream = store
             .ipfs
             .pubsub_subscribe(get_inbox_topic(store.did_key.as_ref()))
@@ -188,105 +180,96 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
 
-        tokio::spawn(async move {
-            let mut store = store_inner;
+        tokio::spawn({
+            let mut store = store.clone();
+            async move {
+                tokio::spawn({
+                    let store = store.clone();
+                    async move { if let Err(_e) = store.queue.load().await {} }
+                });
 
-            let discovery = store.identity.discovery_type();
-            if let Some(phonebook) = store.phonebook.as_ref() {
-                if let Err(_e) = phonebook.set_discovery(discovery).await {}
+                let discovery = store.identity.discovery_type();
+                if let Some(phonebook) = store.phonebook.as_ref() {
+                    if let Err(_e) = phonebook.set_discovery(discovery).await {}
 
-                for addr in store.identity.relays() {
-                    if let Err(_e) = phonebook.add_relay(addr).await {}
-                }
+                    for addr in store.identity.relays() {
+                        if let Err(_e) = phonebook.add_relay(addr).await {}
+                    }
 
-                if let Err(e) = store.load_queue().await {
-                    error!("Error loading queue: {e}");
-                }
-
-                if let Ok(friends) = store.friends_list().await {
-                    if let Err(_e) = phonebook.add_friend_list(friends).await {
-                        error!("Error adding friends in phonebook: {_e}");
+                    if let Ok(friends) = store.friends_list().await {
+                        if let Err(_e) = phonebook.add_friend_list(friends).await {
+                            error!("Error adding friends in phonebook: {_e}");
+                        }
                     }
                 }
-            }
 
-            // autoban the blocklist
-            match store.block_list().await {
-                Ok(list) => {
-                    for pubkey in list {
-                        if let Ok(peer_id) = did_to_libp2p_pub(&pubkey).map(|p| p.to_peer_id()) {
-                            if let Err(e) = store.ipfs.ban_peer(peer_id).await {
-                                error!("Error banning peer: {e}");
+                // autoban the blocklist
+                match store.block_list().await {
+                    Ok(list) => {
+                        for pubkey in list {
+                            if let Ok(peer_id) = did_to_libp2p_pub(&pubkey).map(|p| p.to_peer_id())
+                            {
+                                if let Err(e) = store.ipfs.ban_peer(peer_id).await {
+                                    error!("Error banning peer: {e}");
+                                }
                             }
                         }
                     }
-                }
-                Err(e) => {
-                    error!("Error loading block list: {e}");
-                }
-            };
-
-            // scan through friends list to see if there is any incoming request or outgoing request matching
-            // and clear them out of the request list as a precautionary measure
-            tokio::spawn({
-                let mut store = store.clone();
-                async move {
-                    let friends = match store.friends_list().await {
-                        Ok(list) => list,
-                        _ => return,
-                    };
-
-                    for friend in friends.iter() {
-                        let mut list = store.list_all_raw_request().await.unwrap_or_default();
-                        // cleanup outgoing
-                        if let Some(req) = list
-                            .iter()
-                            .find(|request| {
-                                request.r#type() == RequestType::Outgoing
-                                    && request.did().eq(friend)
-                            })
-                            .cloned()
-                        {
-                            list.remove(&req);
-                        }
-
-                        // cleanup incoming
-                        if let Some(req) = list
-                            .iter()
-                            .find(|request| {
-                                request.r#type() == RequestType::Incoming
-                                    && request.did().eq(friend)
-                            })
-                            .cloned()
-                        {
-                            list.remove(&req);
-                        }
-
-                        if let Err(_e) = store.set_request_list(list).await {}
+                    Err(e) => {
+                        error!("Error loading block list: {e}");
                     }
-                }
-            });
-            tokio::task::yield_now().await;
+                };
 
-            futures::pin_mut!(stream);
-            let mut broadcast_interval = tokio::time::interval(Duration::from_millis(interval));
+                // scan through friends list to see if there is any incoming request or outgoing request matching
+                // and clear them out of the request list as a precautionary measure
+                tokio::spawn({
+                    let mut store = store.clone();
+                    async move {
+                        let friends = match store.friends_list().await {
+                            Ok(list) => list,
+                            _ => return,
+                        };
 
-            loop {
-                if store.end_event.load(Ordering::SeqCst) {
-                    break;
-                }
-                tokio::select! {
-                    message = stream.next() => {
-                        if let Some(message) = message {
-                            if let Err(e) = store.check_request_message(&local_public_key, message).await {
-                                error!("Error: {e}");
+                        for friend in friends.iter() {
+                            let mut list = store.list_all_raw_request().await.unwrap_or_default();
+                            // cleanup outgoing
+                            if let Some(req) = list
+                                .iter()
+                                .find(|request| {
+                                    request.r#type() == RequestType::Outgoing
+                                        && request.did().eq(friend)
+                                })
+                                .cloned()
+                            {
+                                list.remove(&req);
                             }
+
+                            // cleanup incoming
+                            if let Some(req) = list
+                                .iter()
+                                .find(|request| {
+                                    request.r#type() == RequestType::Incoming
+                                        && request.did().eq(friend)
+                                })
+                                .cloned()
+                            {
+                                list.remove(&req);
+                            }
+
+                            if let Err(_e) = store.set_request_list(list).await {}
                         }
                     }
-                    _ = broadcast_interval.tick() => {
-                        if let Err(e) = store.check_queue().await {
-                            error!("Error: {e}");
-                        }
+                });
+                tokio::task::yield_now().await;
+
+                futures::pin_mut!(stream);
+
+                while let Some(message) = stream.next().await {
+                    if let Err(e) = store
+                        .check_request_message(&local_public_key, message)
+                        .await
+                    {
+                        error!("Error: {e}");
                     }
                 }
             }
@@ -427,46 +410,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
                 _ => {}
             };
-        }
-        Ok(())
-    }
-
-    //TODO: Implement checks to determine if request been accepted, etc.
-    async fn check_queue(&self) -> anyhow::Result<()> {
-        let list = self.queue.read().await.clone();
-        for (did, payload) in list.iter() {
-            if let Ok(crate::store::PeerConnectionType::Connected) =
-                connected_to_peer(&self.ipfs, did.clone()).await
-            {
-                let mut data = Sata::default();
-                data.add_recipient(did).map_err(anyhow::Error::from)?;
-
-                let kp = &*self.did_key;
-                let payload = data
-                    .encrypt(
-                        IpldCodec::DagJson,
-                        kp.as_ref(),
-                        Kind::Reference,
-                        payload.clone(),
-                    )
-                    .map_err(anyhow::Error::from)?;
-
-                let bytes = serde_json::to_vec(&payload)?;
-
-                let topic = get_inbox_topic(did);
-
-                if self.ipfs.pubsub_publish(topic, bytes).await.is_err() {
-                    //Because we are unable to send a single request for whatever reason, kill the iteration
-                    //and proceed to the next item in line
-                    break;
-                }
-
-                if let Entry::Occupied(entry) = self.queue.write().await.entry(did.clone()) {
-                    entry.remove();
-                }
-
-                self.save_queue().await;
-            }
         }
         Ok(())
     }
@@ -620,9 +563,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         self.set_request_list(list).await?;
 
-        if let Entry::Occupied(entry) = self.queue.write().await.entry(pubkey.clone()) {
-            if entry.get().event == Event::Request {
-                entry.remove();
+        if let Some(entry) = self.queue.get(pubkey).await {
+            if entry.event == Event::Request {
+                self.queue.remove(pubkey).await;
                 if let Err(e) = self
                     .tx
                     .send(MultiPassEventKind::OutgoingFriendRequestClosed {
@@ -695,7 +638,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         self.set_block_list(list).await?;
 
         // Remove anything from queue related to the key
-        self.queue.write().await.remove(pubkey);
+        self.queue.remove(pubkey).await;
 
         if self.is_friend(pubkey).await.is_ok() {
             if let Err(e) = self.remove_friend(pubkey, true).await {
@@ -998,12 +941,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     .await
                     .is_err())
         {
-            self.queue
-                .write()
-                .await
-                .insert(recipient.clone(), payload.clone());
+            self.queue.insert(recipient, payload.clone()).await;
 
-            self.save_queue().await;
+            self.queue.save().await;
         }
 
         match payload.event {
@@ -1038,76 +978,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
         };
         Ok(())
     }
-
-    async fn save_queue(&self) {
-        use warp::crypto::did_key::ECDH;
-        if let Some(path) = self.path.as_ref() {
-            let bytes = match serde_json::to_vec(&*self.queue.read().await) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    error!("Error serializing queue list into bytes: {e}");
-                    return;
-                }
-            };
-
-            let prikey =
-                Ed25519KeyPair::from_secret_key(&self.did_key.private_key_bytes()).get_x25519();
-            let pubkey =
-                Ed25519KeyPair::from_public_key(&self.did_key.public_key_bytes()).get_x25519();
-
-            let prik = match std::panic::catch_unwind(|| prikey.key_exchange(&pubkey)) {
-                Ok(pri) => Zeroizing::new(pri),
-                Err(e) => {
-                    error!("Error generating key: {e:?}");
-                    return;
-                }
-            };
-
-            let data = match Cipher::direct_encrypt(
-                warp::crypto::cipher::CipherType::Aes256Gcm,
-                &bytes,
-                &prik,
-            ) {
-                Ok(d) => d,
-                Err(e) => {
-                    error!("Error encrypting queue: {e}");
-                    return;
-                }
-            };
-
-            if let Err(e) = tokio::fs::write(path.join(".request_queue"), data).await {
-                error!("Error saving queue: {e}");
-            }
-        }
-    }
-
-    async fn load_queue(&self) -> anyhow::Result<()> {
-        use warp::crypto::did_key::ECDH;
-        if let Some(path) = self.path.as_ref() {
-            let data = tokio::fs::read(path.join(".request_queue")).await?;
-
-            let prikey =
-                Ed25519KeyPair::from_secret_key(&self.did_key.private_key_bytes()).get_x25519();
-            let pubkey =
-                Ed25519KeyPair::from_public_key(&self.did_key.public_key_bytes()).get_x25519();
-
-            let prik = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
-                .map(Zeroizing::new)
-                .map_err(|_| anyhow::anyhow!("Error performing key exchange"))?;
-
-            let data =
-                Cipher::direct_decrypt(warp::crypto::cipher::CipherType::Aes256Gcm, &data, &prik)?;
-
-            *self.queue.write().await = serde_json::from_slice(&data)?;
-        }
-
-        Ok(())
-    }
 }
 
 pub fn get_inbox_topic(did: &DID) -> String {
     format!("/peer/{}/inbox", did)
 }
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-struct Queue(PeerId, Sata, DID);
