@@ -32,6 +32,8 @@ pub enum MultiPassEventKind {
     FriendRemoved { did: DID },
     IdentityOnline { did: DID },
     IdentityOffline { did: DID },
+    Blocked { did: DID },
+    Unblocked { did: DID }
 }
 
 #[derive(FFIFree)]

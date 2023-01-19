@@ -654,6 +654,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
         // let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
         // self.ipfs.ban_peer(peer_id).await?;
+        if let Err(e) = self.tx.send(MultiPassEventKind::Blocked {
+            did: pubkey.clone(),
+        }) {
+            error!("Error broadcasting event: {e}");
+        }
         Ok(())
     }
 
@@ -672,6 +677,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
         self.ipfs.unban_peer(peer_id).await?;
+
+        if let Err(e) = self.tx.send(MultiPassEventKind::Unblocked {
+            did: pubkey.clone(),
+        }) {
+            error!("Error broadcasting event: {e}");
+        }
         Ok(())
     }
 }

@@ -283,6 +283,7 @@ async fn main() -> anyhow::Result<()> {
 
                             writeln!(stdout, "> {} went offline", username)?;
                         },
+                        _ => {}
                     }
                 }
             }
