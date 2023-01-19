@@ -104,6 +104,8 @@ pub enum Event {
     Retract,
     /// Block user
     Block,
+    /// Unblock user
+    Unblock,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Eq)]
@@ -204,21 +206,21 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
 
                 // autoban the blocklist
-                match store.block_list().await {
-                    Ok(list) => {
-                        for pubkey in list {
-                            if let Ok(peer_id) = did_to_libp2p_pub(&pubkey).map(|p| p.to_peer_id())
-                            {
-                                if let Err(e) = store.ipfs.ban_peer(peer_id).await {
-                                    error!("Error banning peer: {e}");
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Error loading block list: {e}");
-                    }
-                };
+                // match store.block_list().await {
+                //     Ok(list) => {
+                //         for pubkey in list {
+                //             if let Ok(peer_id) = did_to_libp2p_pub(&pubkey).map(|p| p.to_peer_id())
+                //             {
+                //                 if let Err(e) = store.ipfs.ban_peer(peer_id).await {
+                //                     error!("Error banning peer: {e}");
+                //                 }
+                //             }
+                //         }
+                //     }
+                //     Err(e) => {
+                //         error!("Error loading block list: {e}");
+                //     }
+                // };
 
                 // scan through friends list to see if there is any incoming request or outgoing request matching
                 // and clear them out of the request list as a precautionary measure
@@ -300,8 +302,15 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
             // Before we validate the request, we should check to see if the key is blocked
             // If it is, skip the request so we dont wait resources storing it.
-            if self.is_blocked(&data.sender).await? {
-                //TODO: Send event back indicating that they were block if was sent directly from the peer
+            if self.is_blocked(&data.sender).await? && !matches!(data.event, Event::Block) {
+                let payload = PayloadEvent {
+                    sender: (*self.did_key).clone(),
+                    event: Event::Block,
+                };
+
+                self.broadcast_request((&data.sender, &payload), false, true)
+                    .await?;
+
                 return Ok(());
             }
 
@@ -408,7 +417,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         error!("Error broadcasting event: {e}");
                     }
                 }
-                _ => {}
+                Event::Block => {
+                    let mut list = self.list_all_raw_request().await?;
+                    list.retain(|r| data.sender.ne(r.did()));
+                    self.set_request_list(list).await?;
+                }
+                Event::Unblock => {}
             };
         }
         Ok(())
@@ -648,8 +662,13 @@ impl<T: IpfsTypes> FriendsStore<T> {
         // Remove anything from queue related to the key
         self.queue.remove(pubkey).await;
 
+        let mut list = self.list_all_raw_request().await?;
+        list.retain(|r| pubkey.ne(r.did()));
+        self.set_request_list(list).await?;
+
+
         if self.is_friend(pubkey).await.is_ok() {
-            if let Err(e) = self.remove_friend(pubkey, true).await {
+            if let Err(e) = self.remove_friend(pubkey, false).await {
                 error!("Error removing item from friend list: {e}");
             }
         }
@@ -667,7 +686,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
         }) {
             error!("Error broadcasting event: {e}");
         }
-        Ok(())
+
+        let payload = PayloadEvent {
+            sender: local_public_key,
+            event: Event::Block,
+        };
+
+        self.broadcast_request((pubkey, &payload), false, true)
+            .await
     }
 
     pub async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
@@ -699,7 +725,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
         }) {
             error!("Error broadcasting event: {e}");
         }
-        Ok(())
+
+        let payload = PayloadEvent {
+            sender: local_public_key,
+            event: Event::Unblock,
+        };
+
+        self.broadcast_request((pubkey, &payload), false, true)
+            .await
     }
 }
 
