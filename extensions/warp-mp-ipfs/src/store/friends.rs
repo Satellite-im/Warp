@@ -418,11 +418,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     }
                 }
                 Event::Block => {
+                    //TODO: Blacklist to add user into to prevent outgoing attempts
                     let mut list = self.list_all_raw_request().await?;
                     list.retain(|r| data.sender.ne(r.did()));
                     self.set_request_list(list).await?;
                 }
-                Event::Unblock => {}
+                Event::Unblock => {
+                    //TODO: Blacklist to remove user from
+                },
             };
         }
         Ok(())
