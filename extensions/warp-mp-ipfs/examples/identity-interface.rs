@@ -283,12 +283,32 @@ async fn main() -> anyhow::Result<()> {
 
                             writeln!(stdout, "> {} went offline", username)?;
                         },
-                        _ => {}
+                        warp::multipass::MultiPassEventKind::Blocked { did } => {
+                            let username = account
+                                .get_identity(Identifier::did_key(did.clone())).await
+                                .ok()
+                                .and_then(|list| list.first().cloned())
+                                .map(|ident| ident.username())
+                                .unwrap_or_else(|| did.to_string());
+
+                            writeln!(stdout, "> {} was blocked", username)?;
+                        },
+                        warp::multipass::MultiPassEventKind::Unblocked { did } => {
+                            let username = account
+                                .get_identity(Identifier::did_key(did.clone())).await
+                                .ok()
+                                .and_then(|list| list.first().cloned())
+                                .map(|ident| ident.username())
+                                .unwrap_or_else(|| did.to_string());
+
+                            writeln!(stdout, "> {} was unblocked", username)?;
+                        }
                     }
                 }
             }
             line = rl.readline().fuse() => match line {
                 Ok(line) => {
+                    rl.add_history_entry(line.clone());
                     let mut cmd_line = line.trim().split(' ');
                     match cmd_line.next() {
                         Some("friends-list") => {
