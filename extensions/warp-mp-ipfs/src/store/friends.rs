@@ -942,8 +942,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     .is_err())
         {
             self.queue.insert(recipient, payload.clone()).await;
-
-            self.queue.save().await;
         }
 
         match payload.event {

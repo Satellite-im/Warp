@@ -71,6 +71,11 @@ impl<T: IpfsTypes> Queue<T> {
     }
 
     pub async fn insert(&self, did: &DID, payload: PayloadEvent) {
+        self.raw_insert(did, payload).await;
+        self.save().await;
+    }
+
+    async fn raw_insert(&self, did: &DID, payload: PayloadEvent) {
         let entry = QueueEntry::new(
             self.ipfs.clone(),
             did.clone(),
@@ -80,7 +85,9 @@ impl<T: IpfsTypes> Queue<T> {
         )
         .await;
 
-        if let Some(entry) = self.entries.write().await.insert(did.clone(), entry) {
+        let entry = self.entries.write().await.insert(did.clone(), entry);
+
+        if let Some(entry) = entry {
             entry.cancel().await;
         }
     }
@@ -100,7 +107,9 @@ impl<T: IpfsTypes> Queue<T> {
     }
 
     pub async fn remove(&self, did: &DID) -> Option<PayloadEvent> {
-        if let Some(entry) = self.entries.write().await.remove(did) {
+        let entry = self.entries.write().await.remove(did).clone();
+
+        if let Some(entry) = entry {
             entry.cancel().await;
             self.save().await;
             return Some(entry.event());
@@ -128,7 +137,7 @@ impl<T: IpfsTypes> Queue<T> {
             let map: HashMap<DID, PayloadEvent> = serde_json::from_slice(&data)?;
 
             for (did, payload) in map {
-                self.insert(&did, payload).await;
+                self.raw_insert(&did, payload).await;
             }
         }
         Ok(())
