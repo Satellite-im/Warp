@@ -1,3 +1,9 @@
+pub mod document;
+pub mod friends;
+pub mod identity;
+pub mod phonebook;
+pub mod queue;
+
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -19,10 +25,6 @@ use crate::config::Discovery;
 
 use self::document::DocumentType;
 
-pub mod document;
-pub mod friends;
-pub mod identity;
-pub mod phonebook;
 
 pub const IDENTITY_BROADCAST: &str = "identity/broadcast";
 pub const FRIENDS_BROADCAST: &str = "friends/broadcast";
