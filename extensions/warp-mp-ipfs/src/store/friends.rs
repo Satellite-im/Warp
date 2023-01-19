@@ -625,6 +625,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
     }
 
     pub async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let (local_ipfs_public_key, _) = self.local().await?;
+
+        let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
+
+        if local_public_key.eq(pubkey) {
+            return Err(Error::CannotBlockOwnKey)
+        }
+
         if self.is_blocked(pubkey).await? {
             return Err(Error::PublicKeyIsBlocked);
         }
@@ -663,6 +671,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
     }
 
     pub async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let (local_ipfs_public_key, _) = self.local().await?;
+
+        let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
+
+        if local_public_key.eq(pubkey) {
+            return Err(Error::CannotUnblockOwnKey)
+        }
+
         if !self.is_blocked(pubkey).await? {
             return Err(Error::PublicKeyIsntBlocked);
         }
