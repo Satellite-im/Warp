@@ -444,7 +444,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     }
                 }
                 Event::Block => {
-                    //TODO: Blacklist to add user into to prevent outgoing attempts
+                    
                     let mut list = self.list_all_raw_request().await?;
                     list.retain(|r| data.sender.ne(r.did()));
                     self.set_request_list(list).await?;
@@ -453,12 +453,18 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         self.remove_friend(&data.sender, false).await?;
                     }
 
+                    let mut list = self.block_by_list().await?;
+                    list.insert(data.sender);
+                    self.set_block_by_list(list).await?;
+
                     if let Some(tx) = std::mem::take(&mut signal) {
                         let _ = tx.send(Err(Error::BlockedByUser));
                     }
                 }
                 Event::Unblock => {
-                    //TODO: Blacklist to remove user from
+                    let mut list = self.block_by_list().await?;
+                    list.remove(&data.sender);
+                    self.set_block_by_list(list).await?;
                 }
                 Event::Response => {
                     if let Some(tx) = std::mem::take(&mut signal) {
@@ -494,6 +500,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         if self.is_friend(pubkey).await.is_ok() {
             return Err(Error::FriendExist);
+        }
+
+        if self.is_blocked_by(pubkey).await? {
+            return Err(Error::BlockedByUser);
         }
 
         if self.is_blocked(pubkey).await? {
@@ -809,7 +819,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         Ok(())
     }
 
-    pub async fn blocked_by(&self, pubkey: &DID) -> Result<bool, Error> {
+    pub async fn is_blocked_by(&self, pubkey: &DID) -> Result<bool, Error> {
         self.block_by_list().await.map(|list| list.contains(pubkey))
     }
 
