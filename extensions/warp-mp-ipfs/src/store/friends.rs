@@ -781,6 +781,41 @@ impl<T: IpfsTypes> FriendsStore<T> {
 }
 
 impl<T: IpfsTypes> FriendsStore<T> {
+    pub async fn block_by_list(&self) -> Result<HashSet<DID>, Error> {
+        let root_document = self.identity.get_root_document().await?;
+        match root_document.block_by {
+            Some(object) => object.resolve(self.ipfs.clone(), None).await,
+            None => Ok(HashSet::new()),
+        }
+    }
+
+    pub async fn set_block_by_list(&mut self, list: HashSet<DID>) -> Result<(), Error> {
+        let mut root_document = self.identity.get_root_document().await?;
+        let old_document = root_document.block_by.clone();
+        if matches!(old_document, Some(DocumentType::Object(_)) | None) {
+            root_document.block_by = Some(DocumentType::Object(list));
+        } else if matches!(old_document, Some(DocumentType::Cid(_))) {
+            let new_cid = self.identity.put_dag(list).await?;
+            root_document.block_by = Some(new_cid.into());
+        }
+
+        self.identity.set_root_document(root_document).await?;
+        if let Some(DocumentType::Cid(cid)) = old_document {
+            if self.ipfs.is_pinned(&cid).await? {
+                self.ipfs.remove_pin(&cid, false).await?;
+            }
+            self.ipfs.remove_block(cid).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn blocked_by(&self, pubkey: &DID) -> Result<bool, Error> {
+        self.block_by_list().await.map(|list| list.contains(pubkey))
+    }
+
+}
+
+impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn friends_list(&self) -> Result<HashSet<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.friends {
