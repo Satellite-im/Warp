@@ -441,6 +441,11 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         }
         true
     }
+
+    pub(crate) async fn is_blocked_by(&self, pubkey: &DID) -> Result<bool, Error> {
+        let friends = self.friend_store().await?;
+        friends.is_blocked_by(pubkey).await
+    }
 }
 
 impl<T: IpfsTypes> Extension for IpfsIdentity<T> {
@@ -871,12 +876,14 @@ impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
         let received_friend_request = self.received_friend_request_from(did).await?;
         let sent_friend_request = self.sent_friend_request_to(did).await?;
         let blocked = self.is_blocked(did).await?;
+        let blocked_by = self.is_blocked_by(did).await?;
 
         let mut relationship = Relationship::default();
         relationship.set_friends(friends);
         relationship.set_received_friend_request(received_friend_request);
         relationship.set_sent_friend_request(sent_friend_request);
         relationship.set_blocked(blocked);
+        relationship.set_blocked_by(blocked_by);
 
         Ok(relationship)
     }
