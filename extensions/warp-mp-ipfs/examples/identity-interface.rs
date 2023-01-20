@@ -36,6 +36,8 @@ struct Opt {
     bootstrap: Option<bool>,
     #[clap(long)]
     provide_platform_info: bool,
+    #[clap(long)]
+    wait: Option<u64>, 
 }
 
 //Note: Cache can be enabled but the internals may need a little rework but since extension handles caching itself, this isnt needed for now
@@ -82,6 +84,8 @@ async fn account(
     if let Some(bootstrap) = opt.bootstrap {
         config.ipfs_setting.bootstrap = bootstrap;
     }
+
+    config.store_setting.wait_on_response = opt.wait;
 
     config.ipfs_setting.mdns.enable = opt.mdns;
     let mut account = ipfs_identity_temporary(Some(config), tesseract, cache).await?;
@@ -130,6 +134,9 @@ async fn account_persistent<P: AsRef<Path>>(
     }
 
     config.ipfs_setting.mdns.enable = opt.mdns;
+
+    config.store_setting.wait_on_response = opt.wait;
+
     let mut account = ipfs_identity_persistent(config, tesseract, cache).await?;
     if account.get_own_identity().await.is_err() {
         account.create_identity(username, None).await?;

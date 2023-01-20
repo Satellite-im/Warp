@@ -53,6 +53,8 @@ pub struct FriendsStore<T: IpfsTypes> {
 
     phonebook: Option<PhoneBook<T>>,
 
+    wait_on_response: Option<u64>,
+
     signal: Arc<RwLock<HashMap<DID, oneshot::Sender<Result<(), Error>>>>>,
 
     tx: broadcast::Sender<MultiPassEventKind>,
@@ -139,6 +141,7 @@ impl<T: IpfsTypes> Clone for FriendsStore<T> {
             phonebook: self.phonebook.clone(),
             signal: self.signal.clone(),
             tx: self.tx.clone(),
+            wait_on_response: self.wait_on_response,
         }
     }
 }
@@ -150,7 +153,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
         path: Option<PathBuf>,
         tesseract: Tesseract,
         _interval: u64,
-        (tx, override_ipld, use_phonebook): (broadcast::Sender<MultiPassEventKind>, bool, bool),
+        (tx, override_ipld, use_phonebook, wait_on_response): (
+            broadcast::Sender<MultiPassEventKind>,
+            bool,
+            bool,
+            Option<u64>,
+        ),
     ) -> anyhow::Result<Self> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -180,6 +188,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             tx,
             override_ipld,
             signal,
+            wait_on_response,
         };
 
         let stream = store
@@ -1026,13 +1035,13 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let mut queued = false;
 
-        let mut rx = if matches!(payload.event, Event::Request) {
+        let wait = self.wait_on_response.is_some();
+
+        let mut rx = (matches!(payload.event, Event::Request) && wait).then_some({
             let (tx, rx) = oneshot::channel();
             self.signal.write().await.insert(recipient.clone(), tx);
-            Some(rx)
-        } else {
-            None
-        };
+            rx
+        });
 
         if !peers.contains(&remote_peer_id)
             || (peers.contains(&remote_peer_id)
@@ -1050,10 +1059,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         if !queued && matches!(payload.event, Event::Request) {
             if let Some(rx) = std::mem::take(&mut rx) {
-                match tokio::time::timeout(Duration::from_millis(500), rx).await {
-                    Ok(Ok(res)) => res?,
-                    _ => {}
-                };
+                if let Some(timeout) = self.wait_on_response.map(Duration::from_millis) {
+                    match tokio::time::timeout(timeout, rx).await {
+                        Ok(Ok(res)) => res?,
+                        _ => {}
+                    };
+                }
             }
         }
 

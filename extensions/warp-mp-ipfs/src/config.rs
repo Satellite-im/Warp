@@ -194,6 +194,8 @@ pub struct StoreSetting {
     pub share_platform: bool,
 
     pub use_phonebook: bool,
+
+    pub wait_on_response: Option<u64>,
 }
 
 impl Default for StoreSetting {
@@ -206,6 +208,7 @@ impl Default for StoreSetting {
             override_ipld: true,
             share_platform: false,
             use_phonebook: true,
+            wait_on_response: None,
         }
     }
 }
