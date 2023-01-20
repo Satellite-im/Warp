@@ -89,8 +89,10 @@ pub enum Error {
     CannotAcceptSelfAsFriend,
     #[error("You cannot deny yourself as a friend")]
     CannotDenySelfAsFriend,
-    #[error("You cannot block yourself as a friend")]
-    CannotBlockSelfAsFriend,
+    #[error("You cannot block yourself")]
+    CannotBlockOwnKey,
+    #[error("You cannot unblock yourself")]
+    CannotUnblockOwnKey,
     #[error("You cannot remove yourself as a friend")]
     CannotRemoveSelfAsFriend,
     #[error("You cannot use yourself")]

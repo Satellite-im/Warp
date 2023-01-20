@@ -299,4 +299,14 @@ mod test {
         assert!(!account_b.is_blocked(&did_a).await?);
         Ok(())
     }
+
+    #[tokio::test]
+    async fn cannot_block_self() -> anyhow::Result<()> {
+        let (mut account_a, did_a, _) =
+            create_account(Some("JohnDoe"), None, Some("test::cannot_block_self".into())).await?;
+
+        assert!(account_a.block(&did_a).await.is_err());
+
+        Ok(())
+    }
 }

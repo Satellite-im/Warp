@@ -132,6 +132,7 @@ pub struct Relationship {
     received_friend_request: bool,
     sent_friend_request: bool,
     blocked: bool,
+    blocked_by: bool,
 }
 
 impl Relationship {
@@ -150,6 +151,10 @@ impl Relationship {
     pub fn set_blocked(&mut self, val: bool) {
         self.blocked = val;
     }
+
+    pub fn set_blocked_by(&mut self, val: bool) {
+        self.blocked_by = val;
+    }
 }
 
 impl Relationship {
@@ -167,6 +172,10 @@ impl Relationship {
 
     pub fn blocked(&self) -> bool {
         self.blocked
+    }
+
+    pub fn blocked_by(&self) -> bool {
+        self.blocked_by
     }
 }
 #[derive(

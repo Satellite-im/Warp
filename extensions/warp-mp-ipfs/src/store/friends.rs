@@ -1,15 +1,16 @@
 #![allow(clippy::await_holding_lock)]
+use futures::channel::oneshot;
 use futures::StreamExt;
 use ipfs::libp2p::gossipsub::GossipsubMessage;
 use ipfs::{Ipfs, IpfsTypes, PeerId};
 use libipld::IpldCodec;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, RwLock};
 use tracing::log::{error, warn};
 use warp::crypto::DID;
 use warp::error::Error;
@@ -51,6 +52,10 @@ pub struct FriendsStore<T: IpfsTypes> {
     tesseract: Tesseract,
 
     phonebook: Option<PhoneBook<T>>,
+
+    wait_on_response: Option<u64>,
+
+    signal: Arc<RwLock<HashMap<DID, oneshot::Sender<Result<(), Error>>>>>,
 
     tx: broadcast::Sender<MultiPassEventKind>,
 }
@@ -104,6 +109,10 @@ pub enum Event {
     Retract,
     /// Block user
     Block,
+    /// Unblock user
+    Unblock,
+    /// Indiciation of a response to a request
+    Response,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Eq)]
@@ -130,7 +139,9 @@ impl<T: IpfsTypes> Clone for FriendsStore<T> {
             queue: self.queue.clone(),
             tesseract: self.tesseract.clone(),
             phonebook: self.phonebook.clone(),
+            signal: self.signal.clone(),
             tx: self.tx.clone(),
+            wait_on_response: self.wait_on_response,
         }
     }
 }
@@ -142,7 +153,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
         path: Option<PathBuf>,
         tesseract: Tesseract,
         _interval: u64,
-        (tx, override_ipld, use_phonebook): (broadcast::Sender<MultiPassEventKind>, bool, bool),
+        (tx, override_ipld, use_phonebook, wait_on_response): (
+            broadcast::Sender<MultiPassEventKind>,
+            bool,
+            bool,
+            Option<u64>,
+        ),
     ) -> anyhow::Result<Self> {
         let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
             true => path,
@@ -158,6 +174,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
         let phonebook = PhoneBook::new(ipfs.clone(), tx.clone());
         let phonebook = use_phonebook.then_some(phonebook);
 
+        let signal = Default::default();
+
         let store = Self {
             ipfs,
             identity,
@@ -169,6 +187,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
             phonebook,
             tx,
             override_ipld,
+            signal,
+            wait_on_response,
         };
 
         let stream = store
@@ -204,21 +224,21 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
 
                 // autoban the blocklist
-                match store.block_list().await {
-                    Ok(list) => {
-                        for pubkey in list {
-                            if let Ok(peer_id) = did_to_libp2p_pub(&pubkey).map(|p| p.to_peer_id())
-                            {
-                                if let Err(e) = store.ipfs.ban_peer(peer_id).await {
-                                    error!("Error banning peer: {e}");
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Error loading block list: {e}");
-                    }
-                };
+                // match store.block_list().await {
+                //     Ok(list) => {
+                //         for pubkey in list {
+                //             if let Ok(peer_id) = did_to_libp2p_pub(&pubkey).map(|p| p.to_peer_id())
+                //             {
+                //                 if let Err(e) = store.ipfs.ban_peer(peer_id).await {
+                //                     error!("Error banning peer: {e}");
+                //                 }
+                //             }
+                //         }
+                //     }
+                //     Err(e) => {
+                //         error!("Error loading block list: {e}");
+                //     }
+                // };
 
                 // scan through friends list to see if there is any incoming request or outgoing request matching
                 // and clear them out of the request list as a precautionary measure
@@ -298,10 +318,19 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 return Ok(());
             }
 
+            let mut signal = self.signal.write().await.remove(&data.sender);
+
             // Before we validate the request, we should check to see if the key is blocked
             // If it is, skip the request so we dont wait resources storing it.
-            if self.is_blocked(&data.sender).await? {
-                //TODO: Send event back indicating that they were block if was sent directly from the peer
+            if self.is_blocked(&data.sender).await? && !matches!(data.event, Event::Block) {
+                let payload = PayloadEvent {
+                    sender: (*self.did_key).clone(),
+                    event: Event::Block,
+                };
+
+                self.broadcast_request((&data.sender, &payload), false, true)
+                    .await?;
+
                 return Ok(());
             }
 
@@ -351,13 +380,19 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
                         self.set_request_list(list).await?;
 
-                        if let Err(e) = self
-                            .tx
-                            .send(MultiPassEventKind::FriendRequestReceived { from: data.sender })
-                        {
+                        if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestReceived {
+                            from: data.sender.clone(),
+                        }) {
                             error!("Error broadcasting event: {e}");
                         }
                     }
+                    let payload = PayloadEvent {
+                        sender: (*self.did_key).clone(),
+                        event: Event::Response,
+                    };
+
+                    self.broadcast_request((&data.sender, &payload), false, false)
+                        .await?;
                 }
                 Event::Reject => {
                     let mut list = self.list_all_raw_request().await?;
@@ -408,8 +443,57 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         error!("Error broadcasting event: {e}");
                     }
                 }
-                _ => {}
+                Event::Block => {
+                    if self.has_request_from(&data.sender).await? {
+                        if let Err(e) =
+                            self.tx
+                                .send(MultiPassEventKind::IncomingFriendRequestClosed {
+                                    did: data.sender.clone(),
+                                })
+                        {
+                            error!("Error broadcasting event: {e}");
+                        }
+                    } else if self.sent_friend_request_to(&data.sender).await? {
+                        if let Err(e) =
+                            self.tx
+                                .send(MultiPassEventKind::OutgoingFriendRequestRejected {
+                                    did: data.sender.clone(),
+                                })
+                        {
+                            error!("Error broadcasting event: {e}");
+                        }
+                    }
+
+                    let mut list = self.list_all_raw_request().await?;
+                    list.retain(|r| data.sender.ne(r.did()));
+                    self.set_request_list(list).await?;
+
+                    if self.is_friend(&data.sender).await.is_ok() {
+                        self.remove_friend(&data.sender, false).await?;
+                    }
+
+                    let mut list = self.block_by_list().await?;
+                    list.insert(data.sender);
+                    self.set_block_by_list(list).await?;
+
+                    if let Some(tx) = std::mem::take(&mut signal) {
+                        let _ = tx.send(Err(Error::BlockedByUser));
+                    }
+                }
+                Event::Unblock => {
+                    let mut list = self.block_by_list().await?;
+                    list.remove(&data.sender);
+                    self.set_block_by_list(list).await?;
+                }
+                Event::Response => {
+                    if let Some(tx) = std::mem::take(&mut signal) {
+                        let _ = tx.send(Ok(()));
+                    }
+                }
             };
+            if let Some(tx) = std::mem::take(&mut signal) {
+                let _ = tx.send(Ok(()));
+            }
         }
         Ok(())
     }
@@ -435,6 +519,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         if self.is_friend(pubkey).await.is_ok() {
             return Err(Error::FriendExist);
+        }
+
+        if self.is_blocked_by(pubkey).await? {
+            return Err(Error::BlockedByUser);
         }
 
         if self.is_blocked(pubkey).await? {
@@ -625,6 +713,14 @@ impl<T: IpfsTypes> FriendsStore<T> {
     }
 
     pub async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let (local_ipfs_public_key, _) = self.local().await?;
+
+        let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
+
+        if local_public_key.eq(pubkey) {
+            return Err(Error::CannotBlockOwnKey);
+        }
+
         if self.is_blocked(pubkey).await? {
             return Err(Error::PublicKeyIsBlocked);
         }
@@ -640,8 +736,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
         // Remove anything from queue related to the key
         self.queue.remove(pubkey).await;
 
+        let mut list = self.list_all_raw_request().await?;
+        list.retain(|r| pubkey.ne(r.did()));
+        self.set_request_list(list).await?;
+
         if self.is_friend(pubkey).await.is_ok() {
-            if let Err(e) = self.remove_friend(pubkey, true).await {
+            if let Err(e) = self.remove_friend(pubkey, false).await {
                 error!("Error removing item from friend list: {e}");
             }
         }
@@ -654,10 +754,30 @@ impl<T: IpfsTypes> FriendsStore<T> {
         // let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
         // self.ipfs.ban_peer(peer_id).await?;
-        Ok(())
+        if let Err(e) = self.tx.send(MultiPassEventKind::Blocked {
+            did: pubkey.clone(),
+        }) {
+            error!("Error broadcasting event: {e}");
+        }
+
+        let payload = PayloadEvent {
+            sender: local_public_key,
+            event: Event::Block,
+        };
+
+        self.broadcast_request((pubkey, &payload), false, true)
+            .await
     }
 
     pub async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let (local_ipfs_public_key, _) = self.local().await?;
+
+        let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
+
+        if local_public_key.eq(pubkey) {
+            return Err(Error::CannotUnblockOwnKey);
+        }
+
         if !self.is_blocked(pubkey).await? {
             return Err(Error::PublicKeyIsntBlocked);
         }
@@ -672,7 +792,54 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
         self.ipfs.unban_peer(peer_id).await?;
+
+        if let Err(e) = self.tx.send(MultiPassEventKind::Unblocked {
+            did: pubkey.clone(),
+        }) {
+            error!("Error broadcasting event: {e}");
+        }
+
+        let payload = PayloadEvent {
+            sender: local_public_key,
+            event: Event::Unblock,
+        };
+
+        self.broadcast_request((pubkey, &payload), false, true)
+            .await
+    }
+}
+
+impl<T: IpfsTypes> FriendsStore<T> {
+    pub async fn block_by_list(&self) -> Result<HashSet<DID>, Error> {
+        let root_document = self.identity.get_root_document().await?;
+        match root_document.block_by {
+            Some(object) => object.resolve(self.ipfs.clone(), None).await,
+            None => Ok(HashSet::new()),
+        }
+    }
+
+    pub async fn set_block_by_list(&mut self, list: HashSet<DID>) -> Result<(), Error> {
+        let mut root_document = self.identity.get_root_document().await?;
+        let old_document = root_document.block_by.clone();
+        if matches!(old_document, Some(DocumentType::Object(_)) | None) {
+            root_document.block_by = Some(DocumentType::Object(list));
+        } else if matches!(old_document, Some(DocumentType::Cid(_))) {
+            let new_cid = self.identity.put_dag(list).await?;
+            root_document.block_by = Some(new_cid.into());
+        }
+
+        self.identity.set_root_document(root_document).await?;
+        if let Some(DocumentType::Cid(cid)) = old_document {
+            if self.ipfs.is_pinned(&cid).await? {
+                self.ipfs.remove_pin(&cid, false).await?;
+            }
+            self.ipfs.remove_block(cid).await?;
+        }
         Ok(())
+    }
+
+    pub async fn is_blocked_by(&self, pubkey: &DID) -> Result<bool, Error> {
+        self.block_by_list().await.map(|list| list.contains(pubkey))
     }
 }
 
@@ -764,7 +931,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 event: Event::Remove,
             };
 
-            self.broadcast_request((pubkey, &payload), false, false)
+            self.broadcast_request((pubkey, &payload), false, true)
                 .await?;
         }
 
@@ -856,7 +1023,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         &mut self,
         (recipient, payload): (&DID, &PayloadEvent),
         store_request: bool,
-        _save_to_disk: bool,
+        queue_broadcast: bool,
     ) -> Result<(), Error> {
         let remote_peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
 
@@ -933,6 +1100,16 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
+        let mut queued = false;
+
+        let wait = self.wait_on_response.is_some();
+
+        let mut rx = (matches!(payload.event, Event::Request) && wait).then_some({
+            let (tx, rx) = oneshot::channel();
+            self.signal.write().await.insert(recipient.clone(), tx);
+            rx
+        });
+
         if !peers.contains(&remote_peer_id)
             || (peers.contains(&remote_peer_id)
                 && self
@@ -940,8 +1117,22 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     .pubsub_publish(topic.clone(), bytes)
                     .await
                     .is_err())
+                && queue_broadcast
         {
             self.queue.insert(recipient, payload.clone()).await;
+            queued = true;
+            self.signal.write().await.remove(recipient);
+        }
+
+        if !queued && matches!(payload.event, Event::Request) {
+            if let Some(rx) = std::mem::take(&mut rx) {
+                if let Some(timeout) = self.wait_on_response.map(Duration::from_millis) {
+                    match tokio::time::timeout(timeout, rx).await {
+                        Ok(Ok(res)) => res?,
+                        _ => {}
+                    };
+                }
+            }
         }
 
         match payload.event {

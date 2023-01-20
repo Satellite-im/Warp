@@ -120,6 +120,8 @@ pub struct RootDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blocks: Option<DocumentType<HashSet<DID>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_by: Option<DocumentType<HashSet<DID>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<DocumentType<HashSet<Request>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<IdentityStatus>,
@@ -139,7 +141,7 @@ impl RootDocument {
     }
 
     pub async fn verify<T: IpfsTypes>(&self, ipfs: Ipfs<T>) -> Result<(), Error> {
-        let (identity, _, _, _, _, _) = self.resolve(ipfs, Some(Duration::from_secs(5))).await?;
+        let (identity, _, _, _, _, _, _) = self.resolve(ipfs, Some(Duration::from_secs(5))).await?;
         let mut root_document = self.clone();
         let signature =
             std::mem::replace(&mut root_document.signature, None).ok_or(Error::InvalidSignature)?;
@@ -161,6 +163,7 @@ impl RootDocument {
             Identity,
             String,
             String,
+            HashSet<DID>,
             HashSet<DID>,
             HashSet<DID>,
             HashSet<Request>,
@@ -186,6 +189,7 @@ impl RootDocument {
         let mut picture = Default::default();
         let mut banner = Default::default();
         let mut block_list = Default::default();
+        let mut block_by_list = Default::default();
         let mut request = Default::default();
 
         if let Some(document) = &self.friends {
@@ -204,11 +208,15 @@ impl RootDocument {
             block_list = document.resolve_or_default(ipfs.clone(), timeout).await
         }
 
+        if let Some(document) = &self.block_by {
+            block_by_list = document.resolve_or_default(ipfs.clone(), timeout).await
+        }
+
         if let Some(document) = &self.request {
             request = document.resolve_or_default(ipfs.clone(), timeout).await
         }
 
-        Ok((identity, picture, banner, friends, block_list, request))
+        Ok((identity, picture, banner, friends, block_list, block_by_list, request))
     }
 }
 
