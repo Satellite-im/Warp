@@ -449,6 +449,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     list.retain(|r| data.sender.ne(r.did()));
                     self.set_request_list(list).await?;
 
+                    if self.is_friend(&data.sender).await.is_ok() {
+                        self.remove_friend(&data.sender, false).await?;
+                    }
+
                     if let Some(tx) = std::mem::take(&mut signal) {
                         let _ = tx.send(Err(Error::BlockedByUser));
                     }
@@ -864,7 +868,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 event: Event::Remove,
             };
 
-            self.broadcast_request((pubkey, &payload), false, false)
+            self.broadcast_request((pubkey, &payload), false, true)
                 .await?;
         }
 
