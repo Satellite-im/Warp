@@ -309,7 +309,27 @@ async fn main() -> anyhow::Result<()> {
                                 .unwrap_or_else(|| did.to_string());
 
                             writeln!(stdout, "> {} was unblocked", username)?;
-                        }
+                        },
+                        warp::multipass::MultiPassEventKind::UnblockedBy { did } => {
+                            let username = account
+                                .get_identity(Identifier::did_key(did.clone())).await
+                                .ok()
+                                .and_then(|list| list.first().cloned())
+                                .map(|ident| ident.username())
+                                .unwrap_or_else(|| did.to_string());
+
+                            writeln!(stdout, "> {} unblocked you", username)?;
+                        },
+                        warp::multipass::MultiPassEventKind::BlockedBy { did } => {
+                            let username = account
+                                .get_identity(Identifier::did_key(did.clone())).await
+                                .ok()
+                                .and_then(|list| list.first().cloned())
+                                .map(|ident| ident.username())
+                                .unwrap_or_else(|| did.to_string());
+
+                            writeln!(stdout, "> {} blocked you", username)?;
+                        },
                     }
                 }
             }
