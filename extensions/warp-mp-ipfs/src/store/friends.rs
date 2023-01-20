@@ -444,7 +444,26 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     }
                 }
                 Event::Block => {
-                    
+                    if self.has_request_from(&data.sender).await? {
+                        if let Err(e) =
+                            self.tx
+                                .send(MultiPassEventKind::IncomingFriendRequestClosed {
+                                    did: data.sender.clone(),
+                                })
+                        {
+                            error!("Error broadcasting event: {e}");
+                        }
+                    } else if self.sent_friend_request_to(&data.sender).await? {
+                        if let Err(e) =
+                            self.tx
+                                .send(MultiPassEventKind::OutgoingFriendRequestRejected {
+                                    did: data.sender.clone(),
+                                })
+                        {
+                            error!("Error broadcasting event: {e}");
+                        }
+                    }
+
                     let mut list = self.list_all_raw_request().await?;
                     list.retain(|r| data.sender.ne(r.did()));
                     self.set_request_list(list).await?;
@@ -822,7 +841,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
     pub async fn is_blocked_by(&self, pubkey: &DID) -> Result<bool, Error> {
         self.block_by_list().await.map(|list| list.contains(pubkey))
     }
-
 }
 
 impl<T: IpfsTypes> FriendsStore<T> {
