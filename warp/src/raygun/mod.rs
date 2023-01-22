@@ -106,7 +106,7 @@ pub enum MessageEventKind {
 }
 
 #[derive(
-    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree, Hash,
 )]
 #[serde(rename_all = "snake_case")]
 #[repr(C)]
@@ -302,7 +302,7 @@ impl Conversation {
     }
 }
 
-#[derive(Default, Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq, Display)]
+#[derive(Default, Clone, Copy, Deserialize, Serialize, Debug, PartialEq, Eq, Display, Hash)]
 #[repr(C)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageType {
@@ -314,10 +314,6 @@ pub enum MessageType {
     /// constellation or sent directly
     #[display(fmt = "attachment")]
     Attachment,
-    /// Event sent as a message.
-    /// TBD
-    #[display(fmt = "event")]
-    Event,
 }
 #[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
 pub struct Message {
@@ -383,6 +379,16 @@ impl Default for Message {
             signature: Default::default(),
             metadata: HashMap::new(),
         }
+    }
+}
+
+impl core::hash::Hash for Message {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+        self.message_type.hash(state);
+        self.conversation_id.hash(state);
+        self.sender.hash(state);
+        self.date.hash(state);
     }
 }
 
@@ -586,14 +592,14 @@ pub enum MessageStatus {
     Delivered,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(C)]
 pub enum ReactionState {
     Add,
     Remove,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(C)]
 pub enum PinState {
     Pin,

@@ -1073,7 +1073,6 @@ async fn message_event_handle(
                                     )?;
                                 }
                             }
-                            MessageType::Event => {}
                         }
                     }
                 }
