@@ -1,6 +1,8 @@
 pub mod conversation;
 pub mod document;
 pub mod message;
+pub mod queue;
+
 use rust_ipfs as ipfs;
 use std::time::Duration;
 
@@ -21,14 +23,14 @@ use warp::{
 
 #[allow(clippy::large_enum_variant)]
 #[allow(clippy::enum_variant_names)]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum ConversationEvents {
     NewConversation(DID),
     NewGroupConversation(DID, Uuid, Vec<DID>, Option<String>),
     DeleteConversation(Uuid),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum MessagingEvents {
     New(Message),
     Edit(Uuid, Uuid, DateTime<Utc>, Vec<String>, Vec<u8>),
