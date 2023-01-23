@@ -315,7 +315,7 @@ pub enum MessageType {
     #[display(fmt = "attachment")]
     Attachment,
 }
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(Clone, Deserialize, Serialize, Debug, Eq, warp_derive::FFIVec, FFIFree)]
 pub struct Message {
     /// ID of the Message
     id: Uuid,
@@ -379,6 +379,16 @@ impl Default for Message {
             signature: Default::default(),
             metadata: HashMap::new(),
         }
+    }
+}
+
+impl PartialEq for Message {
+    fn eq(&self, other: &Self) -> bool {
+        self.id.eq(&other.id)
+            && self.message_type.eq(&other.message_type)
+            && self.conversation_id.eq(&other.conversation_id)
+            && self.sender.eq(&other.sender)
+            && self.date.eq(&other.date)
     }
 }
 

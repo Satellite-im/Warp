@@ -110,7 +110,7 @@ pub enum PeerConnectionType {
 }
 
 pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
-    ipfs: ipfs::Ipfs<T>,
+    ipfs: &ipfs::Ipfs<T>,
     pkey: I,
 ) -> anyhow::Result<PeerConnectionType> {
     let peer_id = match pkey.into() {

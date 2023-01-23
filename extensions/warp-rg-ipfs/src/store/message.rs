@@ -1,4 +1,3 @@
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::PathBuf;
@@ -12,10 +11,9 @@ use futures::channel::oneshot::Sender as OneshotSender;
 use futures::stream::FuturesUnordered;
 use futures::{SinkExt, Stream, StreamExt};
 use rust_ipfs::libp2p::swarm::dial_opts::DialOpts;
-use rust_ipfs::{Ipfs, IpfsTypes, PeerId, SubscriptionStream};
+use rust_ipfs::{Ipfs, IpfsTypes, SubscriptionStream};
 
 use libipld::Cid;
-use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast::{self, Receiver as BroadcastReceiver, Sender as BroadcastSender};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -35,11 +33,12 @@ use warp::raygun::{
 use warp::sata::Sata;
 use warp::sync::Arc;
 
-use crate::store::connected_to_peer;
 use crate::{Persistent, SpamFilter};
 
 use super::conversation::{ConversationDocument, MessageDocument};
 use super::document::{GetDag, ToCid};
+use super::queue::{Queue, QueueData, QueueEntryType};
+
 use super::{
     did_to_libp2p_pub, topic_discovery, verify_serde_sig, ConversationEvents, MessagingEvents,
 };
@@ -76,7 +75,7 @@ pub struct MessageStore<T: IpfsTypes> {
     stream_event_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
 
     // Queue
-    queue: Arc<tokio::sync::RwLock<HashMap<DID, Vec<Queue>>>>,
+    queue: Queue<T>,
 
     // DID
     did: Arc<DID>,
@@ -125,7 +124,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         account: Box<dyn MultiPass>,
         filesystem: Option<Box<dyn Constellation>>,
         discovery: bool,
-        interval_ms: u64,
+        _interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
         (
             check_spam,
@@ -147,9 +146,15 @@ impl<T: IpfsTypes> MessageStore<T> {
             }
         }
 
-        let queue = Arc::new(Default::default());
         let conversation_cid = Arc::new(Default::default());
         let did = Arc::new(account.decrypt_private_key(None)?);
+
+        let queue = Queue::new(
+            ipfs.clone(),
+            did.clone(),
+            path.clone().map(|p| p.join("queue")),
+        )
+        .await;
         let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
         let stream_task = Arc::new(Default::default());
         let stream_event_task = Arc::new(Default::default());
@@ -206,25 +211,14 @@ impl<T: IpfsTypes> MessageStore<T> {
                     return;
                 };
                 futures::pin_mut!(stream);
-                let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
-                loop {
-                    tokio::select! {
-                        message = stream.next() => {
-                            if let Some(message) = message {
-                                if let Ok(sata) = serde_json::from_slice::<Sata>(&message.data) {
-                                    if let Ok(data) = sata.decrypt::<Vec<u8>>(did.as_ref()) {
-                                        if let Ok(events) = serde_json::from_slice::<ConversationEvents>(&data) {
-                                            if let Err(e) = store.process_conversation(sata, events).await {
-                                                error!("Error processing conversation: {e}");
-                                            }
-                                        }
-                                    }
+                while let Some(message) = stream.next().await {
+                    if let Ok(sata) = serde_json::from_slice::<Sata>(&message.data) {
+                        if let Ok(data) = sata.decrypt::<Vec<u8>>(did.as_ref()) {
+                            if let Ok(events) = serde_json::from_slice::<ConversationEvents>(&data)
+                            {
+                                if let Err(e) = store.process_conversation(sata, events).await {
+                                    error!("Error processing conversation: {e}");
                                 }
-                            }
-                        }
-                        _ = interval.tick() => {
-                            if let Err(e) = store.process_queue().await {
-                                error!("Error processing queue: {e}");
                             }
                         }
                     }
@@ -585,7 +579,7 @@ impl<T: IpfsTypes> MessageStore<T> {
                 let mut document: ConversationDocument =
                     conversation_cid.get_dag(&self.ipfs, None).await?;
                 let topic = document.topic();
-                self.queue.write().await.remove(&sender);
+                self.queue.remove_all(&sender).await;
 
                 tokio::spawn({
                     let ipfs = self.ipfs.clone();
@@ -612,66 +606,6 @@ impl<T: IpfsTypes> MessageStore<T> {
                     .send(RayGunEventKind::ConversationDeleted { conversation_id })
                 {
                     error!("Error broadcasting event: {e}");
-                }
-            }
-        }
-        Ok(())
-    }
-
-    async fn process_queue(&self) -> anyhow::Result<()> {
-        let mut list = self.queue.read().await.clone();
-        for (did, items) in list.iter_mut() {
-            if let Ok(crate::store::PeerConnectionType::Connected) =
-                connected_to_peer(self.ipfs.clone(), did.clone()).await
-            {
-                for item in items.iter_mut() {
-                    let Queue::Direct {
-                        peer,
-                        topic,
-                        data,
-                        sent,
-                        ..
-                    } = item;
-                    if !*sent {
-                        if let Ok(peers) = self.ipfs.pubsub_peers(Some(topic.clone())).await {
-                            //TODO: Check peer against conversation to see if they are connected
-                            if peers.contains(peer) {
-                                let bytes = match serde_json::to_vec(&data) {
-                                    Ok(bytes) => bytes,
-                                    Err(e) => {
-                                        error!("Error serializing data to bytes: {e}");
-                                        continue;
-                                    }
-                                };
-
-                                if let Err(e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await
-                                {
-                                    error!("Error publishing to topic: {e}");
-                                    break;
-                                }
-
-                                *sent = true;
-                            }
-                        }
-                    }
-                    self.queue
-                        .write()
-                        .await
-                        .entry(did.clone())
-                        .or_default()
-                        .retain(|queue| {
-                            let Queue::Direct {
-                                sent: inner_sent,
-                                topic: inner_topic,
-                                ..
-                            } = queue;
-
-                            if inner_topic.eq(&*topic) && *sent != *inner_sent {
-                                return false;
-                            }
-                            true
-                        });
-                    self.save_queue().await;
                 }
             }
         }
@@ -768,27 +702,30 @@ impl<T: IpfsTypes> MessageStore<T> {
                 let bytes = serde_json::to_vec(&data)?;
                 if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
                     warn!("Unable to publish to topic. Queuing event");
-                    if let Err(e) = self
-                        .queue_event(
-                            did_key.clone(),
-                            Queue::direct(convo_id, None, peer_id, topic.clone(), data),
+
+                    self.queue
+                        .insert(
+                            QueueEntryType::Conversation(convo_id),
+                            topic.clone(),
+                            did_key,
+                            QueueData::Conversation(ConversationEvents::NewConversation(
+                                own_did.clone(),
+                            )),
                         )
-                        .await
-                    {
-                        error!("Error submitting event to queue: {e}");
-                    }
+                        .await;
                 }
             }
             false => {
-                if let Err(e) = self
-                    .queue_event(
-                        did_key.clone(),
-                        Queue::direct(convo_id, None, peer_id, topic.clone(), data),
+                self.queue
+                    .insert(
+                        QueueEntryType::Conversation(convo_id),
+                        topic.clone(),
+                        did_key,
+                        QueueData::Conversation(ConversationEvents::NewConversation(
+                            own_did.clone(),
+                        )),
                     )
-                    .await
-                {
-                    error!("Error submitting event to queue: {e}");
-                }
+                    .await;
             }
         };
 
@@ -880,7 +817,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             serde_json::to_vec(&ConversationEvents::NewGroupConversation(
                 own_did.clone(),
                 conversation.id(),
-                recipient,
+                recipient.clone(),
                 conversation.signature.clone(),
             ))?,
         )?;
@@ -900,27 +837,35 @@ impl<T: IpfsTypes> MessageStore<T> {
                     let bytes = serde_json::to_vec(&data)?;
                     if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
                         warn!("Unable to publish to topic. Queuing event");
-                        if let Err(e) = self
-                            .queue_event(
-                                did,
-                                Queue::direct(convo_id, None, peer_id, topic.clone(), data.clone()),
+                        self.queue
+                            .insert(
+                                QueueEntryType::Conversation(convo_id),
+                                topic.clone(),
+                                &did,
+                                QueueData::Conversation(ConversationEvents::NewGroupConversation(
+                                    own_did.clone(),
+                                    conversation.id(),
+                                    recipient.clone(),
+                                    conversation.signature.clone(),
+                                )),
                             )
-                            .await
-                        {
-                            error!("Error submitting event to queue: {e}");
-                        }
+                            .await;
                     }
                 }
                 false => {
-                    if let Err(e) = self
-                        .queue_event(
-                            did,
-                            Queue::direct(convo_id, None, peer_id, topic.clone(), data.clone()),
+                    self.queue
+                        .insert(
+                            QueueEntryType::Conversation(convo_id),
+                            topic.clone(),
+                            &did,
+                            QueueData::Conversation(ConversationEvents::NewGroupConversation(
+                                own_did.clone(),
+                                conversation.id(),
+                                recipient.clone(),
+                                conversation.signature.clone(),
+                            )),
                         )
-                        .await
-                    {
-                        error!("Error submitting event to queue: {e}");
-                    }
+                        .await;
                 }
             };
         }
@@ -1002,39 +947,29 @@ impl<T: IpfsTypes> MessageStore<T> {
                             //      its due to the message limit being reached we should probably break up the message to fix into
                             //      "max_transmit_size" within rust-libp2p gossipsub
                             //      For now we will queue the message if we hit an error
-                            if let Err(e) = self
-                                .queue_event(
-                                    recipient.clone(),
-                                    Queue::direct(
-                                        document_type.id(),
-                                        None,
-                                        peer_id,
-                                        topic.clone(),
-                                        data.clone(),
+                            self.queue
+                                .insert(
+                                    QueueEntryType::Conversation(document_type.id()),
+                                    topic.clone(),
+                                    &recipient,
+                                    QueueData::Conversation(
+                                        ConversationEvents::DeleteConversation(document_type.id()),
                                     ),
                                 )
-                                .await
-                            {
-                                error!("Error submitting event to queue: {e}");
-                            }
+                                .await;
                         }
                     }
                     false => {
-                        if let Err(e) = self
-                            .queue_event(
-                                recipient.clone(),
-                                Queue::direct(
+                        self.queue
+                            .insert(
+                                QueueEntryType::Conversation(document_type.id()),
+                                topic.clone(),
+                                &recipient,
+                                QueueData::Conversation(ConversationEvents::DeleteConversation(
                                     document_type.id(),
-                                    None,
-                                    peer_id,
-                                    topic.clone(),
-                                    data.clone(),
-                                ),
+                                )),
                             )
-                            .await
-                        {
-                            error!("Error submitting event to queue: {e}");
-                        }
+                            .await;
                     }
                 };
             }
@@ -1185,33 +1120,25 @@ impl<T: IpfsTypes> MessageStore<T> {
                 let bytes = serde_json::to_vec(&data)?;
                 if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
                     warn!("Unable to publish to topic. Queuing event");
-                    if let Err(e) = self
-                        .queue_event(
-                            did_key.clone(),
-                            Queue::direct(
-                                conversation_id,
-                                None,
-                                peer_id,
-                                topic.clone(),
-                                data.clone(),
-                            ),
+                    self.queue
+                        .insert(
+                            QueueEntryType::Conversation(conversation_id),
+                            topic.clone(),
+                            did_key,
+                            QueueData::Conversation(event),
                         )
-                        .await
-                    {
-                        error!("Error submitting event to queue: {e}");
-                    }
+                        .await;
                 }
             }
             false => {
-                if let Err(e) = self
-                    .queue_event(
-                        did_key.clone(),
-                        Queue::direct(conversation_id, None, peer_id, topic.clone(), data.clone()),
+                self.queue
+                    .insert(
+                        QueueEntryType::Conversation(conversation_id),
+                        topic.clone(),
+                        did_key,
+                        QueueData::Conversation(event),
                     )
-                    .await
-                {
-                    error!("Error submitting event to queue: {e}");
-                }
+                    .await;
             }
         };
 
@@ -1248,17 +1175,16 @@ impl<T: IpfsTypes> MessageStore<T> {
             .collect::<Vec<_>>();
 
         for peer in list {
-            if let Entry::Occupied(entry) = self.queue.read().await.clone().entry(peer) {
-                for item in entry.get() {
-                    let Queue::Direct { id, m_id, .. } = item;
-                    if conversation.id() == *id {
-                        if let Some(m_id) = m_id {
-                            if message_id == *m_id {
-                                return Ok(MessageStatus::NotSent);
-                            }
-                        }
-                    }
-                }
+            if self
+                .queue
+                .get(
+                    QueueEntryType::Messaging(conversation_id, Some(message_id)),
+                    &peer,
+                )
+                .await
+                .is_some()
+            {
+                return Ok(MessageStatus::NotSent);
             }
         }
 
@@ -2195,11 +2121,11 @@ impl<T: IpfsTypes> MessageStore<T> {
         Ok(())
     }
 
-    pub async fn send_raw_event<S: Serialize + Send + Sync>(
+    pub async fn send_raw_event(
         &mut self,
         conversation: Uuid,
         message_id: Option<Uuid>,
-        event: S,
+        event: MessagingEvents,
         queue: bool,
     ) -> Result<(), Error> {
         let conversation = self.get_conversation(conversation).await?;
@@ -2234,86 +2160,54 @@ impl<T: IpfsTypes> MessageStore<T> {
         {
             let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
 
-            match peers.contains(&peer_id) {
-                true => {
-                    if let Err(e) = self
+            if (!peers.contains(&peer_id) || (peers.contains(&peer_id)
+                    && self
                         .ipfs
                         .pubsub_publish(conversation.topic(), bytes.clone())
                         .await
-                    {
-                        if queue {
-                            warn!("Unable to publish to topic due to error: {e}... Queuing event");
-                            if let Err(e) = self
-                                .queue_event(
-                                    recipient.clone(),
-                                    Queue::direct(
-                                        conversation.id(),
-                                        message_id,
-                                        peer_id,
-                                        conversation.topic(),
-                                        payload.clone(),
-                                    ),
-                                )
-                                .await
-                            {
-                                error!("Error submitting event to queue: {e}");
-                            }
-                        }
-                    }
-                }
-                false => {
-                    if queue {
-                        if let Err(e) = self
-                            .queue_event(
-                                recipient.clone(),
-                                Queue::direct(
-                                    conversation.id(),
-                                    message_id,
-                                    peer_id,
-                                    conversation.topic(),
-                                    payload.clone(),
-                                ),
-                            )
-                            .await
-                        {
-                            error!("Error submitting event to queue: {e}");
-                        }
-                    }
-                }
-            };
-        }
-
-        Ok(())
-    }
-
-    async fn queue_event(&self, did: DID, queue: Queue) -> Result<(), Error> {
-        self.queue.write().await.entry(did).or_default().push(queue);
-        self.save_queue().await;
-
-        Ok(())
-    }
-
-    async fn save_queue(&self) {
-        if let Some(path) = self.path.as_ref() {
-            let bytes = match serde_json::to_vec(&*self.queue.read().await) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    error!("Error serializing queue list into bytes: {e}");
-                    return;
-                }
-            };
-
-            if let Err(e) = tokio::fs::write(path.join(".messaging_queue"), bytes).await {
-                error!("Error saving queue: {e}");
+                        .is_err())) && queue {
+                self.queue
+                    .insert(
+                        QueueEntryType::Messaging(conversation.id(), message_id),
+                        conversation.topic(),
+                        recipient,
+                        QueueData::Messaging(event.clone()),
+                    )
+                    .await;
             }
         }
+
+        Ok(())
     }
 
+    // async fn queue_event(&self, did: DID, queue: Queue) -> Result<(), Error> {
+    //     self.queue.write().await.entry(did).or_default().push(queue);
+    //     self.save_queue().await;
+
+    //     Ok(())
+    // }
+
+    // async fn save_queue(&self) {
+    //     // if let Some(path) = self.path.as_ref() {
+    //     //     let bytes = match serde_json::to_vec(&*self.queue.read().await) {
+    //     //         Ok(bytes) => bytes,
+    //     //         Err(e) => {
+    //     //             error!("Error serializing queue list into bytes: {e}");
+    //     //             return;
+    //     //         }
+    //     //     };
+
+    //     //     if let Err(e) = tokio::fs::write(path.join(".messaging_queue"), bytes).await {
+    //     //         error!("Error saving queue: {e}");
+    //     //     }
+    //     // }
+    // }
+
     async fn load_queue(&self) -> anyhow::Result<()> {
-        if let Some(path) = self.path.as_ref() {
-            let data = tokio::fs::read(path.join(".messaging_queue")).await?;
-            *self.queue.write().await = serde_json::from_slice(&data)?;
-        }
+        // if let Some(path) = self.path.as_ref() {
+        //     let data = tokio::fs::read(path.join(".messaging_queue")).await?;
+        //     *self.queue.write().await = serde_json::from_slice(&data)?;
+        // }
 
         Ok(())
     }
@@ -2754,40 +2648,6 @@ pub struct EventOpt {
 pub enum MessageDirection {
     In,
     Out,
-}
-
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Queue {
-    Direct {
-        id: Uuid,
-        m_id: Option<Uuid>,
-        peer: PeerId,
-        topic: String,
-        data: Sata,
-        sent: bool,
-    },
-    // Group {
-    //     id: Uuid,
-    //     m_id: Option<Uuid>,
-    //     peer: HashSet<PeerId>,
-    //     topic: String,
-    //     data: Sata,
-    //     sent: bool,
-    // },
-}
-
-impl Queue {
-    pub fn direct(id: Uuid, m_id: Option<Uuid>, peer: PeerId, topic: String, data: Sata) -> Self {
-        Queue::Direct {
-            id,
-            m_id,
-            peer,
-            topic,
-            data,
-            sent: false,
-        }
-    }
 }
 
 pub fn spam_check(message: &mut Message, filter: Arc<Option<SpamFilter>>) -> anyhow::Result<()> {
