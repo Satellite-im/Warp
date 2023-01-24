@@ -29,6 +29,7 @@ use super::phonebook::PhoneBook;
 use super::queue::Queue;
 use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType};
 
+#[allow(clippy::type_complexity)]
 pub struct FriendsStore<T: IpfsTypes> {
     ipfs: Ipfs<T>,
 
