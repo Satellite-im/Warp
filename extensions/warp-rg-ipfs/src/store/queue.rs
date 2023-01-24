@@ -1,11 +1,14 @@
 use std::collections::hash_map::Entry;
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
+use futures::FutureExt;
 use futures::{channel::mpsc, StreamExt};
 use rust_ipfs::{Ipfs, IpfsTypes};
 use serde::{Deserialize, Serialize};
+use tokio::sync::Notify;
 use tokio::{sync::RwLock, task::JoinHandle};
+use tokio_stream::wrappers::ReadDirStream;
 use uuid::Uuid;
 use warp::crypto::cipher::Cipher;
 use warp::crypto::did_key::{Generate, ECDH};
@@ -42,7 +45,7 @@ pub struct Queue<T: IpfsTypes> {
     did: Arc<DID>,
     ipfs: Ipfs<T>,
     removal: mpsc::UnboundedSender<(QueueEntryType, DID)>,
-    entries: Arc<RwLock<HashMap<DID, HashSet<QueueEntry<T>>>>>,
+    entries: Arc<RwLock<HashMap<DID, BTreeSet<QueueEntry<T>>>>>,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
 }
 
@@ -85,6 +88,18 @@ impl<T: IpfsTypes> Queue<T> {
             async move {
                 while let Some((entry_type, did)) = rx.next().await {
                     let _ = queue.remove(entry_type, &did).await;
+                    if let Entry::Occupied(entry) = queue.entries.write().await.entry(did) {
+                        let entry = entry.get();
+                        if entry.is_empty() {
+                            continue;
+                        }
+                        
+                        if let Some(item) =
+                            entry.iter().find(|entry| entry.entry_type() == entry_type)
+                        {
+                            item.start();
+                        }
+                    }
                 }
             }
         });
@@ -104,6 +119,12 @@ impl<T: IpfsTypes> Queue<T> {
         if let Err(e) = entry.save().await {
             error!("Error saving queue: {e}");
         }
+        if let Entry::Occupied(entry) = self.entries.write().await.entry(did.clone()) {
+            let entry = entry.get();
+            if let Some(item) = entry.first() {
+                item.start();
+            }
+        }
     }
 
     async fn raw_insert(
@@ -114,8 +135,10 @@ impl<T: IpfsTypes> Queue<T> {
         did: &DID,
         entry_item: QueueData,
     ) -> QueueEntry<T> {
+        let count = self.count(did).await.unwrap_or_default();
         let queue_item = QueueEntry::new(
             self.ipfs.clone(),
+            count,
             id,
             self.path.clone(),
             topic,
@@ -127,19 +150,22 @@ impl<T: IpfsTypes> Queue<T> {
         )
         .await;
 
-        let prev = match self.entries.write().await.entry(did.clone()) {
-            Entry::Vacant(entry) => {
-                let item = {
-                    let mut set = HashSet::new();
-                    set.insert(queue_item.clone());
-                    set
-                };
-
-                entry.insert(item);
-                None
-            }
-            Entry::Occupied(mut entry) => entry.get_mut().replace(queue_item.clone()),
-        };
+        let prev = self
+            .entries
+            .write()
+            .map(|mut item| match item.entry(did.clone()) {
+                Entry::Vacant(entry) => {
+                    let item = {
+                        let mut set = BTreeSet::new();
+                        set.insert(queue_item.clone());
+                        set
+                    };
+                    entry.insert(item);
+                    None
+                }
+                Entry::Occupied(mut entry) => entry.get_mut().replace(queue_item.clone()),
+            })
+            .await;
 
         if let Some(prev) = prev {
             prev.cancel().await;
@@ -160,6 +186,13 @@ impl<T: IpfsTypes> Queue<T> {
             }
         }
         None
+    }
+
+    pub async fn count(&self, did: &DID) -> Option<usize> {
+        self.entries
+            .read()
+            .map(|set| set.get(did).map(|set| set.len()))
+            .await
     }
 
     pub async fn remove(&self, entry_type: QueueEntryType, did: &DID) -> Option<QueueData> {
@@ -191,8 +224,8 @@ impl<T: IpfsTypes> Queue<T> {
     pub async fn remove_all(&self, did: &DID) {
         let items = self.entries.write().await.remove(did);
 
-        if let Some(mut entry) = items {
-            for item in entry.drain() {
+        if let Some(entry) = items {
+            for item in entry {
                 item.cancel().await;
                 let _ = item.remove().await.ok();
             }
@@ -202,6 +235,7 @@ impl<T: IpfsTypes> Queue<T> {
 
 #[derive(Serialize, Deserialize)]
 pub struct QueueEntry<T: IpfsTypes> {
+    seq: usize,
     id: Uuid,
     #[serde(skip)]
     path: Option<PathBuf>,
@@ -215,11 +249,14 @@ pub struct QueueEntry<T: IpfsTypes> {
     did: Arc<DID>,
     #[serde(skip)]
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
+    #[serde(skip)]
+    notify: Arc<Notify>,
 }
 
 impl<T: IpfsTypes> std::fmt::Debug for QueueEntry<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("QueueEntry")
+            .field("seq", &self.seq)
             .field("id", &self.id)
             .field("recipient", &self.did)
             .field("topic", &self.topic)
@@ -245,11 +282,24 @@ impl<T: IpfsTypes> PartialEq for QueueEntry<T> {
     }
 }
 
+impl<T: IpfsTypes> PartialOrd for QueueEntry<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.seq.partial_cmp(&other.seq)
+    }
+}
+
+impl<T: IpfsTypes> Ord for QueueEntry<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.seq.cmp(&other.seq)
+    }
+}
+
 impl<T: IpfsTypes> Eq for QueueEntry<T> {}
 
 impl<T: IpfsTypes> Clone for QueueEntry<T> {
     fn clone(&self) -> Self {
         Self {
+            seq: self.seq,
             id: self.id,
             path: self.path.clone(),
             ipfs: self.ipfs.clone(),
@@ -259,6 +309,7 @@ impl<T: IpfsTypes> Clone for QueueEntry<T> {
             data: self.data.clone(),
             did: self.did.clone(),
             task: self.task.clone(),
+            notify: self.notify.clone(),
         }
     }
 }
@@ -267,6 +318,7 @@ impl<T: IpfsTypes> QueueEntry<T> {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         ipfs: Ipfs<T>,
+        seq: usize,
         id: Option<Uuid>,
         path: Option<PathBuf>,
         topic: String,
@@ -276,8 +328,11 @@ impl<T: IpfsTypes> QueueEntry<T> {
         data: QueueData,
         tx: mpsc::UnboundedSender<(QueueEntryType, DID)>,
     ) -> Self {
+        let notify = Arc::new(Notify::new());
+
         let entry = QueueEntry {
             id: id.unwrap_or_else(Uuid::new_v4),
+            seq,
             path,
             recipient,
             ipfs: Some(ipfs),
@@ -286,6 +341,7 @@ impl<T: IpfsTypes> QueueEntry<T> {
             data,
             task: Default::default(),
             did,
+            notify,
         };
 
         let task = tokio::spawn({
@@ -293,6 +349,7 @@ impl<T: IpfsTypes> QueueEntry<T> {
             let ipfs = entry.ipfs.clone().expect("IPFS is always Some");
             async move {
                 let topic = entry.topic.clone();
+                entry.notify.notified().await;
                 loop {
                     let did = entry.recipient.clone();
                     let Ok(peer_id) = did_to_libp2p_pub(&did).map(|pk| pk.to_peer_id()) else {
@@ -303,7 +360,6 @@ impl<T: IpfsTypes> QueueEntry<T> {
                         super::connected_to_peer(&ipfs, peer_id).await
                     {
                         if let Ok(peers) = ipfs.pubsub_peers(Some(topic.clone())).await {
-                            //TODO: Check peer against conversation to see if they are connected
                             if peers.contains(&peer_id) {
                                 let mut data = Sata::default();
                                 if data.add_recipient(did.as_ref()).is_err() {
@@ -347,9 +403,7 @@ impl<T: IpfsTypes> QueueEntry<T> {
                                     }
                                 };
 
-                                if let Err(e) =
-                                    ipfs.pubsub_publish(topic.clone(), bytes).await
-                                {
+                                if let Err(e) = ipfs.pubsub_publish(topic.clone(), bytes).await {
                                     error!("Error publishing to topic: {e}");
                                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                                     continue;
@@ -370,6 +424,10 @@ impl<T: IpfsTypes> QueueEntry<T> {
         entry
     }
 
+    pub fn start(&self) {
+        self.notify.notify_one();
+    }
+
     pub fn entry_type(&self) -> QueueEntryType {
         self.entry_type
     }
@@ -379,14 +437,15 @@ impl<T: IpfsTypes> QueueEntry<T> {
         let recipient = self.recipient.clone();
         self.path.clone().map(|path| match entry_type {
             QueueEntryType::Conversation(id) => path
+                .join(recipient.to_string())
                 .join("conversation")
-                .join(id.to_string())
-                .join(recipient.to_string()),
+                .join(id.to_string()),
+
             QueueEntryType::Messaging(conversation_id, message_id) => path
+                .join(recipient.to_string())
                 .join("messaging")
                 .join(conversation_id.to_string())
-                .join(message_id.unwrap_or_default().to_string())
-                .join(recipient.to_string()),
+                .join(message_id.unwrap_or_default().to_string()),
         })
     }
 
@@ -394,6 +453,15 @@ impl<T: IpfsTypes> QueueEntry<T> {
         if let Some(path) = self.path() {
             if path.exists() {
                 tokio::fs::remove_file(path.join(self.id.to_string())).await?;
+                let mut empty = true;
+                let mut entry_stream = ReadDirStream::new(tokio::fs::read_dir(&path).await?);
+                while let Some(Ok(_)) = entry_stream.next().await {
+                    empty = false;
+                }
+
+                if empty {
+                    tokio::fs::remove_dir(path).await?;
+                }
             }
         }
 
