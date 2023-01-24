@@ -196,17 +196,6 @@ impl<T: IpfsTypes> MessageStore<T> {
             async move {
                 info!("MessagingStore task created");
 
-                tokio::spawn({
-                    let store = store.clone();
-                    async move {
-                        info!("Loading queue");
-                        // Load the queue in a separate task in case it is large
-                        // Note: In the future this will not be needed once a req/res system
-                        //       is implemented
-                        if let Err(_e) = store.load_queue().await {}
-                    }
-                });
-
                 let did = &*(store.did.clone());
                 let Ok(stream) = store.ipfs.pubsub_subscribe(format!("{did}/messaging")).await else {
                     error!("Unable to create subscription stream. Terminating task");
@@ -2182,38 +2171,6 @@ impl<T: IpfsTypes> MessageStore<T> {
                     .await;
             }
         }
-
-        Ok(())
-    }
-
-    // async fn queue_event(&self, did: DID, queue: Queue) -> Result<(), Error> {
-    //     self.queue.write().await.entry(did).or_default().push(queue);
-    //     self.save_queue().await;
-
-    //     Ok(())
-    // }
-
-    // async fn save_queue(&self) {
-    //     // if let Some(path) = self.path.as_ref() {
-    //     //     let bytes = match serde_json::to_vec(&*self.queue.read().await) {
-    //     //         Ok(bytes) => bytes,
-    //     //         Err(e) => {
-    //     //             error!("Error serializing queue list into bytes: {e}");
-    //     //             return;
-    //     //         }
-    //     //     };
-
-    //     //     if let Err(e) = tokio::fs::write(path.join(".messaging_queue"), bytes).await {
-    //     //         error!("Error saving queue: {e}");
-    //     //     }
-    //     // }
-    // }
-
-    async fn load_queue(&self) -> anyhow::Result<()> {
-        // if let Some(path) = self.path.as_ref() {
-        //     let data = tokio::fs::read(path.join(".messaging_queue")).await?;
-        //     *self.queue.write().await = serde_json::from_slice(&data)?;
-        // }
 
         Ok(())
     }
