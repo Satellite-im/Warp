@@ -148,7 +148,6 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         let queue_path = path.clone();
 
-
         let conversation_cid = Arc::new(Default::default());
         let did = Arc::new(account.decrypt_private_key(None)?);
 
@@ -688,38 +687,24 @@ impl<T: IpfsTypes> MessageStore<T> {
                 error!("Unable to save info to file: {e}");
             }
         }
-
-        match peers.contains(&peer_id) {
-            true => {
-                let bytes = serde_json::to_vec(&data)?;
-                if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
-                    warn!("Unable to publish to topic. Queuing event");
-
-                    self.queue
-                        .insert(
-                            QueueEntryType::Conversation(convo_id),
-                            topic.clone(),
-                            did_key,
-                            QueueData::Conversation(ConversationEvents::NewConversation(
-                                own_did.clone(),
-                            )),
-                        )
-                        .await;
-                }
-            }
-            false => {
-                self.queue
-                    .insert(
-                        QueueEntryType::Conversation(convo_id),
-                        topic.clone(),
-                        did_key,
-                        QueueData::Conversation(ConversationEvents::NewConversation(
-                            own_did.clone(),
-                        )),
-                    )
-                    .await;
-            }
-        };
+        let bytes = serde_json::to_vec(&data)?;
+        if !peers.contains(&peer_id)
+            || peers.contains(&peer_id)
+                && self
+                    .ipfs
+                    .pubsub_publish(topic.clone(), bytes)
+                    .await
+                    .is_err()
+        {
+            self.queue
+                .insert(
+                    QueueEntryType::Conversation(convo_id),
+                    topic.clone(),
+                    did_key,
+                    QueueData::Conversation(ConversationEvents::NewConversation(own_did.clone())),
+                )
+                .await;
+        }
 
         if !self.disable_sender_event_emit.load(Ordering::Relaxed) {
             if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
@@ -824,42 +809,29 @@ impl<T: IpfsTypes> MessageStore<T> {
         for (did, peer_id) in peer_id_list {
             let topic = format!("{did}/messaging");
             let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
-            match peers.contains(&peer_id) {
-                true => {
-                    let bytes = serde_json::to_vec(&data)?;
-                    if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
-                        warn!("Unable to publish to topic. Queuing event");
-                        self.queue
-                            .insert(
-                                QueueEntryType::Conversation(convo_id),
-                                topic.clone(),
-                                &did,
-                                QueueData::Conversation(ConversationEvents::NewGroupConversation(
-                                    own_did.clone(),
-                                    conversation.id(),
-                                    recipient.clone(),
-                                    conversation.signature.clone(),
-                                )),
-                            )
-                            .await;
-                    }
-                }
-                false => {
-                    self.queue
-                        .insert(
-                            QueueEntryType::Conversation(convo_id),
-                            topic.clone(),
-                            &did,
-                            QueueData::Conversation(ConversationEvents::NewGroupConversation(
-                                own_did.clone(),
-                                conversation.id(),
-                                recipient.clone(),
-                                conversation.signature.clone(),
-                            )),
-                        )
-                        .await;
-                }
-            };
+            let bytes = serde_json::to_vec(&data)?;
+            if !peers.contains(&peer_id)
+                || peers.contains(&peer_id)
+                    && self
+                        .ipfs
+                        .pubsub_publish(topic.clone(), bytes)
+                        .await
+                        .is_err()
+            {
+                self.queue
+                    .insert(
+                        QueueEntryType::Conversation(convo_id),
+                        topic.clone(),
+                        &did,
+                        QueueData::Conversation(ConversationEvents::NewGroupConversation(
+                            own_did.clone(),
+                            conversation.id(),
+                            recipient.clone(),
+                            conversation.signature.clone(),
+                        )),
+                    )
+                    .await;
+            }
         }
 
         if !self.disable_sender_event_emit.load(Ordering::Relaxed) {
@@ -930,40 +902,25 @@ impl<T: IpfsTypes> MessageStore<T> {
 
                 let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
-                match peers.contains(&peer_id) {
-                    true => {
-                        if let Err(e) = self.ipfs.pubsub_publish(topic.clone(), bytes.clone()).await
-                        {
-                            warn!("Unable to publish to topic: {e}. Queuing event");
-                            //Note: If the error is related to peer not available then we should push this to queue but if
-                            //      its due to the message limit being reached we should probably break up the message to fix into
-                            //      "max_transmit_size" within rust-libp2p gossipsub
-                            //      For now we will queue the message if we hit an error
-                            self.queue
-                                .insert(
-                                    QueueEntryType::Conversation(document_type.id()),
-                                    topic.clone(),
-                                    &recipient,
-                                    QueueData::Conversation(
-                                        ConversationEvents::DeleteConversation(document_type.id()),
-                                    ),
-                                )
-                                .await;
-                        }
-                    }
-                    false => {
-                        self.queue
-                            .insert(
-                                QueueEntryType::Conversation(document_type.id()),
-                                topic.clone(),
-                                &recipient,
-                                QueueData::Conversation(ConversationEvents::DeleteConversation(
-                                    document_type.id(),
-                                )),
-                            )
-                            .await;
-                    }
-                };
+                if !peers.contains(&peer_id)
+                    || peers.contains(&peer_id)
+                        && self
+                            .ipfs
+                            .pubsub_publish(topic.clone(), bytes.clone())
+                            .await
+                            .is_err()
+                {
+                    self.queue
+                        .insert(
+                            QueueEntryType::Conversation(document_type.id()),
+                            topic.clone(),
+                            &recipient,
+                            QueueData::Conversation(ConversationEvents::DeleteConversation(
+                                document_type.id(),
+                            )),
+                        )
+                        .await;
+                }
             }
         }
 
@@ -1107,32 +1064,24 @@ impl<T: IpfsTypes> MessageStore<T> {
         let peer_id = did_to_libp2p_pub(did_key)?.to_peer_id();
         let topic = format!("{did_key}/messaging");
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
-        match peers.contains(&peer_id) {
-            true => {
-                let bytes = serde_json::to_vec(&data)?;
-                if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
-                    warn!("Unable to publish to topic. Queuing event");
-                    self.queue
-                        .insert(
-                            QueueEntryType::Conversation(conversation_id),
-                            topic.clone(),
-                            did_key,
-                            QueueData::Conversation(event),
-                        )
-                        .await;
-                }
-            }
-            false => {
-                self.queue
-                    .insert(
-                        QueueEntryType::Conversation(conversation_id),
-                        topic.clone(),
-                        did_key,
-                        QueueData::Conversation(event),
-                    )
-                    .await;
-            }
-        };
+        let bytes = serde_json::to_vec(&data)?;
+        if !peers.contains(&peer_id)
+            || peers.contains(&peer_id)
+                && self
+                    .ipfs
+                    .pubsub_publish(topic.clone(), bytes)
+                    .await
+                    .is_err()
+        {
+            self.queue
+                .insert(
+                    QueueEntryType::Conversation(conversation_id),
+                    topic.clone(),
+                    did_key,
+                    QueueData::Conversation(event),
+                )
+                .await;
+        }
 
         Ok(())
     }
