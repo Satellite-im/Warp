@@ -7,10 +7,13 @@ use rust_ipfs::{Ipfs, IpfsTypes};
 use serde::{Deserialize, Serialize};
 use tokio::{sync::RwLock, task::JoinHandle};
 use uuid::Uuid;
+use warp::crypto::cipher::Cipher;
+use warp::crypto::did_key::{Generate, ECDH};
+use warp::crypto::zeroize::Zeroizing;
 // use warp::crypto::cipher::Cipher;
 // use warp::crypto::did_key::{Generate, ECDH};
 // use warp::crypto::zeroize::Zeroizing;
-use warp::crypto::DID;
+use warp::crypto::{Ed25519KeyPair, KeyMaterial, DID};
 //Ed25519KeyPair, KeyMaterial,
 use warp::error::Error;
 use warp::logging::tracing::log::error;
@@ -59,6 +62,15 @@ impl<T: IpfsTypes> Clone for Queue<T> {
 impl<T: IpfsTypes> Queue<T> {
     pub async fn new(ipfs: Ipfs<T>, did: Arc<DID>, path: Option<PathBuf>) -> Queue<T> {
         let (tx, mut rx) = mpsc::unbounded();
+
+        if let Some(path) = path.as_ref() {
+            if !path.is_dir() {
+                if let Err(e) = tokio::fs::create_dir_all(path).await {
+                    error!("Error creating directory: {e}");
+                }
+            }
+        }
+
         let queue = Queue {
             path,
             ipfs,
@@ -88,7 +100,10 @@ impl<T: IpfsTypes> Queue<T> {
         did: &DID,
         entry: QueueData,
     ) {
-        let _entry = self.raw_insert(None, entry_type, topic, did, entry).await;
+        let entry = self.raw_insert(None, entry_type, topic, did, entry).await;
+        if let Err(e) = entry.save().await {
+            error!("Error saving queue: {e}");
+        }
     }
 
     async fn raw_insert(
@@ -184,15 +199,21 @@ impl<T: IpfsTypes> Queue<T> {
         }
     }
 }
+
+#[derive(Serialize, Deserialize)]
 pub struct QueueEntry<T: IpfsTypes> {
     id: Uuid,
+    #[serde(skip)]
     path: Option<PathBuf>,
-    ipfs: Ipfs<T>,
     recipient: DID,
+    #[serde(skip)]
+    ipfs: Option<Ipfs<T>>,
     topic: String,
     entry_type: QueueEntryType,
     data: QueueData,
+    #[serde(skip)]
     did: Arc<DID>,
+    #[serde(skip)]
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
 }
 
@@ -213,7 +234,6 @@ impl<T: IpfsTypes> core::hash::Hash for QueueEntry<T> {
         self.id.hash(state);
         self.recipient.hash(state);
         self.entry_type.hash(state);
-        self.data.hash(state);
     }
 }
 
@@ -259,8 +279,8 @@ impl<T: IpfsTypes> QueueEntry<T> {
         let entry = QueueEntry {
             id: id.unwrap_or_else(Uuid::new_v4),
             path,
-            ipfs,
             recipient,
+            ipfs: Some(ipfs),
             topic,
             entry_type,
             data,
@@ -270,6 +290,7 @@ impl<T: IpfsTypes> QueueEntry<T> {
 
         let task = tokio::spawn({
             let entry = entry.clone();
+            let ipfs = entry.ipfs.clone().expect("IPFS is always Some");
             async move {
                 let topic = entry.topic.clone();
                 loop {
@@ -279,9 +300,9 @@ impl<T: IpfsTypes> QueueEntry<T> {
                     };
 
                     if let Ok(crate::store::PeerConnectionType::Connected) =
-                        super::connected_to_peer(&entry.ipfs, peer_id).await
+                        super::connected_to_peer(&ipfs, peer_id).await
                     {
-                        if let Ok(peers) = entry.ipfs.pubsub_peers(Some(topic.clone())).await {
+                        if let Ok(peers) = ipfs.pubsub_peers(Some(topic.clone())).await {
                             //TODO: Check peer against conversation to see if they are connected
                             if peers.contains(&peer_id) {
                                 let mut data = Sata::default();
@@ -327,7 +348,7 @@ impl<T: IpfsTypes> QueueEntry<T> {
                                 };
 
                                 if let Err(e) =
-                                    entry.ipfs.pubsub_publish(topic.clone(), bytes).await
+                                    ipfs.pubsub_publish(topic.clone(), bytes).await
                                 {
                                     error!("Error publishing to topic: {e}");
                                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -386,7 +407,24 @@ impl<T: IpfsTypes> QueueEntry<T> {
                 tokio::fs::create_dir_all(path.clone()).await?;
             }
 
-            //TODO
+            let bytes = serde_json::to_vec(self)?;
+
+            let prikey =
+                Ed25519KeyPair::from_secret_key(&self.did.private_key_bytes()).get_x25519();
+            let pubkey = Ed25519KeyPair::from_public_key(&self.did.public_key_bytes()).get_x25519();
+
+            let prik = match std::panic::catch_unwind(|| prikey.key_exchange(&pubkey)) {
+                Ok(pri) => Zeroizing::new(pri),
+                Err(e) => {
+                    error!("Error generating key: {e:?}");
+                    return Err(anyhow::anyhow!("{:?}", e).into());
+                }
+            };
+
+            let data =
+                Cipher::direct_encrypt(warp::crypto::cipher::CipherType::Aes256Gcm, &bytes, &prik)?;
+
+            tokio::fs::write(path.join(self.id.to_string()), data).await?;
         }
 
         Ok(())

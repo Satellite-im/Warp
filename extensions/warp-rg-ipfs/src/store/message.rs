@@ -146,13 +146,16 @@ impl<T: IpfsTypes> MessageStore<T> {
             }
         }
 
+        let queue_path = path.clone();
+
+
         let conversation_cid = Arc::new(Default::default());
         let did = Arc::new(account.decrypt_private_key(None)?);
 
         let queue = Queue::new(
             ipfs.clone(),
             did.clone(),
-            path.clone().map(|p| p.join("queue")),
+            queue_path.map(|p| p.join("queue")),
         )
         .await;
         let spam_filter = Arc::new(check_spam.then_some(SpamFilter::default()?));
@@ -2160,12 +2163,15 @@ impl<T: IpfsTypes> MessageStore<T> {
         {
             let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
 
-            if (!peers.contains(&peer_id) || (peers.contains(&peer_id)
+            if (!peers.contains(&peer_id)
+                || (peers.contains(&peer_id)
                     && self
                         .ipfs
                         .pubsub_publish(conversation.topic(), bytes.clone())
                         .await
-                        .is_err())) && queue {
+                        .is_err()))
+                && queue
+            {
                 self.queue
                     .insert(
                         QueueEntryType::Messaging(conversation.id(), message_id),
