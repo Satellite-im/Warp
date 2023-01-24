@@ -117,22 +117,19 @@ async fn create_rg(
 ) -> anyhow::Result<Box<dyn RayGun>> {
     let mut config = match path.as_ref() {
         None => RgIpfsConfig::testing(),
-        Some(path) => RgIpfsConfig::production(path)
+        Some(path) => RgIpfsConfig::production(path),
     };
 
     config.store_setting.disable_sender_event_emit = disable_sender_emitter;
 
     let chat = match path.as_ref() {
-        Some(_) => {
-            Box::new(
-                IpfsMessaging::<Persistent>::new(Some(config), account, filesystem, Some(cache))
-                    .await?,
-            ) as Box<dyn RayGun>
-        }
-        None => {
-            Box::new(IpfsMessaging::<Temporary>::new(Some(config), account, filesystem, Some(cache)).await?)
-                as Box<dyn RayGun>
-        }
+        Some(_) => Box::new(
+            IpfsMessaging::<Persistent>::new(Some(config), account, filesystem, Some(cache))
+                .await?,
+        ) as Box<dyn RayGun>,
+        None => Box::new(
+            IpfsMessaging::<Temporary>::new(Some(config), account, filesystem, Some(cache)).await?,
+        ) as Box<dyn RayGun>,
     };
 
     Ok(chat)
@@ -187,7 +184,7 @@ async fn main() -> anyhow::Result<()> {
         new_account.clone(),
         Some(fs.clone()),
         cache,
-        opt.disable_sender_emitter
+        opt.disable_sender_emitter,
     )
     .await?;
 
@@ -421,33 +418,42 @@ async fn main() -> anyhow::Result<()> {
                                 continue
                             }
 
-                            let id = match chat.create_group_conversation(did_keys).await {
-                                Ok(id) => id,
-                                Err(e) => {
-                                    writeln!(stdout, "Error creating conversation: {e}")?;
-                                    continue
-                                }
-                            };
 
-                            *topic.write() = id.id();
-                            writeln!(stdout, "Set conversation to {}", topic.read())?;
-                            let mut stdout = stdout.clone();
-                            let account = new_account.clone();
-                            let stream = chat.get_conversation_stream(id.id()).await?;
-                            let chat = chat.clone();
-                            let topic = topic.clone();
 
-                            tokio::spawn(async move {
-                                if let Err(e) = message_event_handle(
-                                    stdout.clone(),
-                                    account.clone(),
-                                    chat.clone(),
-                                    stream,
-                                    topic.clone(),
-                                ).await {
-                                    writeln!(stdout, ">> Error processing event task: {e}").unwrap();
+                            if opt.disable_sender_emitter {
+                                let id = match chat.create_group_conversation(did_keys).await {
+                                    Ok(id) => id,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error creating conversation: {e}")?;
+                                        continue
+                                    }
+                                };
+
+                                *topic.write() = id.id();
+                                writeln!(stdout, "Set conversation to {}", topic.read())?;
+                                let mut stdout = stdout.clone();
+                                let account = new_account.clone();
+                                let stream = chat.get_conversation_stream(id.id()).await?;
+                                let chat = chat.clone();
+                                let topic = topic.clone();
+
+                                tokio::spawn(async move {
+                                    if let Err(e) = message_event_handle(
+                                        stdout.clone(),
+                                        account.clone(),
+                                        chat.clone(),
+                                        stream,
+                                        topic.clone(),
+                                    ).await {
+                                        writeln!(stdout, ">> Error processing event task: {e}").unwrap();
+                                    }
+                                });
+                            } else {
+                                if let Err(e) = chat.create_group_conversation(did_keys).await {
+                                        writeln!(stdout, "Error creating conversation: {e}")?;
+                                        continue
                                 }
-                            });
+                            }
                         },
                         Some("/remove-conversation") => {
                             let conversation_id = match cmd_line.next() {
