@@ -351,11 +351,9 @@ async fn main() -> anyhow::Result<()> {
                                         writeln!(stdout, ">> Error processing event task: {e}").unwrap();
                                     }
                                 });
-                            } else {
-                                if let Err(e) = chat.create_conversation(&did).await {
-                                    writeln!(stdout, "Error creating conversation: {e}")?;
-                                    continue
-                                }
+                            } else if let Err(e) = chat.create_conversation(&did).await {
+                                writeln!(stdout, "Error creating conversation: {e}")?;
+                                continue
                             }
                         },
                         Some("/add-recipient") => {
@@ -448,11 +446,9 @@ async fn main() -> anyhow::Result<()> {
                                         writeln!(stdout, ">> Error processing event task: {e}").unwrap();
                                     }
                                 });
-                            } else {
-                                if let Err(e) = chat.create_group_conversation(did_keys).await {
-                                        writeln!(stdout, "Error creating conversation: {e}")?;
-                                        continue
-                                }
+                            } else if let Err(e) = chat.create_group_conversation(did_keys).await {
+                                    writeln!(stdout, "Error creating conversation: {e}")?;
+                                    continue
                             }
                         },
                         Some("/remove-conversation") => {
