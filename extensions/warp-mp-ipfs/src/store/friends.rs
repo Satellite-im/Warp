@@ -1127,10 +1127,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
         if !queued && matches!(payload.event, Event::Request) {
             if let Some(rx) = std::mem::take(&mut rx) {
                 if let Some(timeout) = self.wait_on_response.map(Duration::from_millis) {
-                    match tokio::time::timeout(timeout, rx).await {
-                        Ok(Ok(res)) => res?,
-                        _ => {}
-                    };
+                    if let Ok(Ok(res)) = tokio::time::timeout(timeout, rx).await {
+                        res?
+                    }
                 }
             }
         }
