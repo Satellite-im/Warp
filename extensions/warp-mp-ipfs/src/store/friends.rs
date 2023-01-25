@@ -754,12 +754,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
         // let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
         // self.ipfs.ban_peer(peer_id).await?;
-        if let Err(e) = self.tx.send(MultiPassEventKind::Blocked {
-            did: pubkey.clone(),
-        }) {
-            error!("Error broadcasting event: {e}");
-        }
-
         let payload = PayloadEvent {
             sender: local_public_key,
             event: Event::Block,
@@ -792,12 +786,6 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
         self.ipfs.unban_peer(peer_id).await?;
-
-        if let Err(e) = self.tx.send(MultiPassEventKind::Unblocked {
-            did: pubkey.clone(),
-        }) {
-            error!("Error broadcasting event: {e}");
-        }
 
         let payload = PayloadEvent {
             sender: local_public_key,
@@ -1159,6 +1147,20 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         did: recipient.clone(),
                     })
                 {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            Event::Block => {
+                if let Err(e) = self.tx.send(MultiPassEventKind::Blocked {
+                    did: recipient.clone(),
+                }) {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            Event::Unblock => {
+                if let Err(e) = self.tx.send(MultiPassEventKind::Unblocked {
+                    did: recipient.clone(),
+                }) {
                     error!("Error broadcasting event: {e}");
                 }
             }
