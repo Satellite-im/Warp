@@ -803,7 +803,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
     pub async fn get_root_document(&self) -> Result<RootDocument, Error> {
         let root_cid = self.get_cid().await?;
         let path = IpfsPath::from(root_cid);
-        self.get_dag(path, None).await
+        let document: RootDocument = self.get_dag(path, None).await?;
+        document.verify(self.ipfs.clone()).await.map(|_| document)
     }
 
     pub async fn set_root_document(&mut self, mut document: RootDocument) -> Result<(), Error> {
