@@ -763,7 +763,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         if matches!(identity_status, IdentityStatus::Offline) {
             return Ok(Platform::Unknown);
         }
-        
+
         self.cache()
             .await
             .iter()
@@ -812,11 +812,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
         document.sign(&did_kp)?;
 
         let root_cid = self.put_dag(document).await?;
-        if self.ipfs.is_pinned(&old_cid).await? {
-            self.ipfs.remove_pin(&old_cid, true).await?;
+        if old_cid != root_cid {
+            if self.ipfs.is_pinned(&old_cid).await? {
+                self.ipfs.remove_pin(&old_cid, true).await?;
+            }
+            self.ipfs.insert_pin(&root_cid, true).await?;
+            self.ipfs.remove_block(old_cid).await?;
         }
 
-        self.ipfs.insert_pin(&root_cid, true).await?;
         self.save_cid(root_cid).await?;
         Ok(())
     }
