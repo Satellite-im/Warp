@@ -133,10 +133,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
             _ => None,
         };
 
-        let ipfs = match ipfs_handle {
-            Some(ipfs) => ipfs,
-            None => return Err(Error::ConstellationExtensionUnavailable),
-        };
+        let ipfs = ipfs_handle.ok_or(Error::ConstellationExtensionUnavailable)?;
 
         *self.ipfs.write() = Some(ipfs);
 
@@ -342,6 +339,14 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             .map_err(anyhow::Error::from)??;
         self.current_directory()?.add_item(file)?;
         if let Err(_e) = self.export_index().await {}
+
+        let _ = self
+            .broadcast
+            .send(ConstellationEventKind::Uploaded {
+                filename: name.to_string(),
+                size: Some(total_written),
+            })
+            .ok();
         Ok(())
     }
 
@@ -422,7 +427,13 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         file.hash_mut().hash_from_slice(buffer)?;
         self.current_directory()?.add_item(file)?;
         if let Err(_e) = self.export_index().await {}
-
+        let _ = self
+            .broadcast
+            .send(ConstellationEventKind::Uploaded {
+                filename: name.to_string(),
+                size: Some(total_written),
+            })
+            .ok();
         Ok(())
     }
 
@@ -448,11 +459,14 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         }
 
         //TODO: Validate file against the hashed reference
-        if let Err(_e) = self.broadcast.send(ConstellationEventKind::Downloaded {
-            filename: file.name(),
-            size: Some(file.size()),
-            location: None,
-        }) {}
+        let _ = self
+            .broadcast
+            .send(ConstellationEventKind::Downloaded {
+                filename: file.name(),
+                size: Some(file.size()),
+                location: None,
+            })
+            .ok();
         Ok(buffer)
     }
 
@@ -576,10 +590,10 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
                 total: Some(total_written),
             };
 
-            if let Err(_e) = fs.broadcast.send(ConstellationEventKind::Uploaded {
+            let _ = fs.broadcast.send(ConstellationEventKind::Uploaded {
                 filename: name.to_string(),
                 size: Some(total_written)
-            }) {}
+            }).ok();
         };
 
         Ok(ConstellationProgressStream(progress_stream.boxed()))
@@ -612,7 +626,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
                 }
             }
 
-            if let Err(_e) = tx.send(ConstellationEventKind::Downloaded { filename: file.name(), size: Some(size), location: None }) {}
+            let _ = tx.send(ConstellationEventKind::Downloaded { filename: file.name(), size: Some(size), location: None }).ok();
         };
 
         //TODO: Validate file against the hashed reference
@@ -684,9 +698,12 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         directory.remove_item(&item.name())?;
         if let Err(_e) = self.export_index().await {}
 
-        if let Err(_e) = self.broadcast.send(ConstellationEventKind::Deleted {
-            item_name: name.to_string(),
-        }) {}
+        let _ = self
+            .broadcast
+            .send(ConstellationEventKind::Deleted {
+                item_name: name.to_string(),
+            })
+            .ok();
 
         Ok(())
     }
@@ -707,10 +724,13 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 
         directory.rename_item(current, new)?;
         if let Err(_e) = self.export_index().await {}
-        if let Err(_e) = self.broadcast.send(ConstellationEventKind::Renamed {
-            old_item_name: current.to_string(),
-            new_item_name: new.to_string(),
-        }) {}
+        let _ = self
+            .broadcast
+            .send(ConstellationEventKind::Renamed {
+                old_item_name: current.to_string(),
+                new_item_name: new.to_string(),
+            })
+            .ok();
         Ok(())
     }
 
