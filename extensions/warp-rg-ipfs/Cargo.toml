@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 [dependencies]
 warp = { path = "../../warp" }
 
-rust-ipfs = "0.3.0-alpha"
+rust-ipfs = "=0.3.0-alpha"
 libipld = { version = "0.15", features = ["serde-codec"] }
 
 uuid = { version = "1", features = ["serde", "v4"] }
