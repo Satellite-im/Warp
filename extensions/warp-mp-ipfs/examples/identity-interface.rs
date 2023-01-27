@@ -16,7 +16,7 @@ use warp_pd_flatfile::FlatfileStorage;
 use warp_pd_stretto::StrettoClient;
 
 #[derive(Debug, Parser)]
-#[clap(name = "")]
+#[clap(name = "identity-interface")]
 struct Opt {
     #[clap(long)]
     path: Option<PathBuf>,
