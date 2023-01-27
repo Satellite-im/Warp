@@ -256,6 +256,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 },
                 ..Default::default()
             }),
+            port_mapping: config.ipfs_setting.portmapping,
             ..Default::default()
         };
 
@@ -296,7 +297,6 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                             info!("Error listening on relay: {e}");
                             continue;
                         }
-                        tokio::time::sleep(Duration::from_millis(400)).await;
                         if config.ipfs_setting.relay_client.single {
                             break;
                         }
@@ -316,7 +316,6 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                             info!("Error listening on relay: {e}");
                             continue;
                         }
-                        tokio::time::sleep(Duration::from_millis(400)).await;
                         if config.ipfs_setting.relay_client.single {
                             break;
                         }
