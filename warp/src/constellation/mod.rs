@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 pub mod directory;
 pub mod file;
 pub mod item;

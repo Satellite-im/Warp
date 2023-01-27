@@ -1172,5 +1172,5 @@ impl<T: IpfsTypes> FriendsStore<T> {
 }
 
 pub fn get_inbox_topic(did: &DID) -> String {
-    format!("/peer/{}/inbox", did)
+    format!("/peer/{did}/inbox")
 }

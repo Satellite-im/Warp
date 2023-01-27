@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 use crate::{error::Error, tesseract::Tesseract};
 use bip39::{Language, Mnemonic, MnemonicType, Seed};
 use derive_more::Display;

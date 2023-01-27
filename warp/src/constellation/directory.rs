@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 use super::file::File;
 use super::item::Item;
 use crate::error::Error;

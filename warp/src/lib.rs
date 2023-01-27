@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 pub mod sync {
     pub use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
     pub use std::sync::Arc;

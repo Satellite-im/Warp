@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi;
 
