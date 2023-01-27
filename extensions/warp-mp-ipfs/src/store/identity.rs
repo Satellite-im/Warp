@@ -496,10 +496,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let public_key =
             DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().encode()));
 
-        let username = match username {
-            Some(u) => u.to_string(),
-            None => warp::multipass::generator::generate_name(),
-        };
+        let username = username
+            .map(str::to_string)
+            .unwrap_or_else(warp::multipass::generator::generate_name);
 
         identity.set_username(&username);
         let fingerprint = public_key.fingerprint();
