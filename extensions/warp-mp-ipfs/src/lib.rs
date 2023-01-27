@@ -291,7 +291,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 if config.ipfs_setting.relay_client.enable {
                     info!("Relay client enabled. Loading relays");
                     for addr in config.bootstrap.address() {
-                        if let Err(e) = ipfs.swarm_listen_on(addr.with(Protocol::P2pCircuit)).await
+                        if let Err(e) = ipfs.add_listening_address(addr.with(Protocol::P2pCircuit)).await
                         {
                             info!("Error listening on relay: {e}");
                             continue;
@@ -310,7 +310,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                         }
 
                         if let Err(e) = ipfs
-                            .swarm_listen_on(addr.clone().with(Protocol::P2pCircuit))
+                            .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
                             .await
                         {
                             info!("Error listening on relay: {e}");
@@ -324,7 +324,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 }
                 if config.ipfs_setting.bootstrap && !empty_bootstrap {
                     //TODO: run bootstrap in intervals
-                    if let Err(e) = ipfs.direct_bootstrap().await {
+                    if let Err(e) = ipfs.bootstrap().await {
                         error!("Error bootstrapping: {e}");
                     }
                 }

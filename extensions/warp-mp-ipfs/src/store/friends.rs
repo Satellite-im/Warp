@@ -303,7 +303,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
     async fn check_request_message(
         &mut self,
         _local_public_key: &DID,
-        message: Arc<GossipsubMessage>,
+        message: GossipsubMessage,
     ) -> anyhow::Result<()> {
         if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
             let data = data.decrypt::<PayloadEvent>(&self.did_key)?;

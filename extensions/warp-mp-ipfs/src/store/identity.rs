@@ -299,7 +299,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(())
     }
 
-    async fn process_message(&mut self, message: Arc<GossipsubMessage>) -> anyhow::Result<()> {
+    async fn process_message(&mut self, message: GossipsubMessage) -> anyhow::Result<()> {
         let data = serde_json::from_slice::<Sata>(&message.data)?;
 
         let raw_object = data.decode::<IdentityPayload>()?;
