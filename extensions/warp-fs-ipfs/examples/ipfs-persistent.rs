@@ -246,8 +246,8 @@ async fn main() -> anyhow::Result<()> {
                 .and_then(|item| item.get_file())
             {
                 Ok(file) => match file.reference() {
-                    Some(r) => println!("{} Reference: {r}", remote),
-                    None => println!("{} has no reference", remote),
+                    Some(r) => println!("{remote} Reference: {r}"),
+                    None => println!("{remote} has no reference"),
                 },
                 Err(_) => println!("File doesnt exist"),
             }

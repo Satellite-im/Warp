@@ -332,7 +332,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         ipfs.insert_pin(cid, true).await?;
         let file = warp::constellation::file::File::new(name);
         file.set_size(total_written);
-        file.set_reference(&format!("{}", ipfs_path));
+        file.set_reference(&format!("{ipfs_path}"));
         let f = file.clone();
         tokio::task::spawn_blocking(move || f.hash_mut().hash_from_file(&path))
             .await

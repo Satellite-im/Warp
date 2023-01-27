@@ -107,7 +107,7 @@ pub async fn discovery<T: IpfsTypes, S: AsRef<str>>(
 ) -> anyhow::Result<()> {
     let topic = topic.as_ref();
     let cid = ipfs
-        .put_dag(libipld::ipld!(format!("discovery:{}", topic)))
+        .put_dag(libipld::ipld!(format!("discovery:{topic}")))
         .await?;
     ipfs.provide(cid).await?;
 

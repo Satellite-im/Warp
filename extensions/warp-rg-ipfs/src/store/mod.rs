@@ -130,7 +130,7 @@ pub async fn topic_discovery<T: IpfsTypes, S: AsRef<str>>(
 ) -> anyhow::Result<()> {
     trace!("Performing topic discovery");
     let topic = topic.as_ref();
-    let topic_hash = sha256_hash(format!("gossipsub:{}", topic).as_bytes(), None);
+    let topic_hash = sha256_hash(format!("gossipsub:{topic}").as_bytes(), None);
     let cid = ipfs.put_dag(libipld::ipld!(topic_hash)).await?;
     ipfs.provide(cid).await?;
 

@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 use blake2::Blake2s256;
 use digest::Digest;
 use sha1::Sha1;
