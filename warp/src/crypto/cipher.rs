@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 #[allow(unused)]
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{ErrorKind, Read, Write};

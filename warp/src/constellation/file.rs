@@ -1,10 +1,11 @@
+#![allow(clippy::result_large_err)]
 use crate::error::Error;
 use crate::sync::{Arc, RwLock};
 use chrono::{DateTime, Utc};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek};
 use uuid::Uuid;
 use warp_derive::FFIFree;
 #[cfg(target_arch = "wasm32")]
@@ -388,7 +389,7 @@ impl Hash {
     /// ```
     pub fn sha1hash_from_reader<R: Read + Seek>(&mut self, reader: &mut R) -> Result<(), Error> {
         let res = crate::crypto::hash::sha1_hash_stream(reader, None)?;
-        reader.seek(SeekFrom::Start(0))?;
+        reader.rewind()?;
         self.sha1 = Some(hex::encode(res).to_uppercase());
         Ok(())
     }
@@ -418,7 +419,7 @@ impl Hash {
     /// ```
     pub fn sha256hash_from_reader<R: Read + Seek>(&mut self, reader: &mut R) -> Result<(), Error> {
         let res = crate::crypto::hash::sha256_hash_stream(reader, None)?;
-        reader.seek(SeekFrom::Start(0))?;
+        reader.rewind()?;
         self.sha256 = Some(hex::encode(res).to_uppercase());
         Ok(())
     }

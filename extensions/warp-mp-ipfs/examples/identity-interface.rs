@@ -177,7 +177,7 @@ async fn main() -> anyhow::Result<()> {
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
 
-                            writeln!(stdout, "> Pending request from {}. Do \"request accept {}\" to accept.", username, did)?;
+                            writeln!(stdout, "> Pending request from {username}. Do \"request accept {did}\" to accept.")?;
                         },
                         warp::multipass::MultiPassEventKind::FriendRequestSent { to: did } => {
                             let username = account
@@ -187,7 +187,7 @@ async fn main() -> anyhow::Result<()> {
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
 
-                            writeln!(stdout, "> A request has been sent to {}. Do \"request close {}\" to if you wish to close the request", username, did)?;
+                            writeln!(stdout, "> A request has been sent to {username}. Do \"request close {did}\" to if you wish to close the request")?;
                         }
                         warp::multipass::MultiPassEventKind::IncomingFriendRequestRejected { did } => {
                             let username = account
@@ -197,7 +197,7 @@ async fn main() -> anyhow::Result<()> {
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
 
-                            writeln!(stdout, "> You've rejected {} request", username)?;
+                            writeln!(stdout, "> You've rejected {username} request")?;
                         },
                         warp::multipass::MultiPassEventKind::OutgoingFriendRequestRejected { did } => {
                             let username = account
@@ -207,7 +207,7 @@ async fn main() -> anyhow::Result<()> {
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
 
-                            writeln!(stdout, "> {} rejected your request", username)?;
+                            writeln!(stdout, "> {username} rejected your request")?;
                         },
                         warp::multipass::MultiPassEventKind::IncomingFriendRequestClosed { did } => {
                             let username = account
@@ -217,7 +217,7 @@ async fn main() -> anyhow::Result<()> {
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
 
-                            writeln!(stdout, "> {} has retracted their request", username)?;
+                            writeln!(stdout, "> {username} has retracted their request")?;
                         },
                         warp::multipass::MultiPassEventKind::OutgoingFriendRequestClosed { did } => {
                             let username = account
@@ -227,7 +227,7 @@ async fn main() -> anyhow::Result<()> {
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
 
-                            writeln!(stdout, "> Request for {} has been retracted", username)?;
+                            writeln!(stdout, "> Request for {username} has been retracted")?;
                         },
                         warp::multipass::MultiPassEventKind::FriendAdded { did } => {
                             let username = account
@@ -237,7 +237,7 @@ async fn main() -> anyhow::Result<()> {
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
 
-                            writeln!(stdout, "> You are now friends with {}", username)?;
+                            writeln!(stdout, "> You are now friends with {username}")?;
                         },
                         warp::multipass::MultiPassEventKind::FriendRemoved { did } => {
                             let username = account
@@ -247,7 +247,7 @@ async fn main() -> anyhow::Result<()> {
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
 
-                            writeln!(stdout, "> {} has been removed from friends list", username)?;
+                            writeln!(stdout, "> {username} has been removed from friends list")?;
                         },
                         warp::multipass::MultiPassEventKind::IdentityOnline { did } => {
                             let username = account
@@ -257,7 +257,7 @@ async fn main() -> anyhow::Result<()> {
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
 
-                            writeln!(stdout, "> {} has came online", username)?;
+                            writeln!(stdout, "> {username} has came online")?;
                         },
                         warp::multipass::MultiPassEventKind::IdentityOffline { did } => {
                             let username = account
@@ -267,7 +267,7 @@ async fn main() -> anyhow::Result<()> {
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
 
-                            writeln!(stdout, "> {} went offline", username)?;
+                            writeln!(stdout, "> {username} went offline")?;
                         },
                         warp::multipass::MultiPassEventKind::Blocked { did } => {
                             let username = account
@@ -277,7 +277,7 @@ async fn main() -> anyhow::Result<()> {
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
 
-                            writeln!(stdout, "> {} was blocked", username)?;
+                            writeln!(stdout, "> {username} was blocked")?;
                         },
                         warp::multipass::MultiPassEventKind::Unblocked { did } => {
                             let username = account
@@ -287,7 +287,7 @@ async fn main() -> anyhow::Result<()> {
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
 
-                            writeln!(stdout, "> {} was unblocked", username)?;
+                            writeln!(stdout, "> {username} was unblocked")?;
                         }
                     }
                 }
@@ -303,7 +303,7 @@ async fn main() -> anyhow::Result<()> {
                             let friends = match account.list_friends().await {
                                 Ok(list) => list,
                                 Err(e) => {
-                                    writeln!(stdout, "Error obtaining friends list: {}", e)?;
+                                    writeln!(stdout, "Error obtaining friends list: {e}")?;
                                     continue
                                 }
                             };
@@ -317,7 +317,7 @@ async fn main() -> anyhow::Result<()> {
                                     friend.to_string(),
                                 ]);
                             }
-                            writeln!(stdout, "{}", table)?;
+                            writeln!(stdout, "{table}")?;
                         }
                         Some("block-list") => {
                             let mut table = Table::new();
@@ -325,7 +325,7 @@ async fn main() -> anyhow::Result<()> {
                             let block_list = match account.block_list().await {
                                 Ok(list) => list,
                                 Err(e) => {
-                                    writeln!(stdout, "Error obtaining block list: {}", e)?;
+                                    writeln!(stdout, "Error obtaining block list: {e}")?;
                                     continue
                                 }
                             };
@@ -339,14 +339,14 @@ async fn main() -> anyhow::Result<()> {
                                     item.to_string(),
                                 ]);
                             }
-                            writeln!(stdout, "{}", table)?;
+                            writeln!(stdout, "{table}")?;
                         }
                         Some("remove") => {
                             let pk = match cmd_line.next() {
                                 Some(pk) => match pk.to_string().try_into() {
                                     Ok(did) => did,
                                     Err(e) => {
-                                        writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                        writeln!(stdout, "Error Decoding Key: {e}")?;
                                         continue
                                     }
                                 }
@@ -357,7 +357,7 @@ async fn main() -> anyhow::Result<()> {
                             };
 
                             if let Err(e) = account.remove_friend(&pk).await {
-                                writeln!(stdout, "Error Removing Friend: {}", e)?;
+                                writeln!(stdout, "Error Removing Friend: {e}")?;
                                 continue;
                             }
                             writeln!(stdout, "Account is removed")?;
@@ -367,7 +367,7 @@ async fn main() -> anyhow::Result<()> {
                                 Some(pk) => match pk.to_string().try_into() {
                                     Ok(did) => did,
                                     Err(e) => {
-                                        writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                        writeln!(stdout, "Error Decoding Key: {e}")?;
                                         continue
                                     }
                                 }
@@ -378,35 +378,35 @@ async fn main() -> anyhow::Result<()> {
                             };
 
                             if let Err(e) = account.block(&pk).await {
-                                writeln!(stdout, "Error Blocking Key: {}", e)?;
+                                writeln!(stdout, "Error Blocking Key: {e}")?;
                                 continue;
                             }
                             writeln!(stdout, "Account is blocked")?;
                         }
                         Some("set-status-online") => {
                             if let Err(e) = account.set_identity_status(IdentityStatus::Online).await {
-                                writeln!(stdout, "Error setting identity status: {}", e)?;
+                                writeln!(stdout, "Error setting identity status: {e}")?;
                                 continue;
                             }
                             writeln!(stdout, "You are online")?;
                         }
                         Some("set-status-away") => {
                             if let Err(e) = account.set_identity_status(IdentityStatus::Away).await {
-                                writeln!(stdout, "Error setting identity status: {}", e)?;
+                                writeln!(stdout, "Error setting identity status: {e}")?;
                                 continue;
                             }
                             writeln!(stdout, "You are away")?;
                         }
                         Some("set-status-busy") => {
                             if let Err(e) = account.set_identity_status(IdentityStatus::Busy).await {
-                                writeln!(stdout, "Error setting identity status: {}", e)?;
+                                writeln!(stdout, "Error setting identity status: {e}")?;
                                 continue;
                             }
                             writeln!(stdout, "You are busy")?;
                         }
                         Some("set-status-offline") => {
                             if let Err(e) = account.set_identity_status(IdentityStatus::Offline).await {
-                                writeln!(stdout, "Error setting identity status: {}", e)?;
+                                writeln!(stdout, "Error setting identity status: {e}")?;
                                 continue;
                             }
                             writeln!(stdout, "You are offline")?;
@@ -416,7 +416,7 @@ async fn main() -> anyhow::Result<()> {
                                 Some(pk) => match pk.to_string().try_into() {
                                     Ok(did) => did,
                                     Err(e) => {
-                                        writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                        writeln!(stdout, "Error Decoding Key: {e}")?;
                                         continue
                                     }
                                 }
@@ -427,7 +427,7 @@ async fn main() -> anyhow::Result<()> {
                             };
 
                             if let Err(e) = account.unblock(&pk).await {
-                                writeln!(stdout, "Error Unblocking Key: {}", e)?;
+                                writeln!(stdout, "Error Unblocking Key: {e}")?;
                                 continue;
                             }
                             writeln!(stdout, "Account is unblocked")?;
@@ -439,7 +439,7 @@ async fn main() -> anyhow::Result<()> {
                                         Some(pk) => match pk.to_string().try_into() {
                                             Ok(did) => did,
                                             Err(e) => {
-                                                writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                                writeln!(stdout, "Error Decoding Key: {e}")?;
                                                 continue
                                             }
                                         }
@@ -450,7 +450,7 @@ async fn main() -> anyhow::Result<()> {
                                     };
 
                                     if let Err(e) = account.send_request(&pk).await {
-                                        writeln!(stdout, "Error sending request: {}", e)?;
+                                        writeln!(stdout, "Error sending request: {e}")?;
                                         continue;
                                     }
                                     writeln!(stdout, "Friend Request Sent")?;
@@ -460,7 +460,7 @@ async fn main() -> anyhow::Result<()> {
                                         Some(pk) => match pk.to_string().try_into() {
                                             Ok(did) => did,
                                             Err(e) => {
-                                                writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                                writeln!(stdout, "Error Decoding Key: {e}")?;
                                                 continue
                                             }
                                         }
@@ -471,7 +471,7 @@ async fn main() -> anyhow::Result<()> {
                                     };
 
                                     if let Err(e) = account.accept_request(&pk).await {
-                                        writeln!(stdout, "Error Accepting request: {}", e)?;
+                                        writeln!(stdout, "Error Accepting request: {e}")?;
                                         continue;
                                     }
 
@@ -482,7 +482,7 @@ async fn main() -> anyhow::Result<()> {
                                         Some(pk) => match pk.to_string().try_into() {
                                             Ok(did) => did,
                                             Err(e) => {
-                                                writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                                writeln!(stdout, "Error Decoding Key: {e}")?;
                                                 continue
                                             }
                                         }
@@ -493,7 +493,7 @@ async fn main() -> anyhow::Result<()> {
                                     };
 
                                     if let Err(e) = account.deny_request(&pk).await {
-                                        writeln!(stdout, "Error Denying request: {}", e)?;
+                                        writeln!(stdout, "Error Denying request: {e}")?;
                                         continue;
                                     }
 
@@ -504,7 +504,7 @@ async fn main() -> anyhow::Result<()> {
                                         Some(pk) => match pk.to_string().try_into() {
                                             Ok(did) => did,
                                             Err(e) => {
-                                                writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                                writeln!(stdout, "Error Decoding Key: {e}")?;
                                                 continue
                                             }
                                         }
@@ -515,7 +515,7 @@ async fn main() -> anyhow::Result<()> {
                                     };
 
                                     if let Err(e) = account.close_request(&pk).await {
-                                        writeln!(stdout, "Error Closing request: {}", e)?;
+                                        writeln!(stdout, "Error Closing request: {e}")?;
                                         continue;
                                     }
 
@@ -533,7 +533,7 @@ async fn main() -> anyhow::Result<()> {
                             let list = match account.list_incoming_request().await {
                                 Ok(list) => list,
                                 Err(e) => {
-                                    writeln!(stdout, "Error obtaining request list: {}", e)?;
+                                    writeln!(stdout, "Error obtaining request list: {e}")?;
                                     continue;
                                 }
                             };
@@ -546,7 +546,7 @@ async fn main() -> anyhow::Result<()> {
                                     username.to_string(),
                                 ]);
                             }
-                            writeln!(stdout, "{}", table)?;
+                            writeln!(stdout, "{table}")?;
                         },
                         Some("list-outgoing-request") => {
                             let mut table = Table::new();
@@ -554,7 +554,7 @@ async fn main() -> anyhow::Result<()> {
                             let list = match account.list_outgoing_request().await {
                                 Ok(list) => list,
                                 Err(e) => {
-                                    writeln!(stdout, "Error obtaining request list: {}", e)?;
+                                    writeln!(stdout, "Error obtaining request list: {e}")?;
                                     continue;
                                 }
                             };
@@ -567,7 +567,7 @@ async fn main() -> anyhow::Result<()> {
                                     username.to_string(),
                                 ]);
                             }
-                            writeln!(stdout, "{}", table)?;
+                            writeln!(stdout, "{table}")?;
                         },
                         Some("update-status") => {
                             let mut status = vec![];
@@ -578,7 +578,7 @@ async fn main() -> anyhow::Result<()> {
 
                             let status = status.join(" ").to_string();
                             if let Err(e) = account.update_identity(IdentityUpdate::set_status_message(Some(status))).await {
-                                writeln!(stdout, "Error updating status: {}", e)?;
+                                writeln!(stdout, "Error updating status: {e}")?;
                                 continue
                             }
                             writeln!(stdout, "Status updated")?;
@@ -593,7 +593,7 @@ async fn main() -> anyhow::Result<()> {
                             };
 
                             if let Err(e) = account.update_identity(IdentityUpdate::set_username(username.to_string())).await {
-                                writeln!(stdout, "Error updating username: {}", e)?;
+                                writeln!(stdout, "Error updating username: {e}")?;
                                 continue;
                             }
 
@@ -609,7 +609,7 @@ async fn main() -> anyhow::Result<()> {
                             };
 
                             if let Err(e) = account.update_identity(IdentityUpdate::set_graphics_picture(picture.to_string())).await {
-                                writeln!(stdout, "Error updating picture: {}", e)?;
+                                writeln!(stdout, "Error updating picture: {e}")?;
                                 continue;
                             }
 
@@ -625,7 +625,7 @@ async fn main() -> anyhow::Result<()> {
                             };
 
                             if let Err(e) = account.update_identity(IdentityUpdate::set_graphics_banner(banner.to_string())).await {
-                                writeln!(stdout, "Error updating banner: {}", e)?;
+                                writeln!(stdout, "Error updating banner: {e}")?;
                                 continue;
                             }
 
@@ -644,7 +644,7 @@ async fn main() -> anyhow::Result<()> {
                                     match account.get_identity(Identifier::user_name(username)).await {
                                         Ok(identity) => identity,
                                         Err(e) => {
-                                            writeln!(stdout, "Error obtaining identity by username: {}", e)?;
+                                            writeln!(stdout, "Error obtaining identity by username: {e}")?;
                                             continue;
                                         }
                                     }
@@ -654,7 +654,7 @@ async fn main() -> anyhow::Result<()> {
                                         Some(pk) => match pk.to_string().try_into() {
                                             Ok(did) => did,
                                             Err(e) => {
-                                                writeln!(stdout, "Error Decoding Key: {}", e)?;
+                                                writeln!(stdout, "Error Decoding Key: {e}")?;
                                                 continue
                                             }
                                         }
@@ -666,7 +666,7 @@ async fn main() -> anyhow::Result<()> {
                                     match account.get_identity(Identifier::did_key(pk)).await {
                                         Ok(identity) => identity,
                                         Err(e) => {
-                                            writeln!(stdout, "Error obtaining identity by public key: {}", e)?;
+                                            writeln!(stdout, "Error obtaining identity by public key: {e}")?;
                                             continue;
                                         }
                                     }
@@ -675,7 +675,7 @@ async fn main() -> anyhow::Result<()> {
                                     match account.get_identity(Identifier::own()).await {
                                         Ok(identity) => identity,
                                         Err(e) => {
-                                            writeln!(stdout, "Error obtaining own identity: {}", e)?;
+                                            writeln!(stdout, "Error obtaining own identity: {e}")?;
                                             continue;
                                         }
                                     }
@@ -697,10 +697,10 @@ async fn main() -> anyhow::Result<()> {
                                     (!identity.graphics().profile_banner().is_empty()).to_string(),
                                     (!identity.graphics().profile_picture().is_empty()).to_string(),
                                     platform.to_string(),
-                                    format!("{:?}", status),
+                                    format!("{status:?}"),
                                 ]);
                             }
-                            writeln!(stdout, "{}", table)?;
+                            writeln!(stdout, "{table}")?;
                         }
                         _ => continue
                     }
@@ -708,7 +708,7 @@ async fn main() -> anyhow::Result<()> {
                 Err(ReadlineError::Interrupted) => break,
                 Err(ReadlineError::Eof) => break,
                 Err(e) => {
-                    writeln!(stdout, "Error: {}", e)?;
+                    writeln!(stdout, "Error: {e}")?;
                 }
             },
         }

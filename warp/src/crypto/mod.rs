@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 use std::{fmt::Display, str::FromStr};
 
 pub use aes_gcm;
@@ -36,7 +37,7 @@ impl FromStr for DID {
     fn from_str(key: &str) -> Result<Self, Self::Err> {
         let key = match key.starts_with("did:key:") {
             true => key.to_string(),
-            false => format!("did:key:{}", key),
+            false => format!("did:key:{key}"),
         };
 
         std::panic::catch_unwind(|| did_key::resolve(&key))

@@ -31,9 +31,7 @@ use warp::{Extension, SingleHandle};
 use ipfs::{Ipfs, IpfsOptions, IpfsTypes, Keypair, Protocol, TestTypes, Types, UninitializedIpfs};
 use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
 use warp::error::Error;
-use warp::multipass::identity::{
-     Identifier, Identity, IdentityUpdate, Relationship,
-};
+use warp::multipass::identity::{Identifier, Identity, IdentityUpdate, Relationship};
 use warp::multipass::{
     identity, Friends, FriendsEvent, IdentityInformation, MultiPass, MultiPassEventKind,
     MultiPassEventStream,
@@ -361,7 +359,12 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             config.path,
             tesseract.clone(),
             config.store_setting.broadcast_interval,
-            (self.tx.clone(), config.store_setting.override_ipld, config.store_setting.use_phonebook, config.store_setting.wait_on_response),
+            (
+                self.tx.clone(),
+                config.store_setting.override_ipld,
+                config.store_setting.use_phonebook,
+                config.store_setting.wait_on_response,
+            ),
         )
         .await?;
         info!("friends store initialized");
@@ -793,7 +796,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         let store = self.friend_store().await?;
         store.sent_friend_request_to(did).await
     }
-    
+
     async fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.remove_friend(pubkey, true).await

@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 use crate::crypto::DID;
 use crate::error::Error;
 use serde::{Deserialize, Serialize};
