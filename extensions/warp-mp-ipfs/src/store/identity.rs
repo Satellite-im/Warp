@@ -577,16 +577,13 @@ impl<T: IpfsTypes> IdentityStore<T> {
                             //Note: This is done since connect doesnt support dialing out to the peerid directly yet
                             //      so instead we will check if we can find them over DHT before passing the discovery
                             //      a separate function
-                            match ipfs.find_peer(peer_id).await {
-                                Ok(_) => {}
-                                Err(_) => {
-                                    if let Err(e) =
-                                        super::discover_peer(&ipfs, &pubkey, discovery, relay).await
-                                    {
-                                        error!("Error discovering peer: {e}");
-                                    }
+                            if ipfs.identity(Some(peer_id)).await.is_err() {
+                                if let Err(e) =
+                                    super::discover_peer(&ipfs, &pubkey, discovery, relay).await
+                                {
+                                    error!("Error discovering peer: {e}");
                                 }
-                            };
+                            }
                         }
                     });
                     tokio::spawn({
