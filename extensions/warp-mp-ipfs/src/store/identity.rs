@@ -565,9 +565,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     && self.discovering.write().await.insert(pubkey.clone())
                 {
                     let discovering = self.discovering.clone();
-                    //TODO: Have separate functionality (or refactor phonebook) to perform checks on peers
-                    //      to prevent recurring tokio spawning
-
+                    //TODO: Have separate utility to track task of discovery attempts
                     let relay = self.relays();
                     let discovery = self.discovery.clone();
                     tokio::spawn({
