@@ -231,11 +231,6 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 let mut conf = ipfs::libp2p::kad::KademliaConfig::default();
                 conf.disjoint_query_paths(true);
                 conf.set_query_timeout(std::time::Duration::from_secs(60));
-                conf.set_protocol_names(vec![
-                    Cow::Borrowed(DEFAULT_PROTO_NAME),
-                    Cow::Borrowed(b"/warp/sync/0.0.1"),
-                ]);
-
                 conf
             }),
             swarm_configuration: Some(swarm_configuration),
@@ -290,7 +285,9 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 if config.ipfs_setting.relay_client.enable {
                     info!("Relay client enabled. Loading relays");
                     for addr in config.bootstrap.address() {
-                        if let Err(e) = ipfs.add_listening_address(addr.with(Protocol::P2pCircuit)).await
+                        if let Err(e) = ipfs
+                            .add_listening_address(addr.with(Protocol::P2pCircuit))
+                            .await
                         {
                             info!("Error listening on relay: {e}");
                             continue;
