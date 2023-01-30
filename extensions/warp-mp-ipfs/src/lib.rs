@@ -2,9 +2,10 @@ pub mod config;
 pub mod store;
 
 use config::MpIpfsConfig;
+use futures::channel::mpsc::unbounded;
 use futures::StreamExt;
 use ipfs::libp2p::mplex::MplexConfig;
-use ipfs::libp2p::swarm::ConnectionLimits;
+use ipfs::libp2p::swarm::{ConnectionLimits, SwarmEvent};
 use ipfs::libp2p::yamux::{WindowUpdateMode, YamuxConfig};
 use ipfs::p2p::{IdentifyConfiguration, TransportConfig};
 use rust_ipfs as ipfs;
@@ -270,55 +271,101 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             }
         }
 
-        info!("Starting ipfs");
-        let (ipfs, fut) = UninitializedIpfs::<T>::new(opts).start().await?;
+        let (nat_channel_tx, mut nat_channel_rx) = unbounded();
 
-        info!("passing future into tokio task");
-        tokio::spawn(fut);
+        info!("Starting ipfs");
+        let ipfs = UninitializedIpfs::<T>::new(opts)
+        // We check the events from the swarm for autonat
+        // So we can determine our nat status when it does change
+            .swarm_events({
+                move |_, event| {
+                    //Note: This will be used
+                    if let SwarmEvent::Behaviour(ipfs::BehaviourEvent::Autonat(
+                        ipfs::libp2p::autonat::Event::StatusChanged { new, .. },
+                    )) = event
+                    {
+                        match new {
+                            ipfs::libp2p::autonat::NatStatus::Public(_) => {
+                                let _ = nat_channel_tx.unbounded_send(true);
+                            }
+                            ipfs::libp2p::autonat::NatStatus::Private
+                            | ipfs::libp2p::autonat::NatStatus::Unknown => {
+                                let _ = nat_channel_tx.unbounded_send(false);
+                            }
+                        }
+                    }
+                }
+            })
+            .spawn_start()
+            .await?;
 
         tokio::spawn({
             let ipfs = ipfs.clone();
             let config = config.clone();
             async move {
-                if config.ipfs_setting.relay_client.enable {
-                    info!("Relay client enabled. Loading relays");
-                    for addr in config.bootstrap.address() {
-                        if let Err(e) = ipfs
-                            .add_listening_address(addr.with(Protocol::P2pCircuit))
-                            .await
-                        {
-                            info!("Error listening on relay: {e}");
-                            continue;
-                        }
-                        if config.ipfs_setting.relay_client.single {
-                            break;
-                        }
-                    }
-
-                    //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
-                    //      anything on this end
-                    for addr in config.ipfs_setting.relay_client.relay_address.iter() {
-                        if let Err(e) = ipfs.dial(addr.clone()).await {
-                            error!("Error dialing relay {}: {e}", addr.clone());
-                        }
-
-                        if let Err(e) = ipfs
-                            .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
-                            .await
-                        {
-                            info!("Error listening on relay: {e}");
-                            continue;
-                        }
-                        if config.ipfs_setting.relay_client.single {
-                            break;
-                        }
-                    }
-                }
                 if config.ipfs_setting.bootstrap && !empty_bootstrap {
                     //TODO: run bootstrap in intervals
+                    //Note: If we decided to loop or run it in interval
+                    //      we should join on the returned handle
                     if let Err(e) = ipfs.bootstrap().await {
                         error!("Error bootstrapping: {e}");
                     }
+                }
+
+                let relay_client = {
+                    let ipfs = ipfs.clone();
+                    let config = config.clone();
+                    async move {
+                        info!("Relay client enabled. Loading relays");
+                        for addr in config.bootstrap.address() {
+                            if let Err(e) = ipfs
+                                .add_listening_address(addr.with(Protocol::P2pCircuit))
+                                .await
+                            {
+                                info!("Error listening on relay: {e}");
+                                continue;
+                            }
+                            if config.ipfs_setting.relay_client.single {
+                                break;
+                            }
+                        }
+
+                        //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
+                        //      anything on this end
+                        for addr in config.ipfs_setting.relay_client.relay_address.iter() {
+                            if let Err(e) = ipfs.dial(addr.clone()).await {
+                                error!("Error dialing relay {}: {e}", addr.clone());
+                            }
+
+                            if let Err(e) = ipfs
+                                .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
+                                .await
+                            {
+                                info!("Error listening on relay: {e}");
+                                continue;
+                            }
+                            if config.ipfs_setting.relay_client.single {
+                                break;
+                            }
+                        }
+                    }
+                };
+
+                match (
+                    config.ipfs_setting.portmapping,
+                    config.ipfs_setting.relay_client.enable,
+                ) {
+                    (true, true) => {
+                        while let Some(public) = nat_channel_rx.next().await {
+                            if !public {
+                                relay_client.await;
+                                //Note: Although this breaks the loop now, it may be possible for the nat to change in the future resulting in it being public
+                                break;
+                            }
+                        }
+                    }
+                    (false, true) => relay_client.await,
+                    (true, false) | (false, false) => {}
                 }
             }
         });
