@@ -183,14 +183,11 @@ pub async fn discover_peer<T: IpfsTypes>(
     }
 
     match discovery {
-        //Since we are using PROVIDER, there is no need to do anything here
-        Discovery::Provider(_) => {}
-        //We are checking DHT for the peerid
-        Discovery::Direct => loop {
+        // Check over DHT to locate peer
+        Discovery::Provider(_) | Discovery::Direct => loop {
             if ipfs.identity(Some(peer_id)).await.is_ok() {
                 break;
             }
-            tokio::time::sleep(Duration::from_secs(1)).await;
         },
         Discovery::None => {
             //Attempt a direct dial via relay

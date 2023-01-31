@@ -3,7 +3,7 @@ use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
 use warp::multipass::MultiPass;
@@ -16,7 +16,7 @@ use warp_pd_flatfile::FlatfileStorage;
 use warp_pd_stretto::StrettoClient;
 
 #[derive(Debug, Parser)]
-#[clap(name = "")]
+#[clap(name = "identity-interface")]
 struct Opt {
     #[clap(long)]
     path: Option<PathBuf>,
@@ -26,6 +26,10 @@ struct Opt {
     experimental_node: bool,
     #[clap(long)]
     direct: bool,
+    #[clap(long)]
+    disable_relay: bool,
+    #[clap(long)]
+    upnp: bool,
     #[clap(long)]
     no_discovery: bool,
     #[clap(long)]
@@ -37,7 +41,7 @@ struct Opt {
     #[clap(long)]
     provide_platform_info: bool,
     #[clap(long)]
-    wait: Option<u64>, 
+    wait: Option<u64>,
 }
 
 //Note: Cache can be enabled but the internals may need a little rework but since extension handles caching itself, this isnt needed for now
@@ -53,20 +57,42 @@ fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn Pocke
 }
 
 async fn account(
+    path: Option<PathBuf>,
     username: Option<&str>,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     opt: &Opt,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
-    let tesseract = Tesseract::default();
+    let tesseract = match path.as_ref() {
+        Some(path) => match Tesseract::from_file(path.join("tdatastore")) {
+            Ok(tess) => tess,
+            Err(_) => {
+                let tess = Tesseract::default();
+                tess.set_file(path.join("tdatastore"));
+                tess.set_autosave();
+                tess
+            }
+        },
+        None => Tesseract::default(),
+    };
+
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
 
-    let mut config = MpIpfsConfig::testing(opt.experimental_node);
+    let mut config = match path.as_ref() {
+        Some(path) => MpIpfsConfig::production(path, opt.experimental_node),
+        None => MpIpfsConfig::testing(opt.experimental_node),
+    };
 
     if !opt.direct || !opt.no_discovery {
         config.store_setting.discovery = Discovery::Provider(opt.context.clone());
     }
-
+    if opt.disable_relay {
+        config.ipfs_setting.relay_client.enable = false;
+        config.ipfs_setting.relay_client.dcutr = false;
+    }
+    if opt.upnp {
+        config.ipfs_setting.portmapping = true;
+    }
     if opt.direct {
         config.store_setting.discovery = Discovery::Direct;
     }
@@ -76,7 +102,7 @@ async fn account(
     }
 
     config.store_setting.share_platform = opt.provide_platform_info;
-    
+
     if let Some(oride) = opt.r#override {
         config.store_setting.override_ipld = oride;
     }
@@ -88,60 +114,16 @@ async fn account(
     config.store_setting.wait_on_response = opt.wait;
 
     config.ipfs_setting.mdns.enable = opt.mdns;
-    let mut account = ipfs_identity_temporary(Some(config), tesseract, cache).await?;
-    account.create_identity(username, None).await?;
-    Ok(Box::new(account))
-}
 
-async fn account_persistent<P: AsRef<Path>>(
-    username: Option<&str>,
-    path: P,
-    cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-    opt: &Opt,
-) -> anyhow::Result<Box<dyn MultiPass>> {
-    let path = path.as_ref();
-    let tesseract = match Tesseract::from_file(path.join("tdatastore")) {
-        Ok(tess) => tess,
-        Err(_) => {
-            let tess = Tesseract::default();
-            tess.set_file(path.join("tdatastore"));
-            tess.set_autosave();
-            tess
-        }
+    let mut account = match path.is_some() {
+        false => Box::new(ipfs_identity_temporary(Some(config), tesseract, cache).await?)
+            as Box<dyn MultiPass>,
+        true => Box::new(ipfs_identity_persistent(config, tesseract, cache).await?)
+            as Box<dyn MultiPass>,
     };
 
-    tesseract
-        .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
-
-    let mut config = MpIpfsConfig::production(path, opt.experimental_node);
-    if !opt.direct || !opt.no_discovery {
-        config.store_setting.discovery = Discovery::Provider(opt.context.clone());
-    }
-    if opt.direct {
-        config.store_setting.discovery = Discovery::Direct;
-    }
-    if opt.no_discovery {
-        config.store_setting.discovery = Discovery::None;
-        config.ipfs_setting.bootstrap = false;
-    }
-
-    if let Some(oride) = opt.r#override {
-        config.store_setting.override_ipld = oride;
-    }
-
-    if let Some(bootstrap) = opt.bootstrap {
-        config.ipfs_setting.bootstrap = bootstrap;
-    }
-
-    config.ipfs_setting.mdns.enable = opt.mdns;
-
-    config.store_setting.wait_on_response = opt.wait;
-
-    let mut account = ipfs_identity_persistent(config, tesseract, cache).await?;
-    if account.get_own_identity().await.is_err() {
-        account.create_identity(username, None).await?;
-    }
-    Ok(Box::new(account))
+    account.create_identity(username, None).await?;
+    Ok(account)
 }
 
 #[tokio::main]
@@ -166,10 +148,7 @@ async fn main() -> anyhow::Result<()> {
 
     let cache = None; //cache_setup(opt.path.clone()).ok();
 
-    let mut account = match opt.path.as_ref() {
-        Some(path) => account_persistent(None, path, cache, &opt).await?,
-        None => account(None, cache, &opt).await?,
-    };
+    let mut account = account(opt.path.clone(), None, cache, &opt).await?;
 
     println!("Obtaining identity....");
     let own_identity = account.get_own_identity().await?;

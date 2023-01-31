@@ -2,6 +2,7 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError, SharedWriter};
+use warp_mp_ipfs::config::Discovery;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -32,7 +33,7 @@ use warp_rg_ipfs::IpfsMessaging;
 use warp_rg_ipfs::Persistent;
 use warp_rg_ipfs::Temporary;
 #[derive(Debug, Parser)]
-#[clap(name = "")]
+#[clap(name = "messenger")]
 struct Opt {
     #[clap(long)]
     path: Option<PathBuf>,
@@ -44,6 +45,27 @@ struct Opt {
     stdout_log: bool,
     #[clap(long)]
     disable_sender_emitter: bool,
+
+    #[clap(long)]
+    context: Option<String>,
+    #[clap(long)]
+    direct: bool,
+    #[clap(long)]
+    disable_relay: bool,
+    #[clap(long)]
+    upnp: bool,
+    #[clap(long)]
+    no_discovery: bool,
+    #[clap(long)]
+    mdns: bool,
+    #[clap(long)]
+    r#override: Option<bool>,
+    #[clap(long)]
+    bootstrap: Option<bool>,
+    #[clap(long)]
+    provide_platform_info: bool,
+    #[clap(long)]
+    wait: Option<u64>,
 }
 
 fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
@@ -60,6 +82,7 @@ async fn create_account<P: AsRef<Path>>(
     cache: Arc<RwLock<Box<dyn PocketDimension>>>,
     passphrase: Zeroizing<String>,
     experimental: bool,
+    opt: &Opt,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let tesseract = match path.as_ref() {
         Some(path) => {
@@ -74,10 +97,42 @@ async fn create_account<P: AsRef<Path>>(
 
     tesseract.unlock(passphrase.as_bytes())?;
 
-    let config = match path.as_ref() {
+    let mut config = match path.as_ref() {
         Some(path) => warp_mp_ipfs::config::MpIpfsConfig::production(path, experimental),
         None => warp_mp_ipfs::config::MpIpfsConfig::testing(experimental),
     };
+
+    if !opt.direct || !opt.no_discovery {
+        config.store_setting.discovery = Discovery::Provider(opt.context.clone());
+    }
+    if opt.disable_relay {
+        config.ipfs_setting.relay_client.enable = false;
+        config.ipfs_setting.relay_client.dcutr = false;
+    }
+    if opt.upnp {
+        config.ipfs_setting.portmapping = true;
+    }
+    if opt.direct {
+        config.store_setting.discovery = Discovery::Direct;
+    }
+    if opt.no_discovery {
+        config.store_setting.discovery = Discovery::None;
+        config.ipfs_setting.bootstrap = false;
+    }
+
+    config.store_setting.share_platform = opt.provide_platform_info;
+
+    if let Some(oride) = opt.r#override {
+        config.store_setting.override_ipld = oride;
+    }
+
+    if let Some(bootstrap) = opt.bootstrap {
+        config.ipfs_setting.bootstrap = bootstrap;
+    }
+
+    config.store_setting.wait_on_response = opt.wait;
+
+    config.ipfs_setting.mdns.enable = opt.mdns;
 
     let mut account: Box<dyn MultiPass> = match path.is_some() {
         true => Box::new(ipfs_identity_persistent(config, tesseract, Some(cache)).await?),
@@ -172,6 +227,7 @@ async fn main() -> anyhow::Result<()> {
         cache.clone(),
         Zeroizing::new(password),
         opt.experimental_node,
+        &opt
     )
     .await?;
 

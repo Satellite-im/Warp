@@ -299,7 +299,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(())
     }
 
-    async fn process_message(&mut self, message: Arc<GossipsubMessage>) -> anyhow::Result<()> {
+    async fn process_message(&mut self, message: GossipsubMessage) -> anyhow::Result<()> {
         let data = serde_json::from_slice::<Sata>(&message.data)?;
 
         let raw_object = data.decode::<IdentityPayload>()?;
@@ -564,9 +564,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     && self.discovering.write().await.insert(pubkey.clone())
                 {
                     let discovering = self.discovering.clone();
-                    //TODO: Have separate functionality (or refactor phonebook) to perform checks on peers
-                    //      to prevent recurring tokio spawning
-
+                    //TODO: Have separate utility to track task of discovery attempts
                     let relay = self.relays();
                     let discovery = self.discovery.clone();
                     tokio::spawn({
@@ -576,16 +574,13 @@ impl<T: IpfsTypes> IdentityStore<T> {
                             //Note: This is done since connect doesnt support dialing out to the peerid directly yet
                             //      so instead we will check if we can find them over DHT before passing the discovery
                             //      a separate function
-                            match ipfs.find_peer(peer_id).await {
-                                Ok(_) => {}
-                                Err(_) => {
-                                    if let Err(e) =
-                                        super::discover_peer(&ipfs, &pubkey, discovery, relay).await
-                                    {
-                                        error!("Error discovering peer: {e}");
-                                    }
+                            if ipfs.identity(Some(peer_id)).await.is_err() {
+                                if let Err(e) =
+                                    super::discover_peer(&ipfs, &pubkey, discovery, relay).await
+                                {
+                                    error!("Error discovering peer: {e}");
                                 }
-                            };
+                            }
                         }
                     });
                     tokio::spawn({
