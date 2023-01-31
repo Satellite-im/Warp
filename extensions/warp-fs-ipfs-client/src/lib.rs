@@ -551,7 +551,7 @@ fn affix_root<S: AsRef<str>>(name: S) -> String {
     let name = String::from(name.as_ref());
     match name.starts_with('/') {
         true => name,
-        false => format!("/{}", name),
+        false => format!("/{name}"),
     }
 }
 

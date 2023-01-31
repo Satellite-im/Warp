@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 use std::collections::HashMap;
 
 use crate::error::Error;
@@ -15,7 +16,7 @@ pub trait HookType: std::fmt::Display {
     fn base_type(&self) -> String;
 
     fn hook_type(&self) -> String {
-        format!("{}", self).to_lowercase()
+        format!("{self}").to_lowercase()
     }
 }
 

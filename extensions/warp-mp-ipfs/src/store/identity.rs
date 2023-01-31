@@ -299,7 +299,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(())
     }
 
-    async fn process_message(&mut self, message: Arc<GossipsubMessage>) -> anyhow::Result<()> {
+    async fn process_message(&mut self, message: GossipsubMessage) -> anyhow::Result<()> {
         let data = serde_json::from_slice::<Sata>(&message.data)?;
 
         let raw_object = data.decode::<IdentityPayload>()?;
@@ -496,10 +496,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let public_key =
             DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().encode()));
 
-        let username = match username {
-            Some(u) => u.to_string(),
-            None => warp::multipass::generator::generate_name(),
-        };
+        let username = username
+            .map(str::to_string)
+            .unwrap_or_else(warp::multipass::generator::generate_name);
 
         identity.set_username(&username);
         let fingerprint = public_key.fingerprint();
@@ -565,9 +564,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     && self.discovering.write().await.insert(pubkey.clone())
                 {
                     let discovering = self.discovering.clone();
-                    //TODO: Have separate functionality (or refactor phonebook) to perform checks on peers
-                    //      to prevent recurring tokio spawning
-
+                    //TODO: Have separate utility to track task of discovery attempts
                     let relay = self.relays();
                     let discovery = self.discovery.clone();
                     tokio::spawn({
@@ -577,16 +574,13 @@ impl<T: IpfsTypes> IdentityStore<T> {
                             //Note: This is done since connect doesnt support dialing out to the peerid directly yet
                             //      so instead we will check if we can find them over DHT before passing the discovery
                             //      a separate function
-                            match ipfs.find_peer(peer_id).await {
-                                Ok(_) => {}
-                                Err(_) => {
-                                    if let Err(e) =
-                                        super::discover_peer(&ipfs, &pubkey, discovery, relay).await
-                                    {
-                                        error!("Error discovering peer: {e}");
-                                    }
+                            if ipfs.identity(Some(peer_id)).await.is_err() {
+                                if let Err(e) =
+                                    super::discover_peer(&ipfs, &pubkey, discovery, relay).await
+                                {
+                                    error!("Error discovering peer: {e}");
                                 }
-                            };
+                            }
                         }
                     });
                     tokio::spawn({
@@ -763,7 +757,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         if matches!(identity_status, IdentityStatus::Offline) {
             return Ok(Platform::Unknown);
         }
-        
+
         self.cache()
             .await
             .iter()
@@ -803,7 +797,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
     pub async fn get_root_document(&self) -> Result<RootDocument, Error> {
         let root_cid = self.get_cid().await?;
         let path = IpfsPath::from(root_cid);
-        self.get_dag(path, None).await
+        let document: RootDocument = self.get_dag(path, None).await?;
+        document.verify(self.ipfs.clone()).await.map(|_| document)
     }
 
     pub async fn set_root_document(&mut self, mut document: RootDocument) -> Result<(), Error> {
@@ -812,11 +807,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
         document.sign(&did_kp)?;
 
         let root_cid = self.put_dag(document).await?;
-        if self.ipfs.is_pinned(&old_cid).await? {
-            self.ipfs.remove_pin(&old_cid, true).await?;
+        if old_cid != root_cid {
+            if self.ipfs.is_pinned(&old_cid).await? {
+                self.ipfs.remove_pin(&old_cid, true).await?;
+            }
+            self.ipfs.insert_pin(&root_cid, true).await?;
+            self.ipfs.remove_block(old_cid).await?;
         }
 
-        self.ipfs.insert_pin(&root_cid, true).await?;
         self.save_cid(root_cid).await?;
         Ok(())
     }
