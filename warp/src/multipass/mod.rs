@@ -34,7 +34,9 @@ pub enum MultiPassEventKind {
     IdentityOnline { did: DID },
     IdentityOffline { did: DID },
     Blocked { did: DID },
-    Unblocked { did: DID }
+    BlockedBy { did: DID },
+    Unblocked { did: DID },
+    UnblockedBy { did: DID },
 }
 
 #[derive(FFIFree)]
@@ -69,7 +71,8 @@ pub trait MultiPass:
 
     /// Obtain your own [`Identity`]
     async fn get_own_identity(&self) -> Result<Identity, Error> {
-        self.get_identity(Identifier::own()).await
+        self.get_identity(Identifier::own())
+            .await
             .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))
     }
 
@@ -148,7 +151,7 @@ pub trait Friends: Sync + Send {
     }
 
     /// Check to see if public key is blocked
-   async fn is_blocked(&self, _: &DID) -> Result<bool, Error> {
+    async fn is_blocked(&self, _: &DID) -> Result<bool, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -170,7 +173,6 @@ pub trait FriendsEvent: Sync + Send {
         Err(Error::Unimplemented)
     }
 }
-
 
 #[async_trait::async_trait]
 pub trait IdentityInformation: Send + Sync {
@@ -233,10 +235,7 @@ pub mod ffi {
     use crate::error::Error;
     use crate::ffi::{FFIResult, FFIResult_Null, FFIResult_String};
     use crate::multipass::{
-        identity::{
-             FFIResult_FFIVec_Identity, Identifier, Identity,
-            IdentityUpdate,
-        },
+        identity::{FFIResult_FFIVec_Identity, Identifier, Identity, IdentityUpdate},
         MultiPassAdapter,
     };
     use std::ffi::CStr;
@@ -275,8 +274,8 @@ pub mod ffi {
         let mp = &mut *(ctx);
 
         match async_on_block(async {
-            mp
-                .create_identity(username.as_deref(), passphrase.as_deref()).await
+            mp.create_identity(username.as_deref(), passphrase.as_deref())
+                .await
         }) {
             Ok(pkey) => FFIResult::ok(pkey),
             Err(e) => FFIResult::err(e),

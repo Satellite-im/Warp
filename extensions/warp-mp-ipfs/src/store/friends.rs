@@ -474,8 +474,17 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     }
 
                     let mut list = self.block_by_list().await?;
-                    list.insert(data.sender);
+                    let completed = list.insert(data.sender.clone());
                     self.set_block_by_list(list).await?;
+
+                    if completed {
+                        if let Err(e) = self
+                            .tx
+                            .send(MultiPassEventKind::BlockedBy { did: data.sender })
+                        {
+                            error!("Error broadcasting event: {e}");
+                        }
+                    }
 
                     if let Some(tx) = std::mem::take(&mut signal) {
                         let _ = tx.send(Err(Error::BlockedByUser));
@@ -483,8 +492,16 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
                 Event::Unblock => {
                     let mut list = self.block_by_list().await?;
-                    list.remove(&data.sender);
+                    let completed = list.remove(&data.sender);
                     self.set_block_by_list(list).await?;
+                    if completed {
+                        if let Err(e) = self
+                            .tx
+                            .send(MultiPassEventKind::UnblockedBy { did: data.sender })
+                        {
+                            error!("Error broadcasting event: {e}");
+                        }
+                    }
                 }
                 Event::Response => {
                     if let Some(tx) = std::mem::take(&mut signal) {
