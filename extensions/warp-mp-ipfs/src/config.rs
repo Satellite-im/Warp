@@ -175,6 +175,7 @@ pub struct IpfsSetting {
     pub relay_server: RelayServer,
     pub swarm: Swarm,
     pub bootstrap: bool,
+    pub portmapping: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

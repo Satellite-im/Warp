@@ -2,6 +2,7 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError, SharedWriter};
+use warp_mp_ipfs::config::Discovery;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -32,7 +33,7 @@ use warp_rg_ipfs::IpfsMessaging;
 use warp_rg_ipfs::Persistent;
 use warp_rg_ipfs::Temporary;
 #[derive(Debug, Parser)]
-#[clap(name = "")]
+#[clap(name = "messenger")]
 struct Opt {
     #[clap(long)]
     path: Option<PathBuf>,
@@ -44,6 +45,27 @@ struct Opt {
     stdout_log: bool,
     #[clap(long)]
     disable_sender_emitter: bool,
+
+    #[clap(long)]
+    context: Option<String>,
+    #[clap(long)]
+    direct: bool,
+    #[clap(long)]
+    disable_relay: bool,
+    #[clap(long)]
+    upnp: bool,
+    #[clap(long)]
+    no_discovery: bool,
+    #[clap(long)]
+    mdns: bool,
+    #[clap(long)]
+    r#override: Option<bool>,
+    #[clap(long)]
+    bootstrap: Option<bool>,
+    #[clap(long)]
+    provide_platform_info: bool,
+    #[clap(long)]
+    wait: Option<u64>,
 }
 
 fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
@@ -60,6 +82,7 @@ async fn create_account<P: AsRef<Path>>(
     cache: Arc<RwLock<Box<dyn PocketDimension>>>,
     passphrase: Zeroizing<String>,
     experimental: bool,
+    opt: &Opt,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let tesseract = match path.as_ref() {
         Some(path) => {
@@ -74,10 +97,42 @@ async fn create_account<P: AsRef<Path>>(
 
     tesseract.unlock(passphrase.as_bytes())?;
 
-    let config = match path.as_ref() {
+    let mut config = match path.as_ref() {
         Some(path) => warp_mp_ipfs::config::MpIpfsConfig::production(path, experimental),
         None => warp_mp_ipfs::config::MpIpfsConfig::testing(experimental),
     };
+
+    if !opt.direct || !opt.no_discovery {
+        config.store_setting.discovery = Discovery::Provider(opt.context.clone());
+    }
+    if opt.disable_relay {
+        config.ipfs_setting.relay_client.enable = false;
+        config.ipfs_setting.relay_client.dcutr = false;
+    }
+    if opt.upnp {
+        config.ipfs_setting.portmapping = true;
+    }
+    if opt.direct {
+        config.store_setting.discovery = Discovery::Direct;
+    }
+    if opt.no_discovery {
+        config.store_setting.discovery = Discovery::None;
+        config.ipfs_setting.bootstrap = false;
+    }
+
+    config.store_setting.share_platform = opt.provide_platform_info;
+
+    if let Some(oride) = opt.r#override {
+        config.store_setting.override_ipld = oride;
+    }
+
+    if let Some(bootstrap) = opt.bootstrap {
+        config.ipfs_setting.bootstrap = bootstrap;
+    }
+
+    config.store_setting.wait_on_response = opt.wait;
+
+    config.ipfs_setting.mdns.enable = opt.mdns;
 
     let mut account: Box<dyn MultiPass> = match path.is_some() {
         true => Box::new(ipfs_identity_persistent(config, tesseract, Some(cache)).await?),
@@ -172,6 +227,7 @@ async fn main() -> anyhow::Result<()> {
         cache.clone(),
         Zeroizing::new(password),
         opt.experimental_node,
+        &opt
     )
     .await?;
 
@@ -375,7 +431,7 @@ async fn main() -> anyhow::Result<()> {
                                 writeln!(stdout, "Error adding recipient: {e}")?;
                                 continue
                             }
-                            writeln!(stdout, "{} has been added", did)?;
+                            writeln!(stdout, "{did} has been added")?;
 
                         },
                         Some("/remove-recipient") => {
@@ -397,7 +453,7 @@ async fn main() -> anyhow::Result<()> {
                                 writeln!(stdout, "Error removing recipient: {e}")?;
                                 continue
                             }
-                            writeln!(stdout, "{} has been removed", did)?;
+                            writeln!(stdout, "{did} has been removed")?;
 
                         },
                         Some("/create-group") => {
@@ -492,7 +548,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                                 table.add_row(vec![convo.id().to_string(), recipients.join(",").to_string()]);
                             }
-                            writeln!(stdout, "{}", table)?;
+                            writeln!(stdout, "{table}")?;
                         },
                         Some("/list") => {
                             let mut table = Table::new();
@@ -503,7 +559,7 @@ async fn main() -> anyhow::Result<()> {
                                 Some(id) => match id.parse() {
                                     Ok(last) => MessageOptions::default().set_range(0..last),
                                     Err(e) => {
-                                        writeln!(stdout, "Error parsing range: {}", e)?;
+                                        writeln!(stdout, "Error parsing range: {e}")?;
                                         continue
                                     }
                                 },
@@ -535,7 +591,7 @@ async fn main() -> anyhow::Result<()> {
                                     &emojis.join(" ")
                                 ]);
                             }
-                            writeln!(stdout, "{}", table)?;
+                            writeln!(stdout, "{table}")?;
                         },
                         Some("/get-first") => {
                             let mut table = Table::new();
@@ -566,7 +622,7 @@ async fn main() -> anyhow::Result<()> {
                                     &emojis.join(" ")
                                 ]);
                             }
-                            writeln!(stdout, "{}", table)?;
+                            writeln!(stdout, "{table}")?;
                         },
                         Some("/get-last") => {
                             let mut table = Table::new();
@@ -598,7 +654,7 @@ async fn main() -> anyhow::Result<()> {
                                     &emojis.join(" ")
                                 ]);
                             }
-                            writeln!(stdout, "{}", table)?;
+                            writeln!(stdout, "{table}")?;
                         },
                         Some("/search") => {
                             let mut table = Table::new();
@@ -638,14 +694,14 @@ async fn main() -> anyhow::Result<()> {
                                     &emojis.join(" ")
                                 ]);
                             }
-                            writeln!(stdout, "{}", table)?;
+                            writeln!(stdout, "{table}")?;
                         },
                         Some("/edit") => {
                             let message_id = match cmd_line.next() {
                                 Some(id) => match Uuid::from_str(id) {
                                     Ok(uuid) => uuid,
                                     Err(e) => {
-                                        writeln!(stdout, "Error parsing ID: {}", e)?;
+                                        writeln!(stdout, "Error parsing ID: {e}")?;
                                         continue
                                     }
                                 },
@@ -664,7 +720,7 @@ async fn main() -> anyhow::Result<()> {
                             let message = vec![messages.join(" ").to_string()];
                             let conversation_id = topic.read().clone();
                             if let Err(e) = chat.send(conversation_id, Some(message_id), message).await {
-                                writeln!(stdout, "Error: {}", e)?;
+                                writeln!(stdout, "Error: {e}")?;
                                 continue
                             }
                             writeln!(stdout, "Message edited")?;
@@ -693,7 +749,7 @@ async fn main() -> anyhow::Result<()> {
                                 async move {
                                     writeln!(stdout, "Sending....")?;
                                     if let Err(e) = chat.attach(conversation_id, vec![file], message).await {
-                                        writeln!(stdout, "Error: {}", e)?;
+                                        writeln!(stdout, "Error: {e}")?;
                                     } else {
                                         writeln!(stdout, "File sent")?
                                     }
@@ -707,7 +763,7 @@ async fn main() -> anyhow::Result<()> {
                                 Some(id) => match Uuid::from_str(id) {
                                     Ok(uuid) => uuid,
                                     Err(e) => {
-                                        writeln!(stdout, "Error parsing ID: {}", e)?;
+                                        writeln!(stdout, "Error parsing ID: {e}")?;
                                         continue
                                     }
                                 },
@@ -740,7 +796,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut stream = match chat.download(conversation_id, message_id, file, path).await {
                                 Ok(stream) => stream,
                                 Err(e) => {
-                                    writeln!(stdout, "Error: {}", e)?;
+                                    writeln!(stdout, "Error: {e}")?;
                                     continue;
                                 }
                             };
@@ -800,7 +856,7 @@ async fn main() -> anyhow::Result<()> {
                                 Some(id) => match Uuid::from_str(id) {
                                     Ok(uuid) => uuid,
                                     Err(e) => {
-                                        writeln!(stdout, "Error parsing ID: {}", e)?;
+                                        writeln!(stdout, "Error parsing ID: {e}")?;
                                         continue
                                     }
                                 },
@@ -814,7 +870,7 @@ async fn main() -> anyhow::Result<()> {
                                 Some(id) => match Uuid::from_str(id) {
                                     Ok(uuid) => uuid,
                                     Err(e) => {
-                                        writeln!(stdout, "Error parsing ID: {}", e)?;
+                                        writeln!(stdout, "Error parsing ID: {e}")?;
                                         continue
                                     }
                                 },
@@ -833,7 +889,7 @@ async fn main() -> anyhow::Result<()> {
                             };
 
                             if let Err(e) = chat.react(conversation_id, message_id, state, code).await {
-                                writeln!(stdout, "Error: {}", e)?;
+                                writeln!(stdout, "Error: {e}")?;
                                 continue;
                             }
                             writeln!(stdout, "Reacted")?
@@ -846,7 +902,7 @@ async fn main() -> anyhow::Result<()> {
                                     match Uuid::from_str(id) {
                                         Ok(uuid) => uuid,
                                         Err(e) => {
-                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            writeln!(stdout, "Error parsing ID: {e}")?;
                                             continue
                                         }
                                     }
@@ -860,7 +916,7 @@ async fn main() -> anyhow::Result<()> {
                             let status = match chat.message_status(topic, id).await {
                                 Ok(status) => status,
                                 Err(_e) => {
-                                    writeln!(stdout, "Error getting message status: {}", _e)?;
+                                    writeln!(stdout, "Error getting message status: {_e}")?;
                                     continue
                                 }
                             };
@@ -891,12 +947,12 @@ async fn main() -> anyhow::Result<()> {
                                     let id = match Uuid::from_str(id) {
                                         Ok(uuid) => uuid,
                                         Err(e) => {
-                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            writeln!(stdout, "Error parsing ID: {e}")?;
                                             continue
                                         }
                                     };
                                     chat.pin(topic, id, PinState::Pin).await?;
-                                    writeln!(stdout, "Pinned {}", id)?;
+                                    writeln!(stdout, "Pinned {id}")?;
                                 },
                                 None => { writeln!(stdout, "/pin <id | all>")? }
                             }
@@ -925,12 +981,12 @@ async fn main() -> anyhow::Result<()> {
                                     let id = match Uuid::from_str(id) {
                                         Ok(uuid) => uuid,
                                         Err(e) => {
-                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            writeln!(stdout, "Error parsing ID: {e}")?;
                                             continue
                                         }
                                     };
                                     chat.pin(*topic.read(), id, PinState::Unpin).await?;
-                                    writeln!(stdout, "Unpinned {}", id)?;
+                                    writeln!(stdout, "Unpinned {id}")?;
                                 },
                                 None => { writeln!(stdout, "/unpin <id | all>")? }
                             }
@@ -942,14 +998,14 @@ async fn main() -> anyhow::Result<()> {
                                     let id = match Uuid::from_str(id) {
                                         Ok(uuid) => uuid,
                                         Err(e) => {
-                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            writeln!(stdout, "Error parsing ID: {e}")?;
                                             continue
                                         }
                                     };
                                     if let Err(_e) = chat.delete(topic, Some(id)).await {
 
                                     } else {
-                                        writeln!(stdout, "Message {} removed", id)?;
+                                        writeln!(stdout, "Message {id} removed")?;
                                     }
                                 },
                                 None => { writeln!(stdout, "/remove-message <id>")? }
@@ -957,12 +1013,12 @@ async fn main() -> anyhow::Result<()> {
                         }
                         Some("/count") => {
                             let amount = chat.get_message_count(*topic.read()).await?;
-                            writeln!(stdout, "Conversation contains {} messages", amount)?;
+                            writeln!(stdout, "Conversation contains {amount} messages")?;
                         }
                         _ => {
                             if !line.is_empty() {
                                 if let Err(e) = chat.send(*topic.read(), None, vec![line.to_string()]).await {
-                                    writeln!(stdout, "Error sending message: {}", e)?;
+                                    writeln!(stdout, "Error sending message: {e}")?;
                                     continue
                                 }
                             }
@@ -972,7 +1028,7 @@ async fn main() -> anyhow::Result<()> {
                 Err(ReadlineError::Interrupted) => break,
                 Err(ReadlineError::Eof) => break,
                 Err(e) => {
-                    writeln!(stdout, "Error: {}", e)?;
+                    writeln!(stdout, "Error: {e}")?;
                 }
             },
         }
@@ -1084,7 +1140,7 @@ async fn message_event_handle(
                 message_id,
             } => {
                 if *topic.read() == conversation_id {
-                    writeln!(stdout, "> Message {} has been pinned", message_id)?;
+                    writeln!(stdout, "> Message {message_id} has been pinned")?;
                 }
             }
             MessageEventKind::MessageUnpinned {
@@ -1092,7 +1148,7 @@ async fn message_event_handle(
                 message_id,
             } => {
                 if *topic.read() == conversation_id {
-                    writeln!(stdout, "> Message {} has been unpinned", message_id)?;
+                    writeln!(stdout, "> Message {message_id} has been unpinned")?;
                 }
             }
             MessageEventKind::MessageEdited {
@@ -1100,7 +1156,7 @@ async fn message_event_handle(
                 message_id,
             } => {
                 if *topic.read() == conversation_id {
-                    writeln!(stdout, "> Message {} has been edited", message_id)?;
+                    writeln!(stdout, "> Message {message_id} has been edited")?;
                 }
             }
             MessageEventKind::MessageDeleted {
@@ -1108,7 +1164,7 @@ async fn message_event_handle(
                 message_id,
             } => {
                 if *topic.read() == conversation_id {
-                    writeln!(stdout, "> Message {} has been deleted", message_id)?;
+                    writeln!(stdout, "> Message {message_id} has been deleted")?;
                 }
             }
             MessageEventKind::MessageReactionAdded {
@@ -1123,8 +1179,7 @@ async fn message_event_handle(
                         .unwrap_or_else(|_| did_key.to_string());
                     writeln!(
                         stdout,
-                        "> {} has reacted to {} with {}",
-                        username, message_id, reaction
+                        "> {username} has reacted to {message_id} with {reaction}"
                     )?;
                 }
             }
@@ -1140,8 +1195,7 @@ async fn message_event_handle(
                         .unwrap_or_else(|_| did_key.to_string());
                     writeln!(
                         stdout,
-                        "> {} has removed reaction {} from {}",
-                        username, reaction, message_id
+                        "> {username} has removed reaction {reaction} from {message_id}"
                     )?;
                 }
             }
@@ -1156,7 +1210,7 @@ async fn message_event_handle(
                         .unwrap_or_else(|_| did_key.to_string());
                     match event {
                         MessageEvent::Typing => {
-                            writeln!(stdout, ">>> {} is typing", username,)?;
+                            writeln!(stdout, ">>> {username} is typing",)?;
                         }
                     }
                 }
@@ -1173,7 +1227,7 @@ async fn message_event_handle(
 
                     match event {
                         MessageEvent::Typing => {
-                            writeln!(stdout, ">>> {} is no longer typing", username,)?;
+                            writeln!(stdout, ">>> {username} is no longer typing",)?;
                         }
                     }
                 }
@@ -1187,7 +1241,7 @@ async fn message_event_handle(
                         .await
                         .unwrap_or_else(|_| recipient.to_string());
 
-                    writeln!(stdout, ">>> {} was added to {conversation_id}", username)?;
+                    writeln!(stdout, ">>> {username} was added to {conversation_id}")?;
                 }
             }
             MessageEventKind::RecipientRemoved {
@@ -1201,8 +1255,7 @@ async fn message_event_handle(
 
                     writeln!(
                         stdout,
-                        ">>> {} was removed from {conversation_id}",
-                        username
+                        ">>> {username} was removed from {conversation_id}"
                     )?;
                 }
             }

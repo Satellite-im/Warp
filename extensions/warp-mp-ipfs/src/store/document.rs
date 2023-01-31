@@ -144,7 +144,7 @@ impl RootDocument {
         let (identity, _, _, _, _, _, _) = self.resolve(ipfs, Some(Duration::from_secs(5))).await?;
         let mut root_document = self.clone();
         let signature =
-            std::mem::replace(&mut root_document.signature, None).ok_or(Error::InvalidSignature)?;
+            std::mem::take(&mut root_document.signature).ok_or(Error::InvalidSignature)?;
         let bytes = serde_json::to_vec(&root_document)?;
         let sig = bs58::decode(&signature).into_vec()?;
         identity
@@ -216,7 +216,15 @@ impl RootDocument {
             request = document.resolve_or_default(ipfs.clone(), timeout).await
         }
 
-        Ok((identity, picture, banner, friends, block_list, block_by_list, request))
+        Ok((
+            identity,
+            picture,
+            banner,
+            friends,
+            block_list,
+            block_by_list,
+            request,
+        ))
     }
 }
 

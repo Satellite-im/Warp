@@ -360,7 +360,7 @@ impl ConversationDocument {
     pub async fn delete_all_message<T: IpfsTypes>(
         &mut self,
         ipfs: Ipfs<T>,
-    ) -> Result<Vec<Uuid>, Error> {
+    ) -> Result<(), Error> {
         let messages = std::mem::take(&mut self.messages);
 
         let mut ids = vec![];
@@ -372,7 +372,9 @@ impl ConversationDocument {
             ids.push((document.id, document.message));
         }
 
-        let fut = FuturesOrdered::from_iter(ids.iter().map(|(id, cid)| {
+        //TODO: Replace with gc within ipfs (when completed) in the future
+        //      so we dont need to manually delete the blocks
+        let _fut = FuturesOrdered::from_iter(ids.iter().map(|(id, cid)| {
             let ipfs = ipfs.clone();
             async move {
                 ipfs.remove_block(*cid).await?;
@@ -382,7 +384,7 @@ impl ConversationDocument {
         .filter_map(|result| async { result.ok() })
         .collect::<Vec<_>>()
         .await;
-        Ok(fut)
+        Ok(())
     }
 }
 
