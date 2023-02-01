@@ -13,11 +13,7 @@ use uuid::Uuid;
 use warp::crypto::cipher::Cipher;
 use warp::crypto::did_key::{Generate, ECDH};
 use warp::crypto::zeroize::Zeroizing;
-// use warp::crypto::cipher::Cipher;
-// use warp::crypto::did_key::{Generate, ECDH};
-// use warp::crypto::zeroize::Zeroizing;
 use warp::crypto::{Ed25519KeyPair, KeyMaterial, DID};
-//Ed25519KeyPair, KeyMaterial,
 use warp::error::Error;
 use warp::logging::tracing::log::error;
 use warp::sata::Sata;
@@ -45,7 +41,7 @@ pub struct Queue<T: IpfsTypes> {
     did: Arc<DID>,
     ipfs: Ipfs<T>,
     removal: mpsc::UnboundedSender<(QueueEntryType, DID)>,
-    entries: Arc<RwLock<HashMap<DID, BTreeSet<QueueEntry<T>>>>>,
+    entries: Arc<RwLock<HashMap<DID, BTreeSet<QueueEntry>>>>,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
 }
 
@@ -93,7 +89,7 @@ impl<T: IpfsTypes> Queue<T> {
                         if entry.is_empty() {
                             continue;
                         }
-                        
+
                         if let Some(item) =
                             entry.iter().find(|entry| entry.entry_type() == entry_type)
                         {
@@ -116,7 +112,7 @@ impl<T: IpfsTypes> Queue<T> {
         entry: QueueData,
     ) {
         let entry = self.raw_insert(None, entry_type, topic, did, entry).await;
-        if let Err(e) = entry.save().await {
+        if let Err(e) = entry.save(self.did.clone()).await {
             error!("Error saving queue: {e}");
         }
         if let Entry::Occupied(entry) = self.entries.write().await.entry(did.clone()) {
@@ -134,7 +130,7 @@ impl<T: IpfsTypes> Queue<T> {
         topic: String,
         did: &DID,
         entry_item: QueueData,
-    ) -> QueueEntry<T> {
+    ) -> QueueEntry {
         let count = self.count(did).await.unwrap_or_default();
         let queue_item = QueueEntry::new(
             self.ipfs.clone(),
@@ -233,32 +229,91 @@ impl<T: IpfsTypes> Queue<T> {
     }
 }
 
+impl<T: IpfsTypes> Queue<T> {
+    pub async fn load(&self) -> Result<(), Error> {
+        let Some(path) = self.path.as_ref() else {
+            // Since a path was not provided, this will assume that everything will be in-memory
+            return Ok(())
+        };
+
+        if !path.is_dir() {
+            return Err(Error::InvalidDirectory);
+        }
+
+        let mut entry_stream = ReadDirStream::new(tokio::fs::read_dir(path).await?);
+
+        while let Some(Ok(entry)) = entry_stream.next().await {
+            let entry_path = entry.path();
+
+            if entry_path.is_file() {
+                let Ok(data) = tokio::fs::read(entry_path).await else {
+                    continue;
+                };
+
+                let prikey =
+                    Ed25519KeyPair::from_secret_key(&self.did.private_key_bytes()).get_x25519();
+
+                let pubkey =
+                    Ed25519KeyPair::from_public_key(&self.did.public_key_bytes()).get_x25519();
+
+                let prik = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
+                    .map(Zeroizing::new)
+                    .map_err(|_| anyhow::anyhow!("Error performing key exchange"))?;
+
+                let data = Cipher::direct_decrypt(
+                    warp::crypto::cipher::CipherType::Aes256Gcm,
+                    &data,
+                    &prik,
+                )?;
+
+                let Ok(entry) = QueueEntry::from_data(self.ipfs.clone(), self.did.clone(), self.removal.clone(), &data).await else {
+                    continue
+                };
+
+                let recipient = entry.recipient();
+                self.entries
+                    .write()
+                    .await
+                    .entry(recipient.clone())
+                    .or_default()
+                    .insert(entry);
+            }
+        }
+
+        for (_, entries) in self.entries.read().await.clone() {
+            if let Some(item) = entries.first() {
+                if !item.is_running().await {
+                    item.start();
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Serialize, Deserialize)]
-pub struct QueueEntry<T: IpfsTypes> {
+pub struct QueueEntry {
     seq: usize,
     id: Uuid,
     #[serde(skip)]
     path: Option<PathBuf>,
     recipient: DID,
-    #[serde(skip)]
-    ipfs: Option<Ipfs<T>>,
     topic: String,
     entry_type: QueueEntryType,
     data: QueueData,
-    #[serde(skip)]
-    did: Arc<DID>,
     #[serde(skip)]
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
     #[serde(skip)]
     notify: Arc<Notify>,
 }
 
-impl<T: IpfsTypes> std::fmt::Debug for QueueEntry<T> {
+impl std::fmt::Debug for QueueEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("QueueEntry")
             .field("seq", &self.seq)
             .field("id", &self.id)
-            .field("recipient", &self.did)
+            .field("recipient", &self.recipient)
             .field("topic", &self.topic)
             .field("entry_type", &self.entry_type)
             .field("data", &self.data)
@@ -266,7 +321,7 @@ impl<T: IpfsTypes> std::fmt::Debug for QueueEntry<T> {
     }
 }
 
-impl<T: IpfsTypes> core::hash::Hash for QueueEntry<T> {
+impl core::hash::Hash for QueueEntry {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
         self.recipient.hash(state);
@@ -274,7 +329,7 @@ impl<T: IpfsTypes> core::hash::Hash for QueueEntry<T> {
     }
 }
 
-impl<T: IpfsTypes> PartialEq for QueueEntry<T> {
+impl PartialEq for QueueEntry {
     fn eq(&self, other: &Self) -> bool {
         self.id.eq(&other.id)
             && self.recipient.eq(&other.recipient)
@@ -282,41 +337,39 @@ impl<T: IpfsTypes> PartialEq for QueueEntry<T> {
     }
 }
 
-impl<T: IpfsTypes> PartialOrd for QueueEntry<T> {
+impl PartialOrd for QueueEntry {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.seq.partial_cmp(&other.seq)
     }
 }
 
-impl<T: IpfsTypes> Ord for QueueEntry<T> {
+impl Ord for QueueEntry {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.seq.cmp(&other.seq)
     }
 }
 
-impl<T: IpfsTypes> Eq for QueueEntry<T> {}
+impl Eq for QueueEntry {}
 
-impl<T: IpfsTypes> Clone for QueueEntry<T> {
+impl Clone for QueueEntry {
     fn clone(&self) -> Self {
         Self {
             seq: self.seq,
             id: self.id,
             path: self.path.clone(),
-            ipfs: self.ipfs.clone(),
             recipient: self.recipient.clone(),
             topic: self.topic.clone(),
             entry_type: self.entry_type,
             data: self.data.clone(),
-            did: self.did.clone(),
             task: self.task.clone(),
             notify: self.notify.clone(),
         }
     }
 }
 
-impl<T: IpfsTypes> QueueEntry<T> {
+impl QueueEntry {
     #[allow(clippy::too_many_arguments)]
-    pub async fn new(
+    pub async fn new<T: IpfsTypes>(
         ipfs: Ipfs<T>,
         seq: usize,
         id: Option<Uuid>,
@@ -328,26 +381,62 @@ impl<T: IpfsTypes> QueueEntry<T> {
         data: QueueData,
         tx: mpsc::UnboundedSender<(QueueEntryType, DID)>,
     ) -> Self {
-        let notify = Arc::new(Notify::new());
-
         let entry = QueueEntry {
             id: id.unwrap_or_else(Uuid::new_v4),
             seq,
             path,
             recipient,
-            ipfs: Some(ipfs),
             topic,
             entry_type,
             data,
-            task: Default::default(),
-            did,
-            notify,
+            notify: Arc::default(),
+            task: Arc::default(),
         };
 
+        entry.task(did, ipfs, tx).await;
+
+        entry
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn from_data<T: IpfsTypes>(
+        ipfs: Ipfs<T>,
+        did: Arc<DID>,
+        tx: mpsc::UnboundedSender<(QueueEntryType, DID)>,
+        data: &[u8],
+    ) -> Result<Self, Error> {
+        let entry: QueueEntry = serde_json::from_slice(data)?;
+        entry.task(did, ipfs, tx).await;
+        Ok(entry)
+    }
+
+    pub fn start(&self) {
+        self.notify.notify_one();
+    }
+
+    pub async fn is_running(&self) -> bool {
+        self.task
+            .read()
+            .await
+            .as_ref()
+            .map(|t| t.is_finished())
+            .unwrap_or_default()
+    }
+
+    pub fn entry_type(&self) -> QueueEntryType {
+        self.entry_type
+    }
+
+    pub async fn task<T: IpfsTypes>(
+        &self,
+        did_key: Arc<DID>,
+        ipfs: Ipfs<T>,
+        tx: mpsc::UnboundedSender<(QueueEntryType, DID)>,
+    ) {
         let task = tokio::spawn({
-            let entry = entry.clone();
-            let ipfs = entry.ipfs.clone().expect("IPFS is always Some");
+            let entry = self.clone();
             async move {
+                let ipfs = ipfs.clone();
                 let topic = entry.topic.clone();
                 entry.notify.notified().await;
                 loop {
@@ -382,7 +471,7 @@ impl<T: IpfsTypes> QueueEntry<T> {
 
                                 let data = match data.encrypt(
                                     libipld::IpldCodec::DagJson,
-                                    entry.did.as_ref(),
+                                    did_key.as_ref(),
                                     warp::sata::Kind::Reference,
                                     bytes,
                                 ) {
@@ -419,49 +508,19 @@ impl<T: IpfsTypes> QueueEntry<T> {
             }
         });
 
-        *entry.task.write().await = Some(task);
-
-        entry
+        *self.task.write().await = Some(task);
     }
 
-    pub fn start(&self) {
-        self.notify.notify_one();
-    }
-
-    pub fn entry_type(&self) -> QueueEntryType {
-        self.entry_type
-    }
-
-    pub fn path(&self) -> Option<PathBuf> {
-        let entry_type = self.entry_type;
-        let recipient = self.recipient.clone();
-        self.path.clone().map(|path| match entry_type {
-            QueueEntryType::Conversation(id) => path
-                .join(recipient.to_string())
-                .join("conversation")
-                .join(id.to_string()),
-
-            QueueEntryType::Messaging(conversation_id, message_id) => path
-                .join(recipient.to_string())
-                .join("messaging")
-                .join(conversation_id.to_string())
-                .join(message_id.unwrap_or_default().to_string()),
-        })
+    pub fn recipient(&self) -> DID {
+        self.recipient.clone()
     }
 
     pub async fn remove(&self) -> Result<(), Error> {
-        if let Some(path) = self.path() {
-            if path.exists() {
-                tokio::fs::remove_file(path.join(self.id.to_string())).await?;
-                let mut empty = true;
-                let mut entry_stream = ReadDirStream::new(tokio::fs::read_dir(&path).await?);
-                while let Some(Ok(_)) = entry_stream.next().await {
-                    empty = false;
-                }
+        if let Some(path) = self.path.as_ref() {
+            let path = path.join(self.id.to_string());
 
-                if empty {
-                    tokio::fs::remove_dir(path).await?;
-                }
+            if path.is_file() {
+                tokio::fs::remove_file(path).await?;
             }
         }
 
@@ -469,17 +528,16 @@ impl<T: IpfsTypes> QueueEntry<T> {
     }
 
     #[allow(dead_code)]
-    pub async fn save(&self) -> Result<(), Error> {
-        if let Some(path) = self.path() {
+    pub async fn save(&self, did: Arc<DID>) -> Result<(), Error> {
+        if let Some(path) = self.path.as_ref() {
             if !path.is_dir() {
-                tokio::fs::create_dir_all(path.clone()).await?;
+                tokio::fs::create_dir_all(path).await?;
             }
 
             let bytes = serde_json::to_vec(self)?;
 
-            let prikey =
-                Ed25519KeyPair::from_secret_key(&self.did.private_key_bytes()).get_x25519();
-            let pubkey = Ed25519KeyPair::from_public_key(&self.did.public_key_bytes()).get_x25519();
+            let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
+            let pubkey = Ed25519KeyPair::from_public_key(&did.public_key_bytes()).get_x25519();
 
             let prik = match std::panic::catch_unwind(|| prikey.key_exchange(&pubkey)) {
                 Ok(pri) => Zeroizing::new(pri),

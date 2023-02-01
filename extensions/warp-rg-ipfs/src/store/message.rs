@@ -195,6 +195,11 @@ impl<T: IpfsTypes> MessageStore<T> {
             async move {
                 info!("MessagingStore task created");
 
+                tokio::spawn({
+                    let store = store.clone();
+                    async move { if let Err(_e) = store.queue.load().await {} }
+                });
+
                 let did = &*(store.did.clone());
                 let Ok(stream) = store.ipfs.pubsub_subscribe(format!("{did}/messaging")).await else {
                     error!("Unable to create subscription stream. Terminating task");
