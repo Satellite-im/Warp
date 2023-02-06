@@ -10,6 +10,7 @@ pub mod logging {
     pub use tracing_subscriber;
 }
 
+pub mod blink;
 pub mod constellation;
 pub mod crypto;
 pub mod data;
