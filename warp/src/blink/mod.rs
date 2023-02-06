@@ -13,10 +13,7 @@ use serde::{Deserialize, Serialize};
 use mime_types::*;
 use uuid::Uuid;
 
-use crate::raygun::Conversation;
-
-/// same as raygun::Conversation::id()
-pub type CallId = uuid::Uuid;
+use crate::crypto::DID;
 
 // todo: add function to renegotiate codecs, either for the entire call or
 // for one peer. the latter would provide a "low bandwidth" resolution
@@ -35,17 +32,17 @@ pub trait Blink {
     /// attempt to initiate a call. Only one call may be offered at a time.
     /// cannot offer a call if another call is in progress.
     /// During a call, WebRTC connections should only be made to
-    /// peers included in the Conversation.
+    /// peers included in the Vec<DID>.
     fn offer_call(
         &mut self,
-        conversation: Conversation,
+        conversation: Vec<DID>,
         // default codecs for each type of stream
         config: CallConfig,
     );
     /// accept/join a call. Automatically send and receive audio
-    fn answer_call(&mut self, call_id: CallId);
+    fn answer_call(&mut self, call_id: Uuid);
     /// notify a sender/group that you will not join a call
-    fn reject_call(&mut self, call_id: CallId);
+    fn reject_call(&mut self, call_id: Uuid);
     /// end/leave the current call
     fn leave_call(&mut self);
 
@@ -71,11 +68,11 @@ pub trait Blink {
 /// Drives the UI
 pub enum BlinkEventKind {
     /// A call has been offered
-    IncomingCall { call_id: CallId },
+    IncomingCall { call_id: Uuid },
     /// At least one participant accepted the call
-    CallAccepted { call_id: CallId },
+    CallAccepted { call_id: Uuid },
     /// All participants have left the call
-    CallEnded { call_id: CallId },
+    CallEnded { call_id: Uuid },
     /// Someone joined the call
     ParticipantJoined { peer_id: Participant },
     /// Someone left the call
