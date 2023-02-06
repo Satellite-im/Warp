@@ -180,7 +180,7 @@ impl RootDocument {
                 Ok(Ok(ipld)) => from_ipld::<Identity>(ipld)
                     .map_err(anyhow::Error::from)
                     .map_err(Error::from)?,
-                Ok(Err(e)) => return Err(Error::Any(e)),
+                Ok(Err(_)) => return Err(Error::IdentityInvalid),
                 Err(e) => return Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
             }
         };
@@ -256,7 +256,7 @@ impl CacheDocument {
             || identity.did_key() != self.did.clone()
             || identity.short_id() != self.short_id
         {
-            return Err(Error::IdentityDoesntExist); //TODO: Invalid Identity
+            return Err(Error::IdentityInvalid);
         }
 
         if let Some(document) = &self.picture {
