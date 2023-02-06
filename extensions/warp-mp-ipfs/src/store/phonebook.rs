@@ -192,13 +192,11 @@ impl<T: IpfsTypes> PhoneBookEntry<T> {
             .map(RwLock::new)
             .map(Arc::new)?;
 
-        let task = Default::default();
-
         let entry = Self {
             ipfs,
             did,
             connection_type,
-            task,
+            task: Arc::default(),
             event,
             emit_event,
             discovery,

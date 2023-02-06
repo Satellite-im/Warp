@@ -25,10 +25,7 @@ use crate::config::Discovery;
 
 use self::document::DocumentType;
 
-
 pub const IDENTITY_BROADCAST: &str = "identity/broadcast";
-pub const FRIENDS_BROADCAST: &str = "friends/broadcast";
-pub const SYNC_BROADCAST: &str = "/identity/sync/broadcast";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IdentityPayload {
@@ -176,9 +173,10 @@ pub async fn discover_peer<T: IpfsTypes>(
 ) -> anyhow::Result<()> {
     let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
 
-    if connected_to_peer(ipfs, PeerType::PeerId(peer_id)).await?
-        != PeerConnectionType::NotConnected
-    {
+    if matches!(
+        connected_to_peer(ipfs, PeerType::PeerId(peer_id)).await?,
+        PeerConnectionType::Connected,
+    ) {
         return Ok(());
     }
 
