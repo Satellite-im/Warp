@@ -950,12 +950,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
         Ok(())
     }
 
-    pub async fn is_friend(&self, pubkey: &DID) -> Result<(), Error> {
-        let has = self.friends_list().await?.contains(pubkey);
-        match has {
-            true => Ok(()),
-            false => Err(Error::FriendDoesntExist),
-        }
+    pub async fn is_friend(&self, pubkey: &DID) -> Result<bool, Error> {
+        self.friends_list().await.map(|list| list.contains(pubkey))
     }
 }
 
