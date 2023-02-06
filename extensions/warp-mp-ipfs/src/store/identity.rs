@@ -795,14 +795,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn get_root_document(&self) -> Result<RootDocument, Error> {
-        let root_cid = self.get_cid().await?;
+        let root_cid = self.get_root_cid().await?;
         let path = IpfsPath::from(root_cid);
         let document: RootDocument = self.get_dag(path, None).await?;
         document.verify(self.ipfs.clone()).await.map(|_| document)
     }
 
     pub async fn set_root_document(&mut self, mut document: RootDocument) -> Result<(), Error> {
-        let old_cid = self.get_cid().await?;
+        let old_cid = self.get_root_cid().await?;
         let did_kp = self.get_keypair_did()?;
         document.sign(&did_kp)?;
 
@@ -1009,7 +1009,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             .ok_or_else(|| Error::OtherWithContext("Cache cannot be found".into()))
     }
 
-    pub async fn get_cid(&self) -> Result<Cid, Error> {
+    pub async fn get_root_cid(&self) -> Result<Cid, Error> {
         (self.root_cid.read().await.clone()).ok_or(Error::IdentityDoesntExist)
     }
 
