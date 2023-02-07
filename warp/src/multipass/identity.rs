@@ -383,73 +383,93 @@ impl<S: AsRef<str>> From<S> for Identifier {
     }
 }
 
-#[derive(Debug, Clone, Default, FFIFree)]
+#[derive(Debug, Clone, FFIFree)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct IdentityUpdate {
-    /// Setting Username
-    username: Option<String>,
-
-    /// Path of picture
-    graphics_picture: Option<String>,
-
-    /// Path of banner
-    graphics_banner: Option<String>,
-
-    /// Setting Status Message
-    status_message: Option<Option<String>>,
+pub enum IdentityUpdate {
+    Username(String),
+    Picture(String),
+    PicturePath(std::path::PathBuf),
+    Banner(String),
+    BannerPath(std::path::PathBuf),
+    StatusMessage(Option<String>),
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl IdentityUpdate {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_username(username: String) -> IdentityUpdate {
-        IdentityUpdate {
-            username: Some(username),
-            ..Default::default()
-        }
+        IdentityUpdate::Username(username)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_graphics_picture(graphics: String) -> IdentityUpdate {
-        IdentityUpdate {
-            graphics_picture: Some(graphics),
-            ..Default::default()
-        }
+        IdentityUpdate::Picture(graphics)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_graphics_banner(graphics: String) -> IdentityUpdate {
-        IdentityUpdate {
-            graphics_banner: Some(graphics),
-            ..Default::default()
-        }
+        IdentityUpdate::Banner(graphics)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_status_message(status_message: Option<String>) -> IdentityUpdate {
-        IdentityUpdate {
-            status_message: Some(status_message),
-            ..Default::default()
-        }
+        IdentityUpdate::StatusMessage(status_message)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl IdentityUpdate {
+    pub fn set_graphics_picture_path(path: std::path::PathBuf) -> IdentityUpdate {
+        IdentityUpdate::PicturePath(path)
+    }
+
+    pub fn set_graphics_banner_path(path: std::path::PathBuf) -> IdentityUpdate {
+        IdentityUpdate::BannerPath(path)
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl IdentityUpdate {
     pub fn username(&self) -> Option<String> {
-        self.username.clone()
+        match self.clone() {
+            IdentityUpdate::Username(username) => Some(username),
+            _ => None
+        }
     }
 
     pub fn graphics_picture(&self) -> Option<String> {
-        self.graphics_picture.clone()
+        match self.clone() {
+            IdentityUpdate::Picture(data) => Some(data),
+            _ => None
+        }
     }
 
     pub fn graphics_banner(&self) -> Option<String> {
-        self.graphics_banner.clone()
+        match self.clone() {
+            IdentityUpdate::Banner(data) => Some(data),
+            _ => None
+        }
+    }
+
+    pub fn graphics_picture_path(&self) -> Option<std::path::PathBuf> {
+        match self.clone() {
+            IdentityUpdate::PicturePath(path) => Some(path),
+            _ => None
+        }
+    }
+
+    pub fn graphics_banner_path(&self) -> Option<std::path::PathBuf> {
+        match self.clone() {
+            IdentityUpdate::BannerPath(path) => Some(path),
+            _ => None
+        }
     }
 
     pub fn status_message(&self) -> Option<Option<String>> {
-        self.status_message.clone()
+        match self.clone() {
+            IdentityUpdate::StatusMessage(status) => Some(status),
+            _ => None
+        }
     }
 }
 
@@ -481,8 +501,7 @@ impl IdentityUpdate {
 pub mod ffi {
     use crate::crypto::DID;
     use crate::multipass::identity::{
-        Badge, FFIVec_Badge, FFIVec_Role, Graphics, Identifier,
-        Identity, IdentityUpdate, Role,
+        Badge, FFIVec_Badge, FFIVec_Role, Graphics, Identifier, Identity, IdentityUpdate, Role,
     };
     use std::ffi::{CStr, CString};
     use std::os::raw::{c_char, c_void};
