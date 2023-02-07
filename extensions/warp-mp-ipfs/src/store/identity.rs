@@ -8,9 +8,7 @@ use crate::{
 };
 use futures::{stream::BoxStream, FutureExt, StreamExt};
 use ipfs::{
-    libp2p::gossipsub::GossipsubMessage,
-    unixfs::ll::file::adder::{Chunker, FileAdderBuilder},
-    Block, Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId,
+    libp2p::gossipsub::GossipsubMessage, Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId,
 };
 use libipld::{
     serde::{from_ipld, to_ipld},
@@ -25,7 +23,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::broadcast;
-use tracing::log::error;
+use tracing::log::{self, error};
 use warp::{
     crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
@@ -795,14 +793,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn get_root_document(&self) -> Result<RootDocument, Error> {
-        let root_cid = self.get_cid().await?;
+        let root_cid = self.get_root_cid().await?;
         let path = IpfsPath::from(root_cid);
         let document: RootDocument = self.get_dag(path, None).await?;
         document.verify(self.ipfs.clone()).await.map(|_| document)
     }
 
     pub async fn set_root_document(&mut self, mut document: RootDocument) -> Result<(), Error> {
-        let old_cid = self.get_cid().await?;
+        let old_cid = self.get_root_cid().await?;
         let did_kp = self.get_keypair_did()?;
         document.sign(&did_kp)?;
 
@@ -893,49 +891,55 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     pub async fn store_photo(
         &mut self,
-        mut stream: BoxStream<'static, Vec<u8>>,
+        stream: BoxStream<'static, Vec<u8>>,
         limit: Option<usize>,
     ) -> Result<Cid, Error> {
         let ipfs = self.ipfs.clone();
 
-        let mut adder = FileAdderBuilder::default()
-            .with_chunker(Chunker::Size(256 * 1024))
-            .build();
+        let mut stream = ipfs.add_unixfs(stream).await?;
 
-        let mut last_cid = None;
+        let mut ipfs_path = None;
 
-        while let Some(buffer) = stream.next().await {
-            let mut total = 0;
-
-            while total < buffer.len() {
-                let (blocks, consumed) = adder.push(&buffer[total..]);
-                for (cid, block) in blocks {
-                    let block = Block::new(cid, block)?;
-                    let _cid = ipfs.put_block(block).await?;
+        while let Some(status) = stream.next().await {
+            match status {
+                ipfs::unixfs::UnixfsStatus::ProgressStatus { written, .. } => {
+                    if let Some(limit) = limit {
+                        if written >= limit {
+                            return Err(Error::InvalidLength {
+                                context: "photo".into(),
+                                current: written,
+                                minimum: Some(1),
+                                maximum: Some(limit),
+                            });
+                        }
+                    }
+                    log::debug!("{written} bytes written");
                 }
-                total += consumed;
-            }
-            if let Some(limit) = limit {
-                if total >= limit {
-                    return Err(Error::InvalidLength {
-                        context: "photo".into(),
-                        current: total,
-                        minimum: None,
-                        maximum: Some(limit),
-                    });
+                ipfs::unixfs::UnixfsStatus::CompletedStatus { path, written, .. } => {
+                    log::debug!("Image is written with {written} bytes");
+                    ipfs_path = Some(path);
+                }
+                ipfs::unixfs::UnixfsStatus::FailedStatus { written, error, .. } => {
+                    match error {
+                        Some(e) => {
+                            log::error!("Error uploading picture with {written} bytes written with error: {e}");
+                            return Err(Error::from(e));
+                        }
+                        None => {
+                            log::error!("Error uploading picture with {written} bytes written");
+                            return Err(Error::OtherWithContext("Error uploading photo".into()));
+                        }
+                    }
                 }
             }
         }
 
-        let blocks = adder.finish();
-        for (cid, block) in blocks {
-            let block = Block::new(cid, block)?;
-            let cid = ipfs.put_block(block).await?;
-            last_cid = Some(cid);
-        }
-
-        let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
-
+        let cid = ipfs_path
+            .ok_or(Error::Other)?
+            .root()
+            .cid()
+            .copied()
+            .ok_or(Error::Other)?;
         ipfs.insert_pin(&cid, true).await?;
 
         Ok(cid)
@@ -1009,7 +1013,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             .ok_or_else(|| Error::OtherWithContext("Cache cannot be found".into()))
     }
 
-    pub async fn get_cid(&self) -> Result<Cid, Error> {
+    pub async fn get_root_cid(&self) -> Result<Cid, Error> {
         (self.root_cid.read().await.clone()).ok_or(Error::IdentityDoesntExist)
     }
 

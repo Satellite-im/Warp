@@ -12,10 +12,7 @@ use rust_ipfs as ipfs;
 use ipfs::{IpfsTypes, Multiaddr, PeerId, Protocol};
 use serde::{Deserialize, Serialize};
 use warp::{
-    crypto::{
-        did_key::{CoreSign, Generate},
-        DIDKey, Ed25519KeyPair, KeyMaterial, DID,
-    },
+    crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
     multipass::identity::{Identity, IdentityStatus, Platform},
     tesseract::Tesseract,
@@ -25,17 +22,14 @@ use crate::config::Discovery;
 
 use self::document::DocumentType;
 
-
 pub const IDENTITY_BROADCAST: &str = "identity/broadcast";
-pub const FRIENDS_BROADCAST: &str = "friends/broadcast";
-pub const SYNC_BROADCAST: &str = "/identity/sync/broadcast";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IdentityPayload {
     /// Not required but would be used to cross check the identity did, sender (if sent directly)
     pub did: DID,
 
-    /// Type that represents profile picture
+    /// Type that represents profile picturec
     #[serde(skip_serializing_if = "Option::is_none")]
     pub picture: Option<DocumentType<String>>,
 
@@ -77,24 +71,6 @@ fn did_keypair(tesseract: &Tesseract) -> anyhow::Result<DID> {
     let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
     let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(id_kp.secret.as_bytes()));
     Ok(did.into())
-}
-
-// Note that this are temporary
-#[allow(dead_code)]
-fn sign_serde<D: Serialize>(tesseract: &Tesseract, data: &D) -> anyhow::Result<Vec<u8>> {
-    let did = did_keypair(tesseract)?;
-    let bytes = serde_json::to_vec(data)?;
-    Ok(did.as_ref().sign(&bytes))
-}
-
-// Note that this are temporary
-#[allow(dead_code)]
-fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow::Result<()> {
-    let bytes = serde_json::to_vec(data)?;
-    pk.as_ref()
-        .verify(&bytes, signature)
-        .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-    Ok(())
 }
 
 // This function stores the topic as a dag in a "discovery:<topic>" format and provide the cid over DHT and obtain the providers of the same cid
@@ -176,9 +152,10 @@ pub async fn discover_peer<T: IpfsTypes>(
 ) -> anyhow::Result<()> {
     let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
 
-    if connected_to_peer(ipfs, PeerType::PeerId(peer_id)).await?
-        != PeerConnectionType::NotConnected
-    {
+    if matches!(
+        connected_to_peer(ipfs, PeerType::PeerId(peer_id)).await?,
+        PeerConnectionType::Connected,
+    ) {
         return Ok(());
     }
 

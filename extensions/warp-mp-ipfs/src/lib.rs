@@ -869,7 +869,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         store.friends_list().await.map(Vec::from_iter)
     }
 
-    async fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
+    async fn has_friend(&self, pubkey: &DID) -> Result<bool, Error> {
         let store = self.friend_store().await?;
         store.is_friend(pubkey).await
     }

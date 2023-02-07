@@ -161,7 +161,7 @@ pub trait Friends: Sync + Send {
     }
 
     /// Check to see if public key is friend of the account
-    async fn has_friend(&self, _: &DID) -> Result<(), Error> {
+    async fn has_friend(&self, _: &DID) -> Result<bool, Error> {
         Err(Error::Unimplemented)
     }
 }
@@ -565,13 +565,13 @@ pub mod ffi {
     pub unsafe extern "C" fn multipass_has_friend(
         ctx: *const MultiPassAdapter,
         pubkey: *const DID,
-    ) -> FFIResult_Null {
+    ) -> FFIResult<bool> {
         if ctx.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if pubkey.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Public key cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Public key cannot be null")));
         }
 
         let mp = &*(ctx);
