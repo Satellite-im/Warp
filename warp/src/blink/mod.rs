@@ -5,7 +5,7 @@
 //! - selecting input devices (webcam, speaker, etc)
 //! - selecting output devices (speaker, etc)
 //!
-use anyhow::{bail, Result};
+use async_trait::async_trait;
 use derive_more::Display;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,10 @@ use serde::{Deserialize, Serialize};
 use mime_types::*;
 use uuid::Uuid;
 
-use crate::crypto::DID;
+use crate::{
+    crypto::DID,
+    error::{self, Error},
+};
 
 // todo: add function to renegotiate codecs, either for the entire call or
 // for one peer. the latter would provide a "low bandwidth" resolution
@@ -22,10 +25,11 @@ use crate::crypto::DID;
 //
 // todo: add functions for screen sharing
 /// Provides teleconferencing capabilities
+#[async_trait]
 pub trait Blink {
     // ------ Misc ------
     /// The event stream notifies the UI of call related events
-    fn get_event_stream(&mut self) -> Result<BlinkEventStream>;
+    async fn get_event_stream(&mut self) -> Result<BlinkEventStream, Error>;
 
     // ------ Create/Join a call ------
 
@@ -33,36 +37,42 @@ pub trait Blink {
     /// cannot offer a call if another call is in progress.
     /// During a call, WebRTC connections should only be made to
     /// peers included in the Vec<DID>.
-    fn offer_call(
+    async fn offer_call(
         &mut self,
         conversation: Vec<DID>,
         // default codecs for each type of stream
         config: CallConfig,
     );
     /// accept/join a call. Automatically send and receive audio
-    fn answer_call(&mut self, call_id: Uuid);
+    async fn answer_call(&mut self, call_id: Uuid);
     /// notify a sender/group that you will not join a call
-    fn reject_call(&mut self, call_id: Uuid);
+    async fn reject_call(&mut self, call_id: Uuid);
     /// end/leave the current call
-    fn leave_call(&mut self);
+    async fn leave_call(&mut self);
 
     // ------ Select input/output devices ------
 
-    fn get_available_microphones(&self) -> Result<Vec<String>>;
-    fn select_microphone(&mut self, device_name: &str);
-    fn get_available_speakers(&self) -> Result<Vec<String>>;
-    fn select_speaker(&mut self, device_name: &str);
-    fn get_available_cameras(&self) -> Result<Vec<String>>;
-    fn select_camera(&mut self, device_name: &str);
+    async fn get_available_microphones(&self) -> Result<Vec<String>, Error>;
+    async fn select_microphone(&mut self, device_name: &str);
+    async fn get_available_speakers(&self) -> Result<Vec<String>, Error>;
+    async fn select_speaker(&mut self, device_name: &str);
+    async fn get_available_cameras(&self) -> Result<Vec<String>, Error>;
+    async fn select_camera(&mut self, device_name: &str);
 
     // ------ Media controls ------
 
-    fn mute_self(&mut self);
-    fn unmute_self(&mut self);
-    fn enable_camera(&mut self);
-    fn disable_camera(&mut self);
-    fn record_call(&mut self, output_file: &str);
-    fn stop_recording(&mut self);
+    async fn mute_self(&mut self);
+    async fn unmute_self(&mut self);
+    async fn enable_camera(&mut self);
+    async fn disable_camera(&mut self);
+    async fn record_call(&mut self, output_file: &str);
+    async fn stop_recording(&mut self);
+
+    // ------ Utility Functions ------
+
+    /// Returns the ID of the current call, or None if
+    /// a call is not in progress
+    fn get_call_id(&self) -> Option<Uuid>;
 }
 
 /// Drives the UI
@@ -74,13 +84,13 @@ pub enum BlinkEventKind {
     /// All participants have left the call
     CallEnded { call_id: Uuid },
     /// Someone joined the call
-    ParticipantJoined { peer_id: Participant },
+    ParticipantJoined { call_id: Uuid, peer_id: DID },
     /// Someone left the call
-    ParticipantLeft { peer_id: Participant },
+    ParticipantLeft { call_id: Uuid, peer_id: DID },
     /// A participant is speaking
-    ParticipantSpeaking { peer_id: Participant },
+    ParticipantSpeaking { call_id: Uuid, peer_id: DID },
     /// A participant stopped speaking
-    ParticipantNotSpeaking { peer_id: Participant },
+    ParticipantNotSpeaking { call_id: Uuid, peer_id: DID },
 }
 
 /// Specifies codecs for the call
@@ -104,11 +114,6 @@ pub enum MediaType {
     ScreenShare,
 }
 
-pub struct Participant {
-    id: Uuid,
-    display_name: String,
-}
-
 pub struct BlinkEventStream(pub BoxStream<'static, BlinkEventKind>);
 
 impl core::ops::Deref for BlinkEventStream {
@@ -125,7 +130,7 @@ impl core::ops::DerefMut for BlinkEventStream {
 }
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Serialize, Deserialize, Display)]
+#[derive(Serialize, Deserialize, Display, Copy, Clone)]
 /// Known WebRTC MIME types
 pub enum MimeType {
     // https://en.wikipedia.org/wiki/Advanced_Video_Coding
@@ -171,9 +176,10 @@ pub enum MimeType {
     PCMA,
 }
 
-impl MimeType {
-    pub fn from_string(s: &str) -> Result<Self> {
-        let mime_type = match s {
+impl TryFrom<&str> for MimeType {
+    type Error = error::Error;
+    fn try_from(value: &str) -> std::result::Result<Self, Self::Error> {
+        let mime_type = match value {
             MIME_TYPE_H264 => MimeType::H264,
             MIME_TYPE_VP8 => MimeType::VP8,
             MIME_TYPE_VP9 => MimeType::VP9,
@@ -182,9 +188,16 @@ impl MimeType {
             MIME_TYPE_G722 => MimeType::G722,
             MIME_TYPE_PCMU => MimeType::PCMU,
             MIME_TYPE_PCMA => MimeType::PCMA,
-            _ => bail!(format! {"invalid mime type: {s}"}),
+            _ => return Err(Error::InvalidMimeType),
         };
         Ok(mime_type)
+    }
+}
+
+impl TryFrom<String> for MimeType {
+    type Error = error::Error;
+    fn try_from(value: String) -> std::result::Result<Self, Self::Error> {
+        MimeType::try_from(value.as_ref())
     }
 }
 
