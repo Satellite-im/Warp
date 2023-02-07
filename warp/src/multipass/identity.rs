@@ -394,28 +394,34 @@ pub enum IdentityUpdate {
 }
 
 impl IdentityUpdate {
+    /// Set new username
     pub fn set_username(username: String) -> IdentityUpdate {
         IdentityUpdate::Username(username)
     }
 
+    /// Set profile picture
     pub fn set_graphics_picture(graphics: String) -> IdentityUpdate {
         IdentityUpdate::Picture(graphics)
     }
 
+    /// Set profile banner
     pub fn set_graphics_banner(graphics: String) -> IdentityUpdate {
         IdentityUpdate::Banner(graphics)
     }
 
+    /// Set status message
     pub fn set_status_message(status_message: Option<String>) -> IdentityUpdate {
         IdentityUpdate::StatusMessage(status_message)
     }
 }
 
 impl IdentityUpdate {
+    /// Set profile picture from a file
     pub fn set_graphics_picture_path(path: std::path::PathBuf) -> IdentityUpdate {
         IdentityUpdate::PicturePath(path)
     }
 
+    /// Set profile banner from a file
     pub fn set_graphics_banner_path(path: std::path::PathBuf) -> IdentityUpdate {
         IdentityUpdate::BannerPath(path)
     }
