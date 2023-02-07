@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = { version = "1" }
+bytes = "1.4.0"
 cpal = "0.14.2"
 derive_more = "0.99.17"
 futures = { version = "0.3" }
