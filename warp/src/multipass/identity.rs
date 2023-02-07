@@ -384,7 +384,6 @@ impl<S: AsRef<str>> From<S> for Identifier {
 }
 
 #[derive(Debug, Clone, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum IdentityUpdate {
     Username(String),
     Picture(String),
@@ -394,30 +393,24 @@ pub enum IdentityUpdate {
     StatusMessage(Option<String>),
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl IdentityUpdate {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_username(username: String) -> IdentityUpdate {
         IdentityUpdate::Username(username)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_graphics_picture(graphics: String) -> IdentityUpdate {
         IdentityUpdate::Picture(graphics)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_graphics_banner(graphics: String) -> IdentityUpdate {
         IdentityUpdate::Banner(graphics)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn set_status_message(status_message: Option<String>) -> IdentityUpdate {
         IdentityUpdate::StatusMessage(status_message)
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl IdentityUpdate {
     pub fn set_graphics_picture_path(path: std::path::PathBuf) -> IdentityUpdate {
         IdentityUpdate::PicturePath(path)
@@ -428,72 +421,47 @@ impl IdentityUpdate {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl IdentityUpdate {
     pub fn username(&self) -> Option<String> {
         match self.clone() {
             IdentityUpdate::Username(username) => Some(username),
-            _ => None
+            _ => None,
         }
     }
 
     pub fn graphics_picture(&self) -> Option<String> {
         match self.clone() {
             IdentityUpdate::Picture(data) => Some(data),
-            _ => None
+            _ => None,
         }
     }
 
     pub fn graphics_banner(&self) -> Option<String> {
         match self.clone() {
             IdentityUpdate::Banner(data) => Some(data),
-            _ => None
+            _ => None,
         }
     }
 
     pub fn graphics_picture_path(&self) -> Option<std::path::PathBuf> {
         match self.clone() {
             IdentityUpdate::PicturePath(path) => Some(path),
-            _ => None
+            _ => None,
         }
     }
 
     pub fn graphics_banner_path(&self) -> Option<std::path::PathBuf> {
         match self.clone() {
             IdentityUpdate::BannerPath(path) => Some(path),
-            _ => None
+            _ => None,
         }
     }
 
     pub fn status_message(&self) -> Option<Option<String>> {
         match self.clone() {
             IdentityUpdate::StatusMessage(status) => Some(status),
-            _ => None
+            _ => None,
         }
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl IdentityUpdate {
-    #[wasm_bindgen(getter)]
-    pub fn username(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.username).unwrap()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn graphics_picture(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.graphics_picture).unwrap()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn graphics_banner(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.graphics_banner).unwrap()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn status_message(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.status_message).unwrap()
     }
 }
 
