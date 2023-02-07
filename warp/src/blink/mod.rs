@@ -5,6 +5,8 @@
 //! - selecting input devices (webcam, speaker, etc)
 //! - selecting output devices (speaker, etc)
 //!
+use std::str::FromStr;
+
 use async_trait::async_trait;
 use derive_more::Display;
 use futures::stream::BoxStream;
@@ -39,7 +41,7 @@ pub trait Blink {
     /// peers included in the Vec<DID>.
     async fn offer_call(
         &mut self,
-        conversation: Vec<DID>,
+        participants: Vec<DID>,
         // default codecs for each type of stream
         config: CallConfig,
     );
@@ -94,6 +96,7 @@ pub enum BlinkEventKind {
 }
 
 /// Specifies codecs for the call
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub struct CallConfig {
     audio_codec: MediaCodec,
     camera_codec: MediaCodec,
@@ -101,6 +104,7 @@ pub struct CallConfig {
 }
 
 /// Specifies the codec, sample rate, and media source
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub struct MediaCodec {
     mime: MimeType,
     clock_rate: u32,
@@ -108,6 +112,7 @@ pub struct MediaCodec {
     channels: u8,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub enum MediaType {
     Audio,
     Camera,
@@ -130,7 +135,7 @@ impl core::ops::DerefMut for BlinkEventStream {
 }
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Serialize, Deserialize, Display, Copy, Clone)]
+#[derive(Serialize, Deserialize, Display, Copy, Clone, PartialEq, Eq)]
 /// Known WebRTC MIME types
 pub enum MimeType {
     // https://en.wikipedia.org/wiki/Advanced_Video_Coding
@@ -195,6 +200,13 @@ impl TryFrom<&str> for MimeType {
             }
         };
         Ok(mime_type)
+    }
+}
+
+impl FromStr for MimeType {
+    type Err = error::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.try_into()
     }
 }
 
