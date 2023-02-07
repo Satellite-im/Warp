@@ -42,31 +42,31 @@ pub trait Blink {
         conversation: Vec<DID>,
         // default codecs for each type of stream
         config: CallConfig,
-    );
+    ) -> Result<(), Error>;
     /// accept/join a call. Automatically send and receive audio
-    async fn answer_call(&mut self, call_id: Uuid);
+    async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error>;
     /// notify a sender/group that you will not join a call
-    async fn reject_call(&mut self, call_id: Uuid);
+    async fn reject_call(&mut self, call_id: Uuid) -> Result<(), Error>;
     /// end/leave the current call
-    async fn leave_call(&mut self);
+    async fn leave_call(&mut self) -> Result<(), Error>;
 
     // ------ Select input/output devices ------
 
     async fn get_available_microphones(&self) -> Result<Vec<String>, Error>;
-    async fn select_microphone(&mut self, device_name: &str);
+    async fn select_microphone(&mut self, device_name: &str) -> Result<(), Error>;
     async fn get_available_speakers(&self) -> Result<Vec<String>, Error>;
-    async fn select_speaker(&mut self, device_name: &str);
+    async fn select_speaker(&mut self, device_name: &str) -> Result<(), Error>;
     async fn get_available_cameras(&self) -> Result<Vec<String>, Error>;
-    async fn select_camera(&mut self, device_name: &str);
+    async fn select_camera(&mut self, device_name: &str) -> Result<(), Error>;
 
     // ------ Media controls ------
 
-    async fn mute_self(&mut self);
-    async fn unmute_self(&mut self);
-    async fn enable_camera(&mut self);
-    async fn disable_camera(&mut self);
-    async fn record_call(&mut self, output_file: &str);
-    async fn stop_recording(&mut self);
+    async fn mute_self(&mut self) -> Result<(), Error>;
+    async fn unmute_self(&mut self) -> Result<(), Error>;
+    async fn enable_camera(&mut self) -> Result<(), Error>;
+    async fn disable_camera(&mut self) -> Result<(), Error>;
+    async fn record_call(&mut self, output_file: &str) -> Result<(), Error>;
+    async fn stop_recording(&mut self) -> Result<(), Error>;
 
     // ------ Utility Functions ------
 

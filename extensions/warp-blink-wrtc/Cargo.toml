@@ -1,0 +1,31 @@
+[package]
+name = "warp-blink-wrtc"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+cpal = "0.14.2"
+derive_more = "0.99.17"
+futures = { version = "0.3" }
+log = "0.4.17"
+opus = "0.3.0"
+uuid = "1.2.2"
+rand = "0.8.5"
+serde = { version = "1.0.147", features = ["derive"] }
+serde_json = "1.0"
+warp = { path = "../../warp" }
+webrtc = "0.6.0"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[build-dependencies]
+cbindgen = "0.23"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[features]
+build-header = []
