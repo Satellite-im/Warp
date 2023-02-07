@@ -198,8 +198,8 @@ pub enum Error {
     InvalidDataType,
 
     //Blink Errors
-    #[error("Invalid MIME type")]
-    InvalidMimeType,
+    #[error("Invalid MIME type: {mime_type}")]
+    InvalidMimeType { mime_type: String },
 
     //Misc
     #[error("Length for '{context}' is invalid. Current length: {current}. Minimum Length: {minimum:?}, Maximum: {maximum:?}")]

@@ -188,7 +188,11 @@ impl TryFrom<&str> for MimeType {
             MIME_TYPE_G722 => MimeType::G722,
             MIME_TYPE_PCMU => MimeType::PCMU,
             MIME_TYPE_PCMA => MimeType::PCMA,
-            _ => return Err(Error::InvalidMimeType),
+            _ => {
+                return Err(Error::InvalidMimeType {
+                    mime_type: value.into(),
+                })
+            }
         };
         Ok(mime_type)
     }
