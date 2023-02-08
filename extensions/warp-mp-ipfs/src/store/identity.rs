@@ -1009,12 +1009,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn get_cache_cid(&self) -> Result<Cid, Error> {
-        (self.cache_cid.read().await.clone())
+        (self.cache_cid.read().await)
             .ok_or_else(|| Error::OtherWithContext("Cache cannot be found".into()))
     }
 
     pub async fn get_root_cid(&self) -> Result<Cid, Error> {
-        (self.root_cid.read().await.clone()).ok_or(Error::IdentityDoesntExist)
+        (self.root_cid.read().await).ok_or(Error::IdentityDoesntExist)
     }
 
     pub async fn update_identity(&self) -> Result<(), Error> {
