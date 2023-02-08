@@ -105,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
 
             if rand::random() {
                 account_a.remove_friend(&ident_b.did_key()).await?;
-                if account_a.has_friend(&ident_b.did_key()).await.is_ok() {
+                if account_a.has_friend(&ident_b.did_key()).await? {
                     println!(
                         "{} is stuck with {} forever",
                         username(&ident_a),
@@ -116,7 +116,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             } else {
                 account_b.remove_friend(&ident_a.did_key()).await?;
-                if account_b.has_friend(&ident_a.did_key()).await.is_ok() {
+                if account_b.has_friend(&ident_a.did_key()).await? {
                     println!(
                         "{} is stuck with {} forever",
                         username(&ident_b),

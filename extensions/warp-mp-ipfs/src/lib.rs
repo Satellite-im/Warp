@@ -971,7 +971,7 @@ impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
             .await?
             .first()
             .ok_or(Error::IdentityDoesntExist)?;
-        let friends = self.has_friend(did).await.is_ok();
+        let friends = self.has_friend(did).await?;
         let received_friend_request = self.received_friend_request_from(did).await?;
         let sent_friend_request = self.sent_friend_request_to(did).await?;
         let blocked = self.is_blocked(did).await?;
