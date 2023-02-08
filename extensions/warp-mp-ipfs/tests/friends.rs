@@ -60,8 +60,8 @@ mod test {
         })
         .await?;
 
-        assert!(account_b.has_friend(&did_a).await.is_ok());
-        assert!(account_a.has_friend(&did_b).await.is_ok());
+        assert!(account_b.has_friend(&did_a).await?);
+        assert!(account_a.has_friend(&did_b).await?);
         Ok(())
     }
 
@@ -99,8 +99,8 @@ mod test {
         })
         .await?;
 
-        assert!(account_b.has_friend(&did_a).await.is_ok());
-        assert!(account_a.has_friend(&did_b).await.is_ok());
+        assert!(account_b.has_friend(&did_a).await?);
+        assert!(account_a.has_friend(&did_b).await?);
 
         account_a.remove_friend(&did_b).await?;
 
