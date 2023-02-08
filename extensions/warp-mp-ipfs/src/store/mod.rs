@@ -3,6 +3,7 @@ pub mod friends;
 pub mod identity;
 pub mod phonebook;
 pub mod queue;
+pub mod discovery;
 
 use std::time::Duration;
 

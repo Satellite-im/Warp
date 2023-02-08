@@ -2,8 +2,8 @@
 //onto the lock.
 #![allow(clippy::clone_on_copy)]
 use crate::{
-    config::Discovery,
-    store::{did_to_libp2p_pub, IdentityPayload},
+    config::Discovery as DiscoveryConfig,
+    store::{did_to_libp2p_pub, discovery::Discovery, IdentityPayload},
     Persistent,
 };
 use futures::{stream::BoxStream, FutureExt, StreamExt};
@@ -23,7 +23,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::broadcast;
-use tracing::log::{self, error};
+use tracing::log::{self, error, warn};
 use warp::{
     crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
@@ -215,15 +215,19 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 }
             }
         });
-        if let Discovery::Provider(context) = &store.discovery {
-            let ipfs = store.ipfs.clone();
-            let context = context.clone().unwrap_or_else(|| "warp-mp-ipfs".into());
-            tokio::spawn(async {
-                if let Err(e) = super::discovery(ipfs, context).await {
-                    error!("Error performing topic discovery: {e}");
-                }
-            });
-        };
+
+        if let Err(e) = store.discovery.start(store.ipfs.clone()).await {
+            warn!("Error starting discovery service: {e}. Will not be able to discover peers over namespace");
+        }
+        // if let Discovery::Provider(context) = &store.discovery {
+        //     let ipfs = store.ipfs.clone();
+        //     let context = context.clone().unwrap_or_else(|| "warp-mp-ipfs".into());
+        //     tokio::spawn(async {
+        //         if let Err(e) = super::discovery(ipfs, context).await {
+        //             error!("Error performing topic discovery: {e}");
+        //         }
+        //     });
+        // };
         tokio::task::yield_now().await;
         Ok(store)
     }
@@ -464,8 +468,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
         }
     }
 
-    pub fn discovery_type(&self) -> Discovery {
-        self.discovery.clone()
+    pub fn discovery_type(&self) -> DiscoveryConfig {
+        self.discovery.discovery_config()
     }
 
     pub fn relays(&self) -> Vec<Multiaddr> {
@@ -563,19 +567,18 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 {
                     let discovering = self.discovering.clone();
                     //TODO: Have separate utility to track task of discovery attempts
-                    let relay = self.relays();
-                    let discovery = self.discovery.clone();
+                    let _relay = self.relays();
+
                     tokio::spawn({
                         let ipfs = self.ipfs.clone();
                         let pubkey = pubkey.clone();
+                        let discovery = self.discovery.clone();
                         async move {
                             //Note: This is done since connect doesnt support dialing out to the peerid directly yet
                             //      so instead we will check if we can find them over DHT before passing the discovery
                             //      a separate function
-                            if ipfs.identity(Some(peer_id)).await.is_err() {
-                                if let Err(e) =
-                                    super::discover_peer(&ipfs, &pubkey, discovery, relay).await
-                                {
+                            if !discovery.contains(pubkey.clone()).await {
+                                if let Err(e) = discovery.insert(ipfs.clone(), pubkey).await {
                                     error!("Error discovering peer: {e}");
                                 }
                             }
@@ -701,7 +704,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         //Note: This is checked because we may not be connected to those peers with the 2 options below
         //      while with `Discovery::Provider`, they at some point should have been connected or discovered
-        if !matches!(self.discovery_type(), Discovery::Direct | Discovery::None) {
+        if !matches!(
+            self.discovery_type(),
+            DiscoveryConfig::Direct | DiscoveryConfig::None
+        ) {
             self.lookup(LookupBy::DidKey(did.clone()))
                 .await?
                 .first()
