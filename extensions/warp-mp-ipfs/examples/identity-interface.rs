@@ -111,7 +111,7 @@ async fn account(
         config.ipfs_setting.bootstrap = bootstrap;
     }
 
-    config.store_setting.wait_on_response = opt.wait;
+    config.store_setting.friend_request_response_duration = opt.wait;
 
     config.ipfs_setting.mdns.enable = opt.mdns;
 

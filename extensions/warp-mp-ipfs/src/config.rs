@@ -196,7 +196,7 @@ pub struct StoreSetting {
 
     pub use_phonebook: bool,
 
-    pub wait_on_response: Option<u64>,
+    pub friend_request_response_duration: Option<u64>,
 }
 
 impl Default for StoreSetting {
@@ -209,7 +209,7 @@ impl Default for StoreSetting {
             override_ipld: true,
             share_platform: false,
             use_phonebook: true,
-            wait_on_response: None,
+            friend_request_response_duration: None,
         }
     }
 }
