@@ -22,7 +22,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Semaphore};
 use tracing::log::{self, error};
 use warp::{
     crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
@@ -59,6 +59,8 @@ pub struct IdentityStore<T: IpfsTypes> {
 
     discovering: Arc<tokio::sync::RwLock<HashSet<DID>>>,
 
+    permit: Arc<Semaphore>,
+
     discovery: Discovery,
 
     relay: Option<Vec<Multiaddr>>,
@@ -87,6 +89,7 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
             start_event: self.start_event.clone(),
             end_event: self.end_event.clone(),
             discovering: self.discovering.clone(),
+            permit: self.permit.clone(),
             discovery: self.discovery.clone(),
             share_platform: self.share_platform.clone(),
             relay: self.relay.clone(),
@@ -138,6 +141,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let discovering = Arc::new(Default::default());
         let online_status = Arc::default();
         let share_platform = Arc::new(AtomicBool::new(share_platform));
+        let permit = Arc::new(Semaphore::new(1));
 
         let store = Self {
             ipfs,
@@ -155,7 +159,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
             relay,
             tesseract,
             override_ipld,
+            permit,
         };
+
         if store.path.is_some() {
             if let Err(_e) = store.load_cid().await {
                 //We can ignore if it doesnt exist
@@ -796,10 +802,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let root_cid = self.get_root_cid().await?;
         let path = IpfsPath::from(root_cid);
         let document: RootDocument = self.get_dag(path, None).await?;
-        document.verify(self.ipfs.clone()).await.map(|_| document)
+        Ok(document)
     }
 
     pub async fn set_root_document(&mut self, mut document: RootDocument) -> Result<(), Error> {
+        // let permit = self.permit.clone();
+        // let _g = permit.acquire().await.map_err(anyhow::Error::from)?;
         let old_cid = self.get_root_cid().await?;
         let did_kp = self.get_keypair_did()?;
         document.sign(&did_kp)?;
