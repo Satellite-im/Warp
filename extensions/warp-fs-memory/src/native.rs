@@ -28,7 +28,7 @@ impl Constellation for MemorySystem {
     }
 
     fn get_path(&self) -> PathBuf {
-        self.path.clone()
+        PathBuf::from(self.path.to_string_lossy().replace("\\", "/"))
     }
 
     async fn put(&mut self, name: &str, path: &str) -> Result<()> {
