@@ -802,12 +802,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let root_cid = self.get_root_cid().await?;
         let path = IpfsPath::from(root_cid);
         let document: RootDocument = self.get_dag(path, None).await?;
-        document.verify(self.ipfs.clone()).await.map(|_| document)
+        Ok(document)
     }
 
     pub async fn set_root_document(&mut self, mut document: RootDocument) -> Result<(), Error> {
-        let permit = self.permit.clone();
-        let _g = permit.acquire().await.map_err(anyhow::Error::from)?;
+        // let permit = self.permit.clone();
+        // let _g = permit.acquire().await.map_err(anyhow::Error::from)?;
         let old_cid = self.get_root_cid().await?;
         let did_kp = self.get_keypair_did()?;
         document.sign(&did_kp)?;
