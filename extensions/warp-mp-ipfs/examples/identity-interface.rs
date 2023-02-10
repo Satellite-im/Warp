@@ -122,7 +122,9 @@ async fn account(
             as Box<dyn MultiPass>,
     };
 
-    account.create_identity(username, None).await?;
+    if account.get_own_identity().await.is_err() {
+        account.create_identity(username, None).await?;
+    }
     Ok(account)
 }
 

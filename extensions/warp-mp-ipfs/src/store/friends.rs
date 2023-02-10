@@ -355,7 +355,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     self.add_friend(item.did()).await?;
                 }
                 Event::Request => {
-                    if self.is_friend(&data.sender).await.is_ok() {
+                    if self.is_friend(&data.sender).await? {
                         error!("Friend already exist");
                         anyhow::bail!(Error::FriendExist);
                     }
@@ -419,8 +419,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     }
                 }
                 Event::Remove => {
-                    self.is_friend(&data.sender).await?;
-                    self.remove_friend(&data.sender, false).await?;
+                    if self.is_friend(&data.sender).await? {
+                        self.remove_friend(&data.sender, false).await?;
+                    }
                 }
                 Event::Retract => {
                     let mut list = self.list_all_raw_request().await?;
@@ -469,7 +470,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     list.retain(|r| data.sender.ne(r.did()));
                     self.set_request_list(list).await?;
 
-                    if self.is_friend(&data.sender).await.is_ok() {
+                    if self.is_friend(&data.sender).await? {
                         self.remove_friend(&data.sender, false).await?;
                     }
 
@@ -535,7 +536,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             return Err(Error::CannotSendSelfFriendRequest);
         }
 
-        if self.is_friend(pubkey).await.is_ok() {
+        if self.is_friend(pubkey).await? {
             return Err(Error::FriendExist);
         }
 
@@ -590,7 +591,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        if self.is_friend(pubkey).await.is_ok() {
+        if self.is_friend(pubkey).await? {
             warn!("Already friends. Removing request");
             list.remove(&internal_request);
             self.set_request_list(list).await?;
@@ -758,7 +759,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
         list.retain(|r| pubkey.ne(r.did()));
         self.set_request_list(list).await?;
 
-        if self.is_friend(pubkey).await.is_ok() {
+        if self.is_friend(pubkey).await? {
             if let Err(e) = self.remove_friend(pubkey, false).await {
                 error!("Error removing item from friend list: {e}");
             }
@@ -880,7 +881,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
     // Should not be called directly but only after a request is accepted
     pub async fn add_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
-        if self.is_friend(pubkey).await.is_ok() {
+        if self.is_friend(pubkey).await? {
             return Err(Error::FriendExist);
         }
 
@@ -912,7 +913,9 @@ impl<T: IpfsTypes> FriendsStore<T> {
     }
 
     pub async fn remove_friend(&mut self, pubkey: &DID, broadcast: bool) -> Result<(), Error> {
-        self.is_friend(pubkey).await?;
+        if !self.is_friend(pubkey).await? {
+            return Err(Error::FriendDoesntExist);
+        }
 
         let mut list = self.friends_list().await?;
 
