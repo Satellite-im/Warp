@@ -6,7 +6,11 @@ use crate::{
     store::{did_to_libp2p_pub, IdentityPayload},
     Persistent,
 };
-use futures::{stream::BoxStream, FutureExt, StreamExt};
+use futures::{
+    channel::{mpsc, oneshot},
+    stream::BoxStream,
+    FutureExt, StreamExt,
+};
 use ipfs::{
     libp2p::gossipsub::GossipsubMessage, Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId,
 };
@@ -38,7 +42,8 @@ use warp::{multipass::identity::Platform, sata::Sata};
 
 use super::{
     connected_to_peer,
-    document::{CacheDocument, DocumentType, RootDocument},
+    document::{CacheDocument, DocumentType, GetDag, RootDocument, ToCid},
+    friends::Request,
     libp2p_pub_to_did, PeerConnectionType, IDENTITY_BROADCAST,
 };
 
@@ -74,6 +79,10 @@ pub struct IdentityStore<T: IpfsTypes> {
     end_event: Arc<AtomicBool>,
 
     tesseract: Tesseract,
+
+    root_task: Arc<tokio::sync::RwLock<Option<tokio::task::JoinHandle<()>>>>,
+
+    task_send: Arc<tokio::sync::RwLock<Option<mpsc::UnboundedSender<RootDocumentEvents>>>>,
 }
 
 impl<T: IpfsTypes> Clone for IdentityStore<T> {
@@ -95,8 +104,22 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
             relay: self.relay.clone(),
             override_ipld: self.override_ipld.clone(),
             tesseract: self.tesseract.clone(),
+            root_task: self.root_task.clone(),
+            task_send: self.task_send.clone(),
         }
     }
+}
+
+#[allow(clippy::large_enum_variant)]
+pub enum RootDocumentEvents {
+    Get(oneshot::Sender<Result<RootDocument, Error>>),
+    Set(RootDocument, oneshot::Sender<Result<(), Error>>),
+    AddFriend(DID, oneshot::Sender<Result<(), Error>>),
+    RemoveFriend(DID, oneshot::Sender<Result<(), Error>>),
+    AddRequest(Request, oneshot::Sender<Result<(), Error>>),
+    RemoveRequest(Request, oneshot::Sender<Result<(), Error>>),
+    AddBlock(DID, oneshot::Sender<Result<(), Error>>),
+    RemoveBlock(DID, oneshot::Sender<Result<(), Error>>),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -142,6 +165,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let online_status = Arc::default();
         let share_platform = Arc::new(AtomicBool::new(share_platform));
         let permit = Arc::new(Semaphore::new(1));
+        let root_task = Arc::default();
+        let task_send = Arc::default();
 
         let store = Self {
             ipfs,
@@ -160,13 +185,18 @@ impl<T: IpfsTypes> IdentityStore<T> {
             tesseract,
             override_ipld,
             permit,
+            root_task,
+            task_send,
         };
 
+        
         if store.path.is_some() {
             if let Err(_e) = store.load_cid().await {
                 //We can ignore if it doesnt exist
             }
         }
+
+        store.start_root_task().await;
 
         if let Ok(ident) = store.own_identity().await {
             *store.identity.write().await = Some(ident);
@@ -242,6 +272,67 @@ impl<T: IpfsTypes> IdentityStore<T> {
     //     *self.seen.write() = HashSet::from_iter(peers);
     //     Ok(())
     // }
+
+    async fn start_root_task(&self) {
+        let root_cid = self.root_cid.clone();
+        let ipfs = self.ipfs.clone();
+        let (tx, mut rx) = mpsc::unbounded();
+        let store = self.clone();
+        let task = tokio::spawn(async move {
+            let store = store.clone();
+            let root_cid = root_cid.clone();
+
+            while let Some(event) = rx.next().await {
+                match event {
+                    RootDocumentEvents::Get(res) => {
+                        let root_cid = root_cid.clone();
+                        let ipfs = ipfs.clone();
+                        let result = async move {
+                            let root_cid = root_cid
+                                .read()
+                                .await
+                                .clone()
+                                .ok_or(Error::IdentityDoesntExist)?;
+                            let path = IpfsPath::from(root_cid);
+                            let document: RootDocument = path.get_dag(&ipfs, None).await?;
+                            document.verify(ipfs.clone()).await.map(|_| document)
+                        };
+                        let _ = res.send(result.await);
+                    }
+                    RootDocumentEvents::Set(mut document, res) => {
+                        let root_cid = root_cid.clone();
+                        let ipfs = ipfs.clone();
+                        let store = store.clone();
+                        let result = async move {
+                            let old_cid = root_cid
+                                .read()
+                                .await
+                                .clone()
+                                .ok_or(Error::IdentityDoesntExist)?;
+
+                            let did_kp = store.get_keypair_did()?;
+                            document.sign(&did_kp)?;
+                            let root_cid = document.to_cid(&ipfs).await?;
+                            if old_cid != root_cid {
+                                if ipfs.is_pinned(&old_cid).await? {
+                                    ipfs.remove_pin(&old_cid, true).await?;
+                                }
+                                ipfs.insert_pin(&root_cid, true).await?;
+                                ipfs.remove_block(old_cid).await?;
+                            }
+                            document.verify(ipfs.clone()).await?;
+                            store.save_cid(root_cid).await
+                        };
+                        let _ = res.send(result.await);
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        *self.task_send.write().await = Some(tx);
+        *self.root_task.write().await = Some(task);
+    }
 
     //TODO: Replace with a request/resposne style broadcast
     async fn broadcast_identity(&self) -> anyhow::Result<()> {
@@ -799,30 +890,17 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn get_root_document(&self) -> Result<RootDocument, Error> {
-        let root_cid = self.get_root_cid().await?;
-        let path = IpfsPath::from(root_cid);
-        let document: RootDocument = self.get_dag(path, None).await?;
-        Ok(document)
+        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
+        let (tx, rx) = oneshot::channel();
+        task_tx.unbounded_send(RootDocumentEvents::Get(tx)).map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn set_root_document(&mut self, mut document: RootDocument) -> Result<(), Error> {
-        // let permit = self.permit.clone();
-        // let _g = permit.acquire().await.map_err(anyhow::Error::from)?;
-        let old_cid = self.get_root_cid().await?;
-        let did_kp = self.get_keypair_did()?;
-        document.sign(&did_kp)?;
-
-        let root_cid = self.put_dag(document).await?;
-        if old_cid != root_cid {
-            if self.ipfs.is_pinned(&old_cid).await? {
-                self.ipfs.remove_pin(&old_cid, true).await?;
-            }
-            self.ipfs.insert_pin(&root_cid, true).await?;
-            self.ipfs.remove_block(old_cid).await?;
-        }
-
-        self.save_cid(root_cid).await?;
-        Ok(())
+    pub async fn set_root_document(&mut self, document: RootDocument) -> Result<(), Error> {
+        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
+        let (tx, rx) = oneshot::channel();
+        task_tx.unbounded_send(RootDocumentEvents::Set(document, tx)).map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn get_dag<D: DeserializeOwned>(
@@ -879,7 +957,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(identity)
     }
 
-    pub async fn save_cid(&mut self, cid: Cid) -> Result<(), Error> {
+    pub async fn save_cid(&self, cid: Cid) -> Result<(), Error> {
         *self.root_cid.write().await = Some(cid);
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
@@ -888,7 +966,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(())
     }
 
-    pub async fn save_cache_cid(&mut self, cid: Cid) -> Result<(), Error> {
+    pub async fn save_cache_cid(&self, cid: Cid) -> Result<(), Error> {
         *self.cache_cid.write().await = Some(cid);
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
