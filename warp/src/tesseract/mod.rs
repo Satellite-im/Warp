@@ -152,7 +152,9 @@ impl Tesseract {
     /// ```
     pub fn to_file<S: AsRef<Path>>(&self, path: S) -> Result<()> {
         let mut fs = std::fs::File::create(path)?;
-        self.to_writer(&mut fs)
+        self.to_writer(&mut fs)?;
+        fs.sync_all()?;
+        Ok(())
     }
 
     /// Save the keystore from stream
