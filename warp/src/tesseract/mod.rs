@@ -21,7 +21,7 @@ use std::path::PathBuf;
 
 use std::sync::atomic::AtomicBool;
 
-use crate::sync::{Arc, Mutex, RwLock};
+use crate::sync::{Arc, RwLock};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -34,7 +34,7 @@ type Result<T> = std::result::Result<T, Error>;
 pub struct Tesseract {
     internal: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     enc_pass: Arc<RwLock<Vec<u8>>>,
-    file: Arc<Mutex<Option<PathBuf>>>,
+    file: Arc<RwLock<Option<PathBuf>>>,
     autosave: Arc<AtomicBool>,
     check: Arc<AtomicBool>,
     unlock: Arc<AtomicBool>,
@@ -185,7 +185,7 @@ impl Tesseract {
     /// assert!(tesseract.file().is_some());
     /// ```
     pub fn set_file<P: AsRef<Path>>(&self, file: P) {
-        *self.file.lock() = Some(file.as_ref().to_path_buf())
+        *self.file.write() = Some(file.as_ref().to_path_buf())
     }
 
     /// Internal file handle
@@ -201,7 +201,7 @@ impl Tesseract {
     /// ```
     pub fn file(&self) -> Option<String> {
         self.file
-            .lock()
+            .read()
             .as_ref()
             .map(|s| s.to_string_lossy().to_string())
     }
