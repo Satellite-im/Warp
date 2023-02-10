@@ -8,7 +8,9 @@ use warp::{crypto::DID, error::Error};
 
 use crate::config::Discovery as DiscoveryConfig;
 
-use super::{did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType, PeerType};
+use super::{
+    did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType, PeerType, IDENTITY_BROADCAST,
+};
 
 #[derive(Clone)]
 pub struct Discovery {
@@ -79,7 +81,11 @@ impl Discovery {
             .cloned()
     }
 
-    pub async fn insert<P: Into<PeerType>, T: IpfsTypes>(&self, ipfs: Ipfs<T>, peer_type: P)-> Result<(), Error> {
+    pub async fn insert<P: Into<PeerType>, T: IpfsTypes>(
+        &self,
+        ipfs: Ipfs<T>,
+        peer_type: P,
+    ) -> Result<(), Error> {
         let (peer_id, did_key) = match &peer_type.into() {
             PeerType::PeerId(peer_id) => (*peer_id, None),
             PeerType::DID(did_key) => {
@@ -89,7 +95,7 @@ impl Discovery {
         };
 
         if self.contains(peer_id).await {
-            return Ok(())
+            return Ok(());
         }
 
         let entry = DiscoveryEntry::new(ipfs, peer_id, did_key).await;
@@ -183,6 +189,36 @@ impl DiscoveryEntry {
             async move {
                 loop {
                     if did.is_none() {
+                        //TODO: Check discovery config option to determine if we should determine how we
+                        //      should check
+
+                        let Ok(connection_type) = ipfs.connected().await.map(|list| {
+                            if list.iter().any(|peer| *peer == entry.peer_id) {
+                                PeerConnectionType::Connected
+                            } else {
+                                PeerConnectionType::NotConnected
+                            }
+                        }) else {
+                            // If it fails, then its likely that ipfs had a fatal error
+                            // Maybe panic?
+                            break;
+                        };
+
+                        let Ok(peers) = ipfs
+                            .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
+                            .await else {
+                                // If it fails, then its likely that ipfs had a fatal error
+                                // Maybe panic?
+                                break;
+                            };
+
+                        if !peers.contains(&entry.peer_id)
+                            || matches!(connection_type, PeerConnectionType::NotConnected)
+                        {
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                            continue;
+                        }
+
                         let info = loop {
                             //TODO: Possibly dial out over available relays in attempt to establish a connection if we are not able to find them over DHT
                             if let Ok(info) = ipfs.identity(Some(entry.peer_id)).await {
