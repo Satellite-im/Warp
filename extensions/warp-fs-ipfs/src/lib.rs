@@ -26,7 +26,7 @@ use warp::module::Module;
 use chrono::{DateTime, Utc};
 use ipfs::{Ipfs, IpfsPath, IpfsTypes, TestTypes, Types};
 
-use warp::constellation::{directory::Directory, Constellation};
+use warp::constellation::{path::Path, directory::Directory, Constellation};
 use warp::error::Error;
 use warp::pocket_dimension::PocketDimension;
 use warp::{Extension, SingleHandle};
@@ -39,7 +39,7 @@ type Result<T> = std::result::Result<T, Error>;
 #[allow(clippy::type_complexity)]
 pub struct IpfsFileSystem<T: IpfsTypes> {
     index: Directory,
-    path: Arc<RwLock<PathBuf>>,
+    path: Arc<RwLock<Path>>,
     modified: DateTime<Utc>,
     config: Option<FsIpfsConfig>,
     ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
@@ -374,7 +374,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         if let Err(_e) = self.broadcast.send(ConstellationEventKind::Downloaded {
             filename: file.name(),
             size: Some(file.size()),
-            location: Some(PathBuf::from(path)),
+            location: Some(Path::from(path)),
         }) {}
         Ok(())
     }
@@ -787,12 +787,12 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         Ok(())
     }
 
-    fn set_path(&mut self, path: PathBuf) {
+    fn set_path(&mut self, path: Path) {
         *self.path.write() = path;
     }
 
-    fn get_path(&self) -> PathBuf {
-        PathBuf::from(self.path.read().to_string_lossy().replace("\\", "/"))
+    fn get_path(&self) -> Path {
+        self.path.read().clone()
     }
 }
 

@@ -3,7 +3,7 @@ pub mod config;
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
 use warp::constellation::ConstellationEvent;
 use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 // use warp_common::futures::TryStreamExt;
@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use tokio_util::io::StreamReader;
-use warp::constellation::{directory::Directory, Constellation};
+use warp::constellation::{path::Path, directory::Directory, Constellation};
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::hooks::Hooks;
@@ -27,7 +27,7 @@ type Result<T> = std::result::Result<T, Error>;
 #[derive(Serialize, Deserialize, Clone)]
 pub struct IpfsFileSystem {
     pub index: Directory,
-    path: Arc<RwLock<PathBuf>>,
+    path: Arc<RwLock<Path>>,
     pub modified: DateTime<Utc>,
     #[serde(skip)]
     pub client: IpfsInternalClient,
@@ -287,7 +287,7 @@ impl Constellation for IpfsFileSystem {
         let name = affix_root(name);
 
         if let Ok(cache) = self.get_cache() {
-            let name = Path::new(&name)
+            let name = PathBuf::from(&name)
                 .file_name()
                 .ok_or(Error::Other)?
                 .to_string_lossy()
@@ -398,7 +398,7 @@ impl Constellation for IpfsFileSystem {
         self.modified = Utc::now();
 
         if let Ok(mut cache) = self.get_cache_mut() {
-            let name = Path::new(&name)
+            let name = PathBuf::from(&name)
                 .file_name()
                 .ok_or(Error::Other)?
                 .to_string_lossy()
@@ -424,7 +424,7 @@ impl Constellation for IpfsFileSystem {
         let name = affix_root(name);
 
         if let Ok(cache) = self.get_cache() {
-            let name = Path::new(&name)
+            let name = PathBuf::from(&name)
                 .file_name()
                 .ok_or(Error::Other)?
                 .to_string_lossy()
@@ -535,11 +535,11 @@ impl Constellation for IpfsFileSystem {
         Ok(())
     }
 
-    fn set_path(&mut self, path: PathBuf) {
+    fn set_path(&mut self, path: Path) {
         *self.path.write() = path;
     }
 
-    fn get_path(&self) -> PathBuf {
+    fn get_path(&self) -> Path {
         self.path.read().clone()
     }
 }

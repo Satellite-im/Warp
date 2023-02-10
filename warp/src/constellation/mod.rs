@@ -2,8 +2,9 @@
 pub mod directory;
 pub mod file;
 pub mod item;
+pub mod path;
 
-use std::path::{Path, PathBuf};
+use path::Path;
 
 use crate::error::Error;
 use crate::{Extension, SingleHandle};
@@ -35,7 +36,7 @@ pub enum ConstellationEventKind {
     Downloaded {
         filename: String,
         size: Option<usize>,
-        location: Option<PathBuf>,
+        location: Option<Path>,
     },
     Deleted {
         item_name: String,
@@ -120,36 +121,36 @@ pub trait Constellation:
 
     /// Select a directory within the filesystem
     fn select(&mut self, path: &str) -> Result<(), Error> {
-        let path = Path::new(path).to_path_buf();
-        let current_pathbuf = self.get_path();
+        let path = Path::new(path);
+        let current_path = self.get_path();
 
-        if current_pathbuf == path {
+        if current_path == path {
             return Err(Error::Any(anyhow!("Path has not change")));
         }
 
         let item = self
             .current_directory()?
-            .get_item(&path.to_string_lossy())?;
+            .get_item(&path.to_string())?;
 
         if !item.is_directory() {
             return Err(Error::DirectoryNotFound);
         }
 
-        let new_path = Path::new(&current_pathbuf).join(path);
+        let new_path = current_path.join(path);
         self.set_path(new_path);
         Ok(())
     }
 
     /// Set path to current directory
-    fn set_path(&mut self, _: PathBuf);
+    fn set_path(&mut self, _: Path);
 
     /// Get path of current directory
-    fn get_path(&self) -> PathBuf;
+    fn get_path(&self) -> Path;
 
     /// Go back to the previous directory
     fn go_back(&mut self) -> Result<(), Error> {
         let mut path = self.get_path();
-        if !path.pop() {
+        if path.pop().is_none() {
             return Err(Error::DirectoryNotFound);
         }
         self.set_path(path);
@@ -158,7 +159,7 @@ pub trait Constellation:
 
     /// Get the current directory that is mutable.
     fn current_directory(&self) -> Result<Directory, Error> {
-        self.open_directory(&self.get_path().to_string_lossy())
+        self.open_directory(&self.get_path().to_string())
     }
 
     /// Returns a mutable directory from the filesystem

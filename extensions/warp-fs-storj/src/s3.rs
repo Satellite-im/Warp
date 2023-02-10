@@ -3,12 +3,12 @@ use aws_endpoint::partition::endpoint;
 use aws_endpoint::{CredentialScope, Partition, PartitionResolver};
 use aws_sdk_s3::presigning::config::PresigningConfig;
 use warp::constellation::ConstellationEvent;
-use std::path::PathBuf;
+
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::module::Module;
-
+use warp::constellation::path::Path;
 use warp::constellation::{directory::Directory, Constellation};
 use warp::pocket_dimension::{query::QueryBuilder, DimensionData, PocketDimension};
 
@@ -122,7 +122,7 @@ impl Extension for StorjFilesystem {
 pub struct StorjFilesystem {
     pub index: Directory,
     pub modified: DateTime<Utc>,
-    path: Arc<RwLock<PathBuf>>,
+    path: Arc<RwLock<Path>>,
     #[serde(skip)]
     pub client: StorjClient,
     #[serde(skip)]
@@ -195,11 +195,11 @@ impl Constellation for StorjFilesystem {
         self.index.clone()
     }
 
-    fn set_path(&mut self, path: PathBuf) {
+    fn set_path(&mut self, path: Path) {
         *self.path.write() = path;
     }
 
-    fn get_path(&self) -> PathBuf {
+    fn get_path(&self) -> Path {
         self.path.read().clone()
     }
 

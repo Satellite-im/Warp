@@ -10,6 +10,7 @@ use warp::sata::Sata;
 use crate::item::Item;
 use crate::{item, MemorySystem, Result};
 use warp::constellation::directory::Directory;
+use warp::constellation::path::Path;
 use warp::constellation::{Constellation, ConstellationEvent};
 use warp::module::Module;
 
@@ -23,11 +24,11 @@ impl Constellation for MemorySystem {
         self.index.clone()
     }
 
-    fn set_path(&mut self, path: PathBuf) {
+    fn set_path(&mut self, path: Path) {
         self.path = path;
     }
 
-    fn get_path(&self) -> PathBuf {
+    fn get_path(&self) -> Path {
         self.path.clone()
     }
 

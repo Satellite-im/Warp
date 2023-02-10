@@ -10,13 +10,13 @@ use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 use item::Item;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use warp::error::Error;
 
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::constellation::directory::Directory;
+use warp::constellation::path::Path;
 use warp::hooks::Hooks;
 use warp::module::Module;
 use warp::{Extension, SingleHandle};
@@ -47,7 +47,7 @@ impl Default for MemorySystemInternal {
 pub struct MemorySystem {
     index: Directory,
     current: Directory,
-    path: PathBuf,
+    path: Path,
     modified: DateTime<Utc>,
     #[serde(skip)]
     internal: Arc<RwLock<MemorySystemInternal>>,
@@ -64,7 +64,7 @@ impl Default for MemorySystem {
         Self {
             index: Directory::new("root"),
             current: Directory::new("root"),
-            path: PathBuf::new(),
+            path: Path::default(),
             modified: Utc::now(),
             internal: Default::default(),
             cache: None,
