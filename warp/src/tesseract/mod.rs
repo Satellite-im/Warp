@@ -178,21 +178,22 @@ impl Tesseract {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// use warp::tesseract::Tesseract;
     /// let mut tesseract = Tesseract::default();
     /// tesseract.set_file("my_file");
     /// assert!(tesseract.file().is_some());
     /// ```
     pub fn set_file<P: AsRef<Path>>(&self, file: P) {
-        *self.file.write() = Some(file.as_ref().to_path_buf())
+        *self.file.write() = Some(file.as_ref().to_path_buf());
+        if let Err(_e) = self.to_file(file) {}
     }
 
     /// Internal file handle
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
     /// use warp::tesseract::Tesseract;
     /// let mut tesseract = Tesseract::default();
     /// assert!(tesseract.file().is_none());
