@@ -472,6 +472,46 @@ impl Tesseract {
         Ok(plain_text)
     }
 
+    /// Used to update the passphrase to the keystore
+    ///
+    /// # Example
+    ///
+    /// ```
+    ///  let mut tesseract = warp::tesseract::Tesseract::default();
+    ///  tesseract.unlock(b"current_phrase").unwrap();
+    ///  tesseract.set("API", "MYKEY").unwrap();
+    ///  tesseract.update_unlock(b"current_phrase", b"new_phrase").unwrap();
+    ///  let val = tesseract.retrieve("API").unwrap();
+    ///  assert_eq!("MYKEY", val);
+    /// ```
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn update_unlock(&self, old_passphrase: &[u8], new_passphrase: &[u8]) -> Result<()> {
+        if !self.is_unlock() {
+            return Err(Error::TesseractLocked);
+        }
+
+        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &self.enc_pass.read())?;
+
+        if old_passphrase != pkey || old_passphrase == new_passphrase || pkey == new_passphrase {
+            return Err(Error::InvalidPassphrase); //TODO: Mismatch?
+        }
+
+        let exported = self.export()?;
+
+        let mut encrypted = HashMap::new();
+
+        for (key, val) in exported {
+            let data =
+                Cipher::direct_encrypt(CipherType::Aes256Gcm, val.as_bytes(), new_passphrase)?;
+            encrypted.insert(key, data);
+        }
+
+        self.lock();
+        *self.internal.write() = encrypted;
+        self.unlock(new_passphrase)?;
+        self.save()
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     fn dry_retrieve(&self, key: &str) -> Result<()> {
         if !self.is_soft_unlock() {
