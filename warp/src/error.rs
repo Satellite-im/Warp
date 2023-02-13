@@ -195,6 +195,8 @@ pub enum Error {
     TesseractUnavailable,
     #[error("Tesseract is locked")]
     TesseractLocked,
+    #[error("Passphrase supplied is invalid")]
+    InvalidPassphrase,
     #[error("One or more items in the datastore are corrupted or invalid")]
     CorruptedDataStore,
     #[error("Unable to save tesseract")]
