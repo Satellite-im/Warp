@@ -279,7 +279,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let (tx, mut rx) = mpsc::unbounded();
         let store = self.clone();
         let task = tokio::spawn(async move {
-            let store = store.clone();
             let root_cid = root_cid.clone();
 
             while let Some(event) = rx.next().await {
@@ -295,7 +294,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                 .ok_or(Error::IdentityDoesntExist)?;
                             let path = IpfsPath::from(root_cid);
                             let document: RootDocument = path.get_dag(&ipfs, None).await?;
-                            document.verify(ipfs.clone()).await.map(|_| document)
+                            document.verify(&ipfs).await.map(|_| document)
                         };
                         let _ = res.send(result.await);
                     }
@@ -320,7 +319,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                 ipfs.insert_pin(&root_cid, true).await?;
                                 ipfs.remove_block(old_cid).await?;
                             }
-                            document.verify(ipfs.clone()).await?;
+                            document.verify(&ipfs).await?;
                             store.save_cid(root_cid).await
                         };
                         let _ = res.send(result.await);

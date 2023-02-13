@@ -182,7 +182,7 @@ impl RootDocument {
         Ok(())
     }
 
-    pub async fn verify<T: IpfsTypes>(&self, ipfs: Ipfs<T>) -> Result<(), Error> {
+    pub async fn verify<T: IpfsTypes>(&self, ipfs: &Ipfs<T>) -> Result<(), Error> {
         let (identity, _, _, _, _, _, _) = self.resolve(ipfs, Some(Duration::from_secs(5))).await?;
         let mut root_document = self.clone();
         let signature =
@@ -198,7 +198,7 @@ impl RootDocument {
 
     pub async fn resolve<P: IpfsTypes>(
         &self,
-        ipfs: Ipfs<P>,
+        ipfs: &Ipfs<P>,
         timeout: Option<Duration>,
     ) -> Result<
         (
