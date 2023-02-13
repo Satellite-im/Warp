@@ -100,7 +100,7 @@ impl SourceTrack for OpusSource {
 
         let config = input_device.default_input_config().unwrap();
         let input_stream =
-            input_device.build_input_stream(&config.into(), input_data_fn, err_fn)?;
+            input_device.build_input_stream(&config.into(), input_data_fn, err_fn, None)?;
 
         Ok(Self {
             _track: track,

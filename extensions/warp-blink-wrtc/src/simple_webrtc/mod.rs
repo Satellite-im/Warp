@@ -30,6 +30,7 @@ use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecParameters;
 
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
@@ -81,6 +82,7 @@ pub struct Controller {
 pub struct InitArgs {
     pub id: DID,
     pub emitted_event_chan: mpsc::UnboundedSender<EmittedEvents>,
+    pub codecs: Vec<RTCRtpCodecParameters>,
 }
 
 /// stores a PeerConnection for updating SDP and ICE candidates, adding and removing tracks
