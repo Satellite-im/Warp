@@ -118,7 +118,6 @@ impl Tesseract {
                     std::fs::canonicalize(&path).unwrap_or_else(|_| path.as_ref().to_path_buf());
                 tesseract.set_file(file);
                 tesseract.set_autosave();
-                tesseract.to_file(path)?;
                 Ok(tesseract)
             }
             Err(e) => Err(e),
