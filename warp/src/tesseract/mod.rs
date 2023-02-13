@@ -2,7 +2,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi;
 
-use std::{collections::HashMap, fmt::Debug, sync::atomic::Ordering};
+use std::{collections::HashMap, fmt::Debug, io::ErrorKind, sync::atomic::Ordering};
 use warp_derive::FFIFree;
 use zeroize::Zeroize;
 
@@ -99,6 +99,32 @@ impl PartialEq for Tesseract {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Tesseract {
+    /// Loads the keystore from a file. If it does not exist, it will be created.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use warp::tesseract::Tesseract;
+    ///
+    /// let tesseract = Tesseract::open_or_create("test_file").unwrap();
+    /// ```
+    pub fn open_or_create<P: AsRef<Path>>(path: P) -> Result<Self> {
+        match Self::from_file(&path) {
+            Ok(tesseract) => Ok(tesseract),
+            Err(Error::IoError(e)) if e.kind() == ErrorKind::NotFound => {
+                let tesseract = Tesseract::default();
+                tesseract.check.store(true, Ordering::Relaxed);
+                let file =
+                    std::fs::canonicalize(&path).unwrap_or_else(|_| path.as_ref().to_path_buf());
+                tesseract.set_file(file);
+                tesseract.set_autosave();
+                tesseract.to_file(path)?;
+                Ok(tesseract)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Loads the keystore from a file
     ///
     /// # Example
@@ -109,11 +135,15 @@ impl Tesseract {
     /// let tesseract = Tesseract::from_file("test_file").unwrap();
     /// ```
     pub fn from_file<S: AsRef<Path>>(file: S) -> Result<Self> {
+        let file = file.as_ref();
+        if !file.is_file() {
+            return Err(std::io::Error::from(std::io::ErrorKind::NotFound).into());
+        }
         let mut store = Tesseract::default();
         store.check.store(true, Ordering::Relaxed);
-        let fs = std::fs::File::open(&file)?;
+        let fs = std::fs::File::open(file)?;
         let data = serde_json::from_reader(fs)?;
-        let file = std::fs::canonicalize(&file).unwrap_or_else(|_| file.as_ref().to_path_buf());
+        let file = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
         store.set_file(file);
         store.set_autosave();
         store.internal = Arc::new(RwLock::new(data));
