@@ -1,9 +1,12 @@
 use futures::StreamExt;
 use ipfs::{Ipfs, IpfsPath, IpfsTypes};
-use libipld::{serde::{from_ipld, to_ipld}, Cid};
+use libipld::{
+    serde::{from_ipld, to_ipld},
+    Cid,
+};
 use rust_ipfs as ipfs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{collections::HashSet, hash::Hash, time::Duration};
+use std::{hash::Hash, time::Duration};
 use warp::{
     crypto::{did_key::CoreSign, DID},
     error::Error,
@@ -158,13 +161,13 @@ pub struct RootDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub banner: Option<DocumentType<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub friends: Option<DocumentType<HashSet<DID>>>,
+    pub friends: Option<DocumentType<Vec<DID>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub blocks: Option<DocumentType<HashSet<DID>>>,
+    pub blocks: Option<DocumentType<Vec<DID>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub block_by: Option<DocumentType<HashSet<DID>>>,
+    pub block_by: Option<DocumentType<Vec<DID>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub request: Option<DocumentType<HashSet<Request>>>,
+    pub request: Option<DocumentType<Vec<Request>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<IdentityStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -205,10 +208,10 @@ impl RootDocument {
             Identity,
             String,
             String,
-            HashSet<DID>,
-            HashSet<DID>,
-            HashSet<DID>,
-            HashSet<Request>,
+            Vec<DID>,
+            Vec<DID>,
+            Vec<DID>,
+            Vec<Request>,
         ),
         Error,
     > {
