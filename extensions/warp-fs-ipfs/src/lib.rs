@@ -792,7 +792,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
     }
 
     fn get_path(&self) -> PathBuf {
-        PathBuf::from(self.path.read().to_string_lossy().replace("\\", "/"))
+        PathBuf::from(self.path.read().to_string_lossy().replace('\\', "/"))
     }
 }
 
