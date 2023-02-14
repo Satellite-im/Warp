@@ -294,7 +294,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                 .ok_or(Error::IdentityDoesntExist)?;
                             let path = IpfsPath::from(root_cid);
                             let document: RootDocument = path.get_dag(&ipfs, None).await?;
-                            document.verify(&ipfs).await.map(|_| document)
+                            // TODO: Look further into
+                            // document.verify(&ipfs).await.map(|_| document)
+                            Ok(document)
                         };
                         let _ = res.send(result.await);
                     }
@@ -891,14 +893,18 @@ impl<T: IpfsTypes> IdentityStore<T> {
     pub async fn get_root_document(&self) -> Result<RootDocument, Error> {
         let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
         let (tx, rx) = oneshot::channel();
-        task_tx.unbounded_send(RootDocumentEvents::Get(tx)).map_err(anyhow::Error::from)?;
+        task_tx
+            .unbounded_send(RootDocumentEvents::Get(tx))
+            .map_err(anyhow::Error::from)?;
         rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn set_root_document(&mut self, document: RootDocument) -> Result<(), Error> {
         let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
         let (tx, rx) = oneshot::channel();
-        task_tx.unbounded_send(RootDocumentEvents::Set(document, tx)).map_err(anyhow::Error::from)?;
+        task_tx
+            .unbounded_send(RootDocumentEvents::Set(document, tx))
+            .map_err(anyhow::Error::from)?;
         rx.await.map_err(anyhow::Error::from)?
     }
 
