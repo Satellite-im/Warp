@@ -6,7 +6,7 @@ use ipfs::{Ipfs, IpfsTypes, PeerId};
 use libipld::IpldCodec;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -27,7 +27,7 @@ use super::document::DocumentType;
 use super::identity::IdentityStore;
 use super::phonebook::PhoneBook;
 use super::queue::Queue;
-use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType};
+use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType, VecExt};
 
 #[allow(clippy::type_complexity)]
 pub struct FriendsStore<T: IpfsTypes> {
@@ -262,7 +262,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                 })
                                 .cloned()
                             {
-                                list.remove(&req);
+                                list.remove_item(&req);
                             }
 
                             // cleanup incoming
@@ -274,7 +274,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                                 })
                                 .cloned()
                             {
-                                list.remove(&req);
+                                list.remove_item(&req);
                             }
 
                             if let Err(_e) = store.set_request_list(list).await {}
@@ -345,7 +345,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         )
                     };
 
-                    if !list.remove(&item) {
+                    if !list.remove_item(&item) {
                         anyhow::bail!(
                             "Unable to locate pending request. Already been accepted or rejected?"
                         )
@@ -372,12 +372,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     {
                         //Because there is also a corresponding outgoing request for the incoming request
                         //we can automatically add them
-                        list.remove(&inner_req);
+                        list.remove_item(&inner_req);
                         self.set_request_list(list).await?;
                         self.add_friend(inner_req.did()).await?;
                     } else {
                         //TODO: Perform check to see if request already exist
-                        list.insert(Request::In(data.sender.clone()));
+                        list.insert_item(&Request::In(data.sender.clone()));
 
                         self.set_request_list(list).await?;
 
@@ -406,7 +406,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         .cloned()
                         .ok_or(Error::FriendRequestDoesntExist)?;
 
-                    list.remove(&internal_request);
+                    list.remove_item(&internal_request);
                     self.set_request_list(list).await?;
 
                     if let Err(e) =
@@ -434,7 +434,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                         .cloned()
                         .ok_or(Error::FriendRequestDoesntExist)?;
 
-                    list.remove(&internal_request);
+                    list.remove_item(&internal_request);
 
                     self.set_request_list(list).await?;
 
@@ -475,7 +475,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                     }
 
                     let mut list = self.block_by_list().await?;
-                    let completed = list.insert(data.sender.clone());
+                    let completed = list.insert_item(&data.sender);
                     self.set_block_by_list(list).await?;
 
                     if completed {
@@ -493,7 +493,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
                 }
                 Event::Unblock => {
                     let mut list = self.block_by_list().await?;
-                    let completed = list.remove(&data.sender);
+                    let completed = list.remove_item(&data.sender);
                     self.set_block_by_list(list).await?;
                     if completed {
                         if let Err(e) = self
@@ -593,7 +593,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         if self.is_friend(pubkey).await? {
             warn!("Already friends. Removing request");
-            list.remove(&internal_request);
+            list.remove_item(&internal_request);
             self.set_request_list(list).await?;
             return Ok(());
         }
@@ -605,7 +605,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         self.add_friend(pubkey).await?;
 
-        list.remove(&internal_request);
+        list.remove_item(&internal_request);
 
         self.set_request_list(list).await?;
 
@@ -640,7 +640,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             event: Event::Reject,
         };
 
-        list.remove(&internal_request);
+        list.remove_item(&internal_request);
 
         self.set_request_list(list).await?;
 
@@ -666,7 +666,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             event: Event::Retract,
         };
 
-        list.remove(&internal_request);
+        list.remove_item(&internal_request);
 
         self.set_request_list(list).await?;
 
@@ -697,15 +697,15 @@ impl<T: IpfsTypes> FriendsStore<T> {
 }
 
 impl<T: IpfsTypes> FriendsStore<T> {
-    pub async fn block_list(&self) -> Result<HashSet<DID>, Error> {
+    pub async fn block_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.blocks {
             Some(object) => object.resolve(self.ipfs.clone(), None).await,
-            None => Ok(HashSet::new()),
+            None => Ok(Vec::new()),
         }
     }
 
-    pub async fn set_block_list(&mut self, list: HashSet<DID>) -> Result<(), Error> {
+    pub async fn set_block_list(&mut self, list: Vec<DID>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
         let old_document = root_document.blocks.clone();
         if matches!(old_document, Some(DocumentType::Object(_)) | None) {
@@ -746,9 +746,11 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let mut list = self.block_list().await?;
 
-        if !list.insert(pubkey.clone()) {
+        if list.contains(pubkey) {
             return Err(Error::PublicKeyIsBlocked);
         }
+
+        list.push(pubkey.clone());
 
         self.set_block_list(list).await?;
 
@@ -797,7 +799,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let mut list = self.block_list().await?;
 
-        if !list.remove(pubkey) {
+        if !list.remove_item(pubkey) {
             return Err(Error::PublicKeyIsntBlocked);
         }
 
@@ -817,15 +819,15 @@ impl<T: IpfsTypes> FriendsStore<T> {
 }
 
 impl<T: IpfsTypes> FriendsStore<T> {
-    pub async fn block_by_list(&self) -> Result<HashSet<DID>, Error> {
+    pub async fn block_by_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.block_by {
             Some(object) => object.resolve(self.ipfs.clone(), None).await,
-            None => Ok(HashSet::new()),
+            None => Ok(Vec::new()),
         }
     }
 
-    pub async fn set_block_by_list(&mut self, list: HashSet<DID>) -> Result<(), Error> {
+    pub async fn set_block_by_list(&mut self, list: Vec<DID>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
         let old_document = root_document.block_by.clone();
         if matches!(old_document, Some(DocumentType::Object(_)) | None) {
@@ -851,15 +853,15 @@ impl<T: IpfsTypes> FriendsStore<T> {
 }
 
 impl<T: IpfsTypes> FriendsStore<T> {
-    pub async fn friends_list(&self) -> Result<HashSet<DID>, Error> {
+    pub async fn friends_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.friends {
             Some(object) => object.resolve(self.ipfs.clone(), None).await,
-            None => Ok(HashSet::new()),
+            None => Ok(Vec::new()),
         }
     }
 
-    pub async fn set_friends_list(&mut self, list: HashSet<DID>) -> Result<(), Error> {
+    pub async fn set_friends_list(&mut self, list: Vec<DID>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
         let old_document = root_document.friends.clone();
         if matches!(old_document, Some(DocumentType::Object(_)) | None) {
@@ -891,7 +893,8 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let mut list = self.friends_list().await?;
 
-        if !list.insert(pubkey.clone()) {
+
+        if !list.insert_item(pubkey) {
             return Err(Error::FriendExist);
         }
 
@@ -919,7 +922,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let mut list = self.friends_list().await?;
 
-        if !list.remove(pubkey) {
+        if !list.remove_item(pubkey) {
             return Err(Error::FriendDoesntExist);
         }
 
@@ -959,15 +962,15 @@ impl<T: IpfsTypes> FriendsStore<T> {
 }
 
 impl<T: IpfsTypes> FriendsStore<T> {
-    pub async fn list_all_raw_request(&self) -> Result<HashSet<Request>, Error> {
+    pub async fn list_all_raw_request(&self) -> Result<Vec<Request>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.request {
             Some(object) => object.resolve(self.ipfs.clone(), None).await,
-            None => Ok(HashSet::new()),
+            None => Ok(Vec::new()),
         }
     }
 
-    pub async fn set_request_list(&mut self, list: HashSet<Request>) -> Result<(), Error> {
+    pub async fn set_request_list(&mut self, list: Vec<Request>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
         let old_document = root_document.request.clone();
         if matches!(old_document, Some(DocumentType::Object(_)) | None) {
@@ -1073,7 +1076,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
             let outgoing_request = Request::Out(recipient.clone());
             let mut list = self.list_all_raw_request().await?;
             if !list.contains(&outgoing_request) {
-                list.insert(outgoing_request);
+                list.insert_item(&outgoing_request);
                 self.set_request_list(list).await?;
             }
         }

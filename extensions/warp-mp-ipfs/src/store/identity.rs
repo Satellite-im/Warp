@@ -294,9 +294,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
                                 .ok_or(Error::IdentityDoesntExist)?;
                             let path = IpfsPath::from(root_cid);
                             let document: RootDocument = path.get_dag(&ipfs, None).await?;
-                            // TODO: Look further into
-                            // document.verify(&ipfs).await.map(|_| document)
-                            Ok(document)
+                            document.verify(&ipfs).await.map(|_| document)
                         };
                         let _ = res.send(result.await);
                     }
