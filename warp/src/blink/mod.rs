@@ -39,12 +39,7 @@ pub trait Blink {
     /// cannot offer a call if another call is in progress.
     /// During a call, WebRTC connections should only be made to
     /// peers included in the Vec<DID>.
-    async fn offer_call(
-        &mut self,
-        participants: Vec<DID>,
-        // default codecs for each type of stream
-        config: CallConfig,
-    ) -> Result<(), Error>;
+    async fn offer_call(&mut self, participants: Vec<DID>) -> Result<(), Error>;
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error>;
     /// notify a sender/group that you will not join a call
@@ -82,7 +77,7 @@ pub enum BlinkEventKind {
     /// A call has been offered
     IncomingCall { call_id: Uuid },
     /// At least one participant accepted the call
-    CallAccepted { call_id: Uuid },
+    CallStarted { call_id: Uuid },
     /// All participants have left the call
     CallEnded { call_id: Uuid },
     /// Someone joined the call
@@ -93,30 +88,6 @@ pub enum BlinkEventKind {
     ParticipantSpeaking { call_id: Uuid, peer_id: DID },
     /// A participant stopped speaking
     ParticipantNotSpeaking { call_id: Uuid, peer_id: DID },
-}
-
-/// Specifies codecs for the call
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub struct CallConfig {
-    audio_codec: MediaCodec,
-    camera_codec: MediaCodec,
-    screen_share_codec: MediaCodec,
-}
-
-/// Specifies the codec, sample rate, and media source
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub struct MediaCodec {
-    mime: MimeType,
-    clock_rate: u32,
-    /// either 1 or 2
-    channels: u8,
-}
-
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub enum MediaType {
-    Audio,
-    Camera,
-    ScreenShare,
 }
 
 pub struct BlinkEventStream(pub BoxStream<'static, BlinkEventKind>);
@@ -132,6 +103,15 @@ impl core::ops::DerefMut for BlinkEventStream {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
+}
+
+/// Specifies the codec and sample rate
+#[derive(Copy, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct MediaCodec {
+    mime: MimeType,
+    clock_rate: u32,
+    /// either 1 or 2
+    channels: u8,
 }
 
 #[allow(clippy::upper_case_acronyms)]
