@@ -1,6 +1,5 @@
 use rust_ipfs as ipfs;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -64,7 +63,7 @@ impl<T: IpfsTypes> PhoneBook<T> {
         }
     }
 
-    pub async fn add_friend_list(&self, list: HashSet<DID>) -> anyhow::Result<()> {
+    pub async fn add_friend_list(&self, list: Vec<DID>) -> anyhow::Result<()> {
         for friend in list.iter() {
             self.add_friend(friend).await?;
         }

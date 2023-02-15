@@ -1,9 +1,12 @@
 use futures::StreamExt;
 use ipfs::{Ipfs, IpfsPath, IpfsTypes};
-use libipld::{serde::from_ipld, Cid};
+use libipld::{
+    serde::{from_ipld, to_ipld},
+    Cid,
+};
 use rust_ipfs as ipfs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{collections::HashSet, hash::Hash, time::Duration};
+use std::{hash::Hash, time::Duration};
 use warp::{
     crypto::{did_key::CoreSign, DID},
     error::Error,
@@ -11,6 +14,48 @@ use warp::{
 };
 
 use super::friends::Request;
+
+#[async_trait::async_trait]
+pub(crate) trait ToCid<T: IpfsTypes>: Sized {
+    async fn to_cid(&self, ipfs: &Ipfs<T>) -> Result<Cid, Error>;
+}
+
+#[async_trait::async_trait]
+pub(crate) trait GetDag<D, I: IpfsTypes>: Sized {
+    async fn get_dag(&self, ipfs: &Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error>;
+}
+
+#[async_trait::async_trait]
+impl<D: DeserializeOwned, I: IpfsTypes> GetDag<D, I> for Cid {
+    async fn get_dag(&self, ipfs: &Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error> {
+        IpfsPath::from(*self).get_dag(ipfs, timeout).await
+    }
+}
+
+#[async_trait::async_trait]
+impl<D: DeserializeOwned, I: IpfsTypes> GetDag<D, I> for IpfsPath {
+    async fn get_dag(&self, ipfs: &Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error> {
+        let timeout = timeout.unwrap_or(std::time::Duration::from_secs(10));
+        match tokio::time::timeout(timeout, ipfs.get_dag(self.clone())).await {
+            Ok(Ok(ipld)) => from_ipld(ipld)
+                .map_err(anyhow::Error::from)
+                .map_err(Error::from),
+            Ok(Err(e)) => Err(Error::Any(e)),
+            Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<T, I: IpfsTypes> ToCid<I> for T
+where
+    T: Serialize + Clone + Send + Sync,
+{
+    async fn to_cid(&self, ipfs: &Ipfs<I>) -> Result<Cid, Error> {
+        let ipld = to_ipld(self.clone()).map_err(anyhow::Error::from)?;
+        ipfs.put_dag(ipld).await.map_err(Error::from)
+    }
+}
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -116,13 +161,13 @@ pub struct RootDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub banner: Option<DocumentType<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub friends: Option<DocumentType<HashSet<DID>>>,
+    pub friends: Option<DocumentType<Vec<DID>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub blocks: Option<DocumentType<HashSet<DID>>>,
+    pub blocks: Option<DocumentType<Vec<DID>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub block_by: Option<DocumentType<HashSet<DID>>>,
+    pub block_by: Option<DocumentType<Vec<DID>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub request: Option<DocumentType<HashSet<Request>>>,
+    pub request: Option<DocumentType<Vec<Request>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<IdentityStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -140,7 +185,7 @@ impl RootDocument {
         Ok(())
     }
 
-    pub async fn verify<T: IpfsTypes>(&self, ipfs: Ipfs<T>) -> Result<(), Error> {
+    pub async fn verify<T: IpfsTypes>(&self, ipfs: &Ipfs<T>) -> Result<(), Error> {
         let (identity, _, _, _, _, _, _) = self.resolve(ipfs, Some(Duration::from_secs(5))).await?;
         let mut root_document = self.clone();
         let signature =
@@ -156,17 +201,17 @@ impl RootDocument {
 
     pub async fn resolve<P: IpfsTypes>(
         &self,
-        ipfs: Ipfs<P>,
+        ipfs: &Ipfs<P>,
         timeout: Option<Duration>,
     ) -> Result<
         (
             Identity,
             String,
             String,
-            HashSet<DID>,
-            HashSet<DID>,
-            HashSet<DID>,
-            HashSet<Request>,
+            Vec<DID>,
+            Vec<DID>,
+            Vec<DID>,
+            Vec<Request>,
         ),
         Error,
     > {

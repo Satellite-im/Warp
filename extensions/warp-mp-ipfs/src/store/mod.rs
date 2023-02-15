@@ -25,6 +25,36 @@ use self::document::DocumentType;
 
 pub const IDENTITY_BROADCAST: &str = "identity/broadcast";
 
+pub trait VecExt<T: Eq> {
+    fn insert_item(&mut self, item: &T) -> bool;
+    fn remove_item(&mut self, item: &T) -> bool;
+}
+
+impl<T> VecExt<T> for Vec<T>
+where
+    T: Eq + Clone,
+{
+    fn insert_item(&mut self, item: &T) -> bool {
+        if self.contains(item) {
+            return false;
+        }
+
+        self.push(item.clone());
+        true
+    }
+
+    fn remove_item(&mut self, item: &T) -> bool {
+        if !self.contains(item) {
+            return false;
+        }
+        if let Some(index) = self.iter().position(|el| item.eq(el)) {
+            self.remove(index);
+            return true;
+        }
+        false
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IdentityPayload {
     /// Not required but would be used to cross check the identity did, sender (if sent directly)
