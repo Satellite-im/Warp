@@ -7,7 +7,7 @@ use webrtc::{
     track::track_remote::TrackRemote,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum EmittedEvents {
     Ice {
         dest: DID,

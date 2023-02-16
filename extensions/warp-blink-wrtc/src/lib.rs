@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::bail;
 use async_trait::async_trait;
@@ -14,6 +15,8 @@ use ipfs::Ipfs;
 use ipfs::IpfsTypes;
 use serde::Deserialize;
 use serde::Serialize;
+use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 use warp::blink::MediaCodec;
 use warp::libipld;
@@ -34,9 +37,12 @@ mod simple_webrtc;
 // todo: add option to init WebRtc using a configuration file
 pub struct WebRtc<T: IpfsTypes> {
     account: Box<dyn MultiPass>,
-    ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
-    webrtc: Arc<RwLock<simple_webrtc::Controller>>,
-    current_call: Option<Call>,
+    // todo: get this during initialization and don't use an option
+    ipfs: Arc<RwLock<Ipfs<T>>>,
+    // todo: get this
+    id: DID,
+    webrtc: Arc<Mutex<simple_webrtc::Controller>>,
+    active_call: Option<ActiveCall>,
     pending_calls: HashMap<Uuid, Call>,
     cpal_host: cpal::Host,
     audio_input: Option<cpal::Device>,
@@ -65,6 +71,26 @@ impl Call {
         Self {
             id: Uuid::new_v4(),
             participants,
+        }
+    }
+}
+
+// used when a call is offered
+impl ActiveCall {
+    fn new(participants: Vec<DID>) -> Self {
+        Self {
+            call: Call::new(participants),
+            state: CallState::Pending,
+        }
+    }
+}
+
+// used when a call is accepted
+impl From<Call> for ActiveCall {
+    fn from(value: Call) -> Self {
+        Self {
+            call: value,
+            state: CallState::InProgress,
         }
     }
 }
@@ -114,23 +140,23 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
     /// During a call, WebRTC connections should only be made to
     /// peers included in the Vec<DID>.
     async fn offer_call(&mut self, participants: Vec<DID>) -> Result<(), Error> {
-        if let Some(_call) = self.current_call.as_ref() {
+        if let Some(_call) = self.active_call.as_ref() {
             // todo: end call
         }
-        self.current_call = Some(Call::new(participants));
+        self.active_call = Some(ActiveCall::new(participants));
 
         // todo: signal
         todo!()
     }
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error> {
-        if let Some(_call) = self.current_call.as_ref() {
+        if let Some(_call) = self.active_call.as_ref() {
             // todo: end call
         }
 
         // todo: fix this
-        if let Some(mut call) = self.pending_calls.remove(&call_id) {
-            self.current_call = Some(call);
+        if let Some(call) = self.pending_calls.remove(&call_id) {
+            self.active_call = Some(call.into());
         }
         // todo: emit event
         todo!()
@@ -144,7 +170,7 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
     }
     /// end/leave the current call
     async fn leave_call(&mut self) -> Result<(), Error> {
-        if let Some(_call) = self.current_call.take() {
+        if let Some(_call) = self.active_call.take() {
             // todo: leave call
         }
         todo!()
@@ -242,10 +268,19 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
 }
 
 impl<T: IpfsTypes> WebRtc<T> {
-    pub async fn initialize(&mut self) -> anyhow::Result<()> {
-        let ipfs_handle = match self.account.handle() {
+    pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Self> {
+        while account.get_own_identity().is_err() {
+            tokio::time::sleep(Duration::from_millis(100)).await
+        }
+
+        let did = match account.get_own_identity() {
+            Ok(ident) => ident.did_key(),
+            Err(e) => anyhow::bail!("failed to get identity: {e}"),
+        };
+
+        let ipfs_handle = match account.handle() {
             Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
-            _ => None,
+            _ => anyhow::bail!("Unable to obtain IPFS Handle"),
         };
 
         let ipfs = match ipfs_handle {
@@ -254,19 +289,25 @@ impl<T: IpfsTypes> WebRtc<T> {
                 anyhow::bail!("Unable to use IPFS Handle");
             }
         };
-        *self.ipfs.write() = Some(ipfs);
 
-        // todo: spawn a task to receive messages
-        Ok(())
+        let webrtc = Self {
+            webrtc: Arc::new(Mutex::new(simple_webrtc::Controller::new(did.clone())?)),
+            account,
+            ipfs: Arc::new(RwLock::new(ipfs)),
+            id: did,
+            active_call: None,
+            pending_calls: HashMap::new(),
+            cpal_host: cpal::default_host(),
+            audio_input: None,
+            audio_output: None,
+        };
+
+        Ok(webrtc)
     }
 
     async fn offer_call(&self, call: Call) -> anyhow::Result<()> {
         // todo: revisit this hacky code
-        let lock = self.ipfs.read();
-        let ipfs = match lock.as_ref() {
-            Some(i) => i,
-            None => bail!("no ipfs instance available"),
-        };
+        let ipfs = self.ipfs.read();
 
         // todo: move this somewhere else
         const TELECON_BROADCAST: &str = "telecon";
@@ -282,6 +323,14 @@ impl<T: IpfsTypes> WebRtc<T> {
             ))
             .await?;
 
+        // this one is already pinned to the heap
+        let mut webrtc_event_stream = async {
+            let webrtc = self.webrtc.lock().await;
+            webrtc.get_event_stream()
+        }
+        .await?;
+
+        // SimpleWebRTC instance
         let webrtc = self.webrtc.clone();
         tokio::spawn(async move {
             futures::pin_mut!(call_broadcast_stream);
@@ -294,7 +343,7 @@ impl<T: IpfsTypes> WebRtc<T> {
                         match opt {
                             Some(message) => {
                                 if let Err(_e) = decode_broadcast_signal(message).await {
-                                    let _webrtc = webrtc.write();
+                                    let _webrtc = webrtc.lock().await;
                                     todo!("handle signal");
                                 }
                             }
@@ -306,11 +355,19 @@ impl<T: IpfsTypes> WebRtc<T> {
                     opt = call_signaling_stream.next() => {
                         match opt {
                             Some(_signal) => {
-                                let _webrtc = webrtc.write();
+                                let _webrtc = webrtc.lock().await;
                                 // todo: dial if needed
                                 todo!("handle signal");
                             }
                             None => break
+                        }
+                    }
+                    opt = webrtc_event_stream.next() => {
+                        match opt {
+                            Some(_event) => {
+                                todo!("handle event");
+                            }
+                            None => todo!()
                         }
                     }
                 }

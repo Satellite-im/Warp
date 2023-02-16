@@ -108,7 +108,7 @@ pub type MediaSourceId = String;
 /// recv_ice
 /// recv_sdp
 impl Controller {
-    pub fn init(did: DID) -> Result<Self> {
+    pub fn new(did: DID) -> Result<Self> {
         // todo: verify size
         let (event_ch, _rx) = broadcast::channel(1024);
         Ok(Self {
