@@ -1,10 +1,14 @@
 //! A Blink implementation relying on Mozilla's WebRTC library (hence the name warp-blink-wrtc)
 //!
+//! todo as of 2023-02-16:
+//!     use a thread to create/delete MediaTracks in response to a channel command. see manage_tracks at the bottom of the file
+//!     create signal handling functions
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::bail;
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait};
 use futures::StreamExt;
@@ -13,9 +17,12 @@ use ipfs::Ipfs;
 use ipfs::IpfsTypes;
 use serde::Deserialize;
 use serde::Serialize;
+use simple_webrtc::media::SourceTrack;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
+use tokio::task::JoinHandle;
 use uuid::Uuid;
+use warp::blink::MimeType;
 use warp::libipld;
 use warp::multipass::MultiPass;
 use warp::sata::Sata;
@@ -27,6 +34,8 @@ use warp::{
 };
 use webrtc::ice_transport::ice_candidate::RTCIceCandidate;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
+use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 
 mod signaling;
 mod simple_webrtc;
@@ -87,6 +96,14 @@ enum CallState {
     Pending,
     InProgress,
     Ended,
+}
+
+impl<T: IpfsTypes> Drop for WebRtc<T> {
+    fn drop(&mut self) {
+        if let Some(ac) = self.active_call.as_ref() {
+            ac.stop.notify_waiters();
+        }
+    }
 }
 
 impl Call {
@@ -328,14 +345,13 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
 
 impl<T: IpfsTypes> WebRtc<T> {
     pub async fn new(account: Box<dyn MultiPass>) -> anyhow::Result<Self> {
-        while account.get_own_identity().is_err() {
+        let identity = loop {
+            if let Ok(identity) = account.get_own_identity() {
+                break identity;
+            }
             tokio::time::sleep(Duration::from_millis(100)).await
-        }
-
-        let did = match account.get_own_identity() {
-            Ok(ident) => ident.did_key(),
-            Err(e) => anyhow::bail!("failed to get identity: {e}"),
         };
+        let did = identity.did_key();
 
         let ipfs_handle = match account.handle() {
             Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
@@ -372,7 +388,7 @@ impl<T: IpfsTypes> WebRtc<T> {
         Ok(webrtc)
     }
 
-    async fn init_call(&self, call: Call, stop: Arc<Notify>) -> anyhow::Result<()> {
+    async fn init_call(&mut self, call: Call, stop: Arc<Notify>) -> anyhow::Result<()> {
         let ipfs = self.ipfs.read();
 
         // use this on error conditions and after terminating the call
@@ -391,6 +407,27 @@ impl<T: IpfsTypes> WebRtc<T> {
                 log::error!("failed to unsubscribe cal_signal_route: {e}");
             }
         };
+
+        // todo: use a config struct instead of hardcoding this
+        // set up input devices before creating streams
+        // warning: a media source must be added before attempting to connect or SDP will fail
+        /*let input_device: cpal::Device = match self.cpal_host.default_input_device() {
+            Some(d) => d,
+            None => {
+                bail!("failed to get default audio input device");
+            }
+        };*/
+        let codec = RTCRtpCodecCapability {
+            mime_type: MimeType::OPUS.to_string(),
+            clock_rate: 48000,
+            channels: opus::Channels::Mono as u16,
+            ..Default::default()
+        };
+
+        {
+            let mut webrtc = self.webrtc.lock().await;
+            webrtc.add_media_source("audio".into(), codec).await?;
+        }
 
         let call_broadcast_stream = match ipfs
             .pubsub_subscribe(ipfs_routes::call_broadcast_route(&call.id))
@@ -490,4 +527,35 @@ async fn decode_broadcast_signal(message: Arc<GossipsubMessage>) -> anyhow::Resu
     // todo: initiate WebRTC communications if needed
 
     todo!()
+}
+
+// todo: move this elsewhere
+pub mod media_track {
+    use std::collections::HashMap;
+
+    use tokio::sync::mpsc;
+    use uuid::Uuid;
+
+    use crate::simple_webrtc::media::{SinkTrack, SourceTrack};
+
+    #[derive(Eq, PartialEq, Clone, Copy)]
+    enum SourceTrackType {
+        Audio,
+    }
+
+    pub enum Command {
+        CreateSourceTrack,
+        RemoveSourceTrack,
+        CreateSinkTrack,
+        RemoveSinkTrack,
+        Reset,
+    }
+
+    // SourceTrack isn't Send due to cpal::Stream. need to use a thread to manage the
+    // tracks in response to commands.
+    pub async fn manage_tracks(mut ch: mpsc::UnboundedReceiver<Command>) {
+        let mut sink_tracks: HashMap<Uuid, Box<dyn SinkTrack>> = HashMap::new();
+        let mut source_tracks: HashMap<SourceTrackType, Box<dyn SourceTrack>> = HashMap::new();
+        while let Some(cmd) = ch.recv().await {}
+    }
 }
