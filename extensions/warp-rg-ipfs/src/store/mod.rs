@@ -14,7 +14,7 @@ use warp::{
     },
     error::Error,
     logging::tracing::log::{error, trace},
-    raygun::{Message, PinState, ReactionState, MessageEvent},
+    raygun::{Message, MessageEvent, PinState, ReactionState},
 };
 
 pub const DIRECT_BROADCAST: &str = "direct/broadcast";
@@ -80,7 +80,6 @@ fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow
         .map_err(|e| anyhow::anyhow!("{:?}", e))?;
     Ok(())
 }
-
 
 #[allow(clippy::large_enum_variant)]
 pub enum PeerType {

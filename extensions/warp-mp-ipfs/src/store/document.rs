@@ -42,7 +42,7 @@ impl<T> DocumentType<T> {
                 }
             }
             //This will resolve into a buffer that can be deserialize into T.
-            //Best not to use this to resolve a large file. 
+            //Best not to use this to resolve a large file.
             DocumentType::UnixFS(cid, limit) => {
                 let fut = async {
                     let stream = ipfs

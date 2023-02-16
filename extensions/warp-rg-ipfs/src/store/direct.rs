@@ -903,7 +903,7 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
             }
         }
 
-        //Not a guarantee that it been sent but for now since the message exist locally and not marked in queue, we will assume it have been sent 
+        //Not a guarantee that it been sent but for now since the message exist locally and not marked in queue, we will assume it have been sent
         Ok(MessageStatus::Sent)
     }
 
@@ -1085,7 +1085,13 @@ impl<T: IpfsTypes> DirectMessageStore<T> {
 
         let signature = super::sign_serde(&self.did, &construct)?;
 
-        let event = MessagingEvents::Edit(conversation.id(), message_id, Utc::now(), messages, signature);
+        let event = MessagingEvents::Edit(
+            conversation.id(),
+            message_id,
+            Utc::now(),
+            messages,
+            signature,
+        );
 
         direct_message_event(
             &mut conversation.messages_mut(),

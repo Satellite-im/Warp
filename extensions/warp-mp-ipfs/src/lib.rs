@@ -8,7 +8,6 @@ use ipfs::libp2p::mplex::MplexConfig;
 use ipfs::libp2p::swarm::ConnectionLimits;
 use ipfs::libp2p::yamux::{WindowUpdateMode, YamuxConfig};
 use ipfs::p2p::{IdentifyConfiguration, TransportConfig};
-use warp::sata::Sata;
 use std::any::Any;
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,6 +20,7 @@ use warp::crypto::did_key::Generate;
 use warp::data::DataType;
 use warp::hooks::Hooks;
 use warp::pocket_dimension::query::QueryBuilder;
+use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::module::Module;
@@ -629,8 +629,9 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                         .store_photo(
                             futures::stream::once(async move {
                                 serde_json::to_vec(&data).unwrap_or_default()
-                            }).boxed(),
-                            Some(2 * 1024 * 1024)
+                            })
+                            .boxed(),
+                            Some(2 * 1024 * 1024),
                         )
                         .await?;
 
@@ -663,8 +664,9 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                         .store_photo(
                             futures::stream::once(async move {
                                 serde_json::to_vec(&data).unwrap_or_default()
-                            }).boxed(),
-                            Some(2 * 1024 * 1024)
+                            })
+                            .boxed(),
+                            Some(2 * 1024 * 1024),
                         )
                         .await?;
 

@@ -8,8 +8,8 @@ use uuid::Uuid;
 use super::directory::Directory;
 use super::file::File;
 use crate::error::Error;
-use warp_derive::FFIFree;
 use derive_more::Display;
+use warp_derive::FFIFree;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;

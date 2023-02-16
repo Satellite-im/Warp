@@ -234,6 +234,8 @@ pub enum Error {
     #[error("{0}")]
     SerdeJsonError(#[from] serde_json::Error),
     #[error("{0}")]
+    SerdeCborError(#[from] serde_cbor::Error),
+    #[error("{0}")]
     UuidError(#[from] uuid::Error),
     #[error("{0}")]
     SerdeYamlError(#[from] serde_yaml::Error),

@@ -5,20 +5,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::bail;
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait};
 use futures::StreamExt;
 use ipfs::libp2p::gossipsub::GossipsubMessage;
-use ipfs::libp2p::simple;
 use ipfs::Ipfs;
 use ipfs::IpfsTypes;
 use serde::Deserialize;
 use serde::Serialize;
-use tokio::sync::mpsc;
 use tokio::sync::Mutex;
+use tokio::sync::Notify;
 use uuid::Uuid;
-use warp::blink::MediaCodec;
 use warp::libipld;
 use warp::multipass::MultiPass;
 use warp::sata::Sata;
@@ -34,7 +31,7 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 mod signaling;
 mod simple_webrtc;
 
-mod IPFS_ROUTES {
+mod ipfs_routes {
     use uuid::Uuid;
     use warp::crypto::DID;
 
@@ -75,11 +72,14 @@ struct Call {
     participants: Vec<DID>,
 }
 
+#[derive(Clone)]
 struct ActiveCall {
     call: Call,
     state: CallState,
+    stop: Arc<Notify>,
 }
 
+#[derive(Clone)]
 enum CallState {
     Pending,
     InProgress,
@@ -101,6 +101,7 @@ impl ActiveCall {
         Self {
             call: Call::new(participants),
             state: CallState::Pending,
+            stop: Arc::new(Notify::new()),
         }
     }
 }
@@ -111,6 +112,7 @@ impl From<Call> for ActiveCall {
         Self {
             call: value,
             state: CallState::InProgress,
+            stop: Arc::new(Notify::new()),
         }
     }
 }
@@ -163,10 +165,38 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
         if let Some(_call) = self.active_call.as_ref() {
             // todo: end call
         }
-        self.active_call = Some(ActiveCall::new(participants));
+        let ac = ActiveCall::new(participants);
+        self.active_call = Some(ac.clone());
 
-        // todo: signal
-        todo!()
+        self.init_call(ac.call.clone(), ac.stop).await?;
+
+        let ipfs = self.ipfs.read();
+        // send message until participants accept or decline.
+        let data = Sata::default();
+        let payload = ac.call.clone();
+        let res = data.encode(
+            libipld::IpldCodec::DagJson,
+            warp::sata::Kind::Static,
+            payload,
+        )?;
+        let bytes = match serde_cbor::to_vec(&res) {
+            Ok(b) => b,
+            Err(e) => {
+                log::error!("failed to encode Call struct: {e}");
+                return Err(Error::SerdeCborError(e));
+            }
+        };
+        for participant in &ac.call.participants {
+            if let Err(e) = ipfs
+                .pubsub_publish(ipfs_routes::offer_call_route(participant), bytes.clone())
+                .await
+            {
+                log::error!("failed to offer call to participant {participant}: {e}");
+            }
+            todo!();
+        }
+
+        todo!();
     }
     /// accept/join a call. Automatically send and receive audio
     async fn answer_call(&mut self, call_id: Uuid) -> Result<(), Error> {
@@ -174,11 +204,11 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
             // todo: end call
         }
 
-        // todo: fix this
         if let Some(call) = self.pending_calls.remove(&call_id) {
-            self.active_call = Some(call.into());
+            let ac: ActiveCall = call.into();
+            self.active_call = Some(ac.clone());
+            self.init_call(ac.call, ac.stop).await?;
         }
-        // todo: emit event
         todo!()
     }
     /// notify a sender/group that you will not join a call
@@ -190,8 +220,14 @@ impl<T: IpfsTypes> Blink for WebRtc<T> {
     }
     /// end/leave the current call
     async fn leave_call(&mut self) -> Result<(), Error> {
-        if let Some(_call) = self.active_call.take() {
+        if let Some(ac) = self.active_call.take() {
             // todo: leave call
+            ac.stop.notify_waiters();
+
+            let mut webrtc = self.webrtc.lock().await;
+            webrtc.deinit().await?;
+
+            // todo: remove media streams
         }
         todo!()
     }
@@ -325,16 +361,15 @@ impl<T: IpfsTypes> WebRtc<T> {
         Ok(webrtc)
     }
 
-    async fn offer_call(&self, call: Call) -> anyhow::Result<()> {
-        // todo: revisit this hacky code
+    async fn init_call(&self, call: Call, stop: Arc<Notify>) -> anyhow::Result<()> {
         let ipfs = self.ipfs.read();
 
         let call_broadcast_stream = ipfs
-            .pubsub_subscribe(IPFS_ROUTES::call_broadcast_route(&call.id))
+            .pubsub_subscribe(ipfs_routes::call_broadcast_route(&call.id))
             .await?;
 
         let call_signaling_stream = ipfs
-            .pubsub_subscribe(IPFS_ROUTES::call_signal_route(&self.id, &call.id))
+            .pubsub_subscribe(ipfs_routes::call_signal_route(&self.id, &call.id))
             .await?;
 
         // this one is already pinned to the heap
@@ -350,7 +385,6 @@ impl<T: IpfsTypes> WebRtc<T> {
             futures::pin_mut!(call_broadcast_stream);
             futures::pin_mut!(call_signaling_stream);
 
-            // todo: add a way to stop the loop
             loop {
                 tokio::select! {
                     opt = call_broadcast_stream.next() => {
@@ -384,24 +418,13 @@ impl<T: IpfsTypes> WebRtc<T> {
                             None => todo!()
                         }
                     }
+                    _ = stop.notified() => {
+                        log::debug!("call termniated via notify()");
+                        break;
+                    }
                 }
             }
         });
-
-        // send message until participants accept or decline.
-        let data = Sata::default();
-        let payload = call.clone();
-        let res = data.encode(
-            libipld::IpldCodec::DagJson,
-            warp::sata::Kind::Static,
-            payload,
-        )?;
-        let bytes = serde_cbor::to_vec(&res)?;
-        for participant in call.participants.iter() {
-            ipfs.pubsub_publish(IPFS_ROUTES::offer_call_route(participant), bytes.clone())
-                .await;
-            todo!();
-        }
 
         Ok(())
     }

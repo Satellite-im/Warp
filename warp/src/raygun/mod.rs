@@ -185,7 +185,9 @@ pub enum ConversationType {
     Group,
 }
 
-#[derive(Debug, Hash, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+#[derive(
+    Debug, Hash, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
+)]
 pub struct Conversation {
     id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -513,7 +515,7 @@ impl Reaction {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
-#[serde(rename_all="snake_case")]
+#[serde(rename_all = "snake_case")]
 #[repr(C)]
 pub enum MessageStatus {
     /// If a message has not been sent.
