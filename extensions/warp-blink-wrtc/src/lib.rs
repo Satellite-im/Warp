@@ -34,6 +34,26 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 mod signaling;
 mod simple_webrtc;
 
+mod IPFS_ROUTES {
+    use uuid::Uuid;
+    use warp::crypto::DID;
+
+    const TELECON_BROADCAST: &str = "telecon";
+    const OFFER_CALL: &str = "offer_call";
+
+    pub fn call_broadcast_route(call_id: &Uuid) -> String {
+        format!("{TELECON_BROADCAST}/{call_id}")
+    }
+
+    pub fn call_signal_route(peer: &DID, call_id: &Uuid) -> String {
+        format!("{TELECON_BROADCAST}/{call_id}/{peer}")
+    }
+
+    pub fn offer_call_route(peer: &DID) -> String {
+        format!("{OFFER_CALL}/{peer}")
+    }
+}
+
 // todo: add option to init WebRtc using a configuration file
 pub struct WebRtc<T: IpfsTypes> {
     account: Box<dyn MultiPass>,
@@ -309,18 +329,12 @@ impl<T: IpfsTypes> WebRtc<T> {
         // todo: revisit this hacky code
         let ipfs = self.ipfs.read();
 
-        // todo: move this somewhere else
-        const TELECON_BROADCAST: &str = "telecon";
         let call_broadcast_stream = ipfs
-            .pubsub_subscribe(format!("{TELECON_BROADCAST}/{}", &call.id))
+            .pubsub_subscribe(IPFS_ROUTES::call_broadcast_route(&call.id))
             .await?;
 
         let call_signaling_stream = ipfs
-            .pubsub_subscribe(format!(
-                "{TELECON_BROADCAST}/{}/{}",
-                &call.id,
-                self.account.id()
-            ))
+            .pubsub_subscribe(IPFS_ROUTES::call_signal_route(&self.id, &call.id))
             .await?;
 
         // this one is already pinned to the heap
@@ -384,7 +398,7 @@ impl<T: IpfsTypes> WebRtc<T> {
         )?;
         let bytes = serde_cbor::to_vec(&res)?;
         for participant in call.participants.iter() {
-            ipfs.pubsub_publish(format!("offer_call/{}", participant), bytes.clone())
+            ipfs.pubsub_publish(IPFS_ROUTES::offer_call_route(participant), bytes.clone())
                 .await;
             todo!();
         }
