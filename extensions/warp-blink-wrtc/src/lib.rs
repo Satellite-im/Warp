@@ -38,14 +38,17 @@ mod ipfs_routes {
     const TELECON_BROADCAST: &str = "telecon";
     const OFFER_CALL: &str = "offer_call";
 
+    /// subscribe/unsubscribe per-call
     pub fn call_broadcast_route(call_id: &Uuid) -> String {
         format!("{TELECON_BROADCAST}/{call_id}")
     }
 
+    /// subscribe/unsubscribe per-call
     pub fn call_signal_route(peer: &DID, call_id: &Uuid) -> String {
         format!("{TELECON_BROADCAST}/{call_id}/{peer}")
     }
 
+    /// subscribe to this when initializing Blink
     pub fn offer_call_route(peer: &DID) -> String {
         format!("{OFFER_CALL}/{peer}")
     }
@@ -349,8 +352,8 @@ impl<T: IpfsTypes> WebRtc<T> {
         let webrtc = Self {
             webrtc: Arc::new(Mutex::new(simple_webrtc::Controller::new(did.clone())?)),
             account,
-            ipfs: Arc::new(RwLock::new(ipfs)),
-            id: did,
+            ipfs: Arc::new(RwLock::new(ipfs.clone())),
+            id: did.clone(),
             active_call: None,
             pending_calls: HashMap::new(),
             cpal_host: cpal::default_host(),
@@ -358,26 +361,74 @@ impl<T: IpfsTypes> WebRtc<T> {
             audio_output: None,
         };
 
+        if let Err(e) = ipfs
+            .pubsub_subscribe(ipfs_routes::offer_call_route(&did))
+            .await
+        {
+            log::error!("failed to subscribe to offer_call_route: {e}");
+            return Err(e);
+        }
+
         Ok(webrtc)
     }
 
     async fn init_call(&self, call: Call, stop: Arc<Notify>) -> anyhow::Result<()> {
         let ipfs = self.ipfs.read();
 
-        let call_broadcast_stream = ipfs
+        // use this on error conditions and after terminating the call
+        let unsubscribe = async {
+            if let Err(e) = ipfs
+                .pubsub_unsubscribe(&ipfs_routes::call_broadcast_route(&call.id))
+                .await
+            {
+                log::error!("failed to unsubscribe call_broadcast_route: {e}");
+            }
+
+            if let Err(e) = ipfs
+                .pubsub_unsubscribe(&ipfs_routes::call_signal_route(&self.id, &call.id))
+                .await
+            {
+                log::error!("failed to unsubscribe cal_signal_route: {e}");
+            }
+        };
+
+        let call_broadcast_stream = match ipfs
             .pubsub_subscribe(ipfs_routes::call_broadcast_route(&call.id))
-            .await?;
+            .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("failed to subscribe to call_broadcast_route: {e}");
+                return Err(e);
+            }
+        };
 
-        let call_signaling_stream = ipfs
+        let call_signaling_stream = match ipfs
             .pubsub_subscribe(ipfs_routes::call_signal_route(&self.id, &call.id))
-            .await?;
+            .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("failed to subscribe to call_signaling_route: {e}");
+                unsubscribe.await;
+                return Err(e);
+            }
+        };
 
-        // this one is already pinned to the heap
-        let mut webrtc_event_stream = async {
+        let get_event_stream = async {
             let webrtc = self.webrtc.lock().await;
             webrtc.get_event_stream()
         }
-        .await?;
+        .await;
+        // this one is already pinned to the heap
+        let mut webrtc_event_stream = match get_event_stream {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("failed to get webrtc_event_stream: {e}");
+                unsubscribe.await;
+                return Err(e);
+            }
+        };
 
         // SimpleWebRTC instance
         let webrtc = self.webrtc.clone();
@@ -426,6 +477,7 @@ impl<T: IpfsTypes> WebRtc<T> {
             }
         });
 
+        unsubscribe.await;
         Ok(())
     }
 }
