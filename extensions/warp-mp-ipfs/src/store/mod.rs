@@ -1,9 +1,9 @@
+pub mod discovery;
 pub mod document;
 pub mod friends;
 pub mod identity;
 pub mod phonebook;
 pub mod queue;
-pub mod discovery;
 
 use std::time::Duration;
 
@@ -143,9 +143,10 @@ impl From<PeerId> for PeerType {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PeerConnectionType {
     Connected,
+    #[default]
     NotConnected,
 }
 
