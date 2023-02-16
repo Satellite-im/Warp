@@ -1,4 +1,4 @@
-use std::{collections::HashSet, hash::Hash, sync::Arc, time::Duration};
+use std::{collections::HashSet, hash::Hash, sync::{Arc, atomic::{AtomicBool, Ordering}}, time::Duration};
 
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
 use rust_ipfs::{Ipfs, IpfsTypes, PeerId};
@@ -162,6 +162,7 @@ impl Discovery {
 #[derive(Clone)]
 pub struct DiscoveryEntry {
     did: Arc<RwLock<Option<DID>>>,
+    discover: Arc<AtomicBool>,
     peer_id: PeerId,
     connection_type: Arc<RwLock<PeerConnectionType>>,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
@@ -184,18 +185,18 @@ impl Eq for DiscoveryEntry {}
 impl DiscoveryEntry {
     pub async fn new<T: IpfsTypes>(ipfs: Ipfs<T>, peer_id: PeerId, did: Option<DID>) -> Self {
         let entry = Self {
-            did: Arc::new(RwLock::new(did.clone())),
+            did: Arc::new(RwLock::new(did)),
             peer_id,
-            connection_type: Arc::new(RwLock::new(PeerConnectionType::NotConnected)),
+            connection_type: Arc::default(),
+            discover: Arc::default(),
             task: Arc::default(),
         };
 
         let task = tokio::spawn({
             let entry = entry.clone();
-            let mut did = did;
             async move {
                 loop {
-                    if did.is_none() {
+                    if !entry.valid().await {
                         //TODO: Check discovery config option to determine if we should determine how we
                         //      should check connectivity
 
@@ -221,6 +222,7 @@ impl DiscoveryEntry {
 
                         let info = loop {
                             //TODO: Possibly dial out over available relays in attempt to establish a connection if we are not able to find them over DHT
+                            //Note: This does adds an additional cost so might want to have a scheduler
                             if let Ok(info) = ipfs.identity(Some(entry.peer_id)).await {
                                 break info;
                             }
@@ -236,8 +238,15 @@ impl DiscoveryEntry {
                             // If it fails to convert then the public key may not be a ed25519 or may be corrupted in some way
                             break;
                         };
-                        *entry.did.write().await = Some(did_key.clone());
-                        did = Some(did_key);
+
+                        // Used as a precaution 
+                        if !entry.valid().await {
+                            *entry.did.write().await = Some(did_key.clone());
+                        }
+                    }
+
+                    if entry.discover.load(Ordering::SeqCst) {
+                        //TODO: Call discovery methods based on configuration
                     }
 
                     let Ok(connection_type) = ipfs.connected().await.map(|list| {
@@ -261,18 +270,37 @@ impl DiscoveryEntry {
         entry
     }
 
+    /// Returns a peer id
     pub fn peer_id(&self) -> PeerId {
         self.peer_id
     }
 
+    /// Contains a valid did key
     pub async fn valid(&self) -> bool {
         self.did.read().await.is_some()
     }
 
+    pub async fn set_did_key(&self, did: DID) {
+        if self.valid().await {
+            return;
+        }
+
+        // Validate the peer_id against the entry id. If does not matches, then the did key is invalid.
+
+        match did_to_libp2p_pub(&did).map(|pk| pk.to_peer_id()) {
+            Ok(peer_id) if self.peer_id == peer_id => {}
+            _ => return,
+        }
+
+        *self.did.write().await = Some(did)
+    }
+
+    /// Returns a DID key
     pub async fn did_key(&self) -> Result<DID, Error> {
         self.did.read().await.clone().ok_or(Error::PublicKeyInvalid)
     }
 
+    /// Returns a connection type
     pub async fn connection_type(&self) -> PeerConnectionType {
         *self.connection_type.read().await
     }
