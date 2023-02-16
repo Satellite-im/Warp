@@ -17,9 +17,10 @@
 //!
 
 use anyhow::{bail, Context, Result};
+use futures::Stream;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 use warp::crypto::DID;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::MediaEngine;
@@ -30,7 +31,6 @@ use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::RTCPeerConnection;
-use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecParameters;
 
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
@@ -68,21 +68,10 @@ use self::events::EmittedEvents;
 
 pub struct Controller {
     api: webrtc::api::API,
-    /// client's id
     id: DID,
-    /// list of peers
     peers: HashMap<DID, Peer>,
-    /// used to emit events
-    emitted_event_chan: mpsc::UnboundedSender<EmittedEvents>,
-    /// attach these to every PeerConnection
+    event_ch: broadcast::Sender<EmittedEvents>,
     media_sources: HashMap<MediaSourceId, Arc<TrackLocalStaticRTP>>,
-}
-
-// a lazy version of the builder pattern
-pub struct InitArgs {
-    pub id: DID,
-    pub emitted_event_chan: mpsc::UnboundedSender<EmittedEvents>,
-    pub codecs: Vec<RTCRtpCodecParameters>,
 }
 
 /// stores a PeerConnection for updating SDP and ICE candidates, adding and removing tracks
@@ -119,12 +108,14 @@ pub type MediaSourceId = String;
 /// recv_ice
 /// recv_sdp
 impl Controller {
-    pub fn init(args: InitArgs) -> Result<Self> {
+    pub fn init(did: DID) -> Result<Self> {
+        // todo: verify size
+        let (event_ch, _rx) = broadcast::channel(1024);
         Ok(Self {
             api: create_api()?,
-            id: args.id,
+            id: did,
             peers: HashMap::new(),
-            emitted_event_chan: args.emitted_event_chan,
+            event_ch,
             media_sources: HashMap::new(),
         })
     }
@@ -138,6 +129,19 @@ impl Controller {
 
         Ok(())
     }
+    pub fn get_event_stream(&self) -> anyhow::Result<impl Stream<Item = EmittedEvents>> {
+        let mut rx = self.event_ch.subscribe();
+        let stream = async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        };
+        Ok(Box::pin(stream))
+    }
     /// creates a RTCPeerConnection, sets the local SDP object, emits a CallInitiatedEvent,
     /// which contains the SDP object
     /// continues with the following signals: Sdp, CallTerminated, CallRejected
@@ -148,7 +152,7 @@ impl Controller {
         // Note: this will start the gathering of ICE candidates
         pc.set_local_description(local_sdp.clone()).await?;
 
-        self.emitted_event_chan.send(EmittedEvents::CallInitiated {
+        self.event_ch.send(EmittedEvents::CallInitiated {
             dest: peer_id.clone(),
             sdp: Box::new(local_sdp),
         })?;
@@ -183,7 +187,7 @@ impl Controller {
             bail!("peer not found");
         }
 
-        self.emitted_event_chan.send(EmittedEvents::Sdp {
+        self.event_ch.send(EmittedEvents::Sdp {
             dest: peer_id.clone(),
             sdp: Box::new(answer),
         })?;
@@ -360,7 +364,7 @@ impl Controller {
 
         // send discovered ice candidates (for self) to remote peer
         // the next 2 lines is some nonsense to satisfy the (otherwise excellent) rust compiler
-        let tx = self.emitted_event_chan.clone();
+        let tx = self.event_ch.clone();
         let dest = peer_id.clone();
         peer_connection.on_ice_candidate(Box::new(move |c: Option<RTCIceCandidate>| {
             if let Some(candidate) = c {
@@ -377,7 +381,7 @@ impl Controller {
         // Set the handler for ICE connection state
         // This will notify you when the peer has connected/disconnected
         // the next 2 lines is some nonsense to satisfy the (otherwise excellent) rust compiler
-        let tx = self.emitted_event_chan.clone();
+        let tx = self.event_ch.clone();
         let dest = peer_id.clone();
         peer_connection.on_ice_connection_state_change(Box::new(
             move |connection_state: RTCIceConnectionState| {
@@ -397,7 +401,7 @@ impl Controller {
 
         // store media tracks when created
         // the next 2 lines is some nonsense to satisfy the (otherwise excellent) rust compiler
-        let tx = self.emitted_event_chan.clone();
+        let tx = self.event_ch.clone();
         let dest = peer_id.clone();
         peer_connection.on_track(Box::new(
             move |track: Option<Arc<TrackRemote>>, _receiver: Option<Arc<RTCRtpReceiver>>| {
