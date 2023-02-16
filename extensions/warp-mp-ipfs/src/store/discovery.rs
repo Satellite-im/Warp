@@ -51,7 +51,14 @@ impl Discovery {
                     loop {
                         if let Ok(mut stream) = ipfs.get_providers(cid).await {
                             while let Some(peer_id) = stream.next().await {
-                                if cached.insert(peer_id) {
+                                let Ok(connection_type) = super::connected_to_peer(&ipfs, peer_id).await else {
+                                    break;
+                                };
+
+                                if matches!(connection_type, PeerConnectionType::Connected)
+                                    && !discovery.contains(peer_id).await
+                                    && cached.insert(peer_id)
+                                {
                                     let entry =
                                         DiscoveryEntry::new(ipfs.clone(), peer_id, None).await;
                                     discovery.entries.write().await.insert(entry);
@@ -190,20 +197,13 @@ impl DiscoveryEntry {
                 loop {
                     if did.is_none() {
                         //TODO: Check discovery config option to determine if we should determine how we
-                        //      should check
+                        //      should check connectivity
 
-                        let Ok(connection_type) = ipfs.connected().await.map(|list| {
-                            if list.iter().any(|peer| *peer == entry.peer_id) {
-                                PeerConnectionType::Connected
-                            } else {
-                                PeerConnectionType::NotConnected
-                            }
-                        }) else {
-                            // If it fails, then its likely that ipfs had a fatal error
-                            // Maybe panic?
+                        let Ok(connection_type) = super::connected_to_peer(&ipfs, peer_id).await else {
                             break;
                         };
 
+                        // TODO: Remove when implementing REQ/RES as checking the subscribers would be irrelevant
                         let Ok(peers) = ipfs
                             .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
                             .await else {
