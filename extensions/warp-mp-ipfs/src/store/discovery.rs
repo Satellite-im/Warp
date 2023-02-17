@@ -1,4 +1,12 @@
-use std::{collections::HashSet, hash::Hash, sync::{Arc, atomic::{AtomicBool, Ordering}}, time::Duration};
+use std::{
+    collections::HashSet,
+    hash::Hash,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
 use rust_ipfs::{Ipfs, IpfsTypes, PeerId};
@@ -6,7 +14,7 @@ use tokio::{sync::RwLock, task::JoinHandle};
 use tracing::log;
 use warp::{crypto::DID, error::Error};
 
-use crate::config::Discovery as DiscoveryConfig;
+use crate::config::{self, Discovery as DiscoveryConfig};
 
 use super::{
     did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType, PeerType, IDENTITY_BROADCAST,
@@ -60,7 +68,7 @@ impl Discovery {
                                     && cached.insert(peer_id)
                                 {
                                     let entry =
-                                        DiscoveryEntry::new(ipfs.clone(), peer_id, None).await;
+                                        DiscoveryEntry::new(ipfs.clone(), peer_id, None, discovery.config.clone()).await;
                                     discovery.entries.write().await.insert(entry);
                                 }
                             }
@@ -105,7 +113,7 @@ impl Discovery {
             return Ok(());
         }
 
-        let entry = DiscoveryEntry::new(ipfs, peer_id, did_key).await;
+        let entry = DiscoveryEntry::new(ipfs, peer_id, did_key, self.config.clone()).await;
         self.entries.write().await.insert(entry);
         Ok(())
     }
@@ -165,6 +173,7 @@ pub struct DiscoveryEntry {
     discover: Arc<AtomicBool>,
     peer_id: PeerId,
     connection_type: Arc<RwLock<PeerConnectionType>>,
+    config: DiscoveryConfig,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
 }
 
@@ -183,11 +192,12 @@ impl Hash for DiscoveryEntry {
 impl Eq for DiscoveryEntry {}
 
 impl DiscoveryEntry {
-    pub async fn new<T: IpfsTypes>(ipfs: Ipfs<T>, peer_id: PeerId, did: Option<DID>) -> Self {
+    pub async fn new<T: IpfsTypes>(ipfs: Ipfs<T>, peer_id: PeerId, did: Option<DID>, config: DiscoveryConfig) -> Self {
         let entry = Self {
             did: Arc::new(RwLock::new(did)),
             peer_id,
             connection_type: Arc::default(),
+            config,
             discover: Arc::default(),
             task: Arc::default(),
         };
@@ -195,6 +205,8 @@ impl DiscoveryEntry {
         let task = tokio::spawn({
             let entry = entry.clone();
             async move {
+                let mut identity_checked = false;
+                let mut counter = 0;
                 loop {
                     if !entry.valid().await {
                         //TODO: Check discovery config option to determine if we should determine how we
@@ -239,14 +251,39 @@ impl DiscoveryEntry {
                             break;
                         };
 
-                        // Used as a precaution 
+                        // Used as a precaution
                         if !entry.valid().await {
                             *entry.did.write().await = Some(did_key.clone());
                         }
                     }
 
-                    if entry.discover.load(Ordering::SeqCst) {
-                        //TODO: Call discovery methods based on configuration
+                    if entry.discover.load(Ordering::SeqCst)
+                        && matches!(entry.connection_type().await, PeerConnectionType::NotConnected)
+                    {
+                        match entry.config {
+                            // Used for provider. Doesnt do anything right now
+                            // TODO: Maybe have separate provider query in case
+                            //       Discovery task isnt enabled? 
+                            DiscoveryConfig::Provider(_) => {}
+                            // Check over DHT
+                            DiscoveryConfig::Direct => {
+                                //Note: Used to delay
+                                if !identity_checked && counter == 100 {
+                                    let _ = ipfs.identity(Some(entry.peer_id)).await.ok();
+                                    counter = 0;
+                                    identity_checked = true; 
+                                }
+                                if counter == 100 {
+                                    identity_checked = false;
+                                }
+
+                                counter += 1;
+                            }
+                            config::Discovery::None => {
+                                //TODO: Dial out through common relays
+                                // Note: This will work if both peers shares the relays used. 
+                            }
+                        }
                     }
 
                     let Ok(connection_type) = ipfs.connected().await.map(|list| {
