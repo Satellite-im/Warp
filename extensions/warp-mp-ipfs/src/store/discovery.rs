@@ -114,6 +114,7 @@ impl Discovery {
         }
 
         let entry = DiscoveryEntry::new(ipfs, peer_id, did_key, self.config.clone()).await;
+        entry.enable_discovery();
         self.entries.write().await.insert(entry);
         Ok(())
     }
@@ -268,13 +269,15 @@ impl DiscoveryEntry {
                             // Check over DHT
                             DiscoveryConfig::Direct => {
                                 //Note: Used to delay
-                                if !identity_checked && counter == 100 {
+                                //TODO: Replace with a literal timer that can be polled 
+                                if counter == 30 {
+                                    identity_checked = false;
+                                }
+
+                                if !identity_checked && counter == 30 {
                                     let _ = ipfs.identity(Some(entry.peer_id)).await.ok();
                                     counter = 0;
                                     identity_checked = true; 
-                                }
-                                if counter == 100 {
-                                    identity_checked = false;
                                 }
 
                                 counter += 1;
@@ -340,5 +343,13 @@ impl DiscoveryEntry {
     /// Returns a connection type
     pub async fn connection_type(&self) -> PeerConnectionType {
         *self.connection_type.read().await
+    }
+
+    pub fn enable_discovery(&self) {
+        self.discover.store(true, Ordering::SeqCst)
+    }
+
+    pub fn disable_discovery(&self) {
+        self.discover.store(false, Ordering::SeqCst)
     }
 }
