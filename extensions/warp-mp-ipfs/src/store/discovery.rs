@@ -67,8 +67,13 @@ impl Discovery {
                                     && !discovery.contains(peer_id).await
                                     && cached.insert(peer_id)
                                 {
-                                    let entry =
-                                        DiscoveryEntry::new(ipfs.clone(), peer_id, None, discovery.config.clone()).await;
+                                    let entry = DiscoveryEntry::new(
+                                        ipfs.clone(),
+                                        peer_id,
+                                        None,
+                                        discovery.config.clone(),
+                                    )
+                                    .await;
                                     discovery.entries.write().await.insert(entry);
                                 }
                             }
@@ -193,7 +198,12 @@ impl Hash for DiscoveryEntry {
 impl Eq for DiscoveryEntry {}
 
 impl DiscoveryEntry {
-    pub async fn new<T: IpfsTypes>(ipfs: Ipfs<T>, peer_id: PeerId, did: Option<DID>, config: DiscoveryConfig) -> Self {
+    pub async fn new<T: IpfsTypes>(
+        ipfs: Ipfs<T>,
+        peer_id: PeerId,
+        did: Option<DID>,
+        config: DiscoveryConfig,
+    ) -> Self {
         let entry = Self {
             did: Arc::new(RwLock::new(did)),
             peer_id,
@@ -206,8 +216,7 @@ impl DiscoveryEntry {
         let task = tokio::spawn({
             let entry = entry.clone();
             async move {
-                let mut identity_checked = false;
-                let mut counter = 0;
+                let mut timer = tokio::time::interval(Duration::from_secs(30));
                 loop {
                     if !entry.valid().await {
                         //TODO: Check discovery config option to determine if we should determine how we
@@ -259,32 +268,28 @@ impl DiscoveryEntry {
                     }
 
                     if entry.discover.load(Ordering::SeqCst)
-                        && matches!(entry.connection_type().await, PeerConnectionType::NotConnected)
+                        && matches!(
+                            entry.connection_type().await,
+                            PeerConnectionType::NotConnected
+                        )
                     {
                         match entry.config {
                             // Used for provider. Doesnt do anything right now
                             // TODO: Maybe have separate provider query in case
-                            //       Discovery task isnt enabled? 
+                            //       Discovery task isnt enabled?
                             DiscoveryConfig::Provider(_) => {}
                             // Check over DHT
                             DiscoveryConfig::Direct => {
-                                //Note: Used to delay
-                                //TODO: Replace with a literal timer that can be polled 
-                                if counter == 30 {
-                                    identity_checked = false;
+                                tokio::select! {
+                                    _ = timer.tick() => {
+                                        let _ = ipfs.identity(Some(entry.peer_id)).await.ok();
+                                    }
+                                    _ = async {} => {}
                                 }
-
-                                if !identity_checked && counter == 30 {
-                                    let _ = ipfs.identity(Some(entry.peer_id)).await.ok();
-                                    counter = 0;
-                                    identity_checked = true; 
-                                }
-
-                                counter += 1;
                             }
                             config::Discovery::None => {
-                                //TODO: Dial out through common relays
-                                // Note: This will work if both peers shares the relays used. 
+                                //TODO: Dial out through common relays 
+                                // Note: This will work if both peers shares the relays used.
                             }
                         }
                     }
