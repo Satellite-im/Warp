@@ -281,19 +281,74 @@ mod test {
     #[tokio::test]
     async fn block_unblock_identity() -> anyhow::Result<()> {
         let (mut account_a, did_a, _) =
-            create_account(Some("JohnDoe"), None, Some("test::block_unblock_identity".into())).await?;
+            create_account(None, None, Some("test::block_unblock_identity".into())).await?;
 
         let (mut account_b, did_b, _) =
-            create_account(Some("JaneDoe"), None, Some("test::block_unblock_identity".into())).await?;
+            create_account(None, None, Some("test::block_unblock_identity".into())).await?;
+
+        let mut subscribe_a = account_a.subscribe().await?;
+        let mut subscribe_b = account_b.subscribe().await?;
 
         account_a.block(&did_b).await?;
         account_b.block(&did_a).await?;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(
+                    MultiPassEventKind::Blocked { did } | MultiPassEventKind::BlockedBy { did },
+                ) = subscribe_a.next().await
+                {
+                    assert_eq!(did, did_b);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(
+                    MultiPassEventKind::Blocked { did } | MultiPassEventKind::BlockedBy { did },
+                ) = subscribe_b.next().await
+                {
+                    assert_eq!(did, did_a);
+                    break;
+                }
+            }
+        })
+        .await?;
 
         assert!(account_a.is_blocked(&did_b).await?);
         assert!(account_b.is_blocked(&did_a).await?);
 
         account_a.unblock(&did_b).await?;
         account_b.unblock(&did_a).await?;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(
+                    MultiPassEventKind::Unblocked { did } | MultiPassEventKind::UnblockedBy { did },
+                ) = subscribe_a.next().await
+                {
+                    assert_eq!(did, did_b);
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(
+                    MultiPassEventKind::Unblocked { did } | MultiPassEventKind::UnblockedBy { did },
+                ) = subscribe_b.next().await
+                {
+                    assert_eq!(did, did_a);
+                    break;
+                }
+            }
+        })
+        .await?;
 
         assert!(!account_a.is_blocked(&did_b).await?);
         assert!(!account_b.is_blocked(&did_a).await?);
@@ -302,8 +357,12 @@ mod test {
 
     #[tokio::test]
     async fn cannot_block_self() -> anyhow::Result<()> {
-        let (mut account_a, did_a, _) =
-            create_account(Some("JohnDoe"), None, Some("test::cannot_block_self".into())).await?;
+        let (mut account_a, did_a, _) = create_account(
+            Some("JohnDoe"),
+            None,
+            Some("test::cannot_block_self".into()),
+        )
+        .await?;
 
         assert!(account_a.block(&did_a).await.is_err());
 
