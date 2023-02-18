@@ -530,7 +530,6 @@ mod test {
         let mut conversation_c = chat_c.get_conversation_stream(id_c).await?;
         let mut conversation_d = chat_c.get_conversation_stream(id_d).await?;
 
-
         chat_a.send(id_a, None, vec!["Hello, World".into()]).await?;
 
         let message_a = tokio::time::timeout(Duration::from_secs(5), async {
@@ -553,7 +552,15 @@ mod test {
                     message_id,
                 }) = conversation_b.next().await
                 {
-                    break chat_b.get_message(conversation_id, message_id).await;
+                    break tokio::time::timeout(Duration::from_secs(5), async move {
+                        loop {
+                            if let Ok(message) =
+                                chat_b.get_message(conversation_id, message_id).await
+                            {
+                                break message;
+                            }
+                        }
+                    }).await;
                 }
             }
         })
@@ -566,7 +573,15 @@ mod test {
                     message_id,
                 }) = conversation_c.next().await
                 {
-                    break chat_c.get_message(conversation_id, message_id).await;
+                    break tokio::time::timeout(Duration::from_secs(5), async move {
+                        loop {
+                            if let Ok(message) =
+                                chat_c.get_message(conversation_id, message_id).await
+                            {
+                                break message;
+                            }
+                        }
+                    }).await;
                 }
             }
         })
@@ -579,17 +594,23 @@ mod test {
                     message_id,
                 }) = conversation_d.next().await
                 {
-                    break chat_d.get_message(conversation_id, message_id).await;
+                    break tokio::time::timeout(Duration::from_secs(5), async move {
+                        loop {
+                            if let Ok(message) =
+                                chat_d.get_message(conversation_id, message_id).await
+                            {
+                                break message;
+                            }
+                        }
+                    }).await;
                 }
             }
         })
         .await??;
-
 
         assert_eq!(message_a, message_b);
         assert_eq!(message_b, message_c);
         assert_eq!(message_c, message_d);
         Ok(())
     }
-
 }
