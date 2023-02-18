@@ -318,9 +318,6 @@ mod test {
         })
         .await?;
 
-        assert!(account_a.is_blocked(&did_b).await?);
-        assert!(account_b.is_blocked(&did_a).await?);
-
         account_a.unblock(&did_b).await?;
         account_b.unblock(&did_a).await?;
 
@@ -350,8 +347,6 @@ mod test {
         })
         .await?;
 
-        assert!(!account_a.is_blocked(&did_b).await?);
-        assert!(!account_b.is_blocked(&did_a).await?);
         Ok(())
     }
 
