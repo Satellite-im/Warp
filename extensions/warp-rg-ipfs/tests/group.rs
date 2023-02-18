@@ -444,4 +444,152 @@ mod test {
         assert!(conversation.recipients().contains(&did_d));
         Ok(())
     }
+
+    #[tokio::test]
+    async fn send_message_in_group_conversation() -> anyhow::Result<()> {
+        let (_account_a, mut chat_a, _, _) = create_account_and_chat(
+            None,
+            None,
+            Some("test::send_message_in_group_conversation".into()),
+        )
+        .await?;
+        let (_account_b, mut chat_b, did_b, _) = create_account_and_chat(
+            None,
+            None,
+            Some("test::send_message_in_group_conversation".into()),
+        )
+        .await?;
+        let (_account_c, mut chat_c, did_c, _) = create_account_and_chat(
+            None,
+            None,
+            Some("test::send_message_in_group_conversation".into()),
+        )
+        .await?;
+        let (_account_d, mut chat_d, did_d, _) = create_account_and_chat(
+            None,
+            None,
+            Some("test::send_message_in_group_conversation".into()),
+        )
+        .await?;
+
+        let mut chat_subscribe_a = chat_a.subscribe().await?;
+        let mut chat_subscribe_b = chat_b.subscribe().await?;
+        let mut chat_subscribe_c = chat_c.subscribe().await?;
+        let mut chat_subscribe_d = chat_d.subscribe().await?;
+
+        chat_a
+            .create_group_conversation(vec![did_b.clone(), did_c.clone(), did_d.clone()])
+            .await?;
+
+        let id_a = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_a.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let id_b = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_b.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let id_c = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_c.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let id_d = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_d.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
+        let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
+        let mut conversation_c = chat_c.get_conversation_stream(id_c).await?;
+        let mut conversation_d = chat_c.get_conversation_stream(id_d).await?;
+
+
+        chat_a.send(id_a, None, vec!["Hello, World".into()]).await?;
+
+        let message_a = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(MessageEventKind::MessageSent {
+                    conversation_id,
+                    message_id,
+                }) = conversation_a.next().await
+                {
+                    break chat_a.get_message(conversation_id, message_id).await;
+                }
+            }
+        })
+        .await??;
+
+        let message_b = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(MessageEventKind::MessageReceived {
+                    conversation_id,
+                    message_id,
+                }) = conversation_b.next().await
+                {
+                    break chat_b.get_message(conversation_id, message_id).await;
+                }
+            }
+        })
+        .await??;
+
+        let message_c = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(MessageEventKind::MessageReceived {
+                    conversation_id,
+                    message_id,
+                }) = conversation_c.next().await
+                {
+                    break chat_c.get_message(conversation_id, message_id).await;
+                }
+            }
+        })
+        .await??;
+
+        let message_d = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(MessageEventKind::MessageReceived {
+                    conversation_id,
+                    message_id,
+                }) = conversation_d.next().await
+                {
+                    break chat_d.get_message(conversation_id, message_id).await;
+                }
+            }
+        })
+        .await??;
+
+
+        assert_eq!(message_a, message_b);
+        assert_eq!(message_b, message_c);
+        assert_eq!(message_c, message_d);
+        Ok(())
+    }
+
 }
