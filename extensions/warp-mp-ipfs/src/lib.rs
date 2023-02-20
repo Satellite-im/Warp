@@ -279,7 +279,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         let (nat_channel_tx, mut nat_channel_rx) = unbounded();
 
         info!("Starting ipfs");
-        let ipfs = UninitializedIpfs::<T>::new(opts)
+        let ipfs = UninitializedIpfs::<T>::with_opt(opts)
             // We check the events from the swarm for autonat
             // So we can determine our nat status when it does change
             .swarm_events({
@@ -301,7 +301,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                     }
                 }
             })
-            .spawn_start()
+            .start()
             .await?;
 
         tokio::spawn({
