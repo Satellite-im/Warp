@@ -417,11 +417,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         }
 
         if !self.discovery.contains(identity.did_key()).await {
-            if let Err(e) = self
-                .discovery
-                .insert(self.ipfs.clone(), identity.did_key())
-                .await
-            {
+            if let Err(e) = self.discovery.insert(&self.ipfs, identity.did_key()).await {
                 log::warn!("Error inserting into discovery service: {e}");
             }
         }
@@ -661,10 +657,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     return self.own_identity().await.map(|i| vec![i]);
                 }
 
-                if !self.discovery.contains(pubkey.clone()).await {
-                    self.discovery
-                        .insert(self.ipfs.clone(), pubkey.clone())
-                        .await?;
+                if !self.discovery.contains(pubkey).await {
+                    self.discovery.insert(&self.ipfs, pubkey).await?;
                 }
 
                 self.cache()

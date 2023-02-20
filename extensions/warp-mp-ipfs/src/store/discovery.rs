@@ -68,7 +68,7 @@ impl Discovery {
                                     && cached.insert(peer_id)
                                 {
                                     let entry = DiscoveryEntry::new(
-                                        ipfs.clone(),
+                                        &ipfs,
                                         peer_id,
                                         None,
                                         discovery.config.clone(),
@@ -103,7 +103,7 @@ impl Discovery {
 
     pub async fn insert<P: Into<PeerType>, T: IpfsTypes>(
         &self,
-        ipfs: Ipfs<T>,
+        ipfs: &Ipfs<T>,
         peer_type: P,
     ) -> Result<(), Error> {
         let (peer_id, did_key) = match &peer_type.into() {
@@ -199,7 +199,7 @@ impl Eq for DiscoveryEntry {}
 
 impl DiscoveryEntry {
     pub async fn new<T: IpfsTypes>(
-        ipfs: Ipfs<T>,
+        ipfs: &Ipfs<T>,
         peer_id: PeerId,
         did: Option<DID>,
         config: DiscoveryConfig,
@@ -215,6 +215,7 @@ impl DiscoveryEntry {
 
         let task = tokio::spawn({
             let entry = entry.clone();
+            let ipfs = ipfs.clone();
             async move {
                 let mut timer = tokio::time::interval(Duration::from_secs(30));
                 loop {
@@ -288,7 +289,7 @@ impl DiscoveryEntry {
                                 }
                             }
                             config::Discovery::None => {
-                                //TODO: Dial out through common relays 
+                                //TODO: Dial out through common relays
                                 // Note: This will work if both peers shares the relays used.
                             }
                         }

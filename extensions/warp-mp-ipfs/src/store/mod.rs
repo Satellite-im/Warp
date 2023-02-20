@@ -131,6 +131,12 @@ pub enum PeerType {
     DID(DID),
 }
 
+impl From<&DID> for PeerType {
+    fn from(did: &DID) -> Self {
+        PeerType::DID(did.clone())
+    }
+}
+
 impl From<DID> for PeerType {
     fn from(did: DID) -> Self {
         PeerType::DID(did)
@@ -140,6 +146,12 @@ impl From<DID> for PeerType {
 impl From<PeerId> for PeerType {
     fn from(peer_id: PeerId) -> Self {
         PeerType::PeerId(peer_id)
+    }
+}
+
+impl From<&PeerId> for PeerType {
+    fn from(peer_id: &PeerId) -> Self {
+        PeerType::PeerId(*peer_id)
     }
 }
 
