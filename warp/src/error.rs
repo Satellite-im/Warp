@@ -63,6 +63,8 @@ pub enum Error {
     IdentityExist,
     #[error("Identity does not exist")]
     IdentityDoesntExist,
+    #[error("Identity was invalid")]
+    IdentityInvalid,
     #[error("Username cannot be updated for identity")]
     CannotUpdateIdentityUsername,
     #[error("Picture cannot be updated for identity")]
@@ -193,6 +195,8 @@ pub enum Error {
     TesseractUnavailable,
     #[error("Tesseract is locked")]
     TesseractLocked,
+    #[error("Passphrase supplied is invalid")]
+    InvalidPassphrase,
     #[error("One or more items in the datastore are corrupted or invalid")]
     CorruptedDataStore,
     #[error("Unable to save tesseract")]

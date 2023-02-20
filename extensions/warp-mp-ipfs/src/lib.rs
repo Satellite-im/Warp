@@ -15,6 +15,7 @@ use std::time::Duration;
 use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
 use tokio::sync::broadcast;
+use tokio_util::io::ReaderStream;
 use tracing::log::{error, info, trace, warn};
 use warp::crypto::did_key::Generate;
 use warp::data::DataType;
@@ -274,9 +275,9 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         let (nat_channel_tx, mut nat_channel_rx) = unbounded();
 
         info!("Starting ipfs");
-        let ipfs = UninitializedIpfs::<T>::new(opts)
-        // We check the events from the swarm for autonat
-        // So we can determine our nat status when it does change
+        let ipfs = UninitializedIpfs::<T>::with_opt(opts)
+            // We check the events from the swarm for autonat
+            // So we can determine our nat status when it does change
             .swarm_events({
                 move |_, event| {
                     //Note: This will be used
@@ -296,7 +297,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                     }
                 }
             })
-            .spawn_start()
+            .start()
             .await?;
 
         tokio::spawn({
@@ -643,14 +644,9 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
         let mut store = self.identity_store(true).await?;
         let mut identity = self.get_own_identity().await?;
-        let old_identity = identity.clone();
-        match (
-            option.username(),
-            option.graphics_picture(),
-            option.graphics_banner(),
-            option.status_message(),
-        ) {
-            (Some(username), None, None, None) => {
+
+        match option {
+            IdentityUpdate::Username(username) => {
                 let len = username.chars().count();
                 if !(4..=64).contains(&len) {
                     return Err(Error::InvalidLength {
@@ -663,7 +659,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
 
                 identity.set_username(&username);
             }
-            (None, Some(data), None, None) => {
+            IdentityUpdate::Picture(data) => {
                 let len = data.len();
                 if len > 2 * 1024 * 1024 {
                     return Err(Error::InvalidLength {
@@ -697,7 +693,50 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 root_document.picture = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
                 store.set_root_document(root_document).await?;
             }
-            (None, None, Some(data), None) => {
+            IdentityUpdate::PicturePath(path) => {
+                if !path.is_file() {
+                    return Err(Error::IoError(std::io::Error::from(
+                        std::io::ErrorKind::NotFound,
+                    )));
+                }
+
+                let file = tokio::fs::File::open(path).await?;
+
+                let metadata = file.metadata().await?;
+
+                let len = metadata.len() as _;
+
+                if metadata.len() > 2 * 1024 * 1024 {
+                    return Err(Error::InvalidLength {
+                        context: "profile picture".into(),
+                        current: len,
+                        minimum: None,
+                        maximum: Some(2 * 1024 * 1024),
+                    });
+                }
+
+                let stream = ReaderStream::new(file)
+                    .filter_map(|result| async { result.ok() })
+                    .map(|data| data.into());
+
+                let cid = store
+                    .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
+                    .await?;
+
+                let mut root_document = store.get_root_document().await?;
+                if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
+                    if picture_cid == cid {
+                        return Err(Error::CannotUpdateIdentityPicture);
+                    }
+                    if let Err(e) = store.delete_photo(picture_cid).await {
+                        error!("Error deleting banner: {e}");
+                    }
+                }
+
+                root_document.picture = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
+                store.set_root_document(root_document).await?;
+            }
+            IdentityUpdate::Banner(data) => {
                 let len = data.len();
                 if len > 2 * 1024 * 1024 {
                     return Err(Error::InvalidLength {
@@ -731,10 +770,53 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 root_document.banner = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
                 store.set_root_document(root_document).await?;
             }
-            (None, None, None, Some(status)) => {
+            IdentityUpdate::BannerPath(path) => {
+                if !path.is_file() {
+                    return Err(Error::IoError(std::io::Error::from(
+                        std::io::ErrorKind::NotFound,
+                    )));
+                }
+
+                let file = tokio::fs::File::open(path).await?;
+
+                let metadata = file.metadata().await?;
+
+                let len = metadata.len() as _;
+
+                if metadata.len() > 2 * 1024 * 1024 {
+                    return Err(Error::InvalidLength {
+                        context: "profile banner".into(),
+                        current: len,
+                        minimum: None,
+                        maximum: Some(2 * 1024 * 1024),
+                    });
+                }
+
+                let stream = ReaderStream::new(file)
+                    .filter_map(|result| async { result.ok() })
+                    .map(|data| data.into());
+
+                let cid = store
+                    .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
+                    .await?;
+
+                let mut root_document = store.get_root_document().await?;
+                if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
+                    if banner_cid == cid {
+                        return Err(Error::CannotUpdateIdentityBanner);
+                    }
+                    if let Err(e) = store.delete_photo(banner_cid).await {
+                        error!("Error deleting banner: {e}");
+                    }
+                }
+
+                root_document.banner = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
+                store.set_root_document(root_document).await?;
+            }
+            IdentityUpdate::StatusMessage(status) => {
                 if let Some(status) = status.clone() {
                     let len = status.chars().count();
-                    if len >= 512 {
+                    if len > 512 {
                         return Err(Error::InvalidLength {
                             context: "status".into(),
                             current: len,
@@ -745,36 +827,9 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 }
                 identity.set_status_message(status);
             }
-            _ => return Err(Error::CannotUpdateIdentity),
-        }
-        store.identity_update(identity.clone()).await?;
+        };
 
-        if let Ok(mut cache) = self.get_cache_mut() {
-            let mut query = QueryBuilder::default();
-            //TODO: Query by public key to tie/assiociate the username to identity in the event of dup
-            query.r#where("username", &old_identity.username())?;
-            if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query)) {
-                //get last
-                if !list.is_empty() {
-                    // let mut obj = list.last().unwrap().clone();
-                    let mut object = Sata::default();
-                    object.set_version(list.len() as _);
-                    let obj = object.encode(
-                        warp::sata::libipld::IpldCodec::DagJson,
-                        warp::sata::Kind::Reference,
-                        identity.clone(),
-                    )?;
-                    cache.add_data(DataType::from(Module::Accounts), &obj)?;
-                }
-            } else {
-                let object = Sata::default().encode(
-                    warp::sata::libipld::IpldCodec::DagJson,
-                    warp::sata::Kind::Reference,
-                    identity.clone(),
-                )?;
-                cache.add_data(DataType::from(Module::Accounts), &object)?;
-            }
-        }
+        store.identity_update(identity.clone()).await?;
 
         info!("Update identity store");
         store.update_identity().await?;
@@ -869,7 +924,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
         store.friends_list().await.map(Vec::from_iter)
     }
 
-    async fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
+    async fn has_friend(&self, pubkey: &DID) -> Result<bool, Error> {
         let store = self.friend_store().await?;
         store.is_friend(pubkey).await
     }
@@ -916,7 +971,7 @@ impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
             .await?
             .first()
             .ok_or(Error::IdentityDoesntExist)?;
-        let friends = self.has_friend(did).await.is_ok();
+        let friends = self.has_friend(did).await?;
         let received_friend_request = self.received_friend_request_from(did).await?;
         let sent_friend_request = self.sent_friend_request_to(did).await?;
         let blocked = self.is_blocked(did).await?;

@@ -9,10 +9,11 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 [dependencies]
 warp = { path = "../../warp" }
 
-rust-ipfs = "=0.3.0-alpha.2"
+rust-ipfs = "=0.3.0-alpha.4"
 libipld = { version = "0.15", features = ["serde-codec"] }
 uuid = { version = "1.0", features = ["serde", "v4"] }
 tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["full"] }
 futures = { version = "0.3" }
 async-trait = { version = "0.1" }
 async-stream = "0.3"
