@@ -256,7 +256,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
             }
         });
 
-        if let Err(e) = store.discovery.start(store.ipfs.clone()).await {
+        if let Err(e) = store.discovery.start(&store.ipfs).await {
             warn!("Error starting discovery service: {e}. Will not be able to discover peers over namespace");
         }
 

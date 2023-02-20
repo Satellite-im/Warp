@@ -38,7 +38,7 @@ impl Discovery {
 
     /// Start discovery task
     /// Note: This starting will only work across a provided namespace via Discovery::Provider
-    pub async fn start<T: IpfsTypes>(&self, ipfs: Ipfs<T>) -> Result<(), Error> {
+    pub async fn start<T: IpfsTypes>(&self, ipfs: &Ipfs<T>) -> Result<(), Error> {
         if let DiscoveryConfig::Provider(namespace) = &self.config {
             let namespace = namespace.clone().unwrap_or_else(|| "warp-mp-ipfs".into());
             let cid = ipfs
@@ -47,6 +47,7 @@ impl Discovery {
 
             let task = tokio::spawn({
                 let discovery = self.clone();
+                let ipfs = ipfs.clone();
                 async move {
                     let mut cached = HashSet::new();
 
