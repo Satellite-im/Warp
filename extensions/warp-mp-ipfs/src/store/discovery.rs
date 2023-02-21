@@ -123,11 +123,9 @@ impl Discovery {
 
         let entry = DiscoveryEntry::new(ipfs, peer_id, did_key, self.config.clone()).await;
         entry.enable_discovery();
-        if !self.entries.write().await.insert(entry.clone()) {
+        let prev = self.entries.write().await.replace(entry);
+        if let Some(entry) = prev {
             entry.cancel().await;
-            return Err(Error::OtherWithContext(
-                "Discovery task already exist".into(),
-            ));
         }
         Ok(())
     }
