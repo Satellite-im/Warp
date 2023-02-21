@@ -75,7 +75,9 @@ impl Discovery {
                                         discovery.config.clone(),
                                     )
                                     .await;
-                                    discovery.entries.write().await.insert(entry);
+                                    if !discovery.entries.write().await.insert(entry.clone()) {
+                                        entry.cancel().await;
+                                    }
                                 }
                             }
                         }
@@ -121,7 +123,12 @@ impl Discovery {
 
         let entry = DiscoveryEntry::new(ipfs, peer_id, did_key, self.config.clone()).await;
         entry.enable_discovery();
-        self.entries.write().await.insert(entry);
+        if !self.entries.write().await.insert(entry.clone()) {
+            entry.cancel().await;
+            return Err(Error::OtherWithContext(
+                "Discovery task already exist".into(),
+            ));
+        }
         Ok(())
     }
 
@@ -358,5 +365,14 @@ impl DiscoveryEntry {
 
     pub fn disable_discovery(&self) {
         self.discover.store(false, Ordering::SeqCst)
+    }
+
+    pub async fn cancel(&self) {
+        let task = std::mem::take(&mut *self.task.write().await);
+        if let Some(task) = task {
+            if !task.is_finished() {
+                task.abort();
+            }
+        }
     }
 }
