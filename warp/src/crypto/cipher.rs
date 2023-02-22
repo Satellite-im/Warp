@@ -4,13 +4,17 @@
 use std::io::{ErrorKind, Read, Write};
 
 use crate::crypto::hash::sha256_hash;
+use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use zeroize::Zeroize;
 
 use crate::error::Error;
 
 #[cfg(not(target_arch = "wasm32"))]
 use aes_gcm::aead::stream::{DecryptorBE32, EncryptorBE32};
-use aes_gcm::{Aes256Gcm, aead::{Aead, KeyInit}};
+use aes_gcm::{
+    aead::{Aead, KeyInit},
+    Aes256Gcm,
+};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -274,6 +278,105 @@ impl Cipher {
             }
         }
         writer.flush()?;
+        Ok(())
+    }
+
+    pub async fn encrypt_async_stream<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+        &self,
+        cipher_type: CipherType,
+        reader: &mut R,
+        writer: &mut W,
+    ) -> Result<()> {
+        let nonce = match cipher_type {
+            CipherType::Aes256Gcm => crate::crypto::generate(7),
+        };
+
+        let key = zeroize::Zeroizing::new(match self.private_key.len() {
+            32 => self.private_key.clone(),
+            _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
+        });
+
+        let mut buffer = [0u8; 512];
+        match cipher_type {
+            CipherType::Aes256Gcm => {
+                let cipher = Aes256Gcm::new(key.as_slice().into());
+
+                let mut stream = EncryptorBE32::from_aead(cipher, nonce.as_slice().into());
+                writer.write_all(&nonce).await?;
+
+                loop {
+                    match reader.read(&mut buffer).await {
+                        Ok(512) => {
+                            let ciphertext = stream
+                                .encrypt_next(buffer.as_slice())
+                                .map_err(|_| Error::EncryptionStreamError)?;
+                            writer.write_all(&ciphertext).await?;
+                        }
+                        Ok(read_count) => {
+                            let ciphertext = stream
+                                .encrypt_last(&buffer[..read_count])
+                                .map_err(|_| Error::EncryptionStreamError)?;
+                            writer.write_all(&ciphertext).await?;
+                            break;
+                        }
+                        Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                        Err(e) => return Err(Error::from(e)),
+                    }
+                }
+                writer.flush().await?;
+            }
+        };
+        Ok(())
+    }
+
+    pub async fn decrypt_async_stream<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+        &self,
+        cipher_type: CipherType,
+        reader: &mut R,
+        writer: &mut W,
+    ) -> Result<()> {
+        let mut nonce = match cipher_type {
+            CipherType::Aes256Gcm => vec![0u8; 7],
+        };
+
+        reader.read_exact(&mut nonce).await?;
+
+        let key = zeroize::Zeroizing::new(match self.private_key.len() {
+            32 => self.private_key.clone(),
+            _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
+        });
+
+        let mut buffer = [0u8; 528];
+
+        match cipher_type {
+            CipherType::Aes256Gcm => {
+                let cipher = Aes256Gcm::new(key.as_slice().into());
+                let mut stream = DecryptorBE32::from_aead(cipher, nonce.as_slice().into());
+
+                loop {
+                    match reader.read(&mut buffer).await {
+                        Ok(528) => {
+                            let plaintext = stream
+                                .decrypt_next(buffer.as_slice())
+                                .map_err(|_| Error::DecryptionStreamError)?;
+
+                            writer.write_all(&plaintext).await?
+                        }
+                        Ok(read_count) if read_count == 0 => break,
+                        Ok(read_count) => {
+                            let plaintext = stream
+                                .decrypt_last(&buffer[..read_count])
+                                .map_err(|_| Error::DecryptionStreamError)?;
+                            writer.write_all(&plaintext).await?;
+                            break;
+                        }
+                        Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                        Err(e) => return Err(Error::from(e)),
+                    };
+                }
+            }
+        }
+        writer.flush().await?;
         Ok(())
     }
 }
