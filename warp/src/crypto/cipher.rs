@@ -182,6 +182,33 @@ impl Cipher {
         Ok(())
     }
 
+    pub async fn self_encrypt_async_stream<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+        cipher_type: CipherType,
+        reader: &mut R,
+        writer: &mut W,
+    ) -> Result<()> {
+        let cipher = Cipher::new();
+        writer.write_all(&cipher.private_key()).await?;
+        cipher
+            .encrypt_async_stream(cipher_type, reader, writer)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn self_decrypt_async_stream<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+        cipher_type: CipherType,
+        reader: &mut R,
+        writer: &mut W,
+    ) -> Result<()> {
+        let mut key = vec![0u8; 34];
+        reader.read_exact(&mut key).await?;
+        let cipher = Cipher::from(key);
+        cipher
+            .decrypt_async_stream(cipher_type, reader, writer)
+            .await?;
+        Ok(())
+    }
+
     pub fn encrypt_stream(
         &self,
         cipher_type: CipherType,
@@ -569,6 +596,38 @@ mod test {
     }
 
     #[test]
+    fn cipher_aes256gcm_async_stream_self_encrypt_decrypt() -> anyhow::Result<()> {
+        futures::executor::block_on(async move {
+            let base = b"this is my message";
+            let mut cipher = Vec::<u8>::new();
+
+            let mut plaintext = Vec::<u8>::new();
+
+            Cipher::self_encrypt_async_stream(
+                CipherType::Aes256Gcm,
+                &mut base.as_slice(),
+                &mut cipher,
+            )
+            .await?;
+
+            Cipher::self_decrypt_async_stream(
+                CipherType::Aes256Gcm,
+                &mut cipher.as_slice(),
+                &mut plaintext,
+            )
+            .await?;
+
+            assert_ne!(cipher, plaintext);
+
+            assert_eq!(
+                String::from_utf8_lossy(&plaintext),
+                String::from_utf8_lossy(base)
+            );
+            Ok(())
+        })
+    }
+
+    #[test]
     fn cipher_aes256gcm_stream_encrypt_decrypt() -> anyhow::Result<()> {
         let cipher = Cipher::from(b"this is my key");
         let base = b"this is my message";
@@ -595,5 +654,40 @@ mod test {
             String::from_utf8_lossy(base)
         );
         Ok(())
+    }
+
+    #[test]
+    fn cipher_aes256gcm_async_stream_encrypt_decrypt() -> anyhow::Result<()> {
+        futures::executor::block_on(async move {
+            let cipher = Cipher::from(b"this is my key");
+            let base = b"this is my message";
+            let mut cipher_data = Vec::<u8>::new();
+
+            let mut plaintext = Vec::<u8>::new();
+
+            cipher
+                .encrypt_async_stream(
+                    CipherType::Aes256Gcm,
+                    &mut base.as_slice(),
+                    &mut cipher_data,
+                )
+                .await?;
+
+            cipher
+                .decrypt_async_stream(
+                    CipherType::Aes256Gcm,
+                    &mut cipher_data.as_slice(),
+                    &mut plaintext,
+                )
+                .await?;
+
+            assert_ne!(cipher_data, plaintext);
+
+            assert_eq!(
+                String::from_utf8_lossy(&plaintext),
+                String::from_utf8_lossy(base)
+            );
+            Ok(())
+        })
     }
 }
