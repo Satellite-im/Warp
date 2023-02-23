@@ -17,6 +17,10 @@ use aes_gcm::{
 
 type Result<T> = std::result::Result<T, Error>;
 
+const AES256_GCM_TAG_SIZE: usize = 16;
+const AES256_GCM_ENCRYPTION_BUF_SIZE: usize = 512;
+const AES256_GCM_DECRYPTION_BUF_SIZE: usize = AES256_GCM_ENCRYPTION_BUF_SIZE + AES256_GCM_TAG_SIZE;
+
 #[derive(Zeroize)]
 pub struct Cipher {
     private_key: Vec<u8>,
@@ -183,7 +187,7 @@ impl Cipher {
         });
 
         let stream = async_stream::stream! {
-            let mut buffer = [0u8; 512];
+            let mut buffer = [0u8; AES256_GCM_ENCRYPTION_BUF_SIZE];
             let cipher = Aes256Gcm::new(key.as_slice().into());
             let mut stream = EncryptorBE32::from_aead(cipher, nonce.as_slice().into());
 
@@ -191,7 +195,7 @@ impl Cipher {
 
             loop {
                 match reader.read(&mut buffer).await {
-                    Ok(512) => match stream.encrypt_next(buffer.as_slice()).map_err(|_| Error::EncryptionStreamError) {
+                    Ok(AES256_GCM_ENCRYPTION_BUF_SIZE) => match stream.encrypt_next(buffer.as_slice()).map_err(|_| Error::EncryptionStreamError) {
                         Ok(data) => yield Ok(data),
                         Err(e) => {
                             yield Err(e);
@@ -231,13 +235,13 @@ impl Cipher {
         });
 
         let stream = async_stream::stream! {
-            let mut buffer = vec![0u8; 528];
+            let mut buffer = [0u8; AES256_GCM_DECRYPTION_BUF_SIZE];
             let cipher = Aes256Gcm::new(key.as_slice().into());
             let mut stream = DecryptorBE32::from_aead(cipher, nonce.as_slice().into());
 
             loop {
                 match reader.read(&mut buffer).await {
-                    Ok(528) => {
+                    Ok(AES256_GCM_DECRYPTION_BUF_SIZE) => {
                         match stream.decrypt_next(buffer.as_slice()).map_err(|_| Error::DecryptionStreamError) {
                             Ok(data) => yield Ok(data),
                             Err(e) => {
@@ -283,7 +287,7 @@ impl Cipher {
             _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
         });
         let stream = async_stream::stream! {
-            let mut buffer = [0u8; 512];
+            let mut buffer = [0u8; AES256_GCM_ENCRYPTION_BUF_SIZE];
             let cipher = Aes256Gcm::new(key.as_slice().into());
             let mut stream = EncryptorBE32::from_aead(cipher, nonce.as_slice().into());
 
@@ -291,7 +295,7 @@ impl Cipher {
 
             loop {
                 match reader.read(&mut buffer).await {
-                    Ok(512) => match stream.encrypt_next(buffer.as_slice()).map_err(|_| Error::EncryptionStreamError) {
+                    Ok(AES256_GCM_ENCRYPTION_BUF_SIZE) => match stream.encrypt_next(buffer.as_slice()).map_err(|_| Error::EncryptionStreamError) {
                         Ok(data) => yield Ok(data),
                         Err(e) => {
                             yield Err(e);
@@ -329,13 +333,13 @@ impl Cipher {
         });
 
         let stream = async_stream::stream! {
-            let mut buffer = vec![0u8; 528];
+            let mut buffer = [0u8; AES256_GCM_DECRYPTION_BUF_SIZE];
             let cipher = Aes256Gcm::new(key.as_slice().into());
             let mut stream = DecryptorBE32::from_aead(cipher, nonce.as_slice().into());
 
             loop {
                 match reader.read(&mut buffer).await {
-                    Ok(528) => {
+                    Ok(AES256_GCM_DECRYPTION_BUF_SIZE) => {
                         match stream.decrypt_next(buffer.as_slice()).map_err(|_| Error::DecryptionStreamError) {
                             Ok(data) => yield Ok(data),
                             Err(e) => {
@@ -413,7 +417,7 @@ impl Cipher {
             _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
         });
 
-        let mut buffer = [0u8; 512];
+        let mut buffer = [0u8; AES256_GCM_ENCRYPTION_BUF_SIZE];
         match cipher_type {
             CipherType::Aes256Gcm => {
                 let cipher = Aes256Gcm::new(key.as_slice().into());
@@ -423,7 +427,7 @@ impl Cipher {
 
                 loop {
                     match reader.read(&mut buffer) {
-                        Ok(512) => {
+                        Ok(AES256_GCM_ENCRYPTION_BUF_SIZE) => {
                             let ciphertext = stream
                                 .encrypt_next(buffer.as_slice())
                                 .map_err(|_| Error::EncryptionStreamError)?;
@@ -464,7 +468,7 @@ impl Cipher {
             _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
         });
 
-        let mut buffer = [0u8; 528];
+        let mut buffer = [0u8; AES256_GCM_DECRYPTION_BUF_SIZE];
 
         match cipher_type {
             CipherType::Aes256Gcm => {
@@ -473,7 +477,7 @@ impl Cipher {
 
                 loop {
                     match reader.read(&mut buffer) {
-                        Ok(528) => {
+                        Ok(AES256_GCM_DECRYPTION_BUF_SIZE) => {
                             let plaintext = stream
                                 .decrypt_next(buffer.as_slice())
                                 .map_err(|_| Error::DecryptionStreamError)?;
