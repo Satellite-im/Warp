@@ -162,7 +162,7 @@ impl Cipher {
     pub async fn self_decrypt_async_stream<'a>(
         mut stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
     ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
-        let mut key = vec![0u8; 34];
+        let mut key = [0u8; 34];
         {
             let mut reader = stream.by_ref().into_async_read();
             reader.read_exact(&mut key).await?;
@@ -225,7 +225,7 @@ impl Cipher {
     ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
         let mut reader = stream.into_async_read();
 
-        let mut nonce = vec![0u8; 7];
+        let mut nonce = [0u8; 7];
 
         reader.read_exact(&mut nonce).await?;
 
@@ -323,7 +323,7 @@ impl Cipher {
         &self,
         mut reader: R,
     ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
-        let mut nonce = vec![0u8; 7];
+        let mut nonce = [0u8; 7];
 
         reader.read_exact(&mut nonce).await?;
 
@@ -394,7 +394,7 @@ impl Cipher {
         reader: &mut impl Read,
         writer: &mut impl Write,
     ) -> Result<()> {
-        let mut key = vec![0u8; 34];
+        let mut key = [0u8; 34];
         reader.read_exact(&mut key)?;
         let cipher = Cipher::from(key);
         cipher.decrypt_stream(cipher_type, reader, writer)?;
@@ -458,7 +458,7 @@ impl Cipher {
         writer: &mut impl Write,
     ) -> Result<()> {
         let mut nonce = match cipher_type {
-            CipherType::Aes256Gcm => vec![0u8; 7],
+            CipherType::Aes256Gcm => [0u8; 7],
         };
 
         reader.read_exact(&mut nonce)?;
