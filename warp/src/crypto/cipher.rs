@@ -323,7 +323,7 @@ impl Cipher {
         });
 
         let stream = async_stream::stream! {
-            let mut buffer = [0u8; 1024];
+            let mut buffer = [0u8; 512];
             let cipher = Aes256Gcm::new(key.as_slice().into());
             let mut stream = EncryptorBE32::from_aead(cipher, nonce.as_slice().into());
 
@@ -331,7 +331,7 @@ impl Cipher {
 
             loop {
                 match reader.read(&mut buffer).await {
-                    Ok(1024) => match stream.encrypt_next(buffer.as_slice()).map_err(|_| Error::EncryptionStreamError) {
+                    Ok(512) => match stream.encrypt_next(buffer.as_slice()).map_err(|_| Error::EncryptionStreamError) {
                         Ok(data) => yield Ok(data),
                         Err(e) => {
                             yield Err(e);
@@ -376,7 +376,7 @@ impl Cipher {
 
             loop {
                 match reader.read(&mut buffer).await {
-                    Ok(1040) => {
+                    Ok(528) => {
                         match stream.decrypt_next(buffer.as_slice()).map_err(|_| Error::DecryptionStreamError) {
                             Ok(data) => yield Ok(data),
                             Err(e) => {
