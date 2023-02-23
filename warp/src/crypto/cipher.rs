@@ -4,21 +4,24 @@
 use std::io::{ErrorKind, Read, Write};
 
 use crate::crypto::hash::sha256_hash;
+use futures::{stream, AsyncRead, AsyncReadExt, Stream, StreamExt, TryStreamExt};
 use zeroize::Zeroize;
 
 use crate::error::Error;
 
-#[cfg(not(target_arch = "wasm32"))]
 use aes_gcm::aead::stream::{DecryptorBE32, EncryptorBE32};
-use aes_gcm::{Aes256Gcm, aead::{Aead, KeyInit}};
-
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
+use aes_gcm::{
+    aead::{Aead, KeyInit},
+    Aes256Gcm,
+};
 
 type Result<T> = std::result::Result<T, Error>;
 
+const AES256_GCM_TAG_SIZE: usize = 16;
+const AES256_GCM_ENCRYPTION_BUF_SIZE: usize = 512;
+const AES256_GCM_DECRYPTION_BUF_SIZE: usize = AES256_GCM_ENCRYPTION_BUF_SIZE + AES256_GCM_TAG_SIZE;
+
 #[derive(Zeroize)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Cipher {
     private_key: Vec<u8>,
 }
@@ -45,22 +48,18 @@ impl<U: AsRef<[u8]>> From<U> for Cipher {
 
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum CipherType {
     /// AES256-GCM
     Aes256Gcm,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Cipher {
     /// Create an instance of Cipher.
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new() -> Cipher {
         Cipher::default()
     }
 
     /// Import key into Cipher
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn from_bytes(private_key: &[u8]) -> Cipher {
         let private_key = private_key.to_vec();
         Cipher { private_key }
@@ -72,7 +71,6 @@ impl Cipher {
     }
 
     /// Used to generate and encrypt data with a random key
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn self_encrypt(cipher_type: CipherType, data: &[u8]) -> Result<Vec<u8>> {
         let cipher = Cipher::new();
         let mut data = cipher.encrypt(cipher_type, data)?;
@@ -81,7 +79,6 @@ impl Cipher {
     }
 
     /// Used to decrypt data with a key that was attached to the data
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn self_decrypt(cipher_type: CipherType, data: &[u8]) -> Result<Vec<u8>> {
         let (key, data) = extract_data_slice(data, 34);
         let cipher = Cipher::from_bytes(key);
@@ -90,21 +87,18 @@ impl Cipher {
     }
 
     /// Used to encrypt data directly with key
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn direct_encrypt(cipher_type: CipherType, data: &[u8], key: &[u8]) -> Result<Vec<u8>> {
         let cipher = Cipher::from(key);
         cipher.encrypt(cipher_type, data)
     }
 
     /// Used to decrypt data directly with key
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn direct_decrypt(cipher_type: CipherType, data: &[u8], key: &[u8]) -> Result<Vec<u8>> {
         let cipher = Cipher::from(key);
         cipher.decrypt(cipher_type, data)
     }
 
     /// Used to encrypt data
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn encrypt(&self, cipher_type: CipherType, data: &[u8]) -> Result<Vec<u8>> {
         let nonce = match cipher_type {
             CipherType::Aes256Gcm => crate::crypto::generate(12),
@@ -129,7 +123,6 @@ impl Cipher {
     }
 
     /// Used to decrypt data
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn decrypt(&self, cipher_type: CipherType, data: &[u8]) -> Result<Vec<u8>> {
         let (nonce, payload) = match cipher_type {
             CipherType::Aes256Gcm => extract_data_slice(data, 12),
@@ -151,10 +144,239 @@ impl Cipher {
 
         Ok(decrypted_data)
     }
+
+    /// Encrypts and embeds private key into async stream
+    pub async fn self_encrypt_async_stream<'a>(
+        stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
+    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
+        let cipher = Cipher::new();
+        let key_stream = stream::iter(Ok::<_, Error>(Ok(cipher.private_key())));
+
+        let cipher_stream = cipher.encrypt_async_stream(stream).await?;
+
+        let stream = key_stream.chain(cipher_stream);
+        Ok(stream)
+    }
+
+    /// Decrypts with embedded private key into async stream
+    pub async fn self_decrypt_async_stream<'a>(
+        mut stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
+    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
+        let mut key = [0u8; 34];
+        {
+            let mut reader = stream.by_ref().into_async_read();
+            reader.read_exact(&mut key).await?;
+        }
+
+        let cipher = Cipher::from(key);
+        cipher.decrypt_async_stream(stream).await
+    }
+
+    /// Encrypts data from async stream into another async stream
+    pub async fn encrypt_async_stream<'a>(
+        &self,
+        stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
+    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
+        let mut reader = stream.into_async_read();
+
+        let nonce = crate::crypto::generate(7);
+
+        let key = zeroize::Zeroizing::new(match self.private_key.len() {
+            32 => self.private_key.clone(),
+            _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
+        });
+
+        let stream = async_stream::stream! {
+            let mut buffer = [0u8; AES256_GCM_ENCRYPTION_BUF_SIZE];
+            let cipher = Aes256Gcm::new(key.as_slice().into());
+            let mut stream = EncryptorBE32::from_aead(cipher, nonce.as_slice().into());
+
+            yield Ok(nonce);
+
+            loop {
+                match reader.read(&mut buffer).await {
+                    Ok(AES256_GCM_ENCRYPTION_BUF_SIZE) => match stream.encrypt_next(buffer.as_slice()).map_err(|_| Error::EncryptionStreamError) {
+                        Ok(data) => yield Ok(data),
+                        Err(e) => {
+                            yield Err(e);
+                            break;
+                        }
+                    }
+                    Ok(read_count) => {
+                        yield stream.encrypt_last(&buffer[..read_count]).map_err(|_| Error::EncryptionStreamError);
+                        break;
+                    }
+                    Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                    Err(e) => {
+                        yield Err(Error::from(e));
+                        break;
+                    },
+                }
+            }
+        };
+
+        Ok(stream)
+    }
+
+    /// Decrypt data from async stream into another async stream
+    pub async fn decrypt_async_stream<'a>(
+        &self,
+        stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
+    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
+        let mut reader = stream.into_async_read();
+
+        let mut nonce = [0u8; 7];
+
+        reader.read_exact(&mut nonce).await?;
+
+        let key = zeroize::Zeroizing::new(match self.private_key.len() {
+            32 => self.private_key.clone(),
+            _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
+        });
+
+        let stream = async_stream::stream! {
+            let mut buffer = [0u8; AES256_GCM_DECRYPTION_BUF_SIZE];
+            let cipher = Aes256Gcm::new(key.as_slice().into());
+            let mut stream = DecryptorBE32::from_aead(cipher, nonce.as_slice().into());
+
+            loop {
+                match reader.read(&mut buffer).await {
+                    Ok(AES256_GCM_DECRYPTION_BUF_SIZE) => {
+                        match stream.decrypt_next(buffer.as_slice()).map_err(|_| Error::DecryptionStreamError) {
+                            Ok(data) => yield Ok(data),
+                            Err(e) => {
+                                yield Err(e);
+                                break;
+                            }
+                        };
+                    }
+                    Ok(read_count) if read_count == 0 => break,
+                    Ok(read_count) => {
+                        match stream.decrypt_last(&buffer[..read_count]).map_err(|_| Error::DecryptionStreamError) {
+                            Ok(data) => {
+                                yield Ok(data);
+                                break;
+                            },
+                            Err(e) => {
+                                yield Err(e);
+                                break;
+                            }
+                        };
+                    }
+                    Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                    Err(e) => {
+                        yield Err::<_, Error>(Error::from(e));
+                        break;
+                    },
+                };
+            }
+        };
+
+        Ok(stream)
+    }
+
+    /// Encrypts data from async reader into async stream
+    pub async fn encrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
+        &self,
+        mut reader: R,
+    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
+        let nonce = crate::crypto::generate(7);
+
+        let key = zeroize::Zeroizing::new(match self.private_key.len() {
+            32 => self.private_key.clone(),
+            _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
+        });
+        let stream = async_stream::stream! {
+            let mut buffer = [0u8; AES256_GCM_ENCRYPTION_BUF_SIZE];
+            let cipher = Aes256Gcm::new(key.as_slice().into());
+            let mut stream = EncryptorBE32::from_aead(cipher, nonce.as_slice().into());
+
+            yield Ok(nonce);
+
+            loop {
+                match reader.read(&mut buffer).await {
+                    Ok(AES256_GCM_ENCRYPTION_BUF_SIZE) => match stream.encrypt_next(buffer.as_slice()).map_err(|_| Error::EncryptionStreamError) {
+                        Ok(data) => yield Ok(data),
+                        Err(e) => {
+                            yield Err(e);
+                            break;
+                        }
+                    }
+                    Ok(read_count) => {
+                        yield stream.encrypt_last(&buffer[..read_count]).map_err(|_| Error::EncryptionStreamError);
+                        break;
+                    }
+                    Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                    Err(e) => {
+                        yield Err(Error::from(e));
+                        break;
+                    },
+                }
+            }
+        };
+
+        Ok(stream.boxed())
+    }
+
+    /// Decrypts data from async read into async stream
+    pub async fn decrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
+        &self,
+        mut reader: R,
+    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
+        let mut nonce = [0u8; 7];
+
+        reader.read_exact(&mut nonce).await?;
+
+        let key = zeroize::Zeroizing::new(match self.private_key.len() {
+            32 => self.private_key.clone(),
+            _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
+        });
+
+        let stream = async_stream::stream! {
+            let mut buffer = [0u8; AES256_GCM_DECRYPTION_BUF_SIZE];
+            let cipher = Aes256Gcm::new(key.as_slice().into());
+            let mut stream = DecryptorBE32::from_aead(cipher, nonce.as_slice().into());
+
+            loop {
+                match reader.read(&mut buffer).await {
+                    Ok(AES256_GCM_DECRYPTION_BUF_SIZE) => {
+                        match stream.decrypt_next(buffer.as_slice()).map_err(|_| Error::DecryptionStreamError) {
+                            Ok(data) => yield Ok(data),
+                            Err(e) => {
+                                yield Err(e);
+                                break;
+                            }
+                        };
+                    }
+                    Ok(read_count) if read_count == 0 => break,
+                    Ok(read_count) => {
+                        match stream.decrypt_last(&buffer[..read_count]).map_err(|_| Error::DecryptionStreamError) {
+                            Ok(data) => {
+                                yield Ok(data);
+                                break;
+                            },
+                            Err(e) => {
+                                yield Err(e);
+                                break;
+                            }
+                        };
+                    }
+                    Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                    Err(e) => {
+                        yield Err::<_, Error>(Error::from(e));
+                        break;
+                    },
+                };
+            }
+        };
+
+        Ok(stream)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Cipher {
+    /// Encrypts and embeds private key into writer stream
     pub fn self_encrypt_stream(
         cipher_type: CipherType,
         reader: &mut impl Read,
@@ -166,18 +388,20 @@ impl Cipher {
         Ok(())
     }
 
+    /// Decrypts with embedded private key into writer stream
     pub fn self_decrypt_stream(
         cipher_type: CipherType,
         reader: &mut impl Read,
         writer: &mut impl Write,
     ) -> Result<()> {
-        let mut key = vec![0u8; 34];
+        let mut key = [0u8; 34];
         reader.read_exact(&mut key)?;
         let cipher = Cipher::from(key);
         cipher.decrypt_stream(cipher_type, reader, writer)?;
         Ok(())
     }
 
+    /// Encrypts data from std reader into std writer
     pub fn encrypt_stream(
         &self,
         cipher_type: CipherType,
@@ -193,7 +417,7 @@ impl Cipher {
             _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
         });
 
-        let mut buffer = [0u8; 512];
+        let mut buffer = [0u8; AES256_GCM_ENCRYPTION_BUF_SIZE];
         match cipher_type {
             CipherType::Aes256Gcm => {
                 let cipher = Aes256Gcm::new(key.as_slice().into());
@@ -203,7 +427,7 @@ impl Cipher {
 
                 loop {
                     match reader.read(&mut buffer) {
-                        Ok(512) => {
+                        Ok(AES256_GCM_ENCRYPTION_BUF_SIZE) => {
                             let ciphertext = stream
                                 .encrypt_next(buffer.as_slice())
                                 .map_err(|_| Error::EncryptionStreamError)?;
@@ -226,6 +450,7 @@ impl Cipher {
         Ok(())
     }
 
+    /// Decrypts data from std reader into std writer
     pub fn decrypt_stream(
         &self,
         cipher_type: CipherType,
@@ -233,7 +458,7 @@ impl Cipher {
         writer: &mut impl Write,
     ) -> Result<()> {
         let mut nonce = match cipher_type {
-            CipherType::Aes256Gcm => vec![0u8; 7],
+            CipherType::Aes256Gcm => [0u8; 7],
         };
 
         reader.read_exact(&mut nonce)?;
@@ -243,7 +468,7 @@ impl Cipher {
             _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
         });
 
-        let mut buffer = [0u8; 528];
+        let mut buffer = [0u8; AES256_GCM_DECRYPTION_BUF_SIZE];
 
         match cipher_type {
             CipherType::Aes256Gcm => {
@@ -252,7 +477,7 @@ impl Cipher {
 
                 loop {
                     match reader.read(&mut buffer) {
-                        Ok(528) => {
+                        Ok(AES256_GCM_DECRYPTION_BUF_SIZE) => {
                             let plaintext = stream
                                 .decrypt_next(buffer.as_slice())
                                 .map_err(|_| Error::DecryptionStreamError)?;
@@ -492,5 +717,103 @@ mod test {
             String::from_utf8_lossy(base)
         );
         Ok(())
+    }
+
+    #[test]
+    fn cipher_aes256gcm_async_stream_encrypt_decrypt() -> anyhow::Result<()> {
+        futures::executor::block_on(async move {
+            let cipher = Cipher::from(b"this is my key");
+            let message = b"this is my message";
+            let base = stream::iter(Ok::<_, std::io::Error>(Ok(message.to_vec())));
+
+            let cipher_stream = cipher
+                .encrypt_async_stream(base)
+                .await?
+                .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)))
+                .boxed();
+
+            let plaintext_stream = cipher.decrypt_async_stream(cipher_stream).await?;
+
+            let plaintext_message = plaintext_stream
+                .try_collect::<Vec<_>>()
+                .await?
+                .iter()
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>();
+
+            assert_eq!(
+                String::from_utf8_lossy(&plaintext_message),
+                String::from_utf8_lossy(message)
+            );
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn cipher_aes256gcm_async_read_to_stream_encrypt_decrypt() -> anyhow::Result<()> {
+        use futures::io::Cursor;
+
+        futures::executor::block_on(async move {
+            let cipher = Cipher::from(b"this is my key");
+            let mut message = Cursor::new("this is my message");
+
+            let cipher_stream = cipher
+                .encrypt_async_read_to_stream(&mut message)
+                .await?
+                .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)));
+
+            let mut cipher_reader = cipher_stream.into_async_read();
+
+            let plaintext_stream = cipher
+                .decrypt_async_read_to_stream(&mut cipher_reader)
+                .await?;
+
+            let plaintext_message = plaintext_stream
+                .try_collect::<Vec<_>>()
+                .await?
+                .iter()
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>();
+
+            drop(cipher_reader);
+
+            assert_eq!(
+                String::from_utf8_lossy(&plaintext_message),
+                message.into_inner()
+            );
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn cipher_aes256gcm_async_stream_self_encrypt_decrypt() -> anyhow::Result<()> {
+        futures::executor::block_on(async move {
+            let message = b"this is my message";
+            let base = stream::iter(Ok::<_, std::io::Error>(Ok(message.to_vec())));
+
+            let cipher_stream = Cipher::self_encrypt_async_stream(base)
+                .await?
+                .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)))
+                .boxed();
+
+            let plaintext_stream = Cipher::self_decrypt_async_stream(cipher_stream).await?;
+
+            let plaintext_message = plaintext_stream
+                .try_collect::<Vec<_>>()
+                .await?
+                .iter()
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>();
+
+            assert_eq!(
+                String::from_utf8_lossy(&plaintext_message),
+                String::from_utf8_lossy(message)
+            );
+
+            Ok(())
+        })
     }
 }
