@@ -510,7 +510,7 @@ impl Cipher {
             }
         };
 
-        Ok(stream.boxed())
+        Ok(stream)
     }
 }
 
