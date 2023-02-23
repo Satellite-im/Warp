@@ -6,7 +6,7 @@ use std::io::{ErrorKind, Read, Write};
 use crate::crypto::hash::sha256_hash;
 use futures::{
     stream::{self, BoxStream},
-    AsyncReadExt, Stream, StreamExt, TryStreamExt,
+    AsyncRead, AsyncReadExt, Stream, StreamExt, TryStreamExt,
 };
 use zeroize::Zeroize;
 
@@ -162,6 +162,7 @@ impl Cipher {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Cipher {
+    /// Encrypts and embeds private key into writer stream
     pub fn self_encrypt_stream(
         cipher_type: CipherType,
         reader: &mut impl Read,
@@ -173,6 +174,7 @@ impl Cipher {
         Ok(())
     }
 
+    /// Decrypts with embedded private key into writer stream
     pub fn self_decrypt_stream(
         cipher_type: CipherType,
         reader: &mut impl Read,
@@ -185,6 +187,7 @@ impl Cipher {
         Ok(())
     }
 
+    /// Encrypts and embeds private key into async stream
     pub async fn self_encrypt_async_stream<'a>(
         stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
     ) -> Result<BoxStream<'a, Result<Vec<u8>>>> {
@@ -197,6 +200,7 @@ impl Cipher {
         Ok(stream.boxed())
     }
 
+    /// Decrypts with embedded private key into async stream
     pub async fn self_decrypt_async_stream<'a>(
         mut stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
     ) -> Result<BoxStream<'a, Result<Vec<u8>>>> {
@@ -210,6 +214,7 @@ impl Cipher {
         cipher.decrypt_async_stream(stream).await
     }
 
+    /// Encrypts data from std reader into std writer
     pub fn encrypt_stream(
         &self,
         cipher_type: CipherType,
@@ -258,6 +263,7 @@ impl Cipher {
         Ok(())
     }
 
+    /// Decrypts data from std reader into std writer
     pub fn decrypt_stream(
         &self,
         cipher_type: CipherType,
@@ -309,6 +315,7 @@ impl Cipher {
         Ok(())
     }
 
+    /// Encrypts data from async stream into another async stream
     pub async fn encrypt_async_stream<'a>(
         &self,
         stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
@@ -354,6 +361,7 @@ impl Cipher {
         Ok(stream.boxed())
     }
 
+    /// Decrypt data from async stream into another async stream
     pub async fn decrypt_async_stream<'a>(
         &self,
         stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
@@ -410,6 +418,7 @@ impl Cipher {
         Ok(stream.boxed())
     }
 
+    /// Encrypts data from async reader into async stream
     pub async fn encrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
         &self,
         mut reader: R,
@@ -452,6 +461,7 @@ impl Cipher {
         Ok(stream.boxed())
     }
 
+    /// Decrypts data from async read into async stream
     pub async fn decrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
         &self,
         mut reader: R,
