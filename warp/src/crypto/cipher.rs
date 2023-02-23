@@ -409,6 +409,102 @@ impl Cipher {
 
         Ok(stream.boxed())
     }
+
+    pub async fn encrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
+        &self,
+        mut reader: R,
+    ) -> Result<BoxStream<'a, Result<Vec<u8>>>> {
+        let nonce = crate::crypto::generate(7);
+
+        let key = zeroize::Zeroizing::new(match self.private_key.len() {
+            32 => self.private_key.clone(),
+            _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
+        });
+        let stream = async_stream::stream! {
+            let mut buffer = [0u8; 512];
+            let cipher = Aes256Gcm::new(key.as_slice().into());
+            let mut stream = EncryptorBE32::from_aead(cipher, nonce.as_slice().into());
+
+            yield Ok(nonce);
+
+            loop {
+                match reader.read(&mut buffer).await {
+                    Ok(512) => match stream.encrypt_next(buffer.as_slice()).map_err(|_| Error::EncryptionStreamError) {
+                        Ok(data) => yield Ok(data),
+                        Err(e) => {
+                            yield Err(e);
+                            break;
+                        }
+                    }
+                    Ok(read_count) => {
+                        yield stream.encrypt_last(&buffer[..read_count]).map_err(|_| Error::EncryptionStreamError);
+                        break;
+                    }
+                    Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                    Err(e) => {
+                        yield Err(Error::from(e));
+                        break;
+                    },
+                }
+            }
+        };
+
+        Ok(stream.boxed())
+    }
+
+    pub async fn decrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
+        &self,
+        mut reader: R,
+    ) -> Result<BoxStream<'a, Result<Vec<u8>>>> {
+        let mut nonce = vec![0u8; 7];
+
+        reader.read_exact(&mut nonce).await?;
+
+        let key = zeroize::Zeroizing::new(match self.private_key.len() {
+            32 => self.private_key.clone(),
+            _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
+        });
+
+        let stream = async_stream::stream! {
+            let mut buffer = vec![0u8; 528];
+            let cipher = Aes256Gcm::new(key.as_slice().into());
+            let mut stream = DecryptorBE32::from_aead(cipher, nonce.as_slice().into());
+
+            loop {
+                match reader.read(&mut buffer).await {
+                    Ok(528) => {
+                        match stream.decrypt_next(buffer.as_slice()).map_err(|_| Error::DecryptionStreamError) {
+                            Ok(data) => yield Ok(data),
+                            Err(e) => {
+                                yield Err(e);
+                                break;
+                            }
+                        };
+                    }
+                    Ok(read_count) if read_count == 0 => break,
+                    Ok(read_count) => {
+                        match stream.decrypt_last(&buffer[..read_count]).map_err(|_| Error::DecryptionStreamError) {
+                            Ok(data) => {
+                                yield Ok(data);
+                                break;
+                            },
+                            Err(e) => {
+                                yield Err(e);
+                                break;
+                            }
+                        };
+                    }
+                    Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                    Err(e) => {
+                        yield Err::<_, Error>(Error::from(e));
+                        break;
+                    },
+                };
+            }
+        };
+
+        Ok(stream.boxed())
+    }
 }
 
 fn extract_data_slice(data: &[u8], size: usize) -> (&[u8], &[u8]) {
