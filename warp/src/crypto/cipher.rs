@@ -4,10 +4,7 @@
 use std::io::{ErrorKind, Read, Write};
 
 use crate::crypto::hash::sha256_hash;
-use futures::{
-    stream::{self, BoxStream},
-    AsyncRead, AsyncReadExt, Stream, StreamExt, TryStreamExt,
-};
+use futures::{stream, AsyncRead, AsyncReadExt, Stream, StreamExt, TryStreamExt};
 use zeroize::Zeroize;
 
 use crate::error::Error;
@@ -190,20 +187,20 @@ impl Cipher {
     /// Encrypts and embeds private key into async stream
     pub async fn self_encrypt_async_stream<'a>(
         stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
-    ) -> Result<BoxStream<'a, Result<Vec<u8>>>> {
+    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
         let cipher = Cipher::new();
         let key_stream = stream::iter(Ok::<_, Error>(Ok(cipher.private_key())));
 
         let cipher_stream = cipher.encrypt_async_stream(stream).await?;
 
         let stream = key_stream.chain(cipher_stream);
-        Ok(stream.boxed())
+        Ok(stream)
     }
 
     /// Decrypts with embedded private key into async stream
     pub async fn self_decrypt_async_stream<'a>(
         mut stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
-    ) -> Result<BoxStream<'a, Result<Vec<u8>>>> {
+    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
         let mut key = vec![0u8; 34];
         {
             let mut reader = stream.by_ref().into_async_read();
@@ -319,7 +316,7 @@ impl Cipher {
     pub async fn encrypt_async_stream<'a>(
         &self,
         stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
-    ) -> Result<BoxStream<'a, Result<Vec<u8>>>> {
+    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
         let mut reader = stream.into_async_read();
 
         let nonce = crate::crypto::generate(7);
@@ -358,14 +355,14 @@ impl Cipher {
             }
         };
 
-        Ok(stream.boxed())
+        Ok(stream)
     }
 
     /// Decrypt data from async stream into another async stream
     pub async fn decrypt_async_stream<'a>(
         &self,
         stream: impl Stream<Item = std::result::Result<Vec<u8>, std::io::Error>> + Unpin + Send + 'a,
-    ) -> Result<BoxStream<'a, Result<Vec<u8>>>> {
+    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
         let mut reader = stream.into_async_read();
 
         let mut nonce = vec![0u8; 7];
@@ -415,14 +412,14 @@ impl Cipher {
             }
         };
 
-        Ok(stream.boxed())
+        Ok(stream)
     }
 
     /// Encrypts data from async reader into async stream
     pub async fn encrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
         &self,
         mut reader: R,
-    ) -> Result<BoxStream<'a, Result<Vec<u8>>>> {
+    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
         let nonce = crate::crypto::generate(7);
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
@@ -465,7 +462,7 @@ impl Cipher {
     pub async fn decrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
         &self,
         mut reader: R,
-    ) -> Result<BoxStream<'a, Result<Vec<u8>>>> {
+    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
         let mut nonce = vec![0u8; 7];
 
         reader.read_exact(&mut nonce).await?;
@@ -743,7 +740,8 @@ mod test {
             let cipher_stream = cipher
                 .encrypt_async_stream(base)
                 .await?
-                .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)));
+                .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)))
+                .boxed();
 
             let plaintext_stream = cipher.decrypt_async_stream(cipher_stream).await?;
 
@@ -808,7 +806,8 @@ mod test {
 
             let cipher_stream = Cipher::self_encrypt_async_stream(base)
                 .await?
-                .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)));
+                .map(|result| result.map_err(|_| std::io::Error::from(std::io::ErrorKind::Other)))
+                .boxed();
 
             let plaintext_stream = Cipher::self_decrypt_async_stream(cipher_stream).await?;
 
