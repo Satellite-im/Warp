@@ -1,3 +1,4 @@
+pub mod discovery;
 pub mod document;
 pub mod friends;
 pub mod identity;
@@ -23,6 +24,36 @@ use crate::config::Discovery;
 use self::document::DocumentType;
 
 pub const IDENTITY_BROADCAST: &str = "identity/broadcast";
+
+pub trait VecExt<T: Eq> {
+    fn insert_item(&mut self, item: &T) -> bool;
+    fn remove_item(&mut self, item: &T) -> bool;
+}
+
+impl<T> VecExt<T> for Vec<T>
+where
+    T: Eq + Clone,
+{
+    fn insert_item(&mut self, item: &T) -> bool {
+        if self.contains(item) {
+            return false;
+        }
+
+        self.push(item.clone());
+        true
+    }
+
+    fn remove_item(&mut self, item: &T) -> bool {
+        if !self.contains(item) {
+            return false;
+        }
+        if let Some(index) = self.iter().position(|el| item.eq(el)) {
+            self.remove(index);
+            return true;
+        }
+        false
+    }
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IdentityPayload {
@@ -100,6 +131,12 @@ pub enum PeerType {
     DID(DID),
 }
 
+impl From<&DID> for PeerType {
+    fn from(did: &DID) -> Self {
+        PeerType::DID(did.clone())
+    }
+}
+
 impl From<DID> for PeerType {
     fn from(did: DID) -> Self {
         PeerType::DID(did)
@@ -112,9 +149,16 @@ impl From<PeerId> for PeerType {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+impl From<&PeerId> for PeerType {
+    fn from(peer_id: &PeerId) -> Self {
+        PeerType::PeerId(*peer_id)
+    }
+}
+
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PeerConnectionType {
     Connected,
+    #[default]
     NotConnected,
 }
 

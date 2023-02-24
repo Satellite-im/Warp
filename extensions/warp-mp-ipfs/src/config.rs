@@ -176,6 +176,7 @@ pub struct IpfsSetting {
     pub swarm: Swarm,
     pub bootstrap: bool,
     pub portmapping: bool,
+    pub agent_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
