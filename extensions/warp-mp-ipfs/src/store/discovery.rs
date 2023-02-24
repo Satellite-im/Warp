@@ -131,7 +131,7 @@ impl Discovery {
     }
 
     pub async fn get(&self, did: &DID) -> Option<DiscoveryEntry> {
-        if !self.contains(did.clone()).await {
+        if !self.contains(did).await {
             return None;
         }
 
