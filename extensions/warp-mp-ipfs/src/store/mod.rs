@@ -1,3 +1,4 @@
+pub mod discovery;
 pub mod document;
 pub mod friends;
 pub mod identity;
@@ -130,6 +131,12 @@ pub enum PeerType {
     DID(DID),
 }
 
+impl From<&DID> for PeerType {
+    fn from(did: &DID) -> Self {
+        PeerType::DID(did.clone())
+    }
+}
+
 impl From<DID> for PeerType {
     fn from(did: DID) -> Self {
         PeerType::DID(did)
@@ -142,9 +149,16 @@ impl From<PeerId> for PeerType {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+impl From<&PeerId> for PeerType {
+    fn from(peer_id: &PeerId) -> Self {
+        PeerType::PeerId(*peer_id)
+    }
+}
+
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PeerConnectionType {
     Connected,
+    #[default]
     NotConnected,
 }
 

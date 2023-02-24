@@ -38,6 +38,7 @@ use warp::multipass::{
 };
 
 use crate::config::Bootstrap;
+use crate::store::discovery::Discovery;
 use crate::store::document::DocumentType;
 
 pub type Temporary = TestTypes;
@@ -222,15 +223,24 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
             keep_alive: true,
-            identify_configuration: Some(IdentifyConfiguration {
-                cache: 100,
-                push_update: true,
-                ..Default::default()
+            identify_configuration: Some({
+                let mut idconfig = IdentifyConfiguration {
+                    cache: 100,
+                    push_update: true,
+                    protocol_version: "/satellite/warp/0.1".into(),
+                    ..Default::default()
+                };
+                if let Some(agent) = config.ipfs_setting.agent_version.as_ref() {
+                    idconfig.agent_version = agent.clone();
+                }
+                idconfig
             }),
             kad_configuration: Some({
                 let mut conf = ipfs::libp2p::kad::KademliaConfig::default();
                 conf.disjoint_query_paths(true);
                 conf.set_query_timeout(std::time::Duration::from_secs(60));
+                conf.set_publication_interval(Some(Duration::from_secs(30 * 60)));
+                conf.set_provider_record_ttl(Some(Duration::from_secs(60 * 60)));
                 conf
             }),
             swarm_configuration: Some(swarm_configuration),
@@ -380,6 +390,8 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 .collect()
         });
 
+        let discovery = Discovery::new(config.store_setting.discovery);
+
         let identity_store = IdentityStore::new(
             ipfs.clone(),
             config.path.clone(),
@@ -387,7 +399,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             config.store_setting.broadcast_interval,
             self.tx.clone(),
             (
-                config.store_setting.discovery,
+                discovery,
                 relays,
                 config.store_setting.override_ipld,
                 config.store_setting.share_platform,
