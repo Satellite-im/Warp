@@ -226,7 +226,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             identify_configuration: Some(IdentifyConfiguration {
                 cache: 100,
                 push_update: true,
-                protocol_version: "satellite/warp/0.1".into(),
+                protocol_version: "/satellite/warp/0.1".into(),
                 ..Default::default()
             }),
             kad_configuration: Some({
