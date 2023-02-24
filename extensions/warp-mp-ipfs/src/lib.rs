@@ -223,11 +223,17 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
             keep_alive: true,
-            identify_configuration: Some(IdentifyConfiguration {
-                cache: 100,
-                push_update: true,
-                protocol_version: "/satellite/warp/0.1".into(),
-                ..Default::default()
+            identify_configuration: Some({
+                let mut idconfig = IdentifyConfiguration {
+                    cache: 100,
+                    push_update: true,
+                    protocol_version: "/satellite/warp/0.1".into(),
+                    ..Default::default()
+                };
+                if let Some(agent) = config.ipfs_setting.agent_version.as_ref() {
+                    idconfig.agent_version = agent.clone();
+                }
+                idconfig
             }),
             kad_configuration: Some({
                 let mut conf = ipfs::libp2p::kad::KademliaConfig::default();
