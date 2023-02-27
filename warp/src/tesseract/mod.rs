@@ -9,10 +9,7 @@ use zeroize::Zeroize;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
-use crate::{
-    crypto::cipher::{Cipher, CipherType},
-    error::Error,
-};
+use crate::{crypto::cipher::Cipher, error::Error};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::prelude::*;
@@ -416,8 +413,8 @@ impl Tesseract {
         if !self.is_unlock() {
             return Err(Error::TesseractLocked);
         }
-        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &self.enc_pass.read())?;
-        let data = Cipher::direct_encrypt(CipherType::Aes256Gcm, value.as_bytes(), &pkey)?;
+        let pkey = Cipher::self_decrypt(&self.enc_pass.read())?;
+        let data = Cipher::direct_encrypt(value.as_bytes(), &pkey)?;
         self.internal.write().insert(key.to_string(), data);
         self.save()
     }
@@ -460,14 +457,14 @@ impl Tesseract {
             return Err(Error::ObjectNotFound);
         }
 
-        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &self.enc_pass.read())?;
+        let pkey = Cipher::self_decrypt(&self.enc_pass.read())?;
         let data = self
             .internal
             .read()
             .get(key)
             .cloned()
             .ok_or(Error::ObjectNotFound)?;
-        let slice = Cipher::direct_decrypt(CipherType::Aes256Gcm, &data, &pkey)?;
+        let slice = Cipher::direct_decrypt(&data, &pkey)?;
         let plain_text = String::from_utf8_lossy(&slice[..]).to_string();
         Ok(plain_text)
     }
@@ -490,7 +487,7 @@ impl Tesseract {
             return Err(Error::TesseractLocked);
         }
 
-        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &self.enc_pass.read())?;
+        let pkey = Cipher::self_decrypt(&self.enc_pass.read())?;
 
         if old_passphrase != pkey || old_passphrase == new_passphrase || pkey == new_passphrase {
             return Err(Error::InvalidPassphrase); //TODO: Mismatch?
@@ -501,8 +498,7 @@ impl Tesseract {
         let mut encrypted = HashMap::new();
 
         for (key, val) in exported {
-            let data =
-                Cipher::direct_encrypt(CipherType::Aes256Gcm, val.as_bytes(), new_passphrase)?;
+            let data = Cipher::direct_encrypt(val.as_bytes(), new_passphrase)?;
             encrypted.insert(key, data);
         }
 
@@ -522,14 +518,14 @@ impl Tesseract {
             return Err(Error::ObjectNotFound);
         }
 
-        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &self.enc_pass.read())?;
+        let pkey = Cipher::self_decrypt(&self.enc_pass.read())?;
         let data = self
             .internal
             .read()
             .get(key)
             .cloned()
             .ok_or(Error::ObjectNotFound)?;
-        Cipher::direct_decrypt(CipherType::Aes256Gcm, &data, &pkey)?;
+        Cipher::direct_decrypt(&data, &pkey)?;
         Ok(())
     }
 
@@ -611,7 +607,7 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn unlock(&self, passphrase: &[u8]) -> Result<()> {
-        *self.enc_pass.write() = Cipher::self_encrypt(CipherType::Aes256Gcm, passphrase)?;
+        *self.enc_pass.write() = Cipher::self_encrypt(passphrase)?;
         self.soft_unlock.store(true, Ordering::Relaxed);
         if self.is_key_check_enabled() {
             let keys = self.internal_keys();
