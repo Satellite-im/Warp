@@ -46,13 +46,6 @@ impl<U: AsRef<[u8]>> From<U> for Cipher {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
-#[repr(C)]
-pub enum CipherType {
-    /// AES256-GCM
-    Aes256Gcm,
-}
-
 impl Cipher {
     /// Create an instance of Cipher.
     pub fn new() -> Cipher {
@@ -71,78 +64,65 @@ impl Cipher {
     }
 
     /// Used to generate and encrypt data with a random key
-    pub fn self_encrypt(cipher_type: CipherType, data: &[u8]) -> Result<Vec<u8>> {
+    pub fn self_encrypt(data: &[u8]) -> Result<Vec<u8>> {
         let cipher = Cipher::new();
-        let mut data = cipher.encrypt(cipher_type, data)?;
+        let mut data = cipher.encrypt(data)?;
         data.extend(cipher.private_key());
         Ok(data)
     }
 
     /// Used to decrypt data with a key that was attached to the data
-    pub fn self_decrypt(cipher_type: CipherType, data: &[u8]) -> Result<Vec<u8>> {
+    pub fn self_decrypt(data: &[u8]) -> Result<Vec<u8>> {
         let (key, data) = extract_data_slice(data, 34);
         let cipher = Cipher::from_bytes(key);
-        let data = cipher.decrypt(cipher_type, data)?;
+        let data = cipher.decrypt(data)?;
         Ok(data)
     }
 
     /// Used to encrypt data directly with key
-    pub fn direct_encrypt(cipher_type: CipherType, data: &[u8], key: &[u8]) -> Result<Vec<u8>> {
+    pub fn direct_encrypt(data: &[u8], key: &[u8]) -> Result<Vec<u8>> {
         let cipher = Cipher::from(key);
-        cipher.encrypt(cipher_type, data)
+        cipher.encrypt(data)
     }
 
     /// Used to decrypt data directly with key
-    pub fn direct_decrypt(cipher_type: CipherType, data: &[u8], key: &[u8]) -> Result<Vec<u8>> {
+    pub fn direct_decrypt(data: &[u8], key: &[u8]) -> Result<Vec<u8>> {
         let cipher = Cipher::from(key);
-        cipher.decrypt(cipher_type, data)
+        cipher.decrypt(data)
     }
 
     /// Used to encrypt data
-    pub fn encrypt(&self, cipher_type: CipherType, data: &[u8]) -> Result<Vec<u8>> {
-        let nonce = match cipher_type {
-            CipherType::Aes256Gcm => crate::crypto::generate(12),
-        };
+    pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
+        let nonce = crate::crypto::generate(12);
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
             _ => sha256_hash(&self.private_key, Some(nonce.clone())),
         });
 
-        let mut cipher_data = match cipher_type {
-            CipherType::Aes256Gcm => {
-                let cipher = Aes256Gcm::new(key.as_slice().into());
-                cipher
-                    .encrypt(nonce.as_slice().into(), data)
-                    .map_err(|_| Error::EncryptionError)?
-            }
-        };
+        let cipher = Aes256Gcm::new(key.as_slice().into());
+        let mut cipher_data = cipher
+            .encrypt(nonce.as_slice().into(), data)
+            .map_err(|_| Error::EncryptionError)?;
+
         cipher_data.extend(nonce);
 
         Ok(cipher_data)
     }
 
     /// Used to decrypt data
-    pub fn decrypt(&self, cipher_type: CipherType, data: &[u8]) -> Result<Vec<u8>> {
-        let (nonce, payload) = match cipher_type {
-            CipherType::Aes256Gcm => extract_data_slice(data, 12),
-        };
+    pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
+        let (nonce, payload) = extract_data_slice(data, 12);
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
             _ => sha256_hash(&self.private_key, Some(nonce.to_vec())),
         });
 
-        let decrypted_data = match cipher_type {
-            CipherType::Aes256Gcm => {
-                let cipher = Aes256Gcm::new(key.as_slice().into());
-                cipher
-                    .decrypt(nonce.into(), payload)
-                    .map_err(|_| Error::DecryptionError)?
-            }
-        };
-
-        Ok(decrypted_data)
+        let cipher = Aes256Gcm::new(key.as_slice().into());
+        cipher
+            .decrypt(nonce.into(), payload)
+            .map_err(|_| Error::DecryptionError)
     }
 
     /// Encrypts and embeds private key into async stream
@@ -377,40 +357,25 @@ impl Cipher {
 #[cfg(not(target_arch = "wasm32"))]
 impl Cipher {
     /// Encrypts and embeds private key into writer stream
-    pub fn self_encrypt_stream(
-        cipher_type: CipherType,
-        reader: &mut impl Read,
-        writer: &mut impl Write,
-    ) -> Result<()> {
+    pub fn self_encrypt_stream(reader: &mut impl Read, writer: &mut impl Write) -> Result<()> {
         let cipher = Cipher::new();
         writer.write_all(&cipher.private_key())?;
-        cipher.encrypt_stream(cipher_type, reader, writer)?;
+        cipher.encrypt_stream(reader, writer)?;
         Ok(())
     }
 
     /// Decrypts with embedded private key into writer stream
-    pub fn self_decrypt_stream(
-        cipher_type: CipherType,
-        reader: &mut impl Read,
-        writer: &mut impl Write,
-    ) -> Result<()> {
+    pub fn self_decrypt_stream(reader: &mut impl Read, writer: &mut impl Write) -> Result<()> {
         let mut key = [0u8; 34];
         reader.read_exact(&mut key)?;
         let cipher = Cipher::from(key);
-        cipher.decrypt_stream(cipher_type, reader, writer)?;
+        cipher.decrypt_stream(reader, writer)?;
         Ok(())
     }
 
     /// Encrypts data from std reader into std writer
-    pub fn encrypt_stream(
-        &self,
-        cipher_type: CipherType,
-        reader: &mut impl Read,
-        writer: &mut impl Write,
-    ) -> Result<()> {
-        let nonce = match cipher_type {
-            CipherType::Aes256Gcm => crate::crypto::generate(7),
-        };
+    pub fn encrypt_stream(&self, reader: &mut impl Read, writer: &mut impl Write) -> Result<()> {
+        let nonce = crate::crypto::generate(7);
 
         let key = zeroize::Zeroizing::new(match self.private_key.len() {
             32 => self.private_key.clone(),
@@ -418,48 +383,39 @@ impl Cipher {
         });
 
         let mut buffer = [0u8; AES256_GCM_ENCRYPTION_BUF_SIZE];
-        match cipher_type {
-            CipherType::Aes256Gcm => {
-                let cipher = Aes256Gcm::new(key.as_slice().into());
 
-                let mut stream = EncryptorBE32::from_aead(cipher, nonce.as_slice().into());
-                writer.write_all(&nonce)?;
+        let cipher = Aes256Gcm::new(key.as_slice().into());
 
-                loop {
-                    match reader.read(&mut buffer) {
-                        Ok(AES256_GCM_ENCRYPTION_BUF_SIZE) => {
-                            let ciphertext = stream
-                                .encrypt_next(buffer.as_slice())
-                                .map_err(|_| Error::EncryptionStreamError)?;
-                            writer.write_all(&ciphertext)?;
-                        }
-                        Ok(read_count) => {
-                            let ciphertext = stream
-                                .encrypt_last(&buffer[..read_count])
-                                .map_err(|_| Error::EncryptionStreamError)?;
-                            writer.write_all(&ciphertext)?;
-                            break;
-                        }
-                        Err(e) if e.kind() == ErrorKind::Interrupted => continue,
-                        Err(e) => return Err(Error::from(e)),
-                    }
+        let mut stream = EncryptorBE32::from_aead(cipher, nonce.as_slice().into());
+        writer.write_all(&nonce)?;
+
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(AES256_GCM_ENCRYPTION_BUF_SIZE) => {
+                    let ciphertext = stream
+                        .encrypt_next(buffer.as_slice())
+                        .map_err(|_| Error::EncryptionStreamError)?;
+                    writer.write_all(&ciphertext)?;
                 }
-                writer.flush()?;
+                Ok(read_count) => {
+                    let ciphertext = stream
+                        .encrypt_last(&buffer[..read_count])
+                        .map_err(|_| Error::EncryptionStreamError)?;
+                    writer.write_all(&ciphertext)?;
+                    break;
+                }
+                Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(e) => return Err(Error::from(e)),
             }
-        };
+        }
+        writer.flush()?;
+
         Ok(())
     }
 
     /// Decrypts data from std reader into std writer
-    pub fn decrypt_stream(
-        &self,
-        cipher_type: CipherType,
-        reader: &mut impl Read,
-        writer: &mut impl Write,
-    ) -> Result<()> {
-        let mut nonce = match cipher_type {
-            CipherType::Aes256Gcm => [0u8; 7],
-        };
+    pub fn decrypt_stream(&self, reader: &mut impl Read, writer: &mut impl Write) -> Result<()> {
+        let mut nonce = [0u8; 7];
 
         reader.read_exact(&mut nonce)?;
 
@@ -470,34 +426,31 @@ impl Cipher {
 
         let mut buffer = [0u8; AES256_GCM_DECRYPTION_BUF_SIZE];
 
-        match cipher_type {
-            CipherType::Aes256Gcm => {
-                let cipher = Aes256Gcm::new(key.as_slice().into());
-                let mut stream = DecryptorBE32::from_aead(cipher, nonce.as_slice().into());
+        let cipher = Aes256Gcm::new(key.as_slice().into());
+        let mut stream = DecryptorBE32::from_aead(cipher, nonce.as_slice().into());
 
-                loop {
-                    match reader.read(&mut buffer) {
-                        Ok(AES256_GCM_DECRYPTION_BUF_SIZE) => {
-                            let plaintext = stream
-                                .decrypt_next(buffer.as_slice())
-                                .map_err(|_| Error::DecryptionStreamError)?;
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(AES256_GCM_DECRYPTION_BUF_SIZE) => {
+                    let plaintext = stream
+                        .decrypt_next(buffer.as_slice())
+                        .map_err(|_| Error::DecryptionStreamError)?;
 
-                            writer.write_all(&plaintext)?
-                        }
-                        Ok(read_count) if read_count == 0 => break,
-                        Ok(read_count) => {
-                            let plaintext = stream
-                                .decrypt_last(&buffer[..read_count])
-                                .map_err(|_| Error::DecryptionStreamError)?;
-                            writer.write_all(&plaintext)?;
-                            break;
-                        }
-                        Err(e) if e.kind() == ErrorKind::Interrupted => continue,
-                        Err(e) => return Err(Error::from(e)),
-                    };
+                    writer.write_all(&plaintext)?
                 }
-            }
+                Ok(read_count) if read_count == 0 => break,
+                Ok(read_count) => {
+                    let plaintext = stream
+                        .decrypt_last(&buffer[..read_count])
+                        .map_err(|_| Error::DecryptionStreamError)?;
+                    writer.write_all(&plaintext)?;
+                    break;
+                }
+                Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(e) => return Err(Error::from(e)),
+            };
         }
+
         writer.flush()?;
         Ok(())
     }
@@ -539,7 +492,6 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn cipher_self_encrypt(
-        cipher_type: CipherType,
         data: *const u8,
         data_size: usize,
     ) -> FFIResult<FFIVec<u8>> {
@@ -549,7 +501,7 @@ pub mod ffi {
 
         let data = std::slice::from_raw_parts(data, data_size);
 
-        match Cipher::self_encrypt(cipher_type, data) {
+        match Cipher::self_encrypt(data) {
             Ok(encrypted) => FFIResult::ok(FFIVec::from(encrypted)),
             Err(e) => FFIResult::err(e),
         }
@@ -558,7 +510,6 @@ pub mod ffi {
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn cipher_self_decrypt(
-        cipher_type: CipherType,
         data: *const u8,
         data_size: usize,
     ) -> FFIResult<FFIVec<u8>> {
@@ -568,7 +519,7 @@ pub mod ffi {
 
         let data = std::slice::from_raw_parts(data, data_size);
 
-        match Cipher::self_decrypt(cipher_type, data) {
+        match Cipher::self_decrypt(data) {
             Ok(decrypted) => FFIResult::ok(FFIVec::from(decrypted)),
             Err(e) => FFIResult::err(e),
         }
@@ -578,7 +529,6 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn cipher_encrypt(
         cipher: *const Cipher,
-        cipher_type: CipherType,
         data: *const u8,
         data_size: usize,
     ) -> FFIResult<FFIVec<u8>> {
@@ -594,7 +544,7 @@ pub mod ffi {
 
         let cipher = &*cipher;
 
-        match cipher.encrypt(cipher_type, data) {
+        match cipher.encrypt(data) {
             Ok(encrypted) => FFIResult::ok(FFIVec::from(encrypted)),
             Err(e) => FFIResult::err(e),
         }
@@ -604,7 +554,6 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn cipher_decrypt(
         cipher: *const Cipher,
-        cipher_type: CipherType,
         data: *const u8,
         data_size: usize,
     ) -> FFIResult<FFIVec<u8>> {
@@ -620,7 +569,7 @@ pub mod ffi {
 
         let cipher = &*cipher;
 
-        match cipher.decrypt(cipher_type, data) {
+        match cipher.decrypt(data) {
             Ok(encrypted) => FFIResult::ok(FFIVec::from(encrypted)),
             Err(e) => FFIResult::err(e),
         }
@@ -636,9 +585,9 @@ mod test {
         let cipher = Cipher::from(b"this is my secret cipher key!");
         let message = b"Hello, World!";
 
-        let cipher_data = cipher.encrypt(CipherType::Aes256Gcm, message)?;
+        let cipher_data = cipher.encrypt(message)?;
 
-        let plaintext = cipher.decrypt(CipherType::Aes256Gcm, &cipher_data)?;
+        let plaintext = cipher.decrypt(&cipher_data)?;
 
         assert_ne!(cipher_data, plaintext);
 
@@ -653,9 +602,9 @@ mod test {
     fn cipher_aes256gcm_self_encrypt_decrypt() -> anyhow::Result<()> {
         let message = b"Hello, World!";
 
-        let cipher_data = Cipher::self_encrypt(CipherType::Aes256Gcm, message)?;
+        let cipher_data = Cipher::self_encrypt(message)?;
 
-        let plaintext = Cipher::self_decrypt(CipherType::Aes256Gcm, &cipher_data)?;
+        let plaintext = Cipher::self_decrypt(&cipher_data)?;
 
         assert_ne!(cipher_data, plaintext);
 
@@ -673,13 +622,9 @@ mod test {
 
         let mut plaintext = Vec::<u8>::new();
 
-        Cipher::self_encrypt_stream(CipherType::Aes256Gcm, &mut base.as_slice(), &mut cipher)?;
+        Cipher::self_encrypt_stream(&mut base.as_slice(), &mut cipher)?;
 
-        Cipher::self_decrypt_stream(
-            CipherType::Aes256Gcm,
-            &mut cipher.as_slice(),
-            &mut plaintext,
-        )?;
+        Cipher::self_decrypt_stream(&mut cipher.as_slice(), &mut plaintext)?;
 
         assert_ne!(cipher, plaintext);
 
@@ -698,17 +643,9 @@ mod test {
 
         let mut plaintext = Vec::<u8>::new();
 
-        cipher.encrypt_stream(
-            CipherType::Aes256Gcm,
-            &mut base.as_slice(),
-            &mut cipher_data,
-        )?;
+        cipher.encrypt_stream(&mut base.as_slice(), &mut cipher_data)?;
 
-        cipher.decrypt_stream(
-            CipherType::Aes256Gcm,
-            &mut cipher_data.as_slice(),
-            &mut plaintext,
-        )?;
+        cipher.decrypt_stream(&mut cipher_data.as_slice(), &mut plaintext)?;
 
         assert_ne!(cipher_data, plaintext);
 

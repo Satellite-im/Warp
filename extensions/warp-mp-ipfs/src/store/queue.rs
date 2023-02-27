@@ -131,8 +131,7 @@ impl<T: IpfsTypes> Queue<T> {
                 .map(Zeroizing::new)
                 .map_err(|_| anyhow::anyhow!("Error performing key exchange"))?;
 
-            let data =
-                Cipher::direct_decrypt(warp::crypto::cipher::CipherType::Aes256Gcm, &data, &prik)?;
+            let data = Cipher::direct_decrypt(&data, &prik)?;
 
             let map: HashMap<DID, PayloadEvent> = serde_json::from_slice(&data)?;
 
@@ -166,11 +165,7 @@ impl<T: IpfsTypes> Queue<T> {
                 }
             };
 
-            let data = match Cipher::direct_encrypt(
-                warp::crypto::cipher::CipherType::Aes256Gcm,
-                &bytes,
-                &prik,
-            ) {
+            let data = match Cipher::direct_encrypt(&bytes, &prik) {
                 Ok(d) => d,
                 Err(e) => {
                     error!("Error encrypting queue: {e}");
