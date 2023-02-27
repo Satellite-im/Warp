@@ -41,7 +41,7 @@ impl Keystore {
             .get(&recipient)
             .map(|list| {
                 list.last()
-                    .and_then(|entry| super::encrypt(did, None, entry.key()).ok())
+                    .and_then(|entry| super::decrypt(did, None, entry.key()).ok())
             })
             .and_then(|entry| entry)
             .ok_or(Error::PublicKeyInvalid)
@@ -52,7 +52,7 @@ impl Keystore {
             .get(&recipient)
             .map(|list| {
                 list.iter()
-                    .filter_map(|entry| super::encrypt(did, None, entry.key()).ok())
+                    .filter_map(|entry| super::decrypt(did, None, entry.key()).ok())
                     .collect::<Vec<_>>()
             })
             .ok_or(Error::PublicKeyInvalid)
