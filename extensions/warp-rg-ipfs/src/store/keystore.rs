@@ -10,6 +10,7 @@ pub struct Keystore {
     recipient_key: HashMap<DID, BTreeSet<KeyEntry>>,
 }
 
+#[allow(dead_code)]
 impl Keystore {
     pub fn new() -> Self {
         Self::default()
