@@ -16,10 +16,10 @@ impl Keystore {
         Self::default()
     }
 
-    pub fn insert(&mut self, did: &DID, recipient: DID, key: Vec<u8>) -> Result<(), Error> {
+    pub fn insert<K: AsRef<[u8]>>(&mut self, did: &DID, recipient: &DID, key: K) -> Result<(), Error> {
         let key = super::encrypt(did, None, key)?.into_boxed_slice();
 
-        match self.recipient_key.entry(recipient) {
+        match self.recipient_key.entry(recipient.clone()) {
             Entry::Occupied(mut entry) => {
                 if entry.get().iter().any(|e| e.key == key) {
                     return Err(Error::PublicKeyInvalid);
@@ -37,9 +37,9 @@ impl Keystore {
         Ok(())
     }
 
-    pub fn get_latest(&self, did: &DID, recipient: DID) -> Result<Vec<u8>, Error> {
+    pub fn get_latest(&self, did: &DID, recipient: &DID) -> Result<Vec<u8>, Error> {
         self.recipient_key
-            .get(&recipient)
+            .get(recipient)
             .map(|list| {
                 list.last()
                     .and_then(|entry| super::decrypt(did, None, entry.key()).ok())
@@ -48,9 +48,9 @@ impl Keystore {
             .ok_or(Error::PublicKeyInvalid)
     }
 
-    pub fn get_all(&self, did: &DID, recipient: DID) -> Result<Vec<Vec<u8>>, Error> {
+    pub fn get_all(&self, did: &DID, recipient: &DID) -> Result<Vec<Vec<u8>>, Error> {
         self.recipient_key
-            .get(&recipient)
+            .get(recipient)
             .map(|list| {
                 list.iter()
                     .filter_map(|entry| super::decrypt(did, None, entry.key()).ok())
@@ -97,3 +97,51 @@ impl PartialEq for KeyEntry {
 }
 
 impl Eq for KeyEntry {}
+
+#[cfg(test)]
+mod test {
+    use warp::crypto::{DID, generate};
+    use super::Keystore;
+
+    #[test]
+    fn keystore_test() -> anyhow::Result<()> {
+        let mut keystore = Keystore::new();
+
+        let keypair = DID::default();
+        let recipient = DID::default();
+
+        assert_ne!(keypair, recipient);
+
+        let key = generate(32);
+
+        keystore.insert(&keypair, &recipient, &key)?;
+
+        let stored_key = keystore.get_latest(&keypair, &recipient)?;
+
+        assert_eq!(stored_key, key);
+        Ok(())
+    }
+
+    #[test]
+    fn keystore_get_latest() -> anyhow::Result<()> {
+        let mut keystore = Keystore::new();
+
+        let keypair = DID::default();
+        let recipient = DID::default();
+
+        assert_ne!(keypair, recipient);
+
+        let key_1 = generate(32);
+        let key_2 = generate(32);
+
+        keystore.insert(&keypair, &recipient, &key_1)?;
+        keystore.insert(&keypair, &recipient, &key_2)?;
+
+        let latest_key = keystore.get_latest(&keypair, &recipient)?;
+
+        assert_eq!(latest_key, key_2);
+
+        Ok(())
+    }
+
+}
