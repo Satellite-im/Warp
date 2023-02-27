@@ -152,6 +152,28 @@ impl Cipher {
         cipher.decrypt_async_stream(stream).await
     }
 
+    pub async fn self_encrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
+        reader: R,
+    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
+        let cipher = Cipher::new();
+        let key_stream = stream::iter(Ok::<_, Error>(Ok(cipher.private_key())));
+
+        let cipher_stream = cipher.encrypt_async_read_to_stream(reader).await?;
+        let stream = key_stream.chain(cipher_stream);
+        Ok(stream)
+    }
+
+    pub async fn self_decrypt_async_read_to_stream<'a, R: AsyncRead + Unpin + Send + 'a>(
+        mut reader: R,
+    ) -> Result<impl Stream<Item = Result<Vec<u8>>> + Send + 'a> {
+        let mut key = [0u8; 34];
+
+        reader.read_exact(&mut key).await?;
+
+        let cipher = Cipher::from(key);
+        cipher.decrypt_async_read_to_stream(reader).await
+    }
+
     /// Encrypts data from async stream into another async stream
     pub async fn encrypt_async_stream<'a>(
         &self,
