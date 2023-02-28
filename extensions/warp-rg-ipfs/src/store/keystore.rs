@@ -15,8 +15,11 @@ pub struct Keystore {
 
 #[allow(dead_code)]
 impl Keystore {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(conversation_id: Uuid) -> Self {
+        Self {
+            conversation_id,
+            ..Default::default()
+        }
     }
 
     pub fn insert<K: AsRef<[u8]>>(
@@ -138,7 +141,7 @@ mod test {
 
     #[test]
     fn keystore_test() -> anyhow::Result<()> {
-        let mut keystore = Keystore::new();
+        let mut keystore = Keystore::default();
 
         let keypair = DID::default();
         let recipient = DID::default();
@@ -157,7 +160,7 @@ mod test {
 
     #[test]
     fn keystore_get_latest() -> anyhow::Result<()> {
-        let mut keystore = Keystore::new();
+        let mut keystore = Keystore::default();
 
         let keypair = DID::default();
         let recipient = DID::default();
@@ -180,7 +183,7 @@ mod test {
     #[test]
     fn keystore_try_decrypt() -> anyhow::Result<()> {
         let mut rng = rand::thread_rng();
-        let mut keystore = Keystore::new();
+        let mut keystore = Keystore::default();
 
         let keypair = DID::default();
         let recipient = DID::default();
