@@ -1,4 +1,7 @@
-use std::collections::{hash_map::Entry, BTreeSet, HashMap};
+use std::{
+    collections::{hash_map::Entry, BTreeSet, HashMap},
+    fmt::Debug,
+};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -7,7 +10,7 @@ use warp::{
     error::Error,
 };
 
-#[derive(Default, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Keystore {
     conversation_id: Uuid,
     recipient_key: HashMap<DID, BTreeSet<KeyEntry>>,
@@ -95,6 +98,14 @@ impl Keystore {
 pub struct KeyEntry {
     id: usize,
     key: Box<[u8]>,
+}
+
+impl Debug for KeyEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyEntry")
+            .field("id/seq", &self.id)
+            .finish()
+    }
 }
 
 impl KeyEntry {
