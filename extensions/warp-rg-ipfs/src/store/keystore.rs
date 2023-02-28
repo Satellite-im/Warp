@@ -16,7 +16,12 @@ impl Keystore {
         Self::default()
     }
 
-    pub fn insert<K: AsRef<[u8]>>(&mut self, did: &DID, recipient: &DID, key: K) -> Result<(), Error> {
+    pub fn insert<K: AsRef<[u8]>>(
+        &mut self,
+        did: &DID,
+        recipient: &DID,
+        key: K,
+    ) -> Result<(), Error> {
         let key = super::encrypt(did, None, key)?.into_boxed_slice();
 
         match self.recipient_key.entry(recipient.clone()) {
@@ -56,6 +61,13 @@ impl Keystore {
                     .filter_map(|entry| super::decrypt(did, None, entry.key()).ok())
                     .collect::<Vec<_>>()
             })
+            .ok_or(Error::PublicKeyInvalid)
+    }
+
+    pub fn count(&self, recipient: &DID) -> Result<usize, Error> {
+        self.recipient_key
+            .get(recipient)
+            .map(|list| list.len())
             .ok_or(Error::PublicKeyInvalid)
     }
 }
@@ -100,8 +112,8 @@ impl Eq for KeyEntry {}
 
 #[cfg(test)]
 mod test {
-    use warp::crypto::{DID, generate};
     use super::Keystore;
+    use warp::crypto::{generate, DID};
 
     #[test]
     fn keystore_test() -> anyhow::Result<()> {
@@ -143,5 +155,4 @@ mod test {
 
         Ok(())
     }
-
 }
