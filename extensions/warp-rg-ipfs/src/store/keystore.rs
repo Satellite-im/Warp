@@ -197,17 +197,23 @@ mod test {
         let mut keystore = Keystore::default();
 
         let keypair = DID::default();
-        let recipient = DID::default();
+        let recipients = (0..100).map(|_| DID::default()).collect::<Vec<_>>();
 
-        assert_ne!(keypair, recipient);
-
-        let keys = (0..100).map(|_| generate(32)).collect::<Vec<_>>();
-
-        for key in keys.iter() {
-            keystore.insert(&keypair, &recipient, key)?;
+        for recipient in recipients.iter() {
+            for key in (0..100).map(|_| generate(32)) {
+                keystore.insert(&keypair, recipient, key)?;
+            }
         }
 
         let plaintext = b"message";
+
+        let random_recipient = loop {
+            if let Some(recipient) = recipients.choose(&mut rng) {
+                break recipient;
+            }
+        };
+
+        let keys = keystore.get_all(&keypair, random_recipient)?;
 
         let random_key = loop {
             if let Some(key) = keys.choose(&mut rng) {
@@ -216,7 +222,7 @@ mod test {
         };
 
         let cipher_message = Cipher::direct_encrypt(plaintext, random_key)?;
-        let decrypted_message = keystore.try_decrypt(&keypair, &recipient, &cipher_message)?;
+        let decrypted_message = keystore.try_decrypt(&keypair, random_recipient, &cipher_message)?;
 
         assert_eq!(decrypted_message, plaintext);
 
