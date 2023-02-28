@@ -129,7 +129,12 @@ impl Eq for KeyEntry {}
 #[cfg(test)]
 mod test {
     use super::Keystore;
-    use warp::crypto::{cipher::Cipher, generate, DID};
+    use warp::crypto::{
+        cipher::Cipher,
+        generate,
+        rand::{self, seq::SliceRandom},
+        DID,
+    };
 
     #[test]
     fn keystore_test() -> anyhow::Result<()> {
@@ -174,6 +179,7 @@ mod test {
 
     #[test]
     fn keystore_try_decrypt() -> anyhow::Result<()> {
+        let mut rng = rand::thread_rng();
         let mut keystore = Keystore::new();
 
         let keypair = DID::default();
@@ -181,18 +187,21 @@ mod test {
 
         assert_ne!(keypair, recipient);
 
-        let key_1 = generate(32);
-        let key_2 = generate(32);
-        let key_3 = generate(32);
+        let keys = (0..100).map(|_| generate(32)).collect::<Vec<_>>();
 
-        keystore.insert(&keypair, &recipient, &key_1)?;
-        keystore.insert(&keypair, &recipient, &key_2)?;
-        keystore.insert(&keypair, &recipient, &key_3)?;
+        for key in keys.iter() {
+            keystore.insert(&keypair, &recipient, key)?;
+        }
 
         let plaintext = b"message";
 
-        let cipher_message = Cipher::direct_encrypt(plaintext, &key_2)?;
+        let random_key = loop {
+            if let Some(key) = keys.choose(&mut rng) {
+                break key;
+            }
+        };
 
+        let cipher_message = Cipher::direct_encrypt(plaintext, random_key)?;
         let decrypted_message = keystore.try_decrypt(&keypair, &recipient, &cipher_message)?;
 
         assert_eq!(decrypted_message, plaintext);
