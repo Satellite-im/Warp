@@ -22,7 +22,7 @@ impl Keystore {
         recipient: &DID,
         key: K,
     ) -> Result<(), Error> {
-        let key = super::encrypt(did, None, key)?.into_boxed_slice();
+        let key = super::ecdh_encrypt(did, None, key)?.into_boxed_slice();
 
         match self.recipient_key.entry(recipient.clone()) {
             Entry::Occupied(mut entry) => {
@@ -47,7 +47,7 @@ impl Keystore {
             .get(recipient)
             .map(|list| {
                 list.last()
-                    .and_then(|entry| super::decrypt(did, None, entry.key()).ok())
+                    .and_then(|entry| super::ecdh_decrypt(did, None, entry.key()).ok())
             })
             .and_then(|entry| entry)
             .ok_or(Error::PublicKeyInvalid)
@@ -58,7 +58,7 @@ impl Keystore {
             .get(recipient)
             .map(|list| {
                 list.iter()
-                    .filter_map(|entry| super::decrypt(did, None, entry.key()).ok())
+                    .filter_map(|entry| super::ecdh_decrypt(did, None, entry.key()).ok())
                     .collect::<Vec<_>>()
             })
             .ok_or(Error::PublicKeyInvalid)

@@ -70,7 +70,7 @@ fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::
     Ok(pk)
 }
 
-fn encrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> Result<Vec<u8>, Error> {
+fn ecdh_encrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> Result<Vec<u8>, Error> {
     let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
     let did_pubkey = match recipient {
         Some(did) => did.public_key_bytes(),
@@ -78,15 +78,13 @@ fn encrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> Result
     };
 
     let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
-
     let prik = prikey.key_exchange(&pubkey);
-
     let data = Cipher::direct_encrypt(data.as_ref(), &prik)?;
 
     Ok(data)
 }
 
-fn decrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> Result<Vec<u8>, Error> {
+fn ecdh_decrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> Result<Vec<u8>, Error> {
     let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
     let did_pubkey = match recipient {
         Some(did) => did.public_key_bytes(),
@@ -94,9 +92,7 @@ fn decrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> Result
     };
 
     let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
-
     let prik = prikey.key_exchange(&pubkey);
-
     let data = Cipher::direct_decrypt(data.as_ref(), &prik)?;
 
     Ok(data)
