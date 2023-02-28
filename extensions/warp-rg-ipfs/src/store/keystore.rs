@@ -2,7 +2,10 @@ use std::collections::{hash_map::Entry, BTreeSet, HashMap};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use warp::{crypto::DID, error::Error};
+use warp::{
+    crypto::{cipher::Cipher, DID},
+    error::Error,
+};
 
 #[derive(Default, Serialize, Deserialize, Clone)]
 pub struct Keystore {
@@ -72,6 +75,19 @@ impl Keystore {
     }
 }
 
+#[allow(dead_code)]
+impl Keystore {
+    pub fn try_decrypt(&self, did: &DID, recipient: &DID, data: &[u8]) -> Result<Vec<u8>, Error> {
+        let keys = self.get_all(did, recipient)?;
+        for key in keys {
+            if let Ok(data) = Cipher::direct_decrypt(data, &key) {
+                return Ok(data);
+            }
+        }
+        Err(Error::DecryptionError)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct KeyEntry {
     id: usize,
@@ -113,7 +129,7 @@ impl Eq for KeyEntry {}
 #[cfg(test)]
 mod test {
     use super::Keystore;
-    use warp::crypto::{generate, DID};
+    use warp::crypto::{cipher::Cipher, generate, DID};
 
     #[test]
     fn keystore_test() -> anyhow::Result<()> {
@@ -152,6 +168,34 @@ mod test {
         let latest_key = keystore.get_latest(&keypair, &recipient)?;
 
         assert_eq!(latest_key, key_2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn keystore_try_decrypt() -> anyhow::Result<()> {
+        let mut keystore = Keystore::new();
+
+        let keypair = DID::default();
+        let recipient = DID::default();
+
+        assert_ne!(keypair, recipient);
+
+        let key_1 = generate(32);
+        let key_2 = generate(32);
+        let key_3 = generate(32);
+
+        keystore.insert(&keypair, &recipient, &key_1)?;
+        keystore.insert(&keypair, &recipient, &key_2)?;
+        keystore.insert(&keypair, &recipient, &key_3)?;
+
+        let plaintext = b"message";
+
+        let cipher_message = Cipher::direct_encrypt(plaintext, &key_2)?;
+
+        let decrypted_message = keystore.try_decrypt(&keypair, &recipient, &cipher_message)?;
+
+        assert_eq!(decrypted_message, plaintext);
 
         Ok(())
     }
