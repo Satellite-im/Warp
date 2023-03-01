@@ -24,14 +24,13 @@ use warp::raygun::{
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_fs_ipfs::config::FsIpfsConfig;
-use warp_fs_ipfs::{IpfsFileSystem, Persistent as FsPersistent, Temporary as FsTemporary};
+use warp_fs_ipfs::{IpfsFileSystem};
 use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
 use warp_pd_flatfile::FlatfileStorage;
 use warp_pd_stretto::StrettoClient;
 use warp_rg_ipfs::config::RgIpfsConfig;
 use warp_rg_ipfs::IpfsMessaging;
-use warp_rg_ipfs::Persistent;
-use warp_rg_ipfs::Temporary;
+
 #[derive(Debug, Parser)]
 #[clap(name = "messenger")]
 struct Opt {
@@ -155,8 +154,8 @@ async fn create_fs<P: AsRef<Path>>(
     };
 
     let filesystem: Box<dyn Constellation> = match path.is_some() {
-        true => Box::new(IpfsFileSystem::<FsPersistent>::new(account, Some(config)).await?),
-        false => Box::new(IpfsFileSystem::<FsTemporary>::new(account, Some(config)).await?),
+        true => Box::new(IpfsFileSystem::new(account, Some(config)).await?),
+        false => Box::new(IpfsFileSystem::new(account, Some(config)).await?),
     };
 
     Ok(filesystem)
@@ -179,11 +178,11 @@ async fn create_rg(
 
     let chat = match path.as_ref() {
         Some(_) => Box::new(
-            IpfsMessaging::<Persistent>::new(Some(config), account, filesystem, Some(cache))
+            IpfsMessaging::new(Some(config), account, filesystem, Some(cache))
                 .await?,
         ) as Box<dyn RayGun>,
         None => Box::new(
-            IpfsMessaging::<Temporary>::new(Some(config), account, filesystem, Some(cache)).await?,
+            IpfsMessaging::new(Some(config), account, filesystem, Some(cache)).await?,
         ) as Box<dyn RayGun>,
     };
 

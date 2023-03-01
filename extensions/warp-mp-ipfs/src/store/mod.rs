@@ -10,7 +10,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use rust_ipfs as ipfs;
 
-use ipfs::{IpfsTypes, Multiaddr, PeerId, Protocol};
+use ipfs::{Multiaddr, PeerId, Protocol};
 use serde::{Deserialize, Serialize};
 use warp::{
     crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
@@ -108,8 +108,8 @@ fn did_keypair(tesseract: &Tesseract) -> anyhow::Result<DID> {
 // who are providing and connect to them.
 // Note that there is usually a delay in `ipfs.provide`.
 // TODO: Investigate the delay in providing the CID
-pub async fn discovery<T: IpfsTypes, S: AsRef<str>>(
-    ipfs: ipfs::Ipfs<T>,
+pub async fn discovery<S: AsRef<str>>(
+    ipfs: ipfs::Ipfs,
     topic: S,
 ) -> anyhow::Result<()> {
     let topic = topic.as_ref();
@@ -171,8 +171,8 @@ impl From<PeerConnectionType> for IdentityStatus {
     }
 }
 
-pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
-    ipfs: &ipfs::Ipfs<T>,
+pub async fn connected_to_peer<I: Into<PeerType>>(
+    ipfs: &ipfs::Ipfs,
     pkey: I,
 ) -> anyhow::Result<PeerConnectionType> {
     let peer_id = match pkey.into() {
@@ -188,8 +188,8 @@ pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
     })
 }
 
-pub async fn discover_peer<T: IpfsTypes>(
-    ipfs: &ipfs::Ipfs<T>,
+pub async fn discover_peer(
+    ipfs: &ipfs::Ipfs,
     did: &DID,
     discovery: Discovery,
     relay: Vec<Multiaddr>,

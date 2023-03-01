@@ -1,5 +1,5 @@
 use futures::StreamExt;
-use ipfs::{Ipfs, IpfsPath, IpfsTypes};
+use ipfs::{Ipfs, IpfsPath};
 use libipld::{
     serde::{from_ipld, to_ipld},
     Cid,
@@ -16,25 +16,25 @@ use warp::{
 use super::friends::Request;
 
 #[async_trait::async_trait]
-pub(crate) trait ToCid<T: IpfsTypes>: Sized {
-    async fn to_cid(&self, ipfs: &Ipfs<T>) -> Result<Cid, Error>;
+pub(crate) trait ToCid: Sized {
+    async fn to_cid(&self, ipfs: &Ipfs) -> Result<Cid, Error>;
 }
 
 #[async_trait::async_trait]
-pub(crate) trait GetDag<D, I: IpfsTypes>: Sized {
-    async fn get_dag(&self, ipfs: &Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error>;
+pub(crate) trait GetDag<D>: Sized {
+    async fn get_dag(&self, ipfs: &Ipfs, timeout: Option<Duration>) -> Result<D, Error>;
 }
 
 #[async_trait::async_trait]
-impl<D: DeserializeOwned, I: IpfsTypes> GetDag<D, I> for Cid {
-    async fn get_dag(&self, ipfs: &Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error> {
+impl<D: DeserializeOwned> GetDag<D> for Cid {
+    async fn get_dag(&self, ipfs: &Ipfs, timeout: Option<Duration>) -> Result<D, Error> {
         IpfsPath::from(*self).get_dag(ipfs, timeout).await
     }
 }
 
 #[async_trait::async_trait]
-impl<D: DeserializeOwned, I: IpfsTypes> GetDag<D, I> for IpfsPath {
-    async fn get_dag(&self, ipfs: &Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error> {
+impl<D: DeserializeOwned> GetDag<D> for IpfsPath {
+    async fn get_dag(&self, ipfs: &Ipfs, timeout: Option<Duration>) -> Result<D, Error> {
         let timeout = timeout.unwrap_or(std::time::Duration::from_secs(10));
         match tokio::time::timeout(timeout, ipfs.get_dag(self.clone())).await {
             Ok(Ok(ipld)) => from_ipld(ipld)
@@ -47,11 +47,11 @@ impl<D: DeserializeOwned, I: IpfsTypes> GetDag<D, I> for IpfsPath {
 }
 
 #[async_trait::async_trait]
-impl<T, I: IpfsTypes> ToCid<I> for T
+impl<T> ToCid for T
 where
     T: Serialize + Clone + Send + Sync,
 {
-    async fn to_cid(&self, ipfs: &Ipfs<I>) -> Result<Cid, Error> {
+    async fn to_cid(&self, ipfs: &Ipfs) -> Result<Cid, Error> {
         let ipld = to_ipld(self.clone()).map_err(anyhow::Error::from)?;
         ipfs.put_dag(ipld).await.map_err(Error::from)
     }
@@ -66,9 +66,9 @@ pub enum DocumentType<T> {
 }
 
 impl<T> DocumentType<T> {
-    pub async fn resolve<P: IpfsTypes>(
+    pub async fn resolve(
         &self,
-        ipfs: Ipfs<P>,
+        ipfs: Ipfs,
         timeout: Option<Duration>,
     ) -> Result<T, Error>
     where
@@ -131,9 +131,9 @@ impl<T> DocumentType<T> {
         }
     }
 
-    pub async fn resolve_or_default<P: IpfsTypes>(
+    pub async fn resolve_or_default(
         &self,
-        ipfs: Ipfs<P>,
+        ipfs: Ipfs,
         timeout: Option<Duration>,
     ) -> T
     where
@@ -185,7 +185,7 @@ impl RootDocument {
         Ok(())
     }
 
-    pub async fn verify<T: IpfsTypes>(&self, ipfs: &Ipfs<T>) -> Result<(), Error> {
+    pub async fn verify(&self, ipfs: &Ipfs) -> Result<(), Error> {
         let (identity, _, _, _, _, _, _) = self.resolve(ipfs, Some(Duration::from_secs(5))).await?;
         let mut root_document = self.clone();
         let signature =
@@ -199,9 +199,9 @@ impl RootDocument {
         Ok(())
     }
 
-    pub async fn resolve<P: IpfsTypes>(
+    pub async fn resolve(
         &self,
-        ipfs: &Ipfs<P>,
+        ipfs: &Ipfs,
         timeout: Option<Duration>,
     ) -> Result<
         (
@@ -291,9 +291,9 @@ pub struct CacheDocument {
 }
 
 impl CacheDocument {
-    pub async fn resolve<P: IpfsTypes>(
+    pub async fn resolve(
         &self,
-        ipfs: Ipfs<P>,
+        ipfs: Ipfs,
         timeout: Option<Duration>,
     ) -> Result<Identity, Error> {
         let mut identity = self.identity.resolve(ipfs.clone(), timeout).await?;

@@ -1,8 +1,8 @@
 #![allow(clippy::await_holding_lock)]
 use futures::channel::oneshot;
 use futures::StreamExt;
-use ipfs::libp2p::gossipsub::GossipsubMessage;
-use ipfs::{Ipfs, IpfsTypes, PeerId};
+use ipfs::libp2p::gossipsub::Message as GossipsubMessage;
+use ipfs::{Ipfs, PeerId};
 use libipld::IpldCodec;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
@@ -21,7 +21,6 @@ use warp::sync::Arc;
 use warp::tesseract::Tesseract;
 
 use crate::config::Discovery;
-use crate::Persistent;
 
 use super::document::DocumentType;
 use super::identity::IdentityStore;
@@ -30,11 +29,11 @@ use super::queue::Queue;
 use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType, VecExt};
 
 #[allow(clippy::type_complexity)]
-pub struct FriendsStore<T: IpfsTypes> {
-    ipfs: Ipfs<T>,
+pub struct FriendsStore {
+    ipfs: Ipfs,
 
     // Identity Store
-    identity: IdentityStore<T>,
+    identity: IdentityStore,
 
     // keypair
     did_key: Arc<DID>,
@@ -47,12 +46,12 @@ pub struct FriendsStore<T: IpfsTypes> {
 
     override_ipld: Arc<AtomicBool>,
 
-    queue: Queue<T>,
+    queue: Queue,
 
     // Tesseract
     tesseract: Tesseract,
 
-    phonebook: Option<PhoneBook<T>>,
+    phonebook: Option<PhoneBook>,
 
     wait_on_response: Option<u64>,
 
@@ -128,7 +127,7 @@ pub enum RequestType {
     Outgoing,
 }
 
-impl<T: IpfsTypes> Clone for FriendsStore<T> {
+impl Clone for FriendsStore {
     fn clone(&self) -> Self {
         Self {
             ipfs: self.ipfs.clone(),
@@ -147,10 +146,10 @@ impl<T: IpfsTypes> Clone for FriendsStore<T> {
     }
 }
 
-impl<T: IpfsTypes> FriendsStore<T> {
+impl FriendsStore {
     pub async fn new(
-        ipfs: Ipfs<T>,
-        identity: IdentityStore<T>,
+        ipfs: Ipfs,
+        identity: IdentityStore,
         path: Option<PathBuf>,
         tesseract: Tesseract,
         _interval: u64,
@@ -161,10 +160,10 @@ impl<T: IpfsTypes> FriendsStore<T> {
             Option<u64>,
         ),
     ) -> anyhow::Result<Self> {
-        let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
-            true => path,
-            false => None,
-        };
+        // let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
+        //     true => path,
+        //     false => None,
+        // };
 
         let end_event = Arc::new(AtomicBool::new(false));
 
@@ -527,7 +526,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
     }
 }
 
-impl<T: IpfsTypes> FriendsStore<T> {
+impl FriendsStore {
     pub async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
         let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
@@ -696,7 +695,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
     }
 }
 
-impl<T: IpfsTypes> FriendsStore<T> {
+impl FriendsStore {
     pub async fn block_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.blocks {
@@ -818,7 +817,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
     }
 }
 
-impl<T: IpfsTypes> FriendsStore<T> {
+impl FriendsStore {
     pub async fn block_by_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.block_by {
@@ -852,7 +851,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
     }
 }
 
-impl<T: IpfsTypes> FriendsStore<T> {
+impl FriendsStore {
     pub async fn friends_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.friends {
@@ -961,7 +960,7 @@ impl<T: IpfsTypes> FriendsStore<T> {
     }
 }
 
-impl<T: IpfsTypes> FriendsStore<T> {
+impl FriendsStore {
     pub async fn list_all_raw_request(&self) -> Result<Vec<Request>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.request {
