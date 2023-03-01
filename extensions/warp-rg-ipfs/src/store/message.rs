@@ -40,6 +40,7 @@ use crate::{Persistent, SpamFilter};
 
 use super::conversation::{ConversationDocument, MessageDocument};
 use super::document::{GetDag, ToCid};
+use super::keystore::Keystore;
 use super::{
     did_to_libp2p_pub, topic_discovery, verify_serde_sig, ConversationEvents, MessagingEvents,
 };
@@ -58,6 +59,7 @@ pub struct MessageStore<T: IpfsTypes> {
 
     // conversation cid
     conversation_cid: Arc<tokio::sync::RwLock<HashMap<Uuid, Cid>>>,
+    conversation_keystore_cid: Arc<tokio::sync::RwLock<HashMap<Uuid, Cid>>>,
 
     conversation_lock: Arc<tokio::sync::RwLock<HashMap<Uuid, Arc<Semaphore>>>>,
 
@@ -99,6 +101,7 @@ impl<T: IpfsTypes> Clone for MessageStore<T> {
             ipfs: self.ipfs.clone(),
             path: self.path.clone(),
             stream_sender: self.stream_sender.clone(),
+            conversation_keystore_cid: self.conversation_keystore_cid.clone(),
             conversation_cid: self.conversation_cid.clone(),
             conversation_sender: self.conversation_sender.clone(),
             conversation_lock: self.conversation_lock.clone(),
@@ -159,6 +162,7 @@ impl<T: IpfsTypes> MessageStore<T> {
         let stream_sender = Arc::new(Default::default());
         let conversation_lock = Arc::new(Default::default());
         let conversation_sender = Arc::default();
+        let conversation_keystore_cid = Arc::default();
 
         let store = Self {
             path,
@@ -178,6 +182,7 @@ impl<T: IpfsTypes> MessageStore<T> {
             disable_sender_event_emit,
             with_friends,
             attach_recipients_on_storing,
+            conversation_keystore_cid,
         };
 
         info!("Loading existing conversations task");
@@ -730,12 +735,20 @@ impl<T: IpfsTypes> MessageStore<T> {
         let conversation =
             ConversationDocument::new_direct(own_did, [own_did.clone(), did_key.clone()])?;
 
+        let mut keystore = Keystore::new(conversation.id());
+        keystore.insert(own_did, own_did, warp::crypto::generate(64))?;
+
         let cid = conversation.to_cid(&self.ipfs).await?;
+        let keystore_cid = keystore.to_cid(&self.ipfs).await?;
 
         let convo_id = conversation.id();
         let topic = conversation.topic();
 
         self.conversation_cid.write().await.insert(convo_id, cid);
+        self.conversation_keystore_cid
+            .write()
+            .await
+            .insert(convo_id, keystore_cid);
 
         let stream = self.ipfs.pubsub_subscribe(topic).await?;
 
@@ -758,7 +771,14 @@ impl<T: IpfsTypes> MessageStore<T> {
 
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
+            let keystore_cid = keystore_cid.to_string();
+
+
             if let Err(e) = tokio::fs::write(path.join(conversation.id().to_string()), cid).await {
+                error!("Unable to save info to file: {e}");
+            }
+
+            if let Err(e) = tokio::fs::write(path.join(format!("{}.keystore", conversation.id())), keystore_cid).await {
                 error!("Unable to save info to file: {e}");
             }
         }
@@ -1100,31 +1120,37 @@ impl<T: IpfsTypes> MessageStore<T> {
                 let Some(id) = entry_path.file_name().map(|file| file.to_string_lossy().to_string()).and_then(|id| Uuid::from_str(&id).ok()) else {
                     continue
                 };
+                let keystore = entry_path.ends_with(".keystore");
                 let Ok(cid_str) = tokio::fs::read(entry_path).await.map(|bytes| String::from_utf8_lossy(&bytes).to_string()) else {
                     continue
                 };
                 if let Ok(cid) = cid_str.parse::<Cid>() {
-                    let task = {
-                        let store = self.clone();
-                        async move {
-                            let conversation: ConversationDocument = cid
-                                .get_dag(&store.ipfs, Some(Duration::from_secs(10)))
-                                .await?;
-                            conversation.verify()?;
-                            store.conversation_cid.write().await.insert(id, cid);
+                    if keystore {
+                        self.conversation_keystore_cid.write().await.insert(id, cid);
+                    } else {
+                        let task = {
+                            let store = self.clone();
+                            async move {
+                                let conversation: ConversationDocument = cid
+                                    .get_dag(&store.ipfs, Some(Duration::from_secs(10)))
+                                    .await?;
+                                conversation.verify()?;
+                                store.conversation_cid.write().await.insert(id, cid);
 
-                            let stream = store.ipfs.pubsub_subscribe(conversation.topic()).await?;
+                                let stream =
+                                    store.ipfs.pubsub_subscribe(conversation.topic()).await?;
 
-                            store.start_task(conversation.id(), stream).await;
+                                store.start_task(conversation.id(), stream).await;
 
-                            Ok::<_, Error>(())
+                                Ok::<_, Error>(())
+                            }
+                        };
+
+                        if background {
+                            tokio::spawn(task);
+                        } else if let Err(e) = task.await {
+                            error!("Error loading conversation: {e}");
                         }
-                    };
-
-                    if background {
-                        tokio::spawn(task);
-                    } else if let Err(e) = task.await {
-                        error!("Error loading conversation: {e}");
                     }
                 }
             }

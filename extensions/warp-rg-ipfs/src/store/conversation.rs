@@ -357,10 +357,7 @@ impl ConversationDocument {
         document.remove(ipfs).await
     }
 
-    pub async fn delete_all_message<T: IpfsTypes>(
-        &mut self,
-        ipfs: Ipfs<T>,
-    ) -> Result<(), Error> {
+    pub async fn delete_all_message<T: IpfsTypes>(&mut self, ipfs: Ipfs<T>) -> Result<(), Error> {
         let messages = std::mem::take(&mut self.messages);
 
         let mut ids = vec![];
