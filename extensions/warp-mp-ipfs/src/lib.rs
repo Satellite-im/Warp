@@ -636,6 +636,7 @@ impl MultiPass for IpfsIdentity {
                 }
 
                 identity.set_username(&username);
+                store.identity_update(identity.clone()).await?;
             }
             IdentityUpdate::Picture(data) => {
                 let len = data.len();
@@ -649,10 +650,8 @@ impl MultiPass for IpfsIdentity {
                 }
                 let cid = store
                     .store_photo(
-                        futures::stream::once(async move {
-                            Ok::<_, std::io::Error>(serde_json::to_vec(&data).unwrap_or_default())
-                        })
-                        .boxed(),
+                        futures::stream::iter(Ok::<_, std::io::Error>(Ok(serde_json::to_vec(&data)?)))
+                            .boxed(),
                         Some(2 * 1024 * 1024),
                     )
                     .await?;
@@ -769,7 +768,7 @@ impl MultiPass for IpfsIdentity {
                 }
 
                 let stream = ReaderStream::new(file).map(|result| result.map(|data| data.into()));
-                
+
                 let cid = store
                     .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
                     .await?;
@@ -800,10 +799,9 @@ impl MultiPass for IpfsIdentity {
                     }
                 }
                 identity.set_status_message(status);
+                store.identity_update(identity.clone()).await?;
             }
         };
-
-        store.identity_update(identity.clone()).await?;
 
         info!("Update identity store");
         store.update_identity().await?;
