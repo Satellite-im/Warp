@@ -623,6 +623,7 @@ impl MultiPass for IpfsIdentity {
         let mut store = self.identity_store(true).await?;
         let mut identity = self.get_own_identity().await?;
 
+        let mut old_cid = None;
         match option {
             IdentityUpdate::Username(username) => {
                 let len = username.chars().count();
@@ -640,18 +641,20 @@ impl MultiPass for IpfsIdentity {
             }
             IdentityUpdate::Picture(data) => {
                 let len = data.len();
-                if len > 2 * 1024 * 1024 {
+                if len == 0 || len > 2 * 1024 * 1024 {
                     return Err(Error::InvalidLength {
                         context: "profile picture".into(),
                         current: len,
-                        minimum: None,
+                        minimum: Some(1),
                         maximum: Some(2 * 1024 * 1024),
                     });
                 }
                 let cid = store
                     .store_photo(
-                        futures::stream::iter(Ok::<_, std::io::Error>(Ok(serde_json::to_vec(&data)?)))
-                            .boxed(),
+                        futures::stream::iter(Ok::<_, std::io::Error>(Ok(serde_json::to_vec(
+                            &data,
+                        )?)))
+                        .boxed(),
                         Some(2 * 1024 * 1024),
                     )
                     .await?;
@@ -660,10 +663,13 @@ impl MultiPass for IpfsIdentity {
 
                 if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
                     if picture_cid == cid {
-                        return Ok(())
+                        return Ok(());
                     }
-                    if let Err(e) = store.delete_photo(picture_cid).await {
-                        error!("Error deleting picture: {e}");
+
+                    if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
+                        if picture_cid != banner_cid {
+                            old_cid = Some(picture_cid);
+                        }
                     }
                 }
 
@@ -683,11 +689,11 @@ impl MultiPass for IpfsIdentity {
 
                 let len = metadata.len() as _;
 
-                if metadata.len() > 2 * 1024 * 1024 {
+                if len == 0 || len > 2 * 1024 * 1024 {
                     return Err(Error::InvalidLength {
                         context: "profile picture".into(),
                         current: len,
-                        minimum: None,
+                        minimum: Some(1),
                         maximum: Some(2 * 1024 * 1024),
                     });
                 }
@@ -701,10 +707,13 @@ impl MultiPass for IpfsIdentity {
                 let mut root_document = store.get_root_document().await?;
                 if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
                     if picture_cid == cid {
-                        return Ok(())
+                        return Ok(());
                     }
-                    if let Err(e) = store.delete_photo(picture_cid).await {
-                        error!("Error deleting banner: {e}");
+
+                    if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
+                        if picture_cid != banner_cid {
+                            old_cid = Some(picture_cid);
+                        }
                     }
                 }
 
@@ -713,11 +722,11 @@ impl MultiPass for IpfsIdentity {
             }
             IdentityUpdate::Banner(data) => {
                 let len = data.len();
-                if len > 2 * 1024 * 1024 {
+                if len == 0 || len > 2 * 1024 * 1024 {
                     return Err(Error::InvalidLength {
                         context: "profile banner".into(),
                         current: len,
-                        minimum: None,
+                        minimum: Some(1),
                         maximum: Some(2 * 1024 * 1024),
                     });
                 }
@@ -735,10 +744,13 @@ impl MultiPass for IpfsIdentity {
                 let mut root_document = store.get_root_document().await?;
                 if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
                     if banner_cid == cid {
-                        return Ok(())
+                        return Ok(());
                     }
-                    if let Err(e) = store.delete_photo(banner_cid).await {
-                        error!("Error deleting banner: {e}");
+
+                    if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
+                        if picture_cid != banner_cid {
+                            old_cid = Some(banner_cid);
+                        }
                     }
                 }
 
@@ -758,11 +770,11 @@ impl MultiPass for IpfsIdentity {
 
                 let len = metadata.len() as _;
 
-                if metadata.len() > 2 * 1024 * 1024 {
+                if len == 0 || len > 2 * 1024 * 1024 {
                     return Err(Error::InvalidLength {
                         context: "profile banner".into(),
                         current: len,
-                        minimum: None,
+                        minimum: Some(1),
                         maximum: Some(2 * 1024 * 1024),
                     });
                 }
@@ -776,10 +788,13 @@ impl MultiPass for IpfsIdentity {
                 let mut root_document = store.get_root_document().await?;
                 if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
                     if banner_cid == cid {
-                        return Ok(())
+                        return Ok(());
                     }
-                    if let Err(e) = store.delete_photo(banner_cid).await {
-                        error!("Error deleting banner: {e}");
+
+                    if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
+                        if picture_cid != banner_cid {
+                            old_cid = Some(banner_cid);
+                        }
                     }
                 }
 
@@ -802,6 +817,12 @@ impl MultiPass for IpfsIdentity {
                 store.identity_update(identity.clone()).await?;
             }
         };
+
+        if let Some(cid) = old_cid {
+            if let Err(e) = store.delete_photo(cid).await {
+                error!("Error deleting picture: {e}");
+            }
+        }
 
         info!("Update identity store");
         store.update_identity().await?;
