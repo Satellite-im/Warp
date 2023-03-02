@@ -148,11 +148,6 @@ impl IdentityStore {
             bool,
         ),
     ) -> Result<Self, Error> {
-        // let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
-        //     true => path,
-        //     false => None,
-        // };
-
         if let Some(path) = path.as_ref() {
             if !path.exists() {
                 tokio::fs::create_dir_all(path).await?;

@@ -160,10 +160,6 @@ impl FriendsStore {
             Option<u64>,
         ),
     ) -> anyhow::Result<Self> {
-        // let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
-        //     true => path,
-        //     false => None,
-        // };
 
         let end_event = Arc::new(AtomicBool::new(false));
 
