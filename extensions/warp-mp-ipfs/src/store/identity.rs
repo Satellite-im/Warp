@@ -992,7 +992,10 @@ impl IdentityStore {
             .cid()
             .copied()
             .ok_or(Error::Other)?;
-        ipfs.insert_pin(&cid, true).await?;
+        
+        if let Err(_e) = ipfs.insert_pin(&cid, true).await {
+            //Note: If the cid exist, the image itself would also exist too.
+        }
 
         Ok(cid)
     }
