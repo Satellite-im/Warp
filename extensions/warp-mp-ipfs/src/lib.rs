@@ -660,7 +660,7 @@ impl MultiPass for IpfsIdentity {
 
                 if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
                     if picture_cid == cid {
-                        return Err(Error::CannotUpdateIdentityPicture);
+                        return Ok(())
                     }
                     if let Err(e) = store.delete_photo(picture_cid).await {
                         error!("Error deleting picture: {e}");
@@ -701,7 +701,7 @@ impl MultiPass for IpfsIdentity {
                 let mut root_document = store.get_root_document().await?;
                 if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
                     if picture_cid == cid {
-                        return Err(Error::CannotUpdateIdentityPicture);
+                        return Ok(())
                     }
                     if let Err(e) = store.delete_photo(picture_cid).await {
                         error!("Error deleting banner: {e}");
@@ -735,7 +735,7 @@ impl MultiPass for IpfsIdentity {
                 let mut root_document = store.get_root_document().await?;
                 if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
                     if banner_cid == cid {
-                        return Err(Error::CannotUpdateIdentityBanner);
+                        return Ok(())
                     }
                     if let Err(e) = store.delete_photo(banner_cid).await {
                         error!("Error deleting banner: {e}");
@@ -776,7 +776,7 @@ impl MultiPass for IpfsIdentity {
                 let mut root_document = store.get_root_document().await?;
                 if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
                     if banner_cid == cid {
-                        return Err(Error::CannotUpdateIdentityBanner);
+                        return Ok(())
                     }
                     if let Err(e) = store.delete_photo(banner_cid).await {
                         error!("Error deleting banner: {e}");
