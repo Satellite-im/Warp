@@ -9,7 +9,7 @@ use std::{
 };
 
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
-use rust_ipfs::{Ipfs, IpfsTypes, PeerId};
+use rust_ipfs::{Ipfs, PeerId};
 use tokio::{sync::RwLock, task::JoinHandle};
 use tracing::log;
 use warp::{crypto::DID, error::Error};
@@ -38,7 +38,7 @@ impl Discovery {
 
     /// Start discovery task
     /// Note: This starting will only work across a provided namespace via Discovery::Provider
-    pub async fn start<T: IpfsTypes>(&self, ipfs: &Ipfs<T>) -> Result<(), Error> {
+    pub async fn start(&self, ipfs: &Ipfs) -> Result<(), Error> {
         if let DiscoveryConfig::Provider(namespace) = &self.config {
             let namespace = namespace.clone().unwrap_or_else(|| "warp-mp-ipfs".into());
             let cid = ipfs
@@ -104,9 +104,9 @@ impl Discovery {
             .cloned()
     }
 
-    pub async fn insert<P: Into<PeerType>, T: IpfsTypes>(
+    pub async fn insert<P: Into<PeerType>>(
         &self,
-        ipfs: &Ipfs<T>,
+        ipfs: &Ipfs,
         peer_type: P,
     ) -> Result<(), Error> {
         let (peer_id, did_key) = match &peer_type.into() {
@@ -204,8 +204,8 @@ impl Hash for DiscoveryEntry {
 impl Eq for DiscoveryEntry {}
 
 impl DiscoveryEntry {
-    pub async fn new<T: IpfsTypes>(
-        ipfs: &Ipfs<T>,
+    pub async fn new(
+        ipfs: &Ipfs,
         peer_id: PeerId,
         did: Option<DID>,
         config: DiscoveryConfig,
