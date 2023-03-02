@@ -49,7 +49,7 @@ pub enum ItemInner {
 pub enum ItemType {
     #[display(fmt = "file")]
     FileItem,
-    #[display(fmt = "item")]
+    #[display(fmt = "directory")]
     DirectoryItem,
     #[display(fmt = "invalid")]
     /// Would be invalid or undetermined

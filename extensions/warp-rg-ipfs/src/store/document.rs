@@ -1,8 +1,8 @@
-use rust_ipfs::{Ipfs, IpfsPath, IpfsTypes};
 use libipld::{
     serde::{from_ipld, to_ipld},
     Cid,
 };
+use rust_ipfs::{Ipfs, IpfsPath};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -10,46 +10,46 @@ use std::time::Duration;
 use warp::error::Error;
 
 #[async_trait::async_trait]
-pub(crate) trait ToDocument<T: IpfsTypes>: Sized {
-    async fn to_document(&self, ipfs: &Ipfs<T>) -> Result<DocumentType<Self>, Error>;
+pub(crate) trait ToDocument: Sized {
+    async fn to_document(&self, ipfs: &Ipfs) -> Result<DocumentType<Self>, Error>;
 }
 
 #[async_trait::async_trait]
-pub(crate) trait ToCid<T: IpfsTypes>: Sized {
-    async fn to_cid(&self, ipfs: &Ipfs<T>) -> Result<Cid, Error>;
+pub(crate) trait ToCid: Sized {
+    async fn to_cid(&self, ipfs: &Ipfs) -> Result<Cid, Error>;
 }
 
 #[async_trait::async_trait]
-pub(crate) trait GetDag<D, I: IpfsTypes>: Sized {
-    async fn get_dag(&self, ipfs: &Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error>;
+pub(crate) trait GetDag<D>: Sized {
+    async fn get_dag(&self, ipfs: &Ipfs, timeout: Option<Duration>) -> Result<D, Error>;
 }
 
 #[async_trait::async_trait]
 #[allow(clippy::wrong_self_convention)]
-pub(crate) trait FromDocument<T: IpfsTypes, I> {
-    async fn from_document(&self, ipfs: &Ipfs<T>) -> Result<I, Error>;
+pub(crate) trait FromDocument<I> {
+    async fn from_document(&self, ipfs: &Ipfs) -> Result<I, Error>;
 }
 
 #[async_trait::async_trait]
-impl<T, I: IpfsTypes> ToDocument<I> for T
+impl<T> ToDocument for T
 where
     T: Serialize + Clone + Send + Sync,
 {
-    async fn to_document(&self, ipfs: &Ipfs<I>) -> Result<DocumentType<T>, Error> {
+    async fn to_document(&self, ipfs: &Ipfs) -> Result<DocumentType<T>, Error> {
         ToCid::to_cid(self, ipfs).await.map(|cid| cid.into())
     }
 }
 
 #[async_trait::async_trait]
-impl<D: DeserializeOwned, I: IpfsTypes> GetDag<D, I> for Cid {
-    async fn get_dag(&self, ipfs: &Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error> {
+impl<D: DeserializeOwned> GetDag<D> for Cid {
+    async fn get_dag(&self, ipfs: &Ipfs, timeout: Option<Duration>) -> Result<D, Error> {
         IpfsPath::from(*self).get_dag(ipfs, timeout).await
     }
 }
 
 #[async_trait::async_trait]
-impl<D: DeserializeOwned, I: IpfsTypes> GetDag<D, I> for IpfsPath {
-    async fn get_dag(&self, ipfs: &Ipfs<I>, timeout: Option<Duration>) -> Result<D, Error> {
+impl<D: DeserializeOwned> GetDag<D> for IpfsPath {
+    async fn get_dag(&self, ipfs: &Ipfs, timeout: Option<Duration>) -> Result<D, Error> {
         let timeout = timeout.unwrap_or(std::time::Duration::from_secs(10));
         match tokio::time::timeout(timeout, ipfs.get_dag(self.clone())).await {
             Ok(Ok(ipld)) => from_ipld(ipld)
@@ -62,22 +62,22 @@ impl<D: DeserializeOwned, I: IpfsTypes> GetDag<D, I> for IpfsPath {
 }
 
 #[async_trait::async_trait]
-impl<T, I: IpfsTypes> ToCid<I> for T
+impl<T> ToCid for T
 where
     T: Serialize + Clone + Send + Sync,
 {
-    async fn to_cid(&self, ipfs: &Ipfs<I>) -> Result<Cid, Error> {
+    async fn to_cid(&self, ipfs: &Ipfs) -> Result<Cid, Error> {
         let ipld = to_ipld(self.clone()).map_err(anyhow::Error::from)?;
         ipfs.put_dag(ipld).await.map_err(Error::from)
     }
 }
 
 #[async_trait::async_trait]
-impl<T, I: IpfsTypes> FromDocument<I, T> for DocumentType<T>
+impl<T> FromDocument<T> for DocumentType<T>
 where
     T: Sized + Send + Sync + Clone + DeserializeOwned,
 {
-    async fn from_document(&self, ipfs: &Ipfs<I>) -> Result<T, Error> {
+    async fn from_document(&self, ipfs: &Ipfs) -> Result<T, Error> {
         self.resolve(ipfs, None).await
     }
 }
@@ -86,7 +86,6 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, Copy)]
 pub struct DocumentType<T> {
     pub document: Cid,
-    #[serde(skip)]
     _marker: PhantomData<T>,
 }
 
@@ -103,11 +102,7 @@ impl<T: PartialEq> PartialEq for DocumentType<T> {
 }
 
 impl<T> DocumentType<T> {
-    pub async fn resolve<P: IpfsTypes>(
-        &self,
-        ipfs: &Ipfs<P>,
-        timeout: Option<Duration>,
-    ) -> Result<T, Error>
+    pub async fn resolve(&self, ipfs: &Ipfs, timeout: Option<Duration>) -> Result<T, Error>
     where
         T: Clone,
         T: DeserializeOwned,
@@ -116,11 +111,7 @@ impl<T> DocumentType<T> {
     }
 
     #[allow(dead_code)]
-    pub async fn resolve_or_default<P: IpfsTypes>(
-        &self,
-        ipfs: &Ipfs<P>,
-        timeout: Option<Duration>,
-    ) -> T
+    pub async fn resolve_or_default(&self, ipfs: &Ipfs, timeout: Option<Duration>) -> T
     where
         T: Clone,
         T: DeserializeOwned,
@@ -156,9 +147,9 @@ impl<T> From<Cid> for DocumentType<T> {
 // }
 
 // impl ConversationRootDocument {
-//     pub async fn get_conversation<T: IpfsTypes>(
+//     pub async fn get_conversation(
 //         &self,
-//         ipfs: Ipfs<T>,
+//         ipfs: Ipfs,
 //         conversation_id: Uuid,
 //     ) -> Result<ConversationDocument, Error> {
 //         let document_type = self
@@ -167,9 +158,9 @@ impl<T> From<Cid> for DocumentType<T> {
 //         document_type.resolve(ipfs, None).await
 //     }
 
-//     pub async fn get_conversation_document<T: IpfsTypes>(
+//     pub async fn get_conversation_document(
 //         &self,
-//         ipfs: Ipfs<T>,
+//         ipfs: Ipfs,
 //         conversation_id: Uuid,
 //     ) -> Result<DocumentType<ConversationDocument>, Error> {
 //         FuturesUnordered::from_iter(self.conversations.iter().map(|document| {
@@ -195,9 +186,9 @@ impl<T> From<Cid> for DocumentType<T> {
 //         .ok_or(Error::InvalidConversation)
 //     }
 
-//     pub async fn list_conversations<T: IpfsTypes>(
+//     pub async fn list_conversations(
 //         &self,
-//         ipfs: Ipfs<T>,
+//         ipfs: Ipfs,
 //     ) -> Result<Vec<ConversationDocument>, Error> {
 //         debug!("Loading conversations");
 //         let list = FuturesUnordered::from_iter(
@@ -212,9 +203,9 @@ impl<T> From<Cid> for DocumentType<T> {
 //         Ok(list)
 //     }
 
-//     pub async fn remove_conversation<T: IpfsTypes>(
+//     pub async fn remove_conversation(
 //         &mut self,
-//         ipfs: Ipfs<T>,
+//         ipfs: Ipfs,
 //         conversation_id: Uuid,
 //     ) -> Result<ConversationDocument, Error> {
 //         info!("Removing conversation");
@@ -239,9 +230,9 @@ impl<T> From<Cid> for DocumentType<T> {
 //         Ok(conversation)
 //     }
 
-//     pub async fn update_conversation<T: IpfsTypes>(
+//     pub async fn update_conversation(
 //         &mut self,
-//         ipfs: Ipfs<T>,
+//         ipfs: Ipfs,
 //         conversation_id: Uuid,
 //         document: ConversationDocument,
 //     ) -> Result<(), Error> {

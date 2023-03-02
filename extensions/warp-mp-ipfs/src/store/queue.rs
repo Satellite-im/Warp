@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use futures::{channel::mpsc, StreamExt};
 use libipld::IpldCodec;
-use rust_ipfs::{Ipfs, IpfsTypes};
+use rust_ipfs::{Ipfs};
 use tokio::{sync::RwLock, task::JoinHandle};
 use tracing::log::error;
 use warp::{
@@ -21,15 +21,15 @@ use super::{
     friends::{get_inbox_topic, PayloadEvent},
 };
 
-pub struct Queue<T: IpfsTypes> {
+pub struct Queue {
     path: Option<PathBuf>,
-    ipfs: Ipfs<T>,
-    entries: Arc<RwLock<HashMap<DID, QueueEntry<T>>>>,
+    ipfs: Ipfs,
+    entries: Arc<RwLock<HashMap<DID, QueueEntry>>>,
     removal: mpsc::UnboundedSender<DID>,
     did: Arc<DID>,
 }
 
-impl<T: IpfsTypes> Clone for Queue<T> {
+impl Clone for Queue {
     fn clone(&self) -> Self {
         Self {
             path: self.path.clone(),
@@ -41,8 +41,8 @@ impl<T: IpfsTypes> Clone for Queue<T> {
     }
 }
 
-impl<T: IpfsTypes> Queue<T> {
-    pub fn new(ipfs: Ipfs<T>, did: Arc<DID>, path: Option<PathBuf>) -> Queue<T> {
+impl Queue {
+    pub fn new(ipfs: Ipfs, did: Arc<DID>, path: Option<PathBuf>) -> Queue {
         let (tx, mut rx) = mpsc::unbounded();
         let queue = Queue {
             path,
@@ -118,7 +118,7 @@ impl<T: IpfsTypes> Queue<T> {
     }
 }
 
-impl<T: IpfsTypes> Queue<T> {
+impl Queue {
     pub async fn load(&self) -> Result<(), Error> {
         if let Some(path) = self.path.as_ref() {
             let data = tokio::fs::read(path.join(".request_queue")).await?;
@@ -131,8 +131,7 @@ impl<T: IpfsTypes> Queue<T> {
                 .map(Zeroizing::new)
                 .map_err(|_| anyhow::anyhow!("Error performing key exchange"))?;
 
-            let data =
-                Cipher::direct_decrypt(warp::crypto::cipher::CipherType::Aes256Gcm, &data, &prik)?;
+            let data = Cipher::direct_decrypt(&data, &prik)?;
 
             let map: HashMap<DID, PayloadEvent> = serde_json::from_slice(&data)?;
 
@@ -166,11 +165,7 @@ impl<T: IpfsTypes> Queue<T> {
                 }
             };
 
-            let data = match Cipher::direct_encrypt(
-                warp::crypto::cipher::CipherType::Aes256Gcm,
-                &bytes,
-                &prik,
-            ) {
+            let data = match Cipher::direct_encrypt(&bytes, &prik) {
                 Ok(d) => d,
                 Err(e) => {
                     error!("Error encrypting queue: {e}");
@@ -185,15 +180,15 @@ impl<T: IpfsTypes> Queue<T> {
     }
 }
 
-pub struct QueueEntry<T: IpfsTypes> {
-    ipfs: Ipfs<T>,
+pub struct QueueEntry {
+    ipfs: Ipfs,
     recipient: DID,
     did: Arc<DID>,
     item: PayloadEvent,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
 }
 
-impl<T: IpfsTypes> Clone for QueueEntry<T> {
+impl Clone for QueueEntry {
     fn clone(&self) -> Self {
         Self {
             ipfs: self.ipfs.clone(),
@@ -205,14 +200,14 @@ impl<T: IpfsTypes> Clone for QueueEntry<T> {
     }
 }
 
-impl<T: IpfsTypes> QueueEntry<T> {
+impl QueueEntry {
     pub async fn new(
-        ipfs: Ipfs<T>,
+        ipfs: Ipfs,
         recipient: DID,
         item: PayloadEvent,
         did: Arc<DID>,
         tx: mpsc::UnboundedSender<DID>,
-    ) -> QueueEntry<T> {
+    ) -> QueueEntry {
         let entry = QueueEntry {
             ipfs,
             recipient,

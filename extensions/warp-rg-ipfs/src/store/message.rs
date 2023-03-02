@@ -12,6 +12,7 @@ use futures::stream::FuturesUnordered;
 use futures::{SinkExt, Stream, StreamExt};
 use rust_ipfs::libp2p::swarm::dial_opts::DialOpts;
 use rust_ipfs::{Ipfs, IpfsTypes, SubscriptionStream};
+use rust_ipfs::{Ipfs, PeerId, SubscriptionStream};
 
 use libipld::Cid;
 use tokio::io::AsyncWriteExt;
@@ -33,7 +34,8 @@ use warp::raygun::{
 use warp::sata::Sata;
 use warp::sync::Arc;
 
-use crate::{Persistent, SpamFilter};
+use crate::store::connected_to_peer;
+use crate::SpamFilter;
 
 use super::conversation::{ConversationDocument, MessageDocument};
 use super::document::{GetDag, ToCid};
@@ -48,9 +50,9 @@ const PERMIT_AMOUNT: usize = 1;
 type ConversationSender =
     UnboundedSender<(MessagingEvents, Option<OneshotSender<Result<(), Error>>>)>;
 
-pub struct MessageStore<T: IpfsTypes> {
+pub struct MessageStore {
     // ipfs instance
-    ipfs: Ipfs<T>,
+    ipfs: Ipfs,
 
     // Write handler
     path: Option<PathBuf>,
@@ -92,7 +94,7 @@ pub struct MessageStore<T: IpfsTypes> {
     disable_sender_event_emit: Arc<AtomicBool>,
 }
 
-impl<T: IpfsTypes> Clone for MessageStore<T> {
+impl Clone for MessageStore {
     fn clone(&self) -> Self {
         Self {
             ipfs: self.ipfs.clone(),
@@ -117,9 +119,9 @@ impl<T: IpfsTypes> Clone for MessageStore<T> {
 }
 
 #[allow(clippy::too_many_arguments)]
-impl<T: IpfsTypes> MessageStore<T> {
+impl MessageStore {
     pub async fn new(
-        ipfs: Ipfs<T>,
+        ipfs: Ipfs,
         path: Option<PathBuf>,
         account: Box<dyn MultiPass>,
         filesystem: Option<Box<dyn Constellation>>,
@@ -135,10 +137,10 @@ impl<T: IpfsTypes> MessageStore<T> {
         ): (bool, bool, bool, bool, bool),
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
-        let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
-            true => path,
-            false => None,
-        };
+        // let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
+        //     true => path,
+        //     false => None,
+        // };
 
         if let Some(path) = path.as_ref() {
             if !path.exists() {
@@ -609,7 +611,7 @@ impl<T: IpfsTypes> MessageStore<T> {
     }
 }
 
-impl<T: IpfsTypes> MessageStore<T> {
+impl MessageStore {
     pub async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation, Error> {
         if self.with_friends.load(Ordering::SeqCst) {
             self.account.has_friend(did_key).await?;
