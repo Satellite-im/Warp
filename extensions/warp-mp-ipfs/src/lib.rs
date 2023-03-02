@@ -4,10 +4,8 @@ pub mod store;
 use config::MpIpfsConfig;
 use futures::channel::mpsc::unbounded;
 use futures::StreamExt;
-use ipfs::libp2p::mplex::MplexConfig;
-use ipfs::libp2p::swarm::{ConnectionLimits, SwarmEvent};
-use ipfs::libp2p::yamux::{WindowUpdateMode, YamuxConfig};
-use ipfs::p2p::{IdentifyConfiguration, TransportConfig};
+use ipfs::libp2p::swarm::SwarmEvent;
+use ipfs::p2p::{ConnectionLimits, IdentifyConfiguration, TransportConfig};
 use rust_ipfs as ipfs;
 use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,7 +26,7 @@ use warp::pocket_dimension::PocketDimension;
 use warp::tesseract::Tesseract;
 use warp::{Extension, SingleHandle};
 
-use ipfs::{Ipfs, IpfsOptions, IpfsTypes, Keypair, Protocol, TestTypes, Types, UninitializedIpfs};
+use ipfs::{Ipfs, IpfsOptions, Keypair, Protocol, StoragePath, UninitializedIpfs};
 use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity, IdentityUpdate, Relationship};
@@ -41,40 +39,23 @@ use crate::config::Bootstrap;
 use crate::store::discovery::Discovery;
 use crate::store::document::DocumentType;
 
-pub type Temporary = TestTypes;
-pub type Persistent = Types;
-
-pub struct IpfsIdentity<T: IpfsTypes> {
+#[derive(Clone)]
+pub struct IpfsIdentity {
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     config: MpIpfsConfig,
-    ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
+    ipfs: Arc<RwLock<Option<Ipfs>>>,
     tesseract: Tesseract,
-    friend_store: Arc<RwLock<Option<FriendsStore<T>>>>,
-    identity_store: Arc<RwLock<Option<IdentityStore<T>>>>,
+    friend_store: Arc<RwLock<Option<FriendsStore>>>,
+    identity_store: Arc<RwLock<Option<IdentityStore>>>,
     initialized: Arc<AtomicBool>,
     tx: broadcast::Sender<MultiPassEventKind>,
-}
-
-impl<T: IpfsTypes> Clone for IpfsIdentity<T> {
-    fn clone(&self) -> Self {
-        Self {
-            cache: self.cache.clone(),
-            config: self.config.clone(),
-            ipfs: self.ipfs.clone(),
-            tesseract: self.tesseract.clone(),
-            friend_store: self.friend_store.clone(),
-            identity_store: self.identity_store.clone(),
-            initialized: self.initialized.clone(),
-            tx: self.tx.clone(),
-        }
-    }
 }
 
 pub async fn ipfs_identity_persistent(
     config: MpIpfsConfig,
     tesseract: Tesseract,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-) -> anyhow::Result<IpfsIdentity<Persistent>> {
+) -> anyhow::Result<IpfsIdentity> {
     if config.path.is_none() {
         anyhow::bail!("Path is required for identity to be persistent")
     }
@@ -84,7 +65,7 @@ pub async fn ipfs_identity_temporary(
     config: Option<MpIpfsConfig>,
     tesseract: Tesseract,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-) -> anyhow::Result<IpfsIdentity<Temporary>> {
+) -> anyhow::Result<IpfsIdentity> {
     if let Some(config) = &config {
         if config.path.is_some() {
             anyhow::bail!("Path cannot be set")
@@ -93,12 +74,12 @@ pub async fn ipfs_identity_temporary(
     IpfsIdentity::new(config.unwrap_or_default(), tesseract, cache).await
 }
 
-impl<T: IpfsTypes> IpfsIdentity<T> {
+impl IpfsIdentity {
     pub async fn new(
         config: MpIpfsConfig,
         tesseract: Tesseract,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-    ) -> anyhow::Result<IpfsIdentity<T>> {
+    ) -> anyhow::Result<IpfsIdentity> {
         let (tx, _) = broadcast::channel(1024);
         trace!("Initializing Multipass");
 
@@ -245,47 +226,32 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             }),
             swarm_configuration: Some(swarm_configuration),
             transport_configuration: Some(TransportConfig {
-                yamux_config: {
-                    let mut config = YamuxConfig::default();
-                    config.set_max_buffer_size(16 * 1024 * 1024);
-                    config.set_receive_window_size(16 * 1024 * 1024);
-                    config.set_window_update_mode(WindowUpdateMode::on_receive());
-                    config
-                },
-                mplex_config: {
-                    let mut config = MplexConfig::default();
-                    config.set_max_buffer_size(usize::MAX);
-                    config
-                },
+                yamux_max_buffer_size: 16 * 1024 * 1024,
+                yamux_receive_window_size: 16 * 1024 * 1024,
+                yamux_update_mode: 0,
+                mplex_max_buffer_size: usize::MAX / 2,
+                enable_quic: false,
                 ..Default::default()
             }),
             port_mapping: config.ipfs_setting.portmapping,
             ..Default::default()
         };
 
-        trace!("Ipfs Opt: {opts:?}");
-
-        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
+        if let Some(path) = self.config.path.as_ref() {
             info!("Instance will be persistent");
-            // Create directory if it doesnt exist
-            let path = self
-                .config
-                .path
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("\"path\" must be set"))?;
-
             info!("Path set: {}", path.display());
-            opts.ipfs_path = path.clone();
-            if !opts.ipfs_path.exists() {
+
+            if !path.is_dir() {
                 warn!("Path doesnt exist... creating");
                 tokio::fs::create_dir(path).await?;
             }
+            opts.ipfs_path = StoragePath::Disk(path.clone());
         }
 
         let (nat_channel_tx, mut nat_channel_rx) = unbounded();
 
         info!("Starting ipfs");
-        let ipfs = UninitializedIpfs::<T>::with_opt(opts)
+        let ipfs = UninitializedIpfs::with_opt(opts)
             // We check the events from the swarm for autonat
             // So we can determine our nat status when it does change
             .swarm_events({
@@ -433,7 +399,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         Ok(())
     }
 
-    pub async fn friend_store(&self) -> Result<FriendsStore<T>, Error> {
+    pub async fn friend_store(&self) -> Result<FriendsStore, Error> {
         self.identity_store(true).await?;
         self.friend_store
             .read()
@@ -441,7 +407,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             .ok_or(Error::MultiPassExtensionUnavailable)
     }
 
-    pub async fn identity_store(&self, created: bool) -> Result<IdentityStore<T>, Error> {
+    pub async fn identity_store(&self, created: bool) -> Result<IdentityStore, Error> {
         let store = self.identity_store_sync()?;
         if created && !store.local_id_created().await {
             return Err(Error::IdentityNotCreated);
@@ -449,7 +415,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         Ok(store)
     }
 
-    pub fn identity_store_sync(&self) -> Result<IdentityStore<T>, Error> {
+    pub fn identity_store_sync(&self) -> Result<IdentityStore, Error> {
         if !self.tesseract.is_unlock() {
             return Err(Error::TesseractLocked);
         }
@@ -462,7 +428,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             .ok_or(Error::MultiPassExtensionUnavailable)
     }
 
-    pub fn ipfs(&self) -> Result<Ipfs<T>, Error> {
+    pub fn ipfs(&self) -> Result<Ipfs, Error> {
         self.ipfs
             .read()
             .clone()
@@ -505,7 +471,7 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
     }
 }
 
-impl<T: IpfsTypes> Extension for IpfsIdentity<T> {
+impl Extension for IpfsIdentity {
     fn id(&self) -> String {
         "warp-mp-ipfs".to_string()
     }
@@ -518,14 +484,14 @@ impl<T: IpfsTypes> Extension for IpfsIdentity<T> {
     }
 }
 
-impl<T: IpfsTypes> SingleHandle for IpfsIdentity<T> {
+impl SingleHandle for IpfsIdentity {
     fn handle(&self) -> Result<Box<dyn Any>, Error> {
         self.ipfs().map(|ipfs| Box::new(ipfs) as Box<dyn Any>)
     }
 }
 
 #[async_trait::async_trait]
-impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
+impl MultiPass for IpfsIdentity {
     async fn create_identity(
         &mut self,
         username: Option<&str>,
@@ -684,7 +650,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 let cid = store
                     .store_photo(
                         futures::stream::once(async move {
-                            serde_json::to_vec(&data).unwrap_or_default()
+                            Ok::<_, std::io::Error>(serde_json::to_vec(&data).unwrap_or_default())
                         })
                         .boxed(),
                         Some(2 * 1024 * 1024),
@@ -727,9 +693,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                     });
                 }
 
-                let stream = ReaderStream::new(file)
-                    .filter_map(|result| async { result.ok() })
-                    .map(|data| data.into());
+                let stream = ReaderStream::new(file).map(|result| result.map(|data| data.into()));
 
                 let cid = store
                     .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
@@ -762,7 +726,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                 let cid = store
                     .store_photo(
                         futures::stream::once(async move {
-                            serde_json::to_vec(&data).unwrap_or_default()
+                            Ok::<_, std::io::Error>(serde_json::to_vec(&data).unwrap_or_default())
                         })
                         .boxed(),
                         Some(2 * 1024 * 1024),
@@ -804,10 +768,8 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
                     });
                 }
 
-                let stream = ReaderStream::new(file)
-                    .filter_map(|result| async { result.ok() })
-                    .map(|data| data.into());
-
+                let stream = ReaderStream::new(file).map(|result| result.map(|data| data.into()));
+                
                 let cid = store
                     .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
                     .await?;
@@ -865,7 +827,7 @@ impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
+impl Friends for IpfsIdentity {
     async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.send_request(pubkey).await
@@ -943,7 +905,7 @@ impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: IpfsTypes> FriendsEvent for IpfsIdentity<T> {
+impl FriendsEvent for IpfsIdentity {
     async fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
         let mut rx = self.tx.subscribe();
 
@@ -962,7 +924,7 @@ impl<T: IpfsTypes> FriendsEvent for IpfsIdentity<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
+impl IdentityInformation for IpfsIdentity {
     async fn identity_status(&self, did: &DID) -> Result<identity::IdentityStatus, Error> {
         let store = self.identity_store(true).await?;
         store.identity_status(did).await
@@ -1002,7 +964,7 @@ impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
 
 pub mod ffi {
     use crate::config::MpIpfsConfig;
-    use crate::{IpfsIdentity, Persistent, Temporary};
+    use crate::IpfsIdentity;
     use warp::async_on_block;
     use warp::error::Error;
     use warp::ffi::FFIResult;
@@ -1025,19 +987,20 @@ pub mod ffi {
             true => Tesseract::default(),
         };
 
-        let config = match config.is_null() {
+        let mut config = match config.is_null() {
             true => MpIpfsConfig::testing(true),
             false => (*config).clone(),
         };
+
+        config.path = None;
 
         let cache = match pocketdimension.is_null() {
             true => None,
             false => Some(&*pocketdimension),
         };
 
-        let future = async move {
-            IpfsIdentity::<Temporary>::new(config, tesseract, cache.map(|c| c.inner())).await
-        };
+        let future =
+            async move { IpfsIdentity::new(config, tesseract, cache.map(|c| c.inner())).await };
 
         let account = match async_on_block(future) {
             Ok(identity) => identity,
@@ -1074,7 +1037,7 @@ pub mod ffi {
             false => Some(&*pocketdimension),
         };
 
-        let account = match async_on_block(IpfsIdentity::<Persistent>::new(
+        let account = match async_on_block(IpfsIdentity::new(
             config,
             tesseract,
             cache.map(|c| c.inner()),

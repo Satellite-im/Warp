@@ -4,7 +4,6 @@
 use crate::{
     config::Discovery as DiscoveryConfig,
     store::{did_to_libp2p_pub, discovery::Discovery, IdentityPayload},
-    Persistent,
 };
 use futures::{
     channel::{mpsc, oneshot},
@@ -12,7 +11,7 @@ use futures::{
     FutureExt, StreamExt,
 };
 use ipfs::{
-    libp2p::gossipsub::GossipsubMessage, Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId,
+    libp2p::gossipsub::Message as GossipsubMessage, Ipfs, IpfsPath, Keypair, Multiaddr, PeerId,
 };
 use libipld::{
     serde::{from_ipld, to_ipld},
@@ -52,8 +51,8 @@ use super::{
     libp2p_pub_to_did, IDENTITY_BROADCAST,
 };
 
-pub struct IdentityStore<T: IpfsTypes> {
-    ipfs: Ipfs<T>,
+pub struct IdentityStore {
+    ipfs: Ipfs,
 
     path: Option<PathBuf>,
 
@@ -90,7 +89,7 @@ pub struct IdentityStore<T: IpfsTypes> {
     task_send: Arc<tokio::sync::RwLock<Option<mpsc::UnboundedSender<RootDocumentEvents>>>>,
 }
 
-impl<T: IpfsTypes> Clone for IdentityStore<T> {
+impl Clone for IdentityStore {
     fn clone(&self) -> Self {
         Self {
             ipfs: self.ipfs.clone(),
@@ -135,9 +134,9 @@ pub enum LookupBy {
     ShortId(String),
 }
 
-impl<T: IpfsTypes> IdentityStore<T> {
+impl IdentityStore {
     pub async fn new(
-        ipfs: Ipfs<T>,
+        ipfs: Ipfs,
         path: Option<PathBuf>,
         tesseract: Tesseract,
         interval: u64,
@@ -149,11 +148,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
             bool,
         ),
     ) -> Result<Self, Error> {
-        let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
-            true => path,
-            false => None,
-        };
-
         if let Some(path) = path.as_ref() {
             if !path.exists() {
                 tokio::fs::create_dir_all(path).await?;
@@ -949,7 +943,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     pub async fn store_photo(
         &mut self,
-        stream: BoxStream<'static, Vec<u8>>,
+        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
         limit: Option<usize>,
     ) -> Result<Cid, Error> {
         let ipfs = self.ipfs.clone();

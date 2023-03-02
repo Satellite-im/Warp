@@ -10,7 +10,7 @@ mod test {
     use warp::tesseract::Tesseract;
     use warp_mp_ipfs::config::Discovery;
     use warp_mp_ipfs::ipfs_identity_temporary;
-    use warp_rg_ipfs::{IpfsMessaging, Temporary};
+    use warp_rg_ipfs::{IpfsMessaging};
 
     async fn create_account_and_chat(
         username: Option<&str>,
@@ -29,7 +29,7 @@ mod test {
         let identity = account.get_own_identity().await?;
 
         let raygun =
-            Box::new(IpfsMessaging::<Temporary>::new(None, account.clone(), None, None).await?)
+            Box::new(IpfsMessaging::new(None, account.clone(), None, None).await?)
                 as Box<_>;
         Ok((account, raygun, did, identity))
     }

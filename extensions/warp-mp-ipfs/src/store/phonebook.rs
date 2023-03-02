@@ -10,7 +10,7 @@ use ipfs::Multiaddr;
 use tokio::sync::broadcast;
 use tokio::sync::RwLock;
 
-use ipfs::{Ipfs, IpfsTypes};
+use ipfs::{Ipfs};
 use tracing::log::error;
 use warp::crypto::DID;
 use warp::error::Error;
@@ -23,16 +23,16 @@ use super::PeerConnectionType;
 
 /// Used to handle friends connectivity status
 #[allow(clippy::type_complexity)]
-pub struct PhoneBook<T: IpfsTypes> {
-    ipfs: Ipfs<T>,
+pub struct PhoneBook {
+    ipfs: Ipfs,
     discovery: Arc<RwLock<Discovery>>,
     relays: Arc<RwLock<Vec<Multiaddr>>>,
     emit_event: Arc<AtomicBool>,
-    entries: Arc<RwLock<HashMap<DID, PhoneBookEntry<T>>>>,
+    entries: Arc<RwLock<HashMap<DID, PhoneBookEntry>>>,
     event: broadcast::Sender<MultiPassEventKind>,
 }
 
-impl<T: IpfsTypes> Clone for PhoneBook<T> {
+impl Clone for PhoneBook {
     fn clone(&self) -> Self {
         Self {
             ipfs: self.ipfs.clone(),
@@ -45,8 +45,8 @@ impl<T: IpfsTypes> Clone for PhoneBook<T> {
     }
 }
 
-impl<T: IpfsTypes> PhoneBook<T> {
-    pub fn new(ipfs: Ipfs<T>, event: broadcast::Sender<MultiPassEventKind>) -> Self {
+impl PhoneBook {
+    pub fn new(ipfs: Ipfs, event: broadcast::Sender<MultiPassEventKind>) -> Self {
         let discovery = Arc::new(RwLock::new(Discovery::None));
         let relays = Default::default();
         let emit_event = Arc::new(AtomicBool::new(false));
@@ -137,8 +137,8 @@ impl<T: IpfsTypes> PhoneBook<T> {
     }
 }
 
-pub struct PhoneBookEntry<T: IpfsTypes> {
-    ipfs: Ipfs<T>,
+pub struct PhoneBookEntry {
+    ipfs: Ipfs,
     did: DID,
     connection_type: Arc<RwLock<PeerConnectionType>>,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
@@ -148,21 +148,21 @@ pub struct PhoneBookEntry<T: IpfsTypes> {
     emit_event: Arc<AtomicBool>,
 }
 
-impl<T: IpfsTypes> PartialEq for PhoneBookEntry<T> {
+impl PartialEq for PhoneBookEntry {
     fn eq(&self, other: &Self) -> bool {
         self.did.eq(&other.did)
     }
 }
 
-impl<T: IpfsTypes> Eq for PhoneBookEntry<T> {}
+impl Eq for PhoneBookEntry {}
 
-impl<T: IpfsTypes> core::hash::Hash for PhoneBookEntry<T> {
+impl core::hash::Hash for PhoneBookEntry {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.did.hash(state);
     }
 }
 
-impl<T: IpfsTypes> Clone for PhoneBookEntry<T> {
+impl Clone for PhoneBookEntry {
     fn clone(&self) -> Self {
         Self {
             ipfs: self.ipfs.clone(),
@@ -177,9 +177,9 @@ impl<T: IpfsTypes> Clone for PhoneBookEntry<T> {
     }
 }
 
-impl<T: IpfsTypes> PhoneBookEntry<T> {
+impl PhoneBookEntry {
     pub async fn new(
-        ipfs: Ipfs<T>,
+        ipfs: Ipfs,
         did: DID,
         event: broadcast::Sender<MultiPassEventKind>,
         emit_event: Arc<AtomicBool>,
