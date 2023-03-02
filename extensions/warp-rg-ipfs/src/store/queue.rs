@@ -4,7 +4,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use futures::FutureExt;
 use futures::{channel::mpsc, StreamExt};
-use rust_ipfs::{Ipfs, IpfsTypes};
+use rust_ipfs::Ipfs;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 use tokio::{sync::RwLock, task::JoinHandle};
@@ -36,16 +36,16 @@ pub enum QueueEntryType {
     Messaging(Uuid, Option<Uuid>),
 }
 
-pub struct Queue<T: IpfsTypes> {
+pub struct Queue {
     path: Option<PathBuf>,
     did: Arc<DID>,
-    ipfs: Ipfs<T>,
+    ipfs: Ipfs,
     removal: mpsc::UnboundedSender<(QueueEntryType, DID)>,
     entries: Arc<RwLock<HashMap<DID, BTreeSet<QueueEntry>>>>,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
 }
 
-impl<T: IpfsTypes> Clone for Queue<T> {
+impl Clone for Queue {
     fn clone(&self) -> Self {
         Self {
             path: self.path.clone(),
@@ -58,8 +58,8 @@ impl<T: IpfsTypes> Clone for Queue<T> {
     }
 }
 
-impl<T: IpfsTypes> Queue<T> {
-    pub async fn new(ipfs: Ipfs<T>, did: Arc<DID>, path: Option<PathBuf>) -> Queue<T> {
+impl Queue {
+    pub async fn new(ipfs: Ipfs, did: Arc<DID>, path: Option<PathBuf>) -> Queue {
         let (tx, mut rx) = mpsc::unbounded();
 
         if let Some(path) = path.as_ref() {
@@ -229,7 +229,7 @@ impl<T: IpfsTypes> Queue<T> {
     }
 }
 
-impl<T: IpfsTypes> Queue<T> {
+impl Queue {
     pub async fn load(&self) -> Result<(), Error> {
         let Some(path) = self.path.as_ref() else {
             // Since a path was not provided, this will assume that everything will be in-memory
@@ -260,11 +260,7 @@ impl<T: IpfsTypes> Queue<T> {
                     .map(Zeroizing::new)
                     .map_err(|_| anyhow::anyhow!("Error performing key exchange"))?;
 
-                let data = Cipher::direct_decrypt(
-                    warp::crypto::cipher::CipherType::Aes256Gcm,
-                    &data,
-                    &prik,
-                )?;
+                let data = Cipher::direct_decrypt(&data, &prik)?;
 
                 let Ok(entry) = QueueEntry::from_data(self.ipfs.clone(), self.did.clone(), self.removal.clone(), &data).await else {
                     continue
@@ -369,8 +365,8 @@ impl Clone for QueueEntry {
 
 impl QueueEntry {
     #[allow(clippy::too_many_arguments)]
-    pub async fn new<T: IpfsTypes>(
-        ipfs: Ipfs<T>,
+    pub async fn new(
+        ipfs: Ipfs,
         seq: usize,
         id: Option<Uuid>,
         path: Option<PathBuf>,
@@ -399,8 +395,8 @@ impl QueueEntry {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn from_data<T: IpfsTypes>(
-        ipfs: Ipfs<T>,
+    pub async fn from_data(
+        ipfs: Ipfs,
         did: Arc<DID>,
         tx: mpsc::UnboundedSender<(QueueEntryType, DID)>,
         data: &[u8],
@@ -427,10 +423,10 @@ impl QueueEntry {
         self.entry_type
     }
 
-    pub async fn task<T: IpfsTypes>(
+    pub async fn task(
         &self,
         did_key: Arc<DID>,
-        ipfs: Ipfs<T>,
+        ipfs: Ipfs,
         tx: mpsc::UnboundedSender<(QueueEntryType, DID)>,
     ) {
         let task = tokio::spawn({
@@ -547,8 +543,7 @@ impl QueueEntry {
                 }
             };
 
-            let data =
-                Cipher::direct_encrypt(warp::crypto::cipher::CipherType::Aes256Gcm, &bytes, &prik)?;
+            let data = Cipher::direct_encrypt(&bytes, &prik)?;
 
             tokio::fs::write(path.join(self.id.to_string()), data).await?;
         }

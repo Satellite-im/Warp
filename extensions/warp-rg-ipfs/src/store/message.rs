@@ -11,8 +11,7 @@ use futures::channel::oneshot::Sender as OneshotSender;
 use futures::stream::FuturesUnordered;
 use futures::{SinkExt, Stream, StreamExt};
 use rust_ipfs::libp2p::swarm::dial_opts::DialOpts;
-use rust_ipfs::{Ipfs, IpfsTypes, SubscriptionStream};
-use rust_ipfs::{Ipfs, PeerId, SubscriptionStream};
+use rust_ipfs::{Ipfs, SubscriptionStream};
 
 use libipld::Cid;
 use tokio::io::AsyncWriteExt;
@@ -34,7 +33,6 @@ use warp::raygun::{
 use warp::sata::Sata;
 use warp::sync::Arc;
 
-use crate::store::connected_to_peer;
 use crate::SpamFilter;
 
 use super::conversation::{ConversationDocument, MessageDocument};
@@ -77,7 +75,7 @@ pub struct MessageStore {
     stream_event_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
 
     // Queue
-    queue: Queue<T>,
+    queue: Queue,
 
     // DID
     did: Arc<DID>,
