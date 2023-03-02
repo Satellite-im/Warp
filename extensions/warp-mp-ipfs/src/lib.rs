@@ -804,11 +804,11 @@ impl MultiPass for IpfsIdentity {
             IdentityUpdate::StatusMessage(status) => {
                 if let Some(status) = status.clone() {
                     let len = status.chars().count();
-                    if len > 512 {
+                    if len == 0 || len > 512 {
                         return Err(Error::InvalidLength {
                             context: "status".into(),
                             current: len,
-                            minimum: None,
+                            minimum: Some(1),
                             maximum: Some(512),
                         });
                     }
