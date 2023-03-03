@@ -718,7 +718,7 @@ async fn main() -> anyhow::Result<()> {
 
                             let message = vec![messages.join(" ").to_string()];
                             let conversation_id = topic.read().clone();
-                            if let Err(e) = chat.send(conversation_id, Some(message_id), message).await {
+                            if let Err(e) = chat.edit(conversation_id, message_id, message).await {
                                 writeln!(stdout, "Error: {e}")?;
                                 continue
                             }
@@ -1016,7 +1016,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                         _ => {
                             if !line.is_empty() {
-                                if let Err(e) = chat.send(*topic.read(), None, vec![line.to_string()]).await {
+                                if let Err(e) = chat.send(*topic.read(), vec![line.to_string()]).await {
                                     writeln!(stdout, "Error sending message: {e}")?;
                                     continue
                                 }
