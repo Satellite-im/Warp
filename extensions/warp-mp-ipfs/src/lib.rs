@@ -750,9 +750,9 @@ impl MultiPass for IpfsIdentity {
 
                 let cid = store
                     .store_photo(
-                        futures::stream::once(async move {
-                            Ok::<_, std::io::Error>(serde_json::to_vec(&data).unwrap_or_default())
-                        })
+                        futures::stream::iter(Ok::<_, std::io::Error>(Ok(serde_json::to_vec(
+                            &data,
+                        )?)))
                         .boxed(),
                         Some(2 * 1024 * 1024),
                     )
