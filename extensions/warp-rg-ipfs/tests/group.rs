@@ -531,7 +531,7 @@ mod test {
         let mut conversation_d = chat_c.get_conversation_stream(id_d).await?;
 
 
-        chat_a.send(id_a, None, vec!["Hello, World".into()]).await?;
+        chat_a.send(id_a, vec!["Hello, World".into()]).await?;
 
         let message_a = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
