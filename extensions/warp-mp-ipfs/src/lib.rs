@@ -3,7 +3,7 @@ pub mod store;
 
 use config::MpIpfsConfig;
 use futures::channel::mpsc::unbounded;
-use futures::StreamExt;
+use futures::{AsyncReadExt, StreamExt};
 use ipfs::libp2p::swarm::SwarmEvent;
 use ipfs::p2p::{ConnectionLimits, IdentifyConfiguration, TransportConfig};
 use rust_ipfs as ipfs;
@@ -13,7 +13,7 @@ use std::time::Duration;
 use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
 use tokio::sync::broadcast;
-use tokio_util::io::ReaderStream;
+use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::log::{error, info, trace, warn};
 use warp::crypto::did_key::Generate;
 use warp::data::DataType;
@@ -698,7 +698,24 @@ impl MultiPass for IpfsIdentity {
                     });
                 }
 
-                let stream = ReaderStream::new(file).map(|result| result.map(|data| data.into()));
+                let stream = async_stream::stream! {
+                    let mut reader = file.compat();
+                    let mut buffer = vec![0u8; 512];
+                    loop {
+                        match reader.read(&mut buffer).await {
+                            Ok(512) => yield Ok(buffer.clone()),
+                            Ok(_n) => {
+                                yield Ok(buffer.clone());
+                                break;
+                            },
+                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                            Err(e) => {
+                                yield Err(e);
+                                break;
+                            }
+                        }
+                    }
+                };
 
                 let cid = store
                     .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
@@ -779,7 +796,24 @@ impl MultiPass for IpfsIdentity {
                     });
                 }
 
-                let stream = ReaderStream::new(file).map(|result| result.map(|data| data.into()));
+                let stream = async_stream::stream! {
+                    let mut reader = file.compat();
+                    let mut buffer = vec![0u8; 512];
+                    loop {
+                        match reader.read(&mut buffer).await {
+                            Ok(512) => yield Ok(buffer.clone()),
+                            Ok(_n) => {
+                                yield Ok(buffer.clone());
+                                break;
+                            },
+                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                            Err(e) => {
+                                yield Err(e);
+                                break;
+                            }
+                        }
+                    }
+                };
 
                 let cid = store
                     .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
