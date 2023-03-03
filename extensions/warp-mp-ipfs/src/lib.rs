@@ -23,7 +23,7 @@ use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::module::Module;
 use warp::pocket_dimension::PocketDimension;
-use warp::tesseract::Tesseract;
+use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
 use ipfs::{Ipfs, IpfsOptions, Keypair, Protocol, StoragePath, UninitializedIpfs};
@@ -97,8 +97,11 @@ impl IpfsIdentity {
         if !identity.tesseract.is_unlock() {
             let mut inner = identity.clone();
             tokio::spawn(async move {
-                while !inner.tesseract.is_unlock() {
-                    tokio::time::sleep(Duration::from_nanos(50)).await
+                let mut stream = inner.tesseract.subscribe();
+                while let Some(event) = stream.next().await {
+                    if matches!(event, TesseractEvent::Unlocked) {
+                        break;
+                    }
                 }
                 if let Err(_e) = inner.initialize_store(false).await {}
             });
