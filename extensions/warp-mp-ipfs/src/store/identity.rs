@@ -7,7 +7,7 @@ use crate::{
 };
 use futures::{
     channel::{mpsc, oneshot},
-    stream::BoxStream,
+    stream::{BoxStream, self},
     FutureExt, StreamExt,
 };
 use ipfs::{
@@ -643,6 +643,8 @@ impl IdentityStore {
                 Error::OtherWithContext("Identity store may not be initialized".into())
             })?;
 
+        let mut preidentity = vec![];
+
         let idents_docs = match &lookup {
             //Note: If this returns more than one identity, then its likely due to frontend cache not clearing out.
             //TODO: Maybe move cache into the backend to serve as a secondary cache
@@ -668,6 +670,16 @@ impl IdentityStore {
                 let cache = self.cache().await;
 
                 for pubkey in list {
+                    if own_did.eq(pubkey) {
+                        let own_identity = match self.own_identity().await {
+                            Ok(id) => id,
+                            Err(_) => continue,
+                        };
+                        if !preidentity.contains(&own_identity) {
+                            preidentity.push(own_identity);
+                        }
+                        continue;
+                    }
                     if !self.discovery.contains(pubkey).await {
                         self.discovery.insert(&self.ipfs, pubkey).await?;
                     }
@@ -738,6 +750,7 @@ impl IdentityStore {
 
         let list = future_list
             .filter_map(|res| async { res.ok() })
+            .chain(stream::iter(preidentity))
             .collect::<Vec<_>>()
             .await;
 
