@@ -992,7 +992,10 @@ impl IdentityStore {
             .cid()
             .copied()
             .ok_or(Error::Other)?;
-        ipfs.insert_pin(&cid, true).await?;
+
+        if !ipfs.is_pinned(&cid).await? {
+            ipfs.insert_pin(&cid, true).await?;
+        }
 
         Ok(cid)
     }
