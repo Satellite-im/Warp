@@ -130,6 +130,7 @@ pub enum RootDocumentEvents {
 #[derive(Debug, Clone)]
 pub enum LookupBy {
     DidKey(DID),
+    DidKeys(Vec<DID>),
     Username(String),
     ShortId(String),
 }
@@ -661,6 +662,23 @@ impl IdentityStore {
                     .filter(|ident| ident.did == *pubkey)
                     .cloned()
                     .collect::<Vec<_>>()
+            }
+            LookupBy::DidKeys(list) => {
+                let mut items = vec![];
+                let cache = self.cache().await;
+
+                for pubkey in list {
+                    if !self.discovery.contains(pubkey).await {
+                        self.discovery.insert(&self.ipfs, pubkey).await?;
+                    }
+
+                    if let Some(cache) = cache.iter().find(|cache| cache.did.eq(pubkey)) {
+                        if !items.contains(cache) {
+                            items.push(cache.clone());
+                        }
+                    }
+                }
+                items
             }
             LookupBy::Username(username) if username.contains('#') => {
                 let cache = self.cache().await;
