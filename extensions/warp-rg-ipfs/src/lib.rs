@@ -5,7 +5,7 @@ mod store;
 use crate::spam_filter::SpamFilter;
 use config::RgIpfsConfig;
 use futures::StreamExt;
-use rust_ipfs::{Ipfs};
+use rust_ipfs::Ipfs;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -289,17 +289,19 @@ impl RayGun for IpfsMessaging {
             .await
     }
 
-    async fn send(
+    async fn send(&mut self, conversation_id: Uuid, value: Vec<String>) -> Result<()> {
+        let mut store = self.messaging_store()?;
+        store.send_message(conversation_id, value).await
+    }
+
+    async fn edit(
         &mut self,
         conversation_id: Uuid,
-        message_id: Option<Uuid>,
+        message_id: Uuid,
         value: Vec<String>,
     ) -> Result<()> {
         let mut store = self.messaging_store()?;
-        match message_id {
-            Some(id) => store.edit_message(conversation_id, id, value).await,
-            None => store.send_message(conversation_id, value).await,
-        }
+        store.edit_message(conversation_id, message_id, value).await
     }
 
     async fn delete(&mut self, conversation_id: Uuid, message_id: Option<Uuid>) -> Result<()> {
