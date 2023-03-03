@@ -2,8 +2,10 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
+use warp::crypto::DID;
 use std::io::Write;
 use std::path::PathBuf;
+use std::str::FromStr;
 use tracing_subscriber::EnvFilter;
 use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
 use warp::multipass::MultiPass;
@@ -671,20 +673,18 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                 },
                                 Some("publickey") | Some("public-key") | Some("didkey") | Some("did-key") | Some("did") => {
-                                    let pk = match cmd_line.next() {
-                                        Some(pk) => match pk.to_string().try_into() {
+                                    let mut keys = vec![];
+                                    for item in cmd_line.by_ref() {
+                                        let pk = match DID::from_str(item) {
                                             Ok(did) => did,
                                             Err(e) => {
                                                 writeln!(stdout, "Error Decoding Key: {e}")?;
                                                 continue
                                             }
-                                        }
-                                        None => {
-                                            writeln!(stdout, "Public key required")?;
-                                            continue;
-                                        }
-                                    };
-                                    match account.get_identity(Identifier::did_key(pk)).await {
+                                        };
+                                        keys.push(pk);
+                                    }
+                                    match account.get_identity(Identifier::did_keys(keys)).await {
                                         Ok(identity) => identity,
                                         Err(e) => {
                                             writeln!(stdout, "Error obtaining identity by public key: {e}")?;
