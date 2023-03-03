@@ -7,7 +7,7 @@ use crate::{
 };
 use futures::{
     channel::{mpsc, oneshot},
-    stream::{BoxStream, self},
+    stream::{self, BoxStream},
     FutureExt, StreamExt,
 };
 use ipfs::{
@@ -742,17 +742,14 @@ impl IdentityStore {
                 .collect::<Vec<_>>(),
         };
 
-        let future_list =
-            futures::stream::FuturesUnordered::from_iter(idents_docs.iter().map(|doc| {
-                doc.resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
-                    .boxed()
-            }));
-
-        let list = future_list
-            .filter_map(|res| async { res.ok() })
-            .chain(stream::iter(preidentity))
-            .collect::<Vec<_>>()
-            .await;
+        let list = futures::stream::FuturesUnordered::from_iter(idents_docs.iter().map(|doc| {
+            doc.resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
+                .boxed()
+        }))
+        .filter_map(|res| async { res.ok() })
+        .chain(stream::iter(preidentity))
+        .collect::<Vec<_>>()
+        .await;
 
         Ok(list)
     }
