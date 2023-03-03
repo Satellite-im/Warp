@@ -597,7 +597,7 @@ impl MultiPass for IpfsIdentity {
                 }
                 store.lookup(LookupBy::Username(username)).await
             }
-            Identifier::DIDList(_list) => return Err(Error::Unimplemented),
+            Identifier::DIDList(list) => store.lookup(LookupBy::DidKeys(list)).await,
             Identifier::Own => return store.own_identity().await.map(|i| vec![i]),
         }?;
         trace!("Found {} identities", idents.len());
