@@ -2,6 +2,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi;
 
+use futures::{stream::BoxStream, StreamExt};
 use std::{collections::HashMap, fmt::Debug, io::ErrorKind, sync::atomic::Ordering};
 use warp_derive::FFIFree;
 use zeroize::Zeroize;
@@ -36,10 +37,19 @@ pub struct Tesseract {
     check: Arc<AtomicBool>,
     unlock: Arc<AtomicBool>,
     soft_unlock: Arc<AtomicBool>,
+    event_tx: async_broadcast::Sender<TesseractEvent>,
+    event_rx: async_broadcast::Receiver<TesseractEvent>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TesseractEvent {
+    Unlocked,
+    Locked,
 }
 
 impl Default for Tesseract {
     fn default() -> Self {
+        let (event_tx, event_rx) = async_broadcast::broadcast(1024);
         Tesseract {
             internal: Arc::new(Default::default()),
             enc_pass: Arc::new(Default::default()),
@@ -48,6 +58,8 @@ impl Default for Tesseract {
             check: Arc::new(Default::default()),
             unlock: Arc::new(Default::default()),
             soft_unlock: Arc::new(Default::default()),
+            event_tx,
+            event_rx,
         }
     }
 }
@@ -62,6 +74,8 @@ impl Clone for Tesseract {
             check: self.check.clone(),
             unlock: self.unlock.clone(),
             soft_unlock: self.soft_unlock.clone(),
+            event_rx: self.event_rx.clone(),
+            event_tx: self.event_tx.clone(),
         }
     }
 }
@@ -620,6 +634,7 @@ impl Tesseract {
         }
         self.soft_unlock.store(false, Ordering::Relaxed);
         self.unlock.store(true, Ordering::Relaxed);
+        let _ = self.event_tx.try_broadcast(TesseractEvent::Unlocked);
         Ok(())
     }
 
@@ -640,6 +655,24 @@ impl Tesseract {
         self.enc_pass.write().zeroize();
         self.unlock.store(false, Ordering::Relaxed);
         self.soft_unlock.store(false, Ordering::Relaxed);
+        let _ = self.event_tx.try_broadcast(TesseractEvent::Locked);
+    }
+}
+
+impl Tesseract {
+    pub fn subscribe(&self) -> BoxStream<'static, TesseractEvent> {
+        let mut rx = self.event_rx.clone();
+        let stream = async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(async_broadcast::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        };
+
+        stream.boxed()
     }
 }
 
@@ -716,8 +749,10 @@ impl Tesseract {
 
 #[cfg(test)]
 mod test {
+    use futures::StreamExt;
+
     use crate::crypto::generate;
-    use crate::tesseract::Tesseract;
+    use crate::tesseract::{Tesseract, TesseractEvent};
 
     #[test]
     pub fn test_default() -> anyhow::Result<()> {
@@ -822,6 +857,23 @@ mod test {
 
         assert_eq!(tesseract, tess_dup);
 
+        Ok(())
+    }
+
+    #[test]
+    pub fn tesseract_event() -> anyhow::Result<()> {
+        let tesseract = Tesseract::default();
+        let mut stream = tesseract.subscribe();
+        let key = generate(32);
+
+        tesseract.unlock(&key)?;
+        let event = futures::executor::block_on(stream.next());
+        assert_eq!(event, Some(TesseractEvent::Unlocked));
+
+        tesseract.lock();
+        let event = futures::executor::block_on(stream.next());
+        assert_eq!(event, Some(TesseractEvent::Locked));
+        
         Ok(())
     }
 }

@@ -18,6 +18,7 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 futures = { version = "0.3" }
 async-trait = { version = "0.1" }
 async-stream = "0.3"
+async-broadcast = "0.5"
 
 # Crypto crates
 x25519-dalek = { version = "1" }
