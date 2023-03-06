@@ -198,6 +198,7 @@ impl IdentityStore {
         store.start_root_task().await;
 
         if let Ok(ident) = store.own_identity().await {
+            log::info!("Identity loaded with {}", ident.did_key());
             *store.identity.write().await = Some(ident);
             store.start_event.store(true, Ordering::SeqCst);
         }
