@@ -25,6 +25,7 @@ impl<'d> Deserialize<'d> for Path {
         let str = <String>::deserialize(deserializer)?;
         let paths = str
             .split('/')
+            .filter(|p| !p.is_empty())
             .map(|s| Bytes::copy_from_slice(s.as_bytes()))
             .collect();
         Ok(Self { paths })
@@ -47,7 +48,11 @@ impl core::fmt::Display for Path {
         write!(
             f,
             "{}{}",
-            if self.paths.is_empty() { "" } else { "/" },
+            if !self.paths.is_empty() && !path.starts_with('/') {
+                "/"
+            } else {
+                ""
+            },
             path
         )
     }
