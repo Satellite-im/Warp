@@ -10,7 +10,7 @@ mod test {
     use warp::tesseract::Tesseract;
     use warp_mp_ipfs::config::Discovery;
     use warp_mp_ipfs::ipfs_identity_temporary;
-    use warp_rg_ipfs::{IpfsMessaging, Temporary};
+    use warp_rg_ipfs::{IpfsMessaging};
 
     async fn create_account_and_chat(
         username: Option<&str>,
@@ -29,7 +29,7 @@ mod test {
         let identity = account.get_own_identity().await?;
 
         let raygun =
-            Box::new(IpfsMessaging::<Temporary>::new(None, account.clone(), None, None).await?)
+            Box::new(IpfsMessaging::new(None, account.clone(), None, None).await?)
                 as Box<_>;
         Ok((account, raygun, did, identity))
     }
@@ -531,7 +531,7 @@ mod test {
         let mut conversation_d = chat_c.get_conversation_stream(id_d).await?;
 
 
-        chat_a.send(id_a, None, vec!["Hello, World".into()]).await?;
+        chat_a.send(id_a, vec!["Hello, World".into()]).await?;
 
         let message_a = tokio::time::timeout(Duration::from_secs(5), async {
             loop {

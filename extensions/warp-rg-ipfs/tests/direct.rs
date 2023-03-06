@@ -12,7 +12,7 @@ mod test {
     use warp::tesseract::Tesseract;
     use warp_mp_ipfs::config::Discovery;
     use warp_mp_ipfs::ipfs_identity_temporary;
-    use warp_rg_ipfs::{IpfsMessaging, Temporary};
+    use warp_rg_ipfs::{IpfsMessaging};
 
     async fn create_account_and_chat(
         username: Option<&str>,
@@ -31,7 +31,7 @@ mod test {
         let identity = account.get_own_identity().await?;
 
         let raygun =
-            Box::new(IpfsMessaging::<Temporary>::new(None, account.clone(), None, None).await?)
+            Box::new(IpfsMessaging::new(None, account.clone(), None, None).await?)
                 as Box<_>;
         Ok((account, raygun, did, identity))
     }
@@ -125,7 +125,7 @@ mod test {
         let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
         let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
 
-        chat_a.send(id_a, None, vec!["Hello, World".into()]).await?;
+        chat_a.send(id_a, vec!["Hello, World".into()]).await?;
 
         let message_a = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -202,7 +202,7 @@ mod test {
         let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
         let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
 
-        chat_a.send(id_a, None, vec!["Hello, World".into()]).await?;
+        chat_a.send(id_a, vec!["Hello, World".into()]).await?;
 
         let message_a = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -301,7 +301,7 @@ mod test {
         let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
         let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
 
-        chat_a.send(id_a, None, vec!["Hello, World".into()]).await?;
+        chat_a.send(id_a, vec!["Hello, World".into()]).await?;
 
         let message_a = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -332,7 +332,7 @@ mod test {
         assert_eq!(message_a, message_b);
 
         chat_a
-            .send(id_a, Some(message_a.id()), vec!["New Message".into()])
+            .edit(id_a, message_a.id(), vec!["New Message".into()])
             .await?;
 
         let message_a = tokio::time::timeout(Duration::from_secs(5), async {
@@ -410,7 +410,7 @@ mod test {
         let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
         let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
 
-        chat_a.send(id_a, None, vec!["Hello, World".into()]).await?;
+        chat_a.send(id_a, vec!["Hello, World".into()]).await?;
 
         let message_a = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -607,7 +607,7 @@ mod test {
         let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
         let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
 
-        chat_a.send(id_a, None, vec!["Hello, World".into()]).await?;
+        chat_a.send(id_a, vec!["Hello, World".into()]).await?;
 
         let message_a = tokio::time::timeout(Duration::from_secs(5), async {
             loop {

@@ -2,6 +2,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi;
 
+use futures::{stream::BoxStream, StreamExt};
 use std::{collections::HashMap, fmt::Debug, io::ErrorKind, sync::atomic::Ordering};
 use warp_derive::FFIFree;
 use zeroize::Zeroize;
@@ -9,10 +10,7 @@ use zeroize::Zeroize;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
-use crate::{
-    crypto::cipher::{Cipher, CipherType},
-    error::Error,
-};
+use crate::{crypto::cipher::Cipher, error::Error};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::prelude::*;
@@ -39,10 +37,19 @@ pub struct Tesseract {
     check: Arc<AtomicBool>,
     unlock: Arc<AtomicBool>,
     soft_unlock: Arc<AtomicBool>,
+    event_tx: async_broadcast::Sender<TesseractEvent>,
+    event_rx: async_broadcast::Receiver<TesseractEvent>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TesseractEvent {
+    Unlocked,
+    Locked,
 }
 
 impl Default for Tesseract {
     fn default() -> Self {
+        let (event_tx, event_rx) = async_broadcast::broadcast(1024);
         Tesseract {
             internal: Arc::new(Default::default()),
             enc_pass: Arc::new(Default::default()),
@@ -51,6 +58,8 @@ impl Default for Tesseract {
             check: Arc::new(Default::default()),
             unlock: Arc::new(Default::default()),
             soft_unlock: Arc::new(Default::default()),
+            event_tx,
+            event_rx,
         }
     }
 }
@@ -65,6 +74,8 @@ impl Clone for Tesseract {
             check: self.check.clone(),
             unlock: self.unlock.clone(),
             soft_unlock: self.soft_unlock.clone(),
+            event_rx: self.event_rx.clone(),
+            event_tx: self.event_tx.clone(),
         }
     }
 }
@@ -416,8 +427,8 @@ impl Tesseract {
         if !self.is_unlock() {
             return Err(Error::TesseractLocked);
         }
-        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &self.enc_pass.read())?;
-        let data = Cipher::direct_encrypt(CipherType::Aes256Gcm, value.as_bytes(), &pkey)?;
+        let pkey = Cipher::self_decrypt(&self.enc_pass.read())?;
+        let data = Cipher::direct_encrypt(value.as_bytes(), &pkey)?;
         self.internal.write().insert(key.to_string(), data);
         self.save()
     }
@@ -460,14 +471,14 @@ impl Tesseract {
             return Err(Error::ObjectNotFound);
         }
 
-        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &self.enc_pass.read())?;
+        let pkey = Cipher::self_decrypt(&self.enc_pass.read())?;
         let data = self
             .internal
             .read()
             .get(key)
             .cloned()
             .ok_or(Error::ObjectNotFound)?;
-        let slice = Cipher::direct_decrypt(CipherType::Aes256Gcm, &data, &pkey)?;
+        let slice = Cipher::direct_decrypt(&data, &pkey)?;
         let plain_text = String::from_utf8_lossy(&slice[..]).to_string();
         Ok(plain_text)
     }
@@ -490,7 +501,7 @@ impl Tesseract {
             return Err(Error::TesseractLocked);
         }
 
-        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &self.enc_pass.read())?;
+        let pkey = Cipher::self_decrypt(&self.enc_pass.read())?;
 
         if old_passphrase != pkey || old_passphrase == new_passphrase || pkey == new_passphrase {
             return Err(Error::InvalidPassphrase); //TODO: Mismatch?
@@ -501,8 +512,7 @@ impl Tesseract {
         let mut encrypted = HashMap::new();
 
         for (key, val) in exported {
-            let data =
-                Cipher::direct_encrypt(CipherType::Aes256Gcm, val.as_bytes(), new_passphrase)?;
+            let data = Cipher::direct_encrypt(val.as_bytes(), new_passphrase)?;
             encrypted.insert(key, data);
         }
 
@@ -522,14 +532,14 @@ impl Tesseract {
             return Err(Error::ObjectNotFound);
         }
 
-        let pkey = Cipher::self_decrypt(CipherType::Aes256Gcm, &self.enc_pass.read())?;
+        let pkey = Cipher::self_decrypt(&self.enc_pass.read())?;
         let data = self
             .internal
             .read()
             .get(key)
             .cloned()
             .ok_or(Error::ObjectNotFound)?;
-        Cipher::direct_decrypt(CipherType::Aes256Gcm, &data, &pkey)?;
+        Cipher::direct_decrypt(&data, &pkey)?;
         Ok(())
     }
 
@@ -611,7 +621,7 @@ impl Tesseract {
     /// ```
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn unlock(&self, passphrase: &[u8]) -> Result<()> {
-        *self.enc_pass.write() = Cipher::self_encrypt(CipherType::Aes256Gcm, passphrase)?;
+        *self.enc_pass.write() = Cipher::self_encrypt(passphrase)?;
         self.soft_unlock.store(true, Ordering::Relaxed);
         if self.is_key_check_enabled() {
             let keys = self.internal_keys();
@@ -624,6 +634,7 @@ impl Tesseract {
         }
         self.soft_unlock.store(false, Ordering::Relaxed);
         self.unlock.store(true, Ordering::Relaxed);
+        let _ = self.event_tx.try_broadcast(TesseractEvent::Unlocked);
         Ok(())
     }
 
@@ -644,6 +655,24 @@ impl Tesseract {
         self.enc_pass.write().zeroize();
         self.unlock.store(false, Ordering::Relaxed);
         self.soft_unlock.store(false, Ordering::Relaxed);
+        let _ = self.event_tx.try_broadcast(TesseractEvent::Locked);
+    }
+}
+
+impl Tesseract {
+    pub fn subscribe(&self) -> BoxStream<'static, TesseractEvent> {
+        let mut rx = self.event_rx.clone();
+        let stream = async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(async_broadcast::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        };
+
+        stream.boxed()
     }
 }
 
@@ -720,8 +749,10 @@ impl Tesseract {
 
 #[cfg(test)]
 mod test {
+    use futures::StreamExt;
+
     use crate::crypto::generate;
-    use crate::tesseract::Tesseract;
+    use crate::tesseract::{Tesseract, TesseractEvent};
 
     #[test]
     pub fn test_default() -> anyhow::Result<()> {
@@ -826,6 +857,23 @@ mod test {
 
         assert_eq!(tesseract, tess_dup);
 
+        Ok(())
+    }
+
+    #[test]
+    pub fn tesseract_event() -> anyhow::Result<()> {
+        let tesseract = Tesseract::default();
+        let mut stream = tesseract.subscribe();
+        let key = generate(32);
+
+        tesseract.unlock(&key)?;
+        let event = futures::executor::block_on(stream.next());
+        assert_eq!(event, Some(TesseractEvent::Unlocked));
+
+        tesseract.lock();
+        let event = futures::executor::block_on(stream.next());
+        assert_eq!(event, Some(TesseractEvent::Locked));
+        
         Ok(())
     }
 }

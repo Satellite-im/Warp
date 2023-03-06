@@ -321,65 +321,42 @@ impl Identity {
     }
 }
 
-#[derive(Default, Debug, Clone, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct Identifier {
-    /// Select identity based on DID Key
-    did_key: Option<DID>,
-    /// Select identity based on Username (eg `Username#0000`)
-    user_name: Option<String>,
-    /// Select own identity.
-    own: bool,
+#[derive(Debug, Clone, FFIFree)]
+#[allow(clippy::large_enum_variant)]
+pub enum Identifier {
+    DID(DID),
+    DIDList(Vec<DID>),
+    Username(String),
+    Own,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Identifier {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn user_name(name: &str) -> Self {
-        Identifier {
-            user_name: Some(name.to_string()),
-            ..Default::default()
-        }
+        Self::Username(name.to_string())
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn did_key(key: DID) -> Self {
-        Identifier {
-            did_key: Some(key),
-            ..Default::default()
-        }
+        Self::DID(key)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn did_keys(keys: Vec<DID>) -> Self {
+        Self::DIDList(keys)
+    }
+
     pub fn own() -> Self {
-        Identifier {
-            own: true,
-            ..Default::default()
-        }
-    }
-}
-
-impl Identifier {
-    pub fn get_inner(&self) -> (Option<DID>, Option<String>, bool) {
-        (self.did_key.clone(), self.user_name.clone(), self.own)
+        Self::Own
     }
 }
 
 impl From<DID> for Identifier {
     fn from(did_key: DID) -> Self {
-        Identifier {
-            did_key: Some(did_key),
-            ..Default::default()
-        }
+        Self::DID(did_key)
     }
 }
 
 impl<S: AsRef<str>> From<S> for Identifier {
     fn from(username: S) -> Self {
-        Identifier {
-            user_name: Some(username.as_ref().to_string()),
-            ..Default::default()
-        }
+        Self::Username(username.as_ref().to_string())
     }
 }
 
