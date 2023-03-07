@@ -743,7 +743,7 @@ pub trait RayGunAttachment: Sync + Send {
     }
 
     /// Downloads a file that been attached to a message
-    /// Note: Must use the filename assiocated when downloading
+    /// Note: Must use the filename associated when downloading
     async fn download(
         &self,
         _: Uuid,
