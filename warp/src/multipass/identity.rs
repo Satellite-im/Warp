@@ -321,159 +321,130 @@ impl Identity {
     }
 }
 
-#[derive(Default, Debug, Clone, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct Identifier {
-    /// Select identity based on DID Key
-    did_key: Option<DID>,
-    /// Select identity based on Username (eg `Username#0000`)
-    user_name: Option<String>,
-    /// Select own identity.
-    own: bool,
+#[derive(Debug, Clone, FFIFree)]
+#[allow(clippy::large_enum_variant)]
+pub enum Identifier {
+    DID(DID),
+    DIDList(Vec<DID>),
+    Username(String),
+    Own,
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Identifier {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn user_name(name: &str) -> Self {
-        Identifier {
-            user_name: Some(name.to_string()),
-            ..Default::default()
-        }
+        Self::Username(name.to_string())
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn did_key(key: DID) -> Self {
-        Identifier {
-            did_key: Some(key),
-            ..Default::default()
-        }
+        Self::DID(key)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn did_keys(keys: Vec<DID>) -> Self {
+        Self::DIDList(keys)
+    }
+
     pub fn own() -> Self {
-        Identifier {
-            own: true,
-            ..Default::default()
-        }
-    }
-}
-
-impl Identifier {
-    pub fn get_inner(&self) -> (Option<DID>, Option<String>, bool) {
-        (self.did_key.clone(), self.user_name.clone(), self.own)
+        Self::Own
     }
 }
 
 impl From<DID> for Identifier {
     fn from(did_key: DID) -> Self {
-        Identifier {
-            did_key: Some(did_key),
-            ..Default::default()
-        }
+        Self::DID(did_key)
     }
 }
 
 impl<S: AsRef<str>> From<S> for Identifier {
     fn from(username: S) -> Self {
-        Identifier {
-            user_name: Some(username.as_ref().to_string()),
-            ..Default::default()
-        }
+        Self::Username(username.as_ref().to_string())
     }
 }
 
-#[derive(Debug, Clone, Default, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct IdentityUpdate {
-    /// Setting Username
-    username: Option<String>,
-
-    /// Path of picture
-    graphics_picture: Option<String>,
-
-    /// Path of banner
-    graphics_banner: Option<String>,
-
-    /// Setting Status Message
-    status_message: Option<Option<String>>,
+#[derive(Debug, Clone, FFIFree)]
+pub enum IdentityUpdate {
+    Username(String),
+    Picture(String),
+    PicturePath(std::path::PathBuf),
+    Banner(String),
+    BannerPath(std::path::PathBuf),
+    StatusMessage(Option<String>),
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl IdentityUpdate {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    /// Set new username
     pub fn set_username(username: String) -> IdentityUpdate {
-        IdentityUpdate {
-            username: Some(username),
-            ..Default::default()
-        }
+        IdentityUpdate::Username(username)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    /// Set profile picture
     pub fn set_graphics_picture(graphics: String) -> IdentityUpdate {
-        IdentityUpdate {
-            graphics_picture: Some(graphics),
-            ..Default::default()
-        }
+        IdentityUpdate::Picture(graphics)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    /// Set profile banner
     pub fn set_graphics_banner(graphics: String) -> IdentityUpdate {
-        IdentityUpdate {
-            graphics_banner: Some(graphics),
-            ..Default::default()
-        }
+        IdentityUpdate::Banner(graphics)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    /// Set status message
     pub fn set_status_message(status_message: Option<String>) -> IdentityUpdate {
-        IdentityUpdate {
-            status_message: Some(status_message),
-            ..Default::default()
-        }
+        IdentityUpdate::StatusMessage(status_message)
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+impl IdentityUpdate {
+    /// Set profile picture from a file
+    pub fn set_graphics_picture_path(path: std::path::PathBuf) -> IdentityUpdate {
+        IdentityUpdate::PicturePath(path)
+    }
+
+    /// Set profile banner from a file
+    pub fn set_graphics_banner_path(path: std::path::PathBuf) -> IdentityUpdate {
+        IdentityUpdate::BannerPath(path)
+    }
+}
+
 impl IdentityUpdate {
     pub fn username(&self) -> Option<String> {
-        self.username.clone()
+        match self.clone() {
+            IdentityUpdate::Username(username) => Some(username),
+            _ => None,
+        }
     }
 
     pub fn graphics_picture(&self) -> Option<String> {
-        self.graphics_picture.clone()
+        match self.clone() {
+            IdentityUpdate::Picture(data) => Some(data),
+            _ => None,
+        }
     }
 
     pub fn graphics_banner(&self) -> Option<String> {
-        self.graphics_banner.clone()
+        match self.clone() {
+            IdentityUpdate::Banner(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    pub fn graphics_picture_path(&self) -> Option<std::path::PathBuf> {
+        match self.clone() {
+            IdentityUpdate::PicturePath(path) => Some(path),
+            _ => None,
+        }
+    }
+
+    pub fn graphics_banner_path(&self) -> Option<std::path::PathBuf> {
+        match self.clone() {
+            IdentityUpdate::BannerPath(path) => Some(path),
+            _ => None,
+        }
     }
 
     pub fn status_message(&self) -> Option<Option<String>> {
-        self.status_message.clone()
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl IdentityUpdate {
-    #[wasm_bindgen(getter)]
-    pub fn username(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.username).unwrap()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn graphics_picture(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.graphics_picture).unwrap()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn graphics_banner(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.graphics_banner).unwrap()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn status_message(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.status_message).unwrap()
+        match self.clone() {
+            IdentityUpdate::StatusMessage(status) => Some(status),
+            _ => None,
+        }
     }
 }
 
@@ -481,8 +452,7 @@ impl IdentityUpdate {
 pub mod ffi {
     use crate::crypto::DID;
     use crate::multipass::identity::{
-        Badge, FFIVec_Badge, FFIVec_Role, Graphics, Identifier,
-        Identity, IdentityUpdate, Role,
+        Badge, FFIVec_Badge, FFIVec_Role, Graphics, Identifier, Identity, IdentityUpdate, Role,
     };
     use std::ffi::{CStr, CString};
     use std::os::raw::{c_char, c_void};

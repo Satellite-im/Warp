@@ -117,7 +117,7 @@ impl ConnectionLimit {
         }
     }
 
-    pub fn minimial() -> Self {
+    pub fn minimal() -> Self {
         Self {
             max_pending_incoming: Some(128),
             max_pending_outgoing: Some(128),
@@ -176,6 +176,7 @@ pub struct IpfsSetting {
     pub swarm: Swarm,
     pub bootstrap: bool,
     pub portmapping: bool,
+    pub agent_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -277,8 +278,8 @@ impl MpIpfsConfig {
         }
     }
 
-    /// Minimial production configuration
-    pub fn minimial_testing() -> MpIpfsConfig {
+    /// Minimal production configuration
+    pub fn minimal_testing() -> MpIpfsConfig {
         MpIpfsConfig {
             bootstrap: Bootstrap::Ipfs,
             ipfs_setting: IpfsSetting {
@@ -299,8 +300,8 @@ impl MpIpfsConfig {
         }
     }
 
-    /// Minimial production configuration
-    pub fn minimial<P: AsRef<std::path::Path>>(path: P) -> MpIpfsConfig {
+    /// Minimal production configuration
+    pub fn minimal<P: AsRef<std::path::Path>>(path: P) -> MpIpfsConfig {
         MpIpfsConfig {
             bootstrap: Bootstrap::Ipfs,
             path: Some(path.as_ref().to_path_buf()),
@@ -470,7 +471,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn mp_ipfs_config_minimial(
+    pub unsafe extern "C" fn mp_ipfs_config_minimal(
         path: *const c_char,
     ) -> FFIResult<MpIpfsConfig> {
         if path.is_null() {
@@ -479,6 +480,6 @@ pub mod ffi {
 
         let path = CStr::from_ptr(path).to_string_lossy().to_string();
 
-        FFIResult::ok(MpIpfsConfig::minimial(path))
+        FFIResult::ok(MpIpfsConfig::minimal(path))
     }
 }

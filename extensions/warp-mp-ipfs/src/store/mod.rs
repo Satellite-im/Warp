@@ -1,3 +1,4 @@
+pub mod discovery;
 pub mod document;
 pub mod friends;
 pub mod identity;
@@ -9,7 +10,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use rust_ipfs as ipfs;
 
-use ipfs::{IpfsTypes, Multiaddr, PeerId, Protocol};
+use ipfs::{Multiaddr, PeerId, Protocol};
 use serde::{Deserialize, Serialize};
 use warp::{
     crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
@@ -23,6 +24,36 @@ use crate::config::Discovery;
 use self::document::DocumentType;
 
 pub const IDENTITY_BROADCAST: &str = "identity/broadcast";
+
+pub trait VecExt<T: Eq> {
+    fn insert_item(&mut self, item: &T) -> bool;
+    fn remove_item(&mut self, item: &T) -> bool;
+}
+
+impl<T> VecExt<T> for Vec<T>
+where
+    T: Eq + Clone,
+{
+    fn insert_item(&mut self, item: &T) -> bool {
+        if self.contains(item) {
+            return false;
+        }
+
+        self.push(item.clone());
+        true
+    }
+
+    fn remove_item(&mut self, item: &T) -> bool {
+        if !self.contains(item) {
+            return false;
+        }
+        if let Some(index) = self.iter().position(|el| item.eq(el)) {
+            self.remove(index);
+            return true;
+        }
+        false
+    }
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IdentityPayload {
@@ -77,8 +108,8 @@ fn did_keypair(tesseract: &Tesseract) -> anyhow::Result<DID> {
 // who are providing and connect to them.
 // Note that there is usually a delay in `ipfs.provide`.
 // TODO: Investigate the delay in providing the CID
-pub async fn discovery<T: IpfsTypes, S: AsRef<str>>(
-    ipfs: ipfs::Ipfs<T>,
+pub async fn discovery<S: AsRef<str>>(
+    ipfs: ipfs::Ipfs,
     topic: S,
 ) -> anyhow::Result<()> {
     let topic = topic.as_ref();
@@ -100,6 +131,12 @@ pub enum PeerType {
     DID(DID),
 }
 
+impl From<&DID> for PeerType {
+    fn from(did: &DID) -> Self {
+        PeerType::DID(did.clone())
+    }
+}
+
 impl From<DID> for PeerType {
     fn from(did: DID) -> Self {
         PeerType::DID(did)
@@ -112,9 +149,16 @@ impl From<PeerId> for PeerType {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+impl From<&PeerId> for PeerType {
+    fn from(peer_id: &PeerId) -> Self {
+        PeerType::PeerId(*peer_id)
+    }
+}
+
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PeerConnectionType {
     Connected,
+    #[default]
     NotConnected,
 }
 
@@ -127,8 +171,8 @@ impl From<PeerConnectionType> for IdentityStatus {
     }
 }
 
-pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
-    ipfs: &ipfs::Ipfs<T>,
+pub async fn connected_to_peer<I: Into<PeerType>>(
+    ipfs: &ipfs::Ipfs,
     pkey: I,
 ) -> anyhow::Result<PeerConnectionType> {
     let peer_id = match pkey.into() {
@@ -144,8 +188,8 @@ pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
     })
 }
 
-pub async fn discover_peer<T: IpfsTypes>(
-    ipfs: &ipfs::Ipfs<T>,
+pub async fn discover_peer(
+    ipfs: &ipfs::Ipfs,
     did: &DID,
     discovery: Discovery,
     relay: Vec<Multiaddr>,

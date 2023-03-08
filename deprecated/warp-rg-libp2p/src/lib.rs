@@ -496,7 +496,7 @@ impl GroupChatManagement for Libp2pMessaging {
     //         return Err(Error::GroupNameTooLong);
     //     }
     //     let helper = self.group_helper()?;
-    //     //Note: Maybe refactor the trait funciton to supply its own id rather than generating one?
+    //     //Note: Maybe refactor the trait function to supply its own id rather than generating one?
     //     let id = GroupId::new_uuid();
     //     let group_id = id.get_id().ok_or(Error::Other)?;
     //     helper.create_group(&group_id.to_string(), name)?;
@@ -616,7 +616,7 @@ impl GroupInvite for Libp2pMessaging {
     //     //     if self.peer_registry.exist(PeerOption::PeerId(peer_id)) {
     //     //         // Peer is not found in registry after executing command
     //     //         // TODO: Maybe provide another stated term besides invalid group member?
-    //     //         return Err(Error::InvalidGroupMemeber);
+    //     //         return Err(Error::InvalidGroupMember);
     //     //     }
     //     // }
 
@@ -625,7 +625,7 @@ impl GroupInvite for Libp2pMessaging {
     //     if self.peer_registry.exist(PeerOption::PeerId(peer_id)) {
     //         // Peer is not found in registry after executing command
     //         // TODO: Maybe provide another stated term besides invalid group member?
-    //         return Err(Error::InvalidGroupMemeber);
+    //         return Err(Error::InvalidGroupMember);
     //     }
     //     // Connect to user if found
     //     // Note: this is a optional since connection may already be establish

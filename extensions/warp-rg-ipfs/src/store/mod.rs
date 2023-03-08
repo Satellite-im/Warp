@@ -5,7 +5,7 @@ use rust_ipfs as ipfs;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use rust_ipfs::{IpfsTypes, PeerId};
+use rust_ipfs::{ PeerId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp::{
@@ -107,8 +107,8 @@ pub enum PeerConnectionType {
     NotConnected,
 }
 
-pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
-    ipfs: ipfs::Ipfs<T>,
+pub async fn connected_to_peer< I: Into<PeerType>>(
+    ipfs: ipfs::Ipfs,
     pkey: I,
 ) -> anyhow::Result<PeerConnectionType> {
     let peer_id = match pkey.into() {
@@ -124,8 +124,8 @@ pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
     })
 }
 
-pub async fn topic_discovery<T: IpfsTypes, S: AsRef<str>>(
-    ipfs: ipfs::Ipfs<T>,
+pub async fn topic_discovery<S: AsRef<str>>(
+    ipfs: ipfs::Ipfs,
     topic: S,
 ) -> anyhow::Result<()> {
     trace!("Performing topic discovery");

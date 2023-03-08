@@ -2,13 +2,16 @@
 //onto the lock.
 #![allow(clippy::clone_on_copy)]
 use crate::{
-    config::Discovery,
-    store::{did_to_libp2p_pub, IdentityPayload},
-    Persistent,
+    config::Discovery as DiscoveryConfig,
+    store::{did_to_libp2p_pub, discovery::Discovery, IdentityPayload},
 };
-use futures::{stream::BoxStream, FutureExt, StreamExt};
+use futures::{
+    channel::{mpsc, oneshot},
+    stream::{self, BoxStream},
+    FutureExt, StreamExt,
+};
 use ipfs::{
-    libp2p::gossipsub::GossipsubMessage, Ipfs, IpfsPath, IpfsTypes, Keypair, Multiaddr, PeerId,
+    libp2p::gossipsub::Message as GossipsubMessage, Ipfs, IpfsPath, Keypair, Multiaddr, PeerId,
 };
 use libipld::{
     serde::{from_ipld, to_ipld},
@@ -22,8 +25,13 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
-use tokio::sync::broadcast;
-use tracing::log::{self, error};
+
+use tokio::sync::{broadcast, Semaphore};
+use tracing::{
+    log::{self, error},
+    warn,
+};
+
 use warp::{
     crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
@@ -38,12 +46,13 @@ use warp::{multipass::identity::Platform, sata::Sata};
 
 use super::{
     connected_to_peer,
-    document::{CacheDocument, DocumentType, RootDocument},
-    libp2p_pub_to_did, PeerConnectionType, IDENTITY_BROADCAST,
+    document::{CacheDocument, DocumentType, GetDag, RootDocument, ToCid},
+    friends::Request,
+    libp2p_pub_to_did, IDENTITY_BROADCAST,
 };
 
-pub struct IdentityStore<T: IpfsTypes> {
-    ipfs: Ipfs<T>,
+pub struct IdentityStore {
+    ipfs: Ipfs,
 
     path: Option<PathBuf>,
 
@@ -59,6 +68,8 @@ pub struct IdentityStore<T: IpfsTypes> {
 
     discovering: Arc<tokio::sync::RwLock<HashSet<DID>>>,
 
+    permit: Arc<Semaphore>,
+
     discovery: Discovery,
 
     relay: Option<Vec<Multiaddr>>,
@@ -72,9 +83,13 @@ pub struct IdentityStore<T: IpfsTypes> {
     end_event: Arc<AtomicBool>,
 
     tesseract: Tesseract,
+
+    root_task: Arc<tokio::sync::RwLock<Option<tokio::task::JoinHandle<()>>>>,
+
+    task_send: Arc<tokio::sync::RwLock<Option<mpsc::UnboundedSender<RootDocumentEvents>>>>,
 }
 
-impl<T: IpfsTypes> Clone for IdentityStore<T> {
+impl Clone for IdentityStore {
     fn clone(&self) -> Self {
         Self {
             ipfs: self.ipfs.clone(),
@@ -87,26 +102,42 @@ impl<T: IpfsTypes> Clone for IdentityStore<T> {
             start_event: self.start_event.clone(),
             end_event: self.end_event.clone(),
             discovering: self.discovering.clone(),
+            permit: self.permit.clone(),
             discovery: self.discovery.clone(),
             share_platform: self.share_platform.clone(),
             relay: self.relay.clone(),
             override_ipld: self.override_ipld.clone(),
             tesseract: self.tesseract.clone(),
+            root_task: self.root_task.clone(),
+            task_send: self.task_send.clone(),
         }
     }
+}
+
+#[allow(clippy::large_enum_variant)]
+pub enum RootDocumentEvents {
+    Get(oneshot::Sender<Result<RootDocument, Error>>),
+    Set(RootDocument, oneshot::Sender<Result<(), Error>>),
+    AddFriend(DID, oneshot::Sender<Result<(), Error>>),
+    RemoveFriend(DID, oneshot::Sender<Result<(), Error>>),
+    AddRequest(Request, oneshot::Sender<Result<(), Error>>),
+    RemoveRequest(Request, oneshot::Sender<Result<(), Error>>),
+    AddBlock(DID, oneshot::Sender<Result<(), Error>>),
+    RemoveBlock(DID, oneshot::Sender<Result<(), Error>>),
 }
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum LookupBy {
     DidKey(DID),
+    DidKeys(Vec<DID>),
     Username(String),
     ShortId(String),
 }
 
-impl<T: IpfsTypes> IdentityStore<T> {
+impl IdentityStore {
     pub async fn new(
-        ipfs: Ipfs<T>,
+        ipfs: Ipfs,
         path: Option<PathBuf>,
         tesseract: Tesseract,
         interval: u64,
@@ -118,11 +149,6 @@ impl<T: IpfsTypes> IdentityStore<T> {
             bool,
         ),
     ) -> Result<Self, Error> {
-        let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
-            true => path,
-            false => None,
-        };
-
         if let Some(path) = path.as_ref() {
             if !path.exists() {
                 tokio::fs::create_dir_all(path).await?;
@@ -138,6 +164,9 @@ impl<T: IpfsTypes> IdentityStore<T> {
         let discovering = Arc::new(Default::default());
         let online_status = Arc::default();
         let share_platform = Arc::new(AtomicBool::new(share_platform));
+        let permit = Arc::new(Semaphore::new(1));
+        let root_task = Arc::default();
+        let task_send = Arc::default();
 
         let store = Self {
             ipfs,
@@ -155,14 +184,21 @@ impl<T: IpfsTypes> IdentityStore<T> {
             relay,
             tesseract,
             override_ipld,
+            permit,
+            root_task,
+            task_send,
         };
+
         if store.path.is_some() {
             if let Err(_e) = store.load_cid().await {
                 //We can ignore if it doesnt exist
             }
         }
 
+        store.start_root_task().await;
+
         if let Ok(ident) = store.own_identity().await {
+            log::info!("Identity loaded with {}", ident.did_key());
             *store.identity.write().await = Some(ident);
             store.start_event.store(true, Ordering::SeqCst);
         }
@@ -215,15 +251,11 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 }
             }
         });
-        if let Discovery::Provider(context) = &store.discovery {
-            let ipfs = store.ipfs.clone();
-            let context = context.clone().unwrap_or_else(|| "warp-mp-ipfs".into());
-            tokio::spawn(async {
-                if let Err(e) = super::discovery(ipfs, context).await {
-                    error!("Error performing topic discovery: {e}");
-                }
-            });
-        };
+
+        if let Err(e) = store.discovery.start(&store.ipfs).await {
+            warn!("Error starting discovery service: {e}. Will not be able to discover peers over namespace");
+        }
+
         tokio::task::yield_now().await;
         Ok(store)
     }
@@ -236,6 +268,66 @@ impl<T: IpfsTypes> IdentityStore<T> {
     //     *self.seen.write() = HashSet::from_iter(peers);
     //     Ok(())
     // }
+
+    async fn start_root_task(&self) {
+        let root_cid = self.root_cid.clone();
+        let ipfs = self.ipfs.clone();
+        let (tx, mut rx) = mpsc::unbounded();
+        let store = self.clone();
+        let task = tokio::spawn(async move {
+            let root_cid = root_cid.clone();
+
+            while let Some(event) = rx.next().await {
+                match event {
+                    RootDocumentEvents::Get(res) => {
+                        let root_cid = root_cid.clone();
+                        let ipfs = ipfs.clone();
+                        let result = async move {
+                            let root_cid = root_cid
+                                .read()
+                                .await
+                                .clone()
+                                .ok_or(Error::IdentityDoesntExist)?;
+                            let path = IpfsPath::from(root_cid);
+                            let document: RootDocument = path.get_dag(&ipfs, None).await?;
+                            document.verify(&ipfs).await.map(|_| document)
+                        };
+                        let _ = res.send(result.await);
+                    }
+                    RootDocumentEvents::Set(mut document, res) => {
+                        let root_cid = root_cid.clone();
+                        let ipfs = ipfs.clone();
+                        let store = store.clone();
+                        let result = async move {
+                            let old_cid = root_cid
+                                .read()
+                                .await
+                                .clone()
+                                .ok_or(Error::IdentityDoesntExist)?;
+
+                            let did_kp = store.get_keypair_did()?;
+                            document.sign(&did_kp)?;
+                            let root_cid = document.to_cid(&ipfs).await?;
+                            if old_cid != root_cid {
+                                if ipfs.is_pinned(&old_cid).await? {
+                                    ipfs.remove_pin(&old_cid, true).await?;
+                                }
+                                ipfs.insert_pin(&root_cid, true).await?;
+                                ipfs.remove_block(old_cid).await?;
+                            }
+                            document.verify(&ipfs).await?;
+                            store.save_cid(root_cid).await
+                        };
+                        let _ = res.send(result.await);
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        *self.task_send.write().await = Some(tx);
+        *self.root_task.write().await = Some(task);
+    }
 
     //TODO: Replace with a request/resposne style broadcast
     async fn broadcast_identity(&self) -> anyhow::Result<()> {
@@ -318,6 +410,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         if let Some(own_id) = self.identity.read().await.clone() {
             anyhow::ensure!(own_id != identity, "Cannot accept own identity");
+        }
+
+        if !self.discovery.contains(identity.did_key()).await {
+            if let Err(e) = self.discovery.insert(&self.ipfs, identity.did_key()).await {
+                log::warn!("Error inserting into discovery service: {e}");
+            }
         }
 
         let (old_cid, mut cache_documents) = match self.get_cache_cid().await {
@@ -431,7 +529,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     fn own_platform(&self) -> Platform {
         if self.share_platform.load(Ordering::Relaxed) {
-            #[cfg(any(
+            if cfg!(any(
                 target_os = "windows",
                 target_os = "macos",
                 target_os = "linux",
@@ -439,33 +537,21 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 target_os = "dragonfly",
                 target_os = "openbsd",
                 target_os = "netbsd"
-            ))]
-            let platform = Platform::Desktop;
-
-            #[cfg(any(target_os = "android", target_os = "ios"))]
-            let platform = Platform::Mobile;
-
-            #[cfg(not(any(any(
-                target_os = "windows",
-                target_os = "macos",
-                target_os = "linux",
-                target_os = "freebsd",
-                target_os = "dragonfly",
-                target_os = "openbsd",
-                target_os = "netbsd",
-                target_os = "android",
-                target_os = "ios"
-            ))))]
-            let platform = Platform::Unknown;
-
-            platform
+            )) {
+                Platform::Desktop
+            } else if cfg!(any(target_os = "android", target_os = "ios")) {
+                Platform::Mobile
+            }
+            else { 
+                Platform::Unknown
+            }
         } else {
             Platform::Unknown
         }
     }
 
-    pub fn discovery_type(&self) -> Discovery {
-        self.discovery.clone()
+    pub fn discovery_type(&self) -> DiscoveryConfig {
+        self.discovery.discovery_config()
     }
 
     pub fn relays(&self) -> Vec<Multiaddr> {
@@ -546,6 +632,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 Error::OtherWithContext("Identity store may not be initialized".into())
             })?;
 
+        let mut preidentity = vec![];
+
         let idents_docs = match &lookup {
             //Note: If this returns more than one identity, then its likely due to frontend cache not clearing out.
             //TODO: Maybe move cache into the backend to serve as a secondary cache
@@ -555,48 +643,8 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     return self.own_identity().await.map(|i| vec![i]);
                 }
 
-                let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
-
-                let connected = connected_to_peer(&self.ipfs, peer_id).await?;
-                if connected == PeerConnectionType::NotConnected
-                    && self.discovering.write().await.insert(pubkey.clone())
-                {
-                    let discovering = self.discovering.clone();
-                    //TODO: Have separate utility to track task of discovery attempts
-                    let relay = self.relays();
-                    let discovery = self.discovery.clone();
-                    tokio::spawn({
-                        let ipfs = self.ipfs.clone();
-                        let pubkey = pubkey.clone();
-                        async move {
-                            //Note: This is done since connect doesnt support dialing out to the peerid directly yet
-                            //      so instead we will check if we can find them over DHT before passing the discovery
-                            //      a separate function
-                            if ipfs.identity(Some(peer_id)).await.is_err() {
-                                if let Err(e) =
-                                    super::discover_peer(&ipfs, &pubkey, discovery, relay).await
-                                {
-                                    error!("Error discovering peer: {e}");
-                                }
-                            }
-                        }
-                    });
-                    tokio::spawn({
-                        let ipfs = self.ipfs.clone();
-                        let pubkey = pubkey.clone();
-                        async move {
-                            loop {
-                                if let Ok(PeerConnectionType::Connected) =
-                                    connected_to_peer(&ipfs, peer_id).await
-                                {
-                                    discovering.write().await.remove(&pubkey);
-                                    break;
-                                }
-                                tokio::time::sleep(Duration::from_secs(1)).await;
-                            }
-                        }
-                    });
-                    tokio::task::yield_now().await;
+                if !self.discovery.contains(pubkey).await {
+                    self.discovery.insert(&self.ipfs, pubkey).await?;
                 }
 
                 self.cache()
@@ -605,6 +653,33 @@ impl<T: IpfsTypes> IdentityStore<T> {
                     .filter(|ident| ident.did == *pubkey)
                     .cloned()
                     .collect::<Vec<_>>()
+            }
+            LookupBy::DidKeys(list) => {
+                let mut items = vec![];
+                let cache = self.cache().await;
+
+                for pubkey in list {
+                    if own_did.eq(pubkey) {
+                        let own_identity = match self.own_identity().await {
+                            Ok(id) => id,
+                            Err(_) => continue,
+                        };
+                        if !preidentity.contains(&own_identity) {
+                            preidentity.push(own_identity);
+                        }
+                        continue;
+                    }
+                    if !self.discovery.contains(pubkey).await {
+                        self.discovery.insert(&self.ipfs, pubkey).await?;
+                    }
+
+                    if let Some(cache) = cache.iter().find(|cache| cache.did.eq(pubkey)) {
+                        if !items.contains(cache) {
+                            items.push(cache.clone());
+                        }
+                    }
+                }
+                items
             }
             LookupBy::Username(username) if username.contains('#') => {
                 let cache = self.cache().await;
@@ -656,16 +731,14 @@ impl<T: IpfsTypes> IdentityStore<T> {
                 .collect::<Vec<_>>(),
         };
 
-        let future_list =
-            futures::stream::FuturesUnordered::from_iter(idents_docs.iter().map(|doc| {
-                doc.resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
-                    .boxed()
-            }));
-
-        let list = future_list
-            .filter_map(|res| async { res.ok() })
-            .collect::<Vec<_>>()
-            .await;
+        let list = futures::stream::FuturesUnordered::from_iter(idents_docs.iter().map(|doc| {
+            doc.resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
+                .boxed()
+        }))
+        .filter_map(|res| async { res.ok() })
+        .chain(stream::iter(preidentity))
+        .collect::<Vec<_>>()
+        .await;
 
         Ok(list)
     }
@@ -701,7 +774,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
         //Note: This is checked because we may not be connected to those peers with the 2 options below
         //      while with `Discovery::Provider`, they at some point should have been connected or discovered
-        if !matches!(self.discovery_type(), Discovery::Direct | Discovery::None) {
+        if !matches!(
+            self.discovery_type(),
+            DiscoveryConfig::Direct | DiscoveryConfig::None
+        ) {
             self.lookup(LookupBy::DidKey(did.clone()))
                 .await?
                 .first()
@@ -793,28 +869,21 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn get_root_document(&self) -> Result<RootDocument, Error> {
-        let root_cid = self.get_root_cid().await?;
-        let path = IpfsPath::from(root_cid);
-        let document: RootDocument = self.get_dag(path, None).await?;
-        document.verify(self.ipfs.clone()).await.map(|_| document)
+        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
+        let (tx, rx) = oneshot::channel();
+        task_tx
+            .unbounded_send(RootDocumentEvents::Get(tx))
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
-    pub async fn set_root_document(&mut self, mut document: RootDocument) -> Result<(), Error> {
-        let old_cid = self.get_root_cid().await?;
-        let did_kp = self.get_keypair_did()?;
-        document.sign(&did_kp)?;
-
-        let root_cid = self.put_dag(document).await?;
-        if old_cid != root_cid {
-            if self.ipfs.is_pinned(&old_cid).await? {
-                self.ipfs.remove_pin(&old_cid, true).await?;
-            }
-            self.ipfs.insert_pin(&root_cid, true).await?;
-            self.ipfs.remove_block(old_cid).await?;
-        }
-
-        self.save_cid(root_cid).await?;
-        Ok(())
+    pub async fn set_root_document(&mut self, document: RootDocument) -> Result<(), Error> {
+        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
+        let (tx, rx) = oneshot::channel();
+        task_tx
+            .unbounded_send(RootDocumentEvents::Set(document, tx))
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
     }
 
     pub async fn get_dag<D: DeserializeOwned>(
@@ -871,7 +940,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(identity)
     }
 
-    pub async fn save_cid(&mut self, cid: Cid) -> Result<(), Error> {
+    pub async fn save_cid(&self, cid: Cid) -> Result<(), Error> {
         *self.root_cid.write().await = Some(cid);
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
@@ -880,7 +949,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
         Ok(())
     }
 
-    pub async fn save_cache_cid(&mut self, cid: Cid) -> Result<(), Error> {
+    pub async fn save_cache_cid(&self, cid: Cid) -> Result<(), Error> {
         *self.cache_cid.write().await = Some(cid);
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
@@ -891,7 +960,7 @@ impl<T: IpfsTypes> IdentityStore<T> {
 
     pub async fn store_photo(
         &mut self,
-        stream: BoxStream<'static, Vec<u8>>,
+        stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
         limit: Option<usize>,
     ) -> Result<Cid, Error> {
         let ipfs = self.ipfs.clone();
@@ -940,7 +1009,10 @@ impl<T: IpfsTypes> IdentityStore<T> {
             .cid()
             .copied()
             .ok_or(Error::Other)?;
-        ipfs.insert_pin(&cid, true).await?;
+
+        if !ipfs.is_pinned(&cid).await? {
+            ipfs.insert_pin(&cid, true).await?;
+        }
 
         Ok(cid)
     }
@@ -1009,12 +1081,12 @@ impl<T: IpfsTypes> IdentityStore<T> {
     }
 
     pub async fn get_cache_cid(&self) -> Result<Cid, Error> {
-        (self.cache_cid.read().await.clone())
+        (self.cache_cid.read().await)
             .ok_or_else(|| Error::OtherWithContext("Cache cannot be found".into()))
     }
 
     pub async fn get_root_cid(&self) -> Result<Cid, Error> {
-        (self.root_cid.read().await.clone()).ok_or(Error::IdentityDoesntExist)
+        (self.root_cid.read().await).ok_or(Error::IdentityDoesntExist)
     }
 
     pub async fn update_identity(&self) -> Result<(), Error> {

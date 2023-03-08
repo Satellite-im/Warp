@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use core::hash::Hash;
 use futures::{stream::FuturesOrdered, StreamExt};
 use libipld::{Cid, IpldCodec};
-use rust_ipfs::{Ipfs, IpfsTypes};
+use rust_ipfs::{Ipfs};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -254,9 +254,9 @@ impl ConversationDocument {
         Ok(())
     }
 
-    pub async fn get_messages<T: IpfsTypes>(
+    pub async fn get_messages(
         &self,
-        ipfs: &Ipfs<T>,
+        ipfs: &Ipfs,
         did: Arc<DID>,
         option: MessageOptions,
     ) -> Result<BTreeSet<Message>, Error> {
@@ -328,9 +328,9 @@ impl ConversationDocument {
         Ok(list)
     }
 
-    pub async fn get_message<T: IpfsTypes>(
+    pub async fn get_message(
         &self,
-        ipfs: &Ipfs<T>,
+        ipfs: &Ipfs,
         did: Arc<DID>,
         message_id: Uuid,
     ) -> Result<Message, Error> {
@@ -342,9 +342,9 @@ impl ConversationDocument {
             .await
     }
 
-    pub async fn delete_message<T: IpfsTypes>(
+    pub async fn delete_message(
         &mut self,
-        ipfs: Ipfs<T>,
+        ipfs: Ipfs,
         message_id: Uuid,
     ) -> Result<(), Error> {
         let mut document = self
@@ -357,9 +357,9 @@ impl ConversationDocument {
         document.remove(ipfs).await
     }
 
-    pub async fn delete_all_message<T: IpfsTypes>(
+    pub async fn delete_all_message(
         &mut self,
-        ipfs: Ipfs<T>,
+        ipfs: Ipfs,
     ) -> Result<(), Error> {
         let messages = std::mem::take(&mut self.messages);
 
@@ -433,8 +433,8 @@ impl Ord for MessageDocument {
 }
 
 impl MessageDocument {
-    pub async fn new<T: IpfsTypes>(
-        ipfs: &Ipfs<T>,
+    pub async fn new(
+        ipfs: &Ipfs,
         did: Arc<DID>,
         recipients: Option<Vec<DID>>,
         message: Message,
@@ -471,7 +471,7 @@ impl MessageDocument {
         Ok(document)
     }
 
-    pub async fn remove<T: IpfsTypes>(&mut self, ipfs: Ipfs<T>) -> Result<(), Error> {
+    pub async fn remove(&mut self, ipfs: Ipfs) -> Result<(), Error> {
         let cid = self.message;
         if ipfs.is_pinned(&cid).await? {
             ipfs.remove_pin(&cid, false).await?;
@@ -481,14 +481,14 @@ impl MessageDocument {
         Ok(())
     }
 
-    pub async fn update<T: IpfsTypes>(
+    pub async fn update(
         &mut self,
-        ipfs: &Ipfs<T>,
+        ipfs: &Ipfs,
         did: Arc<DID>,
         message: Message,
     ) -> Result<(), Error> {
         info!("Updating message {} for {}", self.id, self.conversation_id);
-        let recipients = self.receipients(ipfs).await?;
+        let recipients = self.recipients(ipfs).await?;
         let old_message = self.resolve(ipfs, did.clone()).await?;
         let old_document = self.message;
 
@@ -520,7 +520,7 @@ impl MessageDocument {
         Ok(())
     }
 
-    pub async fn receipients<T: IpfsTypes>(&self, ipfs: &Ipfs<T>) -> Result<Vec<DID>, Error> {
+    pub async fn recipients(&self, ipfs: &Ipfs) -> Result<Vec<DID>, Error> {
         let data: Sata = self.message.get_dag(ipfs, None).await?;
         data.recipients()
             .map(|list| {
@@ -532,9 +532,9 @@ impl MessageDocument {
             .ok_or(Error::PublicKeyInvalid)
     }
 
-    pub async fn resolve<T: IpfsTypes>(
+    pub async fn resolve(
         &self,
-        ipfs: &Ipfs<T>,
+        ipfs: &Ipfs,
         did: Arc<DID>,
     ) -> Result<Message, Error> {
         let data: Sata = self.message.get_dag(ipfs, None).await?;

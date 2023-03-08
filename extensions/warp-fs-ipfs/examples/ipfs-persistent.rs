@@ -12,7 +12,7 @@ use warp::{
     multipass::MultiPass,
     tesseract::Tesseract,
 };
-use warp_fs_ipfs::{config::FsIpfsConfig, IpfsFileSystem, Persistent};
+use warp_fs_ipfs::{config::FsIpfsConfig, IpfsFileSystem};
 use warp_mp_ipfs::{config::MpIpfsConfig, ipfs_identity_persistent};
 
 #[derive(Debug, Parser)]
@@ -91,7 +91,7 @@ async fn main() -> anyhow::Result<()> {
     let account = account_persistent(None, opt.path.clone(), &opt).await?;
 
     let config = FsIpfsConfig::production(opt.path);
-    let mut filesystem = IpfsFileSystem::<Persistent>::new(account.clone(), Some(config)).await?;
+    let mut filesystem = IpfsFileSystem::new(account.clone(), Some(config)).await?;
 
     match opt.command {
         Command::UploadFile { local, remote } => {

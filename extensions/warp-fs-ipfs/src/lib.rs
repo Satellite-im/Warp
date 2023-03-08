@@ -24,32 +24,29 @@ use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use warp::module::Module;
 
 use chrono::{DateTime, Utc};
-use ipfs::{Ipfs, IpfsPath, IpfsTypes, TestTypes, Types};
+use ipfs::{Ipfs, IpfsPath};
 
 use warp::constellation::{directory::Directory, Constellation};
 use warp::error::Error;
 use warp::pocket_dimension::PocketDimension;
 use warp::{Extension, SingleHandle};
 
-pub type Temporary = TestTypes;
-pub type Persistent = Types;
-
 type Result<T> = std::result::Result<T, Error>;
 
 #[allow(clippy::type_complexity)]
-pub struct IpfsFileSystem<T: IpfsTypes> {
+pub struct IpfsFileSystem {
     index: Directory,
     path: Arc<RwLock<PathBuf>>,
     modified: DateTime<Utc>,
     config: Option<FsIpfsConfig>,
-    ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
+    ipfs: Arc<RwLock<Option<Ipfs>>>,
     index_cid: Arc<RwLock<Option<Cid>>>,
     account: Arc<tokio::sync::RwLock<Option<Box<dyn MultiPass>>>>,
     broadcast: tokio::sync::broadcast::Sender<ConstellationEventKind>,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
 }
 
-impl<T: IpfsTypes> Clone for IpfsFileSystem<T> {
+impl Clone for IpfsFileSystem {
     fn clone(&self) -> Self {
         Self {
             index: self.index.clone(),
@@ -65,7 +62,7 @@ impl<T: IpfsTypes> Clone for IpfsFileSystem<T> {
     }
 }
 
-impl<T: IpfsTypes> IpfsFileSystem<T> {
+impl IpfsFileSystem {
     pub async fn new(
         account: Box<dyn MultiPass>,
         config: Option<FsIpfsConfig>,
@@ -129,7 +126,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
             .ok_or(Error::MultiPassExtensionUnavailable)?;
 
         let ipfs_handle = match account.handle() {
-            Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
+            Ok(handle) if handle.is::<Ipfs>() => handle.downcast_ref::<Ipfs>().cloned(),
             _ => None,
         };
 
@@ -235,7 +232,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
             .ok_or(Error::MultiPassExtensionUnavailable)
     }
 
-    pub fn ipfs(&self) -> Result<Ipfs<T>> {
+    pub fn ipfs(&self) -> Result<Ipfs> {
         self.ipfs
             .read()
             .as_ref()
@@ -264,7 +261,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
     }
 }
 
-impl<T: IpfsTypes> Extension for IpfsFileSystem<T> {
+impl Extension for IpfsFileSystem {
     fn id(&self) -> String {
         String::from("warp-fs-ipfs")
     }
@@ -277,14 +274,14 @@ impl<T: IpfsTypes> Extension for IpfsFileSystem<T> {
     }
 }
 
-impl<T: IpfsTypes> SingleHandle for IpfsFileSystem<T> {
+impl SingleHandle for IpfsFileSystem {
     fn handle(&self) -> Result<Box<dyn Any>> {
         self.ipfs().map(|ipfs| Box::new(ipfs) as Box<dyn Any>)
     }
 }
 
 #[async_trait::async_trait]
-impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
+impl Constellation for IpfsFileSystem {
     fn modified(&self) -> DateTime<Utc> {
         self.modified
     }
@@ -390,8 +387,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         }
 
         let reader = ReaderStream::new(Cursor::new(buffer.clone()))
-            .filter_map(|x| async { x.ok() })
-            .map(|x| x.into())
+            .map(|result| result.map(|x| x.into()))
             .boxed();
 
         let mut total_written = 0;
@@ -490,7 +486,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 
         let fs = self.clone();
         let name = name.to_string();
-
+        let stream = stream.map(Ok::<_, std::io::Error>).boxed();
         let progress_stream = async_stream::stream! {
 
             let mut last_written = 0;
@@ -524,9 +520,15 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
                         };
                     }
                     UnixfsStatus::FailedStatus {
-                        written, error: _, ..
+                        written, error, ..
                     } => {
                         last_written = written;
+                        yield Progression::ProgressFailed {
+                            name,
+                            last_size: Some(last_written),
+                            error: error.map(|e| e.to_string()),
+                        };
+                        return;
                         // return Err(error.map(Error::Any).unwrap_or(Error::Other));
                     }
                     UnixfsStatus::ProgressStatus { written, .. } => {
@@ -777,7 +779,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         pin_mut!(stream);
 
         while let Some(data) = stream.next().await {
-            //This is to make sure there isnt any errors while tranversing the links
+            //This is to make sure there isnt any errors while traversing the links
             //however we do not need to deal with the data itself as the will store
             //it in the blockstore after being found or blocks being exchanged from peer
             //TODO: Should check first chunk and timeout if it exceeds a specific length
@@ -792,12 +794,12 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
     }
 
     fn get_path(&self) -> PathBuf {
-        self.path.read().clone()
+        PathBuf::from(self.path.read().to_string_lossy().replace('\\', "/"))
     }
 }
 
 #[async_trait::async_trait]
-impl<T: IpfsTypes> ConstellationEvent for IpfsFileSystem<T> {
+impl ConstellationEvent for IpfsFileSystem {
     async fn subscribe(&mut self) -> Result<ConstellationEventStream> {
         let mut rx = self.broadcast.subscribe();
 
@@ -817,7 +819,7 @@ impl<T: IpfsTypes> ConstellationEvent for IpfsFileSystem<T> {
 
 pub mod ffi {
     use crate::config::FsIpfsConfig;
-    use crate::{IpfsFileSystem, Persistent, Temporary};
+    use crate::IpfsFileSystem;
     use warp::constellation::ConstellationAdapter;
     use warp::error::Error;
     use warp::ffi::FFIResult;
@@ -841,7 +843,7 @@ pub mod ffi {
             true => None,
             false => Some((*config).clone()),
         };
-        warp::async_on_block(IpfsFileSystem::<Temporary>::new(account, config))
+        warp::async_on_block(IpfsFileSystem::new(account, config))
             .map(|fs| ConstellationAdapter::new(Box::new(fs)))
             .map_err(Error::from)
             .into()
@@ -866,7 +868,7 @@ pub mod ffi {
             false => Some((*config).clone()),
         };
 
-        warp::async_on_block(IpfsFileSystem::<Persistent>::new(account, config))
+        warp::async_on_block(IpfsFileSystem::new(account, config))
             .map(|fs| ConstellationAdapter::new(Box::new(fs)))
             .map_err(Error::from)
             .into()

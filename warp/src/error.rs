@@ -154,7 +154,7 @@ pub enum Error {
     #[error("Invalid Group Id")]
     InvalidGroupId,
     #[error("Invalid Group Member")]
-    InvalidGroupMemeber,
+    InvalidGroupMember,
     #[error("Invite is invalid")]
     InvalidInvite,
     #[error("Unable to change group status")]
@@ -195,6 +195,8 @@ pub enum Error {
     TesseractUnavailable,
     #[error("Tesseract is locked")]
     TesseractLocked,
+    #[error("Passphrase supplied is invalid")]
+    InvalidPassphrase,
     #[error("One or more items in the datastore are corrupted or invalid")]
     CorruptedDataStore,
     #[error("Unable to save tesseract")]
