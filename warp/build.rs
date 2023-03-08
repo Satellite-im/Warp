@@ -71,7 +71,7 @@ fn main() {
 
     //     cargo build --features "build-header force-install"
 
-    // which will attempt to run and install the commands mentioned aboved but with no guarantee of success.
+    // which will attempt to run and install the commands mentioned above but with no guarantee of success.
 
     // This may change in the future to where this is not needed.
     // "#.split('\n').collect::<Vec<_>>();

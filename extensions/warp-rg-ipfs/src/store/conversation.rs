@@ -488,7 +488,7 @@ impl MessageDocument {
         message: Message,
     ) -> Result<(), Error> {
         info!("Updating message {} for {}", self.id, self.conversation_id);
-        let recipients = self.receipients(ipfs).await?;
+        let recipients = self.recipients(ipfs).await?;
         let old_message = self.resolve(ipfs, did.clone()).await?;
         let old_document = self.message;
 
@@ -520,7 +520,7 @@ impl MessageDocument {
         Ok(())
     }
 
-    pub async fn receipients(&self, ipfs: &Ipfs) -> Result<Vec<DID>, Error> {
+    pub async fn recipients(&self, ipfs: &Ipfs) -> Result<Vec<DID>, Error> {
         let data: Sata = self.message.get_dag(ipfs, None).await?;
         data.recipients()
             .map(|list| {

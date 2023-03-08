@@ -143,7 +143,7 @@ impl IpfsIdentity {
                 )?;
                 Keypair::Ed25519(secret.into())
             }
-            _ => anyhow::bail!("Unable to initalize store"),
+            _ => anyhow::bail!("Unable to initialize store"),
         };
 
         info!(
@@ -556,8 +556,8 @@ impl MultiPass for IpfsIdentity {
     async fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
         let store = self.identity_store(true).await?;
 
-        let idents = match id.get_inner() {
-            (Some(pk), None, false) => {
+        let idents = match id {
+            Identifier::DID(pk) => {
                 if let Ok(cache) = self.get_cache() {
                     let mut query = QueryBuilder::default();
                     query.r#where("did_key", &pk)?;
@@ -577,7 +577,7 @@ impl MultiPass for IpfsIdentity {
                 }
                 store.lookup(LookupBy::DidKey(pk)).await
             }
-            (None, Some(username), false) => {
+            Identifier::Username(username) => {
                 if let Ok(cache) = self.get_cache() {
                     let mut query = QueryBuilder::default();
                     query.r#where("username", &username)?;
@@ -597,27 +597,27 @@ impl MultiPass for IpfsIdentity {
                 }
                 store.lookup(LookupBy::Username(username)).await
             }
-            (None, None, true) => return store.own_identity().await.map(|i| vec![i]),
-            _ => Err(Error::InvalidIdentifierCondition),
+            Identifier::DIDList(list) => store.lookup(LookupBy::DidKeys(list)).await,
+            Identifier::Own => return store.own_identity().await.map(|i| vec![i]),
         }?;
         trace!("Found {} identities", idents.len());
-        for ident in &idents {
-            if let Ok(mut cache) = self.get_cache_mut() {
-                let mut query = QueryBuilder::default();
-                query.r#where("did_key", &ident.did_key())?;
-                if cache
-                    .has_data(DataType::from(Module::Accounts), &query)
-                    .is_err()
-                {
-                    let object = Sata::default().encode(
-                        warp::sata::libipld::IpldCodec::DagJson,
-                        warp::sata::Kind::Reference,
-                        ident.clone(),
-                    )?;
-                    cache.add_data(DataType::from(Module::Accounts), &object)?;
-                }
-            }
-        }
+        // for ident in &idents {
+        //     if let Ok(mut cache) = self.get_cache_mut() {
+        //         let mut query = QueryBuilder::default();
+        //         query.r#where("did_key", &ident.did_key())?;
+        //         if cache
+        //             .has_data(DataType::from(Module::Accounts), &query)
+        //             .is_err()
+        //         {
+        //             let object = Sata::default().encode(
+        //                 warp::sata::libipld::IpldCodec::DagJson,
+        //                 warp::sata::Kind::Reference,
+        //                 ident.clone(),
+        //             )?;
+        //             cache.add_data(DataType::from(Module::Accounts), &object)?;
+        //         }
+        //     }
+        // }
 
         Ok(idents)
     }
