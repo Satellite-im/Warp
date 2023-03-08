@@ -154,7 +154,7 @@ pub enum Error {
     #[error("Invalid Group Id")]
     InvalidGroupId,
     #[error("Invalid Group Member")]
-    InvalidGroupMemeber,
+    InvalidGroupMember,
     #[error("Invite is invalid")]
     InvalidInvite,
     #[error("Unable to change group status")]

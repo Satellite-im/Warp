@@ -197,11 +197,11 @@ impl GroupChat {
         Ok(())
     }
 
-    pub fn modify_successor(&self, group: &str, receipient: Pubkey) -> anyhow::Result<()> {
+    pub fn modify_successor(&self, group: &str, recipient: Pubkey) -> anyhow::Result<()> {
         let admin = self.program.payer();
         let group_key = self.group_address_from_id(group)?;
         let group = self.get_group(group_key)?;
-        let successor = self.invite_pubkey(receipient, group_key)?;
+        let successor = self.invite_pubkey(recipient, group_key)?;
         self.program
             .request()
             .signer(&self.kp)
@@ -239,11 +239,11 @@ impl GroupChat {
         Ok(())
     }
 
-    pub fn admin_leave(&self, group: &str, receipient: Pubkey) -> anyhow::Result<()> {
+    pub fn admin_leave(&self, group: &str, recipient: Pubkey) -> anyhow::Result<()> {
         let payer = self.program.payer();
         let group_key = self.group_address_from_id(group)?;
         let inviter = self.invite_pubkey(payer, group_key)?;
-        let successor = self.invite_pubkey(receipient, group_key)?;
+        let successor = self.invite_pubkey(recipient, group_key)?;
         self.program
             .request()
             .signer(&self.kp)

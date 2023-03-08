@@ -7,7 +7,7 @@ use crate::{
 };
 use futures::{
     channel::{mpsc, oneshot},
-    stream::BoxStream,
+    stream::{self, BoxStream},
     FutureExt, StreamExt,
 };
 use ipfs::{
@@ -130,6 +130,7 @@ pub enum RootDocumentEvents {
 #[derive(Debug, Clone)]
 pub enum LookupBy {
     DidKey(DID),
+    DidKeys(Vec<DID>),
     Username(String),
     ShortId(String),
 }
@@ -197,6 +198,7 @@ impl IdentityStore {
         store.start_root_task().await;
 
         if let Ok(ident) = store.own_identity().await {
+            log::info!("Identity loaded with {}", ident.did_key());
             *store.identity.write().await = Some(ident);
             store.start_event.store(true, Ordering::SeqCst);
         }
@@ -642,6 +644,8 @@ impl IdentityStore {
                 Error::OtherWithContext("Identity store may not be initialized".into())
             })?;
 
+        let mut preidentity = vec![];
+
         let idents_docs = match &lookup {
             //Note: If this returns more than one identity, then its likely due to frontend cache not clearing out.
             //TODO: Maybe move cache into the backend to serve as a secondary cache
@@ -661,6 +665,33 @@ impl IdentityStore {
                     .filter(|ident| ident.did == *pubkey)
                     .cloned()
                     .collect::<Vec<_>>()
+            }
+            LookupBy::DidKeys(list) => {
+                let mut items = vec![];
+                let cache = self.cache().await;
+
+                for pubkey in list {
+                    if own_did.eq(pubkey) {
+                        let own_identity = match self.own_identity().await {
+                            Ok(id) => id,
+                            Err(_) => continue,
+                        };
+                        if !preidentity.contains(&own_identity) {
+                            preidentity.push(own_identity);
+                        }
+                        continue;
+                    }
+                    if !self.discovery.contains(pubkey).await {
+                        self.discovery.insert(&self.ipfs, pubkey).await?;
+                    }
+
+                    if let Some(cache) = cache.iter().find(|cache| cache.did.eq(pubkey)) {
+                        if !items.contains(cache) {
+                            items.push(cache.clone());
+                        }
+                    }
+                }
+                items
             }
             LookupBy::Username(username) if username.contains('#') => {
                 let cache = self.cache().await;
@@ -712,16 +743,14 @@ impl IdentityStore {
                 .collect::<Vec<_>>(),
         };
 
-        let future_list =
-            futures::stream::FuturesUnordered::from_iter(idents_docs.iter().map(|doc| {
-                doc.resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
-                    .boxed()
-            }));
-
-        let list = future_list
-            .filter_map(|res| async { res.ok() })
-            .collect::<Vec<_>>()
-            .await;
+        let list = futures::stream::FuturesUnordered::from_iter(idents_docs.iter().map(|doc| {
+            doc.resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
+                .boxed()
+        }))
+        .filter_map(|res| async { res.ok() })
+        .chain(stream::iter(preidentity))
+        .collect::<Vec<_>>()
+        .await;
 
         Ok(list)
     }
