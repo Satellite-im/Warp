@@ -197,7 +197,7 @@ impl IdentityStore {
 
         store.start_root_task().await;
 
-        if let Ok(ident) = store.own_identity().await {
+        if let Ok(ident) = store.own_identity(false).await {
             log::info!("Identity loaded with {}", ident.did_key());
             *store.identity.write().await = Some(ident);
             store.start_event.store(true, Ordering::SeqCst);
@@ -541,8 +541,7 @@ impl IdentityStore {
                 Platform::Desktop
             } else if cfg!(any(target_os = "android", target_os = "ios")) {
                 Platform::Mobile
-            }
-            else { 
+            } else {
                 Platform::Unknown
             }
         } else {
@@ -572,7 +571,7 @@ impl IdentityStore {
     pub async fn create_identity(&mut self, username: Option<&str>) -> Result<Identity, Error> {
         let raw_kp = self.get_raw_keypair()?;
 
-        if self.own_identity().await.is_ok() {
+        if self.own_identity(false).await.is_ok() {
             return Err(Error::IdentityExist);
         }
 
@@ -640,7 +639,7 @@ impl IdentityStore {
             LookupBy::DidKey(pubkey) => {
                 //Maybe we should omit our own key here?
                 if *pubkey == own_did {
-                    return self.own_identity().await.map(|i| vec![i]);
+                    return self.own_identity(true).await.map(|i| vec![i]);
                 }
 
                 if !self.discovery.contains(pubkey).await {
@@ -660,7 +659,7 @@ impl IdentityStore {
 
                 for pubkey in list {
                     if own_did.eq(pubkey) {
-                        let own_identity = match self.own_identity().await {
+                        let own_identity = match self.own_identity(true).await {
                             Ok(id) => id,
                             Err(_) => continue,
                         };
@@ -908,25 +907,27 @@ impl IdentityStore {
         Ok(cid)
     }
 
-    pub async fn own_identity(&self) -> Result<Identity, Error> {
+    pub async fn own_identity(&self, with_images: bool) -> Result<Identity, Error> {
         let root_document = self.get_root_document().await?;
 
         let ipfs = self.ipfs.clone();
         let path = IpfsPath::from(root_document.identity);
         let mut identity = self.get_dag::<Identity>(path, None).await?;
 
-        if let Some(document) = root_document.banner {
-            let banner = document.resolve_or_default(ipfs.clone(), None).await;
-            let mut graphics = identity.graphics();
-            graphics.set_profile_banner(&banner);
-            identity.set_graphics(graphics);
-        }
+        if with_images {
+            if let Some(document) = root_document.banner {
+                let banner = document.resolve_or_default(ipfs.clone(), None).await;
+                let mut graphics = identity.graphics();
+                graphics.set_profile_banner(&banner);
+                identity.set_graphics(graphics);
+            }
 
-        if let Some(document) = root_document.picture {
-            let picture = document.resolve_or_default(ipfs.clone(), None).await;
-            let mut graphics = identity.graphics();
-            graphics.set_profile_picture(&picture);
-            identity.set_graphics(graphics);
+            if let Some(document) = root_document.picture {
+                let picture = document.resolve_or_default(ipfs.clone(), None).await;
+                let mut graphics = identity.graphics();
+                graphics.set_profile_picture(&picture);
+                identity.set_graphics(graphics);
+            }
         }
 
         let public_key = identity.did_key();
@@ -1090,7 +1091,7 @@ impl IdentityStore {
     }
 
     pub async fn update_identity(&self) -> Result<(), Error> {
-        let ident = self.own_identity().await?;
+        let ident = self.own_identity(false).await?;
         self.validate_identity(&ident)?;
         *self.identity.write().await = Some(ident);
         self.seen.write().await.clear();
