@@ -17,7 +17,7 @@ In-memory filesystem implementation. **This extension is designed for developmen
 
 ## warp-fs-storj
 
-Implementation of [StorJ](https://storj.io) for Constellation, a decentralized cloud storage provider. This extension utilizes StorJ S3 compatibile API. 
+Implementation of [StorJ](https://storj.io) for Constellation, a decentralized cloud storage provider. This extension utilizes StorJ S3 compatible API. 
 
 ### Note
 

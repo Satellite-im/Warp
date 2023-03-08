@@ -779,7 +779,7 @@ impl Constellation for IpfsFileSystem {
         pin_mut!(stream);
 
         while let Some(data) = stream.next().await {
-            //This is to make sure there isnt any errors while tranversing the links
+            //This is to make sure there isnt any errors while traversing the links
             //however we do not need to deal with the data itself as the will store
             //it in the blockstore after being found or blocks being exchanged from peer
             //TODO: Should check first chunk and timeout if it exceeds a specific length
