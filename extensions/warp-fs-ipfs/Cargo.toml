@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib", "rlib", "staticlib"]
 
 [dependencies]
-rust-ipfs = { version = "=0.3.0" }
+rust-ipfs = { version = "=0.3.2" }
 libipld = { version = "0.15", features = ["serde-codec"] }
 
 tokio = { version = "1", features = ["full"] }
