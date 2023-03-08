@@ -143,7 +143,7 @@ impl IpfsIdentity {
                 )?;
                 Keypair::Ed25519(secret.into())
             }
-            _ => anyhow::bail!("Unable to initalize store"),
+            _ => anyhow::bail!("Unable to initialize store"),
         };
 
         info!(
