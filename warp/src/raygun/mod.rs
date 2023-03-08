@@ -686,11 +686,14 @@ pub trait RayGun:
         options: MessageOptions,
     ) -> Result<Vec<Message>, Error>;
 
-    /// Sends a message to a conversation. If `message_id` is provided, it will override the selected message
-    async fn send(
+    /// Sends a message to a conversation.
+    async fn send(&mut self, conversation_id: Uuid, message: Vec<String>) -> Result<(), Error>;
+
+    /// Edit an existing message in a conversation.
+    async fn edit(
         &mut self,
         conversation_id: Uuid,
-        message_id: Option<Uuid>,
+        message_id: Uuid,
         message: Vec<String>,
     ) -> Result<(), Error>;
 
@@ -756,7 +759,7 @@ pub trait RayGunAttachment: Sync + Send {
     }
 
     /// Downloads a file that been attached to a message
-    /// Note: Must use the filename assiocated when downloading
+    /// Note: Must use the filename associated when downloading
     async fn download(
         &self,
         _: Uuid,
@@ -955,7 +958,6 @@ pub mod ffi {
     pub unsafe extern "C" fn raygun_send(
         ctx: *mut RayGunAdapter,
         convo_id: *const c_char,
-        message_id: *const c_char,
         messages: *const *const c_char,
         lines: usize,
     ) -> FFIResult_Null {
@@ -986,12 +988,61 @@ pub mod ffi {
             Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
-        let msg_id = match message_id.is_null() {
-            false => match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy()) {
-                Ok(uuid) => Some(uuid),
-                Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
-            },
-            true => None,
+        let messages = match pointer_to_vec(messages, lines) {
+            Ok(messages) => messages,
+            Err(e) => return FFIResult_Null::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let adapter = &mut *ctx;
+        async_on_block(adapter.send(convo_id, messages)).into()
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_edit(
+        ctx: *mut RayGunAdapter,
+        convo_id: *const c_char,
+        message_id: *const c_char,
+        messages: *const *const c_char,
+        lines: usize,
+    ) -> FFIResult_Null {
+        if ctx.is_null() {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        if convo_id.is_null() {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
+                "Conversation ID cannot be null"
+            )));
+        }
+
+        if message_id.is_null() {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
+                "Conversation ID cannot be null"
+            )));
+        }
+
+        if messages.is_null() {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
+                "Message array cannot be null"
+            )));
+        }
+
+        if lines == 0 {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
+                "Lines has to be more than zero"
+            )));
+        }
+
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
+        };
+
+        let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy()) {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
         let messages = match pointer_to_vec(messages, lines) {
@@ -1000,7 +1051,7 @@ pub mod ffi {
         };
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.send(convo_id, msg_id, messages)).into()
+        async_on_block(adapter.edit(convo_id, msg_id, messages)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
