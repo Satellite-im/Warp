@@ -1,5 +1,5 @@
-use rust_ipfs as ipfs;
 use ipfs::Multiaddr;
+use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
@@ -168,11 +168,25 @@ pub struct RelayServer {
     pub enable: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Pubsub {
+    pub max_transmit_size: usize,
+}
+
+impl Default for Pubsub {
+    fn default() -> Self {
+        Self {
+            max_transmit_size: 8 * 1024 * 1024,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct IpfsSetting {
     pub mdns: Mdns,
     pub relay_client: RelayClient,
     pub relay_server: RelayServer,
+    pub pubsub: Pubsub,
     pub swarm: Swarm,
     pub bootstrap: bool,
     pub portmapping: bool,
@@ -192,7 +206,7 @@ pub struct StoreSetting {
     pub sync_interval: u64,
     /// Use objects directly rather than a cid
     pub override_ipld: bool,
-    
+
     pub share_platform: bool,
 
     pub use_phonebook: bool,
