@@ -13,7 +13,10 @@ use rust_ipfs as ipfs;
 use ipfs::{Multiaddr, PeerId, Protocol};
 use serde::{Deserialize, Serialize};
 use warp::{
-    crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
+    crypto::{
+        did_key::{CoreSign, Generate},
+        DIDKey, Ed25519KeyPair, KeyMaterial, DID,
+    },
     error::Error,
     multipass::identity::{Identity, IdentityStatus, Platform},
     tesseract::Tesseract,
@@ -57,7 +60,6 @@ where
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IdentityPayload {
-    /// Not required but would be used to cross check the identity did, sender (if sent directly)
     pub did: DID,
 
     /// Type that represents profile picturec
@@ -76,6 +78,29 @@ pub struct IdentityPayload {
 
     /// Type that represents identity or cid
     pub payload: DocumentType<Identity>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<Vec<u8>>,
+}
+
+impl IdentityPayload {
+    pub fn sign(mut self, did: &DID) -> Result<IdentityPayload, Error> {
+        let bytes = serde_json::to_vec(&self)?;
+        let signature = did.sign(&bytes);
+        self.signature = Some(signature);
+        Ok(self)
+    }
+
+    pub fn verify(&self) -> Result<(), Error> {
+        let mut payload = self.clone();
+        let signature = std::mem::take(&mut payload.signature).ok_or(Error::InvalidSignature)?;
+
+        let bytes = serde_json::to_vec(&payload)?;
+        self.did
+            .verify(&bytes, &signature)
+            .map_err(|_| Error::InvalidSignature)?;
+        Ok(())
+    }
 }
 
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity::PublicKey> {
@@ -108,10 +133,7 @@ fn did_keypair(tesseract: &Tesseract) -> anyhow::Result<DID> {
 // who are providing and connect to them.
 // Note that there is usually a delay in `ipfs.provide`.
 // TODO: Investigate the delay in providing the CID
-pub async fn discovery<S: AsRef<str>>(
-    ipfs: ipfs::Ipfs,
-    topic: S,
-) -> anyhow::Result<()> {
+pub async fn discovery<S: AsRef<str>>(ipfs: ipfs::Ipfs, topic: S) -> anyhow::Result<()> {
     let topic = topic.as_ref();
     let cid = ipfs
         .put_dag(libipld::ipld!(format!("discovery:{topic}")))
