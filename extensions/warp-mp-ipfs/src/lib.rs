@@ -5,7 +5,7 @@ use config::MpIpfsConfig;
 use futures::channel::mpsc::unbounded;
 use futures::{AsyncReadExt, StreamExt};
 use ipfs::libp2p::swarm::SwarmEvent;
-use ipfs::p2p::{ConnectionLimits, IdentifyConfiguration, TransportConfig};
+use ipfs::p2p::{ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig};
 use rust_ipfs as ipfs;
 use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -234,6 +234,10 @@ impl IpfsIdentity {
                 yamux_update_mode: 0,
                 mplex_max_buffer_size: usize::MAX / 2,
                 enable_quic: false,
+                ..Default::default()
+            }),
+            pubsub_config: Some(PubsubConfig {
+                max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
                 ..Default::default()
             }),
             port_mapping: config.ipfs_setting.portmapping,
