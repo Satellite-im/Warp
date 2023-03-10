@@ -350,10 +350,39 @@ impl IdentityStore {
 
         let did = identity.did_key();
 
-        let picture = root.picture;
-        let banner = root.banner;
+        let override_ipld = self.override_ipld.load(Ordering::Relaxed);
 
-        let payload = match self.override_ipld.load(Ordering::Relaxed) {
+        let picture = match override_ipld {
+            true => {
+                if let Some(document) = root.picture.as_ref() {
+                    Some(DocumentType::Object(
+                        document
+                            .resolve_or_default(self.ipfs.clone(), Some(Duration::from_secs(60)))
+                            .await,
+                    ))
+                } else {
+                    None
+                }
+            }
+            false => root.picture,
+        };
+
+        let banner = match override_ipld {
+            true => {
+                if let Some(document) = root.banner.as_ref() {
+                    Some(DocumentType::Object(
+                        document
+                            .resolve_or_default(self.ipfs.clone(), Some(Duration::from_secs(60)))
+                            .await,
+                    ))
+                } else {
+                    None
+                }
+            }
+            false => root.banner,
+        };
+
+        let payload = match override_ipld {
             true => DocumentType::Object(identity),
             false => DocumentType::Cid(root.identity),
         };
