@@ -748,7 +748,7 @@ impl MultiPass for IpfsIdentity {
                 let mut root_document = store.get_root_document().await?;
                 let document = root_document.picture.take();
                 if let Some(DocumentType::UnixFS(cid, _)) = document {
-                    store.delete_photo(cid).await?;
+                    old_cid = Some(cid);
                 }
                 store.set_root_document(root_document).await?;
             }
@@ -854,7 +854,7 @@ impl MultiPass for IpfsIdentity {
                 let mut root_document = store.get_root_document().await?;
                 let document = root_document.banner.take();
                 if let Some(DocumentType::UnixFS(cid, _)) = document {
-                    store.delete_photo(cid).await?;
+                    old_cid = Some(cid);
                 }
                 store.set_root_document(root_document).await?;
             }
@@ -874,7 +874,8 @@ impl MultiPass for IpfsIdentity {
                 store.identity_update(identity.clone()).await?;
             }
             IdentityUpdate::ClearStatusMessage => {
-                
+                identity.set_status_message(None);
+                store.identity_update(identity.clone()).await?;
             }
         };
 
