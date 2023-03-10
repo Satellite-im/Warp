@@ -409,8 +409,6 @@ impl IdentityStore {
 
         let bytes = Cipher::self_encrypt(&payload_bytes)?;
 
-        log::trace!("Transmitting size: {}", bytes.len());
-        
         self.ipfs
             .pubsub_publish(IDENTITY_BROADCAST.into(), bytes)
             .await?;
