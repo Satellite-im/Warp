@@ -146,7 +146,7 @@ mod test {
         let old_identity = account.get_own_identity().await?;
 
         account
-            .update_identity(IdentityUpdate::set_username("JohnDoe2.0".into()))
+            .update_identity(IdentityUpdate::Username("JohnDoe2.0".into()))
             .await?;
 
         let updated_identity = account.get_own_identity().await?;
@@ -172,7 +172,7 @@ mod test {
         let old_identity = account.get_own_identity().await?;
 
         account
-            .update_identity(IdentityUpdate::set_status_message(Some("Blast off".into())))
+            .update_identity(IdentityUpdate::StatusMessage(Some("Blast off".into())))
             .await?;
 
         let updated_identity = account.get_own_identity().await?;
