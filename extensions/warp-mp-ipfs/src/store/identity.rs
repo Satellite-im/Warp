@@ -32,8 +32,9 @@ use tracing::{
     warn,
 };
 
+use warp::multipass::identity::Platform;
 use warp::{
-    crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
+    crypto::{cipher::Cipher, did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
     multipass::{
         identity::{Identity, IdentityStatus, SHORT_ID_SIZE},
@@ -42,7 +43,6 @@ use warp::{
     sync::Arc,
     tesseract::Tesseract,
 };
-use warp::{multipass::identity::Platform, sata::Sata};
 
 use super::{
     connected_to_peer,
@@ -340,8 +340,6 @@ impl IdentityStore {
             return Ok(());
         }
 
-        let data = Sata::default();
-
         let root = self.get_root_document().await?;
 
         let identity = self
@@ -400,17 +398,19 @@ impl IdentityStore {
             banner,
             platform,
             status,
+            signature: None,
         };
 
-        let res = data.encode(
-            libipld::IpldCodec::DagJson,
-            warp::sata::Kind::Static,
-            payload,
-        )?;
+        let kp_did = self.get_keypair_did()?;
 
-        //TODO: Maybe use bincode instead
-        let bytes = serde_json::to_vec(&res)?;
+        let payload = payload.sign(&kp_did)?;
 
+        let payload_bytes = serde_json::to_vec(&payload)?;
+
+        let bytes = Cipher::self_encrypt(&payload_bytes)?;
+
+        log::trace!("Transmitting size: {}", bytes.len());
+        
         self.ipfs
             .pubsub_publish(IDENTITY_BROADCAST.into(), bytes)
             .await?;
@@ -419,11 +419,11 @@ impl IdentityStore {
     }
 
     async fn process_message(&mut self, message: GossipsubMessage) -> anyhow::Result<()> {
-        let data = serde_json::from_slice::<Sata>(&message.data)?;
+        let bytes = Cipher::self_decrypt(&message.data)?;
 
-        let raw_object = data.decode::<IdentityPayload>()?;
+        let raw_object = serde_json::from_slice::<IdentityPayload>(&bytes)?;
 
-        let payload = raw_object.payload;
+        let payload = raw_object.payload.clone();
 
         //TODO: Validate public key against peer that sent it
         let _pk = did_to_libp2p_pub(&raw_object.did)?;
@@ -436,6 +436,9 @@ impl IdentityStore {
             raw_object.did == identity.did_key(),
             "Payload doesnt match identity"
         );
+
+        // Validate after making sure the identity did matches the payload
+        raw_object.verify()?;
 
         if let Some(own_id) = self.identity.read().await.clone() {
             anyhow::ensure!(own_id != identity, "Cannot accept own identity");
