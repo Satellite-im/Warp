@@ -16,7 +16,7 @@ pub enum Bootstrap {
     None,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Discovery {
     /// Uses DHT PROVIDER to find and connect to peers using the same context
@@ -24,13 +24,8 @@ pub enum Discovery {
     /// Dials out to peers directly. Using this will only work with the DID til that connection is made
     Direct,
     /// Disables Discovery over DHT or Directly (which relays on direct connection via multiaddr)
+    #[default]
     None,
-}
-
-impl Default for Discovery {
-    fn default() -> Self {
-        Discovery::None
-    }
 }
 
 impl Bootstrap {

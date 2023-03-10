@@ -744,6 +744,14 @@ impl MultiPass for IpfsIdentity {
                 root_document.picture = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
                 store.set_root_document(root_document).await?;
             }
+            IdentityUpdate::ClearPicture => {
+                let mut root_document = store.get_root_document().await?;
+                let document = root_document.picture.take();
+                if let Some(DocumentType::UnixFS(cid, _)) = document {
+                    old_cid = Some(cid);
+                }
+                store.set_root_document(root_document).await?;
+            }
             IdentityUpdate::Banner(data) => {
                 let len = data.len();
                 if len == 0 || len > 2 * 1024 * 1024 {
@@ -842,6 +850,14 @@ impl MultiPass for IpfsIdentity {
                 root_document.banner = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
                 store.set_root_document(root_document).await?;
             }
+            IdentityUpdate::ClearBanner => {
+                let mut root_document = store.get_root_document().await?;
+                let document = root_document.banner.take();
+                if let Some(DocumentType::UnixFS(cid, _)) = document {
+                    old_cid = Some(cid);
+                }
+                store.set_root_document(root_document).await?;
+            }
             IdentityUpdate::StatusMessage(status) => {
                 if let Some(status) = status.clone() {
                     let len = status.chars().count();
@@ -855,6 +871,10 @@ impl MultiPass for IpfsIdentity {
                     }
                 }
                 identity.set_status_message(status);
+                store.identity_update(identity.clone()).await?;
+            }
+            IdentityUpdate::ClearStatusMessage => {
+                identity.set_status_message(None);
                 store.identity_update(identity.clone()).await?;
             }
         };

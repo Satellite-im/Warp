@@ -600,7 +600,7 @@ async fn main() -> anyhow::Result<()> {
                             }
 
                             let status = status.join(" ").to_string();
-                            if let Err(e) = account.update_identity(IdentityUpdate::set_status_message(Some(status))).await {
+                            if let Err(e) = account.update_identity(IdentityUpdate::StatusMessage(Some(status))).await {
                                 writeln!(stdout, "Error updating status: {e}")?;
                                 continue
                             }
@@ -615,7 +615,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = account.update_identity(IdentityUpdate::set_username(username.to_string())).await {
+                            if let Err(e) = account.update_identity(IdentityUpdate::Username(username.to_string())).await {
                                 writeln!(stdout, "Error updating username: {e}")?;
                                 continue;
                             }
@@ -631,7 +631,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = account.update_identity(IdentityUpdate::set_graphics_picture(picture.to_string())).await {
+                            if let Err(e) = account.update_identity(IdentityUpdate::Picture(picture.to_string())).await {
                                 writeln!(stdout, "Error updating picture: {e}")?;
                                 continue;
                             }
@@ -647,7 +647,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = account.update_identity(IdentityUpdate::set_graphics_banner(banner.to_string())).await {
+                            if let Err(e) = account.update_identity(IdentityUpdate::Banner(banner.to_string())).await {
                                 writeln!(stdout, "Error updating banner: {e}")?;
                                 continue;
                             }
