@@ -258,8 +258,12 @@ mod test {
 
     #[tokio::test]
     async fn identity_platform() -> anyhow::Result<()> {
-        let (account, did, _) =
-            create_account(Some("JohnDoe"), None, Some("test::identity_platform".into())).await?;
+        let (account, did, _) = create_account(
+            Some("JohnDoe"),
+            None,
+            Some("test::identity_platform".into()),
+        )
+        .await?;
         let platform = account.identity_platform(&did).await?;
         assert_eq!(platform, Platform::Desktop);
         Ok(())

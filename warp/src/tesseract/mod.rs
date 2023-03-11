@@ -873,7 +873,7 @@ mod test {
         tesseract.lock();
         let event = futures::executor::block_on(stream.next());
         assert_eq!(event, Some(TesseractEvent::Locked));
-        
+
         Ok(())
     }
 }
