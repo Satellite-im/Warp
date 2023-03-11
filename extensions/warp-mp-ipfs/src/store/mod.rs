@@ -202,7 +202,7 @@ pub async fn connected_to_peer<I: Into<PeerType>>(
         PeerType::PeerId(peer) => peer,
     };
 
-    let connected_peer = ipfs.connected().await?.iter().any(|peer| *peer == peer_id);
+    let connected_peer = ipfs.is_connected(peer_id).await?;
 
     Ok(match connected_peer {
         true => PeerConnectionType::Connected,
