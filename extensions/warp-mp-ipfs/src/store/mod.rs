@@ -236,7 +236,7 @@ pub async fn discover_peer(
             //Attempt a direct dial via relay
             for addr in relay.iter() {
                 let addr = addr.clone().with(Protocol::P2p(peer_id.into()));
-                if let Err(_e) = ipfs.dial(addr).await {
+                if let Err(_e) = ipfs.connect(addr).await {
                     continue;
                 }
                 tokio::time::sleep(Duration::from_millis(300)).await;

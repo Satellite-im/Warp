@@ -20,6 +20,7 @@ async-stream.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+either.workspace = true
 bs58 = "0.4"
 
 tracing = "0.1"

@@ -69,6 +69,7 @@ sata = { git = "https://github.com/Satellite-im/Sata", rev = "4e4d86751eefdb44cc
 tracing = { version = "0.1" }
 tracing-futures = { version = "0.2" }
 getrandom = { version = "0.2" }
+either = "1"
 
 #ipfs dependency
-rust-ipfs = "=0.3.2"
+rust-ipfs = "=0.3.5"
