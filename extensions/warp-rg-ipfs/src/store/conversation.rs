@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use core::hash::Hash;
 use futures::{stream::FuturesOrdered, StreamExt};
 use libipld::{Cid, IpldCodec};
-use rust_ipfs::{Ipfs};
+use rust_ipfs::Ipfs;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -342,11 +342,7 @@ impl ConversationDocument {
             .await
     }
 
-    pub async fn delete_message(
-        &mut self,
-        ipfs: Ipfs,
-        message_id: Uuid,
-    ) -> Result<(), Error> {
+    pub async fn delete_message(&mut self, ipfs: Ipfs, message_id: Uuid) -> Result<(), Error> {
         let mut document = self
             .messages
             .iter()
@@ -357,10 +353,7 @@ impl ConversationDocument {
         document.remove(ipfs).await
     }
 
-    pub async fn delete_all_message(
-        &mut self,
-        ipfs: Ipfs,
-    ) -> Result<(), Error> {
+    pub async fn delete_all_message(&mut self, ipfs: Ipfs) -> Result<(), Error> {
         let messages = std::mem::take(&mut self.messages);
 
         let mut ids = vec![];
@@ -532,11 +525,7 @@ impl MessageDocument {
             .ok_or(Error::PublicKeyInvalid)
     }
 
-    pub async fn resolve(
-        &self,
-        ipfs: &Ipfs,
-        did: Arc<DID>,
-    ) -> Result<Message, Error> {
+    pub async fn resolve(&self, ipfs: &Ipfs, did: Arc<DID>) -> Result<Message, Error> {
         let data: Sata = self.message.get_dag(ipfs, None).await?;
         let message: Message = data.decrypt(&did).map_err(anyhow::Error::from)?;
         if message.id() != self.id && message.conversation_id() != self.conversation_id {

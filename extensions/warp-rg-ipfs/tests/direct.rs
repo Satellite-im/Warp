@@ -7,12 +7,13 @@ mod test {
     use warp::multipass::identity::Identity;
     use warp::multipass::MultiPass;
     use warp::raygun::{
-        ConversationType, MessageEventKind, PinState, RayGun, RayGunEventKind, ReactionState, MessageEvent,
+        ConversationType, MessageEvent, MessageEventKind, PinState, RayGun, RayGunEventKind,
+        ReactionState,
     };
     use warp::tesseract::Tesseract;
     use warp_mp_ipfs::config::Discovery;
     use warp_mp_ipfs::ipfs_identity_temporary;
-    use warp_rg_ipfs::{IpfsMessaging};
+    use warp_rg_ipfs::IpfsMessaging;
 
     async fn create_account_and_chat(
         username: Option<&str>,
@@ -31,8 +32,7 @@ mod test {
         let identity = account.get_own_identity().await?;
 
         let raygun =
-            Box::new(IpfsMessaging::new(None, account.clone(), None, None).await?)
-                as Box<_>;
+            Box::new(IpfsMessaging::new(None, account.clone(), None, None).await?) as Box<_>;
         Ok((account, raygun, did, identity))
     }
 
@@ -728,11 +728,9 @@ mod test {
     #[ignore = "Will reevaluate"]
     async fn event_in_conversation() -> anyhow::Result<()> {
         let (_account_a, mut chat_a, did_a, _) =
-            create_account_and_chat(None, None, Some("test::event_in_conversation".into()))
-                .await?;
+            create_account_and_chat(None, None, Some("test::event_in_conversation".into())).await?;
         let (_account_b, mut chat_b, did_b, _) =
-            create_account_and_chat(None, None, Some("test::event_in_conversation".into()))
-                .await?;
+            create_account_and_chat(None, None, Some("test::event_in_conversation".into())).await?;
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
@@ -770,13 +768,13 @@ mod test {
                 if let Some(MessageEventKind::EventReceived {
                     conversation_id,
                     did_key,
-                    event
+                    event,
                 }) = conversation_b.next().await
-                {   
+                {
                     assert_eq!(conversation_id, id_b);
                     assert_eq!(did_key, did_a);
                     assert_eq!(event, MessageEvent::Typing);
-                    break
+                    break;
                 }
             }
         })
@@ -789,13 +787,13 @@ mod test {
                 if let Some(MessageEventKind::EventCancelled {
                     conversation_id,
                     did_key,
-                    event
+                    event,
                 }) = conversation_b.next().await
-                {   
+                {
                     assert_eq!(conversation_id, id_b);
                     assert_eq!(did_key, did_a);
                     assert_eq!(event, MessageEvent::Typing);
-                    break
+                    break;
                 }
             }
         })

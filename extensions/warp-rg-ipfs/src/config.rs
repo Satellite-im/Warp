@@ -77,7 +77,7 @@ pub struct IpfsSetting {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
     /// Allow only interactions with `MultiPass` friends
-    /// Note: This is ignored when it comes to chating between group chat recipients 
+    /// Note: This is ignored when it comes to chating between group chat recipients
     pub with_friends: bool,
     pub broadcast_interval: u64,
     #[serde(skip_serializing_if = "Option::is_none")]

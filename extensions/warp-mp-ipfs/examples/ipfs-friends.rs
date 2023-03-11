@@ -40,7 +40,6 @@ async fn main() -> anyhow::Result<()> {
 
     account_a.send_request(&ident_b.did_key()).await?;
 
-
     println!("{} Outgoing request:", username(&ident_a));
 
     for outgoing in account_a.list_outgoing_request().await? {
@@ -62,7 +61,6 @@ async fn main() -> anyhow::Result<()> {
         println!("From: {}", username(&ident));
         println!();
     }
-
 
     let coin = rng.gen_range(0..2);
     match coin {

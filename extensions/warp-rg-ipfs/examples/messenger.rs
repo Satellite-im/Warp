@@ -2,7 +2,6 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError, SharedWriter};
-use warp_mp_ipfs::config::Discovery;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -24,7 +23,8 @@ use warp::raygun::{
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_fs_ipfs::config::FsIpfsConfig;
-use warp_fs_ipfs::{IpfsFileSystem};
+use warp_fs_ipfs::IpfsFileSystem;
+use warp_mp_ipfs::config::Discovery;
 use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
 use warp_pd_flatfile::FlatfileStorage;
 use warp_pd_stretto::StrettoClient;
@@ -177,13 +177,12 @@ async fn create_rg(
     config.store_setting.disable_sender_event_emit = disable_sender_emitter;
 
     let chat = match path.as_ref() {
-        Some(_) => Box::new(
-            IpfsMessaging::new(Some(config), account, filesystem, Some(cache))
-                .await?,
-        ) as Box<dyn RayGun>,
-        None => Box::new(
-            IpfsMessaging::new(Some(config), account, filesystem, Some(cache)).await?,
-        ) as Box<dyn RayGun>,
+        Some(_) => {
+            Box::new(IpfsMessaging::new(Some(config), account, filesystem, Some(cache)).await?)
+                as Box<dyn RayGun>
+        }
+        None => Box::new(IpfsMessaging::new(Some(config), account, filesystem, Some(cache)).await?)
+            as Box<dyn RayGun>,
     };
 
     Ok(chat)
@@ -226,7 +225,7 @@ async fn main() -> anyhow::Result<()> {
         cache.clone(),
         Zeroizing::new(password),
         opt.experimental_node,
-        &opt
+        &opt,
     )
     .await?;
 
@@ -1253,10 +1252,7 @@ async fn message_event_handle(
                         .await
                         .unwrap_or_else(|_| recipient.to_string());
 
-                    writeln!(
-                        stdout,
-                        ">>> {username} was removed from {conversation_id}"
-                    )?;
+                    writeln!(stdout, ">>> {username} was removed from {conversation_id}")?;
                 }
             }
         }

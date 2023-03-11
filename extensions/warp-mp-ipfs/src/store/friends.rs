@@ -6,7 +6,7 @@ use ipfs::{Ipfs, PeerId};
 use libipld::IpldCodec;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -160,7 +160,6 @@ impl FriendsStore {
             Option<u64>,
         ),
     ) -> anyhow::Result<Self> {
-
         let end_event = Arc::new(AtomicBool::new(false));
 
         let did_key = Arc::new(did_keypair(&tesseract)?);
@@ -887,7 +886,6 @@ impl FriendsStore {
         }
 
         let mut list = self.friends_list().await?;
-
 
         if !list.insert_item(pubkey) {
             return Err(Error::FriendExist);
