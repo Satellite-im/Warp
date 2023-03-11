@@ -41,7 +41,7 @@ impl Bootstrap {
             .iter()
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),
-            Bootstrap::Experimental => vec!["/ip4/67.205.175.147/tcp/5000/p2p/12D3KooWDC7igsZ9Yaheip77ejALmjG6AZm2auuVmMDj1AkC2o7B"]
+            Bootstrap::Experimental => vec!["/ip4/137.184.70.241/tcp/4884/p2p/12D3KooWP5aD68wq8eDqMtbcMgAzzhUJt8Y3n2g5vzAA1Lo7uVgY"]
             .iter()
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),

@@ -5,6 +5,7 @@ use config::MpIpfsConfig;
 use either::Either;
 use futures::channel::mpsc::unbounded;
 use futures::{AsyncReadExt, StreamExt};
+use ipfs::libp2p::kad::KademliaBucketInserts;
 use ipfs::libp2p::swarm::SwarmEvent;
 use ipfs::p2p::{ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig};
 use rust_ipfs as ipfs;
@@ -225,6 +226,7 @@ impl IpfsIdentity {
                 conf.set_query_timeout(std::time::Duration::from_secs(60));
                 conf.set_publication_interval(Some(Duration::from_secs(30 * 60)));
                 conf.set_provider_record_ttl(Some(Duration::from_secs(60 * 60)));
+                conf.set_kbucket_inserts(KademliaBucketInserts::Manual);
                 conf
             })),
             swarm_configuration: Some(swarm_configuration),
