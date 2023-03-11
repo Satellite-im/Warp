@@ -1,9 +1,9 @@
 pub mod config;
 
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
-use warp::constellation::ConstellationEvent;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use warp::constellation::ConstellationEvent;
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 // use warp_common::futures::TryStreamExt;

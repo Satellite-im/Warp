@@ -370,7 +370,7 @@ pub enum IdentityUpdate {
     BannerPath(std::path::PathBuf),
     ClearBanner,
     StatusMessage(Option<String>),
-    ClearStatusMessage
+    ClearStatusMessage,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
