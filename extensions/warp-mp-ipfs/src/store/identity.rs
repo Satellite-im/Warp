@@ -32,7 +32,7 @@ use tracing::{
     warn,
 };
 
-use warp::multipass::identity::Platform;
+use warp::multipass::{identity::Platform, UpdateKind};
 use warp::{
     crypto::{cipher::Cipher, did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
@@ -47,7 +47,7 @@ use warp::{
 use super::{
     connected_to_peer,
     document::{CacheDocument, DocumentType, GetDag, RootDocument, ToCid},
-    friends::Request,
+    friends::{FriendsStore, Request},
     libp2p_pub_to_did, IDENTITY_BROADCAST,
 };
 
@@ -87,6 +87,10 @@ pub struct IdentityStore {
     root_task: Arc<tokio::sync::RwLock<Option<tokio::task::JoinHandle<()>>>>,
 
     task_send: Arc<tokio::sync::RwLock<Option<mpsc::UnboundedSender<RootDocumentEvents>>>>,
+
+    event: broadcast::Sender<MultiPassEventKind>,
+
+    friend_store: Arc<tokio::sync::RwLock<Option<FriendsStore>>>,
 }
 
 impl Clone for IdentityStore {
@@ -110,6 +114,8 @@ impl Clone for IdentityStore {
             tesseract: self.tesseract.clone(),
             root_task: self.root_task.clone(),
             task_send: self.task_send.clone(),
+            event: self.event.clone(),
+            friend_store: self.friend_store.clone(),
         }
     }
 }
@@ -141,7 +147,7 @@ impl IdentityStore {
         path: Option<PathBuf>,
         tesseract: Tesseract,
         interval: u64,
-        _tx: broadcast::Sender<MultiPassEventKind>,
+        tx: broadcast::Sender<MultiPassEventKind>,
         (discovery, relay, override_ipld, share_platform): (
             Discovery,
             Option<Vec<Multiaddr>>,
@@ -167,6 +173,8 @@ impl IdentityStore {
         let permit = Arc::new(Semaphore::new(1));
         let root_task = Arc::default();
         let task_send = Arc::default();
+        let event = tx;
+        let friend_store = Arc::default();
 
         let store = Self {
             ipfs,
@@ -187,6 +195,8 @@ impl IdentityStore {
             permit,
             root_task,
             task_send,
+            event,
+            friend_store,
         };
 
         if store.path.is_some() {
@@ -268,6 +278,14 @@ impl IdentityStore {
     //     *self.seen.write() = HashSet::from_iter(peers);
     //     Ok(())
     // }
+
+    pub async fn set_friend_store(&self, store: FriendsStore) {
+        *self.friend_store.write().await = Some(store)
+    }
+
+    async fn friend_store(&self) -> Result<FriendsStore, Error> {
+        self.friend_store.read().await.clone().ok_or(Error::Other)
+    }
 
     async fn start_root_task(&self) {
         let root_cid = self.root_cid.clone();
@@ -497,21 +515,44 @@ impl IdentityStore {
         match (found, &document.identity) {
             (true, object) => {
                 let mut change = false;
+                let mut event: Vec<MultiPassEventKind> = vec![];
                 if document.username != identity.username() {
+                    let old_username = document.username.clone();
                     document.username = identity.username();
                     change = true;
+                    event.push(MultiPassEventKind::IdentityUpdate {
+                        did: document.did.clone(),
+                        kind: UpdateKind::Username {
+                            old: old_username,
+                            new: identity.username(),
+                        },
+                    });
                 }
                 if document.picture != raw_object.picture {
                     document.picture = raw_object.picture;
                     change = true;
+                    event.push(MultiPassEventKind::IdentityUpdate {
+                        did: document.did.clone(),
+                        kind: UpdateKind::Picture,
+                    });
                 }
                 if document.banner != raw_object.banner {
                     document.banner = raw_object.banner;
                     change = true;
+                    event.push(MultiPassEventKind::IdentityUpdate {
+                        did: document.did.clone(),
+                        kind: UpdateKind::Banner,
+                    });
                 }
                 if document.status != raw_object.status {
                     document.status = raw_object.status;
                     change = true;
+                    if let Some(status) = document.status {
+                        event.push(MultiPassEventKind::IdentityUpdate {
+                            did: document.did.clone(),
+                            kind: UpdateKind::Status { status },
+                        });
+                    }
                 }
                 if document.platform != raw_object.platform {
                     document.platform = raw_object.platform;
@@ -535,6 +576,21 @@ impl IdentityStore {
                         }
                         // Do we want to remove the old block?
                         self.ipfs.remove_block(old_cid).await?;
+                    }
+                    if let Ok(store) = self.friend_store().await {
+                        if store
+                            .is_friend(&identity.did_key())
+                            .await
+                            .unwrap_or_default()
+                        {
+                            let mut events = event;
+                            let tx = self.event.clone();
+                            tokio::spawn(async move {
+                                while let Some(event) = events.pop() {
+                                    let _ = tx.send(event);
+                                }
+                            });
+                        }
                     }
                 }
             }
