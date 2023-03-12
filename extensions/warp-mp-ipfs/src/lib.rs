@@ -365,7 +365,7 @@ impl IpfsIdentity {
                 .collect()
         });
 
-        let discovery = Discovery::new(config.store_setting.discovery);
+        let discovery = Discovery::new(ipfs.clone(), config.store_setting.discovery);
 
         let identity_store = IdentityStore::new(
             ipfs.clone(),

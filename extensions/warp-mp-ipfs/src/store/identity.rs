@@ -18,7 +18,7 @@ use libipld::{
     Cid,
 };
 use rust_ipfs as ipfs;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::HashSet,
     path::PathBuf,
@@ -32,7 +32,6 @@ use tracing::{
     warn,
 };
 
-use warp::multipass::{identity::Platform, UpdateKind};
 use warp::{
     crypto::{cipher::Cipher, did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
@@ -40,21 +39,27 @@ use warp::{
         identity::{Identity, IdentityStatus, SHORT_ID_SIZE},
         MultiPassEventKind,
     },
-    sync::Arc,
+    sync::{Arc, RwLock},
     tesseract::Tesseract,
+};
+use warp::{
+    crypto::{did_key::ECDH, zeroize::Zeroizing, KeyMaterial},
+    multipass::{identity::Platform, UpdateKind},
 };
 
 use super::{
     connected_to_peer,
     document::{CacheDocument, DocumentType, GetDag, RootDocument, ToCid},
     friends::{FriendsStore, Request},
-    libp2p_pub_to_did, IDENTITY_BROADCAST,
+    libp2p_pub_to_did,
 };
 
 pub struct IdentityStore {
     ipfs: Ipfs,
 
     path: Option<PathBuf>,
+
+    did: Arc<RwLock<DID>>,
 
     root_cid: Arc<tokio::sync::RwLock<Option<Cid>>>,
 
@@ -98,6 +103,7 @@ impl Clone for IdentityStore {
         Self {
             ipfs: self.ipfs.clone(),
             path: self.path.clone(),
+            did: self.did.clone(),
             root_cid: self.root_cid.clone(),
             cache_cid: self.cache_cid.clone(),
             identity: self.identity.clone(),
@@ -141,6 +147,20 @@ pub enum LookupBy {
     ShortId(String),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[allow(clippy::large_enum_variant)]
+pub enum IdentityEvent {
+    Request,
+    Receive { sender: DID, bytes: Vec<u8> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RequestOption {
+    Identity,
+}
+
 impl IdentityStore {
     pub async fn new(
         ipfs: Ipfs,
@@ -173,6 +193,7 @@ impl IdentityStore {
         let permit = Arc::new(Semaphore::new(1));
         let root_task = Arc::default();
         let task_send = Arc::default();
+        let did = Arc::default();
         let event = tx;
         let friend_store = Arc::default();
 
@@ -195,6 +216,7 @@ impl IdentityStore {
             permit,
             root_task,
             task_send,
+            did,
             event,
             friend_store,
         };
@@ -212,17 +234,23 @@ impl IdentityStore {
             *store.identity.write().await = Some(ident);
             store.start_event.store(true, Ordering::SeqCst);
         }
-        let id_broadcast_stream = store
+
+        let did = store.get_keypair_did()?;
+
+        let event_stream = store
             .ipfs
-            .pubsub_subscribe(IDENTITY_BROADCAST.into())
+            .pubsub_subscribe(format!("/peer/{did}/events"))
             .await?;
 
         tokio::spawn({
             let mut store = store.clone();
             async move {
                 // let mut peer_annoyance = HashMap::<PeerId, usize>::new();
+                if let Err(e) = store.discovery.start().await {
+                    warn!("Error starting discovery service: {e}. Will not be able to discover peers over namespace");
+                }
 
-                futures::pin_mut!(id_broadcast_stream);
+                futures::pin_mut!(event_stream);
 
                 let mut tick = tokio::time::interval(Duration::from_millis(interval));
                 //Use to update the seen list
@@ -236,24 +264,19 @@ impl IdentityStore {
                         tokio::time::sleep(Duration::from_millis(10)).await;
                         continue;
                     }
+
                     tokio::select! {
-                        message = id_broadcast_stream.next() => {
+                        message = event_stream.next() => {
                             if let Some(message) = message {
                                 if let Err(e) = store.process_message(message).await {
                                     error!("Error: {e}");
                                 }
                             }
                         }
-                        // _ = update_seen.tick() => {
-                        //     if let Err(e) = store.update_pubsub_peers_list().await {
-                        //         error!("Error: {e}");
-                        //     }
-                        // }
-                        // _ = clear_seen.tick() => {
-                        //     store.seen.write().clear();
-                        // }
+                        
                         _ = tick.tick() => {
-                            if let Err(e) = store.broadcast_identity().await {
+                            let list = store.discovery.did_iter().await.collect::<Vec<_>>().await;
+                            if let Err(e) = store.push_iter(list).await {
                                 error!("Error broadcasting identity: {e}");
                             }
                         }
@@ -262,22 +285,9 @@ impl IdentityStore {
             }
         });
 
-        if let Err(e) = store.discovery.start(&store.ipfs).await {
-            warn!("Error starting discovery service: {e}. Will not be able to discover peers over namespace");
-        }
-
         tokio::task::yield_now().await;
         Ok(store)
     }
-
-    // async fn update_pubsub_peers_list(&self) -> anyhow::Result<()> {
-    //     let peers = self
-    //         .ipfs
-    //         .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
-    //         .await?;
-    //     *self.seen.write() = HashSet::from_iter(peers);
-    //     Ok(())
-    // }
 
     pub async fn set_friend_store(&self, store: FriendsStore) {
         *self.friend_store.write().await = Some(store)
@@ -347,16 +357,22 @@ impl IdentityStore {
         *self.root_task.write().await = Some(task);
     }
 
-    //TODO: Replace with a request/resposne style broadcast
-    async fn broadcast_identity(&self) -> anyhow::Result<()> {
-        let peers = self
-            .ipfs
-            .pubsub_peers(Some(IDENTITY_BROADCAST.into()))
-            .await?;
-
-        if peers.is_empty() {
-            return Ok(());
+    async fn push_iter<I: IntoIterator<Item = DID>>(&self, list: I) -> Result<(), Error> {
+        for did in list {
+            if let Err(_e) = self.push(&did).await {}
         }
+        Ok(())
+    }
+
+    async fn push(&self, out_did: &DID) -> Result<(), Error> {
+        let pk_did = self.get_keypair_did()?;
+
+        let prikey = Ed25519KeyPair::from_secret_key(&pk_did.private_key_bytes()).get_x25519();
+        let pubkey = Ed25519KeyPair::from_public_key(&out_did.public_key_bytes()).get_x25519();
+
+        let shared_key = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
+            .map(Zeroizing::new)
+            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
         let root = self.get_root_document().await?;
 
@@ -425,17 +441,43 @@ impl IdentityStore {
 
         let payload_bytes = serde_json::to_vec(&payload)?;
 
-        let bytes = Cipher::self_encrypt(&payload_bytes)?;
+        let bytes = Cipher::direct_encrypt(&payload_bytes, &shared_key)?;
 
-        self.ipfs
-            .pubsub_publish(IDENTITY_BROADCAST.into(), bytes)
-            .await?;
+        let topic = format!("/peer/{out_did}/events");
+
+        let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
+
+        if self
+            .ipfs
+            .pubsub_peers(Some(topic.clone()))
+            .await?
+            .contains(&out_peer_id)
+        {
+            self.ipfs.pubsub_publish(topic, bytes).await?;
+        }
 
         Ok(())
     }
 
     async fn process_message(&mut self, message: GossipsubMessage) -> anyhow::Result<()> {
-        let bytes = Cipher::self_decrypt(&message.data)?;
+        let in_did = match message.source {
+            Some(peer_id) => match self.discovery.get_with_peer_id(peer_id).await {
+                Some(entry) => entry.did_key().await?,
+                None => return Ok(()),
+            },
+            None => return Ok(()),
+        };
+
+        let pk_did = self.get_keypair_did()?;
+
+        let prikey = Ed25519KeyPair::from_secret_key(&pk_did.private_key_bytes()).get_x25519();
+        let pubkey = Ed25519KeyPair::from_public_key(&in_did.public_key_bytes()).get_x25519();
+
+        let shared_key = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
+            .map(Zeroizing::new)
+            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+
+        let bytes = Cipher::direct_decrypt(&message.data, &shared_key)?;
 
         let raw_object = serde_json::from_slice::<IdentityPayload>(&bytes)?;
 
