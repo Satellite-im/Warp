@@ -348,8 +348,17 @@ impl DiscoveryEntry {
                     {
                         let did = entry.did.read().await.clone();
                         if let Some(did) = did {
-                            let _ = entry.sender.send(did);
-                            sent_initial_push = true;
+                            let topic = format!("/peer/{did}/events");
+                            let subscribed = ipfs
+                                .pubsub_peers(Some(topic))
+                                .await
+                                .unwrap_or_default()
+                                .contains(&entry.peer_id);
+                            
+                            if subscribed {
+                                let _ = entry.sender.send(did);
+                                sent_initial_push = true;
+                            }
                         }
                     }
 
