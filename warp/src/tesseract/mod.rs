@@ -226,7 +226,9 @@ impl Tesseract {
     /// ```
     pub fn set_file<P: AsRef<Path>>(&self, file: P) {
         *self.file.write() = Some(file.as_ref().to_path_buf());
-        if let Err(_e) = self.to_file(file) {}
+        if !file.as_ref().is_file() {
+            if let Err(_e) = self.to_file(file) {}
+        }
     }
 
     /// Internal file handle
