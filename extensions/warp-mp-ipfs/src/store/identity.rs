@@ -1007,6 +1007,7 @@ impl IdentityStore {
         root_document.status = Some(status);
         self.set_root_document(root_document).await?;
         *self.online_status.write().await = Some(status);
+        self.push_to_all().await;
         Ok(())
     }
 
