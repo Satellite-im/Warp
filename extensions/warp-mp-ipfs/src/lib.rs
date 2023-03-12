@@ -399,6 +399,8 @@ impl IpfsIdentity {
         .await?;
         info!("friends store initialized");
 
+        identity_store.set_friend_store(friend_store.clone()).await;
+
         *self.identity_store.write() = Some(identity_store);
         *self.friend_store.write() = Some(friend_store);
 

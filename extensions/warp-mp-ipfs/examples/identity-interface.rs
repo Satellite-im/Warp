@@ -8,7 +8,7 @@ use std::str::FromStr;
 use tracing_subscriber::EnvFilter;
 use warp::crypto::DID;
 use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
-use warp::multipass::MultiPass;
+use warp::multipass::{MultiPass, UpdateKind};
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -312,6 +312,22 @@ async fn main() -> anyhow::Result<()> {
 
                             writeln!(stdout, "> {username} blocked you")?;
                         },
+                        warp::multipass::MultiPassEventKind::IdentityUpdate { did, kind } => {
+                            let username = account
+                                .get_identity(Identifier::did_key(did.clone())).await
+                                .ok()
+                                .and_then(|list| list.first().cloned())
+                                .map(|ident| ident.username())
+                                .unwrap_or_else(|| did.to_string());
+
+                            match kind {
+                                UpdateKind::Username { old, new } => writeln!(stdout, "> {old} username been updated to \"{new}\"")?,
+                                UpdateKind::StatusMessage => writeln!(stdout, "> {username} updated their status message ")?,
+                                UpdateKind::Status { status } => writeln!(stdout, "> {username} changed to {status} ")?,
+                                UpdateKind::Picture => writeln!(stdout, "> {username} updated their profile picture ")?,
+                                UpdateKind::Banner => writeln!(stdout, "> {username} updated their profile banner ")?, 
+                            };
+                        }
                     }
                 }
             }
