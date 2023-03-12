@@ -275,12 +275,22 @@ impl IdentityStore {
                                 }
                             }
                         }
+                        // Used as the initial request/push
                         Ok(push) = rx.recv() => {
-                            if let Err(e) = store.request(&push).await {
-                                error!("Error pushing identity: {e}");
-                            }
+                            tokio::spawn({
+                                let store = store.clone();
+                                async move {
+                                    if let Err(e) = store.request(&push).await {
+                                        error!("Error requesting identity: {e}");
+                                    }
+                                    if let Err(e) = store.push(&push).await {
+                                        error!("Error pushing identity: {e}");
+                                    }
+                                }
+                            });
                         }
                         _ = tick.tick() => {
+                            //TODO: Auto push on a set interval
                             // let list = store.discovery.did_iter().await.collect::<Vec<_>>().await;
                             // if let Err(e) = store.push_iter(list).await {
                             //     error!("Error broadcasting identity: {e}");
@@ -747,7 +757,7 @@ impl IdentityStore {
         self.relay.clone().unwrap_or_default()
     }
 
-    async fn cache(&self) -> HashSet<CacheDocument> {
+    pub(crate) async fn cache(&self) -> HashSet<CacheDocument> {
         let cache_cid = match self.get_cache_cid().await.ok() {
             Some(cid) => cid,
             None => return Default::default(),
@@ -833,7 +843,7 @@ impl IdentityStore {
                 }
 
                 if !self.discovery.contains(pubkey).await {
-                    self.discovery.insert( pubkey).await?;
+                    self.discovery.insert(pubkey).await?;
                 }
 
                 self.cache()
@@ -859,7 +869,7 @@ impl IdentityStore {
                         continue;
                     }
                     if !self.discovery.contains(pubkey).await {
-                        self.discovery.insert( pubkey).await?;
+                        self.discovery.insert(pubkey).await?;
                     }
 
                     if let Some(cache) = cache.iter().find(|cache| cache.did.eq(pubkey)) {
