@@ -13,7 +13,10 @@ use rust_ipfs::{
     libp2p::swarm::dial_opts::{DialOpts, PeerCondition},
     Ipfs, PeerId,
 };
-use tokio::{sync::RwLock, task::JoinHandle};
+use tokio::{
+    sync::{broadcast, RwLock},
+    task::JoinHandle,
+};
 use tracing::log;
 use warp::{crypto::DID, error::Error};
 
@@ -27,15 +30,18 @@ pub struct Discovery {
     config: DiscoveryConfig,
     entries: Arc<RwLock<HashSet<DiscoveryEntry>>>,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
+    events: broadcast::Sender<DID>,
 }
 
 impl Discovery {
     pub fn new(ipfs: Ipfs, config: DiscoveryConfig) -> Self {
+        let (events, _) = tokio::sync::broadcast::channel(2048);
         Self {
             ipfs,
             config,
             entries: Arc::default(),
             task: Arc::default(),
+            events,
         }
     }
 
@@ -77,6 +83,7 @@ impl Discovery {
                                             peer_id,
                                             None,
                                             discovery.config.clone(),
+                                            discovery.events.clone(),
                                         )
                                         .await;
                                         if !discovery.entries.write().await.insert(entry.clone()) {
@@ -94,6 +101,10 @@ impl Discovery {
             *self.task.write().await = Some(task);
         }
         Ok(())
+    }
+
+    pub fn events(&self) -> broadcast::Receiver<DID> {
+        self.events.subscribe()
     }
 
     pub fn discovery_config(&self) -> DiscoveryConfig {
@@ -122,7 +133,14 @@ impl Discovery {
             return Ok(());
         }
 
-        let entry = DiscoveryEntry::new(ipfs, peer_id, did_key, self.config.clone()).await;
+        let entry = DiscoveryEntry::new(
+            ipfs,
+            peer_id,
+            did_key,
+            self.config.clone(),
+            self.events.clone(),
+        )
+        .await;
         entry.enable_discovery();
         let prev = self.entries.write().await.replace(entry);
         if let Some(entry) = prev {
@@ -189,6 +207,7 @@ pub struct DiscoveryEntry {
     connection_type: Arc<RwLock<PeerConnectionType>>,
     config: DiscoveryConfig,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
+    sender: broadcast::Sender<DID>,
 }
 
 impl PartialEq for DiscoveryEntry {
@@ -211,6 +230,7 @@ impl DiscoveryEntry {
         peer_id: PeerId,
         did: Option<DID>,
         config: DiscoveryConfig,
+        sender: broadcast::Sender<DID>,
     ) -> Self {
         let entry = Self {
             ipfs: ipfs.clone(),
@@ -220,6 +240,7 @@ impl DiscoveryEntry {
             config,
             discover: Arc::default(),
             task: Arc::default(),
+            sender,
         };
 
         let task = tokio::spawn({
@@ -229,6 +250,8 @@ impl DiscoveryEntry {
                 let mut timer = tokio::time::interval(Duration::from_secs(30));
                 //Done in case the peer is located over DHT
                 let _ = ipfs.identity(Some(peer_id)).await.ok();
+
+                let mut sent_initial_push = false;
                 loop {
                     if !entry.valid().await {
                         //TODO: Check discovery config option to determine if we should determine how we
@@ -319,6 +342,16 @@ impl DiscoveryEntry {
                         Ok(false) => PeerConnectionType::NotConnected,
                         Err(_) => break,
                     };
+
+                    if matches!(connection_type, PeerConnectionType::Connected)
+                        && !sent_initial_push
+                    {
+                        let did = entry.did.read().await.clone();
+                        if let Some(did) = did {
+                            let _ = entry.sender.send(did);
+                            sent_initial_push = true;
+                        }
+                    }
 
                     *entry.connection_type.write().await = connection_type;
                     tokio::time::sleep(Duration::from_secs(1)).await;

@@ -151,8 +151,8 @@ pub enum LookupBy {
 #[serde(rename_all = "lowercase")]
 #[allow(clippy::large_enum_variant)]
 pub enum IdentityEvent {
-    Request,
-    Receive { sender: DID, bytes: Vec<u8> },
+    Request { option: RequestOption },
+    Receive { payload: IdentityPayload },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -256,6 +256,8 @@ impl IdentityStore {
                 //Use to update the seen list
                 // let mut update_seen = tokio::time::interval(Duration::from_secs(10));
                 // let mut clear_seen = tokio::time::interval(Duration::from_secs(15));
+                let mut rx = store.discovery.events();
+
                 loop {
                     if store.end_event.load(Ordering::SeqCst) {
                         break;
@@ -273,12 +275,16 @@ impl IdentityStore {
                                 }
                             }
                         }
-                        
-                        _ = tick.tick() => {
-                            let list = store.discovery.did_iter().await.collect::<Vec<_>>().await;
-                            if let Err(e) = store.push_iter(list).await {
-                                error!("Error broadcasting identity: {e}");
+                        Ok(push) = rx.recv() => {
+                            if let Err(e) = store.request(&push).await {
+                                error!("Error pushing identity: {e}");
                             }
+                        }
+                        _ = tick.tick() => {
+                            // let list = store.discovery.did_iter().await.collect::<Vec<_>>().await;
+                            // if let Err(e) = store.push_iter(list).await {
+                            //     error!("Error broadcasting identity: {e}");
+                            // }
                         }
                     }
                 }
@@ -357,10 +363,52 @@ impl IdentityStore {
         *self.root_task.write().await = Some(task);
     }
 
-    async fn push_iter<I: IntoIterator<Item = DID>>(&self, list: I) -> Result<(), Error> {
+    async fn push_iter<I: IntoIterator<Item = DID>>(&self, list: I) {
         for did in list {
-            if let Err(_e) = self.push(&did).await {}
+            tokio::spawn({
+                let did = did.clone();
+                let store = self.clone();
+                async move { if let Err(_e) = store.push(&did).await {} }
+            });
         }
+    }
+
+    async fn push_to_all(&self) {
+        let list = self.discovery.did_iter().await.collect::<Vec<_>>().await;
+        self.push_iter(list).await
+    }
+
+    async fn request(&self, out_did: &DID) -> Result<(), Error> {
+        let pk_did = self.get_keypair_did()?;
+
+        let prikey = Ed25519KeyPair::from_secret_key(&pk_did.private_key_bytes()).get_x25519();
+        let pubkey = Ed25519KeyPair::from_public_key(&out_did.public_key_bytes()).get_x25519();
+
+        let shared_key = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
+            .map(Zeroizing::new)
+            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+
+        let event = IdentityEvent::Request {
+            option: RequestOption::Identity,
+        };
+
+        let payload_bytes = serde_json::to_vec(&event)?;
+
+        let bytes = Cipher::direct_encrypt(&payload_bytes, &shared_key)?;
+
+        let topic = format!("/peer/{out_did}/events");
+
+        let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
+
+        if self
+            .ipfs
+            .pubsub_peers(Some(topic.clone()))
+            .await?
+            .contains(&out_peer_id)
+        {
+            self.ipfs.pubsub_publish(topic, bytes).await?;
+        }
+
         Ok(())
     }
 
@@ -439,7 +487,9 @@ impl IdentityStore {
 
         let payload = payload.sign(&kp_did)?;
 
-        let payload_bytes = serde_json::to_vec(&payload)?;
+        let event = IdentityEvent::Receive { payload };
+
+        let payload_bytes = serde_json::to_vec(&event)?;
 
         let bytes = Cipher::direct_encrypt(&payload_bytes, &shared_key)?;
 
@@ -479,177 +529,189 @@ impl IdentityStore {
 
         let bytes = Cipher::direct_decrypt(&message.data, &shared_key)?;
 
-        let raw_object = serde_json::from_slice::<IdentityPayload>(&bytes)?;
+        let event = serde_json::from_slice::<IdentityEvent>(&bytes)?;
 
-        let payload = raw_object.payload.clone();
-
-        //TODO: Validate public key against peer that sent it
-        let _pk = did_to_libp2p_pub(&raw_object.did)?;
-
-        let identity = payload
-            .resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
-            .await?;
-
-        anyhow::ensure!(
-            raw_object.did == identity.did_key(),
-            "Payload doesnt match identity"
-        );
-
-        // Validate after making sure the identity did matches the payload
-        raw_object.verify()?;
-
-        if let Some(own_id) = self.identity.read().await.clone() {
-            anyhow::ensure!(own_id != identity, "Cannot accept own identity");
-        }
-
-        if !self.discovery.contains(identity.did_key()).await {
-            if let Err(e) = self.discovery.insert(&self.ipfs, identity.did_key()).await {
-                log::warn!("Error inserting into discovery service: {e}");
+        match event {
+            IdentityEvent::Request {
+                option: RequestOption::Identity,
+            } => {
+                self.push(&in_did).await?;
             }
-        }
+            IdentityEvent::Receive { payload } => {
+                let raw_object = payload;
 
-        let (old_cid, mut cache_documents) = match self.get_cache_cid().await {
-            Ok(cid) => match self
-                .get_dag::<HashSet<CacheDocument>>(IpfsPath::from(cid), None)
-                .await
-            {
-                Ok(doc) => (Some(cid), doc),
-                _ => (Some(cid), Default::default()),
-            },
-            _ => (None, Default::default()),
-        };
+                let payload = raw_object.payload.clone();
 
-        let mut found = false;
+                //TODO: Validate public key against peer that sent it
+                let _pk = did_to_libp2p_pub(&raw_object.did)?;
 
-        let mut document = match cache_documents
-            .iter()
-            .find(|document| {
-                document.did == identity.did_key() && document.short_id == identity.short_id()
-            })
-            .cloned()
-        {
-            Some(document) => {
-                found = true;
-                document
-            }
-            None => {
-                let username = identity.username();
-                let short_id = identity.short_id();
-                let did = identity.did_key();
-                let picture = raw_object.picture.clone();
-                let banner = raw_object.banner.clone();
-                let identity = payload.clone();
-                let status = raw_object.status;
-                let platform = raw_object.platform;
-                CacheDocument {
-                    username,
-                    did,
-                    picture,
-                    banner,
-                    short_id,
-                    identity,
-                    status,
-                    platform,
-                }
-            }
-        };
+                let identity = payload
+                    .resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
+                    .await?;
 
-        match (found, &document.identity) {
-            (true, object) => {
-                let mut change = false;
-                let mut event: Vec<MultiPassEventKind> = vec![];
-                if document.username != identity.username() {
-                    let old_username = document.username.clone();
-                    document.username = identity.username();
-                    change = true;
-                    event.push(MultiPassEventKind::IdentityUpdate {
-                        did: document.did.clone(),
-                        kind: UpdateKind::Username {
-                            old: old_username,
-                            new: identity.username(),
-                        },
-                    });
+                anyhow::ensure!(
+                    raw_object.did == identity.did_key(),
+                    "Payload doesnt match identity"
+                );
+
+                // Validate after making sure the identity did matches the payload
+                raw_object.verify()?;
+
+                if let Some(own_id) = self.identity.read().await.clone() {
+                    anyhow::ensure!(own_id != identity, "Cannot accept own identity");
                 }
-                if document.picture != raw_object.picture {
-                    document.picture = raw_object.picture;
-                    change = true;
-                    event.push(MultiPassEventKind::IdentityUpdate {
-                        did: document.did.clone(),
-                        kind: UpdateKind::Picture,
-                    });
-                }
-                if document.banner != raw_object.banner {
-                    document.banner = raw_object.banner;
-                    change = true;
-                    event.push(MultiPassEventKind::IdentityUpdate {
-                        did: document.did.clone(),
-                        kind: UpdateKind::Banner,
-                    });
-                }
-                if document.status != raw_object.status {
-                    document.status = raw_object.status;
-                    change = true;
-                    if let Some(status) = document.status {
-                        event.push(MultiPassEventKind::IdentityUpdate {
-                            did: document.did.clone(),
-                            kind: UpdateKind::Status { status },
-                        });
+
+                if !self.discovery.contains(identity.did_key()).await {
+                    if let Err(e) = self.discovery.insert(&self.ipfs, identity.did_key()).await {
+                        log::warn!("Error inserting into discovery service: {e}");
                     }
                 }
-                if document.platform != raw_object.platform {
-                    document.platform = raw_object.platform;
-                    change = true;
-                }
-                if object != &payload {
-                    document.identity = payload;
-                    change = true;
-                }
 
-                if change {
-                    cache_documents.replace(document);
+                let (old_cid, mut cache_documents) = match self.get_cache_cid().await {
+                    Ok(cid) => match self
+                        .get_dag::<HashSet<CacheDocument>>(IpfsPath::from(cid), None)
+                        .await
+                    {
+                        Ok(doc) => (Some(cid), doc),
+                        _ => (Some(cid), Default::default()),
+                    },
+                    _ => (None, Default::default()),
+                };
 
-                    let new_cid = self.put_dag(cache_documents).await?;
+                let mut found = false;
 
-                    self.ipfs.insert_pin(&new_cid, false).await?;
-                    self.save_cache_cid(new_cid).await?;
-                    if let Some(old_cid) = old_cid {
-                        if self.ipfs.is_pinned(&old_cid).await? {
-                            self.ipfs.remove_pin(&old_cid, false).await?;
+                let mut document = match cache_documents
+                    .iter()
+                    .find(|document| {
+                        document.did == identity.did_key()
+                            && document.short_id == identity.short_id()
+                    })
+                    .cloned()
+                {
+                    Some(document) => {
+                        found = true;
+                        document
+                    }
+                    None => {
+                        let username = identity.username();
+                        let short_id = identity.short_id();
+                        let did = identity.did_key();
+                        let picture = raw_object.picture.clone();
+                        let banner = raw_object.banner.clone();
+                        let identity = payload.clone();
+                        let status = raw_object.status;
+                        let platform = raw_object.platform;
+                        CacheDocument {
+                            username,
+                            did,
+                            picture,
+                            banner,
+                            short_id,
+                            identity,
+                            status,
+                            platform,
                         }
-                        // Do we want to remove the old block?
-                        self.ipfs.remove_block(old_cid).await?;
                     }
-                    if let Ok(store) = self.friend_store().await {
-                        if store
-                            .is_friend(&identity.did_key())
-                            .await
-                            .unwrap_or_default()
-                        {
-                            let mut events = event;
-                            let tx = self.event.clone();
-                            tokio::spawn(async move {
-                                while let Some(event) = events.pop() {
-                                    let _ = tx.send(event);
-                                }
+                };
+
+                match (found, &document.identity) {
+                    (true, object) => {
+                        let mut change = false;
+                        let mut event: Vec<MultiPassEventKind> = vec![];
+                        if document.username != identity.username() {
+                            let old_username = document.username.clone();
+                            document.username = identity.username();
+                            change = true;
+                            event.push(MultiPassEventKind::IdentityUpdate {
+                                did: document.did.clone(),
+                                kind: UpdateKind::Username {
+                                    old: old_username,
+                                    new: identity.username(),
+                                },
                             });
                         }
-                    }
-                }
-            }
-            (false, _object) => {
-                cache_documents.insert(document);
+                        if document.picture != raw_object.picture {
+                            document.picture = raw_object.picture;
+                            change = true;
+                            event.push(MultiPassEventKind::IdentityUpdate {
+                                did: document.did.clone(),
+                                kind: UpdateKind::Picture,
+                            });
+                        }
+                        if document.banner != raw_object.banner {
+                            document.banner = raw_object.banner;
+                            change = true;
+                            event.push(MultiPassEventKind::IdentityUpdate {
+                                did: document.did.clone(),
+                                kind: UpdateKind::Banner,
+                            });
+                        }
+                        if document.status != raw_object.status {
+                            document.status = raw_object.status;
+                            change = true;
+                            if let Some(status) = document.status {
+                                event.push(MultiPassEventKind::IdentityUpdate {
+                                    did: document.did.clone(),
+                                    kind: UpdateKind::Status { status },
+                                });
+                            }
+                        }
+                        if document.platform != raw_object.platform {
+                            document.platform = raw_object.platform;
+                            change = true;
+                        }
+                        if object != &payload {
+                            document.identity = payload;
+                            change = true;
+                        }
 
-                let new_cid = self.put_dag(cache_documents).await?;
+                        if change {
+                            cache_documents.replace(document);
 
-                self.ipfs.insert_pin(&new_cid, false).await?;
-                self.save_cache_cid(new_cid).await?;
-                if let Some(old_cid) = old_cid {
-                    if self.ipfs.is_pinned(&old_cid).await? {
-                        self.ipfs.remove_pin(&old_cid, false).await?;
+                            let new_cid = self.put_dag(cache_documents).await?;
+
+                            self.ipfs.insert_pin(&new_cid, false).await?;
+                            self.save_cache_cid(new_cid).await?;
+                            if let Some(old_cid) = old_cid {
+                                if self.ipfs.is_pinned(&old_cid).await? {
+                                    self.ipfs.remove_pin(&old_cid, false).await?;
+                                }
+                                // Do we want to remove the old block?
+                                self.ipfs.remove_block(old_cid).await?;
+                            }
+                            if let Ok(store) = self.friend_store().await {
+                                if store
+                                    .is_friend(&identity.did_key())
+                                    .await
+                                    .unwrap_or_default()
+                                {
+                                    let mut events = event;
+                                    let tx = self.event.clone();
+                                    tokio::spawn(async move {
+                                        while let Some(event) = events.pop() {
+                                            let _ = tx.send(event);
+                                        }
+                                    });
+                                }
+                            }
+                        }
                     }
-                    // Do we want to remove the old block?
-                    self.ipfs.remove_block(old_cid).await?;
-                }
+                    (false, _object) => {
+                        cache_documents.insert(document);
+
+                        let new_cid = self.put_dag(cache_documents).await?;
+
+                        self.ipfs.insert_pin(&new_cid, false).await?;
+                        self.save_cache_cid(new_cid).await?;
+                        if let Some(old_cid) = old_cid {
+                            if self.ipfs.is_pinned(&old_cid).await? {
+                                self.ipfs.remove_pin(&old_cid, false).await?;
+                            }
+                            // Do we want to remove the old block?
+                            self.ipfs.remove_block(old_cid).await?;
+                        }
+                    }
+                };
             }
         };
         Ok(())
