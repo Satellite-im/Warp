@@ -2,13 +2,13 @@ use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
 use rustyline_async::{Readline, ReadlineError};
-use warp::crypto::DID;
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
 use tracing_subscriber::EnvFilter;
+use warp::crypto::DID;
 use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
-use warp::multipass::MultiPass;
+use warp::multipass::{MultiPass, UpdateKind};
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -312,6 +312,22 @@ async fn main() -> anyhow::Result<()> {
 
                             writeln!(stdout, "> {username} blocked you")?;
                         },
+                        warp::multipass::MultiPassEventKind::IdentityUpdate { did, kind } => {
+                            let username = account
+                                .get_identity(Identifier::did_key(did.clone())).await
+                                .ok()
+                                .and_then(|list| list.first().cloned())
+                                .map(|ident| ident.username())
+                                .unwrap_or_else(|| did.to_string());
+
+                            match kind {
+                                UpdateKind::Username { old, new } => writeln!(stdout, "> {old} username been updated to \"{new}\"")?,
+                                UpdateKind::StatusMessage => writeln!(stdout, "> {username} updated their status message ")?,
+                                UpdateKind::Status { status } => writeln!(stdout, "> {username} changed to {status} ")?,
+                                UpdateKind::Picture => writeln!(stdout, "> {username} updated their profile picture ")?,
+                                UpdateKind::Banner => writeln!(stdout, "> {username} updated their profile banner ")?, 
+                            };
+                        }
                     }
                 }
             }
@@ -600,7 +616,7 @@ async fn main() -> anyhow::Result<()> {
                             }
 
                             let status = status.join(" ").to_string();
-                            if let Err(e) = account.update_identity(IdentityUpdate::set_status_message(Some(status))).await {
+                            if let Err(e) = account.update_identity(IdentityUpdate::StatusMessage(Some(status))).await {
                                 writeln!(stdout, "Error updating status: {e}")?;
                                 continue
                             }
@@ -615,7 +631,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = account.update_identity(IdentityUpdate::set_username(username.to_string())).await {
+                            if let Err(e) = account.update_identity(IdentityUpdate::Username(username.to_string())).await {
                                 writeln!(stdout, "Error updating username: {e}")?;
                                 continue;
                             }
@@ -631,7 +647,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = account.update_identity(IdentityUpdate::set_graphics_picture(picture.to_string())).await {
+                            if let Err(e) = account.update_identity(IdentityUpdate::Picture(picture.to_string())).await {
                                 writeln!(stdout, "Error updating picture: {e}")?;
                                 continue;
                             }
@@ -647,7 +663,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            if let Err(e) = account.update_identity(IdentityUpdate::set_graphics_banner(banner.to_string())).await {
+                            if let Err(e) = account.update_identity(IdentityUpdate::Banner(banner.to_string())).await {
                                 writeln!(stdout, "Error updating banner: {e}")?;
                                 continue;
                             }

@@ -104,11 +104,7 @@ impl Discovery {
             .cloned()
     }
 
-    pub async fn insert<P: Into<PeerType>>(
-        &self,
-        ipfs: &Ipfs,
-        peer_type: P,
-    ) -> Result<(), Error> {
+    pub async fn insert<P: Into<PeerType>>(&self, ipfs: &Ipfs, peer_type: P) -> Result<(), Error> {
         let (peer_id, did_key) = match &peer_type.into() {
             PeerType::PeerId(peer_id) => (*peer_id, None),
             PeerType::DID(did_key) => {
@@ -301,18 +297,12 @@ impl DiscoveryEntry {
                         }
                     }
 
-                    let Ok(connection_type) = ipfs.connected().await.map(|list| {
-                        if list.iter().any(|peer| *peer == entry.peer_id) {
-                            PeerConnectionType::Connected
-                        } else {
-                            PeerConnectionType::NotConnected
-                        }
-                    }) else {
-                        // If it fails, then its likely that ipfs had a fatal error
-                        // Maybe panic?
-                        break;
+                    let connection_type = match ipfs.is_connected(entry.peer_id).await {
+                        Ok(true) =>  PeerConnectionType::Connected,
+                        Ok(false) => PeerConnectionType::NotConnected,
+                        Err(_) => break
                     };
-
+                           
                     *entry.connection_type.write().await = connection_type;
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }

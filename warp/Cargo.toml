@@ -1,11 +1,11 @@
 [package]
 name = "warp"
-version = "0.1.0"
+version.workspace = true
 description = "TBD"
 # readme = "README.md"
-license = "MIT"
-edition = "2021"
-repository = "https://github.com/Satellite-im/Warp"
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
@@ -15,74 +15,74 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 [dependencies]
 
 # Async and futures crates
-futures = { version = "0.3" }
-async-trait = { version = "0.1" }
-async-stream = "0.3"
-async-broadcast = "0.5"
+futures.workspace = true
+async-trait.workspace = true
+async-stream.workspace = true
+async-broadcast.workspace = true
 
 # Crypto crates
-x25519-dalek = { version = "1" }
-ed25519-dalek = { version = "1" }
-curve25519-dalek = "3.2"
-blake2 = { version = "0.10" }
-sha1 = { version = "0.10" }
-sha2 = { version = "0.10" }
-sha3 = { version = "0.10" }
-hmac = { version = "0.12.0", default-features = false }
-digest = { version = "0.10" }
-aes-gcm = { version = "0.10", features = ["stream"] }
-zeroize = "1"
-rand = { version = "0.8" }
-multihash = { version = "0.18", features = ["sha1"] }
-did-key = { git = "https://github.com/Satellite-im/did-key.rs", branch = "backport-patch" }
-tiny-bip39 = "1.0"
+x25519-dalek.workspace = true
+ed25519-dalek.workspace = true
+curve25519-dalek.workspace = true
+blake2.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+sha3.workspace = true
+hmac.workspace = true
+digest.workspace = true
+aes-gcm = { workspace = true, features = ["stream"] }
+zeroize.workspace = true
+rand.workspace = true
+multihash = { workspace = true, features = ["sha1"] }
+did-key.workspace = true
+tiny-bip39.workspace = true
 
 # Error handling crates
-anyhow = { version = "1" }
-thiserror = "1.0"
+anyhow.workspace = true
+thiserror.workspace = true
 
 # Sync crates
-parking_lot = { version = "0.12", features = ["send_guard", "serde"] }
-cfg-if = "1.0"
-once_cell = "1.16"
+parking_lot = { workspace = true, features = ["send_guard", "serde"] }
+cfg-if.workspace = true
+once_cell.workspace = true
 
 # Time crate
-chrono = { version = "0.4", features = ["serde", "wasmbind"] }
+chrono = { workspace = true, features = ["serde", "wasmbind"] }
 
 # Encoding and Serializing Crates
-serde = { version = "1.0", features = ["derive", "rc"] }
-serde_json = { version = "1.0" }
-serde_yaml = "0.9"
-toml = "0.5"
-bs58 = "0.4"
-hex = "0.4"
-libipld = { version = "0.15", features = ["serde-codec"] }
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+toml.workspace = true
+bs58.workspace = true
+hex.workspace = true
+libipld = { workspace = true }
 
 # Misc
-dyn-clone = "1.0"
-uuid = { version = "1", features = ["serde", "v4"] }
-derive_more = "0.99"
-paste = "1.0"
-libc = "0.2"
+dyn-clone.workspace = true
+uuid.workspace = true
+derive_more.workspace = true
+paste.workspace = true
+libc.workspace = true
 warp-derive = { path = "./warp-derive" }
-sata = { git = "https://github.com/Satellite-im/Sata", rev = "4e4d86751eefdb44cc3f3fc473e231773b676173" }
-tracing = { default-features = false, features = ["log"], version = "0.1" }
+sata.workspace = true
+tracing = { default-features = false, features = ["log"], workspace = true }
 tracing-futures = { default-features = false, features = [
     "std-future",
     "std",
     "futures-03",
-], version = "0.2" }
+], workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-getrandom = { version = "0.2" }
-tokio = { version = "1", features = ["full"] }
+getrandom = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { version = "0.2" }
 wasm-bindgen-futures = "0.4.30"
 wasm-streams = "0.2"
 gloo = "0.7"
-getrandom = { version = "0.2", features = ["js"] }
+getrandom = { workspace = true, features = ["js"] }
 web-sys = { version = "0.3" }
 js-sys = { version = "0.3" }
 serde-wasm-bindgen = "0.4.2"

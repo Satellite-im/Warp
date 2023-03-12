@@ -1,5 +1,5 @@
-use rust_ipfs as ipfs;
 use ipfs::Multiaddr;
+use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
@@ -16,7 +16,7 @@ pub enum Bootstrap {
     None,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Discovery {
     /// Uses DHT PROVIDER to find and connect to peers using the same context
@@ -24,13 +24,8 @@ pub enum Discovery {
     /// Dials out to peers directly. Using this will only work with the DID til that connection is made
     Direct,
     /// Disables Discovery over DHT or Directly (which relays on direct connection via multiaddr)
+    #[default]
     None,
-}
-
-impl Default for Discovery {
-    fn default() -> Self {
-        Discovery::None
-    }
 }
 
 impl Bootstrap {
@@ -46,7 +41,7 @@ impl Bootstrap {
             .iter()
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),
-            Bootstrap::Experimental => vec!["/ip4/67.205.175.147/tcp/5000/p2p/12D3KooWDC7igsZ9Yaheip77ejALmjG6AZm2auuVmMDj1AkC2o7B"]
+            Bootstrap::Experimental => vec!["/ip4/137.184.70.241/tcp/4894/p2p/12D3KooWP5aD68wq8eDqMtbcMgAzzhUJt8Y3n2g5vzAA1Lo7uVgY"]
             .iter()
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),
@@ -168,11 +163,25 @@ pub struct RelayServer {
     pub enable: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Pubsub {
+    pub max_transmit_size: usize,
+}
+
+impl Default for Pubsub {
+    fn default() -> Self {
+        Self {
+            max_transmit_size: 8 * 1024 * 1024,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct IpfsSetting {
     pub mdns: Mdns,
     pub relay_client: RelayClient,
     pub relay_server: RelayServer,
+    pub pubsub: Pubsub,
     pub swarm: Swarm,
     pub bootstrap: bool,
     pub portmapping: bool,
@@ -192,7 +201,7 @@ pub struct StoreSetting {
     pub sync_interval: u64,
     /// Use objects directly rather than a cid
     pub override_ipld: bool,
-    
+
     pub share_platform: bool,
 
     pub use_phonebook: bool,

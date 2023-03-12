@@ -32,8 +32,9 @@ use tracing::{
     warn,
 };
 
+use warp::multipass::{identity::Platform, UpdateKind};
 use warp::{
-    crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
+    crypto::{cipher::Cipher, did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
     multipass::{
         identity::{Identity, IdentityStatus, SHORT_ID_SIZE},
@@ -42,12 +43,11 @@ use warp::{
     sync::Arc,
     tesseract::Tesseract,
 };
-use warp::{multipass::identity::Platform, sata::Sata};
 
 use super::{
     connected_to_peer,
     document::{CacheDocument, DocumentType, GetDag, RootDocument, ToCid},
-    friends::Request,
+    friends::{FriendsStore, Request},
     libp2p_pub_to_did, IDENTITY_BROADCAST,
 };
 
@@ -87,6 +87,10 @@ pub struct IdentityStore {
     root_task: Arc<tokio::sync::RwLock<Option<tokio::task::JoinHandle<()>>>>,
 
     task_send: Arc<tokio::sync::RwLock<Option<mpsc::UnboundedSender<RootDocumentEvents>>>>,
+
+    event: broadcast::Sender<MultiPassEventKind>,
+
+    friend_store: Arc<tokio::sync::RwLock<Option<FriendsStore>>>,
 }
 
 impl Clone for IdentityStore {
@@ -110,6 +114,8 @@ impl Clone for IdentityStore {
             tesseract: self.tesseract.clone(),
             root_task: self.root_task.clone(),
             task_send: self.task_send.clone(),
+            event: self.event.clone(),
+            friend_store: self.friend_store.clone(),
         }
     }
 }
@@ -141,7 +147,7 @@ impl IdentityStore {
         path: Option<PathBuf>,
         tesseract: Tesseract,
         interval: u64,
-        _tx: broadcast::Sender<MultiPassEventKind>,
+        tx: broadcast::Sender<MultiPassEventKind>,
         (discovery, relay, override_ipld, share_platform): (
             Discovery,
             Option<Vec<Multiaddr>>,
@@ -167,6 +173,8 @@ impl IdentityStore {
         let permit = Arc::new(Semaphore::new(1));
         let root_task = Arc::default();
         let task_send = Arc::default();
+        let event = tx;
+        let friend_store = Arc::default();
 
         let store = Self {
             ipfs,
@@ -187,6 +195,8 @@ impl IdentityStore {
             permit,
             root_task,
             task_send,
+            event,
+            friend_store,
         };
 
         if store.path.is_some() {
@@ -197,7 +207,7 @@ impl IdentityStore {
 
         store.start_root_task().await;
 
-        if let Ok(ident) = store.own_identity().await {
+        if let Ok(ident) = store.own_identity(false).await {
             log::info!("Identity loaded with {}", ident.did_key());
             *store.identity.write().await = Some(ident);
             store.start_event.store(true, Ordering::SeqCst);
@@ -268,6 +278,14 @@ impl IdentityStore {
     //     *self.seen.write() = HashSet::from_iter(peers);
     //     Ok(())
     // }
+
+    pub async fn set_friend_store(&self, store: FriendsStore) {
+        *self.friend_store.write().await = Some(store)
+    }
+
+    async fn friend_store(&self) -> Result<FriendsStore, Error> {
+        self.friend_store.read().await.clone().ok_or(Error::Other)
+    }
 
     async fn start_root_task(&self) {
         let root_cid = self.root_cid.clone();
@@ -340,8 +358,6 @@ impl IdentityStore {
             return Ok(());
         }
 
-        let data = Sata::default();
-
         let root = self.get_root_document().await?;
 
         let identity = self
@@ -350,10 +366,39 @@ impl IdentityStore {
 
         let did = identity.did_key();
 
-        let picture = root.picture;
-        let banner = root.banner;
+        let override_ipld = self.override_ipld.load(Ordering::Relaxed);
 
-        let payload = match self.override_ipld.load(Ordering::Relaxed) {
+        let picture = match override_ipld {
+            true => {
+                if let Some(document) = root.picture.as_ref() {
+                    Some(DocumentType::Object(
+                        document
+                            .resolve_or_default(self.ipfs.clone(), Some(Duration::from_secs(60)))
+                            .await,
+                    ))
+                } else {
+                    None
+                }
+            }
+            false => root.picture,
+        };
+
+        let banner = match override_ipld {
+            true => {
+                if let Some(document) = root.banner.as_ref() {
+                    Some(DocumentType::Object(
+                        document
+                            .resolve_or_default(self.ipfs.clone(), Some(Duration::from_secs(60)))
+                            .await,
+                    ))
+                } else {
+                    None
+                }
+            }
+            false => root.banner,
+        };
+
+        let payload = match override_ipld {
             true => DocumentType::Object(identity),
             false => DocumentType::Cid(root.identity),
         };
@@ -371,16 +416,16 @@ impl IdentityStore {
             banner,
             platform,
             status,
+            signature: None,
         };
 
-        let res = data.encode(
-            libipld::IpldCodec::DagJson,
-            warp::sata::Kind::Static,
-            payload,
-        )?;
+        let kp_did = self.get_keypair_did()?;
 
-        //TODO: Maybe use bincode instead
-        let bytes = serde_json::to_vec(&res)?;
+        let payload = payload.sign(&kp_did)?;
+
+        let payload_bytes = serde_json::to_vec(&payload)?;
+
+        let bytes = Cipher::self_encrypt(&payload_bytes)?;
 
         self.ipfs
             .pubsub_publish(IDENTITY_BROADCAST.into(), bytes)
@@ -390,11 +435,11 @@ impl IdentityStore {
     }
 
     async fn process_message(&mut self, message: GossipsubMessage) -> anyhow::Result<()> {
-        let data = serde_json::from_slice::<Sata>(&message.data)?;
+        let bytes = Cipher::self_decrypt(&message.data)?;
 
-        let raw_object = data.decode::<IdentityPayload>()?;
+        let raw_object = serde_json::from_slice::<IdentityPayload>(&bytes)?;
 
-        let payload = raw_object.payload;
+        let payload = raw_object.payload.clone();
 
         //TODO: Validate public key against peer that sent it
         let _pk = did_to_libp2p_pub(&raw_object.did)?;
@@ -407,6 +452,9 @@ impl IdentityStore {
             raw_object.did == identity.did_key(),
             "Payload doesnt match identity"
         );
+
+        // Validate after making sure the identity did matches the payload
+        raw_object.verify()?;
 
         if let Some(own_id) = self.identity.read().await.clone() {
             anyhow::ensure!(own_id != identity, "Cannot accept own identity");
@@ -467,21 +515,44 @@ impl IdentityStore {
         match (found, &document.identity) {
             (true, object) => {
                 let mut change = false;
+                let mut event: Vec<MultiPassEventKind> = vec![];
                 if document.username != identity.username() {
+                    let old_username = document.username.clone();
                     document.username = identity.username();
                     change = true;
+                    event.push(MultiPassEventKind::IdentityUpdate {
+                        did: document.did.clone(),
+                        kind: UpdateKind::Username {
+                            old: old_username,
+                            new: identity.username(),
+                        },
+                    });
                 }
                 if document.picture != raw_object.picture {
                     document.picture = raw_object.picture;
                     change = true;
+                    event.push(MultiPassEventKind::IdentityUpdate {
+                        did: document.did.clone(),
+                        kind: UpdateKind::Picture,
+                    });
                 }
                 if document.banner != raw_object.banner {
                     document.banner = raw_object.banner;
                     change = true;
+                    event.push(MultiPassEventKind::IdentityUpdate {
+                        did: document.did.clone(),
+                        kind: UpdateKind::Banner,
+                    });
                 }
                 if document.status != raw_object.status {
                     document.status = raw_object.status;
                     change = true;
+                    if let Some(status) = document.status {
+                        event.push(MultiPassEventKind::IdentityUpdate {
+                            did: document.did.clone(),
+                            kind: UpdateKind::Status { status },
+                        });
+                    }
                 }
                 if document.platform != raw_object.platform {
                     document.platform = raw_object.platform;
@@ -505,6 +576,21 @@ impl IdentityStore {
                         }
                         // Do we want to remove the old block?
                         self.ipfs.remove_block(old_cid).await?;
+                    }
+                    if let Ok(store) = self.friend_store().await {
+                        if store
+                            .is_friend(&identity.did_key())
+                            .await
+                            .unwrap_or_default()
+                        {
+                            let mut events = event;
+                            let tx = self.event.clone();
+                            tokio::spawn(async move {
+                                while let Some(event) = events.pop() {
+                                    let _ = tx.send(event);
+                                }
+                            });
+                        }
                     }
                 }
             }
@@ -541,8 +627,7 @@ impl IdentityStore {
                 Platform::Desktop
             } else if cfg!(any(target_os = "android", target_os = "ios")) {
                 Platform::Mobile
-            }
-            else { 
+            } else {
                 Platform::Unknown
             }
         } else {
@@ -572,7 +657,7 @@ impl IdentityStore {
     pub async fn create_identity(&mut self, username: Option<&str>) -> Result<Identity, Error> {
         let raw_kp = self.get_raw_keypair()?;
 
-        if self.own_identity().await.is_ok() {
+        if self.own_identity(false).await.is_ok() {
             return Err(Error::IdentityExist);
         }
 
@@ -640,7 +725,7 @@ impl IdentityStore {
             LookupBy::DidKey(pubkey) => {
                 //Maybe we should omit our own key here?
                 if *pubkey == own_did {
-                    return self.own_identity().await.map(|i| vec![i]);
+                    return self.own_identity(true).await.map(|i| vec![i]);
                 }
 
                 if !self.discovery.contains(pubkey).await {
@@ -660,7 +745,7 @@ impl IdentityStore {
 
                 for pubkey in list {
                     if own_did.eq(pubkey) {
-                        let own_identity = match self.own_identity().await {
+                        let own_identity = match self.own_identity(true).await {
                             Ok(id) => id,
                             Err(_) => continue,
                         };
@@ -908,25 +993,27 @@ impl IdentityStore {
         Ok(cid)
     }
 
-    pub async fn own_identity(&self) -> Result<Identity, Error> {
+    pub async fn own_identity(&self, with_images: bool) -> Result<Identity, Error> {
         let root_document = self.get_root_document().await?;
 
         let ipfs = self.ipfs.clone();
         let path = IpfsPath::from(root_document.identity);
         let mut identity = self.get_dag::<Identity>(path, None).await?;
 
-        if let Some(document) = root_document.banner {
-            let banner = document.resolve_or_default(ipfs.clone(), None).await;
-            let mut graphics = identity.graphics();
-            graphics.set_profile_banner(&banner);
-            identity.set_graphics(graphics);
-        }
+        if with_images {
+            if let Some(document) = root_document.banner {
+                let banner = document.resolve_or_default(ipfs.clone(), None).await;
+                let mut graphics = identity.graphics();
+                graphics.set_profile_banner(&banner);
+                identity.set_graphics(graphics);
+            }
 
-        if let Some(document) = root_document.picture {
-            let picture = document.resolve_or_default(ipfs.clone(), None).await;
-            let mut graphics = identity.graphics();
-            graphics.set_profile_picture(&picture);
-            identity.set_graphics(graphics);
+            if let Some(document) = root_document.picture {
+                let picture = document.resolve_or_default(ipfs.clone(), None).await;
+                let mut graphics = identity.graphics();
+                graphics.set_profile_picture(&picture);
+                identity.set_graphics(graphics);
+            }
         }
 
         let public_key = identity.did_key();
@@ -1090,7 +1177,7 @@ impl IdentityStore {
     }
 
     pub async fn update_identity(&self) -> Result<(), Error> {
-        let ident = self.own_identity().await?;
+        let ident = self.own_identity(false).await?;
         self.validate_identity(&ident)?;
         *self.identity.write().await = Some(ident);
         self.seen.write().await.clear();

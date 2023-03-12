@@ -2,10 +2,12 @@ pub mod config;
 pub mod store;
 
 use config::MpIpfsConfig;
+use either::Either;
 use futures::channel::mpsc::unbounded;
 use futures::{AsyncReadExt, StreamExt};
+use ipfs::libp2p::kad::KademliaBucketInserts;
 use ipfs::libp2p::swarm::SwarmEvent;
-use ipfs::p2p::{ConnectionLimits, IdentifyConfiguration, TransportConfig};
+use ipfs::p2p::{ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig};
 use rust_ipfs as ipfs;
 use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -219,14 +221,14 @@ impl IpfsIdentity {
                 }
                 idconfig
             }),
-            kad_configuration: Some({
+            kad_configuration: Some(Either::Right({
                 let mut conf = ipfs::libp2p::kad::KademliaConfig::default();
-                conf.disjoint_query_paths(true);
                 conf.set_query_timeout(std::time::Duration::from_secs(60));
                 conf.set_publication_interval(Some(Duration::from_secs(30 * 60)));
                 conf.set_provider_record_ttl(Some(Duration::from_secs(60 * 60)));
+                conf.set_kbucket_inserts(KademliaBucketInserts::Manual);
                 conf
-            }),
+            })),
             swarm_configuration: Some(swarm_configuration),
             transport_configuration: Some(TransportConfig {
                 yamux_max_buffer_size: 16 * 1024 * 1024,
@@ -234,6 +236,10 @@ impl IpfsIdentity {
                 yamux_update_mode: 0,
                 mplex_max_buffer_size: usize::MAX / 2,
                 enable_quic: false,
+                ..Default::default()
+            }),
+            pubsub_config: Some(PubsubConfig {
+                max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
                 ..Default::default()
             }),
             port_mapping: config.ipfs_setting.portmapping,
@@ -313,7 +319,7 @@ impl IpfsIdentity {
                         //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
                         //      anything on this end
                         for addr in config.ipfs_setting.relay_client.relay_address.iter() {
-                            if let Err(e) = ipfs.dial(addr.clone()).await {
+                            if let Err(e) = ipfs.connect(addr.clone()).await {
                                 error!("Error dialing relay {}: {e}", addr.clone());
                             }
 
@@ -392,6 +398,8 @@ impl IpfsIdentity {
         )
         .await?;
         info!("friends store initialized");
+
+        identity_store.set_friend_store(friend_store.clone()).await;
 
         *self.identity_store.write() = Some(identity_store);
         *self.friend_store.write() = Some(friend_store);
@@ -598,7 +606,7 @@ impl MultiPass for IpfsIdentity {
                 store.lookup(LookupBy::Username(username)).await
             }
             Identifier::DIDList(list) => store.lookup(LookupBy::DidKeys(list)).await,
-            Identifier::Own => return store.own_identity().await.map(|i| vec![i]),
+            Identifier::Own => return store.own_identity(true).await.map(|i| vec![i]),
         }?;
         trace!("Found {} identities", idents.len());
         // for ident in &idents {
@@ -740,6 +748,14 @@ impl MultiPass for IpfsIdentity {
                 root_document.picture = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
                 store.set_root_document(root_document).await?;
             }
+            IdentityUpdate::ClearPicture => {
+                let mut root_document = store.get_root_document().await?;
+                let document = root_document.picture.take();
+                if let Some(DocumentType::UnixFS(cid, _)) = document {
+                    old_cid = Some(cid);
+                }
+                store.set_root_document(root_document).await?;
+            }
             IdentityUpdate::Banner(data) => {
                 let len = data.len();
                 if len == 0 || len > 2 * 1024 * 1024 {
@@ -838,6 +854,14 @@ impl MultiPass for IpfsIdentity {
                 root_document.banner = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
                 store.set_root_document(root_document).await?;
             }
+            IdentityUpdate::ClearBanner => {
+                let mut root_document = store.get_root_document().await?;
+                let document = root_document.banner.take();
+                if let Some(DocumentType::UnixFS(cid, _)) = document {
+                    old_cid = Some(cid);
+                }
+                store.set_root_document(root_document).await?;
+            }
             IdentityUpdate::StatusMessage(status) => {
                 if let Some(status) = status.clone() {
                     let len = status.chars().count();
@@ -851,6 +875,10 @@ impl MultiPass for IpfsIdentity {
                     }
                 }
                 identity.set_status_message(status);
+                store.identity_update(identity.clone()).await?;
+            }
+            IdentityUpdate::ClearStatusMessage => {
+                identity.set_status_message(None);
                 store.identity_update(identity.clone()).await?;
             }
         };
