@@ -2,8 +2,10 @@ pub mod config;
 pub mod store;
 
 use config::MpIpfsConfig;
+use either::Either;
 use futures::channel::mpsc::unbounded;
 use futures::{AsyncReadExt, StreamExt};
+use ipfs::libp2p::kad::KademliaBucketInserts;
 use ipfs::libp2p::swarm::SwarmEvent;
 use ipfs::p2p::{ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig};
 use rust_ipfs as ipfs;
@@ -219,14 +221,14 @@ impl IpfsIdentity {
                 }
                 idconfig
             }),
-            kad_configuration: Some({
+            kad_configuration: Some(Either::Right({
                 let mut conf = ipfs::libp2p::kad::KademliaConfig::default();
-                conf.disjoint_query_paths(true);
                 conf.set_query_timeout(std::time::Duration::from_secs(60));
                 conf.set_publication_interval(Some(Duration::from_secs(30 * 60)));
                 conf.set_provider_record_ttl(Some(Duration::from_secs(60 * 60)));
+                conf.set_kbucket_inserts(KademliaBucketInserts::Manual);
                 conf
-            }),
+            })),
             swarm_configuration: Some(swarm_configuration),
             transport_configuration: Some(TransportConfig {
                 yamux_max_buffer_size: 16 * 1024 * 1024,
@@ -317,7 +319,7 @@ impl IpfsIdentity {
                         //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
                         //      anything on this end
                         for addr in config.ipfs_setting.relay_client.relay_address.iter() {
-                            if let Err(e) = ipfs.dial(addr.clone()).await {
+                            if let Err(e) = ipfs.connect(addr.clone()).await {
                                 error!("Error dialing relay {}: {e}", addr.clone());
                             }
 
