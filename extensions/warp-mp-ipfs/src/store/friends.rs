@@ -23,7 +23,7 @@ use warp::tesseract::Tesseract;
 use crate::config::Discovery;
 
 use super::document::DocumentType;
-use super::identity::IdentityStore;
+use super::identity::{IdentityStore, LookupBy};
 use super::phonebook::PhoneBook;
 use super::queue::Queue;
 use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType, VecExt};
@@ -375,11 +375,33 @@ impl FriendsStore {
 
                         self.set_request_list(list).await?;
 
-                        if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestReceived {
-                            from: data.sender.clone(),
-                        }) {
-                            error!("Error broadcasting event: {e}");
-                        }
+                        tokio::spawn({
+                            let tx = self.tx.clone();
+                            let store = self.identity.clone();
+                            let from = data.sender.clone();
+                            async move {
+                                let _ = tokio::time::timeout(Duration::from_secs(10), async {
+                                    loop {
+                                        if let Ok(list) =
+                                            store.lookup(LookupBy::DidKey(from.clone())).await
+                                        {
+                                            if !list.is_empty() {
+                                                break;
+                                            }
+                                        }
+                                        tokio::time::sleep(Duration::from_secs(1)).await;
+                                    }
+                                })
+                                .await
+                                .ok();
+
+                                if let Err(e) =
+                                    tx.send(MultiPassEventKind::FriendRequestReceived { from })
+                                {
+                                    error!("Error broadcasting event: {e}");
+                                }
+                            }
+                        });
                     }
                     let payload = PayloadEvent {
                         sender: (*self.did_key).clone(),
