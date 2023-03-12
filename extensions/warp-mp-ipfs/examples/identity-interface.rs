@@ -65,15 +65,7 @@ async fn account(
     opt: &Opt,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let tesseract = match path.as_ref() {
-        Some(path) => match Tesseract::from_file(path.join("tdatastore")) {
-            Ok(tess) => tess,
-            Err(_) => {
-                let tess = Tesseract::default();
-                tess.set_file(path.join("tdatastore"));
-                tess.set_autosave();
-                tess
-            }
-        },
+        Some(path) => Tesseract::open_or_create(path.join("tdatastore"))?,
         None => Tesseract::default(),
     };
 
@@ -325,7 +317,7 @@ async fn main() -> anyhow::Result<()> {
                                 UpdateKind::StatusMessage => writeln!(stdout, "> {username} updated their status message ")?,
                                 UpdateKind::Status { status } => writeln!(stdout, "> {username} changed to {status} ")?,
                                 UpdateKind::Picture => writeln!(stdout, "> {username} updated their profile picture ")?,
-                                UpdateKind::Banner => writeln!(stdout, "> {username} updated their profile banner ")?, 
+                                UpdateKind::Banner => writeln!(stdout, "> {username} updated their profile banner ")?,
                             };
                         }
                     }
