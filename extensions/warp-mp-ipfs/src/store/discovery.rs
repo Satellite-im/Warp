@@ -120,7 +120,7 @@ impl Discovery {
             .cloned()
     }
 
-    pub async fn insert<P: Into<PeerType>>(&self, ipfs: &Ipfs, peer_type: P) -> Result<(), Error> {
+    pub async fn insert<P: Into<PeerType>>(&self, peer_type: P) -> Result<(), Error> {
         let (peer_id, did_key) = match &peer_type.into() {
             PeerType::PeerId(peer_id) => (*peer_id, None),
             PeerType::DID(did_key) => {
@@ -134,7 +134,7 @@ impl Discovery {
         }
 
         let entry = DiscoveryEntry::new(
-            ipfs,
+            &self.ipfs,
             peer_id,
             did_key,
             self.config.clone(),

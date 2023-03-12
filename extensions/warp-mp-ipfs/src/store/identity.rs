@@ -373,7 +373,7 @@ impl IdentityStore {
         }
     }
 
-    async fn push_to_all(&self) {
+    pub async fn push_to_all(&self) {
         let list = self.discovery.did_iter().await.collect::<Vec<_>>().await;
         self.push_iter(list).await
     }
@@ -562,7 +562,7 @@ impl IdentityStore {
                 }
 
                 if !self.discovery.contains(identity.did_key()).await {
-                    if let Err(e) = self.discovery.insert(&self.ipfs, identity.did_key()).await {
+                    if let Err(e) = self.discovery.insert(identity.did_key()).await {
                         log::warn!("Error inserting into discovery service: {e}");
                     }
                 }
@@ -833,7 +833,7 @@ impl IdentityStore {
                 }
 
                 if !self.discovery.contains(pubkey).await {
-                    self.discovery.insert(&self.ipfs, pubkey).await?;
+                    self.discovery.insert( pubkey).await?;
                 }
 
                 self.cache()
@@ -859,7 +859,7 @@ impl IdentityStore {
                         continue;
                     }
                     if !self.discovery.contains(pubkey).await {
-                        self.discovery.insert(&self.ipfs, pubkey).await?;
+                        self.discovery.insert( pubkey).await?;
                     }
 
                     if let Some(cache) = cache.iter().find(|cache| cache.did.eq(pubkey)) {
