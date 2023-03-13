@@ -365,13 +365,13 @@ impl IpfsIdentity {
                 .collect()
         });
 
-        let discovery = Discovery::new(config.store_setting.discovery);
+        let discovery = Discovery::new(ipfs.clone(), config.store_setting.discovery);
 
         let identity_store = IdentityStore::new(
             ipfs.clone(),
             config.path.clone(),
             tesseract.clone(),
-            config.store_setting.broadcast_interval,
+            config.store_setting.auto_push,
             self.tx.clone(),
             (
                 discovery,
@@ -388,12 +388,11 @@ impl IpfsIdentity {
             identity_store.clone(),
             config.path,
             tesseract.clone(),
-            config.store_setting.broadcast_interval,
             (
                 self.tx.clone(),
                 config.store_setting.override_ipld,
                 config.store_setting.use_phonebook,
-                config.store_setting.wait_on_response,
+                config.store_setting.friend_request_response_duration,
             ),
         )
         .await?;
@@ -891,6 +890,7 @@ impl MultiPass for IpfsIdentity {
 
         info!("Update identity store");
         store.update_identity().await?;
+        store.push_to_all().await;
 
         Ok(())
     }

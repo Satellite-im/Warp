@@ -26,8 +26,6 @@ use crate::config::Discovery;
 
 use self::document::DocumentType;
 
-pub const IDENTITY_BROADCAST: &str = "identity/broadcast";
-
 pub trait VecExt<T: Eq> {
     fn insert_item(&mut self, item: &T) -> bool;
     fn remove_item(&mut self, item: &T) -> bool;

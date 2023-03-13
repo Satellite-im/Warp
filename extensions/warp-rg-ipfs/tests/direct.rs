@@ -24,7 +24,6 @@ mod test {
         tesseract.unlock(b"internal pass").unwrap();
         let mut config = warp_mp_ipfs::config::MpIpfsConfig::development();
         config.store_setting.discovery = Discovery::Provider(context);
-        config.store_setting.broadcast_interval = 100;
 
         let mut account = Box::new(ipfs_identity_temporary(Some(config), tesseract, None).await?)
             as Box<dyn MultiPass>;
