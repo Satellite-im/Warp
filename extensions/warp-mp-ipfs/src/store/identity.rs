@@ -10,9 +10,7 @@ use futures::{
     stream::{self, BoxStream},
     FutureExt, StreamExt,
 };
-use ipfs::{
-    libp2p::gossipsub::Message as GossipsubMessage, Ipfs, IpfsPath, Keypair, Multiaddr, PeerId,
-};
+use ipfs::{libp2p::gossipsub::Message as GossipsubMessage, Ipfs, IpfsPath, Keypair, Multiaddr};
 use libipld::{
     serde::{from_ipld, to_ipld},
     Cid,
@@ -26,7 +24,7 @@ use std::{
     time::Duration,
 };
 
-use tokio::sync::{broadcast, Semaphore};
+use tokio::sync::broadcast;
 use tracing::{
     log::{self, error},
     warn,
@@ -69,11 +67,7 @@ pub struct IdentityStore {
 
     online_status: Arc<tokio::sync::RwLock<Option<IdentityStatus>>>,
 
-    seen: Arc<tokio::sync::RwLock<HashSet<PeerId>>>,
-
     discovering: Arc<tokio::sync::RwLock<HashSet<DID>>>,
-
-    permit: Arc<Semaphore>,
 
     discovery: Discovery,
 
@@ -108,11 +102,9 @@ impl Clone for IdentityStore {
             cache_cid: self.cache_cid.clone(),
             identity: self.identity.clone(),
             online_status: self.online_status.clone(),
-            seen: self.seen.clone(),
             start_event: self.start_event.clone(),
             end_event: self.end_event.clone(),
             discovering: self.discovering.clone(),
-            permit: self.permit.clone(),
             discovery: self.discovery.clone(),
             share_platform: self.share_platform.clone(),
             relay: self.relay.clone(),
@@ -189,12 +181,10 @@ impl IdentityStore {
         let end_event = Arc::new(Default::default());
         let root_cid = Arc::new(Default::default());
         let cache_cid = Arc::new(Default::default());
-        let seen = Arc::new(Default::default());
         let override_ipld = Arc::new(AtomicBool::new(override_ipld));
         let discovering = Arc::new(Default::default());
         let online_status = Arc::default();
         let share_platform = Arc::new(AtomicBool::new(share_platform));
-        let permit = Arc::new(Semaphore::new(1));
         let root_task = Arc::default();
         let task_send = Arc::default();
         let did = Arc::default();
@@ -208,7 +198,6 @@ impl IdentityStore {
             cache_cid,
             identity,
             online_status,
-            seen,
             start_event,
             share_platform,
             end_event,
@@ -217,7 +206,6 @@ impl IdentityStore {
             relay,
             tesseract,
             override_ipld,
-            permit,
             root_task,
             task_send,
             did,
@@ -249,7 +237,6 @@ impl IdentityStore {
         tokio::spawn({
             let mut store = store.clone();
             async move {
-                // let mut peer_annoyance = HashMap::<PeerId, usize>::new();
                 if let Err(e) = store.discovery.start().await {
                     warn!("Error starting discovery service: {e}. Will not be able to discover peers over namespace");
                 }
@@ -1295,7 +1282,6 @@ impl IdentityStore {
         let ident = self.own_identity(false).await?;
         self.validate_identity(&ident)?;
         *self.identity.write().await = Some(ident);
-        self.seen.write().await.clear();
         Ok(())
     }
 
