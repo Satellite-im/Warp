@@ -152,7 +152,6 @@ impl FriendsStore {
         identity: IdentityStore,
         path: Option<PathBuf>,
         tesseract: Tesseract,
-        _interval: u64,
         (tx, override_ipld, use_phonebook, wait_on_response): (
             broadcast::Sender<MultiPassEventKind>,
             bool,

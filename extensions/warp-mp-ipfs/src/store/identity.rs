@@ -162,7 +162,7 @@ impl IdentityStore {
         ipfs: Ipfs,
         path: Option<PathBuf>,
         tesseract: Tesseract,
-        interval: u64,
+        interval: Option<u64>,
         tx: broadcast::Sender<MultiPassEventKind>,
         (discovery, relay, override_ipld, share_platform): (
             Discovery,
@@ -243,6 +243,12 @@ impl IdentityStore {
 
                 futures::pin_mut!(event_stream);
 
+                let auto_push = interval.is_some();
+
+                let interval = interval
+                    .map(|i| if i < 300000 { 300000 } else { i })
+                    .unwrap_or(300000);
+
                 let mut tick = tokio::time::interval(Duration::from_millis(interval));
                 let mut rx = store.discovery.events();
                 loop {
@@ -277,11 +283,9 @@ impl IdentityStore {
                             });
                         }
                         _ = tick.tick() => {
-                            //TODO: Auto push on a set interval
-                            // let list = store.discovery.did_iter().await.collect::<Vec<_>>().await;
-                            // if let Err(e) = store.push_iter(list).await {
-                            //     error!("Error broadcasting identity: {e}");
-                            // }
+                            if auto_push {
+                                store.push_to_all().await;
+                            }
                         }
                     }
                 }

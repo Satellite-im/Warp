@@ -190,8 +190,11 @@ pub struct IpfsSetting {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
-    /// Interval for broadcasting out identity or checking queue (queue will be moved into its own system in the future)
-    pub broadcast_interval: u64,
+    /// Interval for broadcasting out identity (cannot be less than 3 minutes)
+    /// Note: 
+    ///     - If `None`, this will be disabled
+    ///     - This may be removed in the future
+    pub auto_push: Option<u64>,
     /// Discovery type
     pub discovery: Discovery,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -212,7 +215,7 @@ pub struct StoreSetting {
 impl Default for StoreSetting {
     fn default() -> Self {
         Self {
-            broadcast_interval: 1000,
+            auto_push: None,
             discovery: Discovery::Provider(None),
             sync: Vec::new(),
             sync_interval: 100,

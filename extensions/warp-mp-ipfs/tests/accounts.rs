@@ -18,7 +18,6 @@ mod test {
         tesseract.unlock(b"internal pass").unwrap();
         let mut config = warp_mp_ipfs::config::MpIpfsConfig::development();
         config.store_setting.discovery = Discovery::Provider(context);
-        config.store_setting.broadcast_interval = 100;
         config.store_setting.share_platform = true;
 
         let mut account = ipfs_identity_temporary(Some(config), tesseract, None).await?;
