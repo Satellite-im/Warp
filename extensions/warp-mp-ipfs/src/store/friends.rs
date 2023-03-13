@@ -1100,16 +1100,6 @@ impl FriendsStore {
 
         let bytes = serde_json::to_vec(&e_payload)?;
 
-        //Check to make sure the payload itself doesnt exceed 256kb
-        if bytes.len() >= 256 * 1024 {
-            return Err(Error::InvalidLength {
-                context: "payload".into(),
-                current: bytes.len(),
-                minimum: Some(1),
-                maximum: Some(256 * 1024),
-            });
-        }
-
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
         let mut queued = false;
