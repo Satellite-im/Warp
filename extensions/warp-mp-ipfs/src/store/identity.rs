@@ -253,11 +253,7 @@ impl IdentityStore {
                 futures::pin_mut!(event_stream);
 
                 let mut tick = tokio::time::interval(Duration::from_millis(interval));
-                //Use to update the seen list
-                // let mut update_seen = tokio::time::interval(Duration::from_secs(10));
-                // let mut clear_seen = tokio::time::interval(Duration::from_secs(15));
                 let mut rx = store.discovery.events();
-
                 loop {
                     if store.end_event.load(Ordering::SeqCst) {
                         break;

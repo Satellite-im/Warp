@@ -191,10 +191,6 @@ impl FriendsStore {
             .pubsub_subscribe(get_inbox_topic(store.did_key.as_ref()))
             .await?;
 
-        let (local_ipfs_public_key, _) = store.local().await?;
-
-        let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
-
         tokio::spawn({
             let mut store = store.clone();
             async move {
@@ -280,10 +276,7 @@ impl FriendsStore {
                 futures::pin_mut!(stream);
 
                 while let Some(message) = stream.next().await {
-                    if let Err(e) = store
-                        .check_request_message(&local_public_key, message)
-                        .await
-                    {
+                    if let Err(e) = store.check_request_message(message).await {
                         error!("Error: {e}");
                     }
                 }
@@ -294,11 +287,7 @@ impl FriendsStore {
     }
 
     //TODO: Implement Errors
-    async fn check_request_message(
-        &mut self,
-        _local_public_key: &DID,
-        message: GossipsubMessage,
-    ) -> anyhow::Result<()> {
+    async fn check_request_message(&mut self, message: GossipsubMessage) -> anyhow::Result<()> {
         if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
             let data = data.decrypt::<PayloadEvent>(&self.did_key)?;
 
