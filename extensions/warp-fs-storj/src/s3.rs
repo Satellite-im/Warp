@@ -2,8 +2,8 @@ use anyhow::{anyhow, bail};
 use aws_endpoint::partition::endpoint;
 use aws_endpoint::{CredentialScope, Partition, PartitionResolver};
 use aws_sdk_s3::presigning::config::PresigningConfig;
-use warp::constellation::ConstellationEvent;
 use std::path::PathBuf;
+use warp::constellation::ConstellationEvent;
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -563,9 +563,7 @@ pub mod ffi {
             client.set_cache(pd.inner().clone());
         }
 
-        let obj = Box::new(ConstellationAdapter::new(Box::new(
-            client,
-        )));
+        let obj = Box::new(ConstellationAdapter::new(Box::new(client)));
         Box::into_raw(obj) as *mut ConstellationAdapter
     }
 }

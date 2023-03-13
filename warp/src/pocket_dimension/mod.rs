@@ -141,7 +141,7 @@ impl DimensionData {
 /// for caching frequently used data so that request can be made faster. This makes it easy by sorting the data per module, as well
 /// as allowing querying by specific information stored inside the payload of the [`Sata`] for a quick turnaround for search
 /// results.
-pub trait PocketDimension: Extension + Send + Sync + SingleHandle + DynClone{
+pub trait PocketDimension: Extension + Send + Sync + SingleHandle + DynClone {
     /// Used to add data to [`PocketDimension`] for [`Module`]
     fn add_data(&mut self, dimension: DataType, data: &Sata) -> Result<(), Error>;
 

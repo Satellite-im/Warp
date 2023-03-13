@@ -10,7 +10,7 @@ mod test {
     use warp::tesseract::Tesseract;
     use warp_mp_ipfs::config::Discovery;
     use warp_mp_ipfs::ipfs_identity_temporary;
-    use warp_rg_ipfs::{IpfsMessaging};
+    use warp_rg_ipfs::IpfsMessaging;
 
     async fn create_account_and_chat(
         username: Option<&str>,
@@ -21,7 +21,6 @@ mod test {
         tesseract.unlock(b"internal pass").unwrap();
         let mut config = warp_mp_ipfs::config::MpIpfsConfig::development();
         config.store_setting.discovery = Discovery::Provider(context);
-        config.store_setting.broadcast_interval = 100;
 
         let mut account = Box::new(ipfs_identity_temporary(Some(config), tesseract, None).await?)
             as Box<dyn MultiPass>;
@@ -29,8 +28,7 @@ mod test {
         let identity = account.get_own_identity().await?;
 
         let raygun =
-            Box::new(IpfsMessaging::new(None, account.clone(), None, None).await?)
-                as Box<_>;
+            Box::new(IpfsMessaging::new(None, account.clone(), None, None).await?) as Box<_>;
         Ok((account, raygun, did, identity))
     }
 
@@ -530,7 +528,6 @@ mod test {
         let mut conversation_c = chat_c.get_conversation_stream(id_c).await?;
         let mut conversation_d = chat_c.get_conversation_stream(id_d).await?;
 
-
         chat_a.send(id_a, vec!["Hello, World".into()]).await?;
 
         let message_a = tokio::time::timeout(Duration::from_secs(5), async {
@@ -542,7 +539,8 @@ mod test {
                 {
                     break chat_a.get_message(conversation_id, message_id);
                 }
-            }.await
+            }
+            .await
         })
         .await??;
 
@@ -555,7 +553,8 @@ mod test {
                 {
                     break chat_b.get_message(conversation_id, message_id);
                 }
-            }.await
+            }
+            .await
         })
         .await??;
 
@@ -568,7 +567,8 @@ mod test {
                 {
                     break chat_c.get_message(conversation_id, message_id);
                 }
-            }.await
+            }
+            .await
         })
         .await??;
 
@@ -581,15 +581,14 @@ mod test {
                 {
                     break chat_d.get_message(conversation_id, message_id);
                 }
-            }.await
+            }
+            .await
         })
         .await??;
-
 
         assert_eq!(message_a, message_b);
         assert_eq!(message_b, message_c);
         assert_eq!(message_c, message_d);
         Ok(())
     }
-
 }

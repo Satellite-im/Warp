@@ -36,7 +36,7 @@ use warp::sata::Sata;
 use warp::sync::Arc;
 
 use crate::store::connected_to_peer;
-use crate::{SpamFilter};
+use crate::SpamFilter;
 
 use super::conversation::{ConversationDocument, MessageDocument};
 use super::document::{GetDag, ToCid};
@@ -2061,7 +2061,7 @@ impl MessageStore {
                                     .extend_addresses_through_behaviour()
                                     .build();
 
-                                if let Err(e) = ipfs.dial(opt).await {
+                                if let Err(e) = ipfs.connect(opt).await {
                                     error!("Error dialing peer: {e}");
                                 }
                             }

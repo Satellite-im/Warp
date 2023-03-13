@@ -1,9 +1,10 @@
 use std::time::Duration;
 
+use futures::StreamExt;
 use warp::crypto::rand::{self, prelude::*};
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity};
-use warp::multipass::MultiPass;
+use warp::multipass::{MultiPass, MultiPassEventKind};
 use warp::tesseract::Tesseract;
 use warp_mp_ipfs::config::MpIpfsConfig;
 use warp_mp_ipfs::ipfs_identity_temporary;
@@ -28,7 +29,10 @@ async fn main() -> anyhow::Result<()> {
     let mut rng = rand::thread_rng();
 
     let mut account_a = account(None).await?;
+    let mut subscribe_a = account_a.subscribe().await?;
+
     let mut account_b = account(None).await?;
+    let mut subscribe_b = account_b.subscribe().await?;
 
     let ident_a = account_a.get_own_identity().await?;
     let ident_b = account_b.get_own_identity().await?;
@@ -40,6 +44,17 @@ async fn main() -> anyhow::Result<()> {
 
     account_a.send_request(&ident_b.did_key()).await?;
 
+    while let Some(event) = subscribe_a.next().await {
+        if matches!(event, MultiPassEventKind::FriendRequestSent { .. }) {
+            break;
+        }
+    }
+
+    while let Some(event) = subscribe_b.next().await {
+        if matches!(event, MultiPassEventKind::FriendRequestReceived { .. }) {
+            break;
+        }
+    }
 
     println!("{} Outgoing request:", username(&ident_a));
 
@@ -62,7 +77,6 @@ async fn main() -> anyhow::Result<()> {
         println!("From: {}", username(&ident));
         println!();
     }
-
 
     let coin = rng.gen_range(0..2);
     match coin {
