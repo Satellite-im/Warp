@@ -11,18 +11,18 @@ rust-s3 = { version = "0.31", optional = true, default-features = false, feature
 aws-config = { version = "0.46", optional = true }
 aws-sdk-s3 = { version = "0.16", optional = true }
 aws-endpoint = { version = "0.46", optional = true }
-tokio = { version = "1", features = ["full"] }
-tokio-util = { version = "0.7", features = ["full"] }
-tokio-stream = { version = "0.1", features = ["net"] }
-async-trait = "0.1"
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true, features = ["net"] }
+async-trait.workspace = true
 
 warp = { path = "../../warp" }
 
-anyhow = "1"
+anyhow.workspace = true
 
-serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0" }
-chrono = { version = "0.4", features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+chrono = { workspace = true, features = ["serde"] }
 
 [features]
 default = ["s3"]

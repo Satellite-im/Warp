@@ -10,7 +10,7 @@ use ipfs::Multiaddr;
 use tokio::sync::broadcast;
 use tokio::sync::RwLock;
 
-use ipfs::{Ipfs};
+use ipfs::Ipfs;
 use tracing::log::error;
 use warp::crypto::DID;
 use warp::error::Error;

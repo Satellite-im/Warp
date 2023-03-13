@@ -11,25 +11,25 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 [dependencies]
 warp = { path = "../../warp" }
 
-rust-ipfs = { version = "=0.3.2" }
-libipld = { version = "0.15", features = ["serde-codec"] }
+rust-ipfs.workspace = true
+libipld = { workspace = true, features = ["serde-codec"] }
 
-uuid = { version = "1", features = ["serde", "v4"] }
-tokio = { version = "1", features = ["full"] }
-tokio-util = { version = "0.7", features = ["full"] }
-tokio-stream = { version = "0.1", features = ["net"] }
+uuid = { workspace = true, features = ["serde", "v4"] }
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true, features = ["net"] }
 
-futures = { version = "0.3" }
-async-trait = { version = "0.1" }
-async-stream = "0.3"
-anyhow = { version = "1" }
-serde = { version = "1.0", features = ["derive", "rc"] }
-serde_json = { version = "1.0" }
+futures.workspace = true
+async-trait.workspace = true
+async-stream.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 bs58 = "0.4"
 
 bayespam = "1.1.0"
 
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 fdlimit = "0.2"

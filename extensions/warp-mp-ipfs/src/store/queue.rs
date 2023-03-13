@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use futures::{channel::mpsc, StreamExt};
 use libipld::IpldCodec;
-use rust_ipfs::{Ipfs};
+use rust_ipfs::Ipfs;
 use tokio::{sync::RwLock, task::JoinHandle};
 use tracing::log::error;
 use warp::{
