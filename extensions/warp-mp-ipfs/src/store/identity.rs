@@ -151,13 +151,17 @@ pub enum LookupBy {
 #[serde(rename_all = "lowercase")]
 #[allow(clippy::large_enum_variant)]
 pub enum IdentityEvent {
+    /// Send a request event
     Request { option: RequestOption },
+
+    /// Event receiving identity payload
     Receive { payload: IdentityPayload },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RequestOption {
+    /// Identity request
     Identity,
 }
 
