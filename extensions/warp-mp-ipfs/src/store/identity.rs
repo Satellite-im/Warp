@@ -1036,25 +1036,23 @@ impl IdentityStore {
             Ok(keypair) => {
                 let kp = bs58::decode(keypair).into_vec()?;
                 let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-                let secret = ipfs::libp2p::identity::ed25519::SecretKey::from_bytes(
-                    id_kp.secret.to_bytes(),
-                )?;
-                Ok(Keypair::Ed25519(secret.into()))
+                let bytes = Zeroizing::new(id_kp.secret.to_bytes());
+                Ok(Keypair::ed25519_from_bytes(bytes)?)
             }
             Err(_) => anyhow::bail!(Error::PrivateKeyInvalid),
         }
     }
 
     pub fn get_keypair_did(&self) -> anyhow::Result<DID> {
-        let kp = self.get_raw_keypair()?.encode();
-        let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
+        let kp = Zeroizing::new(self.get_raw_keypair()?.encode());
+        let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&*kp)?;
         let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
         Ok(did.into())
     }
 
     pub fn get_raw_keypair(&self) -> anyhow::Result<ipfs::libp2p::identity::ed25519::Keypair> {
-        match self.get_keypair()? {
-            Keypair::Ed25519(kp) => Ok(kp),
+        match self.get_keypair()?.into_ed25519() {
+            Some(kp) => Ok(kp),
             _ => anyhow::bail!("Unsupported keypair"),
         }
     }
