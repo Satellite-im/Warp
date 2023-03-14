@@ -664,6 +664,10 @@ impl IdentityStore {
                         if object != &payload {
                             document.identity = payload;
                             change = true;
+                            event.push(MultiPassEventKind::IdentityUpdate {
+                                did: document.did.clone(),
+                                kind: UpdateKind::Misc,
+                            });
                         }
 
                         if change {

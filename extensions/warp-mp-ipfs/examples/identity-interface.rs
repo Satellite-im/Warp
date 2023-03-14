@@ -318,6 +318,7 @@ async fn main() -> anyhow::Result<()> {
                                 UpdateKind::Status { status } => writeln!(stdout, "> {username} changed to {status} ")?,
                                 UpdateKind::Picture => writeln!(stdout, "> {username} updated their profile picture ")?,
                                 UpdateKind::Banner => writeln!(stdout, "> {username} updated their profile banner ")?,
+                                _ => writeln!(stdout, "> {username} identity been updated ")?,
                             };
                         }
                     }

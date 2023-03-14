@@ -49,6 +49,7 @@ pub enum UpdateKind {
     Status { status: IdentityStatus },
     Picture,
     Banner,
+    Misc
 }
 
 #[derive(FFIFree)]
