@@ -354,7 +354,7 @@ impl DiscoveryEntry {
                                 .await
                                 .unwrap_or_default()
                                 .contains(&entry.peer_id);
-                            
+
                             if subscribed {
                                 let _ = entry.sender.send(did);
                                 sent_initial_push = true;

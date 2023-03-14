@@ -18,6 +18,7 @@ use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tracing::log::{error, info, trace, warn};
 use warp::crypto::did_key::Generate;
+use warp::crypto::zeroize::Zeroizing;
 use warp::data::DataType;
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::sata::Sata;
@@ -126,10 +127,11 @@ impl IpfsIdentity {
         let keypair = match (init, tesseract.exist("keypair")) {
             (true, false) => {
                 info!("Keypair doesnt exist. Generating keypair....");
-                if let Keypair::Ed25519(kp) = Keypair::generate_ed25519() {
+                if let Some(kp) = Keypair::generate_ed25519().into_ed25519() {
                     let encoded_kp = bs58::encode(&kp.encode()).into_string();
                     tesseract.set("keypair", &encoded_kp)?;
-                    Keypair::Ed25519(kp)
+                    let bytes = Zeroizing::new(kp.secret().as_ref().to_vec());
+                    Keypair::ed25519_from_bytes(bytes)?
                 } else {
                     error!("Unreachable. Report this as a bug");
                     anyhow::bail!("Unreachable")
@@ -138,12 +140,9 @@ impl IpfsIdentity {
             (false, true) | (true, true) => {
                 info!("Fetching keypair from tesseract");
                 let keypair = tesseract.retrieve("keypair")?;
-                let kp = bs58::decode(keypair).into_vec()?;
+                let kp = Zeroizing::new(bs58::decode(keypair).into_vec()?);
                 let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-                let secret = ipfs::libp2p::identity::ed25519::SecretKey::from_bytes(
-                    id_kp.secret.to_bytes(),
-                )?;
-                Keypair::Ed25519(secret.into())
+                Keypair::ed25519_from_bytes(id_kp.secret.to_bytes())?
             }
             _ => anyhow::bail!("Unable to initialize store"),
         };
