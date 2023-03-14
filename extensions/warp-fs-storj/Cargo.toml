@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib", "rlib", "staticlib"]
 
 [dependencies]
-rust-s3 = { version = "0.31", optional = true, default-features = false, features = ["tags", "tokio-rustls-tls", "fail-on-err"] }
+rust-s3 = { version = "0.32", optional = true, default-features = false, features = ["tags", "tokio-rustls-tls", "fail-on-err"] }
 aws-config = { version = "0.46", optional = true }
 aws-sdk-s3 = { version = "0.16", optional = true }
 aws-endpoint = { version = "0.46", optional = true }
