@@ -51,6 +51,7 @@ pub fn generate_shared_topic(did_a: &DID, did_b: &DID, seed: Option<&str>) -> an
     Uuid::from_slice(&topic_hash[..topic_hash.len() / 2]).map_err(anyhow::Error::from)
 }
 
+#[allow(deprecated)]
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity::PublicKey> {
     let pk = ipfs::libp2p::identity::PublicKey::Ed25519(
         ipfs::libp2p::identity::ed25519::PublicKey::decode(&public_key.public_key_bytes())?,
@@ -60,8 +61,8 @@ fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity:
 
 #[allow(dead_code)]
 fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::Result<DID> {
-    let pk = match public_key {
-        ipfs::libp2p::identity::PublicKey::Ed25519(pk) => {
+    let pk = match public_key.clone().into_ed25519() {
+        Some(pk) => {
             let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.encode()).into();
             did.try_into()?
         }

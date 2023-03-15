@@ -42,6 +42,7 @@ impl Default for StorjClient {
                 secret_key: None,
                 security_token: None,
                 session_token: None,
+                expiration: None
             },
         }
     }
@@ -54,6 +55,7 @@ impl StorjClient {
             secret_key: Some(secret_key.as_ref().to_string()),
             security_token: None,
             session_token: None,
+            expiration: None
         };
         Self { creds, endpoint }
     }
@@ -64,6 +66,7 @@ impl StorjClient {
             secret_key: Some(secret_key.as_ref().to_string()),
             security_token: None,
             session_token: None,
+            expiration: None
         };
         self.creds = Credentials {
             access_key: Some(access_key.as_ref().to_string()),
@@ -335,10 +338,10 @@ impl Constellation for StorjFilesystem {
             .await
             .map_err(anyhow::Error::from)?;
 
-        if code.1 != 200 {
+        if code.status_code() != 200 {
             return Err(Error::Any(anyhow!(
                 "Error uploading file to storj. Code {}",
-                code.1
+                code.status_code()
             )));
         }
 
@@ -395,7 +398,7 @@ impl Constellation for StorjFilesystem {
             }
         }
 
-        let (buf, code) = self
+        let res = self
             .client
             .bucket(bucket, false)
             .await?
@@ -403,20 +406,20 @@ impl Constellation for StorjFilesystem {
             .await
             .map_err(anyhow::Error::from)?;
 
-        if code != 200 {
+        if res.status_code() != 200 {
             return Err(Error::Any(anyhow!(
                 "Error getting file from storj. Code {}",
-                code
+                res.status_code()
             )));
         }
 
-        Ok(buf)
+        Ok(res.bytes().to_vec())
     }
 
     async fn remove(&mut self, path: &str, _: bool) -> Result<()> {
         let (bucket, name) = split_for(path)?;
 
-        let (_, code) = self
+        let res= self
             .client
             .bucket(bucket, false)
             .await?
@@ -424,26 +427,15 @@ impl Constellation for StorjFilesystem {
             .await
             .map_err(anyhow::Error::from)?;
 
-        if code != 204 {
+        if res.status_code() != 204 {
             return Err(Error::Any(anyhow!(
                 "Error removing data from storj. Code {}",
-                code
+                res.status_code()
             )));
         }
 
-        let item = self.current_directory()?.remove_item(&name)?;
-        if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::from(Module::FileSystem), &item)?;
-            //TODO: Add a proper check
-            let hook_name = if item.is_directory() {
-                "filesystem::remove_directory"
-            } else if item.is_file() {
-                "filesystem::remove_file"
-            } else {
-                "filesystem::unknown_event"
-            };
-            hook.trigger(hook_name, &object);
-        }
+        self.current_directory()?.remove_item(&name)?;
+
         Ok(())
     }
 

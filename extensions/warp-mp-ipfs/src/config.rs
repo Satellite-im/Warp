@@ -191,7 +191,7 @@ pub struct IpfsSetting {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
     /// Interval for broadcasting out identity (cannot be less than 3 minutes)
-    /// Note: 
+    /// Note:
     ///     - If `None`, this will be disabled
     ///     - This may be removed in the future
     pub auto_push: Option<u64>,
