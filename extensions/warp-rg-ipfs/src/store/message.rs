@@ -1907,7 +1907,7 @@ impl MessageStore {
                                     .extend_addresses_through_behaviour()
                                     .build();
 
-                                if let Err(e) = ipfs.dial(opt).await {
+                                if let Err(e) = ipfs.connect(opt).await {
                                     error!("Error dialing peer: {e}");
                                 }
                             }

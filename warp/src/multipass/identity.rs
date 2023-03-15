@@ -365,87 +365,12 @@ pub enum IdentityUpdate {
     Username(String),
     Picture(String),
     PicturePath(std::path::PathBuf),
+    ClearPicture,
     Banner(String),
     BannerPath(std::path::PathBuf),
+    ClearBanner,
     StatusMessage(Option<String>),
-}
-
-impl IdentityUpdate {
-    /// Set new username
-    pub fn set_username(username: String) -> IdentityUpdate {
-        IdentityUpdate::Username(username)
-    }
-
-    /// Set profile picture
-    pub fn set_graphics_picture(graphics: String) -> IdentityUpdate {
-        IdentityUpdate::Picture(graphics)
-    }
-
-    /// Set profile banner
-    pub fn set_graphics_banner(graphics: String) -> IdentityUpdate {
-        IdentityUpdate::Banner(graphics)
-    }
-
-    /// Set status message
-    pub fn set_status_message(status_message: Option<String>) -> IdentityUpdate {
-        IdentityUpdate::StatusMessage(status_message)
-    }
-}
-
-impl IdentityUpdate {
-    /// Set profile picture from a file
-    pub fn set_graphics_picture_path(path: std::path::PathBuf) -> IdentityUpdate {
-        IdentityUpdate::PicturePath(path)
-    }
-
-    /// Set profile banner from a file
-    pub fn set_graphics_banner_path(path: std::path::PathBuf) -> IdentityUpdate {
-        IdentityUpdate::BannerPath(path)
-    }
-}
-
-impl IdentityUpdate {
-    pub fn username(&self) -> Option<String> {
-        match self.clone() {
-            IdentityUpdate::Username(username) => Some(username),
-            _ => None,
-        }
-    }
-
-    pub fn graphics_picture(&self) -> Option<String> {
-        match self.clone() {
-            IdentityUpdate::Picture(data) => Some(data),
-            _ => None,
-        }
-    }
-
-    pub fn graphics_banner(&self) -> Option<String> {
-        match self.clone() {
-            IdentityUpdate::Banner(data) => Some(data),
-            _ => None,
-        }
-    }
-
-    pub fn graphics_picture_path(&self) -> Option<std::path::PathBuf> {
-        match self.clone() {
-            IdentityUpdate::PicturePath(path) => Some(path),
-            _ => None,
-        }
-    }
-
-    pub fn graphics_banner_path(&self) -> Option<std::path::PathBuf> {
-        match self.clone() {
-            IdentityUpdate::BannerPath(path) => Some(path),
-            _ => None,
-        }
-    }
-
-    pub fn status_message(&self) -> Option<Option<String>> {
-        match self.clone() {
-            IdentityUpdate::StatusMessage(status) => Some(status),
-            _ => None,
-        }
-    }
+    ClearStatusMessage,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -723,7 +648,7 @@ pub mod ffi {
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::set_username(name))) as *mut IdentityUpdate
+        Box::into_raw(Box::new(IdentityUpdate::Username(name))) as *mut IdentityUpdate
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -737,7 +662,7 @@ pub mod ffi {
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::set_graphics_picture(name))) as *mut IdentityUpdate
+        Box::into_raw(Box::new(IdentityUpdate::Picture(name))) as *mut IdentityUpdate
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -751,7 +676,7 @@ pub mod ffi {
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::set_graphics_banner(name))) as *mut IdentityUpdate
+        Box::into_raw(Box::new(IdentityUpdate::Banner(name))) as *mut IdentityUpdate
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -761,9 +686,9 @@ pub mod ffi {
     ) -> *mut IdentityUpdate {
         let update = if !name.is_null() {
             let name = CStr::from_ptr(name).to_string_lossy().to_string();
-            IdentityUpdate::set_status_message(Some(name))
+            IdentityUpdate::StatusMessage(Some(name))
         } else {
-            IdentityUpdate::set_status_message(None)
+            IdentityUpdate::StatusMessage(None)
         };
 
         Box::into_raw(Box::new(update)) as *mut IdentityUpdate
@@ -780,12 +705,12 @@ pub mod ffi {
 
         let update = &*update;
 
-        match update.username() {
-            Some(data) => match CString::new(data) {
+        match update {
+            IdentityUpdate::Username(data) => match CString::new(data.clone()) {
                 Ok(data) => data.into_raw(),
                 Err(_) => std::ptr::null_mut(),
             },
-            None => std::ptr::null_mut(),
+            _ => std::ptr::null_mut(),
         }
     }
 
@@ -800,12 +725,12 @@ pub mod ffi {
 
         let update = &*update;
 
-        match update.graphics_picture() {
-            Some(data) => match CString::new(data) {
+        match update {
+            IdentityUpdate::Picture(data) => match CString::new(data.clone()) {
                 Ok(data) => data.into_raw(),
                 Err(_) => std::ptr::null_mut(),
             },
-            None => std::ptr::null_mut(),
+            _ => std::ptr::null_mut(),
         }
     }
 
@@ -820,12 +745,12 @@ pub mod ffi {
 
         let update = &*update;
 
-        match update.graphics_banner() {
-            Some(data) => match CString::new(data) {
+        match update {
+            IdentityUpdate::Banner(data) => match CString::new(data.clone()) {
                 Ok(data) => data.into_raw(),
                 Err(_) => std::ptr::null_mut(),
             },
-            None => std::ptr::null_mut(),
+            _ => std::ptr::null_mut(),
         }
     }
 
@@ -840,8 +765,8 @@ pub mod ffi {
 
         let update = &*update;
 
-        if let Some(Some(inner)) = update.status_message() {
-            if let Ok(data) = CString::new(inner) {
+        if let IdentityUpdate::StatusMessage(Some(inner)) = update {
+            if let Ok(data) = CString::new(inner.clone()) {
                 return data.into_raw();
             }
         }

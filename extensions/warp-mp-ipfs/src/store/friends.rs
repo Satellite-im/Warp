@@ -6,7 +6,7 @@ use ipfs::{Ipfs, PeerId};
 use libipld::IpldCodec;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -23,7 +23,7 @@ use warp::tesseract::Tesseract;
 use crate::config::Discovery;
 
 use super::document::DocumentType;
-use super::identity::IdentityStore;
+use super::identity::{IdentityStore, LookupBy};
 use super::phonebook::PhoneBook;
 use super::queue::Queue;
 use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType, VecExt};
@@ -152,7 +152,6 @@ impl FriendsStore {
         identity: IdentityStore,
         path: Option<PathBuf>,
         tesseract: Tesseract,
-        _interval: u64,
         (tx, override_ipld, use_phonebook, wait_on_response): (
             broadcast::Sender<MultiPassEventKind>,
             bool,
@@ -160,7 +159,6 @@ impl FriendsStore {
             Option<u64>,
         ),
     ) -> anyhow::Result<Self> {
-
         let end_event = Arc::new(AtomicBool::new(false));
 
         let did_key = Arc::new(did_keypair(&tesseract)?);
@@ -191,10 +189,6 @@ impl FriendsStore {
             .ipfs
             .pubsub_subscribe(get_inbox_topic(store.did_key.as_ref()))
             .await?;
-
-        let (local_ipfs_public_key, _) = store.local().await?;
-
-        let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
 
         tokio::spawn({
             let mut store = store.clone();
@@ -281,10 +275,7 @@ impl FriendsStore {
                 futures::pin_mut!(stream);
 
                 while let Some(message) = stream.next().await {
-                    if let Err(e) = store
-                        .check_request_message(&local_public_key, message)
-                        .await
-                    {
+                    if let Err(e) = store.check_request_message(message).await {
                         error!("Error: {e}");
                     }
                 }
@@ -295,11 +286,7 @@ impl FriendsStore {
     }
 
     //TODO: Implement Errors
-    async fn check_request_message(
-        &mut self,
-        _local_public_key: &DID,
-        message: GossipsubMessage,
-    ) -> anyhow::Result<()> {
+    async fn check_request_message(&mut self, message: GossipsubMessage) -> anyhow::Result<()> {
         if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
             let data = data.decrypt::<PayloadEvent>(&self.did_key)?;
 
@@ -376,11 +363,33 @@ impl FriendsStore {
 
                         self.set_request_list(list).await?;
 
-                        if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestReceived {
-                            from: data.sender.clone(),
-                        }) {
-                            error!("Error broadcasting event: {e}");
-                        }
+                        tokio::spawn({
+                            let tx = self.tx.clone();
+                            let store = self.identity.clone();
+                            let from = data.sender.clone();
+                            async move {
+                                let _ = tokio::time::timeout(Duration::from_secs(10), async {
+                                    loop {
+                                        if let Ok(list) =
+                                            store.lookup(LookupBy::DidKey(from.clone())).await
+                                        {
+                                            if !list.is_empty() {
+                                                break;
+                                            }
+                                        }
+                                        tokio::time::sleep(Duration::from_secs(1)).await;
+                                    }
+                                })
+                                .await
+                                .ok();
+
+                                if let Err(e) =
+                                    tx.send(MultiPassEventKind::FriendRequestReceived { from })
+                                {
+                                    error!("Error broadcasting event: {e}");
+                                }
+                            }
+                        });
                     }
                     let payload = PayloadEvent {
                         sender: (*self.did_key).clone(),
@@ -888,7 +897,6 @@ impl FriendsStore {
 
         let mut list = self.friends_list().await?;
 
-
         if !list.insert_item(pubkey) {
             return Err(Error::FriendExist);
         }
@@ -1090,16 +1098,6 @@ impl FriendsStore {
             .map_err(anyhow::Error::from)?;
 
         let bytes = serde_json::to_vec(&e_payload)?;
-
-        //Check to make sure the payload itself doesnt exceed 256kb
-        if bytes.len() >= 256 * 1024 {
-            return Err(Error::InvalidLength {
-                context: "payload".into(),
-                current: bytes.len(),
-                minimum: Some(1),
-                maximum: Some(256 * 1024),
-            });
-        }
 
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
 

@@ -66,11 +66,7 @@ pub enum DocumentType<T> {
 }
 
 impl<T> DocumentType<T> {
-    pub async fn resolve(
-        &self,
-        ipfs: Ipfs,
-        timeout: Option<Duration>,
-    ) -> Result<T, Error>
+    pub async fn resolve(&self, ipfs: Ipfs, timeout: Option<Duration>) -> Result<T, Error>
     where
         T: Clone,
         T: DeserializeOwned,
@@ -131,11 +127,7 @@ impl<T> DocumentType<T> {
         }
     }
 
-    pub async fn resolve_or_default(
-        &self,
-        ipfs: Ipfs,
-        timeout: Option<Duration>,
-    ) -> T
+    pub async fn resolve_or_default(&self, ipfs: Ipfs, timeout: Option<Duration>) -> T
     where
         T: Clone,
         T: DeserializeOwned,
@@ -291,11 +283,7 @@ pub struct CacheDocument {
 }
 
 impl CacheDocument {
-    pub async fn resolve(
-        &self,
-        ipfs: Ipfs,
-        timeout: Option<Duration>,
-    ) -> Result<Identity, Error> {
+    pub async fn resolve(&self, ipfs: Ipfs, timeout: Option<Duration>) -> Result<Identity, Error> {
         let mut identity = self.identity.resolve(ipfs.clone(), timeout).await?;
         if identity.username() != self.username.clone()
             || identity.did_key() != self.did.clone()
@@ -305,16 +293,46 @@ impl CacheDocument {
         }
 
         if let Some(document) = &self.picture {
-            let picture = document.resolve_or_default(ipfs.clone(), timeout).await;
-            let mut graphics = identity.graphics();
-            graphics.set_profile_picture(&picture);
-            identity.set_graphics(graphics);
+            let mut lazily = false;
+            if let DocumentType::UnixFS(cid, _) = document {
+                if !ipfs.refs_local().await?.contains(cid) {
+                    tokio::spawn({
+                        let ipfs = ipfs.clone();
+                        let document = document.clone();
+                        async move {
+                            document.resolve_or_default(ipfs, timeout).await;
+                        }
+                    });
+                    lazily = true;
+                }
+            }
+            if !lazily {
+                let picture = document.resolve_or_default(ipfs.clone(), timeout).await;
+                let mut graphics = identity.graphics();
+                graphics.set_profile_picture(&picture);
+                identity.set_graphics(graphics);
+            }
         }
         if let Some(document) = &self.banner {
-            let banner = document.resolve_or_default(ipfs.clone(), timeout).await;
-            let mut graphics = identity.graphics();
-            graphics.set_profile_banner(&banner);
-            identity.set_graphics(graphics);
+            let mut lazily = false;
+            if let DocumentType::UnixFS(cid, _) = document {
+                if !ipfs.refs_local().await?.contains(cid) {
+                    tokio::spawn({
+                        let ipfs = ipfs.clone();
+                        let document = document.clone();
+                        async move {
+                            document.resolve_or_default(ipfs, timeout).await;
+                        }
+                    });
+                    lazily = true;
+                }
+            }
+            if !lazily {
+                let banner = document.resolve_or_default(ipfs.clone(), timeout).await;
+                let mut graphics = identity.graphics();
+                graphics.set_profile_banner(&banner);
+                identity.set_graphics(graphics);
+            }
         }
 
         Ok(identity)
