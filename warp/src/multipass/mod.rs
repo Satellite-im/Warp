@@ -45,10 +45,10 @@ pub enum MultiPassEventKind {
 #[allow(clippy::large_enum_variant)]
 pub enum UpdateKind {
     Username { old: String, new: String },
-    StatusMessage,
     Status { status: IdentityStatus },
     Picture,
     Banner,
+    Misc
 }
 
 #[derive(FFIFree)]

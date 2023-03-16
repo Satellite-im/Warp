@@ -314,10 +314,10 @@ async fn main() -> anyhow::Result<()> {
 
                             match kind {
                                 UpdateKind::Username { old, new } => writeln!(stdout, "> {old} username been updated to \"{new}\"")?,
-                                UpdateKind::StatusMessage => writeln!(stdout, "> {username} updated their status message ")?,
                                 UpdateKind::Status { status } => writeln!(stdout, "> {username} changed to {status} ")?,
                                 UpdateKind::Picture => writeln!(stdout, "> {username} updated their profile picture ")?,
                                 UpdateKind::Banner => writeln!(stdout, "> {username} updated their profile banner ")?,
+                                _ => writeln!(stdout, "> {username} has been updated ")?,
                             };
                         }
                     }
