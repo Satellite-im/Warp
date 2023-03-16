@@ -6,7 +6,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp::{
-    crypto::{cipher::Cipher, DID},
+    crypto::{cipher::Cipher, zeroize::Zeroize, DID},
     error::Error,
 };
 
@@ -31,7 +31,7 @@ impl Keystore {
         recipient: &DID,
         key: K,
     ) -> Result<(), Error> {
-        let key = super::ecdh_encrypt(did, None, key)?.into_boxed_slice();
+        let key = super::ecdh_encrypt(did, None, key)?;
 
         match self.recipient_key.entry(recipient.clone()) {
             Entry::Occupied(mut entry) => {
@@ -97,7 +97,13 @@ impl Keystore {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct KeyEntry {
     id: usize,
-    key: Box<[u8]>,
+    key: Vec<u8>,
+}
+
+impl Zeroize for KeyEntry {
+    fn zeroize(&mut self) {
+        self.key.zeroize()
+    }
 }
 
 impl Debug for KeyEntry {
@@ -109,7 +115,7 @@ impl Debug for KeyEntry {
 }
 
 impl KeyEntry {
-    pub fn new(id: usize, key: Box<[u8]>) -> Self {
+    pub fn new(id: usize, key: Vec<u8>) -> Self {
         Self { id, key }
     }
 }
@@ -222,7 +228,8 @@ mod test {
         };
 
         let cipher_message = Cipher::direct_encrypt(plaintext, random_key)?;
-        let decrypted_message = keystore.try_decrypt(&keypair, random_recipient, &cipher_message)?;
+        let decrypted_message =
+            keystore.try_decrypt(&keypair, random_recipient, &cipher_message)?;
 
         assert_eq!(decrypted_message, plaintext);
 

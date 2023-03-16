@@ -14,7 +14,7 @@ use warp::{
     crypto::{
         did_key::{CoreSign, Generate, ECDH},
         hash::sha256_hash,
-        DIDKey, Ed25519KeyPair, KeyMaterial, DID, cipher::Cipher,
+        DIDKey, Ed25519KeyPair, KeyMaterial, DID, cipher::Cipher, zeroize::Zeroizing,
     },
     error::Error,
     logging::tracing::log::{error, trace},
@@ -79,7 +79,7 @@ fn ecdh_encrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> R
     };
 
     let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
-    let prik = prikey.key_exchange(&pubkey);
+    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
     let data = Cipher::direct_encrypt(data.as_ref(), &prik)?;
 
     Ok(data)
@@ -93,7 +93,7 @@ fn ecdh_decrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> R
     };
 
     let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
-    let prik = prikey.key_exchange(&pubkey);
+    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
     let data = Cipher::direct_decrypt(data.as_ref(), &prik)?;
 
     Ok(data)
