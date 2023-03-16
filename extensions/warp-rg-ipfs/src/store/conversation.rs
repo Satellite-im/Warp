@@ -1,6 +1,9 @@
 use chrono::{DateTime, Utc};
 use core::hash::Hash;
-use futures::{stream::FuturesOrdered, StreamExt};
+use futures::{
+    stream::{BoxStream, FuturesOrdered},
+    StreamExt,
+};
 use libipld::{Cid, IpldCodec};
 use rust_ipfs::Ipfs;
 use serde::{Deserialize, Serialize};
@@ -326,6 +329,82 @@ impl ConversationDocument {
         .await;
 
         Ok(list)
+    }
+
+    pub async fn get_messages_stream<'a>(
+        &self,
+        ipfs: &Ipfs,
+        did: Arc<DID>,
+        option: MessageOptions,
+    ) -> Result<BoxStream<'a, Result<Message, Error>>, Error> {
+        let messages: Vec<MessageDocument> = match option.date_range() {
+            Some(range) => Vec::from_iter(
+                self.messages
+                    .iter()
+                    .filter(|message| message.date >= range.start && message.date <= range.end)
+                    .copied(),
+            ),
+            None => Vec::from_iter(self.messages.iter().copied()),
+        };
+
+        let sorted: Vec<MessageDocument> = option
+            .range()
+            .map(|mut range| {
+                let start = range.start;
+                let end = range.end;
+                range.start = messages.len() - end;
+                range.end = messages.len() - start;
+                range
+            })
+            .and_then(|range| messages.get(range))
+            .map(|messages| messages.to_vec())
+            .unwrap_or_else(|| messages.clone());
+
+        let list: Vec<MessageDocument> = {
+            if option.first_message() && !option.last_message() {
+                sorted
+                    .first()
+                    .copied()
+                    .map(|item| vec![item])
+                    .unwrap_or_default()
+            } else if !option.first_message() && option.last_message() {
+                sorted
+                    .last()
+                    .copied()
+                    .map(|item| vec![item])
+                    .unwrap_or_default()
+            } else {
+                sorted
+            }
+        };
+
+        let ipfs = ipfs.clone();
+        let stream = async_stream::stream! {
+            let option = option.clone();
+            let did = did.clone();
+            for document in list {
+                match document.resolve(&ipfs, did.clone()).await {
+                    Ok(message) => {
+                        yield if let Some(keyword) = option.keyword() {
+                            if message
+                                .value()
+                                .iter()
+                                .any(|line| line.to_lowercase().contains(&keyword.to_lowercase()))
+                            {
+                                Ok(message)
+                            } else {
+                                Err(Error::Other)
+                            }
+                        } else {
+                            Ok(message)
+                        }
+                    },
+                    Err(e) => yield Err(e)
+                };
+            }
+        };
+
+        Ok(stream.boxed())
     }
 
     pub async fn get_message(
