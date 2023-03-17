@@ -137,6 +137,7 @@ pub struct MessageOptions {
     date_range: Option<Range<DateTime<Utc>>>,
     first_message: bool,
     last_message: bool,
+    reverse: bool,
     messages_type: MessagesType,
     keyword: Option<String>,
     range: Option<Range<usize>>,
@@ -174,6 +175,11 @@ impl MessageOptions {
     pub fn set_last_message(mut self) -> MessageOptions {
         self.first_message = false;
         self.last_message = true;
+        self
+    }
+
+    pub fn set_reverse(mut self) -> MessageOptions {
+        self.reverse = true;
         self
     }
 
@@ -216,6 +222,10 @@ impl MessageOptions {
 
     pub fn messages_type(&self) -> MessagesType {
         self.messages_type
+    }
+
+    pub fn reverse(&self) -> bool {
+        self.reverse
     }
 }
 

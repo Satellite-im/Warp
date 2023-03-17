@@ -338,8 +338,12 @@ impl ConversationDocument {
         did: Arc<DID>,
         option: MessageOptions,
     ) -> Result<BoxStream<'a, Message>, Error> {
-        let messages = Vec::from_iter(self.messages.iter().copied());
+        let mut messages = Vec::from_iter(self.messages.iter().copied());
         
+        if option.reverse() {
+            messages.reverse()
+        }
+
         let ipfs = ipfs.clone();
 
         let stream = async_stream::stream! {
@@ -372,7 +376,6 @@ impl ConversationDocument {
         };
 
         Ok(stream.boxed())
-        // unimplemented!()
     }
 
     pub async fn get_message(
