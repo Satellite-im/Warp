@@ -137,6 +137,7 @@ pub struct MessageOptions {
     date_range: Option<Range<DateTime<Utc>>>,
     first_message: bool,
     last_message: bool,
+    messages_type: MessagesType,
     keyword: Option<String>,
     range: Option<Range<usize>>,
     limit: Option<i64>,
@@ -175,6 +176,11 @@ impl MessageOptions {
         self.last_message = true;
         self
     }
+
+    pub fn set_messages_type(mut self, r#type: MessagesType) -> MessageOptions {
+        self.messages_type = r#type;
+        self
+    }
 }
 
 impl MessageOptions {
@@ -207,6 +213,73 @@ impl MessageOptions {
     pub fn last_message(&self) -> bool {
         self.last_message
     }
+
+    pub fn messages_type(&self) -> MessagesType {
+        self.messages_type
+    }
+}
+
+#[derive(Default, Debug, Hash, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
+#[serde(rename_all = "lowercase")]
+#[repr(C)]
+pub enum MessagesType {
+    #[display(fmt = "stream")]
+    Stream,
+    #[default]
+    #[display(fmt = "list")]
+    List,
+    #[display(fmt = "pages")]
+    Pages {
+        /// Page to select
+        page: Option<usize>,
+
+        /// Amount of messages per page
+        amount_per_page: Option<u8>,
+    },
+}
+
+pub enum Messages {
+    /// List of messages
+    List(Vec<Message>),
+
+    /// Stream of messages
+    Stream(BoxStream<'static, Message>),
+
+    /// Pages of messages
+    /// Note: TBD
+    Page {
+        /// List if pages
+        pages: Vec<MessagePage>,
+        /// Amount of pages
+        total: usize,
+    },
+}
+
+impl TryFrom<Messages> for Vec<Message> {
+    type Error = Error;
+    fn try_from(value: Messages) -> Result<Self, Self::Error> {
+        match value {
+            Messages::List(list) => Ok(list),
+            _ => Err(Error::Unimplemented),
+        }
+    }
+}
+
+impl TryFrom<Messages> for BoxStream<'static, Message> {
+    type Error = Error;
+    fn try_from(value: Messages) -> Result<Self, Self::Error> {
+        match value {
+            Messages::Stream(stream) => Ok(stream),
+            _ => Err(Error::Unimplemented),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+pub struct MessagePage {
+    id: usize,
+    messages: Vec<Message>,
+    total: usize,
 }
 
 #[derive(Debug, Hash, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
@@ -668,15 +741,7 @@ pub trait RayGun:
         &self,
         conversation_id: Uuid,
         options: MessageOptions,
-    ) -> Result<Vec<Message>, Error>;
-
-    async fn get_messages_stream(
-        &self,
-        _: Uuid,
-        _: MessageOptions,
-    ) -> Result<BoxStream<'static, Message>, Error> {
-        Err(Error::Unimplemented)
-    }
+    ) -> Result<Messages, Error>;
 
     /// Sends a message to a conversation.
     async fn send(&mut self, conversation_id: Uuid, message: Vec<String>) -> Result<(), Error>;
@@ -941,7 +1006,9 @@ pub mod ffi {
         };
 
         let adapter = &*ctx;
-        async_on_block(adapter.get_messages(convo_id, option)).into()
+        async_on_block(adapter.get_messages(convo_id, option))
+            .and_then(Vec::<Message>::try_from)
+            .into()
     }
 
     #[allow(clippy::await_holding_lock)]

@@ -4,9 +4,9 @@ mod store;
 
 use crate::spam_filter::SpamFilter;
 use config::RgIpfsConfig;
-use futures::stream::BoxStream;
 use futures::StreamExt;
 use rust_ipfs::Ipfs;
+use warp::raygun::Messages;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -284,19 +284,9 @@ impl RayGun for IpfsMessaging {
         &self,
         conversation_id: Uuid,
         opt: MessageOptions,
-    ) -> Result<Vec<Message>> {
+    ) -> Result<Messages> {
         self.messaging_store()?
             .get_messages(conversation_id, opt)
-            .await
-    }
-
-    async fn get_messages_stream(
-        &self,
-        conversation_id: Uuid,
-        opt: MessageOptions,
-    ) -> Result<BoxStream<'static, Message>> {
-        self.messaging_store()?
-            .get_messages_stream(conversation_id, opt)
             .await
     }
 

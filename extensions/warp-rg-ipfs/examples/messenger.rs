@@ -1,6 +1,7 @@
 use clap::Parser;
 use comfy_table::Table;
 use futures::prelude::*;
+use futures::stream::BoxStream;
 use rustyline_async::{Readline, ReadlineError, SharedWriter};
 use std::collections::HashMap;
 use std::io::Write;
@@ -18,7 +19,7 @@ use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{
     ConversationType, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions,
-    MessageType, PinState, RayGun, ReactionState,
+    MessageType, PinState, RayGun, ReactionState, Message, MessagesType,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -586,7 +587,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             }
 
-                            let mut messages_stream = match chat.get_messages_stream(local_topic, opt).await {
+                            let mut messages_stream = match chat.get_messages(local_topic, opt.set_messages_type(MessagesType::Stream)).await.and_then(BoxStream::<_>::try_from) {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error: {e}")?;
@@ -623,7 +624,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut table = Table::new();
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
                             let local_topic = *topic.read();
-                            let messages = match chat.get_messages(local_topic, MessageOptions::default().set_first_message()).await {
+                            let messages = match chat.get_messages(local_topic, MessageOptions::default().set_first_message()).await.and_then(Vec::<Message>::try_from) {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error: {e}")?;
@@ -655,7 +656,7 @@ async fn main() -> anyhow::Result<()> {
                             table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
                             let local_topic = *topic.read();
 
-                            let messages = match chat.get_messages(local_topic, MessageOptions::default().set_last_message()).await {
+                            let messages = match chat.get_messages(local_topic, MessageOptions::default().set_last_message()).await.and_then(Vec::<Message>::try_from) {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error: {e}")?;
@@ -695,7 +696,7 @@ async fn main() -> anyhow::Result<()> {
 
                             let keywords = keywords.join(" ").to_string();
 
-                            let mut messages_stream = match chat.get_messages_stream(local_topic, MessageOptions::default().set_keyword(&keywords)).await {
+                            let mut messages_stream = match chat.get_messages(local_topic, MessageOptions::default().set_keyword(&keywords).set_messages_type(MessagesType::Stream)).await.and_then(BoxStream::<_>::try_from) {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error: {e}")?;
@@ -960,7 +961,7 @@ async fn main() -> anyhow::Result<()> {
                                         async move {
                                             let messages = chat
                                                 .get_messages(topic, MessageOptions::default())
-                                                .await.unwrap_or_default();
+                                                .await.and_then(Vec::<Message>::try_from).unwrap_or_default();
                                             for message in messages.iter() {
                                                 match chat.pin(topic, message.id(), PinState::Pin).await {
                                                     Ok(_) => writeln!(stdout, "Pinned {}", message.id()).is_ok(),
@@ -994,7 +995,7 @@ async fn main() -> anyhow::Result<()> {
                                         async move {
                                             let messages = chat
                                                 .get_messages(topic, MessageOptions::default())
-                                                .await.unwrap_or_default();
+                                                .await.and_then(Vec::<Message>::try_from).unwrap_or_default();
                                             for message in messages.iter() {
                                                 match chat.pin(topic, message.id(), PinState::Unpin).await {
                                                     Ok(_) => writeln!(stdout, "Unpinned {}", message.id()).is_ok(),
