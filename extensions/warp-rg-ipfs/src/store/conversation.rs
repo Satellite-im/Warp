@@ -418,7 +418,7 @@ impl ConversationDocument {
             .messages
             .iter()
             .find(|document| document.id == message_id)
-            .cloned()
+            .copied()
             .ok_or(Error::MessageNotFound)?;
         self.messages.remove(&document);
         document.remove(ipfs).await
