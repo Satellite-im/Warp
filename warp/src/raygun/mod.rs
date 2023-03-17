@@ -670,7 +670,11 @@ pub trait RayGun:
         options: MessageOptions,
     ) -> Result<Vec<Message>, Error>;
 
-    async fn get_messages_stream(&self, _: Uuid, _: MessageOptions) -> Result<BoxStream<'static, Result<Message, Error>>, Error> {
+    async fn get_messages_stream(
+        &self,
+        _: Uuid,
+        _: MessageOptions,
+    ) -> Result<BoxStream<'static, Message>, Error> {
         Err(Error::Unimplemented)
     }
 

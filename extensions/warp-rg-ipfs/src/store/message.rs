@@ -1282,7 +1282,7 @@ impl MessageStore {
         &self,
         conversation: Uuid,
         opt: MessageOptions,
-    ) -> Result<BoxStream<'a, Result<Message, Error>>, Error> {
+    ) -> Result<BoxStream<'a, Message>, Error> {
         let conversation = self.get_conversation(conversation).await?;
         conversation
             .get_messages_stream(&self.ipfs, self.did.clone(), opt)

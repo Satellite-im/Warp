@@ -337,7 +337,7 @@ impl ConversationDocument {
         ipfs: &Ipfs,
         did: Arc<DID>,
         option: MessageOptions,
-    ) -> Result<BoxStream<'a, Result<Message, Error>>, Error> {
+    ) -> Result<BoxStream<'a, Message>, Error> {
         let messages = Vec::from_iter(self.messages.iter().copied());
         
         let ipfs = ipfs.clone();
@@ -362,10 +362,10 @@ impl ConversationDocument {
                             .iter()
                             .any(|line| line.to_lowercase().contains(&keyword.to_lowercase()))
                         {
-                            yield Ok(message);
+                            yield message;
                         }
                     } else {
-                        yield Ok(message);
+                        yield message;
                     }
                 }
             }

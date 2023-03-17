@@ -294,7 +294,7 @@ impl RayGun for IpfsMessaging {
         &self,
         conversation_id: Uuid,
         opt: MessageOptions,
-    ) -> Result<BoxStream<'static, Result<Message>>> {
+    ) -> Result<BoxStream<'static, Message>> {
         self.messaging_store()?
             .get_messages_stream(conversation_id, opt)
             .await
