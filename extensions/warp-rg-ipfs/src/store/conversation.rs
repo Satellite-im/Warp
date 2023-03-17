@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use core::hash::Hash;
 use futures::{
-    stream::{BoxStream, FuturesOrdered},
+    stream::{self, BoxStream, FuturesOrdered},
     StreamExt,
 };
 use libipld::{Cid, IpldCodec};
@@ -264,7 +264,7 @@ impl ConversationDocument {
         did: Arc<DID>,
         option: MessageOptions,
     ) -> Result<BTreeSet<Message>, Error> {
-        let messages = match option.date_range() {
+        let mut messages = match option.date_range() {
             Some(range) => Vec::from_iter(
                 self.messages
                     .iter()
@@ -273,6 +273,10 @@ impl ConversationDocument {
             ),
             None => Vec::from_iter(self.messages.iter().copied()),
         };
+
+        if option.reverse() {
+            messages.reverse()
+        }
 
         let sorted = option
             .range()
@@ -339,13 +343,30 @@ impl ConversationDocument {
         option: MessageOptions,
     ) -> Result<BoxStream<'a, Message>, Error> {
         let mut messages = Vec::from_iter(self.messages.iter().copied());
-        
+
         if option.reverse() {
             messages.reverse()
         }
 
-        let ipfs = ipfs.clone();
+        if option.first_message() && !messages.is_empty() {
+            let message = messages
+                .first()
+                .ok_or(Error::MessageNotFound)?
+                .resolve(ipfs, did.clone())
+                .await?;
+            return Ok(stream::once(async { message }).boxed());
+        }
 
+        if option.last_message() && !messages.is_empty() {
+            let message = messages
+                .last()
+                .ok_or(Error::MessageNotFound)?
+                .resolve(ipfs, did.clone())
+                .await?;
+            return Ok(stream::once(async { message }).boxed());
+        }
+
+        let ipfs = ipfs.clone();
         let stream = async_stream::stream! {
             for (index, document) in messages.iter().enumerate() {
                 if let Some(range) = option.range() {
