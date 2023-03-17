@@ -549,29 +549,55 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "{table}")?;
                         },
                         Some("/list") => {
-                            let mut table = Table::new();
-                            table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
-                            let local_topic = *topic.read();
 
-                            let opt = match cmd_line.next() {
-                                Some(id) => match id.parse() {
-                                    Ok(last) => MessageOptions::default().set_range(0..last),
+                            let local_topic = *topic.read();
+                            let mut lower_range = None;
+                            let mut upper_range = None;
+
+                            if let Some(id) = cmd_line.next() {
+                                match id.parse() {
+                                    Ok(lower) => {
+                                        lower_range = Some(lower);
+                                        if let Some(id) = cmd_line.next() {
+                                            match id.parse() {
+                                                Ok(upper) => {
+                                                    upper_range = Some(upper);
+                                                },
+                                                Err(e) => {
+                                                    writeln!(stdout, "Error parsing upper range: {e}")?;
+                                                    continue
+                                                }
+                                            }
+                                        }
+                                    },
                                     Err(e) => {
-                                        writeln!(stdout, "Error parsing range: {e}")?;
+                                        writeln!(stdout, "Error parsing lower range: {e}")?;
                                         continue
                                     }
-                                },
-                                None => MessageOptions::default()
+                                }
                             };
 
-                            let messages = match chat.get_messages(local_topic, opt).await {
+                            let mut opt = MessageOptions::default();
+                            if let Some(lower) = lower_range {
+                                if let Some(upper) = upper_range {
+                                    opt = opt.set_range(lower..upper);
+                                } else {
+                                    opt = opt.set_range(0..lower);
+                                }
+                            }
+
+                            let mut messages_stream = match chat.get_messages_stream(local_topic, opt).await {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error: {e}")?;
                                     continue;
                                 }
                             };
-                            for message in messages.iter() {
+
+                            
+                            let mut table = Table::new();
+                            table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
+                            while let Some(message) = messages_stream.next().await {
                                 let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
@@ -589,7 +615,9 @@ async fn main() -> anyhow::Result<()> {
                                     &emojis.join(" ")
                                 ]);
                             }
-                            writeln!(stdout, "{table}")?;
+                            writeln!(stdout, "{table}")?
+                                
+
                         },
                         Some("/get-first") => {
                             let mut table = Table::new();
@@ -666,7 +694,8 @@ async fn main() -> anyhow::Result<()> {
                             }
 
                             let keywords = keywords.join(" ").to_string();
-                            let messages = match chat.get_messages(local_topic, MessageOptions::default().set_keyword(&keywords)).await {
+
+                            let mut messages_stream = match chat.get_messages_stream(local_topic, MessageOptions::default().set_keyword(&keywords)).await {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error: {e}")?;
@@ -674,7 +703,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
 
-                            for message in messages.iter() {
+                            while let Some(message) = messages_stream.next().await {
                                 let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
