@@ -30,8 +30,8 @@ use warp::logging::tracing::warn;
 use warp::multipass::MultiPass;
 use warp::raygun::{
     Conversation, ConversationType, EmbedState, Location, Message, MessageEvent, MessageEventKind,
-    MessageOptions, MessageStatus, MessageType, Messages, MessagesType, PinState, RayGunEventKind,
-    Reaction, ReactionState,
+    MessageOptions, MessageStatus, MessageStream, MessageType, Messages, MessagesType, PinState,
+    RayGunEventKind, Reaction, ReactionState,
 };
 use warp::sata::Sata;
 use warp::sync::Arc;
@@ -1279,7 +1279,7 @@ impl MessageStore {
                 let stream = conversation
                     .get_messages_stream(&self.ipfs, self.did.clone(), opt)
                     .await?;
-                Ok(Messages::Stream(stream))
+                Ok(Messages::Stream(MessageStream(stream)))
             }
             MessagesType::List => {
                 let list = conversation

@@ -17,6 +17,7 @@ use chrono::{DateTime, Utc};
 use core::ops::Range;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -127,6 +128,28 @@ impl core::ops::Deref for MessageEventStream {
 }
 
 impl core::ops::DerefMut for MessageEventStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[derive(FFIFree)]
+pub struct MessageStream(pub BoxStream<'static, Message>);
+
+impl Debug for MessageStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MessageStream")
+    }
+}
+
+impl core::ops::Deref for MessageStream {
+    type Target = BoxStream<'static, Message>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for MessageStream {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -248,12 +271,13 @@ pub enum MessagesType {
     },
 }
 
+#[derive(Debug)]
 pub enum Messages {
     /// List of messages
     List(Vec<Message>),
 
     /// Stream of messages
-    Stream(BoxStream<'static, Message>),
+    Stream(MessageStream),
 
     /// Pages of messages
     /// Note: TBD
@@ -275,7 +299,7 @@ impl TryFrom<Messages> for Vec<Message> {
     }
 }
 
-impl TryFrom<Messages> for BoxStream<'static, Message> {
+impl TryFrom<Messages> for MessageStream {
     type Error = Error;
     fn try_from(value: Messages) -> Result<Self, Self::Error> {
         match value {
@@ -290,6 +314,18 @@ pub struct MessagePage {
     id: usize,
     messages: Vec<Message>,
     total: usize,
+}
+
+impl PartialOrd for MessagePage {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        self.id.partial_cmp(&other.id)
+    }
+}
+
+impl Ord for MessagePage {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.id.cmp(&other.id)
+    }
 }
 
 #[derive(Debug, Hash, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
