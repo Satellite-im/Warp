@@ -3,12 +3,12 @@ use core::hash::Hash;
 use futures::{stream::FuturesOrdered, StreamExt};
 use libipld::{Cid, IpldCodec};
 use rust_ipfs::Ipfs;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use uuid::Uuid;
 use warp::{
-    crypto::{did_key::CoreSign, Fingerprint, DID},
+    crypto::{did_key::CoreSign, DIDKey, Ed25519KeyPair, Fingerprint, KeyMaterial, DID},
     error::Error,
     logging::tracing::log::info,
     raygun::{Conversation, ConversationType, Message, MessageOptions},
@@ -408,9 +408,20 @@ impl From<&ConversationDocument> for Conversation {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageDocument {
     pub id: Uuid,
+    pub sender: DIDEd25519Reference,
     pub conversation_id: Uuid,
     pub date: DateTime<Utc>,
     pub message: Cid,
+    #[serde(skip_serializing_if = "is_false")]
+    pub pinned: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replied: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified: Option<DateTime<Utc>>,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 impl PartialOrd for MessageDocument {
@@ -446,6 +457,10 @@ impl MessageDocument {
             object.add_recipient(&did)?;
         }
 
+        let pinned = message.pinned();
+        let replied = message.replied();
+        let modified = message.modified();
+        let sender = DIDEd25519Reference::from_did(&message.sender());
         let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, message)?;
 
         let message = data.to_cid(ipfs).await?;
@@ -456,8 +471,12 @@ impl MessageDocument {
 
         let document = MessageDocument {
             id,
+            sender,
             conversation_id,
             date,
+            pinned,
+            modified,
+            replied,
             message,
         };
 
@@ -498,6 +517,10 @@ impl MessageDocument {
             object.add_recipient(recipient)?;
         }
 
+        self.pinned = message.pinned();
+        self.replied = message.replied();
+        self.modified = message.modified();
+
         let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, message)?;
         let message_cid = data.to_cid(ipfs).await?;
         info!("Setting Message to document");
@@ -532,5 +555,41 @@ impl MessageDocument {
             return Err(Error::InvalidMessage);
         }
         Ok(message)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DIDEd25519Reference([u8; 32]);
+
+impl DIDEd25519Reference {
+    pub fn from_did(did: &DID) -> Self {
+        let mut pubkey_bytes: [u8; 32] = [0u8; 32];
+        pubkey_bytes.copy_from_slice(&did.public_key_bytes());
+        Self(pubkey_bytes)
+    }
+
+    pub fn to_did(self) -> DID {
+        DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&self.0)).into()
+    }
+}
+
+impl Serialize for DIDEd25519Reference {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let did = self.to_did();
+        serializer.serialize_str(&did.to_string())
+    }
+}
+
+impl<'d> Deserialize<'d> for DIDEd25519Reference {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'d>,
+    {
+        let did_str = <String>::deserialize(deserializer)?;
+        let did = DID::try_from(did_str).map_err(serde::de::Error::custom)?;
+        Ok(DIDEd25519Reference::from_did(&did))
     }
 }
