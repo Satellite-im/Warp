@@ -9,7 +9,7 @@ use std::time::Duration;
 use chrono::Utc;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
 use futures::channel::oneshot::Sender as OneshotSender;
-use futures::stream::{BoxStream, FuturesUnordered};
+use futures::stream::FuturesUnordered;
 use futures::{SinkExt, Stream, StreamExt};
 use rust_ipfs::libp2p::swarm::dial_opts::DialOpts;
 use rust_ipfs::{Ipfs, PeerId, SubscriptionStream};
@@ -1294,17 +1294,6 @@ impl MessageStore {
                     .await
             }
         }
-    }
-
-    pub async fn get_messages_stream<'a>(
-        &self,
-        conversation: Uuid,
-        opt: MessageOptions,
-    ) -> Result<BoxStream<'a, Message>, Error> {
-        let conversation = self.get_conversation(conversation).await?;
-        conversation
-            .get_messages_stream(&self.ipfs, self.did.clone(), opt)
-            .await
     }
 
     pub async fn exist(&self, conversation: Uuid) -> bool {
