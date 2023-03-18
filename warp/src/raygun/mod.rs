@@ -254,7 +254,6 @@ impl MessageOptions {
 
 #[derive(Default, Debug, Hash, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
 #[serde(rename_all = "lowercase")]
-#[repr(C)]
 pub enum MessagesType {
     /// Stream type
     #[display(fmt = "stream")]
