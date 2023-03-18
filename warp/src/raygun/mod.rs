@@ -256,11 +256,14 @@ impl MessageOptions {
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
 pub enum MessagesType {
+    /// Stream type
     #[display(fmt = "stream")]
     Stream,
+    /// List type
     #[default]
     #[display(fmt = "list")]
     List,
+    /// Page type
     #[display(fmt = "pages")]
     Pages {
         /// Page to select
@@ -280,7 +283,6 @@ pub enum Messages {
     Stream(MessageStream),
 
     /// Pages of messages
-    /// Note: TBD
     Page {
         /// List if pages
         pages: Vec<MessagePage>,
