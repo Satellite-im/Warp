@@ -316,6 +316,30 @@ pub struct MessagePage {
     total: usize,
 }
 
+impl MessagePage {
+    pub fn new(id: usize, messages: Vec<Message>, total: usize) -> MessagePage {
+        Self {
+            id,
+            messages,
+            total,
+        }
+    }
+}
+
+impl MessagePage {
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
+    pub fn messages(&self) -> &[Message] {
+        &self.messages
+    }
+
+    pub fn total(&self) -> usize {
+        self.total
+    }
+}
+
 impl PartialOrd for MessagePage {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         self.id.partial_cmp(&other.id)

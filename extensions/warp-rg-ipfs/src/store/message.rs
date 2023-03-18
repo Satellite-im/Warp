@@ -1288,7 +1288,11 @@ impl MessageStore {
                     .map(Vec::from_iter)?;
                 Ok(Messages::List(list))
             }
-            MessagesType::Pages { .. } => Err(Error::Unimplemented),
+            MessagesType::Pages { .. } => {
+                conversation
+                    .get_messages_pages(&self.ipfs, self.did.clone(), opt)
+                    .await
+            }
         }
     }
 

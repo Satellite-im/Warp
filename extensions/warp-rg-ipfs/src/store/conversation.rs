@@ -14,7 +14,10 @@ use warp::{
     crypto::{did_key::CoreSign, Fingerprint, DID},
     error::Error,
     logging::tracing::log::info,
-    raygun::{Conversation, ConversationType, Message, MessageOptions},
+    raygun::{
+        Conversation, ConversationType, Message, MessageOptions, MessagePage, Messages,
+        MessagesType,
+    },
     sata::{Kind, Sata},
 };
 
@@ -397,6 +400,62 @@ impl ConversationDocument {
         };
 
         Ok(stream.boxed())
+    }
+
+    pub async fn get_messages_pages(
+        &self,
+        ipfs: &Ipfs,
+        did: Arc<DID>,
+        option: MessageOptions,
+    ) -> Result<Messages, Error> {
+        let messages = Vec::from_iter(self.messages.iter().copied());
+
+        let (page_index, amount_per_page) = match option.messages_type() {
+            MessagesType::Pages {
+                page,
+                amount_per_page,
+            } => (
+                page,
+                amount_per_page
+                    .map(|amount| if amount == 0 { u8::MAX } else { amount })
+                    .unwrap_or(u8::MAX),
+            ),
+            _ => (None, u8::MAX),
+        };
+
+        let ipfs = ipfs.clone();
+
+        let messages_chunk = messages.chunks(amount_per_page as _).collect::<Vec<_>>();
+
+        if let Some(index) = page_index {
+            let page = messages_chunk.get(index).ok_or(Error::MessageFound)?;
+            let mut messages = vec![];
+            for document in page.iter() {
+                if let Ok(message) = document.resolve(&ipfs, did.clone()).await {
+                    messages.push(message);
+                }
+            }
+            let total = messages.len();
+            let pages = vec![MessagePage::new(index, messages, total)];
+            return Ok(Messages::Page { pages, total: 1 });
+        }
+
+        let mut pages = vec![];
+        for (index, chunk) in messages_chunk.iter().enumerate() {
+            let mut messages = vec![];
+            for document in chunk.iter() {
+                if let Ok(message) = document.resolve(&ipfs, did.clone()).await {
+                    messages.push(message);
+                }
+            }
+
+            let total = messages.len();
+            pages.push(MessagePage::new(index, messages, total));
+        }
+
+        let total = pages.len();
+
+        Ok(Messages::Page { pages, total })
     }
 
     pub async fn get_message(
