@@ -408,7 +408,11 @@ impl ConversationDocument {
         did: Arc<DID>,
         option: MessageOptions,
     ) -> Result<Messages, Error> {
-        let messages = Vec::from_iter(self.messages.iter().copied());
+        let mut messages = Vec::from_iter(self.messages.iter().copied());
+
+        if option.reverse() {
+            messages.reverse()
+        }
 
         let (page_index, amount_per_page) = match option.messages_type() {
             MessagesType::Pages {
