@@ -23,7 +23,6 @@ use warp::logging::tracing::log::trace;
 use warp::module::Module;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::group::{GroupChat, GroupChatManagement, GroupInvite};
 use warp::raygun::{
     Conversation, Location, MessageEvent, MessageEventStream, MessageStatus, RayGunEventStream,
     RayGunEvents, RayGunGroupConversation, RayGunStream,
@@ -229,6 +228,7 @@ impl Extension for IpfsMessaging {
 }
 
 impl SingleHandle for IpfsMessaging {
+    #[inline]
     fn handle(&self) -> std::result::Result<Box<dyn core::any::Any>, warp::error::Error> {
         Ok(Box::new(self.ipfs.read().clone()))
     }
@@ -236,16 +236,19 @@ impl SingleHandle for IpfsMessaging {
 
 #[async_trait::async_trait]
 impl RayGun for IpfsMessaging {
+    #[inline]
     async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation> {
         self.messaging_store()?.create_conversation(did_key).await
     }
 
+    #[inline]
     async fn create_group_conversation(&mut self, recipients: Vec<DID>) -> Result<Conversation> {
         self.messaging_store()?
             .create_group_conversation(HashSet::from_iter(recipients))
             .await
     }
 
+    #[inline]
     async fn get_conversation(&self, conversation_id: Uuid) -> Result<Conversation> {
         self.messaging_store()?
             .get_conversation(conversation_id)
@@ -253,22 +256,26 @@ impl RayGun for IpfsMessaging {
             .map(|convo| convo.into())
     }
 
+    #[inline]
     async fn list_conversations(&self) -> Result<Vec<Conversation>> {
         self.messaging_store()?.list_conversations().await
     }
 
+    #[inline]
     async fn get_message_count(&self, conversation_id: Uuid) -> Result<usize> {
         self.messaging_store()?
             .messages_count(conversation_id)
             .await
     }
 
+    #[inline]
     async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message> {
         self.messaging_store()?
             .get_message(conversation_id, message_id)
             .await
     }
 
+    #[inline]
     async fn message_status(
         &self,
         conversation_id: Uuid,
@@ -279,6 +286,7 @@ impl RayGun for IpfsMessaging {
             .await
     }
 
+    #[inline]
     async fn get_messages(
         &self,
         conversation_id: Uuid,
@@ -289,11 +297,13 @@ impl RayGun for IpfsMessaging {
             .await
     }
 
+    #[inline]
     async fn send(&mut self, conversation_id: Uuid, value: Vec<String>) -> Result<()> {
         let mut store = self.messaging_store()?;
         store.send_message(conversation_id, value).await
     }
 
+    #[inline]
     async fn edit(
         &mut self,
         conversation_id: Uuid,
@@ -304,6 +314,7 @@ impl RayGun for IpfsMessaging {
         store.edit_message(conversation_id, message_id, value).await
     }
 
+    #[inline]
     async fn delete(&mut self, conversation_id: Uuid, message_id: Option<Uuid>) -> Result<()> {
         let mut store = self.messaging_store()?;
         match message_id {
@@ -315,6 +326,7 @@ impl RayGun for IpfsMessaging {
         }
     }
 
+    #[inline]
     async fn react(
         &mut self,
         conversation_id: Uuid,
@@ -327,6 +339,7 @@ impl RayGun for IpfsMessaging {
             .await
     }
 
+    #[inline]
     async fn pin(
         &mut self,
         conversation_id: Uuid,
@@ -338,6 +351,7 @@ impl RayGun for IpfsMessaging {
             .await
     }
 
+    #[inline]
     async fn reply(
         &mut self,
         conversation_id: Uuid,
@@ -349,6 +363,7 @@ impl RayGun for IpfsMessaging {
             .await
     }
 
+    #[inline]
     async fn embeds(
         &mut self,
         conversation_id: Uuid,
@@ -363,6 +378,7 @@ impl RayGun for IpfsMessaging {
 
 #[async_trait::async_trait]
 impl RayGunAttachment for IpfsMessaging {
+    #[inline]
     async fn attach(
         &mut self,
         conversation_id: Uuid,
@@ -374,6 +390,7 @@ impl RayGunAttachment for IpfsMessaging {
             .await
     }
 
+    #[inline]
     async fn download(
         &self,
         conversation_id: Uuid,
@@ -389,12 +406,14 @@ impl RayGunAttachment for IpfsMessaging {
 
 #[async_trait::async_trait]
 impl RayGunGroupConversation for IpfsMessaging {
+    #[inline]
     async fn add_recipient(&mut self, conversation_id: Uuid, did_key: &DID) -> Result<()> {
         self.messaging_store()?
             .add_recipient(conversation_id, did_key)
             .await
     }
 
+    #[inline]
     async fn remove_recipient(&mut self, conversation_id: Uuid, did_key: &DID) -> Result<()> {
         self.messaging_store()?
             .remove_recipient(conversation_id, did_key)
@@ -419,6 +438,8 @@ impl RayGunStream for IpfsMessaging {
 
         Ok(RayGunEventStream(Box::pin(stream)))
     }
+
+    #[inline]
     async fn get_conversation_stream(
         &mut self,
         conversation_id: Uuid,
@@ -431,24 +452,20 @@ impl RayGunStream for IpfsMessaging {
 
 #[async_trait::async_trait]
 impl RayGunEvents for IpfsMessaging {
+    #[inline]
     async fn send_event(&mut self, conversation_id: Uuid, event: MessageEvent) -> Result<()> {
         self.messaging_store()?
             .send_event(conversation_id, event)
             .await
     }
 
+    #[inline]
     async fn cancel_event(&mut self, conversation_id: Uuid, event: MessageEvent) -> Result<()> {
         self.messaging_store()?
             .cancel_event(conversation_id, event)
             .await
     }
 }
-
-impl GroupChat for IpfsMessaging {}
-
-impl GroupChatManagement for IpfsMessaging {}
-
-impl GroupInvite for IpfsMessaging {}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
