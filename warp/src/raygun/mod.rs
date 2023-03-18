@@ -532,6 +532,64 @@ impl Message {
     }
 }
 
+/// Message Reference
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub struct MessageReference {
+    id: Uuid,
+    conversation_id: Uuid,
+    date: DateTime<Utc>,
+    modified: Option<DateTime<Utc>>,
+    replied: Option<Uuid>,
+    pinned: bool,
+}
+
+impl PartialEq for MessageReference {
+    fn eq(&self, other: &Self) -> bool {
+        self.id.eq(&other.id) && self.conversation_id.eq(&other.conversation_id)
+    }
+}
+
+impl Eq for MessageReference {}
+
+impl PartialOrd for MessageReference {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        self.date.partial_cmp(&other.date)
+    }
+}
+
+impl Ord for MessageReference {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.date.cmp(&other.date)
+    }
+}
+
+// Getter functions
+impl MessageReference {
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn conversation_id(&self) -> Uuid {
+        self.conversation_id
+    }
+
+    pub fn date(&self) -> DateTime<Utc> {
+        self.date
+    }
+
+    pub fn modified(&self) -> Option<DateTime<Utc>> {
+        self.modified
+    }
+
+    pub fn pinned(&self) -> bool {
+        self.pinned
+    }
+
+    pub fn replied(&self) -> Option<Uuid> {
+        self.replied
+    }
+}
+
 #[derive(
     Default, Clone, Deserialize, Serialize, Debug, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
 )]
