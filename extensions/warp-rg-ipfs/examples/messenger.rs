@@ -18,7 +18,7 @@ use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{
     ConversationType, Message, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions,
-    MessageType, MessagesType, PinState, RayGun, ReactionState, MessageStream,
+    MessageStream, MessageType, Messages, MessagesType, PinState, RayGun, ReactionState,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -618,6 +618,76 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "{table}")?
 
 
+                        },
+                        Some("/list-pages") => {
+
+                            let local_topic = *topic.read();
+                            let mut page_or_amount: Option<usize> = None;
+                            let mut amount_per_page: Option<u8> = page_or_amount.map(|o| if o > 255 { u8::MAX } else { o as _ }).or(Some(10));
+
+                            if let Some(id) = cmd_line.next() {
+                                match id.parse() {
+                                    Ok(a_o_p) => {
+                                        page_or_amount = Some(a_o_p);
+                                    },
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing: {e}")?;
+                                        continue
+                                    }
+                                }
+                            };
+
+                            if let Some(id) = cmd_line.next() {
+                                match id.parse() {
+                                    Ok(amount) => {
+                                        amount_per_page = Some(amount);
+                                    },
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing: {e}")?;
+                                        continue
+                                    }
+                                }
+                            };
+
+                            let opt = MessageOptions::default().set_messages_type(MessagesType::Pages { page: page_or_amount, amount_per_page} );
+
+                            let pages = match chat.get_messages(local_topic, opt).await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    writeln!(stdout, "Error: {e}")?;
+                                    continue;
+                                }
+                            };
+
+                            let mut table = Table::new();
+                            table.set_header(vec!["Page", "Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
+                            if let Messages::Page { pages, total } = pages {
+                                for page in pages {
+                                    let page_id = page.id();
+                                    for message in page.messages() {
+                                        let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                        let mut emojis = vec![];
+                                        for reaction in message.reactions() {
+                                            emojis.push(reaction.emoji());
+                                        }
+                                        table.add_row(vec![
+                                            &format!("{}", page_id),
+                                            &message.id().to_string(),
+                                            &message.message_type().to_string(),
+                                            &message.conversation_id().to_string(),
+                                            &message.date().to_string(),
+                                            &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
+                                            &username,
+                                            &message.value().join("\n"),
+                                            &format!("{}", message.pinned()),
+                                            &emojis.join(" ")
+                                        ]);
+                                    }
+                                }
+
+                                writeln!(stdout, "{table}")?;
+                                writeln!(stdout, "Total Pages: {total}")?
+                            }
                         },
                         Some("/get-first") => {
                             let mut table = Table::new();
