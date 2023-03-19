@@ -192,23 +192,11 @@ pub struct Identity {
     /// Public key for the identity
     did_key: DID,
 
-    /// TBD
+    /// Handle for profile banner and picture
     graphics: Graphics,
 
     /// Status message
     status_message: Option<String>,
-
-    /// List of roles
-    roles: Vec<Role>,
-
-    /// List of available badges
-    available_badges: Vec<Badge>,
-
-    /// Active badge for identity
-    active_badge: Badge,
-
-    /// TBD
-    // linked_accounts: HashMap<String, String>,
 
     /// Signature of the identity
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -281,43 +269,8 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn active_badge(&self) -> Badge {
-        self.active_badge.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn signature(&self) -> Option<String> {
         self.signature.clone()
-    }
-
-    // #[cfg_attr(target_arch = "wasm32", wasm_bindgen(skip))]
-    // pub fn linked_accounts(&self) -> HashMap<String, String> {
-    //     self.linked_accounts.clone()
-    // }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl Identity {
-    #[wasm_bindgen]
-    pub fn roles(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.roles).unwrap()
-    }
-
-    #[wasm_bindgen]
-    pub fn available_badges(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.available_badges).unwrap()
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl Identity {
-    pub fn roles(&self) -> Vec<Role> {
-        self.roles.clone()
-    }
-
-    pub fn available_badges(&self) -> Vec<Badge> {
-        self.available_badges.clone()
     }
 }
 
@@ -377,7 +330,7 @@ pub enum IdentityUpdate {
 pub mod ffi {
     use crate::crypto::DID;
     use crate::multipass::identity::{
-        Badge, FFIVec_Badge, FFIVec_Role, Graphics, Identifier, Identity, IdentityUpdate, Role,
+        Badge, Graphics, Identifier, Identity, IdentityUpdate, Role,
     };
     use std::ffi::{CStr, CString};
     use std::os::raw::{c_char, c_void};
@@ -550,46 +503,46 @@ pub mod ffi {
         }
     }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_roles(identity: *mut Identity) -> *mut FFIVec_Role {
-        if identity.is_null() {
-            return std::ptr::null_mut();
-        }
+    // #[allow(clippy::missing_safety_doc)]
+    // #[no_mangle]
+    // pub unsafe extern "C" fn multipass_identity_roles(identity: *mut Identity) -> *mut FFIVec_Role {
+    //     if identity.is_null() {
+    //         return std::ptr::null_mut();
+    //     }
 
-        let identity = &*identity;
+    //     let identity = &*identity;
 
-        let contents = identity.roles();
-        Box::into_raw(Box::new(contents.into())) as *mut _
-    }
+    //     let contents = identity.roles();
+    //     Box::into_raw(Box::new(contents.into())) as *mut _
+    // }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_available_badge(
-        identity: *mut Identity,
-    ) -> *mut FFIVec_Badge {
-        if identity.is_null() {
-            return std::ptr::null_mut();
-        }
+    // #[allow(clippy::missing_safety_doc)]
+    // #[no_mangle]
+    // pub unsafe extern "C" fn multipass_identity_available_badge(
+    //     identity: *mut Identity,
+    // ) -> *mut FFIVec_Badge {
+    //     if identity.is_null() {
+    //         return std::ptr::null_mut();
+    //     }
 
-        let identity = &*identity;
+    //     let identity = &*identity;
 
-        let contents = identity.available_badges();
-        Box::into_raw(Box::new(contents.into())) as *mut _
-    }
+    //     let contents = identity.available_badges();
+    //     Box::into_raw(Box::new(contents.into())) as *mut _
+    // }
 
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_active_badge(
-        identity: *const Identity,
-    ) -> *mut Badge {
-        if identity.is_null() {
-            return std::ptr::null_mut();
-        }
+    // #[allow(clippy::missing_safety_doc)]
+    // #[no_mangle]
+    // pub unsafe extern "C" fn multipass_identity_active_badge(
+    //     identity: *const Identity,
+    // ) -> *mut Badge {
+    //     if identity.is_null() {
+    //         return std::ptr::null_mut();
+    //     }
 
-        let identity = &*identity;
-        Box::into_raw(Box::new(identity.active_badge())) as *mut Badge
-    }
+    //     let identity = &*identity;
+    //     Box::into_raw(Box::new(identity.active_badge())) as *mut Badge
+    // }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]

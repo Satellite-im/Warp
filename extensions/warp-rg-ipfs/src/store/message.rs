@@ -2416,7 +2416,7 @@ impl MessageStore {
                                 }
                                 break;
                             }
-                            if let Err(e) = dir.add_file(file) {
+                            if let Err(e) = dir.add_file(file.clone()) {
                                 error!("Error adding file to constellation: {e}");
                             }
                         }

@@ -74,7 +74,7 @@ impl From<&Conversation> for ConversationDocument {
             name: conversation.name(),
             creator: conversation.creator(),
             conversation_type: conversation.conversation_type(),
-            recipients: conversation.recipients(),
+            recipients: conversation.recipients().to_vec(),
             messages: Default::default(),
             signature: None,
         }
@@ -431,7 +431,7 @@ impl ConversationDocument {
 
         let messages_chunk = messages.chunks(amount_per_page as _).collect::<Vec<_>>();
         let mut pages = vec![];
-        // First check to determine if there is a page that was selected 
+        // First check to determine if there is a page that was selected
         if let Some(index) = page_index {
             let page = messages_chunk.get(index).ok_or(Error::MessageNotFound)?;
             let mut messages = vec![];
@@ -444,7 +444,7 @@ impl ConversationDocument {
             pages.push(MessagePage::new(index, messages, total));
             return Ok(Messages::Page { pages, total: 1 });
         }
-        
+
         for (index, chunk) in messages_chunk.iter().enumerate() {
             let mut messages = vec![];
             for document in chunk.iter() {

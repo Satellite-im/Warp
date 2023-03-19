@@ -538,7 +538,7 @@ async fn main() -> anyhow::Result<()> {
                             for convo in list.iter() {
                                 let mut recipients = vec![];
                                 for recipient in convo.recipients() {
-                                    if convo.conversation_type() == ConversationType::Direct && recipient == identity.did_key() {
+                                    if convo.conversation_type() == ConversationType::Direct && identity.did_key().eq(recipient) {
                                         continue
                                     }
                                     let username = get_username(new_account.clone(), recipient.clone()).await.unwrap_or_else(|_| recipient.to_string());

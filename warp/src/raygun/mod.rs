@@ -419,8 +419,8 @@ impl Conversation {
         self.conversation_type
     }
 
-    pub fn recipients(&self) -> Vec<DID> {
-        self.recipients.clone()
+    pub fn recipients(&self) -> &[DID] {
+        &self.recipients
     }
 }
 
@@ -441,8 +441,8 @@ impl Conversation {
         self.conversation_type = conversation_type;
     }
 
-    pub fn set_recipients(&mut self, recipients: Vec<DID>) {
-        self.recipients = recipients;
+    pub fn set_recipients<I: IntoIterator<Item = DID>>(&mut self, recipients: I) {
+        self.recipients = recipients.into_iter().collect()
     }
 }
 
@@ -578,16 +578,16 @@ impl Message {
         self.pinned
     }
 
-    pub fn reactions(&self) -> Vec<Reaction> {
-        self.reactions.clone()
+    pub fn reactions(&self) -> &[Reaction] {
+        &self.reactions
     }
 
-    pub fn value(&self) -> Vec<String> {
-        self.value.clone()
+    pub fn value(&self) -> &[String] {
+        &self.value
     }
 
-    pub fn attachments(&self) -> Vec<File> {
-        self.attachment.clone()
+    pub fn attachments(&self) -> &[File] {
+        &self.attachment
     }
 
     pub fn signature(&self) -> Vec<u8> {
@@ -1525,7 +1525,7 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
         let adapter = &*ctx;
-        Box::into_raw(Box::new(adapter.reactions().into()))
+        Box::into_raw(Box::new(adapter.reactions().to_vec().into()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -1553,7 +1553,7 @@ pub mod ffi {
         let adapter = &*ctx;
         let lines = adapter.value();
 
-        Box::into_raw(Box::new(lines.into()))
+        Box::into_raw(Box::new(lines.to_vec().into()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -1632,7 +1632,7 @@ pub mod ffi {
         }
 
         Box::into_raw(Box::new(
-            Vec::from_iter(Conversation::recipients(&*conversation)).into(),
+            Vec::from_iter(Conversation::recipients(&*conversation).to_vec()).into(),
         ))
     }
 
