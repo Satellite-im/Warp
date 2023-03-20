@@ -56,7 +56,7 @@ impl Keystore {
             .get(recipient)
             .map(|list| {
                 list.last()
-                    .and_then(|entry| super::ecdh_decrypt(did, None, entry.key()).ok())
+                    .and_then(|entry| super::ecdh_decrypt(did, None, entry).ok())
             })
             .and_then(|entry| entry)
             .ok_or(Error::PublicKeyInvalid)
@@ -67,7 +67,7 @@ impl Keystore {
             .get(recipient)
             .map(|list| {
                 list.iter()
-                    .filter_map(|entry| super::ecdh_decrypt(did, None, entry.key()).ok())
+                    .filter_map(|entry| super::ecdh_decrypt(did, None, entry).ok())
                     .collect::<Vec<_>>()
             })
             .ok_or(Error::PublicKeyInvalid)
@@ -100,6 +100,12 @@ pub struct KeyEntry {
     key: Vec<u8>,
 }
 
+impl AsRef<[u8]> for KeyEntry {
+    fn as_ref(&self) -> &[u8] {
+        &self.key
+    }
+}
+
 impl Zeroize for KeyEntry {
     fn zeroize(&mut self) {
         self.key.zeroize()
@@ -117,12 +123,6 @@ impl Debug for KeyEntry {
 impl KeyEntry {
     pub fn new(id: usize, key: Vec<u8>) -> Self {
         Self { id, key }
-    }
-}
-
-impl KeyEntry {
-    pub fn key(&self) -> &[u8] {
-        &self.key
     }
 }
 
