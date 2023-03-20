@@ -421,10 +421,10 @@ impl ConversationDocument {
             } => (
                 page,
                 amount_per_page
-                    .map(|amount| if amount == 0 { u8::MAX } else { amount })
-                    .unwrap_or(u8::MAX),
+                    .map(|amount| if amount == 0 { u8::MAX as _ } else { amount })
+                    .unwrap_or(u8::MAX as _),
             ),
-            _ => (None, u8::MAX),
+            _ => (None, u8::MAX as _),
         };
 
         let ipfs = ipfs.clone();

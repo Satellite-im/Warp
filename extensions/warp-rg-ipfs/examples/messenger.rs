@@ -623,7 +623,7 @@ async fn main() -> anyhow::Result<()> {
 
                             let local_topic = *topic.read();
                             let mut page_or_amount: Option<usize> = None;
-                            let mut amount_per_page: Option<u8> = page_or_amount.map(|o| if o > 255 { u8::MAX } else { o as _ }).or(Some(10));
+                            let mut amount_per_page: Option<usize> = page_or_amount.map(|o| if o == 0 { u8::MAX as _} else { o }).or(Some(10));
 
                             if let Some(id) = cmd_line.next() {
                                 match id.parse() {

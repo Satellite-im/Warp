@@ -269,7 +269,7 @@ pub enum MessagesType {
         page: Option<usize>,
 
         /// Amount of messages per page
-        amount_per_page: Option<u8>,
+        amount_per_page: Option<usize>,
     },
 }
 
