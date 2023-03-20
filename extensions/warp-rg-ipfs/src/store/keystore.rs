@@ -109,7 +109,7 @@ impl Zeroize for KeyEntry {
 impl Debug for KeyEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("KeyEntry")
-            .field("id/seq", &self.id)
+            .field("id", &self.id)
             .finish()
     }
 }
