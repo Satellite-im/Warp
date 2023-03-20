@@ -325,7 +325,14 @@ impl IpfsIdentity {
                         for addr in config.ipfs_setting.relay_client.relay_address.clone() {
                             if let Err(e) = ipfs.connect(addr.clone()).await {
                                 error!("Error dialing relay {}: {e}", addr.clone());
+                                continue;
                             }
+
+                            //Give time for identify to be sent/received
+                            //TODO: Remove on next rust-ipfs update
+                            //TODO: Check for relay protocol from address before attempting to use
+                            //      as a precaution
+                            tokio::time::sleep(Duration::from_millis(500)).await;
 
                             match ipfs
                                 .add_listening_address(addr.with(Protocol::P2pCircuit))
