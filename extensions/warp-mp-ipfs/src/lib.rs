@@ -16,7 +16,7 @@ use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
 use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use tracing::log::{error, info, trace, warn};
+use tracing::log::{error, info, trace, warn, self};
 use warp::crypto::did_key::Generate;
 use warp::crypto::zeroize::Zeroizing;
 use warp::data::DataType;
@@ -29,7 +29,7 @@ use warp::pocket_dimension::PocketDimension;
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
-use ipfs::{Ipfs, IpfsOptions, Keypair, Protocol, StoragePath, UninitializedIpfs};
+use ipfs::{Ipfs, IpfsOptions, Keypair, Multiaddr, Protocol, StoragePath, UninitializedIpfs};
 use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity, IdentityUpdate, Relationship};
@@ -297,19 +297,24 @@ impl IpfsIdentity {
                     }
                 }
 
-                let relay_client = {
+                let start_relay_client = || {
                     let ipfs = ipfs.clone();
                     let config = config.clone();
                     async move {
                         info!("Relay client enabled. Loading relays");
+                        let mut relayed = vec![];
+
                         for addr in config.bootstrap.address() {
-                            if let Err(e) = ipfs
+                            match ipfs
                                 .add_listening_address(addr.with(Protocol::P2pCircuit))
                                 .await
                             {
-                                info!("Error listening on relay: {e}");
-                                continue;
-                            }
+                                Ok(addr) => relayed.push(addr),
+                                Err(e) => {
+                                    info!("Error listening on relay: {e}");
+                                    continue;
+                                }
+                            };
                             if config.ipfs_setting.relay_client.single {
                                 break;
                             }
@@ -317,20 +322,48 @@ impl IpfsIdentity {
 
                         //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
                         //      anything on this end
-                        for addr in config.ipfs_setting.relay_client.relay_address.iter() {
+                        for addr in config.ipfs_setting.relay_client.relay_address.clone() {
                             if let Err(e) = ipfs.connect(addr.clone()).await {
                                 error!("Error dialing relay {}: {e}", addr.clone());
-                            }
-
-                            if let Err(e) = ipfs
-                                .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
-                                .await
-                            {
-                                info!("Error listening on relay: {e}");
                                 continue;
                             }
+
+                            //Give time for identify to be sent/received
+                            //TODO: Remove on next rust-ipfs update
+                            //TODO: Check for relay protocol from address before attempting to use
+                            //      as a precaution
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+
+                            match ipfs
+                                .add_listening_address(addr.with(Protocol::P2pCircuit))
+                                .await
+                            {
+                                Ok(addr) => relayed.push(addr),
+                                Err(e) => {
+                                    info!("Error listening on relay: {e}");
+                                    continue;
+                                }
+                            };
                             if config.ipfs_setting.relay_client.single {
                                 break;
+                            }
+                        }
+
+                        relayed
+                    }
+                };
+
+                let stop_relay_client = |relays: Vec<Multiaddr>| {
+                    let ipfs = ipfs.clone();
+                    async move {
+                        info!("Disconnecting from relays");
+                        for addr in relays {
+                            if let Err(e) = ipfs
+                                .remove_listening_address(addr.with(Protocol::P2pCircuit))
+                                .await
+                            {
+                                info!("Error removing relay: {e}");
+                                continue;
                             }
                         }
                     }
@@ -341,15 +374,33 @@ impl IpfsIdentity {
                     config.ipfs_setting.relay_client.enable,
                 ) {
                     (true, true) => {
+                        //Start using relays right away rather than waiting for nat status
+                        let mut addrs = start_relay_client().await;
+                        let mut using_relay = true;
                         while let Some(public) = nat_channel_rx.next().await {
-                            if !public {
-                                relay_client.await;
-                                //Note: Although this breaks the loop now, it may be possible for the nat to change in the future resulting in it being public
-                                break;
+                            match public {
+                                true => {
+                                    if using_relay {
+                                        log::trace!("Disabling relays due to being publicly accessible.");
+                                        let addrs = addrs.drain(..).collect::<Vec<_>>();
+                                        stop_relay_client(addrs).await;
+                                        using_relay = false;
+                                    }
+                                }
+                                false => {
+                                    if !using_relay {
+                                        log::trace!("No longer publicly accessible. Switching to relays");
+                                        addrs = start_relay_client().await;
+                                        using_relay = true;
+                                    }
+                                }
                             }
                         }
                     }
-                    (false, true) => relay_client.await,
+                    (false, true) => {
+                        // We dont need the addresses of the circuit relays
+                        start_relay_client().await;
+                    }
                     (true, false) | (false, false) => {}
                 }
             }
@@ -494,6 +545,7 @@ impl Extension for IpfsIdentity {
 }
 
 impl SingleHandle for IpfsIdentity {
+    #[inline]
     fn handle(&self) -> Result<Box<dyn Any>, Error> {
         self.ipfs().map(|ipfs| Box::new(ipfs) as Box<dyn Any>)
     }
@@ -911,76 +963,91 @@ impl MultiPass for IpfsIdentity {
 
 #[async_trait::async_trait]
 impl Friends for IpfsIdentity {
+    #[inline]
     async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.send_request(pubkey).await
     }
 
+    #[inline]
     async fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.accept_request(pubkey).await
     }
 
+    #[inline]
     async fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.reject_request(pubkey).await
     }
 
+    #[inline]
     async fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.close_request(pubkey).await
     }
 
+    #[inline]
     async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store().await?;
         store.list_incoming_request().await
     }
 
+    #[inline]
     async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store().await?;
         store.list_outgoing_request().await
     }
 
+    #[inline]
     async fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store().await?;
         store.received_friend_request_from(did).await
     }
 
+    #[inline]
     async fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store().await?;
         store.sent_friend_request_to(did).await
     }
 
+    #[inline]
     async fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.remove_friend(pubkey, true).await
     }
 
+    #[inline]
     async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.block(pubkey).await
     }
 
+    #[inline]
     async fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store().await?;
         store.is_blocked(did).await
     }
 
+    #[inline]
     async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.unblock(pubkey).await
     }
 
+    #[inline]
     async fn block_list(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store().await?;
         store.block_list().await.map(Vec::from_iter)
     }
 
+    #[inline]
     async fn list_friends(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store().await?;
         store.friends_list().await.map(Vec::from_iter)
     }
 
+    #[inline]
     async fn has_friend(&self, pubkey: &DID) -> Result<bool, Error> {
         let store = self.friend_store().await?;
         store.is_friend(pubkey).await
@@ -1008,16 +1075,19 @@ impl FriendsEvent for IpfsIdentity {
 
 #[async_trait::async_trait]
 impl IdentityInformation for IpfsIdentity {
+    #[inline]
     async fn identity_status(&self, did: &DID) -> Result<identity::IdentityStatus, Error> {
         let store = self.identity_store(true).await?;
         store.identity_status(did).await
     }
 
+    #[inline]
     async fn set_identity_status(&mut self, status: identity::IdentityStatus) -> Result<(), Error> {
         let mut store = self.identity_store(true).await?;
         store.set_identity_status(status).await
     }
 
+    #[inline]
     async fn identity_platform(&self, did: &DID) -> Result<identity::Platform, Error> {
         let store = self.identity_store(true).await?;
         store.identity_platform(did).await
