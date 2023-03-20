@@ -1,6 +1,8 @@
 pub mod conversation;
 pub mod document;
 pub mod message;
+pub mod keystore;
+
 use rust_ipfs as ipfs;
 use std::time::Duration;
 
@@ -12,7 +14,7 @@ use warp::{
     crypto::{
         did_key::{CoreSign, Generate, ECDH},
         hash::sha256_hash,
-        DIDKey, Ed25519KeyPair, KeyMaterial, DID,
+        DIDKey, Ed25519KeyPair, KeyMaterial, DID, cipher::Cipher, zeroize::Zeroizing,
     },
     error::Error,
     logging::tracing::log::{error, trace},
@@ -67,6 +69,34 @@ fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::
         _ => anyhow::bail!(Error::PublicKeyInvalid),
     };
     Ok(pk)
+}
+
+fn ecdh_encrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> Result<Vec<u8>, Error> {
+    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
+    let did_pubkey = match recipient {
+        Some(did) => did.public_key_bytes(),
+        None => did.public_key_bytes(),
+    };
+
+    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
+    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
+    let data = Cipher::direct_encrypt(data.as_ref(), &prik)?;
+
+    Ok(data)
+}
+
+fn ecdh_decrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> Result<Vec<u8>, Error> {
+    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
+    let did_pubkey = match recipient {
+        Some(did) => did.public_key_bytes(),
+        None => did.public_key_bytes(),
+    };
+
+    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
+    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
+    let data = Cipher::direct_decrypt(data.as_ref(), &prik)?;
+
+    Ok(data)
 }
 
 // Note that this are temporary
