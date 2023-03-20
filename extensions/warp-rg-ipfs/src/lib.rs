@@ -6,6 +6,7 @@ use crate::spam_filter::SpamFilter;
 use config::RgIpfsConfig;
 use futures::StreamExt;
 use rust_ipfs::Ipfs;
+use warp::raygun::Messages;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -291,7 +292,7 @@ impl RayGun for IpfsMessaging {
         &self,
         conversation_id: Uuid,
         opt: MessageOptions,
-    ) -> Result<Vec<Message>> {
+    ) -> Result<Messages> {
         self.messaging_store()?
             .get_messages(conversation_id, opt)
             .await

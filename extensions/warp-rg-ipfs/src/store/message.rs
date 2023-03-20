@@ -30,7 +30,8 @@ use warp::logging::tracing::warn;
 use warp::multipass::MultiPass;
 use warp::raygun::{
     Conversation, ConversationType, EmbedState, Location, Message, MessageEvent, MessageEventKind,
-    MessageOptions, MessageStatus, MessageType, PinState, RayGunEventKind, Reaction, ReactionState,
+    MessageOptions, MessageStatus, MessageStream, MessageType, Messages, MessagesType, PinState,
+    RayGunEventKind, Reaction, ReactionState,
 };
 use warp::sata::Sata;
 use warp::sync::Arc;
@@ -1270,12 +1271,29 @@ impl MessageStore {
         &self,
         conversation: Uuid,
         opt: MessageOptions,
-    ) -> Result<Vec<Message>, Error> {
+    ) -> Result<Messages, Error> {
         let conversation = self.get_conversation(conversation).await?;
-        conversation
-            .get_messages(&self.ipfs, self.did.clone(), opt)
-            .await
-            .map(Vec::from_iter)
+        let m_type = opt.messages_type();
+        match m_type {
+            MessagesType::Stream => {
+                let stream = conversation
+                    .get_messages_stream(&self.ipfs, self.did.clone(), opt)
+                    .await?;
+                Ok(Messages::Stream(MessageStream(stream)))
+            }
+            MessagesType::List => {
+                let list = conversation
+                    .get_messages(&self.ipfs, self.did.clone(), opt)
+                    .await
+                    .map(Vec::from_iter)?;
+                Ok(Messages::List(list))
+            }
+            MessagesType::Pages { .. } => {
+                conversation
+                    .get_messages_pages(&self.ipfs, self.did.clone(), opt)
+                    .await
+            }
+        }
     }
 
     pub async fn exist(&self, conversation: Uuid) -> bool {
