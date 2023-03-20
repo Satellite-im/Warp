@@ -153,6 +153,8 @@ async fn main() -> anyhow::Result<()> {
         own_identity.username(),
         own_identity.short_id()
     );
+    println!("DID: {}", own_identity.did_key());
+    
     let (mut rl, mut stdout) = Readline::new(format!(
         "{}#{} >>> ",
         own_identity.username(),
