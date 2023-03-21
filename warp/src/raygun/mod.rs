@@ -17,6 +17,7 @@ use chrono::{DateTime, Utc};
 use core::ops::Range;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -132,11 +133,35 @@ impl core::ops::DerefMut for MessageEventStream {
     }
 }
 
+#[derive(FFIFree)]
+pub struct MessageStream(pub BoxStream<'static, Message>);
+
+impl Debug for MessageStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MessageStream")
+    }
+}
+
+impl core::ops::Deref for MessageStream {
+    type Target = BoxStream<'static, Message>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for MessageStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct MessageOptions {
     date_range: Option<Range<DateTime<Utc>>>,
     first_message: bool,
     last_message: bool,
+    reverse: bool,
+    messages_type: MessagesType,
     keyword: Option<String>,
     range: Option<Range<usize>>,
     limit: Option<i64>,
@@ -175,6 +200,16 @@ impl MessageOptions {
         self.last_message = true;
         self
     }
+
+    pub fn set_reverse(mut self) -> MessageOptions {
+        self.reverse = true;
+        self
+    }
+
+    pub fn set_messages_type(mut self, r#type: MessagesType) -> MessageOptions {
+        self.messages_type = r#type;
+        self
+    }
 }
 
 impl MessageOptions {
@@ -206,6 +241,115 @@ impl MessageOptions {
 
     pub fn last_message(&self) -> bool {
         self.last_message
+    }
+
+    pub fn messages_type(&self) -> MessagesType {
+        self.messages_type
+    }
+
+    pub fn reverse(&self) -> bool {
+        self.reverse
+    }
+}
+
+#[derive(Default, Debug, Hash, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
+#[serde(rename_all = "lowercase")]
+pub enum MessagesType {
+    /// Stream type
+    #[display(fmt = "stream")]
+    Stream,
+    /// List type
+    #[default]
+    #[display(fmt = "list")]
+    List,
+    /// Page type
+    #[display(fmt = "pages")]
+    Pages {
+        /// Page to select
+        page: Option<usize>,
+
+        /// Amount of messages per page
+        amount_per_page: Option<usize>,
+    },
+}
+
+#[derive(Debug)]
+pub enum Messages {
+    /// List of messages
+    List(Vec<Message>),
+
+    /// Stream of messages
+    Stream(MessageStream),
+
+    /// Pages of messages
+    Page {
+        /// List if pages
+        pages: Vec<MessagePage>,
+        /// Amount of pages
+        total: usize,
+    },
+}
+
+impl TryFrom<Messages> for Vec<Message> {
+    type Error = Error;
+    fn try_from(value: Messages) -> Result<Self, Self::Error> {
+        match value {
+            Messages::List(list) => Ok(list),
+            _ => Err(Error::Unimplemented),
+        }
+    }
+}
+
+impl TryFrom<Messages> for MessageStream {
+    type Error = Error;
+    fn try_from(value: Messages) -> Result<Self, Self::Error> {
+        match value {
+            Messages::Stream(stream) => Ok(stream),
+            _ => Err(Error::Unimplemented),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+pub struct MessagePage {
+    id: usize,
+    messages: Vec<Message>,
+    total: usize,
+}
+
+impl MessagePage {
+    pub fn new(id: usize, messages: Vec<Message>, total: usize) -> MessagePage {
+        Self {
+            id,
+            messages,
+            total,
+        }
+    }
+}
+
+impl MessagePage {
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
+    pub fn messages(&self) -> &[Message] {
+        &self.messages
+    }
+
+    pub fn total(&self) -> usize {
+        self.total
+    }
+}
+
+impl PartialOrd for MessagePage {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        self.id.partial_cmp(&other.id)
+    }
+}
+
+impl Ord for MessagePage {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.id.cmp(&other.id)
     }
 }
 
@@ -684,7 +828,7 @@ pub trait RayGun:
         &self,
         conversation_id: Uuid,
         options: MessageOptions,
-    ) -> Result<Vec<Message>, Error>;
+    ) -> Result<Messages, Error>;
 
     /// Sends a message to a conversation.
     async fn send(&mut self, conversation_id: Uuid, message: Vec<String>) -> Result<(), Error>;
@@ -949,7 +1093,9 @@ pub mod ffi {
         };
 
         let adapter = &*ctx;
-        async_on_block(adapter.get_messages(convo_id, option)).into()
+        async_on_block(adapter.get_messages(convo_id, option))
+            .and_then(Vec::<Message>::try_from)
+            .into()
     }
 
     #[allow(clippy::await_holding_lock)]
