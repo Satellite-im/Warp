@@ -149,21 +149,35 @@ impl Discovery {
         Ok(())
     }
 
-    pub async fn get(&self, did: &DID) -> Option<DiscoveryEntry> {
-        if !self.contains(did).await {
-            return None;
+    pub async fn remove<P: Into<PeerType>>(&self, peer_type: P) -> Result<(), Error> {
+        let entry = self.get(peer_type).await?;
+
+        let removed = self.entries.write().await.remove(&entry);
+        if removed {
+            entry.cancel().await;
+            return Ok(());
         }
 
-        let Ok(peer_id) = did_to_libp2p_pub(did).map(|pk| pk.to_peer_id()) else {
-            return None
+        Err(Error::ObjectNotFound)
+    }
+
+    pub async fn get<P: Into<PeerType>>(&self, peer_type: P) -> Result<DiscoveryEntry, Error> {
+        let peer_id = match &peer_type.into() {
+            PeerType::PeerId(peer_id) => *peer_id,
+            PeerType::DID(did_key) => did_to_libp2p_pub(did_key).map(|pk| pk.to_peer_id())?,
         };
+
+        if !self.contains(peer_id).await {
+            return Err(Error::ObjectNotFound);
+        }
 
         self.entries
             .read()
             .await
             .iter()
-            .find(|entry| entry.peer_id == peer_id)
+            .find(|entry| entry.peer_id() == peer_id)
             .cloned()
+            .ok_or(Error::ObjectNotFound)
     }
 
     pub async fn contains<P: Into<PeerType>>(&self, peer_type: P) -> bool {

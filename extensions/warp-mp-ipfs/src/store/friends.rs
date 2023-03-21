@@ -26,7 +26,7 @@ use super::document::DocumentType;
 use super::identity::{IdentityStore, LookupBy};
 use super::phonebook::PhoneBook;
 use super::queue::Queue;
-use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType, VecExt};
+use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType, VecExt, discovery};
 
 #[allow(clippy::type_complexity)]
 pub struct FriendsStore {
@@ -150,6 +150,7 @@ impl FriendsStore {
     pub async fn new(
         ipfs: Ipfs,
         identity: IdentityStore,
+        discovery: discovery::Discovery,
         path: Option<PathBuf>,
         tesseract: Tesseract,
         (tx, override_ipld, use_phonebook, wait_on_response): (
@@ -165,7 +166,7 @@ impl FriendsStore {
         let queue = Queue::new(ipfs.clone(), did_key.clone(), path.clone());
         let override_ipld = Arc::new(AtomicBool::new(override_ipld));
 
-        let phonebook = PhoneBook::new(ipfs.clone(), tx.clone());
+        let phonebook = PhoneBook::new(ipfs.clone(), discovery, tx.clone());
         let phonebook = use_phonebook.then_some(phonebook);
 
         let signal = Default::default();

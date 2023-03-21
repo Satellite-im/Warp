@@ -424,7 +424,7 @@ impl IpfsIdentity {
             config.store_setting.auto_push,
             self.tx.clone(),
             (
-                discovery,
+                discovery.clone(),
                 relays,
                 config.store_setting.override_ipld,
                 config.store_setting.share_platform,
@@ -436,6 +436,7 @@ impl IpfsIdentity {
         let friend_store = FriendsStore::new(
             ipfs.clone(),
             identity_store.clone(),
+            discovery,
             config.path,
             tesseract.clone(),
             (

@@ -743,7 +743,7 @@ impl IdentityStore {
             Platform::Unknown
         }
     }
-
+    
     pub fn discovery_type(&self) -> DiscoveryConfig {
         self.discovery.discovery_config()
     }
