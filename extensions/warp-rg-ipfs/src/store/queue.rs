@@ -18,7 +18,7 @@ use warp::error::Error;
 use warp::logging::tracing::log::error;
 use warp::sata::Sata;
 
-use super::{did_to_libp2p_pub, ConversationEvents, MessagingEvents};
+use super::{did_to_libp2p_pub, ConversationEvents, MessagingEvents, ecdh_decrypt, ecdh_encrypt};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "lowercase")]
@@ -250,17 +250,7 @@ impl Queue {
                     continue;
                 };
 
-                let prikey =
-                    Ed25519KeyPair::from_secret_key(&self.did.private_key_bytes()).get_x25519();
-
-                let pubkey =
-                    Ed25519KeyPair::from_public_key(&self.did.public_key_bytes()).get_x25519();
-
-                let prik = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
-                    .map(Zeroizing::new)
-                    .map_err(|_| anyhow::anyhow!("Error performing key exchange"))?;
-
-                let data = Cipher::direct_decrypt(&data, &prik)?;
+                let data = ecdh_decrypt(&self.did, None, data)?;
 
                 let Ok(entry) = QueueEntry::from_data(self.ipfs.clone(), self.did.clone(), self.removal.clone(), &data).await else {
                     continue
@@ -531,20 +521,7 @@ impl QueueEntry {
             }
 
             let bytes = serde_json::to_vec(self)?;
-
-            let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
-            let pubkey = Ed25519KeyPair::from_public_key(&did.public_key_bytes()).get_x25519();
-
-            let prik = match std::panic::catch_unwind(|| prikey.key_exchange(&pubkey)) {
-                Ok(pri) => Zeroizing::new(pri),
-                Err(e) => {
-                    error!("Error generating key: {e:?}");
-                    return Err(anyhow::anyhow!("{:?}", e).into());
-                }
-            };
-
-            let data = Cipher::direct_encrypt(&bytes, &prik)?;
-
+            let data = ecdh_encrypt(&did, None, bytes)?;
             tokio::fs::write(path.join(self.id.to_string()), data).await?;
         }
 
