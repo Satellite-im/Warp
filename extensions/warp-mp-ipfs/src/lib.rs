@@ -359,7 +359,7 @@ impl IpfsIdentity {
                         info!("Disconnecting from relays");
                         for addr in relays {
                             if let Err(e) = ipfs
-                                .remove_listening_address(addr.with(Protocol::P2pCircuit))
+                                .remove_listening_address(addr)
                                 .await
                             {
                                 info!("Error removing relay: {e}");
