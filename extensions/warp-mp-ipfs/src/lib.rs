@@ -545,7 +545,6 @@ impl Extension for IpfsIdentity {
 }
 
 impl SingleHandle for IpfsIdentity {
-    #[inline]
     fn handle(&self) -> Result<Box<dyn Any>, Error> {
         self.ipfs().map(|ipfs| Box::new(ipfs) as Box<dyn Any>)
     }
@@ -963,91 +962,76 @@ impl MultiPass for IpfsIdentity {
 
 #[async_trait::async_trait]
 impl Friends for IpfsIdentity {
-    #[inline]
     async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.send_request(pubkey).await
     }
 
-    #[inline]
     async fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.accept_request(pubkey).await
     }
 
-    #[inline]
     async fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.reject_request(pubkey).await
     }
 
-    #[inline]
     async fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.close_request(pubkey).await
     }
 
-    #[inline]
     async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store().await?;
         store.list_incoming_request().await
     }
 
-    #[inline]
     async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store().await?;
         store.list_outgoing_request().await
     }
 
-    #[inline]
     async fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store().await?;
         store.received_friend_request_from(did).await
     }
 
-    #[inline]
     async fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store().await?;
         store.sent_friend_request_to(did).await
     }
 
-    #[inline]
     async fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.remove_friend(pubkey, true).await
     }
 
-    #[inline]
     async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.block(pubkey).await
     }
 
-    #[inline]
     async fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store().await?;
         store.is_blocked(did).await
     }
 
-    #[inline]
     async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.unblock(pubkey).await
     }
 
-    #[inline]
     async fn block_list(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store().await?;
         store.block_list().await.map(Vec::from_iter)
     }
 
-    #[inline]
     async fn list_friends(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store().await?;
         store.friends_list().await.map(Vec::from_iter)
     }
 
-    #[inline]
     async fn has_friend(&self, pubkey: &DID) -> Result<bool, Error> {
         let store = self.friend_store().await?;
         store.is_friend(pubkey).await
@@ -1075,19 +1059,16 @@ impl FriendsEvent for IpfsIdentity {
 
 #[async_trait::async_trait]
 impl IdentityInformation for IpfsIdentity {
-    #[inline]
     async fn identity_status(&self, did: &DID) -> Result<identity::IdentityStatus, Error> {
         let store = self.identity_store(true).await?;
         store.identity_status(did).await
     }
 
-    #[inline]
     async fn set_identity_status(&mut self, status: identity::IdentityStatus) -> Result<(), Error> {
         let mut store = self.identity_store(true).await?;
         store.set_identity_status(status).await
     }
 
-    #[inline]
     async fn identity_platform(&self, did: &DID) -> Result<identity::Platform, Error> {
         let store = self.identity_store(true).await?;
         store.identity_platform(did).await
