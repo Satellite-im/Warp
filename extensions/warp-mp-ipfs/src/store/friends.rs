@@ -8,7 +8,6 @@ use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use tokio::sync::{broadcast, RwLock};
 use tracing::log::{error, warn};
@@ -29,6 +28,7 @@ use super::queue::Queue;
 use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType, VecExt};
 
 #[allow(clippy::type_complexity)]
+#[derive(Clone)]
 pub struct FriendsStore {
     ipfs: Ipfs,
 
@@ -38,18 +38,8 @@ pub struct FriendsStore {
     // keypair
     did_key: Arc<DID>,
 
-    // path to where things are stored
-    path: Option<PathBuf>,
-
-    // Would be used to stop the look in the tokio task
-    end_event: Arc<AtomicBool>,
-
-    override_ipld: Arc<AtomicBool>,
-
+    // Queue to handle sending friend request
     queue: Queue,
-
-    // Tesseract
-    tesseract: Tesseract,
 
     phonebook: Option<PhoneBook>,
 
@@ -127,43 +117,20 @@ pub enum RequestType {
     Outgoing,
 }
 
-impl Clone for FriendsStore {
-    fn clone(&self) -> Self {
-        Self {
-            ipfs: self.ipfs.clone(),
-            identity: self.identity.clone(),
-            did_key: self.did_key.clone(),
-            path: self.path.clone(),
-            override_ipld: self.override_ipld.clone(),
-            end_event: self.end_event.clone(),
-            queue: self.queue.clone(),
-            tesseract: self.tesseract.clone(),
-            phonebook: self.phonebook.clone(),
-            signal: self.signal.clone(),
-            tx: self.tx.clone(),
-            wait_on_response: self.wait_on_response,
-        }
-    }
-}
-
 impl FriendsStore {
     pub async fn new(
         ipfs: Ipfs,
         identity: IdentityStore,
         path: Option<PathBuf>,
         tesseract: Tesseract,
-        (tx, override_ipld, use_phonebook, wait_on_response): (
+        (tx, use_phonebook, wait_on_response): (
             broadcast::Sender<MultiPassEventKind>,
-            bool,
             bool,
             Option<u64>,
         ),
     ) -> anyhow::Result<Self> {
-        let end_event = Arc::new(AtomicBool::new(false));
-
         let did_key = Arc::new(did_keypair(&tesseract)?);
         let queue = Queue::new(ipfs.clone(), did_key.clone(), path.clone());
-        let override_ipld = Arc::new(AtomicBool::new(override_ipld));
 
         let phonebook = PhoneBook::new(ipfs.clone(), tx.clone());
         let phonebook = use_phonebook.then_some(phonebook);
@@ -174,13 +141,9 @@ impl FriendsStore {
             ipfs,
             identity,
             did_key,
-            path,
-            end_event,
             queue,
-            tesseract,
             phonebook,
             tx,
-            override_ipld,
             signal,
             wait_on_response,
         };
