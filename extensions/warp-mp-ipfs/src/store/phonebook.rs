@@ -49,9 +49,10 @@ impl PhoneBook {
         ipfs: Ipfs,
         discovery: Discovery,
         event: broadcast::Sender<MultiPassEventKind>,
+        emit_event: bool,
     ) -> Self {
         let relays = Default::default();
-        let emit_event = Arc::new(AtomicBool::new(true));
+        let emit_event = Arc::new(AtomicBool::new(emit_event));
 
         let entries = Default::default();
 

@@ -444,6 +444,7 @@ impl IpfsIdentity {
                 config.store_setting.override_ipld,
                 config.store_setting.use_phonebook,
                 config.store_setting.friend_request_response_duration,
+                config.store_setting.emit_online_event,
             ),
         )
         .await?;

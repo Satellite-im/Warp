@@ -210,6 +210,8 @@ pub struct StoreSetting {
     pub use_phonebook: bool,
 
     pub friend_request_response_duration: Option<u64>,
+
+    pub emit_online_event: bool,
 }
 
 impl Default for StoreSetting {
@@ -223,6 +225,7 @@ impl Default for StoreSetting {
             share_platform: false,
             use_phonebook: true,
             friend_request_response_duration: None,
+            emit_online_event: false,
         }
     }
 }

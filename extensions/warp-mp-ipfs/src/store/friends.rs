@@ -154,11 +154,12 @@ impl FriendsStore {
         discovery: discovery::Discovery,
         path: Option<PathBuf>,
         tesseract: Tesseract,
-        (tx, override_ipld, use_phonebook, wait_on_response): (
+        (tx, override_ipld, use_phonebook, wait_on_response, online_event): (
             broadcast::Sender<MultiPassEventKind>,
             bool,
             bool,
             Option<u64>,
+            bool
         ),
     ) -> anyhow::Result<Self> {
         let end_event = Arc::new(AtomicBool::new(false));
@@ -167,7 +168,7 @@ impl FriendsStore {
         let queue = Queue::new(ipfs.clone(), did_key.clone(), path.clone());
         let override_ipld = Arc::new(AtomicBool::new(override_ipld));
 
-        let phonebook = PhoneBook::new(ipfs.clone(), discovery.clone(), tx.clone());
+        let phonebook = PhoneBook::new(ipfs.clone(), discovery.clone(), tx.clone(), online_event);
         let phonebook = use_phonebook.then_some(phonebook);
 
         let signal = Default::default();
