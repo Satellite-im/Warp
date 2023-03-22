@@ -20,13 +20,11 @@ use warp::sync::Arc;
 
 use warp::tesseract::Tesseract;
 
-use crate::config::Discovery;
-
 use super::document::DocumentType;
 use super::identity::{IdentityStore, LookupBy};
 use super::phonebook::PhoneBook;
 use super::queue::Queue;
-use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType, VecExt, discovery};
+use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, VecExt, discovery};
 
 #[allow(clippy::type_complexity)]
 pub struct FriendsStore {
@@ -34,6 +32,8 @@ pub struct FriendsStore {
 
     // Identity Store
     identity: IdentityStore,
+
+    discovery: discovery::Discovery,
 
     // keypair
     did_key: Arc<DID>,
@@ -132,6 +132,7 @@ impl Clone for FriendsStore {
         Self {
             ipfs: self.ipfs.clone(),
             identity: self.identity.clone(),
+            discovery: self.discovery.clone(),
             did_key: self.did_key.clone(),
             path: self.path.clone(),
             override_ipld: self.override_ipld.clone(),
@@ -166,7 +167,7 @@ impl FriendsStore {
         let queue = Queue::new(ipfs.clone(), did_key.clone(), path.clone());
         let override_ipld = Arc::new(AtomicBool::new(override_ipld));
 
-        let phonebook = PhoneBook::new(ipfs.clone(), discovery, tx.clone());
+        let phonebook = PhoneBook::new(ipfs.clone(), discovery.clone(), tx.clone());
         let phonebook = use_phonebook.then_some(phonebook);
 
         let signal = Default::default();
@@ -174,6 +175,7 @@ impl FriendsStore {
         let store = Self {
             ipfs,
             identity,
+            discovery,
             did_key,
             path,
             end_event,
@@ -1038,39 +1040,8 @@ impl FriendsStore {
 
         let topic = get_inbox_topic(recipient);
 
-        if matches!(
-            self.identity.discovery_type(),
-            Discovery::Direct | Discovery::None
-        ) {
-            let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
-
-            let connected = super::connected_to_peer(&self.ipfs, remote_peer_id).await?;
-
-            if connected != PeerConnectionType::Connected {
-                let res = match tokio::time::timeout(
-                    Duration::from_secs(2),
-                    self.ipfs.identity(Some(peer_id)),
-                )
-                .await
-                {
-                    Ok(res) => res,
-                    Err(e) => Err(anyhow::anyhow!("{}", e.to_string())),
-                };
-
-                if let Err(_e) = res {
-                    let ipfs = self.ipfs.clone();
-                    let pubkey = recipient.clone();
-                    let relay = self.identity.relays();
-                    let discovery = self.identity.discovery_type();
-                    tokio::spawn(async move {
-                        if let Err(e) = super::discover_peer(&ipfs, &pubkey, discovery, relay).await
-                        {
-                            error!("Error discoverying peer: {e}");
-                        }
-                    });
-                    tokio::task::yield_now().await;
-                }
-            }
+        if !self.discovery.contains(recipient).await {
+            self.discovery.insert(recipient).await?;
         }
 
         if store_request {
