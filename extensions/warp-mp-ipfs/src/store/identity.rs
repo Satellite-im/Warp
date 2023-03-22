@@ -37,7 +37,7 @@ use warp::{
         identity::{Identity, IdentityStatus, SHORT_ID_SIZE},
         MultiPassEventKind,
     },
-    sync::{Arc, RwLock},
+    sync::Arc,
     tesseract::Tesseract,
 };
 use warp::{
@@ -58,8 +58,6 @@ pub struct IdentityStore {
 
     path: Option<PathBuf>,
 
-    did: Arc<RwLock<DID>>,
-
     root_cid: Arc<tokio::sync::RwLock<Option<Cid>>>,
 
     cache_cid: Arc<tokio::sync::RwLock<Option<Cid>>>,
@@ -67,8 +65,6 @@ pub struct IdentityStore {
     identity: Arc<tokio::sync::RwLock<Option<Identity>>>,
 
     online_status: Arc<tokio::sync::RwLock<Option<IdentityStatus>>>,
-
-    discovering: Arc<tokio::sync::RwLock<HashSet<DID>>>,
 
     discovery: Discovery,
 
@@ -160,12 +156,10 @@ impl IdentityStore {
         let root_cid = Arc::new(Default::default());
         let cache_cid = Arc::new(Default::default());
         let override_ipld = Arc::new(AtomicBool::new(override_ipld));
-        let discovering = Arc::new(Default::default());
         let online_status = Arc::default();
         let share_platform = Arc::new(AtomicBool::new(share_platform));
         let root_task = Arc::default();
         let task_send = Arc::default();
-        let did = Arc::default();
         let event = tx;
         let friend_store = Arc::default();
 
@@ -179,14 +173,12 @@ impl IdentityStore {
             start_event,
             share_platform,
             end_event,
-            discovering,
             discovery,
             relay,
             tesseract,
             override_ipld,
             root_task,
             task_send,
-            did,
             event,
             friend_store,
             update_event,
