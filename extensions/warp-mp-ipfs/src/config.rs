@@ -188,11 +188,23 @@ pub struct IpfsSetting {
     pub agent_version: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub enum UpdateEvents {
+    /// Emit events for all identity updates
+    Enabled,
+    /// Emit events for identity updates from friends
+    #[default]
+    FriendsOnly,
+    /// Disable events 
+    Disable,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
     /// Interval for broadcasting out identity (cannot be less than 3 minutes)
     /// Note:
     ///     - If `None`, this will be disabled
+    ///     - Will default to 3 minutes if less than
     ///     - This may be removed in the future
     pub auto_push: Option<u64>,
     /// Discovery type
@@ -204,12 +216,14 @@ pub struct StoreSetting {
     pub sync_interval: u64,
     /// Use objects directly rather than a cid
     pub override_ipld: bool,
-
+    /// Enables sharing platform (Desktop, Mobile, Web) information to another user
     pub share_platform: bool,
-
+    /// Enables phonebook service
     pub use_phonebook: bool,
-
+    /// Waits for a response from peer for a specific duration
     pub friend_request_response_duration: Option<u64>,
+    
+    pub update_events: UpdateEvents,
 }
 
 impl Default for StoreSetting {
@@ -223,6 +237,7 @@ impl Default for StoreSetting {
             share_platform: false,
             use_phonebook: true,
             friend_request_response_duration: None,
+            update_events: Default::default(),
         }
     }
 }

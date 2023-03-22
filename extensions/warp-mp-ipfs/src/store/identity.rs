@@ -2,7 +2,7 @@
 //onto the lock.
 #![allow(clippy::clone_on_copy)]
 use crate::{
-    config::Discovery as DiscoveryConfig,
+    config::{Discovery as DiscoveryConfig, UpdateEvents},
     store::{did_to_libp2p_pub, discovery::Discovery, IdentityPayload},
 };
 use futures::{
@@ -52,6 +52,7 @@ use super::{
     libp2p_pub_to_did,
 };
 
+#[derive(Clone)]
 pub struct IdentityStore {
     ipfs: Ipfs,
 
@@ -89,33 +90,9 @@ pub struct IdentityStore {
 
     event: broadcast::Sender<MultiPassEventKind>,
 
-    friend_store: Arc<tokio::sync::RwLock<Option<FriendsStore>>>,
-}
+    update_event: UpdateEvents,
 
-impl Clone for IdentityStore {
-    fn clone(&self) -> Self {
-        Self {
-            ipfs: self.ipfs.clone(),
-            path: self.path.clone(),
-            did: self.did.clone(),
-            root_cid: self.root_cid.clone(),
-            cache_cid: self.cache_cid.clone(),
-            identity: self.identity.clone(),
-            online_status: self.online_status.clone(),
-            start_event: self.start_event.clone(),
-            end_event: self.end_event.clone(),
-            discovering: self.discovering.clone(),
-            discovery: self.discovery.clone(),
-            share_platform: self.share_platform.clone(),
-            relay: self.relay.clone(),
-            override_ipld: self.override_ipld.clone(),
-            tesseract: self.tesseract.clone(),
-            root_task: self.root_task.clone(),
-            task_send: self.task_send.clone(),
-            event: self.event.clone(),
-            friend_store: self.friend_store.clone(),
-        }
-    }
+    friend_store: Arc<tokio::sync::RwLock<Option<FriendsStore>>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -164,11 +141,12 @@ impl IdentityStore {
         tesseract: Tesseract,
         interval: Option<u64>,
         tx: broadcast::Sender<MultiPassEventKind>,
-        (discovery, relay, override_ipld, share_platform): (
+        (discovery, relay, override_ipld, share_platform, update_event): (
             Discovery,
             Option<Vec<Multiaddr>>,
             bool,
             bool,
+            UpdateEvents,
         ),
     ) -> Result<Self, Error> {
         if let Some(path) = path.as_ref() {
@@ -211,6 +189,7 @@ impl IdentityStore {
             did,
             event,
             friend_store,
+            update_event,
         };
 
         if store.path.is_some() {
@@ -684,20 +663,30 @@ impl IdentityStore {
                                 // Do we want to remove the old block?
                                 self.ipfs.remove_block(old_cid).await?;
                             }
-                            if let Ok(store) = self.friend_store().await {
-                                if store
-                                    .is_friend(&identity.did_key())
-                                    .await
-                                    .unwrap_or_default()
-                                {
-                                    let mut events = event;
-                                    let tx = self.event.clone();
-                                    tokio::spawn(async move {
-                                        while let Some(event) = events.pop() {
-                                            let _ = tx.send(event);
-                                        }
-                                    });
+                            let mut emit = false;
+
+                            if matches!(self.update_event, UpdateEvents::Enabled) {
+                                emit = true;
+                            } else if matches!(self.update_event, UpdateEvents::FriendsOnly) {
+                                if let Ok(store) = self.friend_store().await {
+                                    if store
+                                        .is_friend(&identity.did_key())
+                                        .await
+                                        .unwrap_or_default()
+                                    {
+                                        emit = true;
+                                    }
                                 }
+                            }
+
+                            if emit {
+                                let mut events = event;
+                                let tx = self.event.clone();
+                                tokio::spawn(async move {
+                                    while let Some(event) = events.pop() {
+                                        let _ = tx.send(event);
+                                    }
+                                });
                             }
                         }
                     }
