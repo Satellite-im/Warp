@@ -128,9 +128,13 @@ impl Discovery {
                 (peer_id, Some(did_key.clone()))
             }
         };
-
-        if self.contains(peer_id).await {
-            return Ok(());
+        if let Some(did) = &did_key {
+            if let Ok(entry) = self.get(peer_id).await {
+                if !entry.valid().await {
+                    entry.set_did_key(did).await;
+                    return Ok(())
+                }
+            }
         }
 
         let entry = DiscoveryEntry::new(
@@ -395,19 +399,19 @@ impl DiscoveryEntry {
         self.did.read().await.is_some()
     }
 
-    pub async fn set_did_key(&self, did: DID) {
+    pub async fn set_did_key(&self, did: &DID) {
         if self.valid().await {
             return;
         }
 
         // Validate the peer_id against the entry id. If does not matches, then the did key is invalid.
 
-        match did_to_libp2p_pub(&did).map(|pk| pk.to_peer_id()) {
+        match did_to_libp2p_pub(did).map(|pk| pk.to_peer_id()) {
             Ok(peer_id) if self.peer_id == peer_id => {}
             _ => return,
         }
 
-        *self.did.write().await = Some(did)
+        *self.did.write().await = Some(did.clone())
     }
 
     /// Returns a DID key
