@@ -222,7 +222,7 @@ pub struct StoreSetting {
     pub use_phonebook: bool,
     /// Waits for a response from peer for a specific duration
     pub friend_request_response_duration: Option<u64>,
-    
+    /// Options to allow emitting identity events to all or just friends
     pub update_events: UpdateEvents,
 }
 

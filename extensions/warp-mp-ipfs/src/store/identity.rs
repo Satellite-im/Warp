@@ -404,6 +404,11 @@ impl IdentityStore {
 
         let override_ipld = self.override_ipld.load(Ordering::Relaxed);
 
+        let is_friend = match self.friend_store().await {
+            Ok(store) => store.is_friend(out_did).await.unwrap_or_default(),
+            _ => false,
+        };
+
         let picture = match override_ipld {
             true => {
                 if let Some(document) = root.picture.as_ref() {
@@ -417,7 +422,12 @@ impl IdentityStore {
                 }
             }
             false => root.picture,
-        };
+        }
+        .and_then(|document| match self.update_event {
+            UpdateEvents::Enabled => Some(document),
+            UpdateEvents::FriendsOnly if is_friend => Some(document),
+            _ => None,
+        });
 
         let banner = match override_ipld {
             true => {
@@ -432,7 +442,12 @@ impl IdentityStore {
                 }
             }
             false => root.banner,
-        };
+        }
+        .and_then(|document| match self.update_event {
+            UpdateEvents::Enabled => Some(document),
+            UpdateEvents::FriendsOnly if is_friend => Some(document),
+            _ => None,
+        });
 
         let payload = match override_ipld {
             true => DocumentType::Object(identity),
