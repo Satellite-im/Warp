@@ -193,9 +193,11 @@ pub enum UpdateEvents {
     /// Emit events for all identity updates
     Enabled,
     /// Emit events for identity updates from friends
-    #[default]
     FriendsOnly,
-    /// Disable events 
+    /// Emit events for all updates, but only emit with friends
+    #[default]
+    EmitFriendsOnly,
+    /// Disable events
     Disable,
 }
 

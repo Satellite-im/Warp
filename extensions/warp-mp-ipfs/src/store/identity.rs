@@ -424,7 +424,7 @@ impl IdentityStore {
             false => root.picture,
         }
         .and_then(|document| match self.update_event {
-            UpdateEvents::Enabled => Some(document),
+            UpdateEvents::Enabled | UpdateEvents::EmitFriendsOnly => Some(document),
             UpdateEvents::FriendsOnly if is_friend => Some(document),
             _ => None,
         });
@@ -444,7 +444,7 @@ impl IdentityStore {
             false => root.banner,
         }
         .and_then(|document| match self.update_event {
-            UpdateEvents::Enabled => Some(document),
+            UpdateEvents::Enabled | UpdateEvents::EmitFriendsOnly => Some(document),
             UpdateEvents::FriendsOnly if is_friend => Some(document),
             _ => None,
         });
@@ -674,7 +674,10 @@ impl IdentityStore {
 
                             if matches!(self.update_event, UpdateEvents::Enabled) {
                                 emit = true;
-                            } else if matches!(self.update_event, UpdateEvents::FriendsOnly) {
+                            } else if matches!(
+                                self.update_event,
+                                UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
+                            ) {
                                 if let Ok(store) = self.friend_store().await {
                                     if store
                                         .is_friend(&identity.did_key())
