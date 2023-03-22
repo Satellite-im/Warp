@@ -199,10 +199,7 @@ impl FriendsStore {
                     async move { if let Err(_e) = store.queue.load().await {} }
                 });
 
-                let discovery = store.identity.discovery_type();
                 if let Some(phonebook) = store.phonebook.as_ref() {
-                    if let Err(_e) = phonebook.set_discovery(discovery).await {}
-
                     for addr in store.identity.relays() {
                         if let Err(_e) = phonebook.add_relay(addr).await {}
                     }

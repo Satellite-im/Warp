@@ -16,8 +16,6 @@ use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::MultiPassEventKind;
 
-use crate::config::Discovery as DiscoveryConfig;
-
 use super::connected_to_peer;
 use super::discovery::Discovery;
 use super::PeerConnectionType;
@@ -26,7 +24,6 @@ use super::PeerConnectionType;
 #[allow(clippy::type_complexity)]
 pub struct PhoneBook {
     ipfs: Ipfs,
-    discovery_config: Arc<RwLock<DiscoveryConfig>>,
     discovery: Discovery,
     relays: Arc<RwLock<Vec<Multiaddr>>>,
     emit_event: Arc<AtomicBool>,
@@ -38,7 +35,6 @@ impl Clone for PhoneBook {
     fn clone(&self) -> Self {
         Self {
             ipfs: self.ipfs.clone(),
-            discovery_config: self.discovery_config.clone(),
             discovery: self.discovery.clone(),
             relays: self.relays.clone(),
             emit_event: self.emit_event.clone(),
@@ -54,7 +50,6 @@ impl PhoneBook {
         discovery: Discovery,
         event: broadcast::Sender<MultiPassEventKind>,
     ) -> Self {
-        let discovery_config = Arc::new(RwLock::new(DiscoveryConfig::None));
         let relays = Default::default();
         let emit_event = Arc::new(AtomicBool::new(true));
 
@@ -62,7 +57,6 @@ impl PhoneBook {
 
         PhoneBook {
             discovery,
-            discovery_config,
             relays,
             emit_event,
             ipfs,
@@ -84,7 +78,6 @@ impl PhoneBook {
             did.clone(),
             self.event.clone(),
             self.emit_event.clone(),
-            self.discovery_config.clone(),
             self.relays.clone(),
         )
         .await?;
@@ -149,11 +142,6 @@ impl PhoneBook {
         Ok(())
     }
 
-    pub async fn set_discovery(&self, discovery: DiscoveryConfig) -> anyhow::Result<()> {
-        *self.discovery_config.write().await = discovery;
-        Ok(())
-    }
-
     pub async fn add_relay(&self, addr: Multiaddr) -> anyhow::Result<()> {
         self.relays.write().await.push(addr);
         Ok(())
@@ -166,7 +154,6 @@ pub struct PhoneBookEntry {
     connection_type: Arc<RwLock<PeerConnectionType>>,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
     event: broadcast::Sender<MultiPassEventKind>,
-    discovery_config: Arc<RwLock<DiscoveryConfig>>,
     relays: Arc<RwLock<Vec<Multiaddr>>>,
     emit_event: Arc<AtomicBool>,
 }
@@ -193,7 +180,6 @@ impl Clone for PhoneBookEntry {
             connection_type: self.connection_type.clone(),
             task: self.task.clone(),
             event: self.event.clone(),
-            discovery_config: self.discovery_config.clone(),
             relays: self.relays.clone(),
             emit_event: self.emit_event.clone(),
         }
@@ -206,7 +192,6 @@ impl PhoneBookEntry {
         did: DID,
         event: broadcast::Sender<MultiPassEventKind>,
         emit_event: Arc<AtomicBool>,
-        discovery_config: Arc<RwLock<DiscoveryConfig>>,
         relays: Arc<RwLock<Vec<Multiaddr>>>,
     ) -> Result<Self, Error> {
         let connection_type = Arc::new(RwLock::new(PeerConnectionType::NotConnected));
@@ -218,7 +203,6 @@ impl PhoneBookEntry {
             task: Arc::default(),
             event,
             emit_event,
-            discovery_config,
             relays,
         };
 
