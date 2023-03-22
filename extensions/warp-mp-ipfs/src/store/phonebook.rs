@@ -56,7 +56,7 @@ impl PhoneBook {
     ) -> Self {
         let discovery_config = Arc::new(RwLock::new(DiscoveryConfig::None));
         let relays = Default::default();
-        let emit_event = Arc::new(AtomicBool::new(false));
+        let emit_event = Arc::new(AtomicBool::new(true));
 
         let entries = Default::default();
 
