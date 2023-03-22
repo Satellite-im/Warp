@@ -111,15 +111,6 @@ impl Discovery {
         self.config.clone()
     }
 
-    pub async fn get_with_peer_id(&self, peer_id: PeerId) -> Option<DiscoveryEntry> {
-        self.entries
-            .read()
-            .await
-            .iter()
-            .find(|entry| entry.peer_id == peer_id)
-            .cloned()
-    }
-
     pub async fn insert<P: Into<PeerType>>(&self, peer_type: P) -> Result<(), Error> {
         let (peer_id, did_key) = match &peer_type.into() {
             PeerType::PeerId(peer_id) => (*peer_id, None),
