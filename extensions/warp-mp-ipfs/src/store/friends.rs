@@ -24,7 +24,7 @@ use super::document::DocumentType;
 use super::identity::{IdentityStore, LookupBy};
 use super::phonebook::PhoneBook;
 use super::queue::Queue;
-use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, VecExt, discovery};
+use super::{did_keypair, did_to_libp2p_pub, discovery, libp2p_pub_to_did, VecExt};
 
 #[allow(clippy::type_complexity)]
 pub struct FriendsStore {
@@ -159,13 +159,18 @@ impl FriendsStore {
             bool,
             bool,
             Option<u64>,
-            bool
+            bool,
         ),
     ) -> anyhow::Result<Self> {
         let end_event = Arc::new(AtomicBool::new(false));
 
         let did_key = Arc::new(did_keypair(&tesseract)?);
-        let queue = Queue::new(ipfs.clone(), did_key.clone(), path.clone());
+        let queue = Queue::new(
+            ipfs.clone(),
+            did_key.clone(),
+            path.clone(),
+            discovery.clone(),
+        );
         let override_ipld = Arc::new(AtomicBool::new(override_ipld));
 
         let phonebook = PhoneBook::new(ipfs.clone(), discovery.clone(), tx.clone(), online_event);
