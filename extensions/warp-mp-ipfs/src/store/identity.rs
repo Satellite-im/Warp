@@ -384,7 +384,7 @@ impl IdentityStore {
         Ok(())
     }
 
-    async fn push(&self, out_did: &DID) -> Result<(), Error> {
+    pub async fn push(&self, out_did: &DID) -> Result<(), Error> {
         let pk_did = self.get_keypair_did()?;
 
         let prikey = Ed25519KeyPair::from_secret_key(&pk_did.private_key_bytes()).get_x25519();

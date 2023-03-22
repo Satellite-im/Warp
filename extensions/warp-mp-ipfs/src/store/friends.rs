@@ -909,6 +909,10 @@ impl FriendsStore {
             }
         }
 
+        // Push to give an update in the event any wasnt transmitted during the initial push
+        // We dont care if this errors or not.
+        let _ = self.identity.push(pubkey).await.ok();
+
         if let Err(e) = self.tx.send(MultiPassEventKind::FriendAdded {
             did: pubkey.clone(),
         }) {
