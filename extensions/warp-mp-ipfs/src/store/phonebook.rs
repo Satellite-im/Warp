@@ -100,6 +100,14 @@ impl PhoneBook {
         Ok(())
     }
 
+    pub async fn connection_type(&self, did: &DID) -> Result<PeerConnectionType, Error> {
+        let entry = self.entries.read().await.get(did).cloned();
+        if let Some(entry) = entry {
+            return Ok(*entry.connection_type.read().await);
+        }
+        Err(Error::PublicKeyInvalid)
+    }
+
     pub async fn online_friends(&self) -> Result<Vec<DID>, Error> {
         let mut online = vec![];
         for (did, entry) in &*self.entries.read().await {
@@ -201,10 +209,7 @@ impl PhoneBookEntry {
         discovery_config: Arc<RwLock<DiscoveryConfig>>,
         relays: Arc<RwLock<Vec<Multiaddr>>>,
     ) -> Result<Self, Error> {
-        let connection_type = connected_to_peer(&ipfs, did.clone())
-            .await
-            .map(RwLock::new)
-            .map(Arc::new)?;
+        let connection_type = Arc::new(RwLock::new(PeerConnectionType::NotConnected));
 
         let entry = Self {
             ipfs,
@@ -220,62 +225,46 @@ impl PhoneBookEntry {
         let task = tokio::spawn({
             let entry = entry.clone();
             async move {
-                let mut discovering = false;
                 let previous_status = entry.connection_type.clone();
                 loop {
                     let Ok(connection_status) =  connected_to_peer(&entry.ipfs, entry.did.clone()).await else {
                         tokio::time::sleep(Duration::from_secs(1)).await;
                         continue;
                     };
-                    match (connection_status, discovering) {
-                        (PeerConnectionType::Connected, true) => {
+                    match connection_status {
+                        PeerConnectionType::Connected => {
                             if matches!(
                                 *previous_status.read().await,
                                 PeerConnectionType::NotConnected
-                            ) && entry.emit_event.load(Ordering::Relaxed)
-                            {
-                                let did = entry.did.clone();
-                                if let Err(e) =
-                                    entry.event.send(MultiPassEventKind::IdentityOnline { did })
-                                {
-                                    error!("Error broadcasting event: {e}");
+                            ) {
+                                if entry.emit_event.load(Ordering::Relaxed) {
+                                    let did = entry.did.clone();
+                                    if let Err(e) =
+                                        entry.event.send(MultiPassEventKind::IdentityOnline { did })
+                                    {
+                                        error!("Error broadcasting event: {e}");
+                                    }
                                 }
                                 *previous_status.write().await = PeerConnectionType::Connected;
                             }
-                            discovering = false;
                         }
-                        (PeerConnectionType::Connected, false) => {
-                            *previous_status.write().await = PeerConnectionType::Connected;
-                        }
-                        (PeerConnectionType::NotConnected, true) => {
+                        PeerConnectionType::NotConnected => {
                             let did = entry.did.clone();
-                            let discovery = entry.discovery_config.read().await.clone();
-                            let relays = entry.relays.read().await.clone();
-                            let ipfs = entry.ipfs.clone();
                             if matches!(
                                 *previous_status.read().await,
                                 PeerConnectionType::Connected
-                            ) && entry.emit_event.load(Ordering::Relaxed)
-                            {
-                                let did = did.clone();
-                                if let Err(e) = entry
-                                    .event
-                                    .send(MultiPassEventKind::IdentityOffline { did })
-                                {
-                                    error!("Error broadcasting event: {e}");
+                            ) {
+                                if entry.emit_event.load(Ordering::Relaxed) {
+                                    let did = did.clone();
+                                    if let Err(e) = entry
+                                        .event
+                                        .send(MultiPassEventKind::IdentityOffline { did })
+                                    {
+                                        error!("Error broadcasting event: {e}");
+                                    }
                                 }
                                 *previous_status.write().await = PeerConnectionType::NotConnected;
                             }
-                            tokio::spawn(async move {
-                                if let Err(_e) =
-                                    super::discover_peer(&ipfs, &did, discovery, relays).await
-                                {
-                                }
-                            });
-                            discovering = true;
-                        }
-                        (PeerConnectionType::NotConnected, false) => {
-                            *previous_status.write().await = PeerConnectionType::NotConnected;
                         }
                     }
                     tokio::time::sleep(Duration::from_secs(1)).await;
