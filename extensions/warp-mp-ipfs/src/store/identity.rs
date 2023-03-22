@@ -135,7 +135,7 @@ impl IdentityStore {
         ipfs: Ipfs,
         path: Option<PathBuf>,
         tesseract: Tesseract,
-        interval: Option<u64>,
+        interval: Option<Duration>,
         tx: broadcast::Sender<MultiPassEventKind>,
         (discovery, relay, override_ipld, share_platform, update_event): (
             Discovery,
@@ -217,10 +217,16 @@ impl IdentityStore {
                 let auto_push = interval.is_some();
 
                 let interval = interval
-                    .map(|i| if i < 300000 { 300000 } else { i })
-                    .unwrap_or(300000);
+                    .map(|i| {
+                        if i.as_millis() < 300000 {
+                            Duration::from_millis(300000)
+                        } else {
+                            i
+                        }
+                    })
+                    .unwrap_or(Duration::from_millis(300000));
 
-                let mut tick = tokio::time::interval(Duration::from_millis(interval));
+                let mut tick = tokio::time::interval(interval);
                 let mut rx = store.discovery.events();
                 loop {
                     if store.end_event.load(Ordering::SeqCst) {

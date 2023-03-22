@@ -42,7 +42,7 @@ pub struct FriendsStore {
 
     phonebook: Option<PhoneBook>,
 
-    wait_on_response: Option<u64>,
+    wait_on_response: Option<Duration>,
 
     signal: Arc<RwLock<HashMap<DID, oneshot::Sender<Result<(), Error>>>>>,
 
@@ -1091,7 +1091,7 @@ impl FriendsStore {
 
         if !queued && matches!(payload.event, Event::Request) {
             if let Some(rx) = std::mem::take(&mut rx) {
-                if let Some(timeout) = self.wait_on_response.map(Duration::from_millis) {
+                if let Some(timeout) = self.wait_on_response {
                     if let Ok(Ok(res)) = tokio::time::timeout(timeout, rx).await {
                         res?
                     }
