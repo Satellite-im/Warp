@@ -323,7 +323,7 @@ impl DiscoveryEntry {
                                 };
 
                                 let opts = DialOpts::peer_id(peer_id)
-                                    .condition(PeerCondition::NotDialing)
+                                    .condition(PeerCondition::Disconnected)
                                     .addresses(addrs)
                                     .extend_addresses_through_behaviour()
                                     .build();
