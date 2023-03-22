@@ -252,6 +252,7 @@ pub struct MpIpfsConfig {
     pub ipfs_setting: IpfsSetting,
     pub store_setting: StoreSetting,
     pub debug: bool,
+    pub save_phrase: bool,
 }
 
 impl Default for MpIpfsConfig {
@@ -270,6 +271,7 @@ impl Default for MpIpfsConfig {
             },
             store_setting: Default::default(),
             debug: false,
+            save_phrase: false,
         }
     }
 }
