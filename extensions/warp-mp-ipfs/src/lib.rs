@@ -16,7 +16,7 @@ use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
 use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use tracing::log::{error, info, trace, warn, self};
+use tracing::log::{self, error, info, trace, warn};
 use warp::crypto::did_key::Generate;
 use warp::crypto::zeroize::Zeroizing;
 use warp::data::DataType;
@@ -358,10 +358,7 @@ impl IpfsIdentity {
                     async move {
                         info!("Disconnecting from relays");
                         for addr in relays {
-                            if let Err(e) = ipfs
-                                .remove_listening_address(addr)
-                                .await
-                            {
+                            if let Err(e) = ipfs.remove_listening_address(addr).await {
                                 info!("Error removing relay: {e}");
                                 continue;
                             }
@@ -381,7 +378,9 @@ impl IpfsIdentity {
                             match public {
                                 true => {
                                     if using_relay {
-                                        log::trace!("Disabling relays due to being publicly accessible.");
+                                        log::trace!(
+                                            "Disabling relays due to being publicly accessible."
+                                        );
                                         let addrs = addrs.drain(..).collect::<Vec<_>>();
                                         stop_relay_client(addrs).await;
                                         using_relay = false;
@@ -389,7 +388,9 @@ impl IpfsIdentity {
                                 }
                                 false => {
                                     if !using_relay {
-                                        log::trace!("No longer publicly accessible. Switching to relays");
+                                        log::trace!(
+                                            "No longer publicly accessible. Switching to relays"
+                                        );
                                         addrs = start_relay_client().await;
                                         using_relay = true;
                                     }
@@ -415,7 +416,7 @@ impl IpfsIdentity {
                 .collect()
         });
 
-        let discovery = Discovery::new(ipfs.clone(), config.store_setting.discovery);
+        let discovery = Discovery::new(ipfs.clone(), config.store_setting.discovery.clone());
 
         let identity_store = IdentityStore::new(
             ipfs.clone(),
@@ -428,7 +429,7 @@ impl IpfsIdentity {
                 relays,
                 config.store_setting.override_ipld,
                 config.store_setting.share_platform,
-                config.store_setting.update_events
+                config.store_setting.update_events,
             ),
         )
         .await?;
@@ -437,13 +438,9 @@ impl IpfsIdentity {
         let friend_store = FriendsStore::new(
             ipfs.clone(),
             identity_store.clone(),
-            config.path,
+            config.clone(),
             tesseract.clone(),
-            (
-                self.tx.clone(),
-                config.store_setting.use_phonebook,
-                config.store_setting.friend_request_response_duration,
-            ),
+            self.tx.clone(),
         )
         .await?;
         info!("friends store initialized");

@@ -7,7 +7,6 @@ use libipld::IpldCodec;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::{broadcast, RwLock};
 use tracing::log::{error, warn};
@@ -19,7 +18,7 @@ use warp::sync::Arc;
 
 use warp::tesseract::Tesseract;
 
-use crate::config::Discovery;
+use crate::config::{Discovery, MpIpfsConfig};
 
 use super::document::DocumentType;
 use super::identity::{IdentityStore, LookupBy};
@@ -121,22 +120,20 @@ impl FriendsStore {
     pub async fn new(
         ipfs: Ipfs,
         identity: IdentityStore,
-        path: Option<PathBuf>,
+        config: MpIpfsConfig,
         tesseract: Tesseract,
-        (tx, use_phonebook, wait_on_response): (
-            broadcast::Sender<MultiPassEventKind>,
-            bool,
-            Option<u64>,
-        ),
+        tx: broadcast::Sender<MultiPassEventKind>,
     ) -> anyhow::Result<Self> {
         let did_key = Arc::new(did_keypair(&tesseract)?);
-        let queue = Queue::new(ipfs.clone(), did_key.clone(), path.clone());
+        let queue = Queue::new(ipfs.clone(), did_key.clone(), config.path.clone());
 
-        let phonebook = PhoneBook::new(ipfs.clone(), tx.clone());
-        let phonebook = use_phonebook.then_some(phonebook);
+        let phonebook = config
+            .store_setting
+            .use_phonebook
+            .then_some(PhoneBook::new(ipfs.clone(), tx.clone()));
 
         let signal = Default::default();
-
+        let wait_on_response = config.store_setting.friend_request_response_duration;
         let store = Self {
             ipfs,
             identity,
