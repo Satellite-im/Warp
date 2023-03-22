@@ -504,7 +504,7 @@ impl IdentityStore {
 
     async fn process_message(&mut self, message: GossipsubMessage) -> anyhow::Result<()> {
         let in_did = match message.source {
-            Some(peer_id) => match self.discovery.get_with_peer_id(peer_id).await {
+            Some(peer_id) => match self.discovery.get(peer_id).await.ok() {
                 Some(entry) => entry.did_key().await?,
                 None => return Ok(()),
             },

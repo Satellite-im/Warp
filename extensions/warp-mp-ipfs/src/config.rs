@@ -3,7 +3,8 @@ use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
-    str::FromStr, time::Duration,
+    str::FromStr,
+    time::Duration,
 };
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -222,6 +223,8 @@ pub struct StoreSetting {
     pub share_platform: bool,
     /// Enables phonebook service
     pub use_phonebook: bool,
+    /// Emit event for when a friend comes online or offline
+    pub emit_online_event: bool,
     /// Waits for a response from peer for a specific duration
     pub friend_request_response_duration: Option<Duration>,
     /// Options to allow emitting identity events to all or just friends
@@ -239,6 +242,7 @@ impl Default for StoreSetting {
             share_platform: false,
             use_phonebook: true,
             friend_request_response_duration: None,
+            emit_online_event: false,
             update_events: Default::default(),
         }
     }

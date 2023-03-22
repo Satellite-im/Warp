@@ -18,13 +18,13 @@ use warp::sync::Arc;
 
 use warp::tesseract::Tesseract;
 
-use crate::config::{Discovery, MpIpfsConfig};
+use crate::config::MpIpfsConfig;
 
 use super::document::DocumentType;
 use super::identity::{IdentityStore, LookupBy};
 use super::phonebook::PhoneBook;
 use super::queue::Queue;
-use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType, VecExt};
+use super::{did_keypair, did_to_libp2p_pub, discovery, libp2p_pub_to_did, VecExt};
 
 #[allow(clippy::type_complexity)]
 #[derive(Clone)]
@@ -33,6 +33,8 @@ pub struct FriendsStore {
 
     // Identity Store
     identity: IdentityStore,
+
+    discovery: discovery::Discovery,
 
     // keypair
     did_key: Arc<DID>,
@@ -120,23 +122,33 @@ impl FriendsStore {
     pub async fn new(
         ipfs: Ipfs,
         identity: IdentityStore,
+        discovery: discovery::Discovery,
         config: MpIpfsConfig,
         tesseract: Tesseract,
         tx: broadcast::Sender<MultiPassEventKind>,
     ) -> anyhow::Result<Self> {
         let did_key = Arc::new(did_keypair(&tesseract)?);
-        let queue = Queue::new(ipfs.clone(), did_key.clone(), config.path.clone());
 
-        let phonebook = config
-            .store_setting
-            .use_phonebook
-            .then_some(PhoneBook::new(ipfs.clone(), tx.clone()));
+        let queue = Queue::new(
+            ipfs.clone(),
+            did_key.clone(),
+            config.path.clone(),
+            discovery.clone(),
+        );
+
+        let phonebook = config.store_setting.use_phonebook.then_some(PhoneBook::new(
+            ipfs.clone(),
+            discovery.clone(),
+            tx.clone(),
+            config.store_setting.emit_online_event,
+        ));
 
         let signal = Default::default();
         let wait_on_response = config.store_setting.friend_request_response_duration;
         let store = Self {
             ipfs,
             identity,
+            discovery,
             did_key,
             queue,
             phonebook,
@@ -158,10 +170,7 @@ impl FriendsStore {
                     async move { if let Err(_e) = store.queue.load().await {} }
                 });
 
-                let discovery = store.identity.discovery_type();
                 if let Some(phonebook) = store.phonebook.as_ref() {
-                    if let Err(_e) = phonebook.set_discovery(discovery).await {}
-
                     for addr in store.identity.relays() {
                         if let Err(_e) = phonebook.add_relay(addr).await {}
                     }
@@ -1004,39 +1013,8 @@ impl FriendsStore {
 
         let topic = get_inbox_topic(recipient);
 
-        if matches!(
-            self.identity.discovery_type(),
-            Discovery::Direct | Discovery::None
-        ) {
-            let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
-
-            let connected = super::connected_to_peer(&self.ipfs, remote_peer_id).await?;
-
-            if connected != PeerConnectionType::Connected {
-                let res = match tokio::time::timeout(
-                    Duration::from_secs(2),
-                    self.ipfs.identity(Some(peer_id)),
-                )
-                .await
-                {
-                    Ok(res) => res,
-                    Err(e) => Err(anyhow::anyhow!("{}", e.to_string())),
-                };
-
-                if let Err(_e) = res {
-                    let ipfs = self.ipfs.clone();
-                    let pubkey = recipient.clone();
-                    let relay = self.identity.relays();
-                    let discovery = self.identity.discovery_type();
-                    tokio::spawn(async move {
-                        if let Err(e) = super::discover_peer(&ipfs, &pubkey, discovery, relay).await
-                        {
-                            error!("Error discoverying peer: {e}");
-                        }
-                    });
-                    tokio::task::yield_now().await;
-                }
-            }
+        if !self.discovery.contains(recipient).await {
+            self.discovery.insert(recipient).await?;
         }
 
         if store_request {

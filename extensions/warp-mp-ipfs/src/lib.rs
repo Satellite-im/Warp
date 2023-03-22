@@ -425,7 +425,7 @@ impl IpfsIdentity {
             config.store_setting.auto_push,
             self.tx.clone(),
             (
-                discovery,
+                discovery.clone(),
                 relays,
                 config.store_setting.override_ipld,
                 config.store_setting.share_platform,
@@ -438,6 +438,7 @@ impl IpfsIdentity {
         let friend_store = FriendsStore::new(
             ipfs.clone(),
             identity_store.clone(),
+            discovery,
             config.clone(),
             tesseract.clone(),
             self.tx.clone(),
@@ -582,7 +583,12 @@ impl MultiPass for IpfsIdentity {
             let mut tesseract = self.tesseract.clone();
             if !tesseract.exist("keypair") {
                 warn!("Loading keypair generated from mnemonic phrase into tesseract");
-                warp::crypto::keypair::mnemonic_into_tesseract(&mut tesseract, phrase, None, self.config.save_phrase)?;
+                warp::crypto::keypair::mnemonic_into_tesseract(
+                    &mut tesseract,
+                    phrase,
+                    None,
+                    self.config.save_phrase,
+                )?;
             }
         }
 
