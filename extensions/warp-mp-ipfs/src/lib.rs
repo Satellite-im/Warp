@@ -16,7 +16,7 @@ use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
 use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use tracing::log::{error, info, trace, warn, self};
+use tracing::log::{self, error, info, trace, warn};
 use warp::crypto::did_key::Generate;
 use warp::crypto::zeroize::Zeroizing;
 use warp::data::DataType;
@@ -358,10 +358,7 @@ impl IpfsIdentity {
                     async move {
                         info!("Disconnecting from relays");
                         for addr in relays {
-                            if let Err(e) = ipfs
-                                .remove_listening_address(addr.with(Protocol::P2pCircuit))
-                                .await
-                            {
+                            if let Err(e) = ipfs.remove_listening_address(addr).await {
                                 info!("Error removing relay: {e}");
                                 continue;
                             }
@@ -381,7 +378,9 @@ impl IpfsIdentity {
                             match public {
                                 true => {
                                     if using_relay {
-                                        log::trace!("Disabling relays due to being publicly accessible.");
+                                        log::trace!(
+                                            "Disabling relays due to being publicly accessible."
+                                        );
                                         let addrs = addrs.drain(..).collect::<Vec<_>>();
                                         stop_relay_client(addrs).await;
                                         using_relay = false;
@@ -389,7 +388,9 @@ impl IpfsIdentity {
                                 }
                                 false => {
                                     if !using_relay {
-                                        log::trace!("No longer publicly accessible. Switching to relays");
+                                        log::trace!(
+                                            "No longer publicly accessible. Switching to relays"
+                                        );
                                         addrs = start_relay_client().await;
                                         using_relay = true;
                                     }
@@ -415,7 +416,7 @@ impl IpfsIdentity {
                 .collect()
         });
 
-        let discovery = Discovery::new(ipfs.clone(), config.store_setting.discovery);
+        let discovery = Discovery::new(ipfs.clone(), config.store_setting.discovery.clone());
 
         let identity_store = IdentityStore::new(
             ipfs.clone(),
@@ -424,10 +425,11 @@ impl IpfsIdentity {
             config.store_setting.auto_push,
             self.tx.clone(),
             (
-                discovery,
+                discovery.clone(),
                 relays,
                 config.store_setting.override_ipld,
                 config.store_setting.share_platform,
+                config.store_setting.update_events,
             ),
         )
         .await?;
@@ -436,14 +438,10 @@ impl IpfsIdentity {
         let friend_store = FriendsStore::new(
             ipfs.clone(),
             identity_store.clone(),
-            config.path,
+            discovery,
+            config.clone(),
             tesseract.clone(),
-            (
-                self.tx.clone(),
-                config.store_setting.override_ipld,
-                config.store_setting.use_phonebook,
-                config.store_setting.friend_request_response_duration,
-            ),
+            self.tx.clone(),
         )
         .await?;
         info!("friends store initialized");
@@ -545,7 +543,6 @@ impl Extension for IpfsIdentity {
 }
 
 impl SingleHandle for IpfsIdentity {
-    #[inline]
     fn handle(&self) -> Result<Box<dyn Any>, Error> {
         self.ipfs().map(|ipfs| Box::new(ipfs) as Box<dyn Any>)
     }
@@ -586,7 +583,12 @@ impl MultiPass for IpfsIdentity {
             let mut tesseract = self.tesseract.clone();
             if !tesseract.exist("keypair") {
                 warn!("Loading keypair generated from mnemonic phrase into tesseract");
-                warp::crypto::keypair::mnemonic_into_tesseract(&mut tesseract, phrase, None)?;
+                warp::crypto::keypair::mnemonic_into_tesseract(
+                    &mut tesseract,
+                    phrase,
+                    None,
+                    self.config.save_phrase,
+                )?;
             }
         }
 
@@ -963,91 +965,76 @@ impl MultiPass for IpfsIdentity {
 
 #[async_trait::async_trait]
 impl Friends for IpfsIdentity {
-    #[inline]
     async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.send_request(pubkey).await
     }
 
-    #[inline]
     async fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.accept_request(pubkey).await
     }
 
-    #[inline]
     async fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.reject_request(pubkey).await
     }
 
-    #[inline]
     async fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.close_request(pubkey).await
     }
 
-    #[inline]
     async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store().await?;
         store.list_incoming_request().await
     }
 
-    #[inline]
     async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store().await?;
         store.list_outgoing_request().await
     }
 
-    #[inline]
     async fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store().await?;
         store.received_friend_request_from(did).await
     }
 
-    #[inline]
     async fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store().await?;
         store.sent_friend_request_to(did).await
     }
 
-    #[inline]
     async fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.remove_friend(pubkey, true).await
     }
 
-    #[inline]
     async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.block(pubkey).await
     }
 
-    #[inline]
     async fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
         let store = self.friend_store().await?;
         store.is_blocked(did).await
     }
 
-    #[inline]
     async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
         let mut store = self.friend_store().await?;
         store.unblock(pubkey).await
     }
 
-    #[inline]
     async fn block_list(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store().await?;
         store.block_list().await.map(Vec::from_iter)
     }
 
-    #[inline]
     async fn list_friends(&self) -> Result<Vec<DID>, Error> {
         let store = self.friend_store().await?;
         store.friends_list().await.map(Vec::from_iter)
     }
 
-    #[inline]
     async fn has_friend(&self, pubkey: &DID) -> Result<bool, Error> {
         let store = self.friend_store().await?;
         store.is_friend(pubkey).await
@@ -1075,19 +1062,16 @@ impl FriendsEvent for IpfsIdentity {
 
 #[async_trait::async_trait]
 impl IdentityInformation for IpfsIdentity {
-    #[inline]
     async fn identity_status(&self, did: &DID) -> Result<identity::IdentityStatus, Error> {
         let store = self.identity_store(true).await?;
         store.identity_status(did).await
     }
 
-    #[inline]
     async fn set_identity_status(&mut self, status: identity::IdentityStatus) -> Result<(), Error> {
         let mut store = self.identity_store(true).await?;
         store.set_identity_status(status).await
     }
 
-    #[inline]
     async fn identity_platform(&self, did: &DID) -> Result<identity::Platform, Error> {
         let store = self.identity_store(true).await?;
         store.identity_platform(did).await

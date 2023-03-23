@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
     str::FromStr,
+    time::Duration,
 };
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -188,28 +189,46 @@ pub struct IpfsSetting {
     pub agent_version: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub enum UpdateEvents {
+    /// Emit events for all identity updates
+    Enabled,
+    /// Emit events for identity updates from friends
+    FriendsOnly,
+    /// Send events for all identity updates, but only emit with friends
+    #[default]
+    EmitFriendsOnly,
+    /// Disable events
+    Disable,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
     /// Interval for broadcasting out identity (cannot be less than 3 minutes)
     /// Note:
     ///     - If `None`, this will be disabled
+    ///     - Will default to 3 minutes if less than
     ///     - This may be removed in the future
-    pub auto_push: Option<u64>,
+    pub auto_push: Option<Duration>,
     /// Discovery type
     pub discovery: Discovery,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     /// Placeholder for a offline agents to obtain information regarding one own identity
     pub sync: Vec<Multiaddr>,
     /// Interval to push or check node
-    pub sync_interval: u64,
+    pub sync_interval: Duration,
     /// Use objects directly rather than a cid
     pub override_ipld: bool,
-
+    /// Enables sharing platform (Desktop, Mobile, Web) information to another user
     pub share_platform: bool,
-
+    /// Enables phonebook service
     pub use_phonebook: bool,
-
-    pub friend_request_response_duration: Option<u64>,
+    /// Emit event for when a friend comes online or offline
+    pub emit_online_event: bool,
+    /// Waits for a response from peer for a specific duration
+    pub friend_request_response_duration: Option<Duration>,
+    /// Options to allow emitting identity events to all or just friends
+    pub update_events: UpdateEvents,
 }
 
 impl Default for StoreSetting {
@@ -218,11 +237,13 @@ impl Default for StoreSetting {
             auto_push: None,
             discovery: Discovery::Provider(None),
             sync: Vec::new(),
-            sync_interval: 100,
+            sync_interval: Duration::from_millis(1000),
             override_ipld: true,
             share_platform: false,
             use_phonebook: true,
             friend_request_response_duration: None,
+            emit_online_event: false,
+            update_events: Default::default(),
         }
     }
 }
@@ -237,6 +258,7 @@ pub struct MpIpfsConfig {
     pub ipfs_setting: IpfsSetting,
     pub store_setting: StoreSetting,
     pub debug: bool,
+    pub save_phrase: bool,
 }
 
 impl Default for MpIpfsConfig {
@@ -255,6 +277,7 @@ impl Default for MpIpfsConfig {
             },
             store_setting: Default::default(),
             debug: false,
+            save_phrase: false,
         }
     }
 }

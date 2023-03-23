@@ -7,8 +7,6 @@ use libipld::IpldCodec;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use tokio::sync::{broadcast, RwLock};
 use tracing::log::{error, warn};
@@ -20,40 +18,33 @@ use warp::sync::Arc;
 
 use warp::tesseract::Tesseract;
 
-use crate::config::Discovery;
+use crate::config::MpIpfsConfig;
 
 use super::document::DocumentType;
 use super::identity::{IdentityStore, LookupBy};
 use super::phonebook::PhoneBook;
 use super::queue::Queue;
-use super::{did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType, VecExt};
+use super::{did_keypair, did_to_libp2p_pub, discovery, libp2p_pub_to_did, VecExt};
 
 #[allow(clippy::type_complexity)]
+#[derive(Clone)]
 pub struct FriendsStore {
     ipfs: Ipfs,
 
     // Identity Store
     identity: IdentityStore,
 
+    discovery: discovery::Discovery,
+
     // keypair
     did_key: Arc<DID>,
 
-    // path to where things are stored
-    path: Option<PathBuf>,
-
-    // Would be used to stop the look in the tokio task
-    end_event: Arc<AtomicBool>,
-
-    override_ipld: Arc<AtomicBool>,
-
+    // Queue to handle sending friend request
     queue: Queue,
-
-    // Tesseract
-    tesseract: Tesseract,
 
     phonebook: Option<PhoneBook>,
 
-    wait_on_response: Option<u64>,
+    wait_on_response: Option<Duration>,
 
     signal: Arc<RwLock<HashMap<DID, oneshot::Sender<Result<(), Error>>>>>,
 
@@ -127,60 +118,41 @@ pub enum RequestType {
     Outgoing,
 }
 
-impl Clone for FriendsStore {
-    fn clone(&self) -> Self {
-        Self {
-            ipfs: self.ipfs.clone(),
-            identity: self.identity.clone(),
-            did_key: self.did_key.clone(),
-            path: self.path.clone(),
-            override_ipld: self.override_ipld.clone(),
-            end_event: self.end_event.clone(),
-            queue: self.queue.clone(),
-            tesseract: self.tesseract.clone(),
-            phonebook: self.phonebook.clone(),
-            signal: self.signal.clone(),
-            tx: self.tx.clone(),
-            wait_on_response: self.wait_on_response,
-        }
-    }
-}
-
 impl FriendsStore {
     pub async fn new(
         ipfs: Ipfs,
         identity: IdentityStore,
-        path: Option<PathBuf>,
+        discovery: discovery::Discovery,
+        config: MpIpfsConfig,
         tesseract: Tesseract,
-        (tx, override_ipld, use_phonebook, wait_on_response): (
-            broadcast::Sender<MultiPassEventKind>,
-            bool,
-            bool,
-            Option<u64>,
-        ),
+        tx: broadcast::Sender<MultiPassEventKind>,
     ) -> anyhow::Result<Self> {
-        let end_event = Arc::new(AtomicBool::new(false));
-
         let did_key = Arc::new(did_keypair(&tesseract)?);
-        let queue = Queue::new(ipfs.clone(), did_key.clone(), path.clone());
-        let override_ipld = Arc::new(AtomicBool::new(override_ipld));
 
-        let phonebook = PhoneBook::new(ipfs.clone(), tx.clone());
-        let phonebook = use_phonebook.then_some(phonebook);
+        let queue = Queue::new(
+            ipfs.clone(),
+            did_key.clone(),
+            config.path.clone(),
+            discovery.clone(),
+        );
+
+        let phonebook = config.store_setting.use_phonebook.then_some(PhoneBook::new(
+            ipfs.clone(),
+            discovery.clone(),
+            tx.clone(),
+            config.store_setting.emit_online_event,
+        ));
 
         let signal = Default::default();
-
+        let wait_on_response = config.store_setting.friend_request_response_duration;
         let store = Self {
             ipfs,
             identity,
+            discovery,
             did_key,
-            path,
-            end_event,
             queue,
-            tesseract,
             phonebook,
             tx,
-            override_ipld,
             signal,
             wait_on_response,
         };
@@ -198,10 +170,7 @@ impl FriendsStore {
                     async move { if let Err(_e) = store.queue.load().await {} }
                 });
 
-                let discovery = store.identity.discovery_type();
                 if let Some(phonebook) = store.phonebook.as_ref() {
-                    if let Err(_e) = phonebook.set_discovery(discovery).await {}
-
                     for addr in store.identity.relays() {
                         if let Err(_e) = phonebook.add_relay(addr).await {}
                     }
@@ -909,6 +878,10 @@ impl FriendsStore {
             }
         }
 
+        // Push to give an update in the event any wasnt transmitted during the initial push
+        // We dont care if this errors or not.
+        let _ = self.identity.push(pubkey).await.ok();
+
         if let Err(e) = self.tx.send(MultiPassEventKind::FriendAdded {
             did: pubkey.clone(),
         }) {
@@ -1040,39 +1013,8 @@ impl FriendsStore {
 
         let topic = get_inbox_topic(recipient);
 
-        if matches!(
-            self.identity.discovery_type(),
-            Discovery::Direct | Discovery::None
-        ) {
-            let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
-
-            let connected = super::connected_to_peer(&self.ipfs, remote_peer_id).await?;
-
-            if connected != PeerConnectionType::Connected {
-                let res = match tokio::time::timeout(
-                    Duration::from_secs(2),
-                    self.ipfs.identity(Some(peer_id)),
-                )
-                .await
-                {
-                    Ok(res) => res,
-                    Err(e) => Err(anyhow::anyhow!("{}", e.to_string())),
-                };
-
-                if let Err(_e) = res {
-                    let ipfs = self.ipfs.clone();
-                    let pubkey = recipient.clone();
-                    let relay = self.identity.relays();
-                    let discovery = self.identity.discovery_type();
-                    tokio::spawn(async move {
-                        if let Err(e) = super::discover_peer(&ipfs, &pubkey, discovery, relay).await
-                        {
-                            error!("Error discoverying peer: {e}");
-                        }
-                    });
-                    tokio::task::yield_now().await;
-                }
-            }
+        if !self.discovery.contains(recipient).await {
+            self.discovery.insert(recipient).await?;
         }
 
         if store_request {
@@ -1127,7 +1069,7 @@ impl FriendsStore {
 
         if !queued && matches!(payload.event, Event::Request) {
             if let Some(rx) = std::mem::take(&mut rx) {
-                if let Some(timeout) = self.wait_on_response.map(Duration::from_millis) {
+                if let Some(timeout) = self.wait_on_response {
                     if let Ok(Ok(res)) = tokio::time::timeout(timeout, rx).await {
                         res?
                     }
