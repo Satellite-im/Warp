@@ -111,15 +111,6 @@ impl Discovery {
         self.config.clone()
     }
 
-    pub async fn get_with_peer_id(&self, peer_id: PeerId) -> Option<DiscoveryEntry> {
-        self.entries
-            .read()
-            .await
-            .iter()
-            .find(|entry| entry.peer_id == peer_id)
-            .cloned()
-    }
-
     pub async fn insert<P: Into<PeerType>>(&self, peer_type: P) -> Result<(), Error> {
         let (peer_id, did_key) = match &peer_type.into() {
             PeerType::PeerId(peer_id) => (*peer_id, None),
@@ -128,9 +119,13 @@ impl Discovery {
                 (peer_id, Some(did_key.clone()))
             }
         };
-
-        if self.contains(peer_id).await {
-            return Ok(());
+        if let Some(did) = &did_key {
+            if let Ok(entry) = self.get(peer_id).await {
+                if !entry.valid().await {
+                    entry.set_did_key(did).await;
+                    return Ok(())
+                }
+            }
         }
 
         let entry = DiscoveryEntry::new(
@@ -149,21 +144,35 @@ impl Discovery {
         Ok(())
     }
 
-    pub async fn get(&self, did: &DID) -> Option<DiscoveryEntry> {
-        if !self.contains(did).await {
-            return None;
+    pub async fn remove<P: Into<PeerType>>(&self, peer_type: P) -> Result<(), Error> {
+        let entry = self.get(peer_type).await?;
+
+        let removed = self.entries.write().await.remove(&entry);
+        if removed {
+            entry.cancel().await;
+            return Ok(());
         }
 
-        let Ok(peer_id) = did_to_libp2p_pub(did).map(|pk| pk.to_peer_id()) else {
-            return None
+        Err(Error::ObjectNotFound)
+    }
+
+    pub async fn get<P: Into<PeerType>>(&self, peer_type: P) -> Result<DiscoveryEntry, Error> {
+        let peer_id = match &peer_type.into() {
+            PeerType::PeerId(peer_id) => *peer_id,
+            PeerType::DID(did_key) => did_to_libp2p_pub(did_key).map(|pk| pk.to_peer_id())?,
         };
+
+        if !self.contains(peer_id).await {
+            return Err(Error::ObjectNotFound);
+        }
 
         self.entries
             .read()
             .await
             .iter()
-            .find(|entry| entry.peer_id == peer_id)
+            .find(|entry| entry.peer_id() == peer_id)
             .cloned()
+            .ok_or(Error::ObjectNotFound)
     }
 
     pub async fn contains<P: Into<PeerType>>(&self, peer_type: P) -> bool {
@@ -314,7 +323,7 @@ impl DiscoveryEntry {
                                 };
 
                                 let opts = DialOpts::peer_id(peer_id)
-                                    .condition(PeerCondition::NotDialing)
+                                    .condition(PeerCondition::Disconnected)
                                     .addresses(addrs)
                                     .extend_addresses_through_behaviour()
                                     .build();
@@ -381,19 +390,19 @@ impl DiscoveryEntry {
         self.did.read().await.is_some()
     }
 
-    pub async fn set_did_key(&self, did: DID) {
+    pub async fn set_did_key(&self, did: &DID) {
         if self.valid().await {
             return;
         }
 
         // Validate the peer_id against the entry id. If does not matches, then the did key is invalid.
 
-        match did_to_libp2p_pub(&did).map(|pk| pk.to_peer_id()) {
+        match did_to_libp2p_pub(did).map(|pk| pk.to_peer_id()) {
             Ok(peer_id) if self.peer_id == peer_id => {}
             _ => return,
         }
 
-        *self.did.write().await = Some(did)
+        *self.did.write().await = Some(did.clone())
     }
 
     /// Returns a DID key

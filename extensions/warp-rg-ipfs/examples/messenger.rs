@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::Duration;
 use tokio::task::JoinHandle;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
@@ -129,7 +130,7 @@ async fn create_account<P: AsRef<Path>>(
         config.ipfs_setting.bootstrap = bootstrap;
     }
 
-    config.store_setting.friend_request_response_duration = opt.wait;
+    config.store_setting.friend_request_response_duration = opt.wait.map(Duration::from_millis);
 
     config.ipfs_setting.mdns.enable = opt.mdns;
 
