@@ -873,14 +873,18 @@ dyn_clone::clone_trait_object!(RayGun);
 
 #[async_trait::async_trait]
 pub trait RayGunGroupConversation: Sync + Send {
+    /// Update conversation name
+    /// Note: This will only update the group conversation name
     async fn update_conversation_name(&mut self, _: Uuid, _: &str) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
-    
+
+    /// Add a recipient to the conversation
     async fn add_recipient(&mut self, _: Uuid, _: &DID) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
+    /// Remove a recipient from the conversation
     async fn remove_recipient(&mut self, _: Uuid, _: &DID) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
