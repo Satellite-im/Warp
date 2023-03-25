@@ -532,20 +532,39 @@ async fn main() -> anyhow::Result<()> {
                             *topic.write() = conversation_id;
                             writeln!(stdout, "Conversation is set to {conversation_id}")?;
                         }
+                        Some("/set-conversation-name") => {
+                            let conversation_id = match cmd_line.next() {
+                                Some(id) => id.parse()?,
+                                None => {
+                                    writeln!(stdout, "/set-conversation-name <conversation-id> <name>")?;
+                                    continue
+                                }
+                            };
+
+                            let name = match cmd_line.next() {
+                                Some(name) => name,
+                                None => {
+                                    writeln!(stdout, "/set-conversation-name <conversation-id> <name>")?;
+                                    continue
+                                }
+                            };
+                            
+                            if let Err(e) = chat.update_conversation_name(conversation_id, name).await {
+                                writeln!(stdout, "Error updating conversation: {e}")?;
+                                continue
+                            }
+                        }
                         Some("/list-conversations") => {
                             let mut table = Table::new();
-                            table.set_header(vec!["ID", "Recipients"]);
+                            table.set_header(vec!["Name", "ID", "Recipients"]);
                             let list = chat.list_conversations().await?;
                             for convo in list.iter() {
                                 let mut recipients = vec![];
                                 for recipient in convo.recipients() {
-                                    if convo.conversation_type() == ConversationType::Direct && recipient == identity.did_key() {
-                                        continue
-                                    }
                                     let username = get_username(new_account.clone(), recipient.clone()).await.unwrap_or_else(|_| recipient.to_string());
                                     recipients.push(username);
                                 }
-                                table.add_row(vec![convo.id().to_string(), recipients.join(",").to_string()]);
+                                table.add_row(vec![convo.name().unwrap_or_default(), convo.id().to_string(), recipients.join(",").to_string()]);
                             }
                             writeln!(stdout, "{table}")?;
                         },
@@ -1329,6 +1348,14 @@ async fn message_event_handle(
                             writeln!(stdout, ">>> {username} is no longer typing",)?;
                         }
                     }
+                }
+            }
+            MessageEventKind::ConversationNameUpdated {
+                conversation_id,
+                name,
+            } => {
+                if *topic.read() == conversation_id {
+                    writeln!(stdout, ">>> Conversation was named to {name}")?;
                 }
             }
             MessageEventKind::RecipientAdded {
