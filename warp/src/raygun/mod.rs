@@ -869,6 +869,10 @@ dyn_clone::clone_trait_object!(RayGun);
 
 #[async_trait::async_trait]
 pub trait RayGunGroupConversation: Sync + Send {
+    async fn update_conversation_name(&mut self, _: Uuid, _: &str) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+    
     async fn add_recipient(&mut self, _: Uuid, _: &DID) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
