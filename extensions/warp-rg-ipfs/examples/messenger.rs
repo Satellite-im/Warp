@@ -533,23 +533,16 @@ async fn main() -> anyhow::Result<()> {
                             writeln!(stdout, "Conversation is set to {conversation_id}")?;
                         }
                         Some("/set-conversation-name") => {
-                            let conversation_id = match cmd_line.next() {
-                                Some(id) => id.parse()?,
-                                None => {
-                                    writeln!(stdout, "/set-conversation-name <conversation-id> <name>")?;
-                                    continue
-                                }
-                            };
-
                             let name = match cmd_line.next() {
                                 Some(name) => name,
                                 None => {
-                                    writeln!(stdout, "/set-conversation-name <conversation-id> <name>")?;
+                                    writeln!(stdout, "/set-conversation-name <name>")?;
                                     continue
                                 }
                             };
+                            let topic = *topic.read();
 
-                            if let Err(e) = chat.update_conversation_name(conversation_id, name).await {
+                            if let Err(e) = chat.update_conversation_name(topic, name).await {
                                 writeln!(stdout, "Error updating conversation: {e}")?;
                                 continue
                             }
