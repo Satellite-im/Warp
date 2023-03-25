@@ -1,7 +1,7 @@
 pub mod conversation;
 pub mod document;
-pub mod message;
 pub mod keystore;
+pub mod message;
 
 use rust_ipfs as ipfs;
 use std::time::Duration;
@@ -12,9 +12,11 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp::{
     crypto::{
+        cipher::Cipher,
         did_key::{CoreSign, Generate, ECDH},
         hash::sha256_hash,
-        DIDKey, Ed25519KeyPair, KeyMaterial, DID, cipher::Cipher, zeroize::Zeroizing,
+        zeroize::Zeroizing,
+        DIDKey, Ed25519KeyPair, KeyMaterial, DID,
     },
     error::Error,
     logging::tracing::log::{error, trace},
@@ -37,6 +39,7 @@ pub enum MessagingEvents {
     Delete(Uuid, Uuid),
     Pin(Uuid, DID, Uuid, PinState),
     React(Uuid, DID, Uuid, ReactionState, String),
+    UpdateConversationName(Uuid, String, String),
     AddRecipient(Uuid, DID, Vec<DID>, String),
     RemoveRecipient(Uuid, DID, Vec<DID>, String),
     Event(Uuid, DID, MessageEvent, bool),
@@ -71,7 +74,11 @@ fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::
     Ok(pk)
 }
 
-fn ecdh_encrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> Result<Vec<u8>, Error> {
+fn ecdh_encrypt<K: AsRef<[u8]>>(
+    did: &DID,
+    recipient: Option<DID>,
+    data: K,
+) -> Result<Vec<u8>, Error> {
     let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
     let did_pubkey = match recipient {
         Some(did) => did.public_key_bytes(),
@@ -85,7 +92,11 @@ fn ecdh_encrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> R
     Ok(data)
 }
 
-fn ecdh_decrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> Result<Vec<u8>, Error> {
+fn ecdh_decrypt<K: AsRef<[u8]>>(
+    did: &DID,
+    recipient: Option<DID>,
+    data: K,
+) -> Result<Vec<u8>, Error> {
     let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
     let did_pubkey = match recipient {
         Some(did) => did.public_key_bytes(),
