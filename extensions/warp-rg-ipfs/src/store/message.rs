@@ -137,10 +137,6 @@ impl MessageStore {
         ): (bool, bool, bool, bool, bool),
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
-        // let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
-        //     true => path,
-        //     false => None,
-        // };
 
         if let Some(path) = path.as_ref() {
             if !path.exists() {

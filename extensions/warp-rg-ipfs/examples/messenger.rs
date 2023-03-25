@@ -459,6 +459,15 @@ async fn main() -> anyhow::Result<()> {
 
                             let mut did_keys = vec![];
 
+                            let name = match cmd_line.next() {
+                                Some(name) => name,
+                                None => {
+                                    writeln!(stdout, "/create-group <name> <DID> ...")?;
+                                    continue
+                                }
+                            };
+
+
                             for item in cmd_line.by_ref() {
                                 let Ok(did) = DID::try_from(item.to_string()) else {
                                     continue;
@@ -471,10 +480,8 @@ async fn main() -> anyhow::Result<()> {
                                 continue
                             }
 
-
-
                             if opt.disable_sender_emitter {
-                                let id = match chat.create_group_conversation(None, did_keys).await {
+                                let id = match chat.create_group_conversation(Some(name.to_string()), did_keys).await {
                                     Ok(id) => id,
                                     Err(e) => {
                                         writeln!(stdout, "Error creating conversation: {e}")?;
@@ -501,7 +508,7 @@ async fn main() -> anyhow::Result<()> {
                                         writeln!(stdout, ">> Error processing event task: {e}").unwrap();
                                     }
                                 });
-                            } else if let Err(e) = chat.create_group_conversation(None, did_keys).await {
+                            } else if let Err(e) = chat.create_group_conversation(Some(name.to_string()), did_keys).await {
                                     writeln!(stdout, "Error creating conversation: {e}")?;
                                     continue
                             }
