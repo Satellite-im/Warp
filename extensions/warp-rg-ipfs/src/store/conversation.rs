@@ -98,6 +98,10 @@ impl ConversationDocument {
         self.id
     }
 
+    pub fn name(&self) -> Option<String> {
+        self.name.clone()
+    }
+
     pub fn topic(&self) -> String {
         format!("{}/{}", self.conversation_type, self.id())
     }

@@ -28,7 +28,7 @@ use warp::{
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConversationEvents {
     NewConversation(DID),
-    NewGroupConversation(DID, Uuid, Vec<DID>, Option<String>),
+    NewGroupConversation(DID, Option<String>, Uuid, Vec<DID>, Option<String>),
     DeleteConversation(Uuid),
 }
 

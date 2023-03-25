@@ -18,8 +18,8 @@ use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{
-    ConversationType, Message, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions,
-    MessageStream, MessageType, Messages, MessagesType, PinState, RayGun, ReactionState,
+    Message, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions, MessageStream,
+    MessageType, Messages, MessagesType, PinState, RayGun, ReactionState,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -474,7 +474,7 @@ async fn main() -> anyhow::Result<()> {
 
 
                             if opt.disable_sender_emitter {
-                                let id = match chat.create_group_conversation(did_keys).await {
+                                let id = match chat.create_group_conversation(None, did_keys).await {
                                     Ok(id) => id,
                                     Err(e) => {
                                         writeln!(stdout, "Error creating conversation: {e}")?;
@@ -501,7 +501,7 @@ async fn main() -> anyhow::Result<()> {
                                         writeln!(stdout, ">> Error processing event task: {e}").unwrap();
                                     }
                                 });
-                            } else if let Err(e) = chat.create_group_conversation(did_keys).await {
+                            } else if let Err(e) = chat.create_group_conversation(None, did_keys).await {
                                     writeln!(stdout, "Error creating conversation: {e}")?;
                                     continue
                             }
@@ -548,7 +548,7 @@ async fn main() -> anyhow::Result<()> {
                                     continue
                                 }
                             };
-                            
+
                             if let Err(e) = chat.update_conversation_name(conversation_id, name).await {
                                 writeln!(stdout, "Error updating conversation: {e}")?;
                                 continue

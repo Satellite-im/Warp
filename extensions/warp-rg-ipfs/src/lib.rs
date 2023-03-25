@@ -240,9 +240,9 @@ impl RayGun for IpfsMessaging {
         self.messaging_store()?.create_conversation(did_key).await
     }
 
-    async fn create_group_conversation(&mut self, recipients: Vec<DID>) -> Result<Conversation> {
+    async fn create_group_conversation(&mut self, name: Option<String>, recipients: Vec<DID>) -> Result<Conversation> {
         self.messaging_store()?
-            .create_group_conversation(HashSet::from_iter(recipients))
+            .create_group_conversation(name, HashSet::from_iter(recipients))
             .await
     }
 
@@ -390,7 +390,7 @@ impl RayGunGroupConversation for IpfsMessaging {
             .update_conversation_name(conversation_id, name)
             .await
     }
-    
+
     async fn add_recipient(&mut self, conversation_id: Uuid, did_key: &DID) -> Result<()> {
         self.messaging_store()?
             .add_recipient(conversation_id, did_key)

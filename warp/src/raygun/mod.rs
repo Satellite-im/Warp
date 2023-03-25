@@ -782,7 +782,7 @@ pub trait RayGun:
         Err(Error::Unimplemented)
     }
 
-    async fn create_group_conversation(&mut self, _: Vec<DID>) -> Result<Conversation, Error> {
+    async fn create_group_conversation(&mut self, _: Option<String>, _: Vec<DID>) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
     }
 

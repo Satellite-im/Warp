@@ -481,6 +481,7 @@ impl MessageStore {
             }
             ConversationEvents::NewGroupConversation(
                 creator,
+                name,
                 conversation_id,
                 initial_recipients,
                 signature,
@@ -496,7 +497,7 @@ impl MessageStore {
                 info!("Creating conversation");
                 let convo = ConversationDocument::new(
                     did,
-                    None,
+                    name,
                     initial_recipients,
                     Some(conversation_id),
                     ConversationType::Group,
@@ -806,6 +807,7 @@ impl MessageStore {
 
     pub async fn create_group_conversation(
         &mut self,
+        name: Option<String>,
         did_key: HashSet<DID>,
     ) -> Result<Conversation, Error> {
         if self.with_friends.load(Ordering::SeqCst) {
@@ -833,20 +835,21 @@ impl MessageStore {
 
         tokio::spawn({
             let account = self.account.clone();
-            let did_list = did_key.clone();
+            let did_list = Vec::from_iter(did_key.clone());
             async move {
-                for did in did_list {
-                    if let Ok(list) = account.get_identity(did.into()).await {
-                        if list.is_empty() {
-                            warn!("Unable to find identity. Creating conversation anyway");
-                        }
+                if let Ok(list) = account
+                    .get_identity(warp::multipass::identity::Identifier::DIDList(did_list))
+                    .await
+                {
+                    if list.is_empty() {
+                        warn!("Unable to find identities. Creating conversation anyway");
                     }
                 }
             }
         });
 
         let conversation =
-            ConversationDocument::new_group(own_did, None, &Vec::from_iter(did_key))?;
+            ConversationDocument::new_group(own_did, name, &Vec::from_iter(did_key))?;
 
         let recipient = conversation.recipients();
 
@@ -882,6 +885,7 @@ impl MessageStore {
             warp::sata::Kind::Reference,
             serde_json::to_vec(&ConversationEvents::NewGroupConversation(
                 own_did.clone(),
+                conversation.name(),
                 conversation.id(),
                 recipient,
                 conversation.signature.clone(),
@@ -1518,6 +1522,7 @@ impl MessageStore {
         let own_did = &*self.did;
         let new_event = ConversationEvents::NewGroupConversation(
             own_did.clone(),
+            conversation.name(),
             conversation.id(),
             conversation.recipients(),
             Some(signature),
