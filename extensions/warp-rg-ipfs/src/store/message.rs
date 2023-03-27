@@ -1828,6 +1828,7 @@ impl MessageStore {
     pub async fn attach(
         &mut self,
         conversation_id: Uuid,
+        message_id: Option<Uuid>,
         location: Location,
         files: Vec<PathBuf>,
         messages: Vec<String>,
@@ -1967,6 +1968,7 @@ impl MessageStore {
         message.set_sender(own_did.clone());
         message.set_attachment(attachments);
         message.set_value(messages.clone());
+        message.set_replied(message_id);
 
         let construct = vec![
             message.id().into_bytes().to_vec(),
