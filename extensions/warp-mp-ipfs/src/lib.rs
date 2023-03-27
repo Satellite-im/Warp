@@ -212,6 +212,7 @@ impl IpfsIdentity {
                     cache: 100,
                     push_update: true,
                     protocol_version: "/satellite/warp/0.1".into(),
+                    initial_delay: Duration::from_secs(0),
                     ..Default::default()
                 };
                 if let Some(agent) = config.ipfs_setting.agent_version.as_ref() {
@@ -288,15 +289,6 @@ impl IpfsIdentity {
             let ipfs = ipfs.clone();
             let config = config.clone();
             async move {
-                if config.ipfs_setting.bootstrap && !empty_bootstrap {
-                    //TODO: run bootstrap in intervals
-                    //Note: If we decided to loop or run it in interval
-                    //      we should join on the returned handle
-                    if let Err(e) = ipfs.bootstrap().await {
-                        error!("Error bootstrapping: {e}");
-                    }
-                }
-
                 let start_relay_client = || {
                     let ipfs = ipfs.clone();
                     let config = config.clone();
@@ -327,12 +319,6 @@ impl IpfsIdentity {
                                 error!("Error dialing relay {}: {e}", addr.clone());
                                 continue;
                             }
-
-                            //Give time for identify to be sent/received
-                            //TODO: Remove on next rust-ipfs update
-                            //TODO: Check for relay protocol from address before attempting to use
-                            //      as a precaution
-                            tokio::time::sleep(Duration::from_millis(500)).await;
 
                             match ipfs
                                 .add_listening_address(addr.with(Protocol::P2pCircuit))
@@ -406,6 +392,13 @@ impl IpfsIdentity {
                 }
             }
         });
+
+        if config.ipfs_setting.bootstrap && !empty_bootstrap {
+            //TODO: determine if bootstrap should run in intervals
+            if let Err(e) = ipfs.bootstrap().await {
+                error!("Error bootstrapping: {e}");
+            }
+        }
 
         let relays = (!config.bootstrap.address().is_empty()).then(|| {
             config
