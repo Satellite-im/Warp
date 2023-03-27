@@ -806,6 +806,19 @@ impl MessageStore {
         name: Option<String>,
         did_key: HashSet<DID>,
     ) -> Result<Conversation, Error> {
+        if let Some(name) = name.as_ref() {
+            let name_length = name.trim().len();
+
+            if name_length == 0 || name_length > 255 {
+                return Err(Error::InvalidLength {
+                    context: "name".into(),
+                    current: name_length,
+                    minimum: Some(1),
+                    maximum: Some(255),
+                });
+            }
+        }
+
         if self.with_friends.load(Ordering::SeqCst) {
             for did in did_key.iter() {
                 self.account.has_friend(did).await?;
@@ -1413,6 +1426,17 @@ impl MessageStore {
         conversation_id: Uuid,
         name: &str,
     ) -> Result<(), Error> {
+        let name_length = name.trim().len();
+
+        if name_length == 0 || name_length > 255 {
+            return Err(Error::InvalidLength {
+                context: "name".into(),
+                current: name_length,
+                minimum: Some(1),
+                maximum: Some(255),
+            });
+        }
+
         let conversation = self.get_conversation(conversation_id).await?;
 
         if matches!(conversation.conversation_type, ConversationType::Direct) {
@@ -2826,6 +2850,22 @@ impl MessageStore {
                 }
             }
             MessagingEvents::UpdateConversationName(conversation_id, name, signature) => {
+                let name_length = name.trim().len();
+
+                if name_length == 0 || name_length > 255 {
+                    return Err(Error::InvalidLength {
+                        context: "name".into(),
+                        current: name_length,
+                        minimum: Some(1),
+                        maximum: Some(255),
+                    });
+                }
+                if let Some(current_name) = document.name() {
+                    if current_name.eq(&name) {
+                        return Ok(false);
+                    }
+                }
+
                 self.get_conversation_mut(document.id(), |conversation| {
                     conversation.name = Some(name.clone());
                     conversation.signature = Some(signature);
