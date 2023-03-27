@@ -98,6 +98,10 @@ impl ConversationDocument {
         self.id
     }
 
+    pub fn name(&self) -> Option<String> {
+        self.name.clone()
+    }
+
     pub fn topic(&self) -> String {
         format!("{}/{}", self.conversation_type, self.id())
     }
@@ -122,6 +126,7 @@ impl ConversationDocument {
 impl ConversationDocument {
     pub fn new(
         did: &DID,
+        name: Option<String>,
         mut recipients: Vec<DID>,
         id: Option<Uuid>,
         conversation_type: ConversationType,
@@ -129,7 +134,6 @@ impl ConversationDocument {
         signature: Option<String>,
     ) -> Result<Self, Error> {
         let id = id.unwrap_or_else(Uuid::new_v4);
-        let name = None;
 
         if !recipients.contains(did) {
             recipients.push(did.clone());
@@ -177,6 +181,7 @@ impl ConversationDocument {
 
         Self::new(
             did,
+            None,
             recipients.to_vec(),
             conversation_id,
             ConversationType::Direct,
@@ -185,10 +190,11 @@ impl ConversationDocument {
         )
     }
 
-    pub fn new_group(did: &DID, recipients: &[DID]) -> Result<Self, Error> {
+    pub fn new_group(did: &DID, name: Option<String>, recipients: &[DID]) -> Result<Self, Error> {
         let conversation_id = Some(Uuid::new_v4());
         Self::new(
             did,
+            name,
             recipients.to_vec(),
             conversation_id,
             ConversationType::Group,
@@ -431,7 +437,7 @@ impl ConversationDocument {
 
         let messages_chunk = messages.chunks(amount_per_page as _).collect::<Vec<_>>();
         let mut pages = vec![];
-        // First check to determine if there is a page that was selected 
+        // First check to determine if there is a page that was selected
         if let Some(index) = page_index {
             let page = messages_chunk.get(index).ok_or(Error::MessageNotFound)?;
             let mut messages = vec![];
@@ -444,7 +450,7 @@ impl ConversationDocument {
             pages.push(MessagePage::new(index, messages, total));
             return Ok(Messages::Page { pages, total: 1 });
         }
-        
+
         for (index, chunk) in messages_chunk.iter().enumerate() {
             let mut messages = vec![];
             for document in chunk.iter() {

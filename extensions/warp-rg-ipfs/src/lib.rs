@@ -6,7 +6,6 @@ use crate::spam_filter::SpamFilter;
 use config::RgIpfsConfig;
 use futures::StreamExt;
 use rust_ipfs::Ipfs;
-use warp::raygun::Messages;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -24,6 +23,7 @@ use warp::logging::tracing::log::trace;
 use warp::module::Module;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
+use warp::raygun::Messages;
 use warp::raygun::{
     Conversation, Location, MessageEvent, MessageEventStream, MessageStatus, RayGunEventStream,
     RayGunEvents, RayGunGroupConversation, RayGunStream,
@@ -240,9 +240,9 @@ impl RayGun for IpfsMessaging {
         self.messaging_store()?.create_conversation(did_key).await
     }
 
-    async fn create_group_conversation(&mut self, recipients: Vec<DID>) -> Result<Conversation> {
+    async fn create_group_conversation(&mut self, name: Option<String>, recipients: Vec<DID>) -> Result<Conversation> {
         self.messaging_store()?
-            .create_group_conversation(HashSet::from_iter(recipients))
+            .create_group_conversation(name, HashSet::from_iter(recipients))
             .await
     }
 
@@ -279,11 +279,7 @@ impl RayGun for IpfsMessaging {
             .await
     }
 
-    async fn get_messages(
-        &self,
-        conversation_id: Uuid,
-        opt: MessageOptions,
-    ) -> Result<Messages> {
+    async fn get_messages(&self, conversation_id: Uuid, opt: MessageOptions) -> Result<Messages> {
         self.messaging_store()?
             .get_messages(conversation_id, opt)
             .await
@@ -390,6 +386,12 @@ impl RayGunAttachment for IpfsMessaging {
 
 #[async_trait::async_trait]
 impl RayGunGroupConversation for IpfsMessaging {
+    async fn update_conversation_name(&mut self, conversation_id: Uuid, name: &str) -> Result<()> {
+        self.messaging_store()?
+            .update_conversation_name(conversation_id, name)
+            .await
+    }
+
     async fn add_recipient(&mut self, conversation_id: Uuid, did_key: &DID) -> Result<()> {
         self.messaging_store()?
             .add_recipient(conversation_id, did_key)
@@ -444,7 +446,6 @@ impl RayGunEvents for IpfsMessaging {
             .await
     }
 }
-
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
