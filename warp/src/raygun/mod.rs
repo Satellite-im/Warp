@@ -894,7 +894,7 @@ pub trait RayGunGroupConversation: Sync + Send {
 pub trait RayGunAttachment: Sync + Send {
     /// Send files to a conversation.
     /// If no files is provided in the array, it will throw an error
-    async fn attach(&mut self, _: Uuid, _: Vec<PathBuf>, _: Vec<String>) -> Result<(), Error> {
+    async fn attach(&mut self, _: Uuid, _: Option<Uuid>, _: Vec<PathBuf>, _: Vec<String>) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
