@@ -200,7 +200,6 @@ impl IpfsIdentity {
         }
 
         let mut opts = IpfsOptions {
-            keypair,
             bootstrap: config.bootstrap.address(),
             mdns: config.ipfs_setting.mdns.enable,
             listening_addrs: config.listen_on.clone(),
@@ -260,6 +259,7 @@ impl IpfsIdentity {
 
         info!("Starting ipfs");
         let ipfs = UninitializedIpfs::with_opt(opts)
+            .set_keypair(keypair)
             // We check the events from the swarm for autonat
             // So we can determine our nat status when it does change
             .swarm_events({
