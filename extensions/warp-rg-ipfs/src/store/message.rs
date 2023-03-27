@@ -1881,6 +1881,24 @@ impl MessageStore {
         files: Vec<PathBuf>,
         messages: Vec<String>,
     ) -> Result<(), Error> {
+        if !messages.is_empty() {
+            let lines_value_length: usize = messages
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.trim())
+                .map(|s| s.chars().count())
+                .sum();
+
+            if lines_value_length > 4096 {
+                error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+                return Err(Error::InvalidLength {
+                    context: "message".into(),
+                    current: lines_value_length,
+                    minimum: None,
+                    maximum: Some(4096),
+                });
+            }
+        }
         let conversation = self.get_conversation(conversation_id).await?;
         let mut tx = self.conversation_tx(conversation_id).await?;
         //TODO: Send directly if constellation isnt present
