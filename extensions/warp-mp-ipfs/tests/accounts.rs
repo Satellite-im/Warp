@@ -18,7 +18,6 @@ mod test {
         tesseract.unlock(b"internal pass").unwrap();
         let mut config = warp_mp_ipfs::config::MpIpfsConfig::development();
         config.store_setting.discovery = Discovery::Provider(context);
-        config.store_setting.broadcast_interval = 100;
         config.store_setting.share_platform = true;
 
         let mut account = ipfs_identity_temporary(Some(config), tesseract, None).await?;
@@ -146,7 +145,7 @@ mod test {
         let old_identity = account.get_own_identity().await?;
 
         account
-            .update_identity(IdentityUpdate::set_username("JohnDoe2.0".into()))
+            .update_identity(IdentityUpdate::Username("JohnDoe2.0".into()))
             .await?;
 
         let updated_identity = account.get_own_identity().await?;
@@ -172,7 +171,7 @@ mod test {
         let old_identity = account.get_own_identity().await?;
 
         account
-            .update_identity(IdentityUpdate::set_status_message(Some("Blast off".into())))
+            .update_identity(IdentityUpdate::StatusMessage(Some("Blast off".into())))
             .await?;
 
         let updated_identity = account.get_own_identity().await?;
@@ -258,8 +257,12 @@ mod test {
 
     #[tokio::test]
     async fn identity_platform() -> anyhow::Result<()> {
-        let (account, did, _) =
-            create_account(Some("JohnDoe"), None, Some("test::identity_platform".into())).await?;
+        let (account, did, _) = create_account(
+            Some("JohnDoe"),
+            None,
+            Some("test::identity_platform".into()),
+        )
+        .await?;
         let platform = account.identity_platform(&did).await?;
         assert_eq!(platform, Platform::Desktop);
         Ok(())

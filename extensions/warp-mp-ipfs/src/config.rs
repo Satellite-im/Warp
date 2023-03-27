@@ -1,9 +1,10 @@
-use rust_ipfs as ipfs;
 use ipfs::Multiaddr;
+use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
     str::FromStr,
+    time::Duration,
 };
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -16,7 +17,7 @@ pub enum Bootstrap {
     None,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Discovery {
     /// Uses DHT PROVIDER to find and connect to peers using the same context
@@ -24,13 +25,8 @@ pub enum Discovery {
     /// Dials out to peers directly. Using this will only work with the DID til that connection is made
     Direct,
     /// Disables Discovery over DHT or Directly (which relays on direct connection via multiaddr)
+    #[default]
     None,
-}
-
-impl Default for Discovery {
-    fn default() -> Self {
-        Discovery::None
-    }
 }
 
 impl Bootstrap {
@@ -46,7 +42,7 @@ impl Bootstrap {
             .iter()
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),
-            Bootstrap::Experimental => vec!["/ip4/67.205.175.147/tcp/5000/p2p/12D3KooWDC7igsZ9Yaheip77ejALmjG6AZm2auuVmMDj1AkC2o7B"]
+            Bootstrap::Experimental => vec!["/ip4/137.184.70.241/tcp/4894/p2p/12D3KooWP5aD68wq8eDqMtbcMgAzzhUJt8Y3n2g5vzAA1Lo7uVgY"]
             .iter()
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),
@@ -168,49 +164,86 @@ pub struct RelayServer {
     pub enable: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Pubsub {
+    pub max_transmit_size: usize,
+}
+
+impl Default for Pubsub {
+    fn default() -> Self {
+        Self {
+            max_transmit_size: 8 * 1024 * 1024,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct IpfsSetting {
     pub mdns: Mdns,
     pub relay_client: RelayClient,
     pub relay_server: RelayServer,
+    pub pubsub: Pubsub,
     pub swarm: Swarm,
     pub bootstrap: bool,
     pub portmapping: bool,
     pub agent_version: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub enum UpdateEvents {
+    /// Emit events for all identity updates
+    Enabled,
+    /// Emit events for identity updates from friends
+    FriendsOnly,
+    /// Send events for all identity updates, but only emit with friends
+    #[default]
+    EmitFriendsOnly,
+    /// Disable events
+    Disable,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
-    /// Interval for broadcasting out identity or checking queue (queue will be moved into its own system in the future)
-    pub broadcast_interval: u64,
+    /// Interval for broadcasting out identity (cannot be less than 3 minutes)
+    /// Note:
+    ///     - If `None`, this will be disabled
+    ///     - Will default to 3 minutes if less than
+    ///     - This may be removed in the future
+    pub auto_push: Option<Duration>,
     /// Discovery type
     pub discovery: Discovery,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     /// Placeholder for a offline agents to obtain information regarding one own identity
     pub sync: Vec<Multiaddr>,
     /// Interval to push or check node
-    pub sync_interval: u64,
+    pub sync_interval: Duration,
     /// Use objects directly rather than a cid
     pub override_ipld: bool,
-    
+    /// Enables sharing platform (Desktop, Mobile, Web) information to another user
     pub share_platform: bool,
-
+    /// Enables phonebook service
     pub use_phonebook: bool,
-
-    pub wait_on_response: Option<u64>,
+    /// Emit event for when a friend comes online or offline
+    pub emit_online_event: bool,
+    /// Waits for a response from peer for a specific duration
+    pub friend_request_response_duration: Option<Duration>,
+    /// Options to allow emitting identity events to all or just friends
+    pub update_events: UpdateEvents,
 }
 
 impl Default for StoreSetting {
     fn default() -> Self {
         Self {
-            broadcast_interval: 1000,
+            auto_push: None,
             discovery: Discovery::Provider(None),
             sync: Vec::new(),
-            sync_interval: 100,
+            sync_interval: Duration::from_millis(1000),
             override_ipld: true,
             share_platform: false,
             use_phonebook: true,
-            wait_on_response: None,
+            friend_request_response_duration: None,
+            emit_online_event: false,
+            update_events: Default::default(),
         }
     }
 }
@@ -225,6 +258,7 @@ pub struct MpIpfsConfig {
     pub ipfs_setting: IpfsSetting,
     pub store_setting: StoreSetting,
     pub debug: bool,
+    pub save_phrase: bool,
 }
 
 impl Default for MpIpfsConfig {
@@ -243,6 +277,7 @@ impl Default for MpIpfsConfig {
             },
             store_setting: Default::default(),
             debug: false,
+            save_phrase: false,
         }
     }
 }

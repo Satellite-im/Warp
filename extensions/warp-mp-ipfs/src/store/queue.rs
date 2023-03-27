@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use futures::{channel::mpsc, StreamExt};
 use libipld::IpldCodec;
-use rust_ipfs::{Ipfs};
+use rust_ipfs::Ipfs;
 use tokio::{sync::RwLock, task::JoinHandle};
 use tracing::log::error;
 use warp::{
@@ -18,6 +18,7 @@ use warp::{
 
 use super::{
     connected_to_peer,
+    discovery::Discovery,
     friends::{get_inbox_topic, PayloadEvent},
 };
 
@@ -27,6 +28,7 @@ pub struct Queue {
     entries: Arc<RwLock<HashMap<DID, QueueEntry>>>,
     removal: mpsc::UnboundedSender<DID>,
     did: Arc<DID>,
+    discovery: Discovery,
 }
 
 impl Clone for Queue {
@@ -37,12 +39,13 @@ impl Clone for Queue {
             entries: self.entries.clone(),
             removal: self.removal.clone(),
             did: self.did.clone(),
+            discovery: self.discovery.clone(),
         }
     }
 }
 
 impl Queue {
-    pub fn new(ipfs: Ipfs, did: Arc<DID>, path: Option<PathBuf>) -> Queue {
+    pub fn new(ipfs: Ipfs, did: Arc<DID>, path: Option<PathBuf>, discovery: Discovery) -> Queue {
         let (tx, mut rx) = mpsc::unbounded();
         let queue = Queue {
             path,
@@ -50,6 +53,7 @@ impl Queue {
             entries: Default::default(),
             removal: tx,
             did,
+            discovery,
         };
 
         tokio::spawn({
@@ -71,6 +75,7 @@ impl Queue {
     }
 
     pub async fn insert(&self, did: &DID, payload: PayloadEvent) {
+        if let Err(_e) = self.discovery.insert(did).await {}
         self.raw_insert(did, payload).await;
         self.save().await;
     }

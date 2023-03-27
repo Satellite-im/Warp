@@ -2,10 +2,12 @@ pub mod config;
 pub mod store;
 
 use config::MpIpfsConfig;
+use either::Either;
 use futures::channel::mpsc::unbounded;
 use futures::{AsyncReadExt, StreamExt};
+use ipfs::libp2p::kad::KademliaBucketInserts;
 use ipfs::libp2p::swarm::SwarmEvent;
-use ipfs::p2p::{ConnectionLimits, IdentifyConfiguration, TransportConfig};
+use ipfs::p2p::{ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig};
 use rust_ipfs as ipfs;
 use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,8 +16,9 @@ use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
 use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use tracing::log::{error, info, trace, warn};
+use tracing::log::{self, error, info, trace, warn};
 use warp::crypto::did_key::Generate;
+use warp::crypto::zeroize::Zeroizing;
 use warp::data::DataType;
 use warp::pocket_dimension::query::QueryBuilder;
 use warp::sata::Sata;
@@ -26,7 +29,7 @@ use warp::pocket_dimension::PocketDimension;
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
-use ipfs::{Ipfs, IpfsOptions, Keypair, Protocol, StoragePath, UninitializedIpfs};
+use ipfs::{Ipfs, IpfsOptions, Keypair, Multiaddr, Protocol, StoragePath, UninitializedIpfs};
 use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity, IdentityUpdate, Relationship};
@@ -124,10 +127,11 @@ impl IpfsIdentity {
         let keypair = match (init, tesseract.exist("keypair")) {
             (true, false) => {
                 info!("Keypair doesnt exist. Generating keypair....");
-                if let Keypair::Ed25519(kp) = Keypair::generate_ed25519() {
+                if let Some(kp) = Keypair::generate_ed25519().into_ed25519() {
                     let encoded_kp = bs58::encode(&kp.encode()).into_string();
                     tesseract.set("keypair", &encoded_kp)?;
-                    Keypair::Ed25519(kp)
+                    let bytes = Zeroizing::new(kp.secret().as_ref().to_vec());
+                    Keypair::ed25519_from_bytes(bytes)?
                 } else {
                     error!("Unreachable. Report this as a bug");
                     anyhow::bail!("Unreachable")
@@ -136,12 +140,9 @@ impl IpfsIdentity {
             (false, true) | (true, true) => {
                 info!("Fetching keypair from tesseract");
                 let keypair = tesseract.retrieve("keypair")?;
-                let kp = bs58::decode(keypair).into_vec()?;
+                let kp = Zeroizing::new(bs58::decode(keypair).into_vec()?);
                 let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-                let secret = ipfs::libp2p::identity::ed25519::SecretKey::from_bytes(
-                    id_kp.secret.to_bytes(),
-                )?;
-                Keypair::Ed25519(secret.into())
+                Keypair::ed25519_from_bytes(id_kp.secret.to_bytes())?
             }
             _ => anyhow::bail!("Unable to initialize store"),
         };
@@ -219,14 +220,14 @@ impl IpfsIdentity {
                 }
                 idconfig
             }),
-            kad_configuration: Some({
+            kad_configuration: Some(Either::Right({
                 let mut conf = ipfs::libp2p::kad::KademliaConfig::default();
-                conf.disjoint_query_paths(true);
                 conf.set_query_timeout(std::time::Duration::from_secs(60));
                 conf.set_publication_interval(Some(Duration::from_secs(30 * 60)));
                 conf.set_provider_record_ttl(Some(Duration::from_secs(60 * 60)));
+                conf.set_kbucket_inserts(KademliaBucketInserts::Manual);
                 conf
-            }),
+            })),
             swarm_configuration: Some(swarm_configuration),
             transport_configuration: Some(TransportConfig {
                 yamux_max_buffer_size: 16 * 1024 * 1024,
@@ -234,6 +235,10 @@ impl IpfsIdentity {
                 yamux_update_mode: 0,
                 mplex_max_buffer_size: usize::MAX / 2,
                 enable_quic: false,
+                ..Default::default()
+            }),
+            pubsub_config: Some(PubsubConfig {
+                max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
                 ..Default::default()
             }),
             port_mapping: config.ipfs_setting.portmapping,
@@ -292,19 +297,24 @@ impl IpfsIdentity {
                     }
                 }
 
-                let relay_client = {
+                let start_relay_client = || {
                     let ipfs = ipfs.clone();
                     let config = config.clone();
                     async move {
                         info!("Relay client enabled. Loading relays");
+                        let mut relayed = vec![];
+
                         for addr in config.bootstrap.address() {
-                            if let Err(e) = ipfs
+                            match ipfs
                                 .add_listening_address(addr.with(Protocol::P2pCircuit))
                                 .await
                             {
-                                info!("Error listening on relay: {e}");
-                                continue;
-                            }
+                                Ok(addr) => relayed.push(addr),
+                                Err(e) => {
+                                    info!("Error listening on relay: {e}");
+                                    continue;
+                                }
+                            };
                             if config.ipfs_setting.relay_client.single {
                                 break;
                             }
@@ -312,20 +322,45 @@ impl IpfsIdentity {
 
                         //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
                         //      anything on this end
-                        for addr in config.ipfs_setting.relay_client.relay_address.iter() {
-                            if let Err(e) = ipfs.dial(addr.clone()).await {
+                        for addr in config.ipfs_setting.relay_client.relay_address.clone() {
+                            if let Err(e) = ipfs.connect(addr.clone()).await {
                                 error!("Error dialing relay {}: {e}", addr.clone());
-                            }
-
-                            if let Err(e) = ipfs
-                                .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
-                                .await
-                            {
-                                info!("Error listening on relay: {e}");
                                 continue;
                             }
+
+                            //Give time for identify to be sent/received
+                            //TODO: Remove on next rust-ipfs update
+                            //TODO: Check for relay protocol from address before attempting to use
+                            //      as a precaution
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+
+                            match ipfs
+                                .add_listening_address(addr.with(Protocol::P2pCircuit))
+                                .await
+                            {
+                                Ok(addr) => relayed.push(addr),
+                                Err(e) => {
+                                    info!("Error listening on relay: {e}");
+                                    continue;
+                                }
+                            };
                             if config.ipfs_setting.relay_client.single {
                                 break;
+                            }
+                        }
+
+                        relayed
+                    }
+                };
+
+                let stop_relay_client = |relays: Vec<Multiaddr>| {
+                    let ipfs = ipfs.clone();
+                    async move {
+                        info!("Disconnecting from relays");
+                        for addr in relays {
+                            if let Err(e) = ipfs.remove_listening_address(addr).await {
+                                info!("Error removing relay: {e}");
+                                continue;
                             }
                         }
                     }
@@ -336,15 +371,37 @@ impl IpfsIdentity {
                     config.ipfs_setting.relay_client.enable,
                 ) {
                     (true, true) => {
+                        //Start using relays right away rather than waiting for nat status
+                        let mut addrs = start_relay_client().await;
+                        let mut using_relay = true;
                         while let Some(public) = nat_channel_rx.next().await {
-                            if !public {
-                                relay_client.await;
-                                //Note: Although this breaks the loop now, it may be possible for the nat to change in the future resulting in it being public
-                                break;
+                            match public {
+                                true => {
+                                    if using_relay {
+                                        log::trace!(
+                                            "Disabling relays due to being publicly accessible."
+                                        );
+                                        let addrs = addrs.drain(..).collect::<Vec<_>>();
+                                        stop_relay_client(addrs).await;
+                                        using_relay = false;
+                                    }
+                                }
+                                false => {
+                                    if !using_relay {
+                                        log::trace!(
+                                            "No longer publicly accessible. Switching to relays"
+                                        );
+                                        addrs = start_relay_client().await;
+                                        using_relay = true;
+                                    }
+                                }
                             }
                         }
                     }
-                    (false, true) => relay_client.await,
+                    (false, true) => {
+                        // We dont need the addresses of the circuit relays
+                        start_relay_client().await;
+                    }
                     (true, false) | (false, false) => {}
                 }
             }
@@ -359,19 +416,20 @@ impl IpfsIdentity {
                 .collect()
         });
 
-        let discovery = Discovery::new(config.store_setting.discovery);
+        let discovery = Discovery::new(ipfs.clone(), config.store_setting.discovery.clone());
 
         let identity_store = IdentityStore::new(
             ipfs.clone(),
             config.path.clone(),
             tesseract.clone(),
-            config.store_setting.broadcast_interval,
+            config.store_setting.auto_push,
             self.tx.clone(),
             (
-                discovery,
+                discovery.clone(),
                 relays,
                 config.store_setting.override_ipld,
                 config.store_setting.share_platform,
+                config.store_setting.update_events,
             ),
         )
         .await?;
@@ -380,18 +438,15 @@ impl IpfsIdentity {
         let friend_store = FriendsStore::new(
             ipfs.clone(),
             identity_store.clone(),
-            config.path,
+            discovery,
+            config.clone(),
             tesseract.clone(),
-            config.store_setting.broadcast_interval,
-            (
-                self.tx.clone(),
-                config.store_setting.override_ipld,
-                config.store_setting.use_phonebook,
-                config.store_setting.wait_on_response,
-            ),
+            self.tx.clone(),
         )
         .await?;
         info!("friends store initialized");
+
+        identity_store.set_friend_store(friend_store.clone()).await;
 
         *self.identity_store.write() = Some(identity_store);
         *self.friend_store.write() = Some(friend_store);
@@ -528,7 +583,12 @@ impl MultiPass for IpfsIdentity {
             let mut tesseract = self.tesseract.clone();
             if !tesseract.exist("keypair") {
                 warn!("Loading keypair generated from mnemonic phrase into tesseract");
-                warp::crypto::keypair::mnemonic_into_tesseract(&mut tesseract, phrase, None)?;
+                warp::crypto::keypair::mnemonic_into_tesseract(
+                    &mut tesseract,
+                    phrase,
+                    None,
+                    self.config.save_phrase,
+                )?;
             }
         }
 
@@ -598,7 +658,7 @@ impl MultiPass for IpfsIdentity {
                 store.lookup(LookupBy::Username(username)).await
             }
             Identifier::DIDList(list) => store.lookup(LookupBy::DidKeys(list)).await,
-            Identifier::Own => return store.own_identity().await.map(|i| vec![i]),
+            Identifier::Own => return store.own_identity(true).await.map(|i| vec![i]),
         }?;
         trace!("Found {} identities", idents.len());
         // for ident in &idents {
@@ -740,6 +800,14 @@ impl MultiPass for IpfsIdentity {
                 root_document.picture = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
                 store.set_root_document(root_document).await?;
             }
+            IdentityUpdate::ClearPicture => {
+                let mut root_document = store.get_root_document().await?;
+                let document = root_document.picture.take();
+                if let Some(DocumentType::UnixFS(cid, _)) = document {
+                    old_cid = Some(cid);
+                }
+                store.set_root_document(root_document).await?;
+            }
             IdentityUpdate::Banner(data) => {
                 let len = data.len();
                 if len == 0 || len > 2 * 1024 * 1024 {
@@ -838,6 +906,14 @@ impl MultiPass for IpfsIdentity {
                 root_document.banner = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
                 store.set_root_document(root_document).await?;
             }
+            IdentityUpdate::ClearBanner => {
+                let mut root_document = store.get_root_document().await?;
+                let document = root_document.banner.take();
+                if let Some(DocumentType::UnixFS(cid, _)) = document {
+                    old_cid = Some(cid);
+                }
+                store.set_root_document(root_document).await?;
+            }
             IdentityUpdate::StatusMessage(status) => {
                 if let Some(status) = status.clone() {
                     let len = status.chars().count();
@@ -853,6 +929,10 @@ impl MultiPass for IpfsIdentity {
                 identity.set_status_message(status);
                 store.identity_update(identity.clone()).await?;
             }
+            IdentityUpdate::ClearStatusMessage => {
+                identity.set_status_message(None);
+                store.identity_update(identity.clone()).await?;
+            }
         };
 
         if let Some(cid) = old_cid {
@@ -863,6 +943,7 @@ impl MultiPass for IpfsIdentity {
 
         info!("Update identity store");
         store.update_identity().await?;
+        store.push_to_all().await;
 
         Ok(())
     }

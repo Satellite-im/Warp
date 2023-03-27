@@ -1,9 +1,9 @@
 pub mod config;
 
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
-use warp::constellation::ConstellationEvent;
 use std::io::ErrorKind;
 use std::path::PathBuf;
+use warp::constellation::ConstellationEvent;
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 // use warp_common::futures::TryStreamExt;
@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use tokio_util::io::StreamReader;
-use warp::constellation::{path::Path, directory::Directory, Constellation};
+use warp::constellation::{directory::Directory, path::Path, Constellation};
 use warp::data::{DataObject, DataType};
 use warp::error::Error;
 use warp::hooks::Hooks;

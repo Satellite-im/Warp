@@ -13,7 +13,10 @@ use rust_ipfs as ipfs;
 use ipfs::{Multiaddr, PeerId, Protocol};
 use serde::{Deserialize, Serialize};
 use warp::{
-    crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
+    crypto::{
+        did_key::{CoreSign, Generate},
+        DIDKey, Ed25519KeyPair, KeyMaterial, DID,
+    },
     error::Error,
     multipass::identity::{Identity, IdentityStatus, Platform},
     tesseract::Tesseract,
@@ -22,8 +25,6 @@ use warp::{
 use crate::config::Discovery;
 
 use self::document::DocumentType;
-
-pub const IDENTITY_BROADCAST: &str = "identity/broadcast";
 
 pub trait VecExt<T: Eq> {
     fn insert_item(&mut self, item: &T) -> bool;
@@ -57,7 +58,6 @@ where
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IdentityPayload {
-    /// Not required but would be used to cross check the identity did, sender (if sent directly)
     pub did: DID,
 
     /// Type that represents profile picturec
@@ -76,18 +76,41 @@ pub struct IdentityPayload {
 
     /// Type that represents identity or cid
     pub payload: DocumentType<Identity>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<Vec<u8>>,
 }
 
+impl IdentityPayload {
+    pub fn sign(mut self, did: &DID) -> Result<IdentityPayload, Error> {
+        let bytes = serde_json::to_vec(&self)?;
+        let signature = did.sign(&bytes);
+        self.signature = Some(signature);
+        Ok(self)
+    }
+
+    pub fn verify(&self) -> Result<(), Error> {
+        let mut payload = self.clone();
+        let signature = std::mem::take(&mut payload.signature).ok_or(Error::InvalidSignature)?;
+
+        let bytes = serde_json::to_vec(&payload)?;
+        self.did
+            .verify(&bytes, &signature)
+            .map_err(|_| Error::InvalidSignature)?;
+        Ok(())
+    }
+}
+
+#[allow(deprecated)]
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity::PublicKey> {
-    let pk = ipfs::libp2p::identity::PublicKey::Ed25519(
-        ipfs::libp2p::identity::ed25519::PublicKey::decode(&public_key.public_key_bytes())?,
-    );
-    Ok(pk)
+    let pub_key =
+        ipfs::libp2p::identity::ed25519::PublicKey::decode(&public_key.public_key_bytes())?;
+    Ok(ipfs::libp2p::identity::PublicKey::Ed25519(pub_key))
 }
 
 fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::Result<DID> {
-    let pk = match public_key {
-        ipfs::libp2p::identity::PublicKey::Ed25519(pk) => {
+    let pk = match public_key.clone().into_ed25519() {
+        Some(pk) => {
             let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.encode()).into();
             did.try_into()?
         }
@@ -108,10 +131,7 @@ fn did_keypair(tesseract: &Tesseract) -> anyhow::Result<DID> {
 // who are providing and connect to them.
 // Note that there is usually a delay in `ipfs.provide`.
 // TODO: Investigate the delay in providing the CID
-pub async fn discovery<S: AsRef<str>>(
-    ipfs: ipfs::Ipfs,
-    topic: S,
-) -> anyhow::Result<()> {
+pub async fn discovery<S: AsRef<str>>(ipfs: ipfs::Ipfs, topic: S) -> anyhow::Result<()> {
     let topic = topic.as_ref();
     let cid = ipfs
         .put_dag(libipld::ipld!(format!("discovery:{topic}")))
@@ -180,7 +200,7 @@ pub async fn connected_to_peer<I: Into<PeerType>>(
         PeerType::PeerId(peer) => peer,
     };
 
-    let connected_peer = ipfs.connected().await?.iter().any(|peer| *peer == peer_id);
+    let connected_peer = ipfs.is_connected(peer_id).await?;
 
     Ok(match connected_peer {
         true => PeerConnectionType::Connected,
@@ -214,7 +234,7 @@ pub async fn discover_peer(
             //Attempt a direct dial via relay
             for addr in relay.iter() {
                 let addr = addr.clone().with(Protocol::P2p(peer_id.into()));
-                if let Err(_e) = ipfs.dial(addr).await {
+                if let Err(_e) = ipfs.connect(addr).await {
                     continue;
                 }
                 tokio::time::sleep(Duration::from_millis(300)).await;
