@@ -1,3 +1,5 @@
+pub mod identity;
+
 use futures::StreamExt;
 use ipfs::{Ipfs, IpfsPath};
 use libipld::{
