@@ -18,6 +18,7 @@ use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
 use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
+use tracing::debug;
 use tracing::log::{self, error, info, trace, warn};
 use warp::crypto::did_key::Generate;
 use warp::crypto::zeroize::Zeroizing;
@@ -307,15 +308,19 @@ impl IpfsIdentity {
 
                         for addr in config.bootstrap.address() {
                             match ipfs
-                                .add_listening_address(addr.with(Protocol::P2pCircuit))
+                                .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
                                 .await
                             {
-                                Ok(addr) => relayed.push(addr),
+                                Ok(addr) => {
+                                    debug!("Listening on {}", addr);
+                                    relayed.push(addr)
+                                }
                                 Err(e) => {
                                     info!("Error listening on relay via bootstrap: {e}");
                                     continue;
                                 }
                             };
+
                             if config.ipfs_setting.relay_client.single {
                                 break;
                             }
@@ -330,12 +335,15 @@ impl IpfsIdentity {
                             }
 
                             match ipfs
-                                .add_listening_address(addr.with(Protocol::P2pCircuit))
+                                .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
                                 .await
                             {
-                                Ok(addr) => relayed.push(addr),
+                                Ok(addr) => {
+                                    debug!("Listening on {}", addr);
+                                    relayed.push(addr);
+                                }
                                 Err(e) => {
-                                    info!("Error listening on inserted relay: {e}");
+                                    info!("Error listening on relay {}: {e}", addr.clone().with(Protocol::P2pCircuit));
                                     continue;
                                 }
                             };
