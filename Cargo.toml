@@ -18,7 +18,7 @@ async-trait = { version = "0.1" }
 async-stream = "0.3"
 async-broadcast = "0.5"
 tokio = { version = "1" }
-tokio-util = { version = "0.7"}
+tokio-util = { version = "0.7" }
 tokio-stream = { version = "0.1" }
 
 # Crypto crates
@@ -72,4 +72,4 @@ getrandom = { version = "0.2" }
 either = "1"
 
 #ipfs dependency
-rust-ipfs = "=0.3.11"
+rust-ipfs = "=0.3.12"
