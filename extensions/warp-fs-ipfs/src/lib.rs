@@ -1,9 +1,8 @@
 pub mod config;
 use config::FsIpfsConfig;
-use futures::stream::BoxStream;
+use futures::stream::{self, BoxStream};
 use futures::{pin_mut, StreamExt};
-use ipfs::unixfs::UnixfsStatus;
-use libipld::serde::{from_ipld, to_ipld};
+use ipfs::unixfs::{AddOpt, AddOption, UnixfsStatus};
 use libipld::Cid;
 use rust_ipfs as ipfs;
 use std::any::Any;
@@ -16,9 +15,12 @@ use warp::constellation::{
     ConstellationDataType, ConstellationEvent, ConstellationEventKind, ConstellationEventStream,
     ConstellationProgressStream, Progression,
 };
+use warp::crypto::cipher::Cipher;
+use warp::crypto::did_key::{Generate, ECDH};
+use warp::crypto::zeroize::Zeroizing;
+use warp::crypto::{Ed25519KeyPair, KeyMaterial, DID};
 use warp::logging::tracing::{debug, error};
 use warp::multipass::MultiPass;
-use warp::sata::{Kind, Sata};
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::module::Module;
@@ -135,7 +137,7 @@ impl IpfsFileSystem {
         *self.ipfs.write() = Some(ipfs);
 
         if let Err(_e) = self.import_index().await {
-            //TODO: Log error
+            error!("Error loading index: {_e}");
         }
 
         tokio::spawn({
@@ -144,7 +146,7 @@ impl IpfsFileSystem {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                     if let Err(_e) = fs.export_index().await {
-                        //Log error
+                        error!("Error exporting index: {_e}");
                     }
                 }
             }
@@ -156,23 +158,46 @@ impl IpfsFileSystem {
     #[allow(clippy::clone_on_copy)]
     pub async fn export_index(&self) -> Result<()> {
         let ipfs = self.ipfs()?;
-        let mut object = Sata::default();
         let index = self.export(ConstellationDataType::Json)?;
-        let data = match self.account().await {
-            Ok(account) => {
-                let key = account.decrypt_private_key(None)?;
-                object.add_recipient(&key)?;
-                object.encrypt(libipld::IpldCodec::DagJson, &key, Kind::Reference, index)?
-            }
-            _ => object.encode(libipld::IpldCodec::DagJson, Kind::Reference, index)?,
-        };
+        let account = self.account().await?;
 
-        let ipld = to_ipld(data).map_err(anyhow::Error::from)?;
-        let cid = ipfs.put_dag(ipld).await?;
+        let key = account.decrypt_private_key(None)?;
+        let data = ecdh_encrypt(&key, None, index.as_bytes())?;
+
+        let data_stream = stream::once(async move { Ok::<_, std::io::Error>(data) }).boxed();
+
+        let mut stream = ipfs
+            .unixfs()
+            .add(
+                AddOpt::Stream(data_stream),
+                Some(AddOption {
+                    pin: true,
+                    ..Default::default()
+                }),
+            )
+            .await?;
+
+        let mut ipfs_path = None;
+
+        while let Some(status) = stream.next().await {
+            if let UnixfsStatus::CompletedStatus { path, .. } = status {
+                ipfs_path = Some(path);
+            }
+        }
+
+        let path = ipfs_path.ok_or(Error::OtherWithContext("unable to get cid".into()))?;
+
+        let cid = path
+            .root()
+            .cid()
+            .ok_or(Error::OtherWithContext("unable to get cid".into()))?;
+
         let last_cid = self.index_cid.read().clone();
-        *self.index_cid.write() = Some(cid);
+
+        *self.index_cid.write() = Some(*cid);
+
         if let Some(last_cid) = last_cid {
-            if cid != last_cid {
+            if *cid != last_cid {
                 if ipfs.is_pinned(&last_cid).await? {
                     ipfs.remove_pin(&last_cid, false).await?;
                 }
@@ -183,7 +208,7 @@ impl IpfsFileSystem {
         if let Some(config) = &self.config {
             if let Some(path) = config.path.as_ref() {
                 if let Err(_e) = tokio::fs::write(path.join(".index_id"), cid.to_string()).await {
-                    //Log export?
+                    error!("Error writing index: {_e}");
                 }
             }
         }
@@ -201,24 +226,29 @@ impl IpfsFileSystem {
                 let cid: Cid = cid_str.parse().map_err(anyhow::Error::from)?;
                 *self.index_cid.write() = Some(cid);
 
-                let ipld = tokio::time::timeout(
-                    std::time::Duration::from_secs(5),
-                    ipfs.get_dag(IpfsPath::from(cid)),
-                )
-                .await
-                .map_err(anyhow::Error::from)??;
+                let mut index_stream = ipfs
+                    .unixfs()
+                    .cat(IpfsPath::from(cid), None, &[], true)
+                    .await
+                    .map_err(anyhow::Error::from)?
+                    .boxed();
 
-                let data: Sata = from_ipld(ipld).map_err(anyhow::Error::from)?;
+                let mut data = vec![];
 
-                let index: String = match self.account().await {
-                    Ok(account) => {
-                        let key = account.decrypt_private_key(None)?;
-                        data.decrypt(&key)?
-                    }
-                    _ => data.decode()?,
-                };
+                while let Some(result) = index_stream.next().await {
+                    let mut bytes = result.map_err(anyhow::Error::from)?;
+                    data.append(&mut bytes);
+                }
+                let account = self.account().await?;
 
-                self.import(ConstellationDataType::Json, index)?;
+                let key = account.decrypt_private_key(None)?;
+
+                let index_bytes = ecdh_decrypt(&key, None, data)?;
+
+                self.import(
+                    ConstellationDataType::Json,
+                    String::from_utf8_lossy(&index_bytes).to_string(),
+                )?;
             }
         }
         Ok(())
@@ -873,4 +903,32 @@ pub mod ffi {
             .map_err(Error::from)
             .into()
     }
+}
+
+fn ecdh_encrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> Result<Vec<u8>> {
+    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
+    let did_pubkey = match recipient {
+        Some(did) => did.public_key_bytes(),
+        None => did.public_key_bytes(),
+    };
+
+    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
+    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
+    let data = Cipher::direct_encrypt(data.as_ref(), &prik)?;
+
+    Ok(data)
+}
+
+fn ecdh_decrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> Result<Vec<u8>> {
+    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
+    let did_pubkey = match recipient {
+        Some(did) => did.public_key_bytes(),
+        None => did.public_key_bytes(),
+    };
+
+    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
+    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
+    let data = Cipher::direct_decrypt(data.as_ref(), &prik)?;
+
+    Ok(data)
 }
