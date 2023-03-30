@@ -112,6 +112,18 @@ pub enum LookupBy {
     ShortId(String),
 }
 
+impl From<DID> for LookupBy {
+    fn from(did: DID) -> Self {
+        LookupBy::DidKey(did)
+    }
+}
+
+impl From<Vec<DID>> for LookupBy {
+    fn from(list: Vec<DID>) -> Self {
+        LookupBy::DidKeys(list)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[allow(clippy::large_enum_variant)]

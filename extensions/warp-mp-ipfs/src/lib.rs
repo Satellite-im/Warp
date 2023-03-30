@@ -409,7 +409,7 @@ impl IpfsIdentity {
                 .collect()
         });
 
-        let discovery = Discovery::new(ipfs.clone(), config.store_setting.discovery.clone());
+        let discovery = Discovery::new(ipfs.clone(), config.store_setting.discovery.clone(), config.ipfs_setting.relay_client.relay_address.clone());
 
         let identity_store = IdentityStore::new(
             ipfs.clone(),

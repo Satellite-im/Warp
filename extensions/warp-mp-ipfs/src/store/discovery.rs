@@ -11,7 +11,7 @@ use std::{
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
 use rust_ipfs::{
     libp2p::swarm::dial_opts::{DialOpts, PeerCondition},
-    Ipfs, PeerId,
+    Ipfs, Multiaddr, PeerId, Protocol,
 };
 use tokio::{
     sync::{broadcast, RwLock},
@@ -28,17 +28,19 @@ use super::{did_to_libp2p_pub, libp2p_pub_to_did, PeerConnectionType, PeerType};
 pub struct Discovery {
     ipfs: Ipfs,
     config: DiscoveryConfig,
+    relays: Vec<Multiaddr>,
     entries: Arc<RwLock<HashSet<DiscoveryEntry>>>,
     task: Arc<RwLock<Option<JoinHandle<()>>>>,
     events: broadcast::Sender<DID>,
 }
 
 impl Discovery {
-    pub fn new(ipfs: Ipfs, config: DiscoveryConfig) -> Self {
+    pub fn new(ipfs: Ipfs, config: DiscoveryConfig, relays: Vec<Multiaddr>) -> Self {
         let (events, _) = tokio::sync::broadcast::channel(2048);
         Self {
             ipfs,
             config,
+            relays,
             entries: Arc::default(),
             task: Arc::default(),
             events,
@@ -82,6 +84,7 @@ impl Discovery {
                                             &discovery.ipfs,
                                             peer_id,
                                             None,
+                                            discovery.relays.clone(),
                                             discovery.config.clone(),
                                             discovery.events.clone(),
                                         )
@@ -123,7 +126,7 @@ impl Discovery {
             if let Ok(entry) = self.get(peer_id).await {
                 if !entry.valid().await {
                     entry.set_did_key(did).await;
-                    return Ok(())
+                    return Ok(());
                 }
             }
         }
@@ -132,6 +135,7 @@ impl Discovery {
             &self.ipfs,
             peer_id,
             did_key,
+            self.relays.clone(),
             self.config.clone(),
             self.events.clone(),
         )
@@ -212,6 +216,7 @@ pub struct DiscoveryEntry {
     ipfs: Ipfs,
     did: Arc<RwLock<Option<DID>>>,
     discover: Arc<AtomicBool>,
+    relays: Vec<Multiaddr>,
     peer_id: PeerId,
     connection_type: Arc<RwLock<PeerConnectionType>>,
     config: DiscoveryConfig,
@@ -238,6 +243,7 @@ impl DiscoveryEntry {
         ipfs: &Ipfs,
         peer_id: PeerId,
         did: Option<DID>,
+        relays: Vec<Multiaddr>,
         config: DiscoveryConfig,
         sender: broadcast::Sender<DID>,
     ) -> Self {
@@ -246,6 +252,7 @@ impl DiscoveryEntry {
             did: Arc::new(RwLock::new(did)),
             peer_id,
             connection_type: Arc::default(),
+            relays,
             config,
             discover: Arc::default(),
             task: Arc::default(),
@@ -316,20 +323,7 @@ impl DiscoveryEntry {
                             // Used for provider. Doesnt do anything right now
                             // TODO: Maybe have separate provider query in case
                             //       Discovery task isnt enabled?
-                            DiscoveryConfig::Provider(_) => {
-                                let addrs = match ipfs.identity(Some(peer_id)).await {
-                                    Ok(info) => info.listen_addrs,
-                                    Err(_) => vec![],
-                                };
-
-                                let opts = DialOpts::peer_id(peer_id)
-                                    .condition(PeerCondition::Disconnected)
-                                    .addresses(addrs)
-                                    .extend_addresses_through_behaviour()
-                                    .build();
-
-                                if let Err(_e) = ipfs.connect(opts).await {}
-                            }
+                            DiscoveryConfig::Provider(_) => {}
                             // Check over DHT
                             DiscoveryConfig::Direct => {
                                 tokio::select! {
@@ -342,6 +336,26 @@ impl DiscoveryEntry {
                             config::Discovery::None => {
                                 //TODO: Dial out through common relays
                                 // Note: This will work if both peers shares the relays used.
+                                tokio::select! {
+                                    _ = timer.tick() => {
+                                        let opts = DialOpts::peer_id(peer_id)
+                                            .condition(PeerCondition::Disconnected)
+                                            .addresses(
+                                                entry
+                                                    .relays
+                                                    .iter()
+                                                    .cloned()
+                                                    .map(|addr| addr.with(Protocol::P2pCircuit))
+                                                    .collect(),
+                                            )
+                                            .extend_addresses_through_behaviour()
+                                            .build();
+
+                                        if let Err(_e) = ipfs.connect(opts).await {}
+                                    }
+                                    _ = async {} => {}
+                                }
+                                
                             }
                         }
                     }
