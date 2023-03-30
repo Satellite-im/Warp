@@ -7,7 +7,9 @@ use futures::channel::mpsc::unbounded;
 use futures::{AsyncReadExt, StreamExt};
 use ipfs::libp2p::kad::KademliaBucketInserts;
 use ipfs::libp2p::swarm::SwarmEvent;
-use ipfs::p2p::{ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig};
+use ipfs::p2p::{
+    ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig, UpdateMode,
+};
 use rust_ipfs as ipfs;
 use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,6 +18,7 @@ use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
 use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
+use tracing::debug;
 use tracing::log::{self, error, info, trace, warn};
 use warp::crypto::did_key::Generate;
 use warp::crypto::zeroize::Zeroizing;
@@ -232,7 +235,7 @@ impl IpfsIdentity {
             transport_configuration: Some(TransportConfig {
                 yamux_max_buffer_size: 16 * 1024 * 1024,
                 yamux_receive_window_size: 16 * 1024 * 1024,
-                yamux_update_mode: 0,
+                yamux_update_mode: UpdateMode::Read,
                 mplex_max_buffer_size: usize::MAX / 2,
                 enable_quic: false,
                 ..Default::default()
@@ -285,6 +288,13 @@ impl IpfsIdentity {
             .start()
             .await?;
 
+        if config.ipfs_setting.bootstrap && !empty_bootstrap {
+            //TODO: determine if bootstrap should run in intervals
+            if let Err(e) = ipfs.bootstrap().await {
+                error!("Error bootstrapping: {e}");
+            }
+        }
+
         tokio::spawn({
             let ipfs = ipfs.clone();
             let config = config.clone();
@@ -298,15 +308,19 @@ impl IpfsIdentity {
 
                         for addr in config.bootstrap.address() {
                             match ipfs
-                                .add_listening_address(addr.with(Protocol::P2pCircuit))
+                                .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
                                 .await
                             {
-                                Ok(addr) => relayed.push(addr),
+                                Ok(addr) => {
+                                    debug!("Listening on {}", addr);
+                                    relayed.push(addr)
+                                }
                                 Err(e) => {
-                                    info!("Error listening on relay: {e}");
+                                    info!("Error listening on relay via bootstrap: {e}");
                                     continue;
                                 }
                             };
+
                             if config.ipfs_setting.relay_client.single {
                                 break;
                             }
@@ -321,18 +335,25 @@ impl IpfsIdentity {
                             }
 
                             match ipfs
-                                .add_listening_address(addr.with(Protocol::P2pCircuit))
+                                .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
                                 .await
                             {
-                                Ok(addr) => relayed.push(addr),
+                                Ok(addr) => {
+                                    debug!("Listening on {}", addr);
+                                    relayed.push(addr);
+                                }
                                 Err(e) => {
-                                    info!("Error listening on relay: {e}");
+                                    info!("Error listening on relay {}: {e}", addr.clone().with(Protocol::P2pCircuit));
                                     continue;
                                 }
                             };
                             if config.ipfs_setting.relay_client.single {
                                 break;
                             }
+                        }
+
+                        if relayed.is_empty() {
+                            log::warn!("No relay connection is available");
                         }
 
                         relayed
@@ -392,13 +413,6 @@ impl IpfsIdentity {
                 }
             }
         });
-
-        if config.ipfs_setting.bootstrap && !empty_bootstrap {
-            //TODO: determine if bootstrap should run in intervals
-            if let Err(e) = ipfs.bootstrap().await {
-                error!("Error bootstrapping: {e}");
-            }
-        }
 
         let relays = (!config.bootstrap.address().is_empty()).then(|| {
             config

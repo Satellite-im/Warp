@@ -58,7 +58,7 @@ pub struct Mdns {
     pub enable: bool,
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelayClient {
     /// Enables relay client in libp2p
     pub enable: bool,
@@ -69,6 +69,17 @@ pub struct RelayClient {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     /// List of relays to use
     pub relay_address: Vec<Multiaddr>,
+}
+
+impl Default for RelayClient {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            dcutr: false,
+            single: false,
+            relay_address: vec!["/ip4/24.199.86.91/tcp/46315/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap()]
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
