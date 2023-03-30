@@ -7,7 +7,9 @@ use futures::channel::mpsc::unbounded;
 use futures::{AsyncReadExt, StreamExt};
 use ipfs::libp2p::kad::KademliaBucketInserts;
 use ipfs::libp2p::swarm::SwarmEvent;
-use ipfs::p2p::{ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig};
+use ipfs::p2p::{
+    ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig, UpdateMode,
+};
 use rust_ipfs as ipfs;
 use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -232,7 +234,7 @@ impl IpfsIdentity {
             transport_configuration: Some(TransportConfig {
                 yamux_max_buffer_size: 16 * 1024 * 1024,
                 yamux_receive_window_size: 16 * 1024 * 1024,
-                yamux_update_mode: 0,
+                yamux_update_mode: UpdateMode::Read,
                 mplex_max_buffer_size: usize::MAX / 2,
                 enable_quic: false,
                 ..Default::default()
