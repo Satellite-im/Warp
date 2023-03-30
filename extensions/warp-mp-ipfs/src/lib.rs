@@ -287,6 +287,13 @@ impl IpfsIdentity {
             .start()
             .await?;
 
+        if config.ipfs_setting.bootstrap && !empty_bootstrap {
+            //TODO: determine if bootstrap should run in intervals
+            if let Err(e) = ipfs.bootstrap().await {
+                error!("Error bootstrapping: {e}");
+            }
+        }
+
         tokio::spawn({
             let ipfs = ipfs.clone();
             let config = config.clone();
@@ -394,13 +401,6 @@ impl IpfsIdentity {
                 }
             }
         });
-
-        if config.ipfs_setting.bootstrap && !empty_bootstrap {
-            //TODO: determine if bootstrap should run in intervals
-            if let Err(e) = ipfs.bootstrap().await {
-                error!("Error bootstrapping: {e}");
-            }
-        }
 
         let relays = (!config.bootstrap.address().is_empty()).then(|| {
             config
