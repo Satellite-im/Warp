@@ -198,10 +198,43 @@ impl IpfsFileSystem {
 
         if let Some(last_cid) = last_cid {
             if *cid != last_cid {
+                let mut pinned_blocks: HashSet<_> = HashSet::from_iter(
+                    ipfs.list_pins(None)
+                        .await
+                        .filter_map(|r| async move {
+                            match r {
+                                Ok(v) => Some(v.0),
+                                Err(_) => None,
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .await,
+                );
+
                 if ipfs.is_pinned(&last_cid).await? {
-                    ipfs.remove_pin(&last_cid, false).await?;
+                    ipfs.remove_pin(&last_cid, true).await?;
                 }
-                ipfs.remove_block(last_cid).await?;
+
+                let new_pinned_blocks: HashSet<_> = HashSet::from_iter(
+                    ipfs.list_pins(None)
+                        .await
+                        .filter_map(|r| async move {
+                            match r {
+                                Ok(v) => Some(v.0),
+                                Err(_) => None,
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .await,
+                );
+
+                for s_cid in new_pinned_blocks.iter() {
+                    pinned_blocks.remove(s_cid);
+                }
+
+                for cid in pinned_blocks {
+                    ipfs.remove_block(cid).await?;
+                }
             }
         }
 
