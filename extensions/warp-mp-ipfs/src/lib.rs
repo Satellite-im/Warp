@@ -352,6 +352,10 @@ impl IpfsIdentity {
                             }
                         }
 
+                        if relayed.is_empty() {
+                            log::warn!("No relay connection is available");
+                        }
+
                         relayed
                     }
                 };
