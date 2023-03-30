@@ -312,7 +312,7 @@ impl IpfsIdentity {
                             {
                                 Ok(addr) => relayed.push(addr),
                                 Err(e) => {
-                                    info!("Error listening on relay: {e}");
+                                    info!("Error listening on relay via bootstrap: {e}");
                                     continue;
                                 }
                             };
@@ -335,7 +335,7 @@ impl IpfsIdentity {
                             {
                                 Ok(addr) => relayed.push(addr),
                                 Err(e) => {
-                                    info!("Error listening on relay: {e}");
+                                    info!("Error listening on inserted relay: {e}");
                                     continue;
                                 }
                             };
