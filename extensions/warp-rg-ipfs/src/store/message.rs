@@ -1116,6 +1116,9 @@ impl MessageStore {
                 let Some(id) = entry_path.file_name().map(|file| file.to_string_lossy().to_string()).and_then(|id| Uuid::from_str(&id).ok()) else {
                     continue
                 };
+                if self.stream_task.read().await.contains_key(&id) {
+                    continue;
+                }
                 let Ok(cid_str) = tokio::fs::read(entry_path).await.map(|bytes| String::from_utf8_lossy(&bytes).to_string()) else {
                     continue
                 };
