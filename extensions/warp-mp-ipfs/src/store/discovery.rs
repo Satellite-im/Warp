@@ -261,8 +261,24 @@ impl DiscoveryEntry {
             let ipfs = ipfs.clone();
             async move {
                 let mut timer = tokio::time::interval(Duration::from_secs(30));
-                //Done in case the peer is located over DHT
-                let _ = ipfs.identity(Some(peer_id)).await.ok();
+                if !entry.valid().await {
+                    //Done in case the peer is located over DHT or if peer is connected already
+                    if let Ok(info) = ipfs.identity(Some(peer_id)).await {
+                        if let Err(e) = ipfs.whitelist(peer_id).await {
+                            log::warn!("Unable to whitelist peer: {e}");
+                        }
+
+                        // If it fails to convert then the public key may not be a ed25519 or may be corrupted in some way
+                        let did_key = libp2p_pub_to_did(&info.public_key)
+                            .expect("ed25519 is only supported at this time");
+
+                        if let Err(e) = ipfs.whitelist(peer_id).await {
+                            log::warn!("Unable to whitelist peer: {e}");
+                        }
+
+                        *entry.did.write().await = Some(did_key.clone());
+                    }
+                }
 
                 let mut sent_initial_push = false;
                 loop {
@@ -323,7 +339,8 @@ impl DiscoveryEntry {
                         }
 
                         // If it fails to convert then the public key may not be a ed25519 or may be corrupted in some way
-                        let did_key = libp2p_pub_to_did(&info.public_key).expect("ed25519 is only supported at this time");
+                        let did_key = libp2p_pub_to_did(&info.public_key)
+                            .expect("ed25519 is only supported at this time");
 
                         // Used as a precaution
                         if !entry.valid().await {
