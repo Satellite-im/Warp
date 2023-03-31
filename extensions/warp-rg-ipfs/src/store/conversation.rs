@@ -4,24 +4,28 @@ use futures::{
     stream::{self, BoxStream, FuturesOrdered},
     StreamExt,
 };
-use libipld::{Cid, IpldCodec};
+use libipld::Cid;
 use rust_ipfs::Ipfs;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use uuid::Uuid;
 use warp::{
-    crypto::{did_key::CoreSign, Fingerprint, DID},
+    crypto::{
+        cipher::Cipher, did_key::CoreSign, DIDKey, Ed25519KeyPair, KeyMaterial, DID,
+    },
     error::Error,
     logging::tracing::log::info,
     raygun::{
         Conversation, ConversationType, Message, MessageOptions, MessagePage, Messages,
         MessagesType,
     },
-    sata::{Kind, Sata},
 };
 
-use super::document::{GetDag, ToCid};
+use super::{
+    document::{GetDag, ToCid},
+    keystore::Keystore,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct ConversationDocument {
@@ -144,6 +148,7 @@ impl ConversationDocument {
         }
 
         let messages = BTreeSet::new();
+
         let mut document = Self {
             id,
             name,
@@ -272,6 +277,7 @@ impl ConversationDocument {
         ipfs: &Ipfs,
         did: Arc<DID>,
         option: MessageOptions,
+        keystore: &Keystore,
     ) -> Result<BTreeSet<Message>, Error> {
         let mut messages = match option.date_range() {
             Some(range) => Vec::from_iter(
@@ -318,11 +324,15 @@ impl ConversationDocument {
             }
         };
 
-        let list = FuturesOrdered::from_iter(
-            sorted
-                .iter()
-                .map(|document| async { document.resolve(ipfs, did.clone()).await }),
-        )
+        let list = FuturesOrdered::from_iter(sorted.iter().map(|document| async {
+            document
+                .resolve(
+                    ipfs,
+                    did.clone(),
+                    keystore,
+                )
+                .await
+        }))
         .filter_map(|res| async { res.ok() })
         .filter_map(|message| async {
             if let Some(keyword) = option.keyword() {
@@ -350,7 +360,9 @@ impl ConversationDocument {
         ipfs: &Ipfs,
         did: Arc<DID>,
         option: MessageOptions,
+        keystore: &Keystore,
     ) -> Result<BoxStream<'a, Message>, Error> {
+        let keystore = keystore.clone();
         let mut messages = Vec::from_iter(self.messages.iter().copied());
 
         if option.reverse() {
@@ -361,7 +373,11 @@ impl ConversationDocument {
             let message = messages
                 .first()
                 .ok_or(Error::MessageNotFound)?
-                .resolve(ipfs, did.clone())
+                .resolve(
+                    ipfs,
+                    did.clone(),
+                    &keystore,
+                )
                 .await?;
             return Ok(stream::once(async { message }).boxed());
         }
@@ -370,13 +386,18 @@ impl ConversationDocument {
             let message = messages
                 .last()
                 .ok_or(Error::MessageNotFound)?
-                .resolve(ipfs, did.clone())
+                .resolve(
+                    ipfs,
+                    did.clone(),
+                    &keystore,
+                )
                 .await?;
             return Ok(stream::once(async { message }).boxed());
         }
 
         let ipfs = ipfs.clone();
         let stream = async_stream::stream! {
+
             for (index, document) in messages.iter().enumerate() {
                 if let Some(range) = option.range() {
                     if range.start > index || range.end < index {
@@ -389,7 +410,7 @@ impl ConversationDocument {
                     }
                 }
 
-                if let Ok(message) = document.resolve(&ipfs, did.clone()).await {
+                if let Ok(message) = document.resolve(&ipfs, did.clone(), &keystore).await {
                     if let Some(keyword) = option.keyword() {
                         if message
                             .value()
@@ -413,6 +434,7 @@ impl ConversationDocument {
         ipfs: &Ipfs,
         did: Arc<DID>,
         option: MessageOptions,
+        keystore: &Keystore
     ) -> Result<Messages, Error> {
         let mut messages = Vec::from_iter(self.messages.iter().copied());
 
@@ -442,7 +464,14 @@ impl ConversationDocument {
             let page = messages_chunk.get(index).ok_or(Error::MessageNotFound)?;
             let mut messages = vec![];
             for document in page.iter() {
-                if let Ok(message) = document.resolve(&ipfs, did.clone()).await {
+                if let Ok(message) = document
+                    .resolve(
+                        &ipfs,
+                        did.clone(),
+                        keystore,
+                    )
+                    .await
+                {
                     messages.push(message);
                 }
             }
@@ -454,7 +483,14 @@ impl ConversationDocument {
         for (index, chunk) in messages_chunk.iter().enumerate() {
             let mut messages = vec![];
             for document in chunk.iter() {
-                if let Ok(message) = document.resolve(&ipfs, did.clone()).await {
+                if let Ok(message) = document
+                    .resolve(
+                        &ipfs,
+                        did.clone(),
+                        keystore,
+                    )
+                    .await
+                {
                     messages.push(message);
                 }
             }
@@ -473,12 +509,13 @@ impl ConversationDocument {
         ipfs: &Ipfs,
         did: Arc<DID>,
         message_id: Uuid,
+        keystore: &Keystore
     ) -> Result<Message, Error> {
         self.messages
             .iter()
             .find(|document| document.id == message_id)
             .ok_or(Error::MessageNotFound)?
-            .resolve(ipfs, did)
+            .resolve(ipfs, did, keystore)
             .await
     }
 
@@ -549,6 +586,7 @@ impl From<&ConversationDocument> for Conversation {
 pub struct MessageDocument {
     pub id: Uuid,
     pub conversation_id: Uuid,
+    pub sender: DIDEd25519Reference,
     pub date: DateTime<Utc>,
     pub message: Cid,
 }
@@ -569,24 +607,17 @@ impl MessageDocument {
     pub async fn new(
         ipfs: &Ipfs,
         did: Arc<DID>,
-        recipients: Option<Vec<DID>>,
         message: Message,
+        keystore: &Keystore,
     ) -> Result<Self, Error> {
         let id = message.id();
         let conversation_id = message.conversation_id();
         let date = message.date();
+        let sender = message.sender();
 
-        let mut object = Sata::default();
-
-        if let Some(list) = recipients.as_ref() {
-            for recipient in list {
-                object.add_recipient(recipient)?;
-            }
-        } else {
-            object.add_recipient(&did)?;
-        }
-
-        let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, message)?;
+        let key = keystore.get_latest(&did, &sender)?;
+        let bytes = serde_json::to_vec(&message)?;
+        let data = Cipher::direct_encrypt(&bytes, &key)?;
 
         let message = data.to_cid(ipfs).await?;
 
@@ -594,8 +625,11 @@ impl MessageDocument {
             ipfs.insert_pin(&message, false).await?;
         }
 
+        let sender = DIDEd25519Reference::from_did(&sender);
+
         let document = MessageDocument {
             id,
+            sender,
             conversation_id,
             date,
             message,
@@ -619,10 +653,10 @@ impl MessageDocument {
         ipfs: &Ipfs,
         did: Arc<DID>,
         message: Message,
+        keystore: &Keystore,
     ) -> Result<(), Error> {
         info!("Updating message {} for {}", self.id, self.conversation_id);
-        let recipients = self.recipients(ipfs).await?;
-        let old_message = self.resolve(ipfs, did.clone()).await?;
+        let old_message = self.resolve(ipfs, did.clone(), keystore).await?;
         let old_document = self.message;
 
         if old_message.id() != message.id()
@@ -633,13 +667,11 @@ impl MessageDocument {
             return Err(Error::InvalidMessage);
         }
 
-        let mut object = Sata::default();
-        for recipient in recipients.iter() {
-            object.add_recipient(recipient)?;
-        }
-
-        let data = object.encrypt(IpldCodec::DagJson, &did, Kind::Reference, message)?;
+        let key = keystore.get_latest(&did, &message.sender())?;
+        let bytes = serde_json::to_vec(&message)?;
+        let data = Cipher::direct_encrypt(&bytes, &key)?;
         let message_cid = data.to_cid(ipfs).await?;
+
         info!("Setting Message to document");
         self.message = message_cid;
         info!("Message is updated");
@@ -653,24 +685,76 @@ impl MessageDocument {
         Ok(())
     }
 
-    pub async fn recipients(&self, ipfs: &Ipfs) -> Result<Vec<DID>, Error> {
-        let data: Sata = self.message.get_dag(ipfs, None).await?;
-        data.recipients()
-            .map(|list| {
-                list.iter()
-                    .map(|key| key.fingerprint())
-                    .filter_map(|key| DID::try_from(key).ok())
-                    .collect()
-            })
-            .ok_or(Error::PublicKeyInvalid)
-    }
+    pub async fn resolve(
+        &self,
+        ipfs: &Ipfs,
+        did: Arc<DID>,
+        keystore: &Keystore,
+    ) -> Result<Message, Error> {
+        let bytes: Vec<u8> = self.message.get_dag(ipfs, None).await?;
 
-    pub async fn resolve(&self, ipfs: &Ipfs, did: Arc<DID>) -> Result<Message, Error> {
-        let data: Sata = self.message.get_dag(ipfs, None).await?;
-        let message: Message = data.decrypt(&did).map_err(anyhow::Error::from)?;
+        let sender = self.sender.to_did();
+        let data = keystore.try_decrypt(&did, &sender, &bytes)?;
+
+        let message: Message = serde_json::from_slice(&data)?;
+
         if message.id() != self.id && message.conversation_id() != self.conversation_id {
             return Err(Error::InvalidMessage);
         }
         Ok(message)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DIDEd25519Reference([u8; 32]);
+
+impl From<DID> for DIDEd25519Reference {
+    fn from(value: DID) -> Self {
+        Self::from(&value)
+    }
+}
+
+impl From<&DID> for DIDEd25519Reference {
+    fn from(value: &DID) -> Self {
+        Self::from_did(value)
+    }
+}
+
+impl From<DIDEd25519Reference> for DID {
+    fn from(value: DIDEd25519Reference) -> Self {
+        value.to_did()
+    }
+}
+
+impl DIDEd25519Reference {
+    pub fn from_did(did: &DID) -> Self {
+        let mut pubkey_bytes: [u8; 32] = [0u8; 32];
+        pubkey_bytes.copy_from_slice(&did.public_key_bytes());
+        Self(pubkey_bytes)
+    }
+
+    pub fn to_did(self) -> DID {
+        DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&self.0)).into()
+    }
+}
+
+impl Serialize for DIDEd25519Reference {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let did = self.to_did();
+        serializer.serialize_str(&did.to_string())
+    }
+}
+
+impl<'d> Deserialize<'d> for DIDEd25519Reference {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'d>,
+    {
+        let did_str = <String>::deserialize(deserializer)?;
+        let did = DID::try_from(did_str).map_err(serde::de::Error::custom)?;
+        Ok(did.into())
     }
 }

@@ -25,6 +25,11 @@ pub(crate) trait GetDag<D>: Sized {
 }
 
 #[async_trait::async_trait]
+pub(crate) trait GetLocalDag<D>: Sized {
+    async fn get_local_dag(&self, ipfs: &Ipfs) -> Result<D, Error>;
+}
+
+#[async_trait::async_trait]
 #[allow(clippy::wrong_self_convention)]
 pub(crate) trait FromDocument<I> {
     async fn from_document(&self, ipfs: &Ipfs) -> Result<I, Error>;
@@ -57,6 +62,25 @@ impl<D: DeserializeOwned> GetDag<D> for IpfsPath {
                 .map_err(Error::from),
             Ok(Err(e)) => Err(Error::Any(e)),
             Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<D: DeserializeOwned> GetLocalDag<D> for Cid {
+    async fn get_local_dag(&self, ipfs: &Ipfs) -> Result<D, Error> {
+        IpfsPath::from(*self).get_local_dag(ipfs).await
+    }
+}
+
+#[async_trait::async_trait]
+impl<D: DeserializeOwned> GetLocalDag<D> for IpfsPath {
+    async fn get_local_dag(&self, ipfs: &Ipfs) -> Result<D, Error> {
+        match ipfs.dag().get(self.clone(), &[], true).await {
+            Ok(ipld) => from_ipld(ipld)
+                .map_err(anyhow::Error::from)
+                .map_err(Error::from),
+            Err(e) => Err(Error::from(anyhow::anyhow!("{e}"))),
         }
     }
 }
