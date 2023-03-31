@@ -270,18 +270,41 @@ impl DiscoveryEntry {
                         //TODO: Check discovery config option to determine if we should determine how we
                         //      should check connectivity
 
-                        let Ok(connection_type) = super::connected_to_peer(&entry.ipfs, peer_id).await else {
-                            break;
-                        };
-
-                        if matches!(connection_type, PeerConnectionType::NotConnected) {
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                            continue;
-                        }
-
                         let info = loop {
-                            //TODO: Possibly dial out over available relays in attempt to establish a connection if we are not able to find them over DHT
-                            //Note: This does adds an additional cost so might want to have a scheduler
+                            match entry.config {
+                                // Used for provider. Doesnt do anything right now
+                                // TODO: Maybe have separate provider query in case
+                                //       Discovery task isnt enabled?
+                                DiscoveryConfig::Provider(_) | DiscoveryConfig::Direct => {}
+                                config::Discovery::None => {
+                                    // Note: This will work if both peers shares the relays used.
+                                    let opts = DialOpts::peer_id(peer_id)
+                                        .addresses(
+                                            entry
+                                                .relays
+                                                .iter()
+                                                .cloned()
+                                                .map(|addr| addr.with(Protocol::P2pCircuit))
+                                                .collect(),
+                                        )
+                                        .build();
+
+                                    if let Err(_e) = ipfs.connect(opts).await {
+                                        tokio::time::sleep(Duration::from_secs(5)).await;
+                                        continue;
+                                    }
+                                }
+                            }
+
+                            let Ok(connection_type) = super::connected_to_peer(&entry.ipfs, peer_id).await else {
+                                continue;
+                            };
+
+                            if matches!(connection_type, PeerConnectionType::NotConnected) {
+                                tokio::time::sleep(Duration::from_secs(5)).await;
+                                continue;
+                            }
+
                             if let Ok(info) = entry.ipfs.identity(Some(entry.peer_id)).await {
                                 break info;
                             }
@@ -299,10 +322,8 @@ impl DiscoveryEntry {
                             log::warn!("Unable to whitelist peer: {e}");
                         }
 
-                        let Ok(did_key) = libp2p_pub_to_did(&info.public_key) else {
-                            // If it fails to convert then the public key may not be a ed25519 or may be corrupted in some way
-                            break;
-                        };
+                        // If it fails to convert then the public key may not be a ed25519 or may be corrupted in some way
+                        let did_key = libp2p_pub_to_did(&info.public_key).expect("ed25519 is only supported at this time");
 
                         // Used as a precaution
                         if !entry.valid().await {
