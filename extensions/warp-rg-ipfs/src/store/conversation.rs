@@ -11,9 +11,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use uuid::Uuid;
 use warp::{
-    crypto::{
-        cipher::Cipher, did_key::CoreSign, DIDKey, Ed25519KeyPair, KeyMaterial, DID,
-    },
+    crypto::{cipher::Cipher, did_key::CoreSign, DIDKey, Ed25519KeyPair, KeyMaterial, DID},
     error::Error,
     logging::tracing::log::info,
     raygun::{
@@ -22,8 +20,11 @@ use warp::{
     },
 };
 
+use crate::store::ecdh_encrypt;
+
 use super::{
     document::{GetDag, ToCid},
+    ecdh_decrypt,
     keystore::Keystore,
 };
 
@@ -277,7 +278,7 @@ impl ConversationDocument {
         ipfs: &Ipfs,
         did: Arc<DID>,
         option: MessageOptions,
-        keystore: &Keystore,
+        keystore: Option<&Keystore>,
     ) -> Result<BTreeSet<Message>, Error> {
         let mut messages = match option.date_range() {
             Some(range) => Vec::from_iter(
@@ -324,15 +325,11 @@ impl ConversationDocument {
             }
         };
 
-        let list = FuturesOrdered::from_iter(sorted.iter().map(|document| async {
-            document
-                .resolve(
-                    ipfs,
-                    did.clone(),
-                    keystore,
-                )
-                .await
-        }))
+        let list = FuturesOrdered::from_iter(
+            sorted
+                .iter()
+                .map(|document| async { document.resolve(ipfs, did.clone(), keystore).await }),
+        )
         .filter_map(|res| async { res.ok() })
         .filter_map(|message| async {
             if let Some(keyword) = option.keyword() {
@@ -360,9 +357,9 @@ impl ConversationDocument {
         ipfs: &Ipfs,
         did: Arc<DID>,
         option: MessageOptions,
-        keystore: &Keystore,
+        keystore: Option<&Keystore>,
     ) -> Result<BoxStream<'a, Message>, Error> {
-        let keystore = keystore.clone();
+        let keystore = keystore.cloned();
         let mut messages = Vec::from_iter(self.messages.iter().copied());
 
         if option.reverse() {
@@ -373,11 +370,7 @@ impl ConversationDocument {
             let message = messages
                 .first()
                 .ok_or(Error::MessageNotFound)?
-                .resolve(
-                    ipfs,
-                    did.clone(),
-                    &keystore,
-                )
+                .resolve(ipfs, did.clone(), keystore.as_ref())
                 .await?;
             return Ok(stream::once(async { message }).boxed());
         }
@@ -386,11 +379,7 @@ impl ConversationDocument {
             let message = messages
                 .last()
                 .ok_or(Error::MessageNotFound)?
-                .resolve(
-                    ipfs,
-                    did.clone(),
-                    &keystore,
-                )
+                .resolve(ipfs, did.clone(), keystore.as_ref())
                 .await?;
             return Ok(stream::once(async { message }).boxed());
         }
@@ -410,7 +399,7 @@ impl ConversationDocument {
                     }
                 }
 
-                if let Ok(message) = document.resolve(&ipfs, did.clone(), &keystore).await {
+                if let Ok(message) = document.resolve(&ipfs, did.clone(), keystore.as_ref()).await {
                     if let Some(keyword) = option.keyword() {
                         if message
                             .value()
@@ -434,7 +423,7 @@ impl ConversationDocument {
         ipfs: &Ipfs,
         did: Arc<DID>,
         option: MessageOptions,
-        keystore: &Keystore
+        keystore: Option<&Keystore>,
     ) -> Result<Messages, Error> {
         let mut messages = Vec::from_iter(self.messages.iter().copied());
 
@@ -464,14 +453,7 @@ impl ConversationDocument {
             let page = messages_chunk.get(index).ok_or(Error::MessageNotFound)?;
             let mut messages = vec![];
             for document in page.iter() {
-                if let Ok(message) = document
-                    .resolve(
-                        &ipfs,
-                        did.clone(),
-                        keystore,
-                    )
-                    .await
-                {
+                if let Ok(message) = document.resolve(&ipfs, did.clone(), keystore).await {
                     messages.push(message);
                 }
             }
@@ -483,14 +465,7 @@ impl ConversationDocument {
         for (index, chunk) in messages_chunk.iter().enumerate() {
             let mut messages = vec![];
             for document in chunk.iter() {
-                if let Ok(message) = document
-                    .resolve(
-                        &ipfs,
-                        did.clone(),
-                        keystore,
-                    )
-                    .await
-                {
+                if let Ok(message) = document.resolve(&ipfs, did.clone(), keystore).await {
                     messages.push(message);
                 }
             }
@@ -509,7 +484,7 @@ impl ConversationDocument {
         ipfs: &Ipfs,
         did: Arc<DID>,
         message_id: Uuid,
-        keystore: &Keystore
+        keystore: Option<&Keystore>,
     ) -> Result<Message, Error> {
         self.messages
             .iter()
@@ -608,16 +583,22 @@ impl MessageDocument {
         ipfs: &Ipfs,
         did: Arc<DID>,
         message: Message,
-        keystore: &Keystore,
+        keystore: Option<&Keystore>,
     ) -> Result<Self, Error> {
         let id = message.id();
         let conversation_id = message.conversation_id();
         let date = message.date();
         let sender = message.sender();
 
-        let key = keystore.get_latest(&did, &sender)?;
         let bytes = serde_json::to_vec(&message)?;
-        let data = Cipher::direct_encrypt(&bytes, &key)?;
+
+        let data = match keystore {
+            Some(keystore) => {
+                let key = keystore.get_latest(&did, &sender)?;
+                Cipher::direct_encrypt(&bytes, &key)?
+            }
+            None => ecdh_decrypt(&did, Some(sender.clone()), &bytes)?,
+        };
 
         let message = data.to_cid(ipfs).await?;
 
@@ -653,7 +634,7 @@ impl MessageDocument {
         ipfs: &Ipfs,
         did: Arc<DID>,
         message: Message,
-        keystore: &Keystore,
+        keystore: Option<&Keystore>,
     ) -> Result<(), Error> {
         info!("Updating message {} for {}", self.id, self.conversation_id);
         let old_message = self.resolve(ipfs, did.clone(), keystore).await?;
@@ -667,9 +648,16 @@ impl MessageDocument {
             return Err(Error::InvalidMessage);
         }
 
-        let key = keystore.get_latest(&did, &message.sender())?;
         let bytes = serde_json::to_vec(&message)?;
-        let data = Cipher::direct_encrypt(&bytes, &key)?;
+
+        let data = match keystore {
+            Some(keystore) => {
+                let key = keystore.get_latest(&did, &message.sender())?;
+                Cipher::direct_encrypt(&bytes, &key)?
+            }
+            None => ecdh_encrypt(&did, Some(self.sender.to_did()), &bytes)?,
+        };
+
         let message_cid = data.to_cid(ipfs).await?;
 
         info!("Setting Message to document");
@@ -689,12 +677,15 @@ impl MessageDocument {
         &self,
         ipfs: &Ipfs,
         did: Arc<DID>,
-        keystore: &Keystore,
+        keystore: Option<&Keystore>,
     ) -> Result<Message, Error> {
         let bytes: Vec<u8> = self.message.get_dag(ipfs, None).await?;
 
         let sender = self.sender.to_did();
-        let data = keystore.try_decrypt(&did, &sender, &bytes)?;
+        let data = match keystore {
+            Some(keystore) => keystore.try_decrypt(&did, &sender, &bytes)?,
+            None => ecdh_decrypt(&did, Some(sender), &bytes)?,
+        };
 
         let message: Message = serde_json::from_slice(&data)?;
 

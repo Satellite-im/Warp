@@ -1280,9 +1280,12 @@ impl MessageStore {
         message_id: Uuid,
     ) -> Result<Message, Error> {
         let conversation = self.get_conversation(conversation_id).await?;
-        let keystore = self.conversation_keystore(conversation_id).await?;
+        let keystore = match conversation.conversation_type {
+            ConversationType::Direct => None,
+            ConversationType::Group =>  self.conversation_keystore(conversation.id()).await.ok()
+        };
         conversation
-            .get_message(&self.ipfs, self.did.clone(), message_id, &keystore)
+            .get_message(&self.ipfs, self.did.clone(), message_id, keystore.as_ref())
             .await
     }
 
@@ -1329,25 +1332,29 @@ impl MessageStore {
         opt: MessageOptions,
     ) -> Result<Messages, Error> {
         let conversation = self.get_conversation(conversation).await?;
-        let keystore = self.conversation_keystore(conversation.id()).await?;
+        let keystore = match conversation.conversation_type {
+            ConversationType::Direct => None,
+            ConversationType::Group =>  self.conversation_keystore(conversation.id()).await.ok()
+        };
+
         let m_type = opt.messages_type();
         match m_type {
             MessagesType::Stream => {
                 let stream = conversation
-                    .get_messages_stream(&self.ipfs, self.did.clone(), opt, &keystore)
+                    .get_messages_stream(&self.ipfs, self.did.clone(), opt, keystore.as_ref())
                     .await?;
                 Ok(Messages::Stream(MessageStream(stream)))
             }
             MessagesType::List => {
                 let list = conversation
-                    .get_messages(&self.ipfs, self.did.clone(), opt, &keystore)
+                    .get_messages(&self.ipfs, self.did.clone(), opt, keystore.as_ref())
                     .await
                     .map(Vec::from_iter)?;
                 Ok(Messages::List(list))
             }
             MessagesType::Pages { .. } => {
                 conversation
-                    .get_messages_pages(&self.ipfs, self.did.clone(), opt, &keystore)
+                    .get_messages_pages(&self.ipfs, self.did.clone(), opt, keystore.as_ref())
                     .await
             }
         }
@@ -2479,7 +2486,10 @@ impl MessageStore {
     ) -> Result<bool, Error> {
         let _guard = self.conversation_queue(document.id()).await?;
         let tx = self.get_conversation_sender(document.id()).await?;
-        let keystore = self.conversation_keystore(document.id()).await?;
+        let keystore = match document.conversation_type {
+            ConversationType::Direct => None,
+            ConversationType::Group =>  self.conversation_keystore(document.id()).await.ok()
+        };
 
         match events.clone() {
             MessagingEvents::New(mut message) => {
@@ -2562,7 +2572,7 @@ impl MessageStore {
                 let message_id = message.id();
 
                 let message_document =
-                    MessageDocument::new(&self.ipfs, self.did.clone(), message, &keystore).await?;
+                    MessageDocument::new(&self.ipfs, self.did.clone(), message, keystore.as_ref()).await?;
 
                 self.get_conversation_mut(document.id(), |conversation_document| {
                     conversation_document.messages.insert(message_document);
@@ -2595,7 +2605,7 @@ impl MessageStore {
                     .ok_or(Error::MessageNotFound)?;
 
                 let mut message = message_document
-                    .resolve(&self.ipfs, self.did.clone(), &keystore)
+                    .resolve(&self.ipfs, self.did.clone(), keystore.as_ref())
                     .await?;
 
                 let lines_value_length: usize = val
@@ -2654,7 +2664,7 @@ impl MessageStore {
                 message.set_modified(modified);
 
                 message_document
-                    .update(&self.ipfs, self.did.clone(), message, &keystore)
+                    .update(&self.ipfs, self.did.clone(), message, keystore.as_ref())
                     .await?;
 
                 self.get_conversation_mut(document.id(), |conversation_document| {
@@ -2681,7 +2691,7 @@ impl MessageStore {
 
                 if opt.keep_if_owned.load(Ordering::SeqCst) {
                     let message = message_document
-                        .resolve(&self.ipfs, self.did.clone(), &keystore)
+                        .resolve(&self.ipfs, self.did.clone(), keystore.as_ref())
                         .await?;
                     let signature = message.signature();
                     let sender = message.sender();
@@ -2723,7 +2733,7 @@ impl MessageStore {
                     .ok_or(Error::MessageNotFound)?;
 
                 let mut message = message_document
-                    .resolve(&self.ipfs, self.did.clone(), &keystore)
+                    .resolve(&self.ipfs, self.did.clone(), keystore.as_ref())
                     .await?;
 
                 let event = match state {
@@ -2744,7 +2754,7 @@ impl MessageStore {
                 };
 
                 message_document
-                    .update(&self.ipfs, self.did.clone(), message, &keystore)
+                    .update(&self.ipfs, self.did.clone(), message, keystore.as_ref())
                     .await?;
 
                 self.get_conversation_mut(document.id(), |conversation_document| {
@@ -2767,7 +2777,7 @@ impl MessageStore {
                     .ok_or(Error::MessageNotFound)?;
 
                 let mut message = message_document
-                    .resolve(&self.ipfs, self.did.clone(), &keystore)
+                    .resolve(&self.ipfs, self.did.clone(), keystore.as_ref())
                     .await?;
 
                 let reactions = message.reactions_mut();
@@ -2791,7 +2801,7 @@ impl MessageStore {
                         };
 
                         message_document
-                            .update(&self.ipfs, self.did.clone(), message, &keystore)
+                            .update(&self.ipfs, self.did.clone(), message, keystore.as_ref())
                             .await?;
 
                         self.get_conversation_mut(document.id(), |conversation_document| {
@@ -2831,7 +2841,7 @@ impl MessageStore {
                             reactions.remove(index);
                         }
                         message_document
-                            .update(&self.ipfs, self.did.clone(), message, &keystore)
+                            .update(&self.ipfs, self.did.clone(), message, keystore.as_ref())
                             .await?;
 
                         self.get_conversation_mut(document.id(), |conversation_document| {
