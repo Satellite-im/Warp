@@ -9,10 +9,7 @@ use std::{
 };
 
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
-use rust_ipfs::{
-    libp2p::swarm::dial_opts::{DialOpts, PeerCondition},
-    Ipfs, Multiaddr, PeerId, Protocol,
-};
+use rust_ipfs::{libp2p::swarm::dial_opts::DialOpts, Ipfs, Multiaddr, PeerId, Protocol};
 use tokio::{
     sync::{broadcast, RwLock},
     task::JoinHandle,
@@ -336,26 +333,21 @@ impl DiscoveryEntry {
                             config::Discovery::None => {
                                 //TODO: Dial out through common relays
                                 // Note: This will work if both peers shares the relays used.
-                                tokio::select! {
-                                    _ = timer.tick() => {
-                                        let opts = DialOpts::peer_id(peer_id)
-                                            .condition(PeerCondition::Disconnected)
-                                            .addresses(
-                                                entry
-                                                    .relays
-                                                    .iter()
-                                                    .cloned()
-                                                    .map(|addr| addr.with(Protocol::P2pCircuit))
-                                                    .collect(),
-                                            )
-                                            .extend_addresses_through_behaviour()
-                                            .build();
 
-                                        if let Err(_e) = ipfs.connect(opts).await {}
-                                    }
-                                    _ = async {} => {}
+                                let opts = DialOpts::peer_id(peer_id)
+                                    .addresses(
+                                        entry
+                                            .relays
+                                            .iter()
+                                            .cloned()
+                                            .map(|addr| addr.with(Protocol::P2pCircuit))
+                                            .collect(),
+                                    )
+                                    .build();
+
+                                if let Err(_e) = ipfs.connect(opts).await {
+                                    tokio::time::sleep(Duration::from_secs(5)).await;
                                 }
-                                
                             }
                         }
                     }
