@@ -597,7 +597,7 @@ impl MessageDocument {
                 let key = keystore.get_latest(&did, &sender)?;
                 Cipher::direct_encrypt(&bytes, &key)?
             }
-            None => ecdh_decrypt(&did, Some(sender.clone()), &bytes)?,
+            None => ecdh_encrypt(&did, Some(sender.clone()), &bytes)?,
         };
 
         let message = data.to_cid(ipfs).await?;

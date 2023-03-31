@@ -734,20 +734,12 @@ impl MessageStore {
         let conversation =
             ConversationDocument::new_direct(own_did, [own_did.clone(), did_key.clone()])?;
 
-        let mut keystore = Keystore::new(conversation.id());
-        keystore.insert(own_did, own_did, warp::crypto::generate(64))?;
-
         let cid = conversation.to_cid(&self.ipfs).await?;
-        let keystore_cid = keystore.to_cid(&self.ipfs).await?;
 
         let convo_id = conversation.id();
         let topic = conversation.topic();
 
         self.conversation_cid.write().await.insert(convo_id, cid);
-        self.conversation_keystore_cid
-            .write()
-            .await
-            .insert(convo_id, keystore_cid);
 
         let stream = self.ipfs.pubsub_subscribe(topic).await?;
 
@@ -767,24 +759,6 @@ impl MessageStore {
 
         let topic = format!("{did_key}/messaging");
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
-
-        if let Some(path) = self.path.as_ref() {
-            let cid = cid.to_string();
-            let keystore_cid = keystore_cid.to_string();
-
-            if let Err(e) = tokio::fs::write(path.join(conversation.id().to_string()), cid).await {
-                error!("Unable to save info to file: {e}");
-            }
-
-            if let Err(e) = tokio::fs::write(
-                path.join(format!("{}.keystore", conversation.id())),
-                keystore_cid,
-            )
-            .await
-            {
-                error!("Unable to save info to file: {e}");
-            }
-        }
 
         match peers.contains(&peer_id) {
             true => {
@@ -884,6 +858,10 @@ impl MessageStore {
         let conversation =
             ConversationDocument::new_group(own_did, name, &Vec::from_iter(did_key))?;
 
+        let mut keystore = Keystore::new(conversation.id());
+        keystore.insert(own_did, own_did, warp::crypto::generate(64))?;
+        let keystore_cid = keystore.to_cid(&self.ipfs).await?;
+
         let recipient = conversation.recipients();
 
         let cid = conversation.to_cid(&self.ipfs).await?;
@@ -892,6 +870,10 @@ impl MessageStore {
         let topic = conversation.topic();
 
         self.conversation_cid.write().await.insert(convo_id, cid);
+        self.conversation_keystore_cid
+            .write()
+            .await
+            .insert(convo_id, keystore_cid);
 
         let stream = self.ipfs.pubsub_subscribe(topic).await?;
 
@@ -905,6 +887,8 @@ impl MessageStore {
             .filter_map(|(a, b)| did_to_libp2p_pub(b).map(|pk| (a, pk)).ok())
             .map(|(did, pk)| (did, pk.to_peer_id()))
             .collect::<Vec<_>>();
+
+        //TODO: Push to each peer directly
 
         let mut data = Sata::default();
 
@@ -924,6 +908,24 @@ impl MessageStore {
                 conversation.signature.clone(),
             ))?,
         )?;
+
+        if let Some(path) = self.path.as_ref() {
+            let cid = cid.to_string();
+            let keystore_cid = keystore_cid.to_string();
+
+            if let Err(e) = tokio::fs::write(path.join(conversation.id().to_string()), cid).await {
+                error!("Unable to save info to file: {e}");
+            }
+
+            if let Err(e) = tokio::fs::write(
+                path.join(format!("{}.keystore", conversation.id())),
+                keystore_cid,
+            )
+            .await
+            {
+                error!("Unable to save info to file: {e}");
+            }
+        }
 
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
@@ -1282,7 +1284,7 @@ impl MessageStore {
         let conversation = self.get_conversation(conversation_id).await?;
         let keystore = match conversation.conversation_type {
             ConversationType::Direct => None,
-            ConversationType::Group =>  self.conversation_keystore(conversation.id()).await.ok()
+            ConversationType::Group => self.conversation_keystore(conversation.id()).await.ok(),
         };
         conversation
             .get_message(&self.ipfs, self.did.clone(), message_id, keystore.as_ref())
@@ -1334,7 +1336,7 @@ impl MessageStore {
         let conversation = self.get_conversation(conversation).await?;
         let keystore = match conversation.conversation_type {
             ConversationType::Direct => None,
-            ConversationType::Group =>  self.conversation_keystore(conversation.id()).await.ok()
+            ConversationType::Group => self.conversation_keystore(conversation.id()).await.ok(),
         };
 
         let m_type = opt.messages_type();
@@ -2488,7 +2490,7 @@ impl MessageStore {
         let tx = self.get_conversation_sender(document.id()).await?;
         let keystore = match document.conversation_type {
             ConversationType::Direct => None,
-            ConversationType::Group =>  self.conversation_keystore(document.id()).await.ok()
+            ConversationType::Group => self.conversation_keystore(document.id()).await.ok(),
         };
 
         match events.clone() {
@@ -2572,7 +2574,8 @@ impl MessageStore {
                 let message_id = message.id();
 
                 let message_document =
-                    MessageDocument::new(&self.ipfs, self.did.clone(), message, keystore.as_ref()).await?;
+                    MessageDocument::new(&self.ipfs, self.did.clone(), message, keystore.as_ref())
+                        .await?;
 
                 self.get_conversation_mut(document.id(), |conversation_document| {
                     conversation_document.messages.insert(message_document);
