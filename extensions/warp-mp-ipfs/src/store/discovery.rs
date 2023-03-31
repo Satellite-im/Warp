@@ -196,7 +196,7 @@ impl Discovery {
         self.entries.read().await.clone()
     }
 
-    pub async fn did_iter(&self) -> impl Stream<Item = DID> {
+    pub async fn did_iter(&self) -> impl Stream<Item = DID> + Send {
         FuturesUnordered::from_iter(
             self.list()
                 .await
