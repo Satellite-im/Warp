@@ -1139,10 +1139,24 @@ impl MessageStore {
             let entry = entry?;
             let entry_path = entry.path();
             if entry_path.is_file() && !entry_path.ends_with(".messaging_queue") {
-                let Some(id) = entry_path.file_name().map(|file| file.to_string_lossy().to_string()).and_then(|id| Uuid::from_str(&id).ok()) else {
+                
+
+                let Some(filename) = entry_path.file_name().map(|file| file.to_string_lossy().to_string()) else {
                     continue
                 };
-                let keystore = entry_path.ends_with(format!(".{id}.keystore"));
+
+                let slices = filename.split('.').collect::<Vec<&str>>();
+
+                let keystore = slices.last().map(|s| s.ends_with(".keystore")).unwrap_or_default();
+
+                let Some(file_id) = slices.first() else {
+                    continue
+                };
+
+                let Ok(id) = Uuid::from_str(file_id) else {
+                    continue
+                };
+
                 let Ok(cid_str) = tokio::fs::read(entry_path).await.map(|bytes| String::from_utf8_lossy(&bytes).to_string()) else {
                     continue
                 };
