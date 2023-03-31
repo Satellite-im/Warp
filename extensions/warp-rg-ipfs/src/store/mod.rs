@@ -33,6 +33,18 @@ pub enum ConversationEvents {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ConversationRequest {
+    Message {
+        conversation_id: Uuid,
+        message_id: Uuid,
+    },
+    Key {
+        conversation_id: Uuid,
+        message_id: Option<Uuid>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessagingEvents {
     New(Message),
     Edit(Uuid, Uuid, DateTime<Utc>, Vec<String>, Vec<u8>),
@@ -41,6 +53,7 @@ pub enum MessagingEvents {
     React(Uuid, DID, Uuid, ReactionState, String),
     UpdateConversationName(Uuid, String, String),
     AddRecipient(Uuid, DID, Vec<DID>, String),
+    KeyResponse(Uuid, Vec<u8>),
     RemoveRecipient(Uuid, DID, Vec<DID>, String),
     Event(Uuid, DID, MessageEvent, bool),
 }

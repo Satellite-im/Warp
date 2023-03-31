@@ -1139,15 +1139,16 @@ impl MessageStore {
             let entry = entry?;
             let entry_path = entry.path();
             if entry_path.is_file() && !entry_path.ends_with(".messaging_queue") {
-                
-
                 let Some(filename) = entry_path.file_name().map(|file| file.to_string_lossy().to_string()) else {
                     continue
                 };
 
                 let slices = filename.split('.').collect::<Vec<&str>>();
 
-                let keystore = slices.last().map(|s| s.ends_with(".keystore")).unwrap_or_default();
+                let keystore = slices
+                    .last()
+                    .map(|s| s.ends_with(".keystore"))
+                    .unwrap_or_default();
 
                 let Some(file_id) = slices.first() else {
                     continue
