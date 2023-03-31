@@ -30,7 +30,8 @@ use warp::logging::tracing::warn;
 use warp::multipass::MultiPass;
 use warp::raygun::{
     Conversation, ConversationType, EmbedState, Location, Message, MessageEvent, MessageEventKind,
-    MessageOptions, MessageStatus, MessageType, PinState, RayGunEventKind, Reaction, ReactionState,
+    MessageOptions, MessageStatus, MessageStream, MessageType, Messages, MessagesType, PinState,
+    RayGunEventKind, Reaction, ReactionState,
 };
 use warp::sata::Sata;
 use warp::sync::Arc;
@@ -139,10 +140,6 @@ impl MessageStore {
         ): (bool, bool, bool, bool, bool),
     ) -> anyhow::Result<Self> {
         info!("Initializing MessageStore");
-        // let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
-        //     true => path,
-        //     false => None,
-        // };
 
         if let Some(path) = path.as_ref() {
             if !path.exists() {
@@ -485,6 +482,7 @@ impl MessageStore {
             }
             ConversationEvents::NewGroupConversation(
                 creator,
+                name,
                 conversation_id,
                 initial_recipients,
                 signature,
@@ -500,6 +498,7 @@ impl MessageStore {
                 info!("Creating conversation");
                 let convo = ConversationDocument::new(
                     did,
+                    name,
                     initial_recipients,
                     Some(conversation_id),
                     ConversationType::Group,
@@ -824,8 +823,22 @@ impl MessageStore {
 
     pub async fn create_group_conversation(
         &mut self,
+        name: Option<String>,
         did_key: HashSet<DID>,
     ) -> Result<Conversation, Error> {
+        if let Some(name) = name.as_ref() {
+            let name_length = name.trim().len();
+
+            if name_length == 0 || name_length > 255 {
+                return Err(Error::InvalidLength {
+                    context: "name".into(),
+                    current: name_length,
+                    minimum: Some(1),
+                    maximum: Some(255),
+                });
+            }
+        }
+
         if self.with_friends.load(Ordering::SeqCst) {
             for did in did_key.iter() {
                 self.account.has_friend(did).await?;
@@ -851,19 +864,21 @@ impl MessageStore {
 
         tokio::spawn({
             let account = self.account.clone();
-            let did_list = did_key.clone();
+            let did_list = Vec::from_iter(did_key.clone());
             async move {
-                for did in did_list {
-                    if let Ok(list) = account.get_identity(did.into()).await {
-                        if list.is_empty() {
-                            warn!("Unable to find identity. Creating conversation anyway");
-                        }
+                if let Ok(list) = account
+                    .get_identity(warp::multipass::identity::Identifier::DIDList(did_list))
+                    .await
+                {
+                    if list.is_empty() {
+                        warn!("Unable to find identities. Creating conversation anyway");
                     }
                 }
             }
         });
 
-        let conversation = ConversationDocument::new_group(own_did, &Vec::from_iter(did_key))?;
+        let conversation =
+            ConversationDocument::new_group(own_did, name, &Vec::from_iter(did_key))?;
 
         let recipient = conversation.recipients();
 
@@ -899,6 +914,7 @@ impl MessageStore {
             warp::sata::Kind::Reference,
             serde_json::to_vec(&ConversationEvents::NewGroupConversation(
                 own_did.clone(),
+                conversation.name(),
                 conversation.id(),
                 recipient,
                 conversation.signature.clone(),
@@ -1296,12 +1312,29 @@ impl MessageStore {
         &self,
         conversation: Uuid,
         opt: MessageOptions,
-    ) -> Result<Vec<Message>, Error> {
+    ) -> Result<Messages, Error> {
         let conversation = self.get_conversation(conversation).await?;
-        conversation
-            .get_messages(&self.ipfs, self.did.clone(), opt)
-            .await
-            .map(Vec::from_iter)
+        let m_type = opt.messages_type();
+        match m_type {
+            MessagesType::Stream => {
+                let stream = conversation
+                    .get_messages_stream(&self.ipfs, self.did.clone(), opt)
+                    .await?;
+                Ok(Messages::Stream(MessageStream(stream)))
+            }
+            MessagesType::List => {
+                let list = conversation
+                    .get_messages(&self.ipfs, self.did.clone(), opt)
+                    .await
+                    .map(Vec::from_iter)?;
+                Ok(Messages::List(list))
+            }
+            MessagesType::Pages { .. } => {
+                conversation
+                    .get_messages_pages(&self.ipfs, self.did.clone(), opt)
+                    .await
+            }
+        }
     }
 
     pub async fn exist(&self, conversation: Uuid) -> bool {
@@ -1414,6 +1447,62 @@ impl MessageStore {
         })
     }
 
+    pub async fn update_conversation_name(
+        &mut self,
+        conversation_id: Uuid,
+        name: &str,
+    ) -> Result<(), Error> {
+        let name_length = name.trim().len();
+
+        if name_length == 0 || name_length > 255 {
+            return Err(Error::InvalidLength {
+                context: "name".into(),
+                current: name_length,
+                minimum: Some(1),
+                maximum: Some(255),
+            });
+        }
+
+        let conversation = self.get_conversation(conversation_id).await?;
+
+        if matches!(conversation.conversation_type, ConversationType::Direct) {
+            return Err(Error::InvalidConversation);
+        }
+
+        let Some(creator) = conversation.creator.clone() else {
+            return Err(Error::InvalidConversation);
+        };
+
+        let own_did = &*self.did;
+
+        if creator.ne(own_did) {
+            return Err(Error::PublicKeyInvalid);
+        }
+
+        self.get_conversation_mut(conversation_id, |conversation| {
+            conversation.name = Some(name.to_string());
+        })
+        .await?;
+
+        let conversation = self.get_conversation(conversation_id).await?;
+
+        let Some(signature) = conversation.signature.clone() else {
+            return Err(Error::InvalidSignature);
+        };
+
+        let event =
+            MessagingEvents::UpdateConversationName(conversation_id, name.to_string(), signature);
+
+        let tx = self.get_conversation_sender(conversation_id).await?;
+        let _ = tx.send(MessageEventKind::ConversationNameUpdated {
+            conversation_id,
+            name: name.to_string(),
+        });
+
+        self.send_raw_event(conversation_id, None, event, true)
+            .await
+    }
+
     pub async fn add_recipient(
         &mut self,
         conversation_id: Uuid,
@@ -1479,6 +1568,7 @@ impl MessageStore {
         let own_did = &*self.did;
         let new_event = ConversationEvents::NewGroupConversation(
             own_did.clone(),
+            conversation.name(),
             conversation.id(),
             conversation.recipients(),
             Some(signature),
@@ -1836,10 +1926,29 @@ impl MessageStore {
     pub async fn attach(
         &mut self,
         conversation_id: Uuid,
+        message_id: Option<Uuid>,
         location: Location,
         files: Vec<PathBuf>,
         messages: Vec<String>,
     ) -> Result<(), Error> {
+        if !messages.is_empty() {
+            let lines_value_length: usize = messages
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.trim())
+                .map(|s| s.chars().count())
+                .sum();
+
+            if lines_value_length > 4096 {
+                error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+                return Err(Error::InvalidLength {
+                    context: "message".into(),
+                    current: lines_value_length,
+                    minimum: None,
+                    maximum: Some(4096),
+                });
+            }
+        }
         let conversation = self.get_conversation(conversation_id).await?;
         let mut tx = self.conversation_tx(conversation_id).await?;
         //TODO: Send directly if constellation isnt present
@@ -1975,6 +2084,7 @@ impl MessageStore {
         message.set_sender(own_did.clone());
         message.set_attachment(attachments);
         message.set_value(messages.clone());
+        message.set_replied(message_id);
 
         let construct = vec![
             message.id().into_bytes().to_vec(),
@@ -2761,6 +2871,36 @@ impl MessageStore {
                 if let Err(e) = tx.send(MessageEventKind::RecipientRemoved {
                     conversation_id,
                     recipient,
+                }) {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            MessagingEvents::UpdateConversationName(conversation_id, name, signature) => {
+                let name_length = name.trim().len();
+
+                if name_length == 0 || name_length > 255 {
+                    return Err(Error::InvalidLength {
+                        context: "name".into(),
+                        current: name_length,
+                        minimum: Some(1),
+                        maximum: Some(255),
+                    });
+                }
+                if let Some(current_name) = document.name() {
+                    if current_name.eq(&name) {
+                        return Ok(false);
+                    }
+                }
+
+                self.get_conversation_mut(document.id(), |conversation| {
+                    conversation.name = Some(name.clone());
+                    conversation.signature = Some(signature);
+                })
+                .await?;
+
+                if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
+                    conversation_id,
+                    name,
                 }) {
                     error!("Error broadcasting event: {e}");
                 }

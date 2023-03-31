@@ -5,6 +5,7 @@ use rustyline_async::{Readline, ReadlineError};
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 use warp::crypto::DID;
 use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
@@ -105,7 +106,7 @@ async fn account(
         config.ipfs_setting.bootstrap = bootstrap;
     }
 
-    config.store_setting.friend_request_response_duration = opt.wait;
+    config.store_setting.friend_request_response_duration = opt.wait.map(Duration::from_millis);
 
     config.ipfs_setting.mdns.enable = opt.mdns;
 
@@ -153,6 +154,8 @@ async fn main() -> anyhow::Result<()> {
         own_identity.username(),
         own_identity.short_id()
     );
+    println!("DID: {}", own_identity.did_key());
+    
     let (mut rl, mut stdout) = Readline::new(format!(
         "{}#{} >>> ",
         own_identity.username(),

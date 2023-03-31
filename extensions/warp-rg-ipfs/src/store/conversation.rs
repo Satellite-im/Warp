@@ -1,6 +1,9 @@
 use chrono::{DateTime, Utc};
 use core::hash::Hash;
-use futures::{stream::FuturesOrdered, StreamExt};
+use futures::{
+    stream::{self, BoxStream, FuturesOrdered},
+    StreamExt,
+};
 use libipld::{Cid, IpldCodec};
 use rust_ipfs::Ipfs;
 use serde::{Deserialize, Serialize};
@@ -11,7 +14,10 @@ use warp::{
     crypto::{did_key::CoreSign, Fingerprint, DID},
     error::Error,
     logging::tracing::log::info,
-    raygun::{Conversation, ConversationType, Message, MessageOptions},
+    raygun::{
+        Conversation, ConversationType, Message, MessageOptions, MessagePage, Messages,
+        MessagesType,
+    },
     sata::{Kind, Sata},
 };
 
@@ -92,6 +98,10 @@ impl ConversationDocument {
         self.id
     }
 
+    pub fn name(&self) -> Option<String> {
+        self.name.clone()
+    }
+
     pub fn topic(&self) -> String {
         format!("{}/{}", self.conversation_type, self.id())
     }
@@ -116,6 +126,7 @@ impl ConversationDocument {
 impl ConversationDocument {
     pub fn new(
         did: &DID,
+        name: Option<String>,
         mut recipients: Vec<DID>,
         id: Option<Uuid>,
         conversation_type: ConversationType,
@@ -123,7 +134,6 @@ impl ConversationDocument {
         signature: Option<String>,
     ) -> Result<Self, Error> {
         let id = id.unwrap_or_else(Uuid::new_v4);
-        let name = None;
 
         if !recipients.contains(did) {
             recipients.push(did.clone());
@@ -171,6 +181,7 @@ impl ConversationDocument {
 
         Self::new(
             did,
+            None,
             recipients.to_vec(),
             conversation_id,
             ConversationType::Direct,
@@ -179,10 +190,11 @@ impl ConversationDocument {
         )
     }
 
-    pub fn new_group(did: &DID, recipients: &[DID]) -> Result<Self, Error> {
+    pub fn new_group(did: &DID, name: Option<String>, recipients: &[DID]) -> Result<Self, Error> {
         let conversation_id = Some(Uuid::new_v4());
         Self::new(
             did,
+            name,
             recipients.to_vec(),
             conversation_id,
             ConversationType::Group,
@@ -254,13 +266,14 @@ impl ConversationDocument {
         Ok(())
     }
 
+    //TODO: Maybe utilize get_messages_stream for returning the set??
     pub async fn get_messages(
         &self,
         ipfs: &Ipfs,
         did: Arc<DID>,
         option: MessageOptions,
     ) -> Result<BTreeSet<Message>, Error> {
-        let messages = match option.date_range() {
+        let mut messages = match option.date_range() {
             Some(range) => Vec::from_iter(
                 self.messages
                     .iter()
@@ -269,6 +282,10 @@ impl ConversationDocument {
             ),
             None => Vec::from_iter(self.messages.iter().copied()),
         };
+
+        if option.reverse() {
+            messages.reverse()
+        }
 
         let sorted = option
             .range()
@@ -328,6 +345,129 @@ impl ConversationDocument {
         Ok(list)
     }
 
+    pub async fn get_messages_stream<'a>(
+        &self,
+        ipfs: &Ipfs,
+        did: Arc<DID>,
+        option: MessageOptions,
+    ) -> Result<BoxStream<'a, Message>, Error> {
+        let mut messages = Vec::from_iter(self.messages.iter().copied());
+
+        if option.reverse() {
+            messages.reverse()
+        }
+
+        if option.first_message() && !messages.is_empty() {
+            let message = messages
+                .first()
+                .ok_or(Error::MessageNotFound)?
+                .resolve(ipfs, did.clone())
+                .await?;
+            return Ok(stream::once(async { message }).boxed());
+        }
+
+        if option.last_message() && !messages.is_empty() {
+            let message = messages
+                .last()
+                .ok_or(Error::MessageNotFound)?
+                .resolve(ipfs, did.clone())
+                .await?;
+            return Ok(stream::once(async { message }).boxed());
+        }
+
+        let ipfs = ipfs.clone();
+        let stream = async_stream::stream! {
+            for (index, document) in messages.iter().enumerate() {
+                if let Some(range) = option.range() {
+                    if range.start > index || range.end < index {
+                        continue
+                    }
+                }
+                if let Some(range) = option.date_range() {
+                    if !(document.date >= range.start && document.date <= range.end) {
+                        continue
+                    }
+                }
+
+                if let Ok(message) = document.resolve(&ipfs, did.clone()).await {
+                    if let Some(keyword) = option.keyword() {
+                        if message
+                            .value()
+                            .iter()
+                            .any(|line| line.to_lowercase().contains(&keyword.to_lowercase()))
+                        {
+                            yield message;
+                        }
+                    } else {
+                        yield message;
+                    }
+                }
+            }
+        };
+
+        Ok(stream.boxed())
+    }
+
+    pub async fn get_messages_pages(
+        &self,
+        ipfs: &Ipfs,
+        did: Arc<DID>,
+        option: MessageOptions,
+    ) -> Result<Messages, Error> {
+        let mut messages = Vec::from_iter(self.messages.iter().copied());
+
+        if option.reverse() {
+            messages.reverse()
+        }
+
+        let (page_index, amount_per_page) = match option.messages_type() {
+            MessagesType::Pages {
+                page,
+                amount_per_page,
+            } => (
+                page,
+                amount_per_page
+                    .map(|amount| if amount == 0 { u8::MAX as _ } else { amount })
+                    .unwrap_or(u8::MAX as _),
+            ),
+            _ => (None, u8::MAX as _),
+        };
+
+        let ipfs = ipfs.clone();
+
+        let messages_chunk = messages.chunks(amount_per_page as _).collect::<Vec<_>>();
+        let mut pages = vec![];
+        // First check to determine if there is a page that was selected
+        if let Some(index) = page_index {
+            let page = messages_chunk.get(index).ok_or(Error::MessageNotFound)?;
+            let mut messages = vec![];
+            for document in page.iter() {
+                if let Ok(message) = document.resolve(&ipfs, did.clone()).await {
+                    messages.push(message);
+                }
+            }
+            let total = messages.len();
+            pages.push(MessagePage::new(index, messages, total));
+            return Ok(Messages::Page { pages, total: 1 });
+        }
+
+        for (index, chunk) in messages_chunk.iter().enumerate() {
+            let mut messages = vec![];
+            for document in chunk.iter() {
+                if let Ok(message) = document.resolve(&ipfs, did.clone()).await {
+                    messages.push(message);
+                }
+            }
+
+            let total = messages.len();
+            pages.push(MessagePage::new(index, messages, total));
+        }
+
+        let total = pages.len();
+
+        Ok(Messages::Page { pages, total })
+    }
+
     pub async fn get_message(
         &self,
         ipfs: &Ipfs,
@@ -347,7 +487,7 @@ impl ConversationDocument {
             .messages
             .iter()
             .find(|document| document.id == message_id)
-            .cloned()
+            .copied()
             .ok_or(Error::MessageNotFound)?;
         self.messages.remove(&document);
         document.remove(ipfs).await

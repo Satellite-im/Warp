@@ -7,7 +7,9 @@ use futures::channel::mpsc::unbounded;
 use futures::{AsyncReadExt, StreamExt};
 use ipfs::libp2p::kad::KademliaBucketInserts;
 use ipfs::libp2p::swarm::SwarmEvent;
-use ipfs::p2p::{ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig};
+use ipfs::p2p::{
+    ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig, UpdateMode,
+};
 use rust_ipfs as ipfs;
 use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,7 +18,8 @@ use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
 use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use tracing::log::{error, info, trace, warn};
+use tracing::debug;
+use tracing::log::{self, error, info, trace, warn};
 use warp::crypto::did_key::Generate;
 use warp::crypto::zeroize::Zeroizing;
 use warp::data::DataType;
@@ -29,7 +32,7 @@ use warp::pocket_dimension::PocketDimension;
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
-use ipfs::{Ipfs, IpfsOptions, Keypair, Protocol, StoragePath, UninitializedIpfs};
+use ipfs::{Ipfs, IpfsOptions, Keypair, Multiaddr, Protocol, StoragePath, UninitializedIpfs};
 use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity, IdentityUpdate, Relationship};
@@ -200,7 +203,6 @@ impl IpfsIdentity {
         }
 
         let mut opts = IpfsOptions {
-            keypair,
             bootstrap: config.bootstrap.address(),
             mdns: config.ipfs_setting.mdns.enable,
             listening_addrs: config.listen_on.clone(),
@@ -213,6 +215,7 @@ impl IpfsIdentity {
                     cache: 100,
                     push_update: true,
                     protocol_version: "/satellite/warp/0.1".into(),
+                    initial_delay: Duration::from_secs(0),
                     ..Default::default()
                 };
                 if let Some(agent) = config.ipfs_setting.agent_version.as_ref() {
@@ -232,7 +235,7 @@ impl IpfsIdentity {
             transport_configuration: Some(TransportConfig {
                 yamux_max_buffer_size: 16 * 1024 * 1024,
                 yamux_receive_window_size: 16 * 1024 * 1024,
-                yamux_update_mode: 0,
+                yamux_update_mode: UpdateMode::Read,
                 mplex_max_buffer_size: usize::MAX / 2,
                 enable_quic: false,
                 ..Default::default()
@@ -260,6 +263,7 @@ impl IpfsIdentity {
 
         info!("Starting ipfs");
         let ipfs = UninitializedIpfs::with_opt(opts)
+            .set_keypair(keypair)
             // We check the events from the swarm for autonat
             // So we can determine our nat status when it does change
             .swarm_events({
@@ -284,32 +288,39 @@ impl IpfsIdentity {
             .start()
             .await?;
 
+        if config.ipfs_setting.bootstrap && !empty_bootstrap {
+            //TODO: determine if bootstrap should run in intervals
+            if let Err(e) = ipfs.bootstrap().await {
+                error!("Error bootstrapping: {e}");
+            }
+        }
+
         tokio::spawn({
             let ipfs = ipfs.clone();
             let config = config.clone();
             async move {
-                if config.ipfs_setting.bootstrap && !empty_bootstrap {
-                    //TODO: run bootstrap in intervals
-                    //Note: If we decided to loop or run it in interval
-                    //      we should join on the returned handle
-                    if let Err(e) = ipfs.bootstrap().await {
-                        error!("Error bootstrapping: {e}");
-                    }
-                }
-
-                let relay_client = {
+                let start_relay_client = || {
                     let ipfs = ipfs.clone();
                     let config = config.clone();
                     async move {
                         info!("Relay client enabled. Loading relays");
+                        let mut relayed = vec![];
+
                         for addr in config.bootstrap.address() {
-                            if let Err(e) = ipfs
-                                .add_listening_address(addr.with(Protocol::P2pCircuit))
+                            match ipfs
+                                .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
                                 .await
                             {
-                                info!("Error listening on relay: {e}");
-                                continue;
-                            }
+                                Ok(addr) => {
+                                    debug!("Listening on {}", addr);
+                                    relayed.push(addr)
+                                }
+                                Err(e) => {
+                                    info!("Error listening on relay via bootstrap: {e}");
+                                    continue;
+                                }
+                            };
+
                             if config.ipfs_setting.relay_client.single {
                                 break;
                             }
@@ -317,20 +328,46 @@ impl IpfsIdentity {
 
                         //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
                         //      anything on this end
-                        for addr in config.ipfs_setting.relay_client.relay_address.iter() {
+                        for addr in config.ipfs_setting.relay_client.relay_address.clone() {
                             if let Err(e) = ipfs.connect(addr.clone()).await {
                                 error!("Error dialing relay {}: {e}", addr.clone());
+                                continue;
                             }
 
-                            if let Err(e) = ipfs
+                            match ipfs
                                 .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
                                 .await
                             {
-                                info!("Error listening on relay: {e}");
-                                continue;
-                            }
+                                Ok(addr) => {
+                                    debug!("Listening on {}", addr);
+                                    relayed.push(addr);
+                                }
+                                Err(e) => {
+                                    info!("Error listening on relay {}: {e}", addr.clone().with(Protocol::P2pCircuit));
+                                    continue;
+                                }
+                            };
                             if config.ipfs_setting.relay_client.single {
                                 break;
+                            }
+                        }
+
+                        if relayed.is_empty() {
+                            log::warn!("No relay connection is available");
+                        }
+
+                        relayed
+                    }
+                };
+
+                let stop_relay_client = |relays: Vec<Multiaddr>| {
+                    let ipfs = ipfs.clone();
+                    async move {
+                        info!("Disconnecting from relays");
+                        for addr in relays {
+                            if let Err(e) = ipfs.remove_listening_address(addr).await {
+                                info!("Error removing relay: {e}");
+                                continue;
                             }
                         }
                     }
@@ -341,15 +378,37 @@ impl IpfsIdentity {
                     config.ipfs_setting.relay_client.enable,
                 ) {
                     (true, true) => {
+                        //Start using relays right away rather than waiting for nat status
+                        let mut addrs = start_relay_client().await;
+                        let mut using_relay = true;
                         while let Some(public) = nat_channel_rx.next().await {
-                            if !public {
-                                relay_client.await;
-                                //Note: Although this breaks the loop now, it may be possible for the nat to change in the future resulting in it being public
-                                break;
+                            match public {
+                                true => {
+                                    if using_relay {
+                                        log::trace!(
+                                            "Disabling relays due to being publicly accessible."
+                                        );
+                                        let addrs = addrs.drain(..).collect::<Vec<_>>();
+                                        stop_relay_client(addrs).await;
+                                        using_relay = false;
+                                    }
+                                }
+                                false => {
+                                    if !using_relay {
+                                        log::trace!(
+                                            "No longer publicly accessible. Switching to relays"
+                                        );
+                                        addrs = start_relay_client().await;
+                                        using_relay = true;
+                                    }
+                                }
                             }
                         }
                     }
-                    (false, true) => relay_client.await,
+                    (false, true) => {
+                        // We dont need the addresses of the circuit relays
+                        start_relay_client().await;
+                    }
                     (true, false) | (false, false) => {}
                 }
             }
@@ -364,7 +423,7 @@ impl IpfsIdentity {
                 .collect()
         });
 
-        let discovery = Discovery::new(ipfs.clone(), config.store_setting.discovery);
+        let discovery = Discovery::new(ipfs.clone(), config.store_setting.discovery.clone());
 
         let identity_store = IdentityStore::new(
             ipfs.clone(),
@@ -373,10 +432,11 @@ impl IpfsIdentity {
             config.store_setting.auto_push,
             self.tx.clone(),
             (
-                discovery,
+                discovery.clone(),
                 relays,
                 config.store_setting.override_ipld,
                 config.store_setting.share_platform,
+                config.store_setting.update_events,
             ),
         )
         .await?;
@@ -385,14 +445,10 @@ impl IpfsIdentity {
         let friend_store = FriendsStore::new(
             ipfs.clone(),
             identity_store.clone(),
-            config.path,
+            discovery,
+            config.clone(),
             tesseract.clone(),
-            (
-                self.tx.clone(),
-                config.store_setting.override_ipld,
-                config.store_setting.use_phonebook,
-                config.store_setting.friend_request_response_duration,
-            ),
+            self.tx.clone(),
         )
         .await?;
         info!("friends store initialized");
@@ -534,7 +590,12 @@ impl MultiPass for IpfsIdentity {
             let mut tesseract = self.tesseract.clone();
             if !tesseract.exist("keypair") {
                 warn!("Loading keypair generated from mnemonic phrase into tesseract");
-                warp::crypto::keypair::mnemonic_into_tesseract(&mut tesseract, phrase, None)?;
+                warp::crypto::keypair::mnemonic_into_tesseract(
+                    &mut tesseract,
+                    phrase,
+                    None,
+                    self.config.save_phrase,
+                )?;
             }
         }
 

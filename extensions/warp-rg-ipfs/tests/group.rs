@@ -49,7 +49,7 @@ mod test {
         let mut chat_subscribe_c = chat_c.subscribe().await?;
 
         chat_a
-            .create_group_conversation(vec![did_b.clone(), did_c.clone()])
+            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()])
             .await?;
 
         let id_a = tokio::time::timeout(Duration::from_secs(5), async {
@@ -130,7 +130,7 @@ mod test {
         let mut chat_subscribe_d = chat_d.subscribe().await?;
 
         chat_a
-            .create_group_conversation(vec![did_b.clone(), did_c.clone()])
+            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()])
             .await?;
 
         let id_a = tokio::time::timeout(Duration::from_secs(5), async {
@@ -272,7 +272,7 @@ mod test {
         let mut chat_subscribe_d = chat_d.subscribe().await?;
 
         chat_a
-            .create_group_conversation(vec![did_b.clone(), did_c.clone()])
+            .create_group_conversation(None, vec![did_b.clone(), did_c.clone()])
             .await?;
 
         let id_a = tokio::time::timeout(Duration::from_secs(5), async {
@@ -476,7 +476,7 @@ mod test {
         let mut chat_subscribe_d = chat_d.subscribe().await?;
 
         chat_a
-            .create_group_conversation(vec![did_b.clone(), did_c.clone(), did_d.clone()])
+            .create_group_conversation(None, vec![did_b.clone(), did_c.clone(), did_d.clone()])
             .await?;
 
         let id_a = tokio::time::timeout(Duration::from_secs(5), async {
