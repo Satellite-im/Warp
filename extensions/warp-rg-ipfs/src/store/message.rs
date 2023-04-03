@@ -375,15 +375,17 @@ impl MessageStore {
                                                     }
                                                 };
 
-                                                let key =
-                                                    match ecdh_encrypt(&did, Some(sender.clone()), raw_key)
-                                                    {
-                                                        Ok(key) => key,
-                                                        Err(e) => {
-                                                            error!("Error: {e}");
-                                                            continue;
-                                                        }
-                                                    };
+                                                let key = match ecdh_encrypt(
+                                                    &did,
+                                                    Some(sender.clone()),
+                                                    raw_key,
+                                                ) {
+                                                    Ok(key) => key,
+                                                    Err(e) => {
+                                                        error!("Error: {e}");
+                                                        continue;
+                                                    }
+                                                };
 
                                                 let response =
                                                     ConversationRequestResponse::Response(
@@ -409,13 +411,25 @@ impl MessageStore {
                                                             serde_json::to_vec(&response)?,
                                                         )?;
 
-                                                        let peers = store.ipfs.pubsub_peers(Some(topic.clone())).await?;
-                                                        let peer_id = did_to_libp2p_pub(&sender).map(|pk| pk.to_peer_id())?;
+                                                        let peers = store
+                                                            .ipfs
+                                                            .pubsub_peers(Some(topic.clone()))
+                                                            .await?;
+                                                        let peer_id = did_to_libp2p_pub(&sender)
+                                                            .map(|pk| pk.to_peer_id())?;
 
                                                         match peers.contains(&peer_id) {
                                                             true => {
-                                                                let bytes = serde_json::to_vec(&data)?;
-                                                                if let Err(_e) = store.ipfs.pubsub_publish(topic.clone(), bytes).await {
+                                                                let bytes =
+                                                                    serde_json::to_vec(&data)?;
+                                                                if let Err(_e) = store
+                                                                    .ipfs
+                                                                    .pubsub_publish(
+                                                                        topic.clone(),
+                                                                        bytes,
+                                                                    )
+                                                                    .await
+                                                                {
                                                                     warn!("Unable to publish to topic. Queuing event");
                                                                     if let Err(e) = store
                                                                         .queue_event(
@@ -438,7 +452,13 @@ impl MessageStore {
                                                                 if let Err(e) = store
                                                                     .queue_event(
                                                                         sender.clone(),
-                                                                        Queue::direct(conversation_id, None, peer_id, topic.clone(), data.clone()),
+                                                                        Queue::direct(
+                                                                            conversation_id,
+                                                                            None,
+                                                                            peer_id,
+                                                                            topic.clone(),
+                                                                            data.clone(),
+                                                                        ),
                                                                     )
                                                                     .await
                                                                 {
@@ -515,6 +535,71 @@ impl MessageStore {
             .write()
             .await
             .insert(conversation_id, task);
+    }
+
+    async fn request_key(&self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
+        let request =
+            ConversationRequestResponse::Request(ConversationRequest::Key { conversation_id });
+
+        let mut conversation = self.get_conversation(conversation_id).await?;
+
+        conversation.messages.clear();
+        conversation.recipients.clear();
+
+        let own_did = &self.did;
+
+        let mut data = Sata::default();
+
+        data.add_recipient(did.as_ref())?;
+
+        let data = data.encrypt(
+            libipld::IpldCodec::DagJson,
+            own_did.as_ref(),
+            warp::sata::Kind::Reference,
+            serde_json::to_vec(&request)?,
+        )?;
+
+        let topic = conversation.reqres_topic(did);
+
+        let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
+        let peer_id = did_to_libp2p_pub(did).map(|pk| pk.to_peer_id())?;
+
+        match peers.contains(&peer_id) {
+            true => {
+                let bytes = serde_json::to_vec(&data)?;
+                if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
+                    warn!("Unable to publish to topic. Queuing event");
+                    if let Err(e) = self
+                        .queue_event(
+                            did.clone(),
+                            Queue::direct(
+                                conversation_id,
+                                None,
+                                peer_id,
+                                topic.clone(),
+                                data.clone(),
+                            ),
+                        )
+                        .await
+                    {
+                        error!("Error submitting event to queue: {e}");
+                    }
+                }
+            }
+            false => {
+                if let Err(e) = self
+                    .queue_event(
+                        did.clone(),
+                        Queue::direct(conversation_id, None, peer_id, topic.clone(), data.clone()),
+                    )
+                    .await
+                {
+                    error!("Error submitting event to queue: {e}");
+                }
+            }
+        };
+
+        Ok(())
     }
 
     async fn start_task(&self, conversation_id: Uuid, stream: SubscriptionStream) {
