@@ -31,6 +31,8 @@ bayespam = "1.1.0"
 
 chrono = { workspace = true, features = ["serde"] }
 
+bytes.workspace = true
+
 [dev-dependencies]
 fdlimit = "0.2"
 warp-pd-stretto = { path = "../warp-pd-stretto" }
