@@ -119,6 +119,10 @@ impl ConversationDocument {
         format!("{}/files", self.topic())
     }
 
+    pub fn reqres_topic(&self, did: &DID) -> String {
+        format!("{}/reqres/{}", self.topic(), did)
+    }
+
     pub fn files_transfer(&self, id: Uuid) -> String {
         format!("{}/{id}", self.files_topic())
     }

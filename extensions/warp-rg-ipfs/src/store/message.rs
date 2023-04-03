@@ -23,7 +23,7 @@ use tokio_stream::wrappers::ReadDirStream;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
-use warp::crypto::DID;
+use warp::crypto::{generate, DID};
 use warp::error::Error;
 use warp::logging::tracing::log::{error, info, trace};
 use warp::logging::tracing::warn;
@@ -36,14 +36,18 @@ use warp::raygun::{
 use warp::sata::Sata;
 use warp::sync::Arc;
 
-use crate::store::connected_to_peer;
+use crate::store::{
+    connected_to_peer, ecdh_decrypt, ecdh_encrypt, ConversationRequestResponse,
+    ConversationResponse,
+};
 use crate::SpamFilter;
 
 use super::conversation::{ConversationDocument, MessageDocument};
 use super::document::{GetDag, GetLocalDag, ToCid};
 use super::keystore::Keystore;
 use super::{
-    did_to_libp2p_pub, topic_discovery, verify_serde_sig, ConversationEvents, MessagingEvents,
+    did_to_libp2p_pub, topic_discovery, verify_serde_sig, ConversationEvents, ConversationRequest,
+    MessagingEvents,
 };
 
 const PERMIT_AMOUNT: usize = 1;
@@ -75,7 +79,7 @@ pub struct MessageStore {
     stream_sender: Arc<tokio::sync::RwLock<HashMap<Uuid, BroadcastSender<MessageEventKind>>>>,
 
     stream_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
-
+    stream_reqres_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
     stream_event_task: Arc<tokio::sync::RwLock<HashMap<Uuid, tokio::task::JoinHandle<()>>>>,
 
     // Queue
@@ -110,6 +114,7 @@ impl Clone for MessageStore {
             filesystem: self.filesystem.clone(),
             stream_task: self.stream_task.clone(),
             stream_event_task: self.stream_event_task.clone(),
+            stream_reqres_task: self.stream_reqres_task.clone(),
             queue: self.queue.clone(),
             did: self.did.clone(),
             event: self.event.clone(),
@@ -161,12 +166,15 @@ impl MessageStore {
         let conversation_sender = Arc::default();
         let conversation_keystore_cid = Arc::default();
 
+        let stream_reqres_task = Arc::default();
+
         let store = Self {
             path,
             ipfs,
             stream_sender,
             stream_task,
             stream_event_task,
+            stream_reqres_task,
             conversation_cid,
             conversation_lock,
             conversation_sender,
@@ -247,11 +255,13 @@ impl MessageStore {
     }
 
     async fn start_event_task(&self, conversation_id: Uuid) {
-        info!("Task started for {conversation_id}");
+        info!("Event Task started for {conversation_id}");
         let did = self.did.clone();
-        let Ok(conversation) = self.get_conversation(conversation_id).await else {
+        let Ok(mut conversation) = self.get_conversation(conversation_id).await else {
             return
         };
+
+        conversation.messages.clear();
 
         let Ok(tx) = self.get_conversation_sender(conversation_id).await else {
             return
@@ -297,6 +307,211 @@ impl MessageStore {
             }
         });
         self.stream_event_task
+            .write()
+            .await
+            .insert(conversation_id, task);
+    }
+
+    async fn start_reqres_task(&self, conversation_id: Uuid) {
+        info!("RequestResponse Task started for {conversation_id}");
+        let did = self.did.clone();
+        let Ok(mut conversation) = self.get_conversation(conversation_id).await else {
+            return
+        };
+
+        conversation.messages.clear();
+        conversation.recipients.clear();
+
+        let Ok(stream) = self.ipfs.pubsub_subscribe(conversation.reqres_topic(&did)).await else {
+            return
+        };
+
+        let task = tokio::spawn({
+            let store = self.clone();
+            async move {
+                futures::pin_mut!(stream);
+
+                while let Some(stream) = stream.next().await {
+                    if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
+                        let sender = match data.sender().map(DID::from) {
+                            Some(did) => did,
+                            None => continue,
+                        };
+                        if let Ok(data) = data.decrypt::<Vec<u8>>(&did) {
+                            if let Ok(event) =
+                                serde_json::from_slice::<ConversationRequestResponse>(&data)
+                            {
+                                match event {
+                                    ConversationRequestResponse::Request(request) => {
+                                        match request {
+                                            ConversationRequest::Key { conversation_id } => {
+                                                let mut keystore = match store
+                                                    .conversation_keystore(conversation_id)
+                                                    .await
+                                                {
+                                                    Ok(keystore) => keystore,
+                                                    Err(e) => {
+                                                        error!("Error obtaining keystore: {e}. Skipping");
+                                                        continue;
+                                                    }
+                                                };
+
+                                                let raw_key = match keystore.get_latest(&did, &did)
+                                                {
+                                                    Ok(key) => key,
+                                                    Err(Error::PublicKeyInvalid) => {
+                                                        let key = generate(64);
+                                                        if let Err(e) =
+                                                            keystore.insert(&did, &did, &key)
+                                                        {
+                                                            error!("Error inserting generated key into store: {e}");
+                                                            continue;
+                                                        }
+                                                        key
+                                                    }
+                                                    Err(e) => {
+                                                        error!("Error getting key from store: {e}");
+                                                        continue;
+                                                    }
+                                                };
+
+                                                let key =
+                                                    match ecdh_encrypt(&did, Some(sender.clone()), raw_key)
+                                                    {
+                                                        Ok(key) => key,
+                                                        Err(e) => {
+                                                            error!("Error: {e}");
+                                                            continue;
+                                                        }
+                                                    };
+
+                                                let response =
+                                                    ConversationRequestResponse::Response(
+                                                        ConversationResponse::Key {
+                                                            conversation_id,
+                                                            key,
+                                                        },
+                                                    );
+
+                                                let result = {
+                                                    let did = did.clone();
+                                                    let store = store.clone();
+                                                    let topic = conversation.reqres_topic(&sender);
+                                                    async move {
+                                                        let mut data = Sata::default();
+
+                                                        data.add_recipient(sender.as_ref())?;
+
+                                                        let data = data.encrypt(
+                                                            libipld::IpldCodec::DagJson,
+                                                            did.as_ref(),
+                                                            warp::sata::Kind::Reference,
+                                                            serde_json::to_vec(&response)?,
+                                                        )?;
+
+                                                        let peers = store.ipfs.pubsub_peers(Some(topic.clone())).await?;
+                                                        let peer_id = did_to_libp2p_pub(&sender).map(|pk| pk.to_peer_id())?;
+
+                                                        match peers.contains(&peer_id) {
+                                                            true => {
+                                                                let bytes = serde_json::to_vec(&data)?;
+                                                                if let Err(_e) = store.ipfs.pubsub_publish(topic.clone(), bytes).await {
+                                                                    warn!("Unable to publish to topic. Queuing event");
+                                                                    if let Err(e) = store
+                                                                        .queue_event(
+                                                                            sender.clone(),
+                                                                            Queue::direct(
+                                                                                conversation_id,
+                                                                                None,
+                                                                                peer_id,
+                                                                                topic.clone(),
+                                                                                data.clone(),
+                                                                            ),
+                                                                        )
+                                                                        .await
+                                                                    {
+                                                                        error!("Error submitting event to queue: {e}");
+                                                                    }
+                                                                }
+                                                            }
+                                                            false => {
+                                                                if let Err(e) = store
+                                                                    .queue_event(
+                                                                        sender.clone(),
+                                                                        Queue::direct(conversation_id, None, peer_id, topic.clone(), data.clone()),
+                                                                    )
+                                                                    .await
+                                                                {
+                                                                    error!("Error submitting event to queue: {e}");
+                                                                }
+                                                            }
+                                                        };
+
+                                                        Ok::<_, Error>(())
+                                                    }
+                                                };
+
+                                                if let Err(e) = result.await {
+                                                    error!("Error: {e}");
+                                                }
+                                            }
+                                        }
+                                    }
+                                    ConversationRequestResponse::Response(response) => {
+                                        match response {
+                                            crate::store::ConversationResponse::Key {
+                                                conversation_id,
+                                                key,
+                                            } => {
+                                                let mut keystore = match store
+                                                    .conversation_keystore(conversation_id)
+                                                    .await
+                                                {
+                                                    Ok(keystore) => keystore,
+                                                    Err(e) => {
+                                                        error!("Error obtaining keystore: {e}. Skipping");
+                                                        continue;
+                                                    }
+                                                };
+
+                                                let raw_key = match ecdh_decrypt(
+                                                    &did,
+                                                    Some(sender.clone()),
+                                                    key,
+                                                ) {
+                                                    Ok(key) => key,
+                                                    Err(e) => {
+                                                        error!(
+                                                            "Error decrypting key: {e}. Skipping"
+                                                        );
+                                                        continue;
+                                                    }
+                                                };
+
+                                                if let Err(e) =
+                                                    keystore.insert(&did, &sender, raw_key)
+                                                {
+                                                    match e {
+                                                        Error::PublicKeyInvalid => {
+                                                            error!("Key already exist in store")
+                                                        }
+                                                        e => error!(
+                                                            "Error inserting key into store: {e}"
+                                                        ),
+                                                    }
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        self.stream_reqres_task
             .write()
             .await
             .insert(conversation_id, task);
@@ -383,9 +598,19 @@ impl MessageStore {
         });
         self.stream_task.write().await.insert(conversation_id, task);
         self.start_event_task(conversation_id).await;
+        self.start_reqres_task(conversation_id).await;
     }
 
     async fn end_task(&self, conversation_id: Uuid) {
+        if let Some(task) = self
+            .stream_reqres_task
+            .write()
+            .await
+            .remove(&conversation_id)
+        {
+            task.abort();
+        }
+
         if let Some(task) = self
             .stream_event_task
             .write()

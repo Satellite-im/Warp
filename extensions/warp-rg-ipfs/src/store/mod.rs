@@ -33,15 +33,21 @@ pub enum ConversationEvents {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all="lowercase", tag = "type")]
+pub enum ConversationRequestResponse {
+    Request(ConversationRequest),
+    Response(ConversationResponse),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all="lowercase")]
 pub enum ConversationRequest {
-    Message {
-        conversation_id: Uuid,
-        message_id: Uuid,
-    },
-    Key {
-        conversation_id: Uuid,
-        message_id: Option<Uuid>,
-    },
+    Key { conversation_id: Uuid },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ConversationResponse {
+    Key { conversation_id: Uuid, key: Vec<u8> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
