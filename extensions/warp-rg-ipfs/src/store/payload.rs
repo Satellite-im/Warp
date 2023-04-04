@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use warp::{crypto::DID, error::Error};
@@ -48,14 +49,10 @@ impl<'a> Payload<'a> {
 
 
 impl Payload<'_> {
-    pub fn to_bytes(&self) -> Result<Bytes, Error> {
-        let bytes = serde_json::to_vec(self)?;
+    pub fn to_bytes(self) -> Result<Bytes, Error> {
+        let bytes = serde_json::to_vec(&self)?;
         let bytes = Bytes::copy_from_slice(&bytes);
         Ok(bytes)
-    }
-
-    pub fn into_bytes(self) -> Result<Bytes, Error> {
-        self.to_bytes()
     }
 }
 
