@@ -397,7 +397,6 @@ impl MessageStore {
                                                         continue;
                                                     }
                                                 };
-
                                                 let response =
                                                     ConversationRequestResponse::Response(
                                                         ConversationResponse::Key {
@@ -405,7 +404,6 @@ impl MessageStore {
                                                             key,
                                                         },
                                                     );
-
                                                 let result = {
                                                     let did = did.clone();
                                                     let store = store.clone();
@@ -481,7 +479,6 @@ impl MessageStore {
                                                         Ok::<_, Error>(())
                                                     }
                                                 };
-
                                                 if let Err(e) = result.await {
                                                     error!("Error: {e}");
                                                 }
@@ -837,6 +834,9 @@ impl MessageStore {
                     convo.id()
                 );
 
+                let mut keystore = Keystore::new(conversation_id);
+                keystore.insert(did, did, warp::crypto::generate(64))?;
+
                 //Although we verify internally, this is just as a precaution
                 convo.verify()?;
 
@@ -853,6 +853,9 @@ impl MessageStore {
                         return Ok(());
                     }
                 };
+
+                self.set_conversation_keystore(conversation_id, &keystore)
+                    .await?;
 
                 self.start_task(convo.id(), stream).await;
                 if let Some(path) = self.path.as_ref() {
@@ -1198,10 +1201,6 @@ impl MessageStore {
         let conversation =
             ConversationDocument::new_group(own_did, name, &Vec::from_iter(did_key))?;
 
-        let mut keystore = Keystore::new(conversation.id());
-        keystore.insert(own_did, own_did, warp::crypto::generate(64))?;
-        let keystore_cid = keystore.to_cid(&self.ipfs).await?;
-
         let recipient = conversation.recipients();
 
         let cid = conversation.to_cid(&self.ipfs).await?;
@@ -1210,10 +1209,9 @@ impl MessageStore {
         let topic = conversation.topic();
 
         self.conversation_cid.write().await.insert(convo_id, cid);
-        self.conversation_keystore_cid
-            .write()
-            .await
-            .insert(convo_id, keystore_cid);
+        let mut keystore = Keystore::new(conversation.id());
+        keystore.insert(own_did, own_did, warp::crypto::generate(64))?;
+        self.set_conversation_keystore(convo_id, &keystore).await?;
 
         let stream = self.ipfs.pubsub_subscribe(topic).await?;
 
@@ -1244,31 +1242,14 @@ impl MessageStore {
                 own_did.clone(),
                 conversation.name(),
                 conversation.id(),
-                recipient,
+                recipient.clone(),
                 conversation.signature.clone(),
             ))?,
         )?;
 
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
-            let keystore_cid = keystore_cid.to_string();
 
-            if let Err(e) = tokio::fs::write(path.join(conversation.id().to_string()), cid).await {
-                error!("Unable to save info to file: {e}");
-            }
-
-            if let Err(e) = tokio::fs::write(
-                path.join(format!("{}.keystore", conversation.id())),
-                keystore_cid,
-            )
-            .await
-            {
-                error!("Unable to save info to file: {e}");
-            }
-        }
-
-        if let Some(path) = self.path.as_ref() {
-            let cid = cid.to_string();
             if let Err(e) = tokio::fs::write(path.join(conversation.id().to_string()), cid).await {
                 error!("Unable to save info to file: {e}");
             }
@@ -1314,6 +1295,21 @@ impl MessageStore {
                 error!("Error broadcasting event: {e}");
             }
         }
+
+        tokio::spawn({
+            let store = self.clone();
+            let conversation_id = conversation.id();
+            let recipients = recipient
+                .iter()
+                .filter(|d| own_did.ne(d))
+                .cloned()
+                .collect::<Vec<_>>();
+            async move {
+                for recipient in recipients {
+                    if let Err(_e) = store.request_key(conversation_id, &recipient).await {}
+                }
+            }
+        });
 
         Ok(Conversation::from(&conversation))
     }
@@ -2007,7 +2003,10 @@ impl MessageStore {
         );
 
         self.send_single_conversation_event(did_key, conversation_id, new_event)
-            .await
+            .await?;
+
+        if let Err(_e) = self.request_key(conversation_id, did_key).await {}
+        Ok(())
     }
 
     pub async fn remove_recipient(
