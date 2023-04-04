@@ -43,14 +43,14 @@ impl<'a> Payload<'a> {
     }
 
     pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, Error> {
-        serde_json::from_slice(bytes).map_err(Error::from)
+        bincode::deserialize(bytes).map_err(Error::from)
     }
 }
 
 
 impl Payload<'_> {
     pub fn to_bytes(self) -> Result<Bytes, Error> {
-        let bytes = serde_json::to_vec(&self)?;
+        let bytes = bincode::serialize(&self)?;
         let bytes = Bytes::copy_from_slice(&bytes);
         Ok(bytes)
     }

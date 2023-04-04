@@ -237,6 +237,8 @@ pub enum Error {
     #[error("{0}")]
     UuidError(#[from] uuid::Error),
     #[error("{0}")]
+    BincodeError(#[from] bincode::Error),
+    #[error("{0}")]
     SerdeYamlError(#[from] serde_yaml::Error),
     #[error("Cannot deserialize: {0}")]
     TomlDeserializeError(#[from] toml::de::Error),

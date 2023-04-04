@@ -54,12 +54,12 @@ chrono = { version = "0.4" }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = { version = "1.0" }
 serde_yaml = "0.9"
-serde_bytes = "0.11"
 toml = "0.5"
 bs58 = "0.4"
 hex = "0.4"
 libipld = { version = "0.15", features = ["serde-codec"] }
 bytes = "1"
+bincode = "1"
 
 # Misc
 dyn-clone = "1.0"
