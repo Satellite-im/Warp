@@ -1635,9 +1635,20 @@ impl MessageStore {
         conversation_id: Uuid,
         message_id: Uuid,
     ) -> Result<MessageStatus, Error> {
-        self.get_message(conversation_id, message_id).await?;
-
         let conversation = self.get_conversation(conversation_id).await?;
+
+        if matches!(conversation.conversation_type, ConversationType::Group) {
+            //TODO: Handle message status for group
+            return Err(Error::Unimplemented);
+        }
+
+        if !conversation
+            .messages
+            .iter()
+            .any(|document| document.id == message_id)
+        {
+            return Err(Error::MessageNotFound);
+        }
 
         let own_did = &*self.did;
 
