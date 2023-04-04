@@ -57,6 +57,10 @@ impl Keystore {
         Ok(())
     }
 
+    pub fn exist(&self, recipient: &DID) -> bool {
+        self.recipient_key.contains_key(recipient)
+    }
+
     pub fn get_latest(&self, did: &DID, recipient: &DID) -> Result<Vec<u8>, Error> {
         self.recipient_key
             .get(recipient)

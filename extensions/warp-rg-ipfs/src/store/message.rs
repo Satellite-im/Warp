@@ -262,6 +262,7 @@ impl MessageStore {
         };
 
         conversation.messages.clear();
+        conversation.recipients.clear();
 
         let Ok(tx) = self.get_conversation_sender(conversation_id).await else {
             return
@@ -365,6 +366,16 @@ impl MessageStore {
                                                             keystore.insert(&did, &did, &key)
                                                         {
                                                             error!("Error inserting generated key into store: {e}");
+                                                            continue;
+                                                        }
+                                                        if let Err(e) = store
+                                                            .set_conversation_keystore(
+                                                                conversation_id,
+                                                                &keystore,
+                                                            )
+                                                            .await
+                                                        {
+                                                            error!("Error setting keystore: {e}");
                                                             continue;
                                                         }
                                                         key
@@ -542,6 +553,11 @@ impl MessageStore {
             ConversationRequestResponse::Request(ConversationRequest::Key { conversation_id });
 
         let mut conversation = self.get_conversation(conversation_id).await?;
+
+        if !conversation.recipients().contains(did) {
+            //TODO: user is not a recipient of the conversation
+            return Err(Error::PublicKeyInvalid);
+        }
 
         conversation.messages.clear();
         conversation.recipients.clear();
@@ -1553,6 +1569,47 @@ impl MessageStore {
             .ok_or(Error::InvalidConversation)?;
 
         cid.get_local_dag(&self.ipfs).await
+    }
+
+    pub async fn set_conversation_keystore(
+        &self,
+        conversation_id: Uuid,
+        keystore: &Keystore,
+    ) -> Result<(), Error> {
+        let cid = keystore.to_cid(&self.ipfs).await?;
+
+        if !self.ipfs.is_pinned(&cid).await? {
+            self.ipfs.insert_pin(&cid, false).await?;
+        }
+
+        let old_cid = self
+            .conversation_keystore_cid
+            .write()
+            .await
+            .insert(conversation_id, cid);
+
+        if let Some(old_cid) = old_cid {
+            if old_cid != cid {
+                if self.ipfs.is_pinned(&old_cid).await? {
+                    self.ipfs.insert_pin(&old_cid, false).await?;
+                }
+                if let Err(_e) = self.ipfs.remove_block(old_cid).await {}
+            }
+        }
+
+        if let Some(path) = self.path.as_ref() {
+            let keystore_cid = cid.to_string();
+            if let Err(e) = tokio::fs::write(
+                path.join(format!("{}.keystore", conversation_id)),
+                keystore_cid,
+            )
+            .await
+            {
+                error!("Unable to save info to file: {e}");
+            }
+        }
+
+        Ok(())
     }
 
     async fn send_single_conversation_event(
