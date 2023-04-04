@@ -530,7 +530,13 @@ impl MessageStore {
                                                     continue;
                                                 }
 
-                                                if let Err(e) = store.set_conversation_keystore(conversation_id, &keystore).await {
+                                                if let Err(e) = store
+                                                    .set_conversation_keystore(
+                                                        conversation_id,
+                                                        &keystore,
+                                                    )
+                                                    .await
+                                                {
                                                     error!("Error setting keystore: {e}");
                                                 }
                                             }
@@ -1230,27 +1236,6 @@ impl MessageStore {
             .map(|(did, pk)| (did, pk.to_peer_id()))
             .collect::<Vec<_>>();
 
-        //TODO: Push to each peer directly
-
-        let mut data = Sata::default();
-
-        for did in recipient.iter() {
-            data.add_recipient(did.as_ref())?;
-        }
-
-        let data = data.encrypt(
-            libipld::IpldCodec::DagJson,
-            own_did.as_ref(),
-            warp::sata::Kind::Reference,
-            serde_json::to_vec(&ConversationEvents::NewGroupConversation(
-                own_did.clone(),
-                conversation.name(),
-                conversation.id(),
-                recipient.clone(),
-                conversation.signature.clone(),
-            ))?,
-        )?;
-
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
 
@@ -1258,8 +1243,26 @@ impl MessageStore {
                 error!("Unable to save info to file: {e}");
             }
         }
+        let event = serde_json::to_vec(&ConversationEvents::NewGroupConversation(
+            own_did.clone(),
+            conversation.name(),
+            conversation.id(),
+            recipient.clone(),
+            conversation.signature.clone(),
+        ))?;
 
         for (did, peer_id) in peer_id_list {
+            let mut data = Sata::default();
+
+            data.add_recipient(did.as_ref())?;
+
+            let data = data.encrypt(
+                libipld::IpldCodec::DagJson,
+                own_did.as_ref(),
+                warp::sata::Kind::Reference,
+                event.clone(),
+            )?;
+
             let topic = format!("{did}/messaging");
             let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
             match peers.contains(&peer_id) {
