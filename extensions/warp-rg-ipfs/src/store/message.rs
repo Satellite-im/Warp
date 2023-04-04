@@ -683,7 +683,8 @@ impl MessageStore {
                                     ecdh_decrypt(own_did, Some(recipient), data.data())
                                 }
                                 ConversationType::Group => {
-                                    let Ok(key) = store.conversation_keystore(conversation.id()).await.and_then(|keystore| keystore.get_latest(own_did, own_did)) else {
+                                    
+                                    let Ok(key) = store.conversation_keystore(conversation.id()).await.and_then(|keystore| keystore.get_latest(own_did, &data.sender())) else {
                                         continue;
                                     };
                                     Cipher::direct_decrypt(data.data(), &key)
