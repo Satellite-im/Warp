@@ -809,7 +809,7 @@ impl MessageStore {
                 let convo = ConversationDocument::new(
                     did,
                     name,
-                    initial_recipients,
+                    initial_recipients.clone(),
                     Some(conversation_id),
                     ConversationType::Group,
                     Some(creator),
@@ -850,6 +850,20 @@ impl MessageStore {
                 }) {
                     error!("Error broadcasting event: {e}");
                 }
+
+                tokio::spawn({
+                    let store = self.clone();
+                    let recipients = initial_recipients
+                        .iter()
+                        .filter(|d| did.ne(d))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    async move {
+                        for recipient in recipients {
+                            if let Err(_e) = store.request_key(conversation_id, &recipient).await {}
+                        }
+                    }
+                });
             }
             ConversationEvents::DeleteConversation(conversation_id) => {
                 trace!("Delete conversation event received for {conversation_id}");
