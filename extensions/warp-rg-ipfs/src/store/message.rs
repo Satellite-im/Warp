@@ -2776,13 +2776,16 @@ impl MessageStore {
         event: S,
         queue: bool,
     ) -> Result<(), Error> {
-        let conversation = self.get_conversation(conversation).await?;
+        let mut conversation = self.get_conversation(conversation).await?;
+        conversation.messages.clear();
 
         let recipients = conversation.recipients();
 
         let own_did = &*self.did;
 
         let mut data = Sata::default();
+
+        //TODO: Send with Payload instead
 
         for recipient in recipients.iter().filter(|did| own_did.ne(did)) {
             if let Err(e) = data.add_recipient(recipient.as_ref()) {
