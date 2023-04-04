@@ -3252,9 +3252,12 @@ impl MessageStore {
                 let mut message = message_document
                     .resolve(&self.ipfs, self.did.clone(), keystore.as_ref())
                     .await?;
-
+                    
                 let event = match state {
                     PinState::Pin => {
+                        if message.pinned() {
+                            return Ok(false);
+                        }
                         *message.pinned_mut() = true;
                         MessageEventKind::MessagePinned {
                             conversation_id: convo_id,
@@ -3262,6 +3265,9 @@ impl MessageStore {
                         }
                     }
                     PinState::Unpin => {
+                        if !message.pinned() {
+                            return Ok(false);
+                        }
                         *message.pinned_mut() = false;
                         MessageEventKind::MessageUnpinned {
                             conversation_id: convo_id,
