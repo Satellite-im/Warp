@@ -10,7 +10,7 @@ use futures::{
     stream::{self, BoxStream},
     FutureExt, StreamExt,
 };
-use ipfs::{libp2p::gossipsub::Message as GossipsubMessage, Ipfs, IpfsPath, Keypair, Multiaddr};
+use ipfs::{Ipfs, IpfsPath, Keypair, Multiaddr};
 use libipld::{
     serde::{from_ipld, to_ipld},
     Cid,
@@ -240,8 +240,17 @@ impl IdentityStore {
                     tokio::select! {
                         message = event_stream.next() => {
                             if let Some(message) = message {
-                                if let Err(e) = store.process_message(message).await {
-                                    error!("Error: {e}");
+                                let entry = match message.source {
+                                    Some(peer_id) => match store.discovery.get(peer_id).await.ok() {
+                                        Some(entry) => entry,
+                                        None => continue,
+                                    },
+                                    None => continue,
+                                };
+                                if let Ok(in_did) = entry.did_key().await {
+                                    if let Err(e) = store.process_message(in_did, &message.data).await {
+                                        error!("Error: {e}");
+                                    }
                                 }
                             }
                         }
@@ -502,15 +511,7 @@ impl IdentityStore {
         Ok(())
     }
 
-    async fn process_message(&mut self, message: GossipsubMessage) -> anyhow::Result<()> {
-        let in_did = match message.source {
-            Some(peer_id) => match self.discovery.get(peer_id).await.ok() {
-                Some(entry) => entry.did_key().await?,
-                None => return Ok(()),
-            },
-            None => return Ok(()),
-        };
-
+    async fn process_message(&mut self, in_did: DID, message: &[u8]) -> anyhow::Result<()> {
         let pk_did = self.get_keypair_did()?;
 
         let prikey = Ed25519KeyPair::from_secret_key(&pk_did.private_key_bytes()).get_x25519();
@@ -520,7 +521,7 @@ impl IdentityStore {
             .map(Zeroizing::new)
             .map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
-        let bytes = Cipher::direct_decrypt(&message.data, &shared_key)?;
+        let bytes = Cipher::direct_decrypt(message, &shared_key)?;
 
         let event = serde_json::from_slice::<IdentityEvent>(&bytes)?;
 
