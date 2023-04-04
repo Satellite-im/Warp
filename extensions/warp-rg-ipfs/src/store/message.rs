@@ -23,6 +23,7 @@ use tokio_stream::wrappers::ReadDirStream;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream, Progression};
+use warp::crypto::cipher::Cipher;
 use warp::crypto::{generate, DID};
 use warp::error::Error;
 use warp::logging::tracing::log::{error, info, trace};
@@ -36,8 +37,9 @@ use warp::raygun::{
 use warp::sata::Sata;
 use warp::sync::Arc;
 
+use crate::store::payload::Payload;
 use crate::store::{
-    connected_to_peer, ecdh_decrypt, ecdh_encrypt, ConversationRequestResponse,
+    connected_to_peer, ecdh_decrypt, ecdh_encrypt, sign_serde, ConversationRequestResponse,
     ConversationResponse,
 };
 use crate::SpamFilter;
@@ -221,10 +223,10 @@ impl MessageStore {
                     tokio::select! {
                         message = stream.next() => {
                             if let Some(message) = message {
-                                if let Ok(sata) = serde_json::from_slice::<Sata>(&message.data) {
-                                    if let Ok(data) = sata.decrypt::<Vec<u8>>(did.as_ref()) {
+                                if let Ok(payload) = Payload::from_bytes(&message.data) {
+                                    if let Ok(data) = ecdh_decrypt(&store.did, Some(payload.sender()), payload.data()) {
                                         if let Ok(events) = serde_json::from_slice::<ConversationEvents>(&data) {
-                                            if let Err(e) = store.process_conversation(sata, events).await {
+                                            if let Err(e) = store.process_conversation(payload, events).await {
                                                 error!("Error processing conversation: {e}");
                                             }
                                         }
@@ -333,12 +335,9 @@ impl MessageStore {
                 futures::pin_mut!(stream);
 
                 while let Some(stream) = stream.next().await {
-                    if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
-                        let sender = match data.sender().map(DID::from) {
-                            Some(did) => did,
-                            None => continue,
-                        };
-                        if let Ok(data) = data.decrypt::<Vec<u8>>(&did) {
+                    if let Ok(payload) = Payload::from_bytes(&stream.data) {
+                        if let Ok(data) = ecdh_decrypt(&did, Some(payload.sender()), payload.data())
+                        {
                             if let Ok(event) =
                                 serde_json::from_slice::<ConversationRequestResponse>(&data)
                             {
@@ -385,7 +384,7 @@ impl MessageStore {
                                                         continue;
                                                     }
                                                 };
-
+                                                let sender = payload.sender();
                                                 let key = match ecdh_encrypt(
                                                     &did,
                                                     Some(sender.clone()),
@@ -409,16 +408,17 @@ impl MessageStore {
                                                     let store = store.clone();
                                                     let topic = conversation.reqres_topic(&sender);
                                                     async move {
-                                                        let mut data = Sata::default();
-
-                                                        data.add_recipient(sender.as_ref())?;
-
-                                                        let data = data.encrypt(
-                                                            libipld::IpldCodec::DagJson,
-                                                            did.as_ref(),
-                                                            warp::sata::Kind::Reference,
+                                                        let bytes = ecdh_encrypt(
+                                                            &did,
+                                                            Some(sender.clone()),
                                                             serde_json::to_vec(&response)?,
                                                         )?;
+                                                        let signature = sign_serde(&did, &bytes)?;
+
+                                                        let payload =
+                                                            Payload::new(&did, &bytes, &signature);
+
+                                                        let bytes = payload.to_bytes()?;
 
                                                         let peers = store
                                                             .ipfs
@@ -429,13 +429,11 @@ impl MessageStore {
 
                                                         match peers.contains(&peer_id) {
                                                             true => {
-                                                                let bytes =
-                                                                    serde_json::to_vec(&data)?;
                                                                 if let Err(_e) = store
                                                                     .ipfs
                                                                     .pubsub_publish(
                                                                         topic.clone(),
-                                                                        bytes,
+                                                                        bytes.into(),
                                                                     )
                                                                     .await
                                                                 {
@@ -491,6 +489,8 @@ impl MessageStore {
                                                 conversation_id,
                                                 key,
                                             } => {
+                                                let sender = payload.sender();
+
                                                 let mut keystore = match store
                                                     .conversation_keystore(conversation_id)
                                                     .await
@@ -571,16 +571,12 @@ impl MessageStore {
 
         let own_did = &self.did;
 
-        let mut data = Sata::default();
+        let bytes = ecdh_encrypt(own_did, Some(did.clone()), serde_json::to_vec(&request)?)?;
+        let signature = sign_serde(own_did, &bytes)?;
 
-        data.add_recipient(did.as_ref())?;
+        let payload = Payload::new(own_did, &bytes, &signature);
 
-        let data = data.encrypt(
-            libipld::IpldCodec::DagJson,
-            own_did.as_ref(),
-            warp::sata::Kind::Reference,
-            serde_json::to_vec(&request)?,
-        )?;
+        let bytes = payload.to_bytes()?;
 
         let topic = conversation.reqres_topic(did);
 
@@ -589,7 +585,7 @@ impl MessageStore {
 
         match peers.contains(&peer_id) {
             true => {
-                let bytes = serde_json::to_vec(&data)?;
+                let bytes = bytes.into();
                 if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
                     warn!("Unable to publish to topic. Queuing event");
                     if let Err(e) = self
@@ -600,7 +596,7 @@ impl MessageStore {
                                 None,
                                 peer_id,
                                 topic.clone(),
-                                data.clone(),
+                                payload.data().to_vec(),
                             ),
                         )
                         .await
@@ -613,7 +609,13 @@ impl MessageStore {
                 if let Err(e) = self
                     .queue_event(
                         did.clone(),
-                        Queue::direct(conversation_id, None, peer_id, topic.clone(), data.clone()),
+                        Queue::direct(
+                            conversation_id,
+                            None,
+                            peer_id,
+                            topic.clone(),
+                            payload.data().to_vec(),
+                        ),
                     )
                     .await
                 {
@@ -647,6 +649,11 @@ impl MessageStore {
         let task = tokio::spawn({
             let mut store = self.clone();
             async move {
+                let mut conversation = store
+                    .get_conversation(conversation_id)
+                    .await
+                    .expect("Conversation exist");
+                conversation.messages.clear();
                 futures::pin_mut!(stream);
                 loop {
                     let (direction, event, ret) = tokio::select! {
@@ -655,15 +662,39 @@ impl MessageStore {
                                 continue;
                             };
 
-                            let Ok(data) = serde_json::from_slice::<Sata>(&event.data) else {
+                            let Ok(data) = Payload::from_bytes(&event.data) else {
                                 continue;
                             };
 
-                            let Ok(data) = data.decrypt::<Vec<u8>>(&did) else {
+                            let own_did = &*did;
+
+                            let bytes_results = match conversation.conversation_type {
+                                ConversationType::Direct => {
+                                    let Some(recipient) = conversation
+                                        .recipients()
+                                        .iter()
+                                        .filter(|did| own_did.ne(did))
+                                        .cloned()
+                                        .collect::<Vec<_>>()
+                                        .first()
+                                        .cloned() else {
+                                            continue;
+                                        };
+                                    ecdh_decrypt(own_did, Some(recipient), data.data())
+                                }
+                                ConversationType::Group => {
+                                    let Ok(key) = store.conversation_keystore(conversation.id()).await.and_then(|keystore| keystore.get_latest(own_did, own_did)) else {
+                                        continue;
+                                    };
+                                    Cipher::direct_decrypt(data.data(), &key)
+                                }
+                            };
+
+                            let Ok(bytes) = bytes_results else {
                                 continue;
                             };
 
-                            let Ok(event) = serde_json::from_slice::<MessagingEvents>(&data) else {
+                            let Ok(event) = serde_json::from_slice::<MessagingEvents>(&bytes) else {
                                 continue;
                             };
 
@@ -756,7 +787,7 @@ impl MessageStore {
 
     async fn process_conversation(
         &mut self,
-        data: Sata,
+        data: Payload<'_>,
         event: ConversationEvents,
     ) -> anyhow::Result<()> {
         match event {
@@ -900,10 +931,7 @@ impl MessageStore {
                     anyhow::bail!("Conversation {conversation_id} doesnt exist");
                 }
 
-                let sender = match data.sender() {
-                    Some(sender) => DID::from(sender),
-                    None => return Ok(()),
-                };
+                let sender = data.sender();
 
                 match self.get_conversation(conversation_id).await {
                     Ok(conversation)
@@ -993,10 +1021,23 @@ impl MessageStore {
                         if let Ok(peers) = self.ipfs.pubsub_peers(Some(topic.clone())).await {
                             //TODO: Check peer against conversation to see if they are connected
                             if peers.contains(peer) {
-                                let bytes = match serde_json::to_vec(&data) {
-                                    Ok(bytes) => bytes,
-                                    Err(e) => {
-                                        error!("Error serializing data to bytes: {e}");
+                                if let Err(_e) = ecdh_decrypt(&self.did, Some(did.clone()), &data) {
+                                    //This validates that the data itself was encrypted by the sender
+                                    continue;
+                                }
+
+                                let signature = match sign_serde(&self.did, &data) {
+                                    Ok(sig) => sig,
+                                    Err(_e) => {
+                                        continue;
+                                    }
+                                };
+
+                                let payload = Payload::new(&self.did, data, &signature);
+
+                                let bytes = match payload.to_bytes() {
+                                    Ok(bytes) => bytes.into(),
+                                    Err(_e) => {
                                         continue;
                                     }
                                 };
@@ -1100,28 +1141,34 @@ impl MessageStore {
 
         let peer_id = did_to_libp2p_pub(did_key)?.to_peer_id();
 
-        let mut data = Sata::default();
-        data.add_recipient(did_key.as_ref())?;
+        let event = ConversationEvents::NewConversation(own_did.clone());
 
-        let data = data.encrypt(
-            libipld::IpldCodec::DagJson,
-            own_did.as_ref(),
-            warp::sata::Kind::Reference,
-            serde_json::to_vec(&ConversationEvents::NewConversation(own_did.clone()))?,
-        )?;
+        let bytes = ecdh_encrypt(own_did, Some(did_key.clone()), serde_json::to_vec(&event)?)?;
+        let signature = sign_serde(own_did, &bytes)?;
+
+        let payload = Payload::new(own_did, &bytes, &signature);
 
         let topic = format!("{did_key}/messaging");
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
         match peers.contains(&peer_id) {
             true => {
-                let bytes = serde_json::to_vec(&data)?;
-                if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
+                if let Err(_e) = self
+                    .ipfs
+                    .pubsub_publish(topic.clone(), payload.to_bytes()?.into())
+                    .await
+                {
                     warn!("Unable to publish to topic. Queuing event");
                     if let Err(e) = self
                         .queue_event(
                             did_key.clone(),
-                            Queue::direct(convo_id, None, peer_id, topic.clone(), data),
+                            Queue::direct(
+                                convo_id,
+                                None,
+                                peer_id,
+                                topic.clone(),
+                                payload.data().to_vec(),
+                            ),
                         )
                         .await
                     {
@@ -1133,7 +1180,13 @@ impl MessageStore {
                 if let Err(e) = self
                     .queue_event(
                         did_key.clone(),
-                        Queue::direct(convo_id, None, peer_id, topic.clone(), data),
+                        Queue::direct(
+                            convo_id,
+                            None,
+                            peer_id,
+                            topic.clone(),
+                            payload.data().to_vec(),
+                        ),
                     )
                     .await
                 {
@@ -1252,28 +1305,31 @@ impl MessageStore {
         ))?;
 
         for (did, peer_id) in peer_id_list {
-            let mut data = Sata::default();
+            let bytes = ecdh_encrypt(own_did, Some(did.clone()), &event)?;
+            let signature = sign_serde(own_did, &bytes)?;
 
-            data.add_recipient(did.as_ref())?;
-
-            let data = data.encrypt(
-                libipld::IpldCodec::DagJson,
-                own_did.as_ref(),
-                warp::sata::Kind::Reference,
-                event.clone(),
-            )?;
+            let payload = Payload::new(own_did, &bytes, &signature);
 
             let topic = format!("{did}/messaging");
             let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
             match peers.contains(&peer_id) {
                 true => {
-                    let bytes = serde_json::to_vec(&data)?;
-                    if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
+                    if let Err(_e) = self
+                        .ipfs
+                        .pubsub_publish(topic.clone(), payload.to_bytes()?.into())
+                        .await
+                    {
                         warn!("Unable to publish to topic. Queuing event");
                         if let Err(e) = self
                             .queue_event(
                                 did,
-                                Queue::direct(convo_id, None, peer_id, topic.clone(), data.clone()),
+                                Queue::direct(
+                                    convo_id,
+                                    None,
+                                    peer_id,
+                                    topic.clone(),
+                                    payload.data().to_vec(),
+                                ),
                             )
                             .await
                         {
@@ -1285,7 +1341,13 @@ impl MessageStore {
                     if let Err(e) = self
                         .queue_event(
                             did,
-                            Queue::direct(convo_id, None, peer_id, topic.clone(), data.clone()),
+                            Queue::direct(
+                                convo_id,
+                                None,
+                                peer_id,
+                                topic.clone(),
+                                payload.data().to_vec(),
+                            ),
                         )
                         .await
                     {
@@ -1359,28 +1421,24 @@ impl MessageStore {
                 .map(|(did, pk)| (did, pk.to_peer_id()))
                 .collect::<Vec<_>>();
 
-            let mut data = Sata::default();
-            for recipient in recipients {
-                data.add_recipient(recipient.as_ref())?;
-            }
-
-            let data = data.encrypt(
-                libipld::IpldCodec::DagJson,
-                own_did.as_ref(),
-                warp::sata::Kind::Reference,
-                serde_json::to_vec(&ConversationEvents::DeleteConversation(document_type.id()))?,
-            )?;
-
-            let bytes = serde_json::to_vec(&data)?;
+            let event =
+                serde_json::to_vec(&ConversationEvents::DeleteConversation(document_type.id()))?;
 
             for (recipient, peer_id) in peer_id_list {
+                let bytes = ecdh_encrypt(own_did, Some(recipient.clone()), &event)?;
+                let signature = sign_serde(own_did, &bytes)?;
+
+                let payload = Payload::new(own_did, &bytes, &signature);
                 let topic = format!("{recipient}/messaging");
 
                 let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
                 match peers.contains(&peer_id) {
                     true => {
-                        if let Err(e) = self.ipfs.pubsub_publish(topic.clone(), bytes.clone()).await
+                        if let Err(e) = self
+                            .ipfs
+                            .pubsub_publish(topic.clone(), payload.to_bytes()?.into())
+                            .await
                         {
                             warn!("Unable to publish to topic: {e}. Queuing event");
                             //Note: If the error is related to peer not available then we should push this to queue but if
@@ -1395,7 +1453,7 @@ impl MessageStore {
                                         None,
                                         peer_id,
                                         topic.clone(),
-                                        data.clone(),
+                                        payload.data().to_vec(),
                                     ),
                                 )
                                 .await
@@ -1413,7 +1471,7 @@ impl MessageStore {
                                     None,
                                     peer_id,
                                     topic.clone(),
-                                    data.clone(),
+                                    payload.data().to_vec(),
                                 ),
                             )
                             .await
@@ -1623,23 +1681,19 @@ impl MessageStore {
     ) -> Result<(), Error> {
         let own_did = &*self.did;
 
-        let mut data = Sata::default();
+        let event = serde_json::to_vec(&event)?;
 
-        data.add_recipient(did_key.as_ref())?;
+        let bytes = ecdh_encrypt(own_did, Some(did_key.clone()), &event)?;
+        let signature = sign_serde(own_did, &bytes)?;
 
-        let data = data.encrypt(
-            libipld::IpldCodec::DagJson,
-            own_did.as_ref(),
-            warp::sata::Kind::Reference,
-            serde_json::to_vec(&event)?,
-        )?;
+        let payload = Payload::new(own_did, &bytes, &signature);
 
         let peer_id = did_to_libp2p_pub(did_key)?.to_peer_id();
         let topic = format!("{did_key}/messaging");
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
         match peers.contains(&peer_id) {
             true => {
-                let bytes = serde_json::to_vec(&data)?;
+                let bytes = payload.to_bytes()?.into();
                 if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
                     warn!("Unable to publish to topic. Queuing event");
                     if let Err(e) = self
@@ -1650,7 +1704,7 @@ impl MessageStore {
                                 None,
                                 peer_id,
                                 topic.clone(),
-                                data.clone(),
+                                payload.data().to_vec(),
                             ),
                         )
                         .await
@@ -1663,7 +1717,13 @@ impl MessageStore {
                 if let Err(e) = self
                     .queue_event(
                         did_key.clone(),
-                        Queue::direct(conversation_id, None, peer_id, topic.clone(), data.clone()),
+                        Queue::direct(
+                            conversation_id,
+                            None,
+                            peer_id,
+                            topic.clone(),
+                            payload.data().to_vec(),
+                        ),
                     )
                     .await
                 {
@@ -2732,25 +2792,36 @@ impl MessageStore {
         conversation_id: Uuid,
         event: MessagingEvents,
     ) -> Result<(), Error> {
-        let conversation = self.get_conversation(conversation_id).await?;
-        let recipients = conversation.recipients();
+        let mut conversation = self.get_conversation(conversation_id).await?;
+        conversation.messages.clear();
 
         let own_did = &*self.did;
 
-        let mut data = Sata::default();
+        let event = serde_json::to_vec(&event)?;
 
-        for recipient in recipients.iter().filter(|did| own_did.ne(did)) {
-            data.add_recipient(recipient.as_ref())?;
-        }
+        //TODO: Send with Payload instead
+        let bytes = match conversation.conversation_type {
+            ConversationType::Direct => {
+                let recipient = conversation
+                    .recipients()
+                    .iter()
+                    .filter(|did| own_did.ne(did))
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .first()
+                    .cloned()
+                    .ok_or(Error::InvalidConversation)?;
+                ecdh_encrypt(own_did, Some(recipient), &event)?
+            }
+            ConversationType::Group => {
+                let keystore = self.conversation_keystore(conversation.id()).await?;
+                let key = keystore.get_latest(own_did, own_did)?;
+                Cipher::direct_encrypt(&event, &key)?
+            }
+        };
 
-        let payload = data.encrypt(
-            libipld::IpldCodec::DagJson,
-            own_did.as_ref(),
-            warp::sata::Kind::Reference,
-            serde_json::to_vec(&event)?,
-        )?;
-
-        let bytes = serde_json::to_vec(&payload)?;
+        let signature = sign_serde(own_did, &bytes)?;
+        let payload = Payload::new(own_did, &bytes, &signature);
 
         let peers = self
             .ipfs
@@ -2760,7 +2831,7 @@ impl MessageStore {
         if !peers.is_empty() {
             if let Err(e) = self
                 .ipfs
-                .pubsub_publish(conversation.event_topic(), bytes)
+                .pubsub_publish(conversation.event_topic(), payload.to_bytes()?.into())
                 .await
             {
                 error!("Unable to send event: {e}");
@@ -2779,30 +2850,38 @@ impl MessageStore {
         let mut conversation = self.get_conversation(conversation).await?;
         conversation.messages.clear();
 
-        let recipients = conversation.recipients();
-
         let own_did = &*self.did;
 
-        let mut data = Sata::default();
+        let event = serde_json::to_vec(&event)?;
 
         //TODO: Send with Payload instead
-
-        for recipient in recipients.iter().filter(|did| own_did.ne(did)) {
-            if let Err(e) = data.add_recipient(recipient.as_ref()) {
-                error!("Unable to add recipient: {e}");
+        let bytes = match conversation.conversation_type {
+            ConversationType::Direct => {
+                let recipient = conversation
+                    .recipients()
+                    .iter()
+                    .filter(|did| own_did.ne(did))
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .first()
+                    .cloned()
+                    .ok_or(Error::InvalidConversation)?;
+                ecdh_encrypt(own_did, Some(recipient), &event)?
             }
-        }
+            ConversationType::Group => {
+                let keystore = self.conversation_keystore(conversation.id()).await?;
+                let key = keystore.get_latest(own_did, own_did)?;
+                Cipher::direct_encrypt(&event, &key)?
+            }
+        };
 
-        let payload = data.encrypt(
-            libipld::IpldCodec::DagJson,
-            own_did.as_ref(),
-            warp::sata::Kind::Reference,
-            serde_json::to_vec(&event)?,
-        )?;
+        let signature = sign_serde(own_did, &bytes)?;
 
-        let bytes = serde_json::to_vec(&payload)?;
+        let payload = Payload::new(own_did, &bytes, &signature);
 
         let peers = self.ipfs.pubsub_peers(Some(conversation.topic())).await?;
+
+        let mut can_publish = false;
 
         for recipient in conversation
             .recipients()
@@ -2813,30 +2892,7 @@ impl MessageStore {
 
             match peers.contains(&peer_id) {
                 true => {
-                    if let Err(e) = self
-                        .ipfs
-                        .pubsub_publish(conversation.topic(), bytes.clone())
-                        .await
-                    {
-                        if queue {
-                            warn!("Unable to publish to topic due to error: {e}... Queuing event");
-                            if let Err(e) = self
-                                .queue_event(
-                                    recipient.clone(),
-                                    Queue::direct(
-                                        conversation.id(),
-                                        message_id,
-                                        peer_id,
-                                        conversation.topic(),
-                                        payload.clone(),
-                                    ),
-                                )
-                                .await
-                            {
-                                error!("Error submitting event to queue: {e}");
-                            }
-                        }
-                    }
+                    can_publish = true;
                 }
                 false => {
                     if queue {
@@ -2848,7 +2904,7 @@ impl MessageStore {
                                     message_id,
                                     peer_id,
                                     conversation.topic(),
-                                    payload.clone(),
+                                    payload.data().to_vec(),
                                 ),
                             )
                             .await
@@ -2858,6 +2914,14 @@ impl MessageStore {
                     }
                 }
             };
+        }
+
+        if can_publish {
+            if let Err(_e) = self
+                .ipfs
+                .pubsub_publish(conversation.topic(), payload.to_bytes()?.into())
+                .await
+            {}
         }
 
         Ok(())
@@ -3370,21 +3434,19 @@ pub enum Queue {
         m_id: Option<Uuid>,
         peer: PeerId,
         topic: String,
-        data: Sata,
+        data: Vec<u8>,
         sent: bool,
     },
-    // Group {
-    //     id: Uuid,
-    //     m_id: Option<Uuid>,
-    //     peer: HashSet<PeerId>,
-    //     topic: String,
-    //     data: Sata,
-    //     sent: bool,
-    // },
 }
 
 impl Queue {
-    pub fn direct(id: Uuid, m_id: Option<Uuid>, peer: PeerId, topic: String, data: Sata) -> Self {
+    pub fn direct(
+        id: Uuid,
+        m_id: Option<Uuid>,
+        peer: PeerId,
+        topic: String,
+        data: Vec<u8>,
+    ) -> Self {
         Queue::Direct {
             id,
             m_id,
