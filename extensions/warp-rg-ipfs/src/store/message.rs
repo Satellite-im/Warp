@@ -683,11 +683,6 @@ impl MessageStore {
         let task = tokio::spawn({
             let mut store = self.clone();
             async move {
-                let mut conversation = store
-                    .get_conversation(conversation_id)
-                    .await
-                    .expect("Conversation exist");
-                conversation.messages.clear();
                 futures::pin_mut!(stream);
                 loop {
                     let (direction, event, ret) = tokio::select! {
@@ -701,6 +696,11 @@ impl MessageStore {
                             };
 
                             let own_did = &*did;
+
+                            let Ok(mut conversation) = store.get_conversation(conversation_id).await else {
+                                    continue;
+                            };
+                            conversation.messages.clear();
 
                             let bytes_results = match conversation.conversation_type {
                                 ConversationType::Direct => {
@@ -724,6 +724,7 @@ impl MessageStore {
                                     Cipher::direct_decrypt(data.data(), &key)
                                 }
                             };
+                            drop(conversation);
 
                             let Ok(bytes) = bytes_results else {
                                 continue;
@@ -3252,7 +3253,7 @@ impl MessageStore {
                 let mut message = message_document
                     .resolve(&self.ipfs, self.did.clone(), keystore.as_ref())
                     .await?;
-                    
+
                 let event = match state {
                     PinState::Pin => {
                         if message.pinned() {
