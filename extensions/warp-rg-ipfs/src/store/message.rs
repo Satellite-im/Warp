@@ -529,6 +529,10 @@ impl MessageStore {
                                                     }
                                                     continue;
                                                 }
+
+                                                if let Err(e) = store.set_conversation_keystore(conversation_id, &keystore).await {
+                                                    error!("Error setting keystore: {e}");
+                                                }
                                             }
                                         }
                                     }
