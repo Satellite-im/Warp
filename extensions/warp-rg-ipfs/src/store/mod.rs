@@ -2,6 +2,7 @@ pub mod conversation;
 pub mod document;
 pub mod keystore;
 pub mod message;
+pub mod payload; 
 
 use rust_ipfs as ipfs;
 use std::time::Duration;
