@@ -3,7 +3,7 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use warp::{crypto::DID, error::Error};
 
-use super::conversation::DIDEd25519Reference;
+use super::{conversation::DIDEd25519Reference, verify_serde_sig};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct Payload<'a> {
@@ -28,6 +28,7 @@ impl Payload<'_> {
 
 impl Payload<'_> {
     pub fn verify(&self) -> Result<(), Error> {
+        verify_serde_sig(self.sender(), &self.data.to_vec(), self.signature())?;
         Ok(())
     }
 }
@@ -43,10 +44,11 @@ impl<'a> Payload<'a> {
     }
 
     pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, Error> {
-        bincode::deserialize(bytes).map_err(Error::from)
+        let payload: Self = bincode::deserialize(bytes)?;
+        payload.verify()?;
+        Ok(payload)
     }
 }
-
 
 impl Payload<'_> {
     pub fn to_bytes(self) -> Result<Bytes, Error> {
@@ -55,4 +57,3 @@ impl Payload<'_> {
         Ok(bytes)
     }
 }
-
