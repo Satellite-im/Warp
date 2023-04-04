@@ -34,7 +34,6 @@ use warp::raygun::{
     MessageOptions, MessageStatus, MessageStream, MessageType, Messages, MessagesType, PinState,
     RayGunEventKind, Reaction, ReactionState,
 };
-use warp::sata::Sata;
 use warp::sync::Arc;
 
 use crate::store::payload::Payload;
@@ -273,14 +272,49 @@ impl MessageStore {
         let Ok(stream) = self.ipfs.pubsub_subscribe(conversation.event_topic()).await else {
             return
         };
+
+        let conversation_type = conversation.conversation_type;
+
         drop(conversation);
         let task = tokio::spawn({
+            let store = self.clone();
             async move {
                 futures::pin_mut!(stream);
 
                 while let Some(stream) = stream.next().await {
-                    if let Ok(data) = serde_json::from_slice::<Sata>(&stream.data) {
-                        if let Ok(data) = data.decrypt::<Vec<u8>>(&did) {
+                    if let Ok(payload) = Payload::from_bytes(&stream.data) {
+                        let bytes = {
+                            let own_did = &*did;
+                            let store = store.clone();
+                            async move {
+                                match conversation_type {
+                                    ConversationType::Direct => {
+                                        let recipient = store
+                                            .get_conversation(conversation_id)
+                                            .await
+                                            .map(|c| c.recipients())
+                                            .unwrap_or_default()
+                                            .iter()
+                                            .filter(|did| own_did.ne(did))
+                                            .cloned()
+                                            .collect::<Vec<_>>()
+                                            .first()
+                                            .cloned()
+                                            .ok_or(Error::InvalidConversation)?;
+                                        ecdh_decrypt(own_did, Some(recipient), payload.data())
+                                    }
+                                    ConversationType::Group => {
+                                        let keystore =
+                                            store.conversation_keystore(conversation_id).await?;
+                                        let key =
+                                            keystore.get_latest(own_did, &payload.sender())?;
+                                        Cipher::direct_decrypt(payload.data(), &key)
+                                    }
+                                }
+                            }
+                        };
+
+                        if let Ok(data) = bytes.await {
                             if let Ok(MessagingEvents::Event(
                                 conversation_id,
                                 did_key,
@@ -683,7 +717,7 @@ impl MessageStore {
                                     ecdh_decrypt(own_did, Some(recipient), data.data())
                                 }
                                 ConversationType::Group => {
-                                    
+
                                     let Ok(key) = store.conversation_keystore(conversation.id()).await.and_then(|keystore| keystore.get_latest(own_did, &data.sender())) else {
                                         continue;
                                     };
@@ -2855,7 +2889,6 @@ impl MessageStore {
 
         let event = serde_json::to_vec(&event)?;
 
-        //TODO: Send with Payload instead
         let bytes = match conversation.conversation_type {
             ConversationType::Direct => {
                 let recipient = conversation
