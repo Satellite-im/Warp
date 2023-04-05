@@ -3229,6 +3229,8 @@ impl MessageStore {
                     verify_serde_sig(sender, &construct, &signature)?;
                 }
 
+                message_document.remove(self.ipfs.clone()).await?;
+
                 self.get_conversation_mut(document.id(), |conversation_document| {
                     conversation_document.messages.remove(&message_document);
 
