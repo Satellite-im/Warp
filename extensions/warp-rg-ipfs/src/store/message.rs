@@ -3409,10 +3409,7 @@ impl MessageStore {
                     let account = self.account.clone();
                     let recipient = recipient.clone();
                     async move {
-                        if let Ok(_list) =
-                            account.get_identity(Identifier::DID(recipient)).await
-                        {
-                        }
+                        if let Ok(_list) = account.get_identity(Identifier::DID(recipient)).await {}
                     }
                 });
 
@@ -3421,6 +3418,8 @@ impl MessageStore {
                     conversation.signature = Some(signature);
                 })
                 .await?;
+
+                if let Err(_e) = self.request_key(conversation_id, &recipient).await {}
 
                 if let Err(e) = tx.send(MessageEventKind::RecipientAdded {
                     conversation_id,
