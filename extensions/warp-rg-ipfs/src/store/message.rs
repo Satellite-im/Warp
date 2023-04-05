@@ -1200,49 +1200,31 @@ impl MessageStore {
         let topic = format!("{did_key}/messaging");
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
-        match peers.contains(&peer_id) {
-            true => {
-                if let Err(_e) = self
+        if !peers.contains(&peer_id)
+            || (peers.contains(&peer_id)
+                && self
                     .ipfs
                     .pubsub_publish(topic.clone(), payload.to_bytes()?.into())
                     .await
-                {
-                    warn!("Unable to publish to topic. Queuing event");
-                    if let Err(e) = self
-                        .queue_event(
-                            did_key.clone(),
-                            Queue::direct(
-                                convo_id,
-                                None,
-                                peer_id,
-                                topic.clone(),
-                                payload.data().to_vec(),
-                            ),
-                        )
-                        .await
-                    {
-                        error!("Error submitting event to queue: {e}");
-                    }
-                }
+                    .is_err())
+        {
+            warn!("Unable to publish to topic. Queuing event");
+            if let Err(e) = self
+                .queue_event(
+                    did_key.clone(),
+                    Queue::direct(
+                        convo_id,
+                        None,
+                        peer_id,
+                        topic.clone(),
+                        payload.data().to_vec(),
+                    ),
+                )
+                .await
+            {
+                error!("Error submitting event to queue: {e}");
             }
-            false => {
-                if let Err(e) = self
-                    .queue_event(
-                        did_key.clone(),
-                        Queue::direct(
-                            convo_id,
-                            None,
-                            peer_id,
-                            topic.clone(),
-                            payload.data().to_vec(),
-                        ),
-                    )
-                    .await
-                {
-                    error!("Error submitting event to queue: {e}");
-                }
-            }
-        };
+        }
 
         if !self.disable_sender_event_emit.load(Ordering::Relaxed) {
             if let Err(e) = self.event.send(RayGunEventKind::ConversationCreated {
@@ -1361,49 +1343,31 @@ impl MessageStore {
 
             let topic = format!("{did}/messaging");
             let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
-            match peers.contains(&peer_id) {
-                true => {
-                    if let Err(_e) = self
+            if !peers.contains(&peer_id)
+                || (peers.contains(&peer_id)
+                    && self
                         .ipfs
                         .pubsub_publish(topic.clone(), payload.to_bytes()?.into())
                         .await
-                    {
-                        warn!("Unable to publish to topic. Queuing event");
-                        if let Err(e) = self
-                            .queue_event(
-                                did,
-                                Queue::direct(
-                                    convo_id,
-                                    None,
-                                    peer_id,
-                                    topic.clone(),
-                                    payload.data().to_vec(),
-                                ),
-                            )
-                            .await
-                        {
-                            error!("Error submitting event to queue: {e}");
-                        }
-                    }
+                        .is_err())
+            {
+                warn!("Unable to publish to topic. Queuing event");
+                if let Err(e) = self
+                    .queue_event(
+                        did,
+                        Queue::direct(
+                            convo_id,
+                            None,
+                            peer_id,
+                            topic.clone(),
+                            payload.data().to_vec(),
+                        ),
+                    )
+                    .await
+                {
+                    error!("Error submitting event to queue: {e}");
                 }
-                false => {
-                    if let Err(e) = self
-                        .queue_event(
-                            did,
-                            Queue::direct(
-                                convo_id,
-                                None,
-                                peer_id,
-                                topic.clone(),
-                                payload.data().to_vec(),
-                            ),
-                        )
-                        .await
-                    {
-                        error!("Error submitting event to queue: {e}");
-                    }
-                }
-            };
+            }
         }
 
         if !self.disable_sender_event_emit.load(Ordering::Relaxed) {
@@ -1482,53 +1446,35 @@ impl MessageStore {
 
                 let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
-                match peers.contains(&peer_id) {
-                    true => {
-                        if let Err(e) = self
+                if !peers.contains(&peer_id)
+                    || (peers.contains(&peer_id)
+                        && self
                             .ipfs
                             .pubsub_publish(topic.clone(), payload.to_bytes()?.into())
                             .await
-                        {
-                            warn!("Unable to publish to topic: {e}. Queuing event");
-                            //Note: If the error is related to peer not available then we should push this to queue but if
-                            //      its due to the message limit being reached we should probably break up the message to fix into
-                            //      "max_transmit_size" within rust-libp2p gossipsub
-                            //      For now we will queue the message if we hit an error
-                            if let Err(e) = self
-                                .queue_event(
-                                    recipient.clone(),
-                                    Queue::direct(
-                                        document_type.id(),
-                                        None,
-                                        peer_id,
-                                        topic.clone(),
-                                        payload.data().to_vec(),
-                                    ),
-                                )
-                                .await
-                            {
-                                error!("Error submitting event to queue: {e}");
-                            }
-                        }
+                            .is_err())
+                {
+                    warn!("Unable to publish to topic. Queuing event");
+                    //Note: If the error is related to peer not available then we should push this to queue but if
+                    //      its due to the message limit being reached we should probably break up the message to fix into
+                    //      "max_transmit_size" within rust-libp2p gossipsub
+                    //      For now we will queue the message if we hit an error
+                    if let Err(e) = self
+                        .queue_event(
+                            recipient.clone(),
+                            Queue::direct(
+                                document_type.id(),
+                                None,
+                                peer_id,
+                                topic.clone(),
+                                payload.data().to_vec(),
+                            ),
+                        )
+                        .await
+                    {
+                        error!("Error submitting event to queue: {e}");
                     }
-                    false => {
-                        if let Err(e) = self
-                            .queue_event(
-                                recipient.clone(),
-                                Queue::direct(
-                                    document_type.id(),
-                                    None,
-                                    peer_id,
-                                    topic.clone(),
-                                    payload.data().to_vec(),
-                                ),
-                            )
-                            .await
-                        {
-                            error!("Error submitting event to queue: {e}");
-                        }
-                    }
-                };
+                }
             }
         }
 
@@ -1740,46 +1686,32 @@ impl MessageStore {
         let peer_id = did_to_libp2p_pub(did_key)?.to_peer_id();
         let topic = format!("{did_key}/messaging");
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
-        match peers.contains(&peer_id) {
-            true => {
-                let bytes = payload.to_bytes()?.into();
-                if let Err(_e) = self.ipfs.pubsub_publish(topic.clone(), bytes).await {
-                    warn!("Unable to publish to topic. Queuing event");
-                    if let Err(e) = self
-                        .queue_event(
-                            did_key.clone(),
-                            Queue::direct(
-                                conversation_id,
-                                None,
-                                peer_id,
-                                topic.clone(),
-                                payload.data().to_vec(),
-                            ),
-                        )
-                        .await
-                    {
-                        error!("Error submitting event to queue: {e}");
-                    }
-                }
-            }
-            false => {
-                if let Err(e) = self
-                    .queue_event(
-                        did_key.clone(),
-                        Queue::direct(
-                            conversation_id,
-                            None,
-                            peer_id,
-                            topic.clone(),
-                            payload.data().to_vec(),
-                        ),
-                    )
+
+        if !peers.contains(&peer_id)
+            || (peers.contains(&peer_id)
+                && self
+                    .ipfs
+                    .pubsub_publish(topic.clone(), payload.to_bytes()?.into())
                     .await
-                {
-                    error!("Error submitting event to queue: {e}");
-                }
+                    .is_err())
+        {
+            warn!("Unable to publish to topic. Queuing event");
+            if let Err(e) = self
+                .queue_event(
+                    did_key.clone(),
+                    Queue::direct(
+                        conversation_id,
+                        None,
+                        peer_id,
+                        topic.clone(),
+                        payload.data().to_vec(),
+                    ),
+                )
+                .await
+            {
+                error!("Error submitting event to queue: {e}");
             }
-        };
+        }
 
         Ok(())
     }
@@ -1799,6 +1731,12 @@ impl MessageStore {
             .await
     }
 
+    //TODO: Send a request to recipient(s) of the chat to ack if message been delivered if message is marked "sent" unless we receive an event acknowledging the message itself 
+    //Note: 
+    //  - For group chat, this can be ignored unless we decide to have a full acknowledgement from all recipients in which case, we can mark it as "sent"
+    //    until all confirm to have received the message
+    //  - If member sends an event stating that they do not have the message to grab the message from the store
+    //    and send it them, with a map marking the attempt(s)   
     pub async fn message_status(
         &self,
         conversation_id: Uuid,
