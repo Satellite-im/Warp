@@ -526,20 +526,18 @@ impl ConversationDocument {
             if ipfs.is_pinned(&document.message).await? {
                 ipfs.remove_pin(&document.message, false).await?;
             }
-            ids.push((document.id, document.message));
+            ids.push(document.message);
         }
 
         //TODO: Replace with gc within ipfs (when completed) in the future
         //      so we dont need to manually delete the blocks
-        let _fut = FuturesOrdered::from_iter(ids.iter().map(|(id, cid)| {
+        FuturesOrdered::from_iter(ids.iter().map(|cid| {
             let ipfs = ipfs.clone();
-            async move {
-                ipfs.remove_block(*cid).await?;
-                Ok::<_, Error>(*id)
-            }
+            async move { (ipfs, *cid) }
         }))
-        .filter_map(|result| async { result.ok() })
-        .collect::<Vec<_>>()
+        .for_each_concurrent(None, |(ipfs, cid)| async move {
+            let _ = ipfs.remove_block(cid).await.ok();
+        })
         .await;
         Ok(())
     }
