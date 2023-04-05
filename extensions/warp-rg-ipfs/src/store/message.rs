@@ -1580,11 +1580,12 @@ impl MessageStore {
                     continue
                 };
 
+                //TODO: Maybe check file extension instead
                 let slices = filename.split('.').collect::<Vec<&str>>();
 
                 let keystore = slices
                     .last()
-                    .map(|s| s.ends_with(".keystore"))
+                    .map(|s| s.ends_with("keystore"))
                     .unwrap_or_default();
 
                 let Some(file_id) = slices.first() else {
