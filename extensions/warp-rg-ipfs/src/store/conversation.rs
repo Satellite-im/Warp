@@ -336,7 +336,9 @@ impl ConversationDocument {
         )
         .filter_map(|res| async { res.ok() })
         .filter_map(|message| async {
-            if let Some(keyword) = option.keyword() {
+            if option.pinned() && !message.pinned() {
+                None
+            } else if let Some(keyword) = option.keyword() {
                 if message
                     .value()
                     .iter()
@@ -404,6 +406,9 @@ impl ConversationDocument {
                 }
 
                 if let Ok(message) = document.resolve(&ipfs, did.clone(), keystore.as_ref()).await {
+                    if option.pinned() && !message.pinned() {
+                        continue;
+                    }
                     if let Some(keyword) = option.keyword() {
                         if message
                             .value()
@@ -470,6 +475,9 @@ impl ConversationDocument {
             let mut messages = vec![];
             for document in chunk.iter() {
                 if let Ok(message) = document.resolve(&ipfs, did.clone(), keystore).await {
+                    if option.pinned() && !message.pinned() {
+                        continue;
+                    }
                     messages.push(message);
                 }
             }
