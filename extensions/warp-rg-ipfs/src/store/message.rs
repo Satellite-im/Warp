@@ -28,6 +28,7 @@ use warp::crypto::{generate, DID};
 use warp::error::Error;
 use warp::logging::tracing::log::{error, info, trace};
 use warp::logging::tracing::warn;
+use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::raygun::{
     Conversation, ConversationType, EmbedState, Location, Message, MessageEvent, MessageEventKind,
@@ -894,6 +895,18 @@ impl MessageStore {
                     warn!("Conversation with {conversation_id} exist");
                     return Ok(());
                 }
+
+                // used to kind of bootstrap the connections internally in case the recipients arent connected
+                tokio::spawn({
+                    let account = self.account.clone();
+                    let recipients = initial_recipients.clone();
+                    async move {
+                        if let Ok(_list) =
+                            account.get_identity(Identifier::DIDList(recipients)).await
+                        {
+                        }
+                    }
+                });
 
                 info!("Creating conversation");
                 let convo = ConversationDocument::new(
@@ -3390,6 +3403,18 @@ impl MessageStore {
                 if document.recipients.contains(&recipient) {
                     return Err(Error::IdentityExist);
                 }
+
+                // used to kind of bootstrap the connections internally in case the recipient isnt connected
+                tokio::spawn({
+                    let account = self.account.clone();
+                    let recipient = recipient.clone();
+                    async move {
+                        if let Ok(_list) =
+                            account.get_identity(Identifier::DID(recipient)).await
+                        {
+                        }
+                    }
+                });
 
                 self.get_conversation_mut(document.id(), |conversation| {
                     conversation.recipients = list;
