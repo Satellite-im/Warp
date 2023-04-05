@@ -507,7 +507,7 @@ impl ConversationDocument {
     }
 
     pub async fn delete_message(&mut self, ipfs: Ipfs, message_id: Uuid) -> Result<(), Error> {
-        let mut document = self
+        let document = self
             .messages
             .iter()
             .find(|document| document.id == message_id)
@@ -631,7 +631,7 @@ impl MessageDocument {
         Ok(document)
     }
 
-    pub async fn remove(&mut self, ipfs: Ipfs) -> Result<(), Error> {
+    pub async fn remove(&self, ipfs: Ipfs) -> Result<(), Error> {
         let cid = self.message;
         if ipfs.is_pinned(&cid).await? {
             ipfs.remove_pin(&cid, false).await?;
