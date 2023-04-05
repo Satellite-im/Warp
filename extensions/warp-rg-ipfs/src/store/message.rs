@@ -44,7 +44,7 @@ use crate::store::{
 use crate::SpamFilter;
 
 use super::conversation::{ConversationDocument, MessageDocument};
-use super::document::{GetDag, GetLocalDag, ToCid};
+use super::document::{GetLocalDag, ToCid};
 use super::keystore::Keystore;
 use super::{
     did_to_libp2p_pub, topic_discovery, verify_serde_sig, ConversationEvents, ConversationRequest,
@@ -1004,7 +1004,7 @@ impl MessageStore {
                 }
 
                 let mut document: ConversationDocument =
-                    conversation_cid.get_dag(&self.ipfs, None).await?;
+                    conversation_cid.get_local_dag(&self.ipfs).await?;
                 let topic = document.topic();
                 self.queue.write().await.remove(&sender);
 
@@ -1439,7 +1439,7 @@ impl MessageStore {
             }
         }
         let mut document_type: ConversationDocument =
-            conversation_cid.get_dag(&self.ipfs, None).await?;
+            conversation_cid.get_local_dag(&self.ipfs).await?;
 
         self.ipfs.remove_block(conversation_cid).await?;
 
@@ -1606,9 +1606,8 @@ impl MessageStore {
                         let task = {
                             let store = self.clone();
                             async move {
-                                let conversation: ConversationDocument = cid
-                                    .get_dag(&store.ipfs, Some(Duration::from_secs(10)))
-                                    .await?;
+                                let conversation: ConversationDocument =
+                                    cid.get_local_dag(&store.ipfs).await?;
                                 conversation.verify()?;
                                 store.conversation_cid.write().await.insert(id, cid);
 
@@ -1635,13 +1634,13 @@ impl MessageStore {
     }
 
     pub async fn list_conversation_documents(&self) -> Result<Vec<ConversationDocument>, Error> {
-        let list = FuturesUnordered::from_iter(self.conversation_cid.read().await.values().map(
-            |cid| async {
-                (*cid)
-                    .get_dag(&self.ipfs, Some(Duration::from_secs(10)))
-                    .await
-            },
-        ))
+        let list = FuturesUnordered::from_iter(
+            self.conversation_cid
+                .read()
+                .await
+                .values()
+                .map(|cid| async { (*cid).get_local_dag(&self.ipfs).await }),
+        )
         .filter_map(|res| async { res.ok() })
         .collect::<Vec<_>>()
         .await;
@@ -1884,7 +1883,7 @@ impl MessageStore {
         let cid = map
             .get(&conversation_id)
             .ok_or(Error::InvalidConversation)?;
-        let conversation: ConversationDocument = (*cid).get_dag(&self.ipfs, None).await?;
+        let conversation: ConversationDocument = (*cid).get_local_dag(&self.ipfs).await?;
         conversation.verify().map(|_| conversation)
     }
 
