@@ -2876,6 +2876,7 @@ impl MessageStore {
         {
             let peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
 
+            // We want to confirm that there is atleast one peer subscribed before attempting to send a message
             match peers.contains(&peer_id) {
                 true => {
                     can_publish = true;
