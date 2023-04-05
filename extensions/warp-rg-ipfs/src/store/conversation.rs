@@ -23,7 +23,7 @@ use warp::{
 use crate::store::ecdh_encrypt;
 
 use super::{
-    document::{GetDag, ToCid},
+    document::{GetLocalDag, ToCid},
     ecdh_decrypt,
     keystore::Keystore,
 };
@@ -459,7 +459,7 @@ impl ConversationDocument {
         let mut pages = vec![];
         // First check to determine if there is a page that was selected
         if let Some(index) = page_index {
-            let page = messages_chunk.get(index).ok_or(Error::MessageNotFound)?;
+            let page = messages_chunk.get(index).ok_or(Error::PageNotFound)?;
             let mut messages = vec![];
             for document in page.iter() {
                 if let Ok(message) = document.resolve(&ipfs, did.clone(), keystore).await {
@@ -691,7 +691,7 @@ impl MessageDocument {
         did: Arc<DID>,
         keystore: Option<&Keystore>,
     ) -> Result<Message, Error> {
-        let bytes: Vec<u8> = self.message.get_dag(ipfs, None).await?;
+        let bytes: Vec<u8> = self.message.get_local_dag(ipfs).await?;
 
         let sender = self.sender.to_did();
         let data = match keystore {

@@ -5,6 +5,7 @@ use warp::{crypto::DID, error::Error};
 
 use super::{conversation::DIDEd25519Reference, verify_serde_sig};
 
+/// zero-copy payload for delivering and receiving data
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct Payload<'a> {
     sender: DIDEd25519Reference,

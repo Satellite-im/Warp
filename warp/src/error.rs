@@ -145,6 +145,8 @@ pub enum Error {
     MessageFound,
     #[error("Message not found within conversation")]
     MessageNotFound,
+    #[error("Page of messages not found")]
+    PageNotFound,
     #[error("Group could not be created at this time")]
     CannotCreateGroup,
     #[error("Unable to join group")]
