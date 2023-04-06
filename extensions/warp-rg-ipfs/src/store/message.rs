@@ -453,8 +453,6 @@ impl MessageStore {
                                                         let payload =
                                                             Payload::new(&did, &bytes, &signature);
 
-                                                        let bytes = payload.to_bytes()?;
-
                                                         let peers = store
                                                             .ipfs
                                                             .pubsub_peers(Some(topic.clone()))
@@ -462,52 +460,34 @@ impl MessageStore {
                                                         let peer_id = did_to_libp2p_pub(&sender)
                                                             .map(|pk| pk.to_peer_id())?;
 
-                                                        match peers.contains(&peer_id) {
-                                                            true => {
-                                                                if let Err(_e) = store
+                                                        if !peers.contains(&peer_id)
+                                                            || (peers.contains(&peer_id)
+                                                                && store
                                                                     .ipfs
                                                                     .pubsub_publish(
                                                                         topic.clone(),
-                                                                        bytes.into(),
+                                                                        payload.to_bytes()?.into(),
                                                                     )
                                                                     .await
-                                                                {
-                                                                    warn!("Unable to publish to topic. Queuing event");
-                                                                    if let Err(e) = store
-                                                                        .queue_event(
-                                                                            sender.clone(),
-                                                                            Queue::direct(
-                                                                                conversation_id,
-                                                                                None,
-                                                                                peer_id,
-                                                                                topic.clone(),
-                                                                                data.clone(),
-                                                                            ),
-                                                                        )
-                                                                        .await
-                                                                    {
-                                                                        error!("Error submitting event to queue: {e}");
-                                                                    }
-                                                                }
+                                                                    .is_err())
+                                                        {
+                                                            warn!("Unable to publish to topic. Queuing event");
+                                                            if let Err(e) = store
+                                                                .queue_event(
+                                                                    sender.clone(),
+                                                                    Queue::direct(
+                                                                        conversation_id,
+                                                                        None,
+                                                                        peer_id,
+                                                                        topic.clone(),
+                                                                        payload.data().into(),
+                                                                    ),
+                                                                )
+                                                                .await
+                                                            {
+                                                                error!("Error submitting event to queue: {e}");
                                                             }
-                                                            false => {
-                                                                if let Err(e) = store
-                                                                    .queue_event(
-                                                                        sender.clone(),
-                                                                        Queue::direct(
-                                                                            conversation_id,
-                                                                            None,
-                                                                            peer_id,
-                                                                            topic.clone(),
-                                                                            data.clone(),
-                                                                        ),
-                                                                    )
-                                                                    .await
-                                                                {
-                                                                    error!("Error submitting event to queue: {e}");
-                                                                }
-                                                            }
-                                                        };
+                                                        }
 
                                                         Ok::<_, Error>(())
                                                     }
