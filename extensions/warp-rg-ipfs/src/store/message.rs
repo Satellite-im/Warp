@@ -358,11 +358,11 @@ impl MessageStore {
         };
 
         conversation.messages.clear();
-        conversation.recipients.clear();
 
         let Ok(stream) = self.ipfs.pubsub_subscribe(conversation.reqres_topic(&did)).await else {
             return
         };
+        drop(conversation);
 
         let task = tokio::spawn({
             let store = self.clone();
@@ -380,6 +380,19 @@ impl MessageStore {
                                     ConversationRequestResponse::Request(request) => {
                                         match request {
                                             ConversationRequest::Key { conversation_id } => {
+                                                let Ok(mut conversation) = store.get_conversation(conversation_id).await else {
+                                                    continue
+                                                };
+
+                                                conversation.messages.clear();
+
+                                                if !conversation
+                                                    .recipients()
+                                                    .contains(&payload.sender())
+                                                {
+                                                    continue;
+                                                }
+
                                                 let mut keystore = match store
                                                     .conversation_keystore(conversation_id)
                                                     .await
@@ -505,7 +518,15 @@ impl MessageStore {
                                                 key,
                                             } => {
                                                 let sender = payload.sender();
+                                                let Ok(mut conversation) = store.get_conversation(conversation_id).await else {
+                                                    continue
+                                                };
 
+                                                conversation.messages.clear();
+
+                                                if !conversation.recipients().contains(&sender) {
+                                                    continue;
+                                                }
                                                 let mut keystore = match store
                                                     .conversation_keystore(conversation_id)
                                                     .await
@@ -1711,12 +1732,12 @@ impl MessageStore {
             .await
     }
 
-    //TODO: Send a request to recipient(s) of the chat to ack if message been delivered if message is marked "sent" unless we receive an event acknowledging the message itself 
-    //Note: 
+    //TODO: Send a request to recipient(s) of the chat to ack if message been delivered if message is marked "sent" unless we receive an event acknowledging the message itself
+    //Note:
     //  - For group chat, this can be ignored unless we decide to have a full acknowledgement from all recipients in which case, we can mark it as "sent"
     //    until all confirm to have received the message
     //  - If member sends an event stating that they do not have the message to grab the message from the store
-    //    and send it them, with a map marking the attempt(s)   
+    //    and send it them, with a map marking the attempt(s)
     pub async fn message_status(
         &self,
         conversation_id: Uuid,
