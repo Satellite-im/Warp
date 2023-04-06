@@ -676,6 +676,14 @@ impl MessageStore {
                 futures::pin_mut!(stream);
                 loop {
                     let (direction, event, ret) = tokio::select! {
+                        biased;
+                        event = rx.next() => {
+                            let Some((event, ret)) = event else {
+                                continue;
+                            };
+
+                            (MessageDirection::Out, event, ret)
+                        }
                         event = stream.next() => {
                             let Some(event) = event else {
                                 continue;
@@ -725,13 +733,6 @@ impl MessageStore {
 
                             (MessageDirection::In, event, None)
                         },
-                        event = rx.next() => {
-                            let Some((event, ret)) = event else {
-                                continue;
-                            };
-
-                            (MessageDirection::Out, event, ret)
-                        }
                     };
 
                     let conversation = match store.get_conversation(conversation_id).await {
