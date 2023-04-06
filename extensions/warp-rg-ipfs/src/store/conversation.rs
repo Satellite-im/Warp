@@ -317,82 +317,11 @@ impl ConversationDocument {
         option: MessageOptions,
         keystore: Option<&Keystore>,
     ) -> Result<BTreeSet<Message>, Error> {
-        let message_list: BTreeSet<MessageDocument> = match self.messages {
-            Some(cid) => cid.get_local_dag(ipfs).await?,
-            None => return Ok(BTreeSet::new()),
-        };
-
-        let mut messages = match option.date_range() {
-            Some(range) => Vec::from_iter(
-                message_list
-                    .iter()
-                    .filter(|message| message.date >= range.start && message.date <= range.end)
-                    .copied(),
-            ),
-            None => Vec::from_iter(message_list.iter().copied()),
-        };
-
-        if option.reverse() {
-            messages.reverse()
-        }
-
-        let sorted = option
-            .range()
-            .map(|mut range| {
-                let start = range.start;
-                let end = range.end;
-                range.start = messages.len() - end;
-                range.end = messages.len() - start;
-                range
-            })
-            .and_then(|range| messages.get(range))
-            .map(|messages| messages.to_vec())
-            .unwrap_or_else(|| messages.clone());
-
-        let sorted = {
-            if option.first_message() && !option.last_message() {
-                sorted
-                    .first()
-                    .copied()
-                    .map(|item| vec![item])
-                    .unwrap_or_default()
-            } else if !option.first_message() && option.last_message() {
-                sorted
-                    .last()
-                    .copied()
-                    .map(|item| vec![item])
-                    .unwrap_or_default()
-            } else {
-                sorted
-            }
-        };
-
-        let list = FuturesOrdered::from_iter(
-            sorted
-                .iter()
-                .map(|document| async { document.resolve(ipfs, did.clone(), keystore).await }),
-        )
-        .filter_map(|res| async { res.ok() })
-        .filter_map(|message| async {
-            if option.pinned() && !message.pinned() {
-                None
-            } else if let Some(keyword) = option.keyword() {
-                if message
-                    .value()
-                    .iter()
-                    .any(|line| line.to_lowercase().contains(&keyword.to_lowercase()))
-                {
-                    Some(message)
-                } else {
-                    None
-                }
-            } else {
-                Some(message)
-            }
-        })
-        .collect::<BTreeSet<Message>>()
-        .await;
-
+        let list = self
+            .get_messages_stream(ipfs, did, option, keystore)
+            .await?
+            .collect::<BTreeSet<_>>()
+            .await;
         Ok(list)
     }
 
