@@ -39,8 +39,8 @@ use warp::sync::Arc;
 
 use crate::store::payload::Payload;
 use crate::store::{
-    connected_to_peer, ecdh_decrypt, ecdh_encrypt, sign_serde, ConversationRequestResponse,
-    ConversationResponse,
+    connected_to_peer, ecdh_decrypt, ecdh_encrypt, sign_serde, ConversationRequestKind,
+    ConversationRequestResponse, ConversationResponseKind,
 };
 use crate::SpamFilter;
 
@@ -48,8 +48,7 @@ use super::conversation::{ConversationDocument, MessageDocument};
 use super::document::{GetLocalDag, ToCid};
 use super::keystore::Keystore;
 use super::{
-    did_to_libp2p_pub, topic_discovery, verify_serde_sig, ConversationEvents, ConversationRequest,
-    MessagingEvents,
+    did_to_libp2p_pub, topic_discovery, verify_serde_sig, ConversationEvents, MessagingEvents,
 };
 
 const PERMIT_AMOUNT: usize = 1;
@@ -377,172 +376,170 @@ impl MessageStore {
                                 serde_json::from_slice::<ConversationRequestResponse>(&data)
                             {
                                 match event {
-                                    ConversationRequestResponse::Request(request) => {
-                                        match request {
-                                            ConversationRequest::Key { conversation_id } => {
-                                                let Ok(mut conversation) = store.get_conversation(conversation_id).await else {
+                                    ConversationRequestResponse::Request {
+                                        conversation_id,
+                                        kind,
+                                    } => match kind {
+                                        ConversationRequestKind::Key => {
+                                            let Ok(mut conversation) = store.get_conversation(conversation_id).await else {
                                                     continue
                                                 };
 
-                                                conversation.messages.clear();
+                                            conversation.messages.clear();
 
-                                                if !conversation
-                                                    .recipients()
-                                                    .contains(&payload.sender())
-                                                {
+                                            if !conversation
+                                                .recipients()
+                                                .contains(&payload.sender())
+                                            {
+                                                continue;
+                                            }
+
+                                            let mut keystore = match store
+                                                .conversation_keystore(conversation_id)
+                                                .await
+                                            {
+                                                Ok(keystore) => keystore,
+                                                Err(e) => {
+                                                    error!(
+                                                        "Error obtaining keystore: {e}. Skipping"
+                                                    );
                                                     continue;
                                                 }
+                                            };
 
-                                                let mut keystore = match store
-                                                    .conversation_keystore(conversation_id)
-                                                    .await
-                                                {
-                                                    Ok(keystore) => keystore,
-                                                    Err(e) => {
-                                                        error!("Error obtaining keystore: {e}. Skipping");
+                                            let raw_key = match keystore.get_latest(&did, &did) {
+                                                Ok(key) => key,
+                                                Err(Error::PublicKeyInvalid) => {
+                                                    let key = generate(64);
+                                                    if let Err(e) =
+                                                        keystore.insert(&did, &did, &key)
+                                                    {
+                                                        error!("Error inserting generated key into store: {e}");
                                                         continue;
                                                     }
-                                                };
+                                                    if let Err(e) = store
+                                                        .set_conversation_keystore(
+                                                            conversation_id,
+                                                            &keystore,
+                                                        )
+                                                        .await
+                                                    {
+                                                        error!("Error setting keystore: {e}");
+                                                        continue;
+                                                    }
+                                                    key
+                                                }
+                                                Err(e) => {
+                                                    error!("Error getting key from store: {e}");
+                                                    continue;
+                                                }
+                                            };
+                                            let sender = payload.sender();
+                                            let key = match ecdh_encrypt(
+                                                &did,
+                                                Some(sender.clone()),
+                                                raw_key,
+                                            ) {
+                                                Ok(key) => key,
+                                                Err(e) => {
+                                                    error!("Error: {e}");
+                                                    continue;
+                                                }
+                                            };
+                                            let response = ConversationRequestResponse::Response {
+                                                conversation_id,
+                                                kind: ConversationResponseKind::Key { key },
+                                            };
+                                            let result = {
+                                                let did = did.clone();
+                                                let store = store.clone();
+                                                let topic = conversation.reqres_topic(&sender);
+                                                async move {
+                                                    let bytes = ecdh_encrypt(
+                                                        &did,
+                                                        Some(sender.clone()),
+                                                        serde_json::to_vec(&response)?,
+                                                    )?;
+                                                    let signature = sign_serde(&did, &bytes)?;
 
-                                                let raw_key = match keystore.get_latest(&did, &did)
-                                                {
-                                                    Ok(key) => key,
-                                                    Err(Error::PublicKeyInvalid) => {
-                                                        let key = generate(64);
-                                                        if let Err(e) =
-                                                            keystore.insert(&did, &did, &key)
-                                                        {
-                                                            error!("Error inserting generated key into store: {e}");
-                                                            continue;
-                                                        }
+                                                    let payload =
+                                                        Payload::new(&did, &bytes, &signature);
+
+                                                    let peers = store
+                                                        .ipfs
+                                                        .pubsub_peers(Some(topic.clone()))
+                                                        .await?;
+                                                    let peer_id = did_to_libp2p_pub(&sender)
+                                                        .map(|pk| pk.to_peer_id())?;
+
+                                                    if !peers.contains(&peer_id)
+                                                        || (peers.contains(&peer_id)
+                                                            && store
+                                                                .ipfs
+                                                                .pubsub_publish(
+                                                                    topic.clone(),
+                                                                    payload.to_bytes()?.into(),
+                                                                )
+                                                                .await
+                                                                .is_err())
+                                                    {
+                                                        warn!("Unable to publish to topic. Queuing event");
                                                         if let Err(e) = store
-                                                            .set_conversation_keystore(
-                                                                conversation_id,
-                                                                &keystore,
+                                                            .queue_event(
+                                                                sender.clone(),
+                                                                Queue::direct(
+                                                                    conversation_id,
+                                                                    None,
+                                                                    peer_id,
+                                                                    topic.clone(),
+                                                                    payload.data().into(),
+                                                                ),
                                                             )
                                                             .await
                                                         {
-                                                            error!("Error setting keystore: {e}");
-                                                            continue;
+                                                            error!("Error submitting event to queue: {e}");
                                                         }
-                                                        key
                                                     }
-                                                    Err(e) => {
-                                                        error!("Error getting key from store: {e}");
-                                                        continue;
-                                                    }
-                                                };
-                                                let sender = payload.sender();
-                                                let key = match ecdh_encrypt(
-                                                    &did,
-                                                    Some(sender.clone()),
-                                                    raw_key,
-                                                ) {
-                                                    Ok(key) => key,
-                                                    Err(e) => {
-                                                        error!("Error: {e}");
-                                                        continue;
-                                                    }
-                                                };
-                                                let response =
-                                                    ConversationRequestResponse::Response(
-                                                        ConversationResponse::Key {
-                                                            conversation_id,
-                                                            key,
-                                                        },
-                                                    );
-                                                let result = {
-                                                    let did = did.clone();
-                                                    let store = store.clone();
-                                                    let topic = conversation.reqres_topic(&sender);
-                                                    async move {
-                                                        let bytes = ecdh_encrypt(
-                                                            &did,
-                                                            Some(sender.clone()),
-                                                            serde_json::to_vec(&response)?,
-                                                        )?;
-                                                        let signature = sign_serde(&did, &bytes)?;
 
-                                                        let payload =
-                                                            Payload::new(&did, &bytes, &signature);
-
-                                                        let peers = store
-                                                            .ipfs
-                                                            .pubsub_peers(Some(topic.clone()))
-                                                            .await?;
-                                                        let peer_id = did_to_libp2p_pub(&sender)
-                                                            .map(|pk| pk.to_peer_id())?;
-
-                                                        if !peers.contains(&peer_id)
-                                                            || (peers.contains(&peer_id)
-                                                                && store
-                                                                    .ipfs
-                                                                    .pubsub_publish(
-                                                                        topic.clone(),
-                                                                        payload.to_bytes()?.into(),
-                                                                    )
-                                                                    .await
-                                                                    .is_err())
-                                                        {
-                                                            warn!("Unable to publish to topic. Queuing event");
-                                                            if let Err(e) = store
-                                                                .queue_event(
-                                                                    sender.clone(),
-                                                                    Queue::direct(
-                                                                        conversation_id,
-                                                                        None,
-                                                                        peer_id,
-                                                                        topic.clone(),
-                                                                        payload.data().into(),
-                                                                    ),
-                                                                )
-                                                                .await
-                                                            {
-                                                                error!("Error submitting event to queue: {e}");
-                                                            }
-                                                        }
-
-                                                        Ok::<_, Error>(())
-                                                    }
-                                                };
-                                                if let Err(e) = result.await {
-                                                    error!("Error: {e}");
+                                                    Ok::<_, Error>(())
                                                 }
+                                            };
+                                            if let Err(e) = result.await {
+                                                error!("Error: {e}");
                                             }
                                         }
-                                    }
-                                    ConversationRequestResponse::Response(response) => {
-                                        match response {
-                                            crate::store::ConversationResponse::Key {
-                                                conversation_id,
-                                                key,
-                                            } => {
-                                                let sender = payload.sender();
-                                                let Ok(mut conversation) = store.get_conversation(conversation_id).await else {
+                                    },
+                                    ConversationRequestResponse::Response {
+                                        conversation_id,
+                                        kind,
+                                    } => match kind {
+                                        ConversationResponseKind::Key { key } => {
+                                            let sender = payload.sender();
+                                            let Ok(mut conversation) = store.get_conversation(conversation_id).await else {
                                                     continue
                                                 };
 
-                                                conversation.messages.clear();
+                                            conversation.messages.clear();
 
-                                                if !conversation.recipients().contains(&sender) {
+                                            if !conversation.recipients().contains(&sender) {
+                                                continue;
+                                            }
+                                            let mut keystore = match store
+                                                .conversation_keystore(conversation_id)
+                                                .await
+                                            {
+                                                Ok(keystore) => keystore,
+                                                Err(e) => {
+                                                    error!(
+                                                        "Error obtaining keystore: {e}. Skipping"
+                                                    );
                                                     continue;
                                                 }
-                                                let mut keystore = match store
-                                                    .conversation_keystore(conversation_id)
-                                                    .await
-                                                {
-                                                    Ok(keystore) => keystore,
-                                                    Err(e) => {
-                                                        error!("Error obtaining keystore: {e}. Skipping");
-                                                        continue;
-                                                    }
-                                                };
+                                            };
 
-                                                let raw_key = match ecdh_decrypt(
-                                                    &did,
-                                                    Some(sender.clone()),
-                                                    key,
-                                                ) {
+                                            let raw_key =
+                                                match ecdh_decrypt(&did, Some(sender.clone()), key)
+                                                {
                                                     Ok(key) => key,
                                                     Err(e) => {
                                                         error!(
@@ -552,32 +549,30 @@ impl MessageStore {
                                                     }
                                                 };
 
-                                                if let Err(e) =
-                                                    keystore.insert(&did, &sender, raw_key)
-                                                {
-                                                    match e {
-                                                        Error::PublicKeyInvalid => {
-                                                            error!("Key already exist in store")
-                                                        }
-                                                        e => error!(
-                                                            "Error inserting key into store: {e}"
-                                                        ),
+                                            if let Err(e) = keystore.insert(&did, &sender, raw_key)
+                                            {
+                                                match e {
+                                                    Error::PublicKeyInvalid => {
+                                                        error!("Key already exist in store")
                                                     }
-                                                    continue;
+                                                    e => error!(
+                                                        "Error inserting key into store: {e}"
+                                                    ),
                                                 }
+                                                continue;
+                                            }
 
-                                                if let Err(e) = store
-                                                    .set_conversation_keystore(
-                                                        conversation_id,
-                                                        &keystore,
-                                                    )
-                                                    .await
-                                                {
-                                                    error!("Error setting keystore: {e}");
-                                                }
+                                            if let Err(e) = store
+                                                .set_conversation_keystore(
+                                                    conversation_id,
+                                                    &keystore,
+                                                )
+                                                .await
+                                            {
+                                                error!("Error setting keystore: {e}");
                                             }
                                         }
-                                    }
+                                    },
                                 }
                             }
                         }
@@ -592,8 +587,10 @@ impl MessageStore {
     }
 
     async fn request_key(&self, conversation_id: Uuid, did: &DID) -> Result<(), Error> {
-        let request =
-            ConversationRequestResponse::Request(ConversationRequest::Key { conversation_id });
+        let request = ConversationRequestResponse::Request {
+            conversation_id,
+            kind: ConversationRequestKind::Key,
+        };
 
         let mut conversation = self.get_conversation(conversation_id).await?;
 

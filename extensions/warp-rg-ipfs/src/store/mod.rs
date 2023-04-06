@@ -2,7 +2,7 @@ pub mod conversation;
 pub mod document;
 pub mod keystore;
 pub mod message;
-pub mod payload; 
+pub mod payload;
 
 use rust_ipfs as ipfs;
 use std::time::Duration;
@@ -34,21 +34,27 @@ pub enum ConversationEvents {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all="lowercase", tag = "type")]
+#[serde(rename_all = "lowercase", tag = "type")]
 pub enum ConversationRequestResponse {
-    Request(ConversationRequest),
-    Response(ConversationResponse),
+    Request {
+        conversation_id: Uuid,
+        kind: ConversationRequestKind,
+    },
+    Response {
+        conversation_id: Uuid,
+        kind: ConversationResponseKind,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all="lowercase")]
-pub enum ConversationRequest {
-    Key { conversation_id: Uuid },
+#[serde(rename_all = "lowercase")]
+pub enum ConversationRequestKind {
+    Key,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ConversationResponse {
-    Key { conversation_id: Uuid, key: Vec<u8> },
+pub enum ConversationResponseKind {
+    Key { key: Vec<u8> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
