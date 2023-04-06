@@ -3,16 +3,9 @@ use libipld::{
     Cid,
 };
 use rust_ipfs::{Ipfs, IpfsPath};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::hash::Hash;
-use std::marker::PhantomData;
+use serde::{de::DeserializeOwned, Serialize};
 use std::time::Duration;
 use warp::error::Error;
-
-#[async_trait::async_trait]
-pub(crate) trait ToDocument: Sized {
-    async fn to_document(&self, ipfs: &Ipfs) -> Result<DocumentType<Self>, Error>;
-}
 
 #[async_trait::async_trait]
 pub(crate) trait ToCid: Sized {
@@ -27,22 +20,6 @@ pub(crate) trait GetDag<D>: Sized {
 #[async_trait::async_trait]
 pub(crate) trait GetLocalDag<D>: Sized {
     async fn get_local_dag(&self, ipfs: &Ipfs) -> Result<D, Error>;
-}
-
-#[async_trait::async_trait]
-#[allow(clippy::wrong_self_convention)]
-pub(crate) trait FromDocument<I> {
-    async fn from_document(&self, ipfs: &Ipfs) -> Result<I, Error>;
-}
-
-#[async_trait::async_trait]
-impl<T> ToDocument for T
-where
-    T: Serialize + Clone + Send + Sync,
-{
-    async fn to_document(&self, ipfs: &Ipfs) -> Result<DocumentType<T>, Error> {
-        ToCid::to_cid(self, ipfs).await.map(|cid| cid.into())
-    }
 }
 
 #[async_trait::async_trait]
@@ -93,64 +70,6 @@ where
     async fn to_cid(&self, ipfs: &Ipfs) -> Result<Cid, Error> {
         let ipld = to_ipld(self.clone()).map_err(anyhow::Error::from)?;
         ipfs.put_dag(ipld).await.map_err(Error::from)
-    }
-}
-
-#[async_trait::async_trait]
-impl<T> FromDocument<T> for DocumentType<T>
-where
-    T: Sized + Send + Sync + Clone + DeserializeOwned,
-{
-    async fn from_document(&self, ipfs: &Ipfs) -> Result<T, Error> {
-        self.resolve(ipfs, None).await
-    }
-}
-
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, Copy)]
-pub struct DocumentType<T> {
-    pub document: Cid,
-    _marker: PhantomData<T>,
-}
-
-impl<T: Hash> Hash for DocumentType<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        Hash::hash(&self.document, state)
-    }
-}
-
-impl<T: PartialEq> PartialEq for DocumentType<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.document.eq(&other.document)
-    }
-}
-
-impl<T> DocumentType<T> {
-    pub async fn resolve(&self, ipfs: &Ipfs, timeout: Option<Duration>) -> Result<T, Error>
-    where
-        T: Clone,
-        T: DeserializeOwned,
-    {
-        self.document.get_dag(ipfs, timeout).await
-    }
-
-    #[allow(dead_code)]
-    pub async fn resolve_or_default(&self, ipfs: &Ipfs, timeout: Option<Duration>) -> T
-    where
-        T: Clone,
-        T: DeserializeOwned,
-        T: Default,
-    {
-        self.resolve(ipfs, timeout).await.unwrap_or_default()
-    }
-}
-
-impl<T> From<Cid> for DocumentType<T> {
-    fn from(document: Cid) -> Self {
-        Self {
-            document,
-            _marker: PhantomData,
-        }
     }
 }
 
