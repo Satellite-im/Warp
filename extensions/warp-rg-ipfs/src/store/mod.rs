@@ -59,17 +59,58 @@ pub enum ConversationResponseKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum MessagingEvents {
-    New(Message),
-    Edit(Uuid, Uuid, DateTime<Utc>, Vec<String>, Vec<u8>),
-    Delete(Uuid, Uuid),
-    Pin(Uuid, DID, Uuid, PinState),
-    React(Uuid, DID, Uuid, ReactionState, String),
-    UpdateConversationName(Uuid, String, String),
-    AddRecipient(Uuid, DID, Vec<DID>, String),
-    KeyResponse(Uuid, Vec<u8>),
-    RemoveRecipient(Uuid, DID, Vec<DID>, String),
-    Event(Uuid, DID, MessageEvent, bool),
+    New {
+        message: Message,
+    },
+    Edit {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        modified: DateTime<Utc>,
+        lines: Vec<String>,
+        signature: Vec<u8>,
+    },
+    Delete {
+        conversation_id: Uuid,
+        message_id: Uuid,
+    },
+    Pin {
+        conversation_id: Uuid,
+        member: DID,
+        message_id: Uuid,
+        state: PinState,
+    },
+    React {
+        conversation_id: Uuid,
+        reactor: DID,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: String,
+    },
+    UpdateConversationName {
+        conversation_id: Uuid,
+        name: String,
+        signature: String,
+    },
+    AddRecipient {
+        conversation_id: Uuid,
+        recipient: DID,
+        list: Vec<DID>,
+        signature: String,
+    },
+    RemoveRecipient {
+        conversation_id: Uuid,
+        recipient: DID,
+        list: Vec<DID>,
+        signature: String,
+    },
+    Event {
+        conversation_id: Uuid,
+        member: DID,
+        event: MessageEvent,
+        cancelled: bool,
+    },
 }
 
 pub fn generate_shared_topic(did_a: &DID, did_b: &DID, seed: Option<&str>) -> anyhow::Result<Uuid> {

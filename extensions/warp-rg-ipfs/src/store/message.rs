@@ -315,22 +315,22 @@ impl MessageStore {
                         };
 
                         if let Ok(data) = bytes.await {
-                            if let Ok(MessagingEvents::Event(
+                            if let Ok(MessagingEvents::Event {
                                 conversation_id,
-                                did_key,
+                                member,
                                 event,
                                 cancelled,
-                            )) = serde_json::from_slice::<MessagingEvents>(&data)
+                            }) = serde_json::from_slice::<MessagingEvents>(&data)
                             {
                                 let ev = match cancelled {
                                     true => MessageEventKind::EventCancelled {
                                         conversation_id,
-                                        did_key,
+                                        did_key: member,
                                         event,
                                     },
                                     false => MessageEventKind::EventReceived {
                                         conversation_id,
-                                        did_key,
+                                        did_key: member,
                                         event,
                                     },
                                 };
@@ -1970,8 +1970,11 @@ impl MessageStore {
             return Err(Error::InvalidSignature);
         };
 
-        let event =
-            MessagingEvents::UpdateConversationName(conversation_id, name.to_string(), signature);
+        let event = MessagingEvents::UpdateConversationName {
+            conversation_id,
+            name: name.to_string(),
+            signature,
+        };
 
         let tx = self.get_conversation_sender(conversation_id).await?;
         let _ = tx.send(MessageEventKind::ConversationNameUpdated {
@@ -2029,12 +2032,12 @@ impl MessageStore {
             return Err(Error::InvalidSignature);
         };
 
-        let event = MessagingEvents::AddRecipient(
+        let event = MessagingEvents::AddRecipient {
             conversation_id,
-            did_key.clone(),
-            conversation.recipients(),
-            signature.clone(),
-        );
+            recipient: did_key.clone(),
+            list: conversation.recipients(),
+            signature: signature.clone(),
+        };
 
         let tx = self.get_conversation_sender(conversation_id).await?;
         let _ = tx.send(MessageEventKind::RecipientAdded {
@@ -2104,12 +2107,12 @@ impl MessageStore {
             return Err(Error::InvalidSignature);
         };
 
-        let event = MessagingEvents::RemoveRecipient(
+        let event = MessagingEvents::RemoveRecipient {
             conversation_id,
-            did_key.clone(),
-            conversation.recipients(),
-            signature.clone(),
-        );
+            recipient: did_key.clone(),
+            list: conversation.recipients(),
+            signature: signature.clone(),
+        };
 
         let tx = self.get_conversation_sender(conversation_id).await?;
         let _ = tx.send(MessageEventKind::RecipientRemoved {
@@ -2192,7 +2195,7 @@ impl MessageStore {
 
         let message_id = message.id();
 
-        let event = MessagingEvents::New(message);
+        let event = MessagingEvents::New { message };
 
         tx.send((event.clone(), None))
             .await
@@ -2247,13 +2250,13 @@ impl MessageStore {
 
         let signature = super::sign_serde(&self.did, &construct)?;
 
-        let event = MessagingEvents::Edit(
-            conversation.id(),
+        let event = MessagingEvents::Edit {
+            conversation_id: conversation.id(),
             message_id,
-            Utc::now(),
-            messages,
+            modified: Utc::now(),
+            lines: messages,
             signature,
-        );
+        };
 
         tx.send((event.clone(), None))
             .await
@@ -2317,7 +2320,7 @@ impl MessageStore {
         let signature = super::sign_serde(own_did, &construct)?;
         message.set_signature(Some(signature));
 
-        let event = MessagingEvents::New(message);
+        let event = MessagingEvents::New { message };
 
         tx.send((event.clone(), None))
             .await
@@ -2336,7 +2339,10 @@ impl MessageStore {
         let conversation = self.get_conversation(conversation_id).await?;
         let mut tx = self.conversation_tx(conversation_id).await?;
 
-        let event = MessagingEvents::Delete(conversation.id(), message_id);
+        let event = MessagingEvents::Delete {
+            conversation_id: conversation.id(),
+            message_id,
+        };
 
         tx.send((event.clone(), None))
             .await
@@ -2361,7 +2367,12 @@ impl MessageStore {
 
         let own_did = &*self.did;
 
-        let event = MessagingEvents::Pin(conversation.id(), own_did.clone(), message_id, state);
+        let event = MessagingEvents::Pin {
+            conversation_id: conversation.id(),
+            member: own_did.clone(),
+            message_id,
+            state,
+        };
 
         tx.send((event.clone(), None))
             .await
@@ -2393,8 +2404,13 @@ impl MessageStore {
 
         let own_did = &*self.did;
 
-        let event =
-            MessagingEvents::React(conversation.id(), own_did.clone(), message_id, state, emoji);
+        let event = MessagingEvents::React {
+            conversation_id: conversation.id(),
+            reactor: own_did.clone(),
+            message_id,
+            state,
+            emoji,
+        };
 
         tx.send((event.clone(), None))
             .await
@@ -2585,7 +2601,7 @@ impl MessageStore {
         let signature = super::sign_serde(own_did, &construct)?;
         message.set_signature(Some(signature));
 
-        let event = MessagingEvents::New(message);
+        let event = MessagingEvents::New { message };
 
         tx.send((event.clone(), None))
             .await
@@ -2756,7 +2772,12 @@ impl MessageStore {
         let conversation = self.get_conversation(conversation_id).await?;
         let own_did = &*self.did;
 
-        let event = MessagingEvents::Event(conversation.id(), own_did.clone(), event, false);
+        let event = MessagingEvents::Event {
+            conversation_id: conversation.id(),
+            member: own_did.clone(),
+            event,
+            cancelled: false,
+        };
         self.send_message_event(conversation_id, event).await
     }
 
@@ -2768,7 +2789,12 @@ impl MessageStore {
         let conversation = self.get_conversation(conversation_id).await?;
         let own_did = &*self.did;
 
-        let event = MessagingEvents::Event(conversation.id(), own_did.clone(), event, true);
+        let event = MessagingEvents::Event {
+            conversation_id: conversation.id(),
+            member: own_did.clone(),
+            event,
+            cancelled: true,
+        };
         self.send_message_event(conversation_id, event).await
     }
 
@@ -2959,7 +2985,9 @@ impl MessageStore {
         };
 
         match events.clone() {
-            MessagingEvents::New(mut message) => {
+            MessagingEvents::New {
+                mut message,
+            } => {
                 if document
                     .messages
                     .iter()
@@ -3062,12 +3090,18 @@ impl MessageStore {
                     error!("Error broadcasting event: {e}");
                 }
             }
-            MessagingEvents::Edit(convo_id, message_id, modified, val, signature) => {
+            MessagingEvents::Edit {
+                conversation_id,
+                message_id,
+                modified,
+                lines,
+                signature,
+            } => {
                 let mut message_document = document
                     .messages
                     .iter()
                     .find(|document| {
-                        document.id == message_id && document.conversation_id == convo_id
+                        document.id == message_id && document.conversation_id == conversation_id
                     })
                     .cloned()
                     .ok_or(Error::MessageNotFound)?;
@@ -3076,7 +3110,7 @@ impl MessageStore {
                     .resolve(&self.ipfs, self.did.clone(), keystore.as_ref())
                     .await?;
 
-                let lines_value_length: usize = val
+                let lines_value_length: usize = lines
                     .iter()
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
@@ -3118,7 +3152,8 @@ impl MessageStore {
                         message.id().into_bytes().to_vec(),
                         message.conversation_id().into_bytes().to_vec(),
                         sender.to_string().as_bytes().to_vec(),
-                        val.iter()
+                        lines
+                            .iter()
                             .map(|s| s.as_bytes())
                             .collect::<Vec<_>>()
                             .concat(),
@@ -3128,7 +3163,7 @@ impl MessageStore {
                 }
 
                 message.set_signature(Some(signature));
-                *message.value_mut() = val;
+                *message.value_mut() = lines;
                 message.set_modified(modified);
 
                 message_document
@@ -3141,19 +3176,22 @@ impl MessageStore {
                 .await?;
 
                 if let Err(e) = tx.send(MessageEventKind::MessageEdited {
-                    conversation_id: convo_id,
+                    conversation_id,
                     message_id,
                 }) {
                     error!("Error broadcasting event: {e}");
                 }
             }
-            MessagingEvents::Delete(convo_id, message_id) => {
+            MessagingEvents::Delete {
+                conversation_id,
+                message_id,
+            } => {
                 let message_document = document
                     .messages
                     .iter()
                     .cloned()
                     .find(|document| {
-                        document.id == message_id && document.conversation_id == convo_id
+                        document.id == message_id && document.conversation_id == conversation_id
                     })
                     .ok_or(Error::MessageNotFound)?;
 
@@ -3184,7 +3222,7 @@ impl MessageStore {
                     conversation_document.messages.remove(&message_document);
 
                     if let Err(e) = tx.send(MessageEventKind::MessageDeleted {
-                        conversation_id: convo_id,
+                        conversation_id,
                         message_id,
                     }) {
                         error!("Error broadcasting event: {e}");
@@ -3192,12 +3230,17 @@ impl MessageStore {
                 })
                 .await?;
             }
-            MessagingEvents::Pin(convo_id, _, message_id, state) => {
+            MessagingEvents::Pin {
+                conversation_id,
+                message_id,
+                state,
+                ..
+            } => {
                 let mut message_document = document
                     .messages
                     .iter()
                     .find(|document| {
-                        document.id == message_id && document.conversation_id == convo_id
+                        document.id == message_id && document.conversation_id == conversation_id
                     })
                     .cloned()
                     .ok_or(Error::MessageNotFound)?;
@@ -3213,7 +3256,7 @@ impl MessageStore {
                         }
                         *message.pinned_mut() = true;
                         MessageEventKind::MessagePinned {
-                            conversation_id: convo_id,
+                            conversation_id,
                             message_id,
                         }
                     }
@@ -3223,7 +3266,7 @@ impl MessageStore {
                         }
                         *message.pinned_mut() = false;
                         MessageEventKind::MessageUnpinned {
-                            conversation_id: convo_id,
+                            conversation_id,
                             message_id,
                         }
                     }
@@ -3242,12 +3285,18 @@ impl MessageStore {
                     error!("Error broadcasting event: {e}");
                 }
             }
-            MessagingEvents::React(convo_id, sender, message_id, state, emoji) => {
+            MessagingEvents::React {
+                conversation_id,
+                reactor,
+                message_id,
+                state,
+                emoji,
+            } => {
                 let mut message_document = document
                     .messages
                     .iter()
                     .find(|document| {
-                        document.id == message_id && document.conversation_id == convo_id
+                        document.id == message_id && document.conversation_id == conversation_id
                     })
                     .cloned()
                     .ok_or(Error::MessageNotFound)?;
@@ -3266,12 +3315,12 @@ impl MessageStore {
                             .and_then(|index| reactions.get_mut(index))
                         {
                             Some(reaction) => {
-                                reaction.users_mut().push(sender.clone());
+                                reaction.users_mut().push(reactor.clone());
                             }
                             None => {
                                 let mut reaction = Reaction::default();
                                 reaction.set_emoji(&emoji);
-                                reaction.set_users(vec![sender.clone()]);
+                                reaction.set_users(vec![reactor.clone()]);
                                 reactions.push(reaction);
                             }
                         };
@@ -3286,9 +3335,9 @@ impl MessageStore {
                         .await?;
 
                         if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
-                            conversation_id: convo_id,
+                            conversation_id,
                             message_id,
-                            did_key: sender,
+                            did_key: reactor,
                             reaction: emoji,
                         }) {
                             error!("Error broadcasting event: {e}");
@@ -3298,7 +3347,7 @@ impl MessageStore {
                         let index = reactions
                             .iter()
                             .position(|reaction| {
-                                reaction.users().contains(&sender) && reaction.emoji().eq(&emoji)
+                                reaction.users().contains(&reactor) && reaction.emoji().eq(&emoji)
                             })
                             .ok_or(Error::MessageNotFound)?;
 
@@ -3307,7 +3356,7 @@ impl MessageStore {
                         let user_index = reaction
                             .users()
                             .iter()
-                            .position(|reaction_sender| reaction_sender.eq(&sender))
+                            .position(|reaction_sender| reaction_sender.eq(&reactor))
                             .ok_or(Error::MessageNotFound)?;
 
                         reaction.users_mut().remove(user_index);
@@ -3326,9 +3375,9 @@ impl MessageStore {
                         .await?;
 
                         if let Err(e) = tx.send(MessageEventKind::MessageReactionRemoved {
-                            conversation_id: convo_id,
+                            conversation_id,
                             message_id,
-                            did_key: sender,
+                            did_key: reactor,
                             reaction: emoji,
                         }) {
                             error!("Error broadcasting event: {e}");
@@ -3336,7 +3385,12 @@ impl MessageStore {
                     }
                 }
             }
-            MessagingEvents::AddRecipient(conversation_id, recipient, list, signature) => {
+            MessagingEvents::AddRecipient {
+                conversation_id,
+                recipient,
+                list,
+                signature,
+            } => {
                 if document.recipients.contains(&recipient) {
                     return Err(Error::IdentityExist);
                 }
@@ -3365,7 +3419,12 @@ impl MessageStore {
                     error!("Error broadcasting event: {e}");
                 }
             }
-            MessagingEvents::RemoveRecipient(conversation_id, recipient, list, signature) => {
+            MessagingEvents::RemoveRecipient {
+                conversation_id,
+                recipient,
+                list,
+                signature,
+            } => {
                 if !document.recipients.contains(&recipient) {
                     return Err(Error::IdentityDoesntExist);
                 }
@@ -3383,7 +3442,11 @@ impl MessageStore {
                     error!("Error broadcasting event: {e}");
                 }
             }
-            MessagingEvents::UpdateConversationName(conversation_id, name, signature) => {
+            MessagingEvents::UpdateConversationName {
+                conversation_id,
+                name,
+                signature,
+            } => {
                 let name_length = name.trim().len();
 
                 if name_length == 0 || name_length > 255 {
