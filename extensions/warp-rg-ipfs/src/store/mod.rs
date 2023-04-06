@@ -53,6 +53,7 @@ pub enum ConversationRequestKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
 pub enum ConversationResponseKind {
     Key { key: Vec<u8> },
 }
