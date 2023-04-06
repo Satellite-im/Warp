@@ -475,11 +475,6 @@ async fn main() -> anyhow::Result<()> {
                                 did_keys.push(did);
                             }
 
-                            if did_keys.is_empty() || did_keys.len() < 2 {
-                                writeln!(stdout, "Group chat requires 2 did keys")?;
-                                continue
-                            }
-
                             if opt.disable_sender_emitter {
                                 let id = match chat.create_group_conversation(Some(name.to_string()), did_keys).await {
                                     Ok(id) => id,
