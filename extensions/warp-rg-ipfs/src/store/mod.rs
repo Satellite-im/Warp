@@ -27,10 +27,21 @@ use warp::{
 #[allow(clippy::large_enum_variant)]
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase", tag = "type")]
 pub enum ConversationEvents {
-    NewConversation(DID),
-    NewGroupConversation(DID, Option<String>, Uuid, Vec<DID>, Option<String>),
-    DeleteConversation(Uuid),
+    NewConversation {
+        recipient: DID,
+    },
+    NewGroupConversation {
+        creator: DID,
+        name: Option<String>,
+        conversation_id: Uuid,
+        list: Vec<DID>,
+        signature: Option<String>,
+    },
+    DeleteConversation {
+        conversation_id: Uuid,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

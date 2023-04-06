@@ -826,22 +826,23 @@ impl MessageStore {
         event: ConversationEvents,
     ) -> anyhow::Result<()> {
         match event {
-            ConversationEvents::NewConversation(peer) => {
+            ConversationEvents::NewConversation { recipient } => {
                 let did = &*self.did;
-                info!("New conversation event received from {peer}");
-                let id = super::generate_shared_topic(did, &peer, Some("direct-conversation"))?;
+                info!("New conversation event received from {recipient}");
+                let id =
+                    super::generate_shared_topic(did, &recipient, Some("direct-conversation"))?;
 
                 if self.exist(id).await {
                     warn!("Conversation with {id} exist");
                     return Ok(());
                 }
 
-                if let Ok(true) = self.account.is_blocked(&peer).await {
-                    warn!("{peer} is blocked");
+                if let Ok(true) = self.account.is_blocked(&recipient).await {
+                    warn!("{recipient} is blocked");
                     return Ok(());
                 }
 
-                let list = [did.clone(), peer];
+                let list = [did.clone(), recipient];
                 info!("Creating conversation");
                 let convo = ConversationDocument::new_direct(did, list)?;
                 info!(
@@ -879,13 +880,13 @@ impl MessageStore {
                     error!("Error broadcasting event: {e}");
                 }
             }
-            ConversationEvents::NewGroupConversation(
+            ConversationEvents::NewGroupConversation {
                 creator,
                 name,
                 conversation_id,
-                initial_recipients,
+                list,
                 signature,
-            ) => {
+            } => {
                 let did = &*self.did;
                 info!("New group conversation event received");
 
@@ -897,7 +898,7 @@ impl MessageStore {
                 // used to kind of bootstrap the connections internally in case the recipients arent connected
                 tokio::spawn({
                     let account = self.account.clone();
-                    let recipients = initial_recipients.clone();
+                    let recipients = list.clone();
                     async move {
                         if let Ok(_list) =
                             account.get_identity(Identifier::DIDList(recipients)).await
@@ -910,7 +911,7 @@ impl MessageStore {
                 let convo = ConversationDocument::new(
                     did,
                     name,
-                    initial_recipients.clone(),
+                    list.clone(),
                     Some(conversation_id),
                     ConversationType::Group,
                     Some(creator),
@@ -960,7 +961,7 @@ impl MessageStore {
 
                 tokio::spawn({
                     let store = self.clone();
-                    let recipients = initial_recipients
+                    let recipients = list
                         .iter()
                         .filter(|d| did.ne(d))
                         .cloned()
@@ -972,7 +973,7 @@ impl MessageStore {
                     }
                 });
             }
-            ConversationEvents::DeleteConversation(conversation_id) => {
+            ConversationEvents::DeleteConversation { conversation_id } => {
                 trace!("Delete conversation event received for {conversation_id}");
                 if !self.exist(conversation_id).await {
                     anyhow::bail!("Conversation {conversation_id} doesnt exist");
@@ -1188,7 +1189,9 @@ impl MessageStore {
 
         let peer_id = did_to_libp2p_pub(did_key)?.to_peer_id();
 
-        let event = ConversationEvents::NewConversation(own_did.clone());
+        let event = ConversationEvents::NewConversation {
+            recipient: own_did.clone(),
+        };
 
         let bytes = ecdh_encrypt(own_did, Some(did_key.clone()), serde_json::to_vec(&event)?)?;
         let signature = sign_serde(own_did, &bytes)?;
@@ -1325,13 +1328,13 @@ impl MessageStore {
                 error!("Unable to save info to file: {e}");
             }
         }
-        let event = serde_json::to_vec(&ConversationEvents::NewGroupConversation(
-            own_did.clone(),
-            conversation.name(),
-            conversation.id(),
-            recipient.clone(),
-            conversation.signature.clone(),
-        ))?;
+        let event = serde_json::to_vec(&ConversationEvents::NewGroupConversation {
+            creator: own_did.clone(),
+            name: conversation.name(),
+            conversation_id: conversation.id(),
+            list: recipient.clone(),
+            signature: conversation.signature.clone(),
+        })?;
 
         for (did, peer_id) in peer_id_list {
             let bytes = ecdh_encrypt(own_did, Some(did.clone()), &event)?;
@@ -1433,7 +1436,7 @@ impl MessageStore {
                 .collect::<Vec<_>>();
 
             let event =
-                serde_json::to_vec(&ConversationEvents::DeleteConversation(document_type.id()))?;
+                serde_json::to_vec(&ConversationEvents::DeleteConversation { conversation_id: document_type.id() })?;
 
             for (recipient, peer_id) in peer_id_list {
                 let bytes = ecdh_encrypt(own_did, Some(recipient.clone()), &event)?;
@@ -2049,13 +2052,13 @@ impl MessageStore {
             .await?;
 
         let own_did = &*self.did;
-        let new_event = ConversationEvents::NewGroupConversation(
-            own_did.clone(),
-            conversation.name(),
-            conversation.id(),
-            conversation.recipients(),
-            Some(signature),
-        );
+        let new_event = ConversationEvents::NewGroupConversation {
+            creator: own_did.clone(),
+            name: conversation.name(),
+            conversation_id: conversation.id(),
+            list: conversation.recipients(),
+            signature: Some(signature),
+        };
 
         self.send_single_conversation_event(did_key, conversation_id, new_event)
             .await?;
@@ -2123,7 +2126,7 @@ impl MessageStore {
         self.send_raw_event(conversation_id, None, event, true)
             .await?;
 
-        let new_event = ConversationEvents::DeleteConversation(conversation.id());
+        let new_event = ConversationEvents::DeleteConversation { conversation_id: conversation.id() };
 
         self.send_single_conversation_event(did_key, conversation.id(), new_event)
             .await
@@ -2985,9 +2988,7 @@ impl MessageStore {
         };
 
         match events.clone() {
-            MessagingEvents::New {
-                mut message,
-            } => {
+            MessagingEvents::New { mut message } => {
                 if document
                     .messages
                     .iter()
