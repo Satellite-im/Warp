@@ -183,6 +183,8 @@ pub enum Error {
     DecryptionStreamError,
     #[error("Public key is invalid")]
     PublicKeyInvalid,
+    #[error("Public key doesnt exist")]
+    PublicKeyDoesntExist,
     #[error("Private key is invalid")]
     PrivateKeyInvalid,
     #[error("Public key length is invalid")]
