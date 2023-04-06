@@ -37,7 +37,8 @@ pub struct ConversationDocument {
     pub creator: Option<DID>,
     pub conversation_type: ConversationType,
     pub recipients: Vec<DID>,
-    pub messages: BTreeSet<MessageDocument>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub messages: Option<Cid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
 }
@@ -152,7 +153,7 @@ impl ConversationDocument {
             return Err(Error::CannotCreateConversation);
         }
 
-        let messages = BTreeSet::new();
+        let messages = None;
 
         let mut document = Self {
             id,
@@ -276,6 +277,38 @@ impl ConversationDocument {
         Ok(())
     }
 
+    pub async fn get_message_list(&self, ipfs: &Ipfs) -> Result<BTreeSet<MessageDocument>, Error> {
+        match self.messages {
+            Some(cid) => cid.get_local_dag(ipfs).await,
+            None => Ok(BTreeSet::new()),
+        }
+    }
+
+    pub async fn set_message_list(
+        &mut self,
+        ipfs: &Ipfs,
+        list: &BTreeSet<MessageDocument>,
+    ) -> Result<(), Error> {
+        let old_cid = self.messages;
+        let cid = list.to_cid(ipfs).await?;
+        if !ipfs.is_pinned(&cid).await? {
+            ipfs.insert_pin(&cid, false).await?;
+        }
+
+        if let Some(old_cid) = old_cid {
+            if old_cid != cid {
+                if ipfs.is_pinned(&old_cid).await? {
+                    ipfs.remove_pin(&old_cid, false).await?;
+                }
+                ipfs.remove_block(old_cid).await?;
+            }
+        }
+
+        self.messages = Some(cid);
+
+        Ok(())
+    }
+
     //TODO: Maybe utilize get_messages_stream for returning the set??
     pub async fn get_messages(
         &self,
@@ -284,14 +317,19 @@ impl ConversationDocument {
         option: MessageOptions,
         keystore: Option<&Keystore>,
     ) -> Result<BTreeSet<Message>, Error> {
+        let message_list: BTreeSet<MessageDocument> = match self.messages {
+            Some(cid) => cid.get_local_dag(ipfs).await?,
+            None => return Ok(BTreeSet::new()),
+        };
+
         let mut messages = match option.date_range() {
             Some(range) => Vec::from_iter(
-                self.messages
+                message_list
                     .iter()
                     .filter(|message| message.date >= range.start && message.date <= range.end)
                     .copied(),
             ),
-            None => Vec::from_iter(self.messages.iter().copied()),
+            None => Vec::from_iter(message_list.iter().copied()),
         };
 
         if option.reverse() {
@@ -365,8 +403,12 @@ impl ConversationDocument {
         option: MessageOptions,
         keystore: Option<&Keystore>,
     ) -> Result<BoxStream<'a, Message>, Error> {
+        let message_list: BTreeSet<MessageDocument> = match self.messages {
+            Some(cid) => cid.get_local_dag(ipfs).await?,
+            None => return Ok(stream::empty().boxed()),
+        };
         let keystore = keystore.cloned();
-        let mut messages = Vec::from_iter(self.messages.iter().copied());
+        let mut messages = Vec::from_iter(message_list);
 
         if option.reverse() {
             messages.reverse()
@@ -434,7 +476,16 @@ impl ConversationDocument {
         option: MessageOptions,
         keystore: Option<&Keystore>,
     ) -> Result<Messages, Error> {
-        let mut messages = Vec::from_iter(self.messages.iter().copied());
+        let message_list: BTreeSet<MessageDocument> = match self.messages {
+            Some(cid) => cid.get_local_dag(ipfs).await?,
+            None => {
+                return Ok(Messages::Page {
+                    pages: vec![],
+                    total: 0,
+                })
+            }
+        };
+        let mut messages = Vec::from_iter(message_list);
 
         if option.reverse() {
             messages.reverse()
@@ -498,7 +549,11 @@ impl ConversationDocument {
         message_id: Uuid,
         keystore: Option<&Keystore>,
     ) -> Result<Message, Error> {
-        self.messages
+        let messages: BTreeSet<MessageDocument> = match self.messages {
+            Some(cid) => cid.get_local_dag(ipfs).await?,
+            None => return Err(Error::MessageNotFound),
+        };
+        messages
             .iter()
             .find(|document| document.id == message_id)
             .ok_or(Error::MessageNotFound)?
@@ -507,18 +562,26 @@ impl ConversationDocument {
     }
 
     pub async fn delete_message(&mut self, ipfs: Ipfs, message_id: Uuid) -> Result<(), Error> {
-        let document = self
-            .messages
+        let mut messages: BTreeSet<MessageDocument> = match self.messages {
+            Some(cid) => cid.get_local_dag(&ipfs).await?,
+            None => return Ok(()),
+        };
+        let document = messages
             .iter()
             .find(|document| document.id == message_id)
             .copied()
             .ok_or(Error::MessageNotFound)?;
-        self.messages.remove(&document);
+        messages.remove(&document);
+        self.set_message_list(&ipfs, &messages).await?;
         document.remove(ipfs).await
     }
 
     pub async fn delete_all_message(&mut self, ipfs: Ipfs) -> Result<(), Error> {
-        let messages = std::mem::take(&mut self.messages);
+        let cid = std::mem::take(&mut self.messages);
+        let (cid, messages): (Cid, BTreeSet<MessageDocument>) = match cid {
+            Some(cid) => (cid, cid.get_local_dag(&ipfs).await?),
+            None => return Ok(()),
+        };
 
         let mut ids = vec![];
 
@@ -528,6 +591,8 @@ impl ConversationDocument {
             }
             ids.push(document.message);
         }
+
+        ipfs.remove_block(cid).await?;
 
         //TODO: Replace with gc within ipfs (when completed) in the future
         //      so we dont need to manually delete the blocks

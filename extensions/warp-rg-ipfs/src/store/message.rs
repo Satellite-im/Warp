@@ -1,5 +1,5 @@
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -261,8 +261,6 @@ impl MessageStore {
         let Ok(mut conversation) = self.get_conversation(conversation_id).await else {
             return
         };
-
-        conversation.messages.clear();
         conversation.recipients.clear();
 
         let Ok(tx) = self.get_conversation_sender(conversation_id).await else {
@@ -352,11 +350,9 @@ impl MessageStore {
     async fn start_reqres_task(&self, conversation_id: Uuid) {
         info!("RequestResponse Task started for {conversation_id}");
         let did = self.did.clone();
-        let Ok(mut conversation) = self.get_conversation(conversation_id).await else {
+        let Ok(conversation) = self.get_conversation(conversation_id).await else {
             return
         };
-
-        conversation.messages.clear();
 
         let Ok(stream) = self.ipfs.pubsub_subscribe(conversation.reqres_topic(&did)).await else {
             return
@@ -381,11 +377,9 @@ impl MessageStore {
                                         kind,
                                     } => match kind {
                                         ConversationRequestKind::Key => {
-                                            let Ok(mut conversation) = store.get_conversation(conversation_id).await else {
+                                            let Ok(conversation) = store.get_conversation(conversation_id).await else {
                                                     continue
                                                 };
-
-                                            conversation.messages.clear();
 
                                             if !conversation
                                                 .recipients()
@@ -515,11 +509,9 @@ impl MessageStore {
                                     } => match kind {
                                         ConversationResponseKind::Key { key } => {
                                             let sender = payload.sender();
-                                            let Ok(mut conversation) = store.get_conversation(conversation_id).await else {
+                                            let Ok(conversation) = store.get_conversation(conversation_id).await else {
                                                     continue
                                                 };
-
-                                            conversation.messages.clear();
 
                                             if !conversation.recipients().contains(&sender) {
                                                 continue;
@@ -599,7 +591,6 @@ impl MessageStore {
             return Err(Error::PublicKeyInvalid);
         }
 
-        conversation.messages.clear();
         conversation.recipients.clear();
 
         let own_did = &self.did;
@@ -696,10 +687,9 @@ impl MessageStore {
 
                             let own_did = &*did;
 
-                            let Ok(mut conversation) = store.get_conversation(conversation_id).await else {
+                            let Ok(conversation) = store.get_conversation(conversation_id).await else {
                                     continue;
                             };
-                            conversation.messages.clear();
 
                             let bytes_results = match conversation.conversation_type {
                                 ConversationType::Direct => {
@@ -1435,8 +1425,9 @@ impl MessageStore {
                 .map(|(did, pk)| (did, pk.to_peer_id()))
                 .collect::<Vec<_>>();
 
-            let event =
-                serde_json::to_vec(&ConversationEvents::DeleteConversation { conversation_id: document_type.id() })?;
+            let event = serde_json::to_vec(&ConversationEvents::DeleteConversation {
+                conversation_id: document_type.id(),
+            })?;
 
             for (recipient, peer_id) in peer_id_list {
                 let bytes = ecdh_encrypt(own_did, Some(recipient.clone()), &event)?;
@@ -1614,8 +1605,13 @@ impl MessageStore {
     }
 
     pub async fn messages_count(&self, conversation_id: Uuid) -> Result<usize, Error> {
-        let conversation = self.get_conversation(conversation_id).await?;
-        Ok(conversation.messages.len())
+        let messages = self
+            .get_conversation(conversation_id)
+            .await?
+            .get_message_list(&self.ipfs)
+            .await?;
+
+        Ok(messages.len())
     }
 
     pub async fn conversation_keystore(&self, conversation_id: Uuid) -> Result<Keystore, Error> {
@@ -1750,11 +1746,9 @@ impl MessageStore {
             return Err(Error::Unimplemented);
         }
 
-        if !conversation
-            .messages
-            .iter()
-            .any(|document| document.id == message_id)
-        {
+        let messages = conversation.get_message_list(&self.ipfs).await?;
+
+        if !messages.iter().any(|document| document.id == message_id) {
             return Err(Error::MessageNotFound);
         }
 
@@ -1839,16 +1833,20 @@ impl MessageStore {
         conversation.verify().map(|_| conversation)
     }
 
-    pub async fn get_conversation_mut<F: FnOnce(&mut ConversationDocument)>(
+    pub async fn get_conversation_mut<
+        F: FnOnce(&mut ConversationDocument, &mut BTreeSet<MessageDocument>),
+    >(
         &self,
         conversation_id: Uuid,
         func: F,
     ) -> Result<(), Error> {
         let document = &mut self.get_conversation(conversation_id).await?;
-
+        let messages = &mut document.get_message_list(&self.ipfs).await?;
         let own_did = &*self.did;
 
-        func(document);
+        func(document, messages);
+
+        document.set_message_list(&self.ipfs, messages).await?;
 
         if let Some(creator) = document.creator.as_ref() {
             if creator.eq(own_did) {
@@ -1962,7 +1960,7 @@ impl MessageStore {
             return Err(Error::PublicKeyInvalid);
         }
 
-        self.get_conversation_mut(conversation_id, |conversation| {
+        self.get_conversation_mut(conversation_id, |conversation, _| {
             conversation.name = Some(name.to_string());
         })
         .await?;
@@ -2023,7 +2021,7 @@ impl MessageStore {
             return Err(Error::IdentityExist);
         }
 
-        self.get_conversation_mut(conversation_id, |conversation| {
+        self.get_conversation_mut(conversation_id, |conversation, _| {
             conversation.recipients.push(did_key.clone());
         })
         .await?;
@@ -2097,7 +2095,7 @@ impl MessageStore {
             return Err(Error::IdentityDoesntExist);
         }
 
-        self.get_conversation_mut(conversation_id, |conversation| {
+        self.get_conversation_mut(conversation_id, |conversation, _| {
             // conversation.recipients.push(did_key.clone());
             conversation.recipients.retain(|did| did.ne(did_key));
         })
@@ -2126,7 +2124,9 @@ impl MessageStore {
         self.send_raw_event(conversation_id, None, event, true)
             .await?;
 
-        let new_event = ConversationEvents::DeleteConversation { conversation_id: conversation.id() };
+        let new_event = ConversationEvents::DeleteConversation {
+            conversation_id: conversation.id(),
+        };
 
         self.send_single_conversation_event(did_key, conversation.id(), new_event)
             .await
@@ -2806,8 +2806,7 @@ impl MessageStore {
         conversation_id: Uuid,
         event: MessagingEvents,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation_id).await?;
-        conversation.messages.clear();
+        let conversation = self.get_conversation(conversation_id).await?;
 
         let own_did = &*self.did;
 
@@ -2861,8 +2860,7 @@ impl MessageStore {
         event: S,
         queue: bool,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation).await?;
-        conversation.messages.clear();
+        let conversation = self.get_conversation(conversation).await?;
 
         let own_did = &*self.did;
 
@@ -2989,13 +2987,15 @@ impl MessageStore {
 
         match events.clone() {
             MessagingEvents::New { mut message } => {
-                if document
-                    .messages
+                let messages = document.get_message_list(&self.ipfs).await?;
+                if messages
                     .iter()
                     .any(|message_document| message_document.id == message.id())
                 {
                     return Err(Error::MessageFound);
                 }
+
+                drop(messages);
 
                 if !document.recipients().contains(&message.sender()) {
                     return Err(Error::IdentityDoesntExist);
@@ -3071,8 +3071,8 @@ impl MessageStore {
                     MessageDocument::new(&self.ipfs, self.did.clone(), message, keystore.as_ref())
                         .await?;
 
-                self.get_conversation_mut(document.id(), |conversation_document| {
-                    conversation_document.messages.insert(message_document);
+                self.get_conversation_mut(document.id(), |_, messages| {
+                    messages.insert(message_document);
                 })
                 .await?;
 
@@ -3099,12 +3099,13 @@ impl MessageStore {
                 signature,
             } => {
                 let mut message_document = document
-                    .messages
+                    .get_message_list(&self.ipfs)
+                    .await?
                     .iter()
                     .find(|document| {
                         document.id == message_id && document.conversation_id == conversation_id
                     })
-                    .cloned()
+                    .copied()
                     .ok_or(Error::MessageNotFound)?;
 
                 let mut message = message_document
@@ -3171,8 +3172,8 @@ impl MessageStore {
                     .update(&self.ipfs, self.did.clone(), message, keystore.as_ref())
                     .await?;
 
-                self.get_conversation_mut(document.id(), |conversation_document| {
-                    conversation_document.messages.replace(message_document);
+                self.get_conversation_mut(document.id(), |_, messages| {
+                    messages.replace(message_document);
                 })
                 .await?;
 
@@ -3188,7 +3189,8 @@ impl MessageStore {
                 message_id,
             } => {
                 let message_document = document
-                    .messages
+                    .get_message_list(&self.ipfs)
+                    .await?
                     .iter()
                     .cloned()
                     .find(|document| {
@@ -3219,8 +3221,8 @@ impl MessageStore {
 
                 message_document.remove(self.ipfs.clone()).await?;
 
-                self.get_conversation_mut(document.id(), |conversation_document| {
-                    conversation_document.messages.remove(&message_document);
+                self.get_conversation_mut(document.id(), |_, messages| {
+                    messages.remove(&message_document);
 
                     if let Err(e) = tx.send(MessageEventKind::MessageDeleted {
                         conversation_id,
@@ -3238,7 +3240,8 @@ impl MessageStore {
                 ..
             } => {
                 let mut message_document = document
-                    .messages
+                    .get_message_list(&self.ipfs)
+                    .await?
                     .iter()
                     .find(|document| {
                         document.id == message_id && document.conversation_id == conversation_id
@@ -3277,8 +3280,8 @@ impl MessageStore {
                     .update(&self.ipfs, self.did.clone(), message, keystore.as_ref())
                     .await?;
 
-                self.get_conversation_mut(document.id(), |conversation_document| {
-                    conversation_document.messages.replace(message_document);
+                self.get_conversation_mut(document.id(), |_, messages| {
+                    messages.replace(message_document);
                 })
                 .await?;
 
@@ -3294,7 +3297,8 @@ impl MessageStore {
                 emoji,
             } => {
                 let mut message_document = document
-                    .messages
+                    .get_message_list(&self.ipfs)
+                    .await?
                     .iter()
                     .find(|document| {
                         document.id == message_id && document.conversation_id == conversation_id
@@ -3330,8 +3334,8 @@ impl MessageStore {
                             .update(&self.ipfs, self.did.clone(), message, keystore.as_ref())
                             .await?;
 
-                        self.get_conversation_mut(document.id(), |conversation_document| {
-                            conversation_document.messages.replace(message_document);
+                        self.get_conversation_mut(document.id(), |_, messages| {
+                            messages.replace(message_document);
                         })
                         .await?;
 
@@ -3370,8 +3374,8 @@ impl MessageStore {
                             .update(&self.ipfs, self.did.clone(), message, keystore.as_ref())
                             .await?;
 
-                        self.get_conversation_mut(document.id(), |conversation_document| {
-                            conversation_document.messages.replace(message_document);
+                        self.get_conversation_mut(document.id(), |_, messages| {
+                            messages.replace(message_document);
                         })
                         .await?;
 
@@ -3405,7 +3409,7 @@ impl MessageStore {
                     }
                 });
 
-                self.get_conversation_mut(document.id(), |conversation| {
+                self.get_conversation_mut(document.id(), |conversation, _| {
                     conversation.recipients = list;
                     conversation.signature = Some(signature);
                 })
@@ -3430,7 +3434,7 @@ impl MessageStore {
                     return Err(Error::IdentityDoesntExist);
                 }
 
-                self.get_conversation_mut(document.id(), |conversation| {
+                self.get_conversation_mut(document.id(), |conversation, _| {
                     conversation.recipients = list;
                     conversation.signature = Some(signature);
                 })
@@ -3464,7 +3468,7 @@ impl MessageStore {
                     }
                 }
 
-                self.get_conversation_mut(document.id(), |conversation| {
+                self.get_conversation_mut(document.id(), |conversation, _| {
                     conversation.name = Some(name.clone());
                     conversation.signature = Some(signature);
                 })
