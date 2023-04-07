@@ -4,7 +4,7 @@ use futures::{
     stream::{self, BoxStream, FuturesOrdered},
     StreamExt,
 };
-use libipld::Cid;
+use libipld::{Cid, Ipld};
 use rust_ipfs::Ipfs;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeSet;
@@ -23,7 +23,7 @@ use warp::{
 use crate::store::ecdh_encrypt;
 
 use super::{
-    document::{GetLocalDag, ToCid},
+    document::{GetLocalDag, ToCid, GetIpldDag},
     ecdh_decrypt,
     keystore::Keystore,
 };
@@ -284,6 +284,12 @@ impl ConversationDocument {
         }
     }
 
+    pub async fn get_raw_message_list(&self, ipfs: &Ipfs) -> Result<Ipld, Error> {
+        match self.messages {
+            Some(cid) => cid.get_ipld_dag(ipfs).await,
+            None => Ok(Ipld::Null),
+        }
+    }
     pub async fn set_message_list(
         &mut self,
         ipfs: &Ipfs,
