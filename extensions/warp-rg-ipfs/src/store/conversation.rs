@@ -301,7 +301,7 @@ impl ConversationDocument {
     pub async fn set_message_list(
         &mut self,
         ipfs: &Ipfs,
-        list: &BTreeSet<MessageDocument>,
+        list: BTreeSet<MessageDocument>,
     ) -> Result<(), Error> {
         let old_cid = self.messages;
         let cid = list.to_cid(ipfs).await?;
@@ -530,7 +530,7 @@ impl ConversationDocument {
             .copied()
             .ok_or(Error::MessageNotFound)?;
         messages.remove(&document);
-        self.set_message_list(&ipfs, &messages).await?;
+        self.set_message_list(&ipfs, messages).await?;
         document.remove(ipfs).await
     }
 

@@ -1856,10 +1856,10 @@ impl MessageStore {
         func: F,
     ) -> Result<(), Error> {
         let document = &mut self.get_conversation(conversation_id).await?;
-        let messages = &mut document.get_message_list(&self.ipfs).await?;
+        let mut messages = document.get_message_list(&self.ipfs).await?;
         let own_did = &*self.did;
 
-        func(document, messages);
+        func(document, &mut messages);
 
         document.set_message_list(&self.ipfs, messages).await?;
 
