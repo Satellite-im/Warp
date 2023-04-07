@@ -352,7 +352,7 @@ impl ConversationDocument {
             let message = messages
                 .first()
                 .ok_or(Error::MessageNotFound)?
-                .resolve(ipfs, did.clone(), keystore.as_ref())
+                .resolve(ipfs, &did, keystore.as_ref())
                 .await?;
             return Ok(stream::once(async { message }).boxed());
         }
@@ -361,7 +361,7 @@ impl ConversationDocument {
             let message = messages
                 .last()
                 .ok_or(Error::MessageNotFound)?
-                .resolve(ipfs, did.clone(), keystore.as_ref())
+                .resolve(ipfs, &did, keystore.as_ref())
                 .await?;
             return Ok(stream::once(async { message }).boxed());
         }
@@ -381,7 +381,7 @@ impl ConversationDocument {
                     }
                 }
 
-                if let Ok(message) = document.resolve(&ipfs, did.clone(), keystore.as_ref()).await {
+                if let Ok(message) = document.resolve(&ipfs, &did, keystore.as_ref()).await {
                     if option.pinned() && !message.pinned() {
                         continue;
                     }
@@ -406,7 +406,7 @@ impl ConversationDocument {
     pub async fn get_messages_pages(
         &self,
         ipfs: &Ipfs,
-        did: Arc<DID>,
+        did: &DID,
         option: MessageOptions,
         keystore: Option<&Keystore>,
     ) -> Result<Messages, Error> {
@@ -447,7 +447,7 @@ impl ConversationDocument {
             let page = messages_chunk.get(index).ok_or(Error::PageNotFound)?;
             let mut messages = vec![];
             for document in page.iter() {
-                if let Ok(message) = document.resolve(&ipfs, did.clone(), keystore).await {
+                if let Ok(message) = document.resolve(&ipfs, did, keystore).await {
                     messages.push(message);
                 }
             }
@@ -459,7 +459,7 @@ impl ConversationDocument {
         for (index, chunk) in messages_chunk.iter().enumerate() {
             let mut messages = vec![];
             for document in chunk.iter() {
-                if let Ok(message) = document.resolve(&ipfs, did.clone(), keystore).await {
+                if let Ok(message) = document.resolve(&ipfs, did, keystore).await {
                     if option.pinned() && !message.pinned() {
                         continue;
                     }
@@ -495,7 +495,7 @@ impl ConversationDocument {
     pub async fn get_message(
         &self,
         ipfs: &Ipfs,
-        did: Arc<DID>,
+        did: &DID,
         message_id: Uuid,
         keystore: Option<&Keystore>,
     ) -> Result<Message, Error> {
@@ -657,12 +657,12 @@ impl MessageDocument {
     pub async fn update(
         &mut self,
         ipfs: &Ipfs,
-        did: Arc<DID>,
+        did: &DID,
         message: Message,
         keystore: Option<&Keystore>,
     ) -> Result<(), Error> {
         info!("Updating message {} for {}", self.id, self.conversation_id);
-        let old_message = self.resolve(ipfs, did.clone(), keystore).await?;
+        let old_message = self.resolve(ipfs, did, keystore).await?;
         let old_document = self.message;
 
         if old_message.id() != message.id()
@@ -677,10 +677,10 @@ impl MessageDocument {
 
         let data = match keystore {
             Some(keystore) => {
-                let key = keystore.get_latest(&did, &message.sender())?;
+                let key = keystore.get_latest(did, &message.sender())?;
                 Cipher::direct_encrypt(&bytes, &key)?
             }
-            None => ecdh_encrypt(&did, Some(self.sender.to_did()), &bytes)?,
+            None => ecdh_encrypt(did, Some(self.sender.to_did()), &bytes)?,
         };
 
         let message_cid = data.to_cid(ipfs).await?;
@@ -701,15 +701,15 @@ impl MessageDocument {
     pub async fn resolve(
         &self,
         ipfs: &Ipfs,
-        did: Arc<DID>,
+        did: &DID,
         keystore: Option<&Keystore>,
     ) -> Result<Message, Error> {
         let bytes: Vec<u8> = self.message.get_local_dag(ipfs).await?;
 
         let sender = self.sender.to_did();
         let data = match keystore {
-            Some(keystore) => keystore.try_decrypt(&did, &sender, &bytes)?,
-            None => ecdh_decrypt(&did, Some(sender), &bytes)?,
+            Some(keystore) => keystore.try_decrypt(did, &sender, &bytes)?,
+            None => ecdh_decrypt(did, Some(sender), &bytes)?,
         };
 
         let message: Message = serde_json::from_slice(&data)?;
