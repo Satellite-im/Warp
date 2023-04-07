@@ -3002,15 +3002,13 @@ impl MessageStore {
 
         match events.clone() {
             MessagingEvents::New { mut message } => {
-                let messages = document.get_message_list(&self.ipfs).await?;
+                let mut messages = document.get_message_list(&self.ipfs).await?;
                 if messages
                     .iter()
                     .any(|message_document| message_document.id == message.id())
                 {
                     return Err(Error::MessageFound);
                 }
-
-                drop(messages);
 
                 if !document.recipients().contains(&message.sender()) {
                     return Err(Error::IdentityDoesntExist);
@@ -3086,10 +3084,9 @@ impl MessageStore {
                     MessageDocument::new(&self.ipfs, self.did.clone(), message, keystore.as_ref())
                         .await?;
 
-                self.get_conversation_mut(document.id(), |_, messages| {
-                    messages.insert(message_document);
-                })
-                .await?;
+                messages.insert(message_document);
+                document.set_message_list(&self.ipfs, messages).await?;
+                self.set_conversation(conversation_id, document).await?;
 
                 let event = match direction {
                     MessageDirection::In => MessageEventKind::MessageReceived {
