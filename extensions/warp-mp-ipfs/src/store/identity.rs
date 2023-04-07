@@ -1101,11 +1101,17 @@ impl IdentityStore {
     }
 
     pub async fn get_local_dag<D: DeserializeOwned>(&self, path: IpfsPath) -> Result<D, Error> {
-        let dag = match self.ipfs.dag().get(path, &[], true).await {
-            Ok(ipld) => from_ipld::<D>(ipld).map_err(anyhow::Error::from)?,
-            Err(e) => return Err(Error::Any(e.into())),
-        };
-        Ok(dag)
+        self.ipfs
+            .dag()
+            .get(path, &[], true)
+            .await
+            .map_err(anyhow::Error::from)
+            .map_err(Error::from)
+            .and_then(|ipld| {
+                from_ipld::<D>(ipld)
+                    .map_err(anyhow::Error::from)
+                    .map_err(Error::from)
+            })
     }
 
     pub async fn get_dag<D: DeserializeOwned>(
