@@ -1101,13 +1101,11 @@ impl IdentityStore {
     }
 
     pub async fn get_local_dag<D: DeserializeOwned>(&self, path: IpfsPath) -> Result<D, Error> {
-        //Because it utilizes DHT requesting other nodes for the cid, it will stall so here we would need to timeout
-        //the request.
-        let identity = match self.ipfs.dag().get(path, &[], true).await {
+        let dag = match self.ipfs.dag().get(path, &[], true).await {
             Ok(ipld) => from_ipld::<D>(ipld).map_err(anyhow::Error::from)?,
             Err(e) => return Err(Error::Any(e.into())),
         };
-        Ok(identity)
+        Ok(dag)
     }
 
     pub async fn get_dag<D: DeserializeOwned>(
