@@ -309,7 +309,6 @@ impl ConversationDocument {
         Ok(())
     }
 
-    //TODO: Maybe utilize get_messages_stream for returning the set??
     pub async fn get_messages(
         &self,
         ipfs: &Ipfs,
@@ -469,6 +468,22 @@ impl ConversationDocument {
         let total = pages.len();
 
         Ok(Messages::Page { pages, total })
+    }
+
+    pub async fn get_message_document(
+        &self,
+        ipfs: &Ipfs,
+        message_id: Uuid,
+    ) -> Result<MessageDocument, Error> {
+        let messages: BTreeSet<MessageDocument> = match self.messages {
+            Some(cid) => cid.get_local_dag(ipfs).await?,
+            None => return Err(Error::MessageNotFound),
+        };
+        messages
+            .iter()
+            .find(|document| document.id == message_id)
+            .copied()
+            .ok_or(Error::MessageNotFound)
     }
 
     pub async fn get_message(
