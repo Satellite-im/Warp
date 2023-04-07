@@ -1579,13 +1579,10 @@ impl MessageStore {
     }
 
     pub async fn messages_count(&self, conversation_id: Uuid) -> Result<usize, Error> {
-        let messages = self
-            .get_conversation(conversation_id)
+        self.get_conversation(conversation_id)
             .await?
-            .get_message_list(&self.ipfs)
-            .await?;
-
-        Ok(messages.len())
+            .messages_length(&self.ipfs)
+            .await
     }
 
     pub async fn conversation_keystore(&self, conversation_id: Uuid) -> Result<Keystore, Error> {

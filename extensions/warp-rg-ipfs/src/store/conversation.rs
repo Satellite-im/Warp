@@ -277,6 +277,14 @@ impl ConversationDocument {
         Ok(())
     }
 
+    pub async fn messages_length(&self, ipfs: &Ipfs) -> Result<usize, Error> {
+        let document = self.get_raw_message_list(ipfs).await?;
+        if let Ipld::List(list) = document {
+            return Ok(list.len())
+        }
+        Err(Error::InvalidDataType)
+    }
+
     pub async fn get_message_list(&self, ipfs: &Ipfs) -> Result<BTreeSet<MessageDocument>, Error> {
         match self.messages {
             Some(cid) => cid.get_local_dag(ipfs).await,
