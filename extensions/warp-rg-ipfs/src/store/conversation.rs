@@ -321,11 +321,11 @@ impl ConversationDocument {
         did: Arc<DID>,
         option: MessageOptions,
         keystore: Option<&Keystore>,
-    ) -> Result<BTreeSet<Message>, Error> {
+    ) -> Result<Vec<Message>, Error> {
         let list = self
             .get_messages_stream(ipfs, did, option, keystore)
             .await?
-            .collect::<BTreeSet<_>>()
+            .collect::<Vec<_>>()
             .await;
         Ok(list)
     }

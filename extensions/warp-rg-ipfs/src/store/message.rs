@@ -1776,8 +1776,7 @@ impl MessageStore {
             MessagesType::List => {
                 let list = conversation
                     .get_messages(&self.ipfs, self.did.clone(), opt, keystore.as_ref())
-                    .await
-                    .map(Vec::from_iter)?;
+                    .await?;
                 Ok(Messages::List(list))
             }
             MessagesType::Pages { .. } => {
