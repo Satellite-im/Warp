@@ -287,7 +287,7 @@ impl ConversationDocument {
     pub async fn get_raw_message_list(&self, ipfs: &Ipfs) -> Result<Ipld, Error> {
         match self.messages {
             Some(cid) => cid.get_ipld_dag(ipfs).await,
-            None => Ok(Ipld::Null),
+            None => Ok(Ipld::List(vec![])),
         }
     }
     pub async fn set_message_list(
