@@ -7,7 +7,7 @@ repository = "https://github.com/Satellite-im/Warp"
 
 
 [workspace]
-members = ["extensions/*", "warp", "warp/warp-derive"]
+members = ["extensions/*", "warp", "warp/warp-derive", "tools/*"]
 exclude = ["deprecated/*"]
 
 [workspace.dependencies]
@@ -72,4 +72,4 @@ getrandom = { version = "0.2" }
 either = "1"
 
 #ipfs dependency
-rust-ipfs = "=0.3.12"
+rust-ipfs = "=0.3.14"

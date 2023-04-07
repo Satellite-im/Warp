@@ -1,7 +1,6 @@
 #![allow(clippy::await_holding_lock)]
 use futures::channel::oneshot;
 use futures::StreamExt;
-use ipfs::libp2p::gossipsub::Message as GossipsubMessage;
 use ipfs::{Ipfs, PeerId};
 use libipld::IpldCodec;
 use rust_ipfs as ipfs;
@@ -244,7 +243,11 @@ impl FriendsStore {
                 futures::pin_mut!(stream);
 
                 while let Some(message) = stream.next().await {
-                    if let Err(e) = store.check_request_message(message).await {
+                    let Ok(data) = serde_json::from_slice::<Sata>(&message.data) else {
+                        continue;
+                    };
+
+                    if let Err(e) = store.check_request_message(data).await {
                         error!("Error: {e}");
                     }
                 }
@@ -255,238 +258,232 @@ impl FriendsStore {
     }
 
     //TODO: Implement Errors
-    async fn check_request_message(&mut self, message: GossipsubMessage) -> anyhow::Result<()> {
-        if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
-            let data = data.decrypt::<PayloadEvent>(&self.did_key)?;
+    async fn check_request_message(&mut self, data: Sata) -> anyhow::Result<()> {
+        let data = data.decrypt::<PayloadEvent>(&self.did_key)?;
 
-            if self
-                .list_incoming_request()
-                .await
-                .unwrap_or_default()
-                .contains(&data.sender)
-                && data.event == Event::Request
-            {
-                warn!("Request exist locally. Skipping");
-                return Ok(());
+        if self
+            .list_incoming_request()
+            .await
+            .unwrap_or_default()
+            .contains(&data.sender)
+            && data.event == Event::Request
+        {
+            warn!("Request exist locally. Skipping");
+            return Ok(());
+        }
+
+        let mut signal = self.signal.write().await.remove(&data.sender);
+
+        // Before we validate the request, we should check to see if the key is blocked
+        // If it is, skip the request so we dont wait resources storing it.
+        if self.is_blocked(&data.sender).await? && !matches!(data.event, Event::Block) {
+            let payload = PayloadEvent {
+                sender: (*self.did_key).clone(),
+                event: Event::Block,
+            };
+
+            self.broadcast_request((&data.sender, &payload), false, true)
+                .await?;
+
+            return Ok(());
+        }
+
+        match data.event {
+            Event::Accept => {
+                let mut list = self.list_all_raw_request().await?;
+
+                let Some(item) = list.iter().filter(|req| req.r#type() == RequestType::Outgoing).find(|req| data.sender.eq(req.did())).cloned() else {
+                        anyhow::bail!(
+                            "Unable to locate pending request. Already been accepted or rejected?"
+                        )
+                    };
+
+                if !list.remove_item(&item) {
+                    anyhow::bail!(
+                        "Unable to locate pending request. Already been accepted or rejected?"
+                    )
+                }
+                self.set_request_list(list).await?;
+
+                self.add_friend(item.did()).await?;
             }
+            Event::Request => {
+                if self.is_friend(&data.sender).await? {
+                    error!("Friend already exist");
+                    anyhow::bail!(Error::FriendExist);
+                }
 
-            let mut signal = self.signal.write().await.remove(&data.sender);
+                let mut list = self.list_all_raw_request().await?;
 
-            // Before we validate the request, we should check to see if the key is blocked
-            // If it is, skip the request so we dont wait resources storing it.
-            if self.is_blocked(&data.sender).await? && !matches!(data.event, Event::Block) {
+                if let Some(inner_req) = list
+                    .iter()
+                    .find(|request| {
+                        request.r#type() == RequestType::Outgoing && data.sender.eq(request.did())
+                    })
+                    .cloned()
+                {
+                    //Because there is also a corresponding outgoing request for the incoming request
+                    //we can automatically add them
+                    list.remove_item(&inner_req);
+                    self.set_request_list(list).await?;
+                    self.add_friend(inner_req.did()).await?;
+                } else {
+                    //TODO: Perform check to see if request already exist
+                    list.insert_item(&Request::In(data.sender.clone()));
+
+                    self.set_request_list(list).await?;
+
+                    tokio::spawn({
+                        let tx = self.tx.clone();
+                        let store = self.identity.clone();
+                        let from = data.sender.clone();
+                        async move {
+                            let _ = tokio::time::timeout(Duration::from_secs(10), async {
+                                loop {
+                                    if let Ok(list) =
+                                        store.lookup(LookupBy::DidKey(from.clone())).await
+                                    {
+                                        if !list.is_empty() {
+                                            break;
+                                        }
+                                    }
+                                    tokio::time::sleep(Duration::from_secs(1)).await;
+                                }
+                            })
+                            .await
+                            .ok();
+
+                            if let Err(e) =
+                                tx.send(MultiPassEventKind::FriendRequestReceived { from })
+                            {
+                                error!("Error broadcasting event: {e}");
+                            }
+                        }
+                    });
+                }
                 let payload = PayloadEvent {
                     sender: (*self.did_key).clone(),
-                    event: Event::Block,
+                    event: Event::Response,
                 };
 
-                self.broadcast_request((&data.sender, &payload), false, true)
+                self.broadcast_request((&data.sender, &payload), false, false)
                     .await?;
-
-                return Ok(());
             }
+            Event::Reject => {
+                let mut list = self.list_all_raw_request().await?;
+                let internal_request = list
+                    .iter()
+                    .find(|request| {
+                        request.r#type() == RequestType::Outgoing && data.sender.eq(request.did())
+                    })
+                    .cloned()
+                    .ok_or(Error::FriendRequestDoesntExist)?;
 
-            match data.event {
-                Event::Accept => {
-                    let mut list = self.list_all_raw_request().await?;
+                list.remove_item(&internal_request);
+                self.set_request_list(list).await?;
 
-                    let Some(item) = list.iter().filter(|req| req.r#type() == RequestType::Outgoing).find(|req| data.sender.eq(req.did())).cloned() else {
-                        anyhow::bail!(
-                            "Unable to locate pending request. Already been accepted or rejected?"
-                        )
-                    };
-
-                    if !list.remove_item(&item) {
-                        anyhow::bail!(
-                            "Unable to locate pending request. Already been accepted or rejected?"
-                        )
-                    }
-                    self.set_request_list(list).await?;
-
-                    self.add_friend(item.did()).await?;
+                if let Err(e) = self
+                    .tx
+                    .send(MultiPassEventKind::OutgoingFriendRequestRejected { did: data.sender })
+                {
+                    error!("Error broadcasting event: {e}");
                 }
-                Event::Request => {
-                    if self.is_friend(&data.sender).await? {
-                        error!("Friend already exist");
-                        anyhow::bail!(Error::FriendExist);
-                    }
+            }
+            Event::Remove => {
+                if self.is_friend(&data.sender).await? {
+                    self.remove_friend(&data.sender, false).await?;
+                }
+            }
+            Event::Retract => {
+                let mut list = self.list_all_raw_request().await?;
+                let internal_request = list
+                    .iter()
+                    .find(|request| {
+                        request.r#type() == RequestType::Incoming && data.sender.eq(request.did())
+                    })
+                    .cloned()
+                    .ok_or(Error::FriendRequestDoesntExist)?;
 
-                    let mut list = self.list_all_raw_request().await?;
+                list.remove_item(&internal_request);
 
-                    if let Some(inner_req) = list
-                        .iter()
-                        .find(|request| {
-                            request.r#type() == RequestType::Outgoing
-                                && data.sender.eq(request.did())
+                self.set_request_list(list).await?;
+
+                if let Err(e) = self
+                    .tx
+                    .send(MultiPassEventKind::IncomingFriendRequestClosed { did: data.sender })
+                {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            Event::Block => {
+                if self.has_request_from(&data.sender).await? {
+                    if let Err(e) = self
+                        .tx
+                        .send(MultiPassEventKind::IncomingFriendRequestClosed {
+                            did: data.sender.clone(),
                         })
-                        .cloned()
                     {
-                        //Because there is also a corresponding outgoing request for the incoming request
-                        //we can automatically add them
-                        list.remove_item(&inner_req);
-                        self.set_request_list(list).await?;
-                        self.add_friend(inner_req.did()).await?;
-                    } else {
-                        //TODO: Perform check to see if request already exist
-                        list.insert_item(&Request::In(data.sender.clone()));
-
-                        self.set_request_list(list).await?;
-
-                        tokio::spawn({
-                            let tx = self.tx.clone();
-                            let store = self.identity.clone();
-                            let from = data.sender.clone();
-                            async move {
-                                let _ = tokio::time::timeout(Duration::from_secs(10), async {
-                                    loop {
-                                        if let Ok(list) =
-                                            store.lookup(LookupBy::DidKey(from.clone())).await
-                                        {
-                                            if !list.is_empty() {
-                                                break;
-                                            }
-                                        }
-                                        tokio::time::sleep(Duration::from_secs(1)).await;
-                                    }
-                                })
-                                .await
-                                .ok();
-
-                                if let Err(e) =
-                                    tx.send(MultiPassEventKind::FriendRequestReceived { from })
-                                {
-                                    error!("Error broadcasting event: {e}");
-                                }
-                            }
-                        });
+                        error!("Error broadcasting event: {e}");
                     }
-                    let payload = PayloadEvent {
-                        sender: (*self.did_key).clone(),
-                        event: Event::Response,
-                    };
-
-                    self.broadcast_request((&data.sender, &payload), false, false)
-                        .await?;
-                }
-                Event::Reject => {
-                    let mut list = self.list_all_raw_request().await?;
-                    let internal_request = list
-                        .iter()
-                        .find(|request| {
-                            request.r#type() == RequestType::Outgoing
-                                && data.sender.eq(request.did())
-                        })
-                        .cloned()
-                        .ok_or(Error::FriendRequestDoesntExist)?;
-
-                    list.remove_item(&internal_request);
-                    self.set_request_list(list).await?;
-
+                } else if self.sent_friend_request_to(&data.sender).await? {
                     if let Err(e) =
                         self.tx
                             .send(MultiPassEventKind::OutgoingFriendRequestRejected {
-                                did: data.sender,
+                                did: data.sender.clone(),
                             })
                     {
                         error!("Error broadcasting event: {e}");
                     }
                 }
-                Event::Remove => {
-                    if self.is_friend(&data.sender).await? {
-                        self.remove_friend(&data.sender, false).await?;
-                    }
+
+                let mut list = self.list_all_raw_request().await?;
+                list.retain(|r| data.sender.ne(r.did()));
+                self.set_request_list(list).await?;
+
+                if self.is_friend(&data.sender).await? {
+                    self.remove_friend(&data.sender, false).await?;
                 }
-                Event::Retract => {
-                    let mut list = self.list_all_raw_request().await?;
-                    let internal_request = list
-                        .iter()
-                        .find(|request| {
-                            request.r#type() == RequestType::Incoming
-                                && data.sender.eq(request.did())
-                        })
-                        .cloned()
-                        .ok_or(Error::FriendRequestDoesntExist)?;
 
-                    list.remove_item(&internal_request);
+                let mut list = self.block_by_list().await?;
+                let completed = list.insert_item(&data.sender);
+                self.set_block_by_list(list).await?;
 
-                    self.set_request_list(list).await?;
-
+                if completed {
                     if let Err(e) = self
                         .tx
-                        .send(MultiPassEventKind::IncomingFriendRequestClosed { did: data.sender })
+                        .send(MultiPassEventKind::BlockedBy { did: data.sender })
                     {
                         error!("Error broadcasting event: {e}");
                     }
                 }
-                Event::Block => {
-                    if self.has_request_from(&data.sender).await? {
-                        if let Err(e) =
-                            self.tx
-                                .send(MultiPassEventKind::IncomingFriendRequestClosed {
-                                    did: data.sender.clone(),
-                                })
-                        {
-                            error!("Error broadcasting event: {e}");
-                        }
-                    } else if self.sent_friend_request_to(&data.sender).await? {
-                        if let Err(e) =
-                            self.tx
-                                .send(MultiPassEventKind::OutgoingFriendRequestRejected {
-                                    did: data.sender.clone(),
-                                })
-                        {
-                            error!("Error broadcasting event: {e}");
-                        }
-                    }
 
-                    let mut list = self.list_all_raw_request().await?;
-                    list.retain(|r| data.sender.ne(r.did()));
-                    self.set_request_list(list).await?;
-
-                    if self.is_friend(&data.sender).await? {
-                        self.remove_friend(&data.sender, false).await?;
-                    }
-
-                    let mut list = self.block_by_list().await?;
-                    let completed = list.insert_item(&data.sender);
-                    self.set_block_by_list(list).await?;
-
-                    if completed {
-                        if let Err(e) = self
-                            .tx
-                            .send(MultiPassEventKind::BlockedBy { did: data.sender })
-                        {
-                            error!("Error broadcasting event: {e}");
-                        }
-                    }
-
-                    if let Some(tx) = std::mem::take(&mut signal) {
-                        let _ = tx.send(Err(Error::BlockedByUser));
-                    }
+                if let Some(tx) = std::mem::take(&mut signal) {
+                    let _ = tx.send(Err(Error::BlockedByUser));
                 }
-                Event::Unblock => {
-                    let mut list = self.block_by_list().await?;
-                    let completed = list.remove_item(&data.sender);
-                    self.set_block_by_list(list).await?;
-                    if completed {
-                        if let Err(e) = self
-                            .tx
-                            .send(MultiPassEventKind::UnblockedBy { did: data.sender })
-                        {
-                            error!("Error broadcasting event: {e}");
-                        }
-                    }
-                }
-                Event::Response => {
-                    if let Some(tx) = std::mem::take(&mut signal) {
-                        let _ = tx.send(Ok(()));
-                    }
-                }
-            };
-            if let Some(tx) = std::mem::take(&mut signal) {
-                let _ = tx.send(Ok(()));
             }
+            Event::Unblock => {
+                let mut list = self.block_by_list().await?;
+                let completed = list.remove_item(&data.sender);
+                self.set_block_by_list(list).await?;
+                if completed {
+                    if let Err(e) = self
+                        .tx
+                        .send(MultiPassEventKind::UnblockedBy { did: data.sender })
+                    {
+                        error!("Error broadcasting event: {e}");
+                    }
+                }
+            }
+            Event::Response => {
+                if let Some(tx) = std::mem::take(&mut signal) {
+                    let _ = tx.send(Ok(()));
+                }
+            }
+        };
+        if let Some(tx) = std::mem::take(&mut signal) {
+            let _ = tx.send(Ok(()));
         }
+
         Ok(())
     }
 
