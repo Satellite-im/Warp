@@ -250,7 +250,7 @@ async fn main() -> anyhow::Result<()> {
         identity.username(),
         identity.short_id()
     );
-    println!("DID: {}", identity.did_key());
+    
     let (mut rl, mut stdout) = Readline::new(format!(
         "{}#{} >>> ",
         identity.username(),
@@ -286,6 +286,7 @@ async fn main() -> anyhow::Result<()> {
     "#;
 
     writeln!(stdout, "{message}")?;
+    writeln!(stdout, "DID: {}", identity.did_key())?;
 
     // loads all conversations into their own task to process events
     for conversation in chat.list_conversations().await.unwrap_or_default() {
