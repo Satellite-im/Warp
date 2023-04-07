@@ -7,7 +7,7 @@ repository = "https://github.com/Satellite-im/Warp"
 
 
 [workspace]
-members = ["extensions/*", "warp", "warp/warp-derive"]
+members = ["extensions/*", "warp", "warp/warp-derive", "tools/*"]
 exclude = ["deprecated/*"]
 
 [workspace.dependencies]
