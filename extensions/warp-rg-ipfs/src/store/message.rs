@@ -659,7 +659,6 @@ impl MessageStore {
                 futures::pin_mut!(stream);
                 loop {
                     let (direction, event, ret) = tokio::select! {
-                        biased;
                         event = rx.next() => {
                             let Some((event, ret)) = event else {
                                 continue;
