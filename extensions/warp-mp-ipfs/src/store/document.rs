@@ -8,12 +8,14 @@ use libipld::{
 };
 use rust_ipfs as ipfs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{hash::Hash, time::Duration};
+use std::time::Duration;
 use warp::{
     crypto::{did_key::CoreSign, DID},
     error::Error,
-    multipass::identity::{Identity, IdentityStatus, Platform},
+    multipass::identity::{Identity, IdentityStatus},
 };
+
+use self::identity::IdentityDocument;
 
 use super::friends::Request;
 
@@ -148,12 +150,7 @@ impl<T> From<Cid> for DocumentType<T> {
 /// node root document for their identity, friends, blocks, etc, along with previous cid (if we wish to track that)
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct RootDocument {
-    //TODO: Maybe use DocumentType<Identity>?
     pub identity: Cid,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub picture: Option<DocumentType<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub banner: Option<DocumentType<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub friends: Option<DocumentType<Vec<DID>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -180,7 +177,7 @@ impl RootDocument {
     }
 
     pub async fn verify(&self, ipfs: &Ipfs) -> Result<(), Error> {
-        let (identity, _, _, _, _, _, _) = self.resolve(ipfs, Some(Duration::from_secs(5))).await?;
+        let (identity, _, _, _, _) = self.resolve(ipfs, Some(Duration::from_secs(15))).await?;
         let mut root_document = self.clone();
         let signature =
             std::mem::take(&mut root_document.signature).ok_or(Error::InvalidSignature)?;
@@ -197,50 +194,29 @@ impl RootDocument {
         &self,
         ipfs: &Ipfs,
         timeout: Option<Duration>,
-    ) -> Result<
-        (
-            Identity,
-            String,
-            String,
-            Vec<DID>,
-            Vec<DID>,
-            Vec<DID>,
-            Vec<Request>,
-        ),
-        Error,
-    > {
-        let identity = {
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                ipfs.get_dag(IpfsPath::from(self.identity)),
-            )
+    ) -> Result<(Identity, Vec<DID>, Vec<DID>, Vec<DID>, Vec<Request>), Error> {
+        let identity = match ipfs
+            .dag()
+            .get(IpfsPath::from(self.identity), &[], true)
             .await
-            {
-                Ok(Ok(ipld)) => from_ipld::<Identity>(ipld)
+        {
+            Ok(ipld) => {
+                from_ipld::<IdentityDocument>(ipld)
                     .map_err(anyhow::Error::from)
-                    .map_err(Error::from)?,
-                Ok(Err(_)) => return Err(Error::IdentityInvalid),
-                Err(e) => return Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
+                    .map_err(Error::from)?
+                    .resolve(ipfs, true)
+                    .await?
             }
+            Err(_) => return Err(Error::IdentityInvalid),
         };
 
         let mut friends = Default::default();
-        let mut picture = Default::default();
-        let mut banner = Default::default();
         let mut block_list = Default::default();
         let mut block_by_list = Default::default();
         let mut request = Default::default();
 
         if let Some(document) = &self.friends {
             friends = document.resolve_or_default(ipfs.clone(), timeout).await
-        }
-
-        if let Some(document) = &self.picture {
-            picture = document.resolve_or_default(ipfs.clone(), timeout).await
-        }
-
-        if let Some(document) = &self.banner {
-            banner = document.resolve_or_default(ipfs.clone(), timeout).await
         }
 
         if let Some(document) = &self.blocks {
@@ -257,99 +233,10 @@ impl RootDocument {
 
         Ok((
             identity,
-            picture,
-            banner,
             friends,
             block_list,
             block_by_list,
             request,
         ))
-    }
-}
-
-/// Used to lookup identities found and their corresponding cid
-#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
-pub struct CacheDocument {
-    pub username: String,
-    pub did: DID,
-    pub short_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub picture: Option<DocumentType<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub banner: Option<DocumentType<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<IdentityStatus>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub platform: Option<Platform>,
-    pub identity: DocumentType<Identity>,
-}
-
-impl CacheDocument {
-    pub async fn resolve(&self, ipfs: Ipfs, timeout: Option<Duration>) -> Result<Identity, Error> {
-        let mut identity = self.identity.resolve(ipfs.clone(), timeout).await?;
-        if identity.username() != self.username.clone()
-            || identity.did_key() != self.did.clone()
-            || identity.short_id() != self.short_id
-        {
-            return Err(Error::IdentityInvalid);
-        }
-
-        if let Some(document) = &self.picture {
-            let mut lazily = false;
-            if let DocumentType::UnixFS(cid, _) = document {
-                if !ipfs.refs_local().await?.contains(cid) {
-                    tokio::spawn({
-                        let ipfs = ipfs.clone();
-                        let document = document.clone();
-                        async move {
-                            document.resolve_or_default(ipfs, timeout).await;
-                        }
-                    });
-                    lazily = true;
-                }
-            }
-            if !lazily {
-                let picture = document.resolve_or_default(ipfs.clone(), timeout).await;
-                let mut graphics = identity.graphics();
-                graphics.set_profile_picture(&picture);
-                identity.set_graphics(graphics);
-            }
-        }
-        if let Some(document) = &self.banner {
-            let mut lazily = false;
-            if let DocumentType::UnixFS(cid, _) = document {
-                if !ipfs.refs_local().await?.contains(cid) {
-                    tokio::spawn({
-                        let ipfs = ipfs.clone();
-                        let document = document.clone();
-                        async move {
-                            document.resolve_or_default(ipfs, timeout).await;
-                        }
-                    });
-                    lazily = true;
-                }
-            }
-            if !lazily {
-                let banner = document.resolve_or_default(ipfs.clone(), timeout).await;
-                let mut graphics = identity.graphics();
-                graphics.set_profile_banner(&banner);
-                identity.set_graphics(graphics);
-            }
-        }
-
-        Ok(identity)
-    }
-}
-
-impl Hash for CacheDocument {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.did.hash(state);
-        self.short_id.hash(state);
-    }
-}
-
-impl PartialEq for CacheDocument {
-    fn eq(&self, other: &Self) -> bool {
-        self.did.eq(&other.did) && self.short_id.eq(&other.short_id)
     }
 }

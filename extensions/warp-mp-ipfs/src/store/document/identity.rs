@@ -1,16 +1,15 @@
-use either::Either;
 use futures::StreamExt;
 use libipld::Cid;
 use rust_ipfs::{Ipfs, IpfsPath};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{hash::Hash, time::Duration};
 use warp::{
     crypto::{did_key::CoreSign, DID},
     error::Error,
     multipass::identity::{Identity, IdentityStatus, Platform, SHORT_ID_SIZE},
 };
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Eq)]
 pub struct IdentityDocument {
     pub username: String,
 
@@ -21,11 +20,11 @@ pub struct IdentityDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_message: Option<String>,
 
-    #[serde(with = "either::serde_untagged")]
-    pub profile_picture: Either<Cid, Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_picture: Option<Cid>,
 
-    #[serde(with = "either::serde_untagged")]
-    pub profile_banner: Either<Cid, Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_banner: Option<Cid>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub platform: Option<Platform>,
@@ -34,7 +33,20 @@ pub struct IdentityDocument {
     pub status: Option<IdentityStatus>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub signature: Option<Vec<u8>>,
+    pub signature: Option<String>,
+}
+
+impl PartialEq for IdentityDocument {
+    fn eq(&self, other: &Self) -> bool {
+        self.did.eq(&other.did) && self.short_id.eq(&other.short_id)
+    }
+}
+
+impl Hash for IdentityDocument {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.did.hash(state);
+        self.short_id.hash(state);
+    }
 }
 
 impl IdentityDocument {
@@ -48,53 +60,27 @@ impl IdentityDocument {
         let mut graphics = identity.graphics();
 
         if with_image {
-            match &self.profile_picture {
-                Either::Left(cid) => {
-                    match unixfs_fetch(ipfs, *cid, None, true, Some(2 * 1024 * 1024)).await {
-                        Ok(data) => {
-                            let picture: String = serde_json::from_slice(&data).unwrap_or_default();
-                            graphics.set_profile_picture(&picture);
-                        }
-                        _ => {
-                            tokio::spawn({
-                                let ipfs = ipfs.clone();
-                                let cid = *cid;
-                                async move {
-                                    unixfs_fetch(&ipfs, cid, None, false, Some(2 * 1024 * 1024))
-                                        .await
-                                }
-                            });
-                        }
+            if let Some(cid) = self.profile_picture {
+                match unixfs_fetch(ipfs, cid, None, true, Some(2 * 1024 * 1024)).await {
+                    Ok(data) => {
+                        let picture: String = serde_json::from_slice(&data).unwrap_or_default();
+                        graphics.set_profile_picture(&picture);
                     }
-                }
-                Either::Right(data) => {
-                    let data = data.clone().unwrap_or_default();
-                    graphics.set_profile_picture(&data);
+                    Err(e) => {
+                        println!("{e}");
+                    }
                 }
             }
 
-            match &self.profile_banner {
-                Either::Left(cid) => {
-                    match unixfs_fetch(ipfs, *cid, None, true, Some(2 * 1024 * 1024)).await {
-                        Ok(data) => {
-                            let banner: String = serde_json::from_slice(&data).unwrap_or_default();
-                            graphics.set_profile_banner(&banner);
-                        }
-                        _ => {
-                            tokio::spawn({
-                                let ipfs = ipfs.clone();
-                                let cid = *cid;
-                                async move {
-                                    unixfs_fetch(&ipfs, cid, None, false, Some(2 * 1024 * 1024))
-                                        .await
-                                }
-                            });
-                        }
+            if let Some(cid) = self.profile_banner {
+                match unixfs_fetch(ipfs, cid, None, true, Some(2 * 1024 * 1024)).await {
+                    Ok(data) => {
+                        let picture: String = serde_json::from_slice(&data).unwrap_or_default();
+                        graphics.set_profile_banner(&picture);
                     }
-                }
-                Either::Right(data) => {
-                    let data = data.clone().unwrap_or_default();
-                    graphics.set_profile_banner(&data);
+                    Err(e) => {
+                        println!("{e}");
+                    }
                 }
             }
         }
@@ -105,8 +91,9 @@ impl IdentityDocument {
     }
 
     pub fn sign(mut self, did: &DID) -> Result<Self, Error> {
+        self.signature = None;
         let bytes = serde_json::to_vec(&self)?;
-        let signature = did.sign(&bytes);
+        let signature = bs58::encode(did.sign(&bytes)).into_string();
         self.signature = Some(signature);
         Ok(self)
     }
@@ -117,16 +104,16 @@ impl IdentityDocument {
         //TODO: Validate username, short id, and status message
 
         let signature = std::mem::take(&mut payload.signature).ok_or(Error::InvalidSignature)?;
-
+        let signature_bytes = bs58::decode(signature).into_vec()?;
         let bytes = serde_json::to_vec(&payload)?;
         self.did
-            .verify(&bytes, &signature)
+            .verify(&bytes, &signature_bytes)
             .map_err(|_| Error::InvalidSignature)?;
         Ok(())
     }
 }
 
-async fn unixfs_fetch(
+pub async fn unixfs_fetch(
     ipfs: &Ipfs,
     cid: Cid,
     timeout: Option<Duration>,
@@ -165,10 +152,15 @@ async fn unixfs_fetch(
         Ok(data)
     };
 
-    let timeout = timeout.unwrap_or(std::time::Duration::from_secs(15));
-    match tokio::time::timeout(timeout, fut).await {
-        Ok(Ok(data)) => serde_json::from_slice(&data).map_err(Error::from),
-        Ok(Err(e)) => Err(e),
-        Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
+    match local {
+        true => fut.await,
+        false => {
+            let timeout = timeout.unwrap_or(std::time::Duration::from_secs(15));
+            match tokio::time::timeout(timeout, fut).await {
+                Ok(Ok(data)) => serde_json::from_slice(&data).map_err(Error::from),
+                Ok(Err(e)) => Err(e),
+                Err(e) => Err(Error::from(anyhow::anyhow!("Timeout at {e}"))),
+            }
+        }
     }
 }

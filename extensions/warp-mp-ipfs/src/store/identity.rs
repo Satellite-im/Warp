@@ -3,7 +3,7 @@
 #![allow(clippy::clone_on_copy)]
 use crate::{
     config::{Discovery as DiscoveryConfig, UpdateEvents},
-    store::{did_to_libp2p_pub, discovery::Discovery, IdentityPayload},
+    store::{did_to_libp2p_pub, discovery::Discovery},
 };
 use futures::{
     channel::{mpsc, oneshot},
@@ -47,7 +47,10 @@ use warp::{
 
 use super::{
     connected_to_peer,
-    document::{CacheDocument, DocumentType, GetDag, RootDocument, ToCid},
+    document::{
+        identity::{unixfs_fetch, IdentityDocument},
+        GetDag, RootDocument, ToCid,
+    },
     friends::{FriendsStore, Request},
     libp2p_pub_to_did,
 };
@@ -120,7 +123,7 @@ pub enum IdentityEvent {
     Request { option: RequestOption },
 
     /// Event receiving identity payload
-    Receive { payload: IdentityPayload },
+    Receive { option: ResponseOption },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +131,21 @@ pub enum IdentityEvent {
 pub enum RequestOption {
     /// Identity request
     Identity,
+    /// Pictures
+    Image {
+        banner: Option<Cid>,
+        picture: Option<Cid>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[allow(clippy::large_enum_variant)]
+pub enum ResponseOption {
+    /// Identity request
+    Identity { identity: IdentityDocument },
+    /// Pictures
+    Image { cid: Cid, data: Vec<u8> },
 }
 
 impl IdentityStore {
@@ -259,7 +277,7 @@ impl IdentityStore {
                             tokio::spawn({
                                 let store = store.clone();
                                 async move {
-                                    if let Err(e) = store.request(&push).await {
+                                    if let Err(e) = store.request(&push, RequestOption::Identity).await {
                                         error!("Error requesting identity: {e}");
                                     }
                                     if let Err(e) = store.push(&push).await {
@@ -365,7 +383,7 @@ impl IdentityStore {
         self.push_iter(list).await
     }
 
-    async fn request(&self, out_did: &DID) -> Result<(), Error> {
+    async fn request(&self, out_did: &DID, option: RequestOption) -> Result<(), Error> {
         let pk_did = self.get_keypair_did()?;
 
         let prikey = Ed25519KeyPair::from_secret_key(&pk_did.private_key_bytes()).get_x25519();
@@ -375,9 +393,7 @@ impl IdentityStore {
             .map(Zeroizing::new)
             .map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
-        let event = IdentityEvent::Request {
-            option: RequestOption::Identity,
-        };
+        let event = IdentityEvent::Request { option };
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
@@ -411,62 +427,17 @@ impl IdentityStore {
 
         let root = self.get_root_document().await?;
 
-        let identity = self
-            .get_dag::<Identity>(IpfsPath::from(root.identity), None)
+        let mut identity = self
+            .get_dag::<IdentityDocument>(IpfsPath::from(root.identity), None)
             .await?;
 
-        let did = identity.did_key();
+        identity.verify()?;
 
-        let override_ipld = self.override_ipld.load(Ordering::Relaxed);
+        let _override_ipld = self.override_ipld.load(Ordering::Relaxed);
 
-        let is_friend = match self.friend_store().await {
+        let _is_friend = match self.friend_store().await {
             Ok(store) => store.is_friend(out_did).await.unwrap_or_default(),
             _ => false,
-        };
-
-        let picture = match override_ipld {
-            true => {
-                if let Some(document) = root.picture.as_ref() {
-                    Some(DocumentType::Object(
-                        document
-                            .resolve_or_default(self.ipfs.clone(), Some(Duration::from_secs(60)))
-                            .await,
-                    ))
-                } else {
-                    None
-                }
-            }
-            false => root.picture,
-        }
-        .and_then(|document| match self.update_event {
-            UpdateEvents::Enabled | UpdateEvents::EmitFriendsOnly => Some(document),
-            UpdateEvents::FriendsOnly if is_friend => Some(document),
-            _ => None,
-        });
-
-        let banner = match override_ipld {
-            true => {
-                if let Some(document) = root.banner.as_ref() {
-                    Some(DocumentType::Object(
-                        document
-                            .resolve_or_default(self.ipfs.clone(), Some(Duration::from_secs(60)))
-                            .await,
-                    ))
-                } else {
-                    None
-                }
-            }
-            false => root.banner,
-        }
-        .and_then(|document| match self.update_event {
-            UpdateEvents::Enabled | UpdateEvents::EmitFriendsOnly => Some(document),
-            UpdateEvents::FriendsOnly if is_friend => Some(document),
-            _ => None,
-        });
-
-        let payload = match override_ipld {
-            true => DocumentType::Object(identity),
-            false => DocumentType::Cid(root.identity),
         };
 
         let share_platform = self.share_platform.load(Ordering::SeqCst);
@@ -475,21 +446,120 @@ impl IdentityStore {
 
         let status = self.online_status.read().await.clone();
 
-        let payload = IdentityPayload {
-            did,
-            payload,
-            picture,
-            banner,
-            platform,
-            status,
-            signature: None,
-        };
+        identity.status = status;
+        identity.platform = platform;
 
         let kp_did = self.get_keypair_did()?;
 
-        let payload = payload.sign(&kp_did)?;
+        let payload = identity.sign(&kp_did)?;
 
-        let event = IdentityEvent::Receive { payload };
+        let event = IdentityEvent::Receive {
+            option: ResponseOption::Identity { identity: payload },
+        };
+
+        let payload_bytes = serde_json::to_vec(&event)?;
+
+        let bytes = Cipher::direct_encrypt(&payload_bytes, &shared_key)?;
+
+        let topic = format!("/peer/{out_did}/events");
+
+        let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
+
+        if self
+            .ipfs
+            .pubsub_peers(Some(topic.clone()))
+            .await?
+            .contains(&out_peer_id)
+        {
+            self.ipfs.pubsub_publish(topic, bytes).await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn push_profile_picture(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
+        let pk_did = self.get_keypair_did()?;
+
+        let prikey = Ed25519KeyPair::from_secret_key(&pk_did.private_key_bytes()).get_x25519();
+        let pubkey = Ed25519KeyPair::from_public_key(&out_did.public_key_bytes()).get_x25519();
+
+        let shared_key = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
+            .map(Zeroizing::new)
+            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+
+        let root = self.get_root_document().await?;
+
+        let identity = self
+            .get_local_dag::<IdentityDocument>(IpfsPath::from(root.identity))
+            .await?;
+
+        identity.verify()?;
+
+        let Some(picture_cid) = identity.profile_picture else {
+            return Ok(())
+        };
+
+        if cid != picture_cid {
+            return Ok(());
+        }
+
+        let data = unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await?;
+
+        let event = IdentityEvent::Receive {
+            option: ResponseOption::Image { cid, data },
+        };
+
+        let payload_bytes = serde_json::to_vec(&event)?;
+
+        let bytes = Cipher::direct_encrypt(&payload_bytes, &shared_key)?;
+
+        let topic = format!("/peer/{out_did}/events");
+
+        let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
+
+        if self
+            .ipfs
+            .pubsub_peers(Some(topic.clone()))
+            .await?
+            .contains(&out_peer_id)
+        {
+            self.ipfs.pubsub_publish(topic, bytes).await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn push_profile_banner(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
+        let pk_did = self.get_keypair_did()?;
+
+        let prikey = Ed25519KeyPair::from_secret_key(&pk_did.private_key_bytes()).get_x25519();
+        let pubkey = Ed25519KeyPair::from_public_key(&out_did.public_key_bytes()).get_x25519();
+
+        let shared_key = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
+            .map(Zeroizing::new)
+            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+
+        let root = self.get_root_document().await?;
+
+        let identity = self
+            .get_local_dag::<IdentityDocument>(IpfsPath::from(root.identity))
+            .await?;
+
+        identity.verify()?;
+
+        let Some(banner_cid) = identity.profile_banner else {
+            return Ok(())
+        };
+
+        if cid != banner_cid {
+            return Ok(());
+        }
+
+        let data = unixfs_fetch(&self.ipfs, cid, None, true, Some(2 * 1024 * 1024)).await?;
+
+        let event = IdentityEvent::Receive {
+            option: ResponseOption::Image { cid, data },
+        };
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
@@ -526,44 +596,45 @@ impl IdentityStore {
         let event = serde_json::from_slice::<IdentityEvent>(&bytes)?;
 
         match event {
-            IdentityEvent::Request {
-                option: RequestOption::Identity,
+            IdentityEvent::Request { option } => match option {
+                RequestOption::Identity => self.push(&in_did).await?,
+                RequestOption::Image { banner, picture } => {
+                    if let Some(cid) = banner {
+                        self.push_profile_banner(&in_did, cid).await?;
+                    }
+                    if let Some(cid) = picture {
+                        self.push_profile_picture(&in_did, cid).await?;
+                    }
+                }
+            },
+            IdentityEvent::Receive {
+                option: ResponseOption::Identity { identity },
             } => {
-                self.push(&in_did).await?;
-            }
-            IdentityEvent::Receive { payload } => {
-                let raw_object = payload;
-
-                let payload = raw_object.payload.clone();
-
                 //TODO: Validate public key against peer that sent it
-                let _pk = did_to_libp2p_pub(&raw_object.did)?;
+                // let _pk = did_to_libp2p_pub(&raw_object.did)?;
 
-                let identity = payload
-                    .resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
-                    .await?;
-
-                anyhow::ensure!(
-                    raw_object.did == identity.did_key(),
-                    "Payload doesnt match identity"
-                );
+                //TODO: Remove upon offline
+                anyhow::ensure!(identity.did == in_did, "Payload doesnt match identity");
 
                 // Validate after making sure the identity did matches the payload
-                raw_object.verify()?;
+                identity.verify()?;
 
                 if let Some(own_id) = self.identity.read().await.clone() {
-                    anyhow::ensure!(own_id != identity, "Cannot accept own identity");
+                    anyhow::ensure!(
+                        own_id.did_key() != identity.did,
+                        "Cannot accept own identity"
+                    );
                 }
 
-                if !self.discovery.contains(identity.did_key()).await {
-                    if let Err(e) = self.discovery.insert(identity.did_key()).await {
+                if !self.discovery.contains(identity.did.clone()).await {
+                    if let Err(e) = self.discovery.insert(identity.did.clone()).await {
                         log::warn!("Error inserting into discovery service: {e}");
                     }
                 }
 
                 let (old_cid, mut cache_documents) = match self.get_cache_cid().await {
                     Ok(cid) => match self
-                        .get_dag::<HashSet<CacheDocument>>(IpfsPath::from(cid), None)
+                        .get_dag::<HashSet<IdentityDocument>>(IpfsPath::from(cid), None)
                         .await
                     {
                         Ok(doc) => (Some(cid), doc),
@@ -572,76 +643,63 @@ impl IdentityStore {
                     _ => (None, Default::default()),
                 };
 
-                let mut found = false;
-
-                let mut document = match cache_documents
+                let document = cache_documents
                     .iter()
                     .find(|document| {
-                        document.did == identity.did_key()
-                            && document.short_id == identity.short_id()
+                        document.did == identity.did && document.short_id == identity.short_id
                     })
-                    .cloned()
-                {
-                    Some(document) => {
-                        found = true;
-                        document
-                    }
-                    None => {
-                        let username = identity.username();
-                        let short_id = identity.short_id();
-                        let did = identity.did_key();
-                        let picture = raw_object.picture.clone();
-                        let banner = raw_object.banner.clone();
-                        let identity = payload.clone();
-                        let status = raw_object.status;
-                        let platform = raw_object.platform;
-                        CacheDocument {
-                            username,
-                            did,
-                            picture,
-                            banner,
-                            short_id,
-                            identity,
-                            status,
-                            platform,
-                        }
-                    }
-                };
+                    .cloned();
 
-                match (found, &document.identity) {
-                    (true, object) => {
+                match document {
+                    Some(mut document) => {
                         let mut change = false;
                         let mut event: Vec<MultiPassEventKind> = vec![];
-                        if document.username != identity.username() {
+                        if document.username != identity.username {
                             let old_username = document.username.clone();
-                            document.username = identity.username();
+                            document.username = identity.username.clone();
                             change = true;
                             event.push(MultiPassEventKind::IdentityUpdate {
                                 did: document.did.clone(),
                                 kind: UpdateKind::Username {
                                     old: old_username,
-                                    new: identity.username(),
+                                    new: identity.username.clone(),
                                 },
                             });
                         }
-                        if document.picture != raw_object.picture {
-                            document.picture = raw_object.picture;
+                        if document.profile_picture != identity.profile_picture {
+                            document.profile_picture = identity.profile_picture;
                             change = true;
-                            event.push(MultiPassEventKind::IdentityUpdate {
-                                did: document.did.clone(),
-                                kind: UpdateKind::Picture,
-                            });
+                            if document.profile_picture.is_some() {
+                                if let Err(_e) = self
+                                    .request(
+                                        &in_did,
+                                        RequestOption::Image {
+                                            banner: None,
+                                            picture: identity.profile_picture,
+                                        },
+                                    )
+                                    .await
+                                {}
+                            }
                         }
-                        if document.banner != raw_object.banner {
-                            document.banner = raw_object.banner;
+                        if document.profile_banner != identity.profile_banner {
+                            document.profile_banner = identity.profile_banner;
                             change = true;
-                            event.push(MultiPassEventKind::IdentityUpdate {
-                                did: document.did.clone(),
-                                kind: UpdateKind::Banner,
-                            });
+                            if document.profile_banner.is_some() {
+                                if let Err(_e) = self
+                                    .request(
+                                        &in_did,
+                                        RequestOption::Image {
+                                            banner: identity.profile_banner,
+                                            picture: None,
+                                        },
+                                    )
+                                    .await
+                                {}
+                            }
                         }
-                        if document.status != raw_object.status {
-                            document.status = raw_object.status;
+                        if document.status != identity.status {
+                            document.status = identity.status;
                             change = true;
                             if let Some(status) = document.status {
                                 event.push(MultiPassEventKind::IdentityUpdate {
@@ -650,12 +708,11 @@ impl IdentityStore {
                                 });
                             }
                         }
-                        if document.platform != raw_object.platform {
-                            document.platform = raw_object.platform;
+                        if document.platform != identity.platform {
+                            document.platform = identity.platform;
                             change = true;
                         }
-                        if object != &payload {
-                            document.identity = payload;
+                        if document.status_message != identity.status_message {
                             change = true;
                             event.push(MultiPassEventKind::IdentityUpdate {
                                 did: document.did.clone(),
@@ -663,7 +720,14 @@ impl IdentityStore {
                             });
                         }
 
+                        if document.signature != identity.signature {
+                            document.signature = identity.signature;
+                            change = true;
+                        }
+
                         if change {
+                            document.verify()?;
+                            let document_did = document.did.clone();
                             cache_documents.replace(document);
 
                             let new_cid = self.put_dag(cache_documents).await?;
@@ -686,11 +750,7 @@ impl IdentityStore {
                                 UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
                             ) {
                                 if let Ok(store) = self.friend_store().await {
-                                    if store
-                                        .is_friend(&identity.did_key())
-                                        .await
-                                        .unwrap_or_default()
-                                    {
+                                    if store.is_friend(&document_did).await.unwrap_or_default() {
                                         emit = true;
                                     }
                                 }
@@ -707,8 +767,9 @@ impl IdentityStore {
                             }
                         }
                     }
-                    (false, _object) => {
-                        cache_documents.insert(document);
+                    None => {
+                        let document_did = identity.did.clone();
+                        cache_documents.insert(identity);
 
                         let new_cid = self.put_dag(cache_documents).await?;
 
@@ -721,8 +782,61 @@ impl IdentityStore {
                             // Do we want to remove the old block?
                             self.ipfs.remove_block(old_cid).await?;
                         }
+
+                        if matches!(self.update_event, UpdateEvents::Enabled) {
+                            let tx = self.event.clone();
+                            tokio::spawn(async move {
+                                let _ = tx.send(MultiPassEventKind::IdentityUpdate {
+                                    did: document_did.clone(),
+                                    kind: UpdateKind::Misc,
+                                });
+                            });
+                        }
                     }
                 };
+            }
+            IdentityEvent::Receive {
+                option: ResponseOption::Image { cid, data },
+            } => {
+                let (_, cache_documents) = match self.get_cache_cid().await {
+                    Ok(cid) => match self
+                        .get_local_dag::<HashSet<IdentityDocument>>(IpfsPath::from(cid))
+                        .await
+                    {
+                        Ok(doc) => (Some(cid), doc),
+                        _ => (Some(cid), Default::default()),
+                    },
+                    _ => (None, Default::default()),
+                };
+
+                if let Some(cache) = cache_documents
+                    .iter()
+                    .find(|document| document.did == in_did)
+                {
+                    if cache.profile_picture == Some(cid) || cache.profile_banner == Some(cid) {
+                        tokio::spawn({
+                            let cid = cid;
+                            let mut store = self.clone();
+                            async move {
+                                let added_cid = store
+                                    .store_photo(
+                                        futures::stream::iter(Ok::<_, std::io::Error>(Ok(data)))
+                                            .boxed(),
+                                        Some(2 * 1024 * 1024),
+                                    )
+                                    .await?;
+
+                                debug_assert_eq!(added_cid, cid);
+                                let tx = store.event.clone();
+                                let _ = tx.send(MultiPassEventKind::IdentityUpdate {
+                                    did: in_did.clone(),
+                                    kind: UpdateKind::Misc,
+                                });
+                                Ok::<_, Error>(())
+                            }
+                        });
+                    }
+                }
             }
         };
         Ok(())
@@ -758,13 +872,13 @@ impl IdentityStore {
         self.relay.clone().unwrap_or_default()
     }
 
-    pub(crate) async fn cache(&self) -> HashSet<CacheDocument> {
+    pub(crate) async fn cache(&self) -> HashSet<IdentityDocument> {
         let cache_cid = match self.get_cache_cid().await.ok() {
             Some(cid) => cid,
             None => return Default::default(),
         };
 
-        self.get_local_dag::<HashSet<CacheDocument>>(IpfsPath::from(cache_cid))
+        self.get_local_dag::<HashSet<IdentityDocument>>(IpfsPath::from(cache_cid))
             .await
             .unwrap_or_default()
     }
@@ -776,7 +890,6 @@ impl IdentityStore {
             return Err(Error::IdentityExist);
         }
 
-        let mut identity = Identity::default();
         let public_key =
             DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().encode()));
 
@@ -784,16 +897,26 @@ impl IdentityStore {
             .map(str::to_string)
             .unwrap_or_else(warp::multipass::generator::generate_name);
 
-        identity.set_username(&username);
+        // identity.set_username(&username);
         let fingerprint = public_key.fingerprint();
         let bytes = fingerprint.as_bytes();
 
-        identity.set_short_id(
-            bytes[bytes.len() - SHORT_ID_SIZE..]
+        let identity = IdentityDocument {
+            username,
+            short_id: bytes[bytes.len() - SHORT_ID_SIZE..]
                 .try_into()
                 .map_err(anyhow::Error::from)?,
-        );
-        identity.set_did_key(public_key.into());
+            did: public_key.into(),
+            status_message: None,
+            profile_banner: None,
+            profile_picture: None,
+            platform: None,
+            status: None,
+            signature: None,
+        };
+
+        let did_kp = self.get_keypair_did()?;
+        let identity = identity.sign(&did_kp)?;
 
         let ident_cid = self.put_dag(identity.clone()).await?;
 
@@ -802,13 +925,14 @@ impl IdentityStore {
             ..Default::default()
         };
 
-        let did_kp = self.get_keypair_did()?;
         root_document.sign(&did_kp)?;
 
         let root_cid = self.put_dag(root_document).await?;
 
         // Pin the dag
         self.ipfs.insert_pin(&root_cid, true).await?;
+
+        let identity = identity.resolve(&self.ipfs, false).await?;
 
         self.save_cid(root_cid).await?;
         self.update_identity().await?;
@@ -920,7 +1044,9 @@ impl IdentityStore {
                             .iter()
                             .filter(|ident| {
                                 ident.username.to_lowercase().eq(&name)
-                                    && ident.short_id.to_lowercase().eq(&code)
+                                    && String::from_utf8_lossy(&ident.short_id)
+                                        .to_lowercase()
+                                        .eq(&code)
                             })
                             .cloned()
                             .collect::<Vec<_>>(),
@@ -941,15 +1067,16 @@ impl IdentityStore {
                 .cache()
                 .await
                 .iter()
-                .filter(|ident| ident.short_id.eq(id))
+                .filter(|ident| String::from_utf8_lossy(&ident.short_id).eq(id))
                 .cloned()
                 .collect::<Vec<_>>(),
         };
 
-        let list = futures::stream::FuturesUnordered::from_iter(idents_docs.iter().map(|doc| {
-            doc.resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
-                .boxed()
-        }))
+        let list = futures::stream::FuturesUnordered::from_iter(
+            idents_docs
+                .iter()
+                .map(|doc| doc.resolve(&self.ipfs, true).boxed()),
+        )
         .filter_map(|res| async { res.ok() })
         .chain(stream::iter(preidentity))
         .collect::<Vec<_>>()
@@ -958,7 +1085,11 @@ impl IdentityStore {
         Ok(list)
     }
 
-    pub async fn identity_update(&mut self, identity: Identity) -> Result<(), Error> {
+    pub async fn identity_update(&mut self, identity: IdentityDocument) -> Result<(), Error> {
+        let kp = self.get_keypair_did()?;
+
+        let identity = identity.sign(&kp)?;
+
         let mut root_document = self.get_root_document().await?;
         let ident_cid = self.put_dag(identity).await?;
         root_document.identity = ident_cid;
@@ -1136,28 +1267,30 @@ impl IdentityStore {
         Ok(cid)
     }
 
+    pub async fn own_identity_document(&self) -> Result<IdentityDocument, Error> {
+        let root_document = self.get_root_document().await?;
+        let path = IpfsPath::from(root_document.identity);
+        let identity = self.get_local_dag::<IdentityDocument>(path).await?;
+        identity.verify()?;
+
+        let kp_public_key = libp2p_pub_to_did(&self.get_keypair()?.public())?;
+        if identity.did != kp_public_key {
+            //Note if we reach this point, the identity would need to be reconstructed
+            return Err(Error::IdentityDoesntExist);
+        }
+        Ok(identity)
+    }
+
     pub async fn own_identity(&self, with_images: bool) -> Result<Identity, Error> {
         let root_document = self.get_root_document().await?;
 
         let ipfs = self.ipfs.clone();
         let path = IpfsPath::from(root_document.identity);
-        let mut identity = self.get_dag::<Identity>(path, None).await?;
-
-        if with_images {
-            if let Some(document) = root_document.banner {
-                let banner = document.resolve_or_default(ipfs.clone(), None).await;
-                let mut graphics = identity.graphics();
-                graphics.set_profile_banner(&banner);
-                identity.set_graphics(graphics);
-            }
-
-            if let Some(document) = root_document.picture {
-                let picture = document.resolve_or_default(ipfs.clone(), None).await;
-                let mut graphics = identity.graphics();
-                graphics.set_profile_picture(&picture);
-                identity.set_graphics(graphics);
-            }
-        }
+        let identity = self
+            .get_local_dag::<IdentityDocument>(path)
+            .await?
+            .resolve(&ipfs, with_images)
+            .await?;
 
         let public_key = identity.did_key();
         let kp_public_key = libp2p_pub_to_did(&self.get_keypair()?.public())?;
