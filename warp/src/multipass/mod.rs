@@ -33,22 +33,11 @@ pub enum MultiPassEventKind {
     FriendRemoved { did: DID },
     IdentityOnline { did: DID },
     IdentityOffline { did: DID },
-    IdentityUpdate { did: DID, kind: UpdateKind },
+    IdentityUpdate { did: DID },
     Blocked { did: DID },
     BlockedBy { did: DID },
     Unblocked { did: DID },
     UnblockedBy { did: DID },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
-#[serde(rename_all = "snake_case")]
-#[allow(clippy::large_enum_variant)]
-pub enum UpdateKind {
-    Username { old: String, new: String },
-    Status { status: IdentityStatus },
-    Picture,
-    Banner,
-    Misc
 }
 
 #[derive(FFIFree)]

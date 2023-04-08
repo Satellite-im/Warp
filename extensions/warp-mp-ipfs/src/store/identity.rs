@@ -42,7 +42,7 @@ use warp::{
 };
 use warp::{
     crypto::{did_key::ECDH, zeroize::Zeroizing, KeyMaterial},
-    multipass::{identity::Platform, UpdateKind},
+    multipass::identity::Platform,
 };
 
 use super::{
@@ -613,7 +613,7 @@ impl IdentityStore {
                 //TODO: Validate public key against peer that sent it
                 // let _pk = did_to_libp2p_pub(&raw_object.did)?;
 
-                //TODO: Remove upon offline
+                //TODO: Remove upon offline implementation
                 anyhow::ensure!(identity.did == in_did, "Payload doesnt match identity");
 
                 // Validate after making sure the identity did matches the payload
@@ -634,7 +634,7 @@ impl IdentityStore {
 
                 let (old_cid, mut cache_documents) = match self.get_cache_cid().await {
                     Ok(cid) => match self
-                        .get_dag::<HashSet<IdentityDocument>>(IpfsPath::from(cid), None)
+                        .get_local_dag::<HashSet<IdentityDocument>>(IpfsPath::from(cid))
                         .await
                     {
                         Ok(doc) => (Some(cid), doc),
@@ -651,84 +651,55 @@ impl IdentityStore {
                     .cloned();
 
                 match document {
-                    Some(mut document) => {
+                    Some(document) => {
                         let mut change = false;
-                        let mut event: Vec<MultiPassEventKind> = vec![];
                         if document.username != identity.username {
-                            let old_username = document.username.clone();
-                            document.username = identity.username.clone();
                             change = true;
-                            event.push(MultiPassEventKind::IdentityUpdate {
-                                did: document.did.clone(),
-                                kind: UpdateKind::Username {
-                                    old: old_username,
-                                    new: identity.username.clone(),
-                                },
-                            });
                         }
                         if document.profile_picture != identity.profile_picture {
-                            document.profile_picture = identity.profile_picture;
                             change = true;
-                            if document.profile_picture.is_some() {
-                                if let Err(_e) = self
-                                    .request(
-                                        &in_did,
-                                        RequestOption::Image {
-                                            banner: None,
-                                            picture: identity.profile_picture,
-                                        },
-                                    )
-                                    .await
-                                {}
-                            }
+                            if let Err(_e) = self
+                                .request(
+                                    &in_did,
+                                    RequestOption::Image {
+                                        banner: None,
+                                        picture: identity.profile_picture,
+                                    },
+                                )
+                                .await
+                            {}
                         }
                         if document.profile_banner != identity.profile_banner {
-                            document.profile_banner = identity.profile_banner;
                             change = true;
-                            if document.profile_banner.is_some() {
-                                if let Err(_e) = self
-                                    .request(
-                                        &in_did,
-                                        RequestOption::Image {
-                                            banner: identity.profile_banner,
-                                            picture: None,
-                                        },
-                                    )
-                                    .await
-                                {}
-                            }
+                            if let Err(_e) = self
+                                .request(
+                                    &in_did,
+                                    RequestOption::Image {
+                                        banner: identity.profile_banner,
+                                        picture: None,
+                                    },
+                                )
+                                .await
+                            {}
                         }
+
                         if document.status != identity.status {
-                            document.status = identity.status;
                             change = true;
-                            if let Some(status) = document.status {
-                                event.push(MultiPassEventKind::IdentityUpdate {
-                                    did: document.did.clone(),
-                                    kind: UpdateKind::Status { status },
-                                });
-                            }
                         }
                         if document.platform != identity.platform {
-                            document.platform = identity.platform;
                             change = true;
                         }
                         if document.status_message != identity.status_message {
                             change = true;
-                            event.push(MultiPassEventKind::IdentityUpdate {
-                                did: document.did.clone(),
-                                kind: UpdateKind::Misc,
-                            });
                         }
 
                         if document.signature != identity.signature {
-                            document.signature = identity.signature;
                             change = true;
                         }
 
                         if change {
-                            document.verify()?;
-                            let document_did = document.did.clone();
-                            cache_documents.replace(document);
+                            let document_did = identity.did.clone();
+                            cache_documents.replace(identity);
 
                             let new_cid = self.put_dag(cache_documents).await?;
 
@@ -757,19 +728,18 @@ impl IdentityStore {
                             }
 
                             if emit {
-                                let mut events = event;
                                 let tx = self.event.clone();
-                                tokio::spawn(async move {
-                                    while let Some(event) = events.pop() {
-                                        let _ = tx.send(event);
-                                    }
-                                });
+                                let _ = tx
+                                    .send(MultiPassEventKind::IdentityUpdate {
+                                        did: document.did.clone(),
+                                    })
+                                    .ok();
                             }
                         }
                     }
                     None => {
                         let document_did = identity.did.clone();
-                        cache_documents.insert(identity);
+                        cache_documents.insert(identity.clone());
 
                         let new_cid = self.put_dag(cache_documents).await?;
 
@@ -785,30 +755,64 @@ impl IdentityStore {
 
                         if matches!(self.update_event, UpdateEvents::Enabled) {
                             let tx = self.event.clone();
-                            tokio::spawn(async move {
-                                let _ = tx.send(MultiPassEventKind::IdentityUpdate {
-                                    did: document_did.clone(),
-                                    kind: UpdateKind::Misc,
-                                });
+                            tokio::spawn({
+                                let did = document_did.clone();
+                                async move {
+                                    let _ = tx.send(MultiPassEventKind::IdentityUpdate { did });
+                                }
+                            });
+                        }
+
+                        let mut emit = false;
+                        if matches!(self.update_event, UpdateEvents::Enabled) {
+                            emit = true;
+                        } else if matches!(
+                            self.update_event,
+                            UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
+                        ) {
+                            if let Ok(store) = self.friend_store().await {
+                                if store.is_friend(&document_did).await.unwrap_or_default() {
+                                    emit = true;
+                                }
+                            }
+                        }
+
+                        if emit {
+                            tokio::spawn({
+                                let store = self.clone();
+                                async move {
+                                    let mut picture = None;
+                                    let mut banner = None;
+
+                                    if let Some(cid) = identity.profile_picture {
+                                        picture = Some(cid);
+                                    }
+
+                                    if let Some(cid) = identity.profile_banner {
+                                        banner = Some(cid)
+                                    }
+
+                                    if banner.is_some() || picture.is_some() {
+                                        store
+                                            .request(
+                                                &in_did,
+                                                RequestOption::Image { banner, picture },
+                                            )
+                                            .await?;
+                                    }
+
+                                    Ok::<_, Error>(())
+                                }
                             });
                         }
                     }
                 };
             }
+            //Used when receiving an image (eg banner, pfp) from a peer
             IdentityEvent::Receive {
                 option: ResponseOption::Image { cid, data },
             } => {
-                let (_, cache_documents) = match self.get_cache_cid().await {
-                    Ok(cid) => match self
-                        .get_local_dag::<HashSet<IdentityDocument>>(IpfsPath::from(cid))
-                        .await
-                    {
-                        Ok(doc) => (Some(cid), doc),
-                        _ => (Some(cid), Default::default()),
-                    },
-                    _ => (None, Default::default()),
-                };
-
+                let cache_documents = self.cache().await;
                 if let Some(cache) = cache_documents
                     .iter()
                     .find(|document| document.did == in_did)
@@ -830,7 +834,6 @@ impl IdentityStore {
                                 let tx = store.event.clone();
                                 let _ = tx.send(MultiPassEventKind::IdentityUpdate {
                                     did: in_did.clone(),
-                                    kind: UpdateKind::Misc,
                                 });
                                 Ok::<_, Error>(())
                             }
@@ -873,14 +876,14 @@ impl IdentityStore {
     }
 
     pub(crate) async fn cache(&self) -> HashSet<IdentityDocument> {
-        let cache_cid = match self.get_cache_cid().await.ok() {
-            Some(cid) => cid,
-            None => return Default::default(),
-        };
-
-        self.get_local_dag::<HashSet<IdentityDocument>>(IpfsPath::from(cache_cid))
-            .await
-            .unwrap_or_default()
+        let cid = self.cache_cid.read().await;
+        match *cid {
+            Some(cid) => self
+                .get_local_dag::<HashSet<IdentityDocument>>(IpfsPath::from(cid))
+                .await
+                .unwrap_or_default(),
+            None => Default::default(),
+        }
     }
 
     pub async fn create_identity(&mut self, username: Option<&str>) -> Result<Identity, Error> {

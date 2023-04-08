@@ -66,9 +66,7 @@ impl IdentityDocument {
                         let picture: String = serde_json::from_slice(&data).unwrap_or_default();
                         graphics.set_profile_picture(&picture);
                     }
-                    Err(e) => {
-                        println!("{e}");
-                    }
+                    Err(_e) => {}
                 }
             }
 
@@ -78,9 +76,7 @@ impl IdentityDocument {
                         let picture: String = serde_json::from_slice(&data).unwrap_or_default();
                         graphics.set_profile_banner(&picture);
                     }
-                    Err(e) => {
-                        println!("{e}");
-                    }
+                    Err(_e) => {}
                 }
             }
         }

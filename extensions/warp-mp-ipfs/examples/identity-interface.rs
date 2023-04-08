@@ -9,7 +9,7 @@ use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 use warp::crypto::DID;
 use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
-use warp::multipass::{MultiPass, UpdateKind};
+use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -155,7 +155,7 @@ async fn main() -> anyhow::Result<()> {
         own_identity.short_id()
     );
     println!("DID: {}", own_identity.did_key());
-    
+
     let (mut rl, mut stdout) = Readline::new(format!(
         "{}#{} >>> ",
         own_identity.username(),
@@ -307,21 +307,14 @@ async fn main() -> anyhow::Result<()> {
 
                             writeln!(stdout, "> {username} blocked you")?;
                         },
-                        warp::multipass::MultiPassEventKind::IdentityUpdate { did, kind } => {
+                        warp::multipass::MultiPassEventKind::IdentityUpdate { did } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
-
-                            match kind {
-                                UpdateKind::Username { old, new } => writeln!(stdout, "> {old} username been updated to \"{new}\"")?,
-                                UpdateKind::Status { status } => writeln!(stdout, "> {username} changed to {status} ")?,
-                                UpdateKind::Picture => writeln!(stdout, "> {username} updated their profile picture ")?,
-                                UpdateKind::Banner => writeln!(stdout, "> {username} updated their profile banner ")?,
-                                _ => writeln!(stdout, "> {username} has been updated ")?,
-                            };
+                            writeln!(stdout, "> {username} has been updated ")?;
                         }
                     }
                 }
