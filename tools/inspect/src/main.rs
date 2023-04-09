@@ -125,9 +125,12 @@ async fn main() -> anyhow::Result<()> {
         let mut table = Table::new();
         table.set_header(vec!["Username", "DID"]);
 
+        let start_time = Instant::now();
         let identites = account
             .get_identity(Identifier::DIDList(friends.clone()))
             .await?;
+        let end_time = start_time.elapsed();
+        println!("Took {}ms to load friends identities", end_time.as_millis());
 
         for identity in identites {
             table.add_row(vec![

@@ -23,7 +23,6 @@ use tracing::log::{self, error, info, trace, warn};
 use warp::crypto::did_key::Generate;
 use warp::crypto::zeroize::Zeroizing;
 use warp::data::DataType;
-use warp::pocket_dimension::query::QueryBuilder;
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -343,7 +342,10 @@ impl IpfsIdentity {
                                     relayed.push(addr);
                                 }
                                 Err(e) => {
-                                    info!("Error listening on relay {}: {e}", addr.clone().with(Protocol::P2pCircuit));
+                                    info!(
+                                        "Error listening on relay {}: {e}",
+                                        addr.clone().with(Protocol::P2pCircuit)
+                                    );
                                     continue;
                                 }
                             };
@@ -624,67 +626,11 @@ impl MultiPass for IpfsIdentity {
         let store = self.identity_store(true).await?;
 
         let idents = match id {
-            Identifier::DID(pk) => {
-                if let Ok(cache) = self.get_cache() {
-                    let mut query = QueryBuilder::default();
-                    query.r#where("did_key", &pk)?;
-                    if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
-                    {
-                        if !list.is_empty() {
-                            let mut items = vec![];
-                            for object in list {
-                                if let Ok(ident) = object.decode::<Identity>().map_err(Error::from)
-                                {
-                                    items.push(ident);
-                                }
-                            }
-                            return Ok(items);
-                        }
-                    }
-                }
-                store.lookup(LookupBy::DidKey(pk)).await
-            }
-            Identifier::Username(username) => {
-                if let Ok(cache) = self.get_cache() {
-                    let mut query = QueryBuilder::default();
-                    query.r#where("username", &username)?;
-                    if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
-                    {
-                        if !list.is_empty() {
-                            let mut items = vec![];
-                            for object in list {
-                                if let Ok(ident) = object.decode::<Identity>().map_err(Error::from)
-                                {
-                                    items.push(ident);
-                                }
-                            }
-                            return Ok(items);
-                        }
-                    }
-                }
-                store.lookup(LookupBy::Username(username)).await
-            }
+            Identifier::DID(pk) => store.lookup(LookupBy::DidKey(pk)).await,
+            Identifier::Username(username) => store.lookup(LookupBy::Username(username)).await,
             Identifier::DIDList(list) => store.lookup(LookupBy::DidKeys(list)).await,
             Identifier::Own => return store.own_identity(true).await.map(|i| vec![i]),
         }?;
-        trace!("Found {} identities", idents.len());
-        // for ident in &idents {
-        //     if let Ok(mut cache) = self.get_cache_mut() {
-        //         let mut query = QueryBuilder::default();
-        //         query.r#where("did_key", &ident.did_key())?;
-        //         if cache
-        //             .has_data(DataType::from(Module::Accounts), &query)
-        //             .is_err()
-        //         {
-        //             let object = Sata::default().encode(
-        //                 warp::sata::libipld::IpldCodec::DagJson,
-        //                 warp::sata::Kind::Reference,
-        //                 ident.clone(),
-        //             )?;
-        //             cache.add_data(DataType::from(Module::Accounts), &object)?;
-        //         }
-        //     }
-        // }
 
         Ok(idents)
     }
