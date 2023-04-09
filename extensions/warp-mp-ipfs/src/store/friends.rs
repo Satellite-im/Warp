@@ -19,7 +19,8 @@ use warp::tesseract::Tesseract;
 
 use crate::config::MpIpfsConfig;
 
-use super::document::DocumentType;
+use super::document::utils::GetLocalDag;
+use super::document::ToCid;
 use super::identity::{IdentityStore, LookupBy};
 use super::phonebook::PhoneBook;
 use super::queue::Queue;
@@ -670,23 +671,23 @@ impl FriendsStore {
     pub async fn block_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.blocks {
-            Some(object) => object.resolve(self.ipfs.clone(), None).await,
+            Some(object) => object.get_local_dag(&self.ipfs).await,
             None => Ok(Vec::new()),
         }
     }
 
     pub async fn set_block_list(&mut self, list: Vec<DID>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
-        let old_document = root_document.blocks.clone();
-        if matches!(old_document, Some(DocumentType::Object(_)) | None) {
-            root_document.blocks = Some(DocumentType::Object(list));
-        } else if matches!(old_document, Some(DocumentType::Cid(_))) {
-            let new_cid = self.identity.put_dag(list).await?;
-            root_document.blocks = Some(new_cid.into());
+        let old_document = root_document.blocks;
+
+        if list.is_empty() {
+            root_document.block_by = None;
+        } else {
+            root_document.block_by = Some(list.to_cid(&self.ipfs).await?);
         }
 
         self.identity.set_root_document(root_document).await?;
-        if let Some(DocumentType::Cid(cid)) = old_document {
+        if let Some(cid) = old_document {
             if self.ipfs.is_pinned(&cid).await? {
                 self.ipfs.remove_pin(&cid, false).await?;
             }
@@ -792,23 +793,23 @@ impl FriendsStore {
     pub async fn block_by_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.block_by {
-            Some(object) => object.resolve(self.ipfs.clone(), None).await,
+            Some(object) => object.get_local_dag(&self.ipfs).await,
             None => Ok(Vec::new()),
         }
     }
 
     pub async fn set_block_by_list(&mut self, list: Vec<DID>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
-        let old_document = root_document.block_by.clone();
-        if matches!(old_document, Some(DocumentType::Object(_)) | None) {
-            root_document.block_by = Some(DocumentType::Object(list));
-        } else if matches!(old_document, Some(DocumentType::Cid(_))) {
-            let new_cid = self.identity.put_dag(list).await?;
-            root_document.block_by = Some(new_cid.into());
+        let old_document = root_document.block_by;
+
+        if list.is_empty() {
+            root_document.block_by = None;
+        } else {
+            root_document.block_by = Some(list.to_cid(&self.ipfs).await?);
         }
 
         self.identity.set_root_document(root_document).await?;
-        if let Some(DocumentType::Cid(cid)) = old_document {
+        if let Some(cid) = old_document {
             if self.ipfs.is_pinned(&cid).await? {
                 self.ipfs.remove_pin(&cid, false).await?;
             }
@@ -826,23 +827,23 @@ impl FriendsStore {
     pub async fn friends_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.friends {
-            Some(object) => object.resolve(self.ipfs.clone(), None).await,
+            Some(object) => object.get_local_dag(&self.ipfs).await,
             None => Ok(Vec::new()),
         }
     }
 
     pub async fn set_friends_list(&mut self, list: Vec<DID>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
-        let old_document = root_document.friends.clone();
-        if matches!(old_document, Some(DocumentType::Object(_)) | None) {
-            root_document.friends = Some(DocumentType::Object(list));
-        } else if matches!(old_document, Some(DocumentType::Cid(_))) {
-            let new_cid = self.identity.put_dag(list).await?;
-            root_document.friends = Some(new_cid.into());
+        let old_document = root_document.friends;
+
+        if list.is_empty() {
+            root_document.friends = None;
+        } else {
+            root_document.friends = Some(list.to_cid(&self.ipfs).await?);
         }
 
         self.identity.set_root_document(root_document).await?;
-        if let Some(DocumentType::Cid(cid)) = old_document {
+        if let Some(cid) = old_document {
             if self.ipfs.is_pinned(&cid).await? {
                 self.ipfs.remove_pin(&cid, false).await?;
             }
@@ -938,29 +939,28 @@ impl FriendsStore {
     pub async fn list_all_raw_request(&self) -> Result<Vec<Request>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.request {
-            Some(object) => object.resolve(self.ipfs.clone(), None).await,
+            Some(object) => object.get_local_dag(&self.ipfs).await,
             None => Ok(Vec::new()),
         }
     }
 
     pub async fn set_request_list(&mut self, list: Vec<Request>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
-        let old_document = root_document.request.clone();
-        if matches!(old_document, Some(DocumentType::Object(_)) | None) {
-            root_document.request = Some(DocumentType::Object(list));
-        } else if matches!(old_document, Some(DocumentType::Cid(_))) {
-            let new_cid = self.identity.put_dag(list).await?;
-            root_document.request = Some(new_cid.into());
+        let old_document = root_document.request;
+        if list.is_empty() {
+            root_document.request = None;
+        } else {
+            root_document.request = Some(list.to_cid(&self.ipfs).await?);
         }
 
         self.identity.set_root_document(root_document).await?;
-
-        if let Some(DocumentType::Cid(cid)) = old_document {
+        if let Some(cid) = old_document {
             if self.ipfs.is_pinned(&cid).await? {
                 self.ipfs.remove_pin(&cid, false).await?;
             }
             self.ipfs.remove_block(cid).await?;
         }
+
         Ok(())
     }
 
