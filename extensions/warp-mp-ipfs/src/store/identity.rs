@@ -30,8 +30,9 @@ use tracing::{
     warn,
 };
 
+use warp::{crypto::zeroize::Zeroizing, multipass::identity::Platform};
 use warp::{
-    crypto::{cipher::Cipher, did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
+    crypto::{did_key::Generate, DIDKey, Ed25519KeyPair, Fingerprint, DID},
     error::Error,
     multipass::{
         identity::{Identity, IdentityStatus, SHORT_ID_SIZE},
@@ -40,10 +41,6 @@ use warp::{
     sync::Arc,
     tesseract::Tesseract,
 };
-use warp::{
-    crypto::{did_key::ECDH, zeroize::Zeroizing, KeyMaterial},
-    multipass::identity::Platform,
-};
 
 use super::{
     connected_to_peer,
@@ -51,6 +48,7 @@ use super::{
         identity::{unixfs_fetch, IdentityDocument},
         GetDag, RootDocument, ToCid,
     },
+    ecdh_decrypt, ecdh_encrypt,
     friends::{FriendsStore, Request},
     libp2p_pub_to_did,
 };
@@ -386,18 +384,11 @@ impl IdentityStore {
     async fn request(&self, out_did: &DID, option: RequestOption) -> Result<(), Error> {
         let pk_did = self.get_keypair_did()?;
 
-        let prikey = Ed25519KeyPair::from_secret_key(&pk_did.private_key_bytes()).get_x25519();
-        let pubkey = Ed25519KeyPair::from_public_key(&out_did.public_key_bytes()).get_x25519();
-
-        let shared_key = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
-            .map(Zeroizing::new)
-            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-
         let event = IdentityEvent::Request { option };
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = Cipher::direct_encrypt(&payload_bytes, &shared_key)?;
+        let bytes = ecdh_encrypt(&pk_did, Some(out_did.clone()), payload_bytes)?;
 
         let topic = format!("/peer/{out_did}/events");
 
@@ -417,13 +408,6 @@ impl IdentityStore {
 
     pub async fn push(&self, out_did: &DID) -> Result<(), Error> {
         let pk_did = self.get_keypair_did()?;
-
-        let prikey = Ed25519KeyPair::from_secret_key(&pk_did.private_key_bytes()).get_x25519();
-        let pubkey = Ed25519KeyPair::from_public_key(&out_did.public_key_bytes()).get_x25519();
-
-        let shared_key = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
-            .map(Zeroizing::new)
-            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
         let root = self.get_root_document().await?;
 
@@ -459,7 +443,7 @@ impl IdentityStore {
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = Cipher::direct_encrypt(&payload_bytes, &shared_key)?;
+        let bytes = ecdh_encrypt(&pk_did, Some(out_did.clone()), payload_bytes)?;
 
         let topic = format!("/peer/{out_did}/events");
 
@@ -479,13 +463,6 @@ impl IdentityStore {
 
     pub async fn push_profile_picture(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
         let pk_did = self.get_keypair_did()?;
-
-        let prikey = Ed25519KeyPair::from_secret_key(&pk_did.private_key_bytes()).get_x25519();
-        let pubkey = Ed25519KeyPair::from_public_key(&out_did.public_key_bytes()).get_x25519();
-
-        let shared_key = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
-            .map(Zeroizing::new)
-            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
         let root = self.get_root_document().await?;
 
@@ -511,7 +488,7 @@ impl IdentityStore {
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = Cipher::direct_encrypt(&payload_bytes, &shared_key)?;
+        let bytes = ecdh_encrypt(&pk_did, Some(out_did.clone()), payload_bytes)?;
 
         let topic = format!("/peer/{out_did}/events");
 
@@ -531,13 +508,6 @@ impl IdentityStore {
 
     pub async fn push_profile_banner(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
         let pk_did = self.get_keypair_did()?;
-
-        let prikey = Ed25519KeyPair::from_secret_key(&pk_did.private_key_bytes()).get_x25519();
-        let pubkey = Ed25519KeyPair::from_public_key(&out_did.public_key_bytes()).get_x25519();
-
-        let shared_key = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
-            .map(Zeroizing::new)
-            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
         let root = self.get_root_document().await?;
 
@@ -563,7 +533,7 @@ impl IdentityStore {
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = Cipher::direct_encrypt(&payload_bytes, &shared_key)?;
+        let bytes = ecdh_encrypt(&pk_did, Some(out_did.clone()), payload_bytes)?;
 
         let topic = format!("/peer/{out_did}/events");
 
@@ -584,14 +554,7 @@ impl IdentityStore {
     async fn process_message(&mut self, in_did: DID, message: &[u8]) -> anyhow::Result<()> {
         let pk_did = self.get_keypair_did()?;
 
-        let prikey = Ed25519KeyPair::from_secret_key(&pk_did.private_key_bytes()).get_x25519();
-        let pubkey = Ed25519KeyPair::from_public_key(&in_did.public_key_bytes()).get_x25519();
-
-        let shared_key = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
-            .map(Zeroizing::new)
-            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-
-        let bytes = Cipher::direct_decrypt(message, &shared_key)?;
+        let bytes = ecdh_decrypt(&pk_did, Some(in_did.clone()), message)?;
 
         let event = serde_json::from_slice::<IdentityEvent>(&bytes)?;
 
