@@ -57,14 +57,13 @@ impl IdentityDocument {
         identity.set_did_key(self.did.clone());
         identity.set_short_id(self.short_id);
         identity.set_status_message(self.status_message.clone());
-        let mut graphics = identity.graphics();
 
         if with_image {
             if let Some(cid) = self.profile_picture {
                 match unixfs_fetch(ipfs, cid, None, true, Some(2 * 1024 * 1024)).await {
                     Ok(data) => {
                         let picture: String = serde_json::from_slice(&data).unwrap_or_default();
-                        graphics.set_profile_picture(&picture);
+                        identity.set_profile_picture(&picture);
                     }
                     Err(_e) => {}
                 }
@@ -74,14 +73,12 @@ impl IdentityDocument {
                 match unixfs_fetch(ipfs, cid, None, true, Some(2 * 1024 * 1024)).await {
                     Ok(data) => {
                         let picture: String = serde_json::from_slice(&data).unwrap_or_default();
-                        graphics.set_profile_banner(&picture);
+                        identity.set_profile_banner(&picture);
                     }
                     Err(_e) => {}
                 }
             }
         }
-
-        identity.set_graphics(graphics);
 
         Ok(identity)
     }
