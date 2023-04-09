@@ -409,13 +409,7 @@ impl IdentityStore {
     pub async fn push(&self, out_did: &DID) -> Result<(), Error> {
         let pk_did = self.get_keypair_did()?;
 
-        let root = self.get_root_document().await?;
-
-        let mut identity = self
-            .get_dag::<IdentityDocument>(IpfsPath::from(root.identity), None)
-            .await?;
-
-        identity.verify()?;
+        let mut identity = self.own_identity_document().await?;
 
         let _override_ipld = self.override_ipld.load(Ordering::Relaxed);
 
@@ -464,13 +458,7 @@ impl IdentityStore {
     pub async fn push_profile_picture(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
         let pk_did = self.get_keypair_did()?;
 
-        let root = self.get_root_document().await?;
-
-        let identity = self
-            .get_local_dag::<IdentityDocument>(IpfsPath::from(root.identity))
-            .await?;
-
-        identity.verify()?;
+        let identity = self.own_identity_document().await?;
 
         let Some(picture_cid) = identity.profile_picture else {
             return Ok(())
@@ -509,13 +497,7 @@ impl IdentityStore {
     pub async fn push_profile_banner(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
         let pk_did = self.get_keypair_did()?;
 
-        let root = self.get_root_document().await?;
-
-        let identity = self
-            .get_local_dag::<IdentityDocument>(IpfsPath::from(root.identity))
-            .await?;
-
-        identity.verify()?;
+        let identity = self.own_identity_document().await?;
 
         let Some(banner_cid) = identity.profile_banner else {
             return Ok(())
