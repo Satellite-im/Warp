@@ -44,6 +44,8 @@ struct Opt {
     #[clap(long)]
     provide_platform_info: bool,
     #[clap(long)]
+    autoaccept_friend: bool,
+    #[clap(long)]
     wait: Option<u64>,
 }
 
@@ -175,8 +177,11 @@ async fn main() -> anyhow::Result<()> {
                                 .and_then(|list| list.first().cloned())
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
-
-                            writeln!(stdout, "> Pending request from {username}. Do \"request accept {did}\" to accept.")?;
+                            if !opt.autoaccept_friend { 
+                                writeln!(stdout, "> Pending request from {username}. Do \"request accept {did}\" to accept.")?;
+                            } else {
+                                account.accept_request(&did).await?;
+                            }
                         },
                         warp::multipass::MultiPassEventKind::FriendRequestSent { to: did } => {
                             let username = account
@@ -719,8 +724,8 @@ async fn main() -> anyhow::Result<()> {
                                     identity.username(),
                                     identity.did_key().to_string(),
                                     identity.status_message().unwrap_or_default(),
-                                    (!identity.graphics().profile_banner().is_empty()).to_string(),
-                                    (!identity.graphics().profile_picture().is_empty()).to_string(),
+                                    (!identity.profile_banner().is_empty()).to_string(),
+                                    (!identity.profile_picture().is_empty()).to_string(),
                                     platform.to_string(),
                                     format!("{status:?}"),
                                 ]);
