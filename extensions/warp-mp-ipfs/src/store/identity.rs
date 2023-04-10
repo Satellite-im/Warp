@@ -764,7 +764,7 @@ impl IdentityStore {
             None => return Default::default(),
         };
 
-        self.get_dag::<HashSet<CacheDocument>>(IpfsPath::from(cache_cid), None)
+        self.get_local_dag::<HashSet<CacheDocument>>(IpfsPath::from(cache_cid))
             .await
             .unwrap_or_default()
     }
@@ -842,10 +842,16 @@ impl IdentityStore {
                 if *pubkey == own_did {
                     return self.own_identity(true).await.map(|i| vec![i]);
                 }
-
-                if !self.discovery.contains(pubkey).await {
-                    self.discovery.insert(pubkey).await?;
-                }
+                tokio::spawn({
+                    let discovery = self.discovery.clone();
+                    let pubkey = pubkey.clone();
+                    async move {
+                        if !discovery.contains(&pubkey).await {
+                            discovery.insert(&pubkey).await?;
+                        }
+                        Ok::<_, Error>(())
+                    }
+                });
 
                 self.cache()
                     .await
@@ -855,8 +861,22 @@ impl IdentityStore {
                     .collect::<Vec<_>>()
             }
             LookupBy::DidKeys(list) => {
-                let mut items = vec![];
+                let mut items = HashSet::new();
                 let cache = self.cache().await;
+
+                tokio::spawn({
+                    let discovery = self.discovery.clone();
+                    let list = list.clone();
+                    let own_did = own_did.clone();
+                    async move {
+                        for pubkey in list {
+                            if !pubkey.eq(&own_did) && !discovery.contains(&pubkey).await {
+                                discovery.insert(&pubkey).await?;
+                            }
+                        }
+                        Ok::<_, Error>(())
+                    }
+                });
 
                 for pubkey in list {
                     if own_did.eq(pubkey) {
@@ -869,17 +889,12 @@ impl IdentityStore {
                         }
                         continue;
                     }
-                    if !self.discovery.contains(pubkey).await {
-                        self.discovery.insert(pubkey).await?;
-                    }
 
                     if let Some(cache) = cache.iter().find(|cache| cache.did.eq(pubkey)) {
-                        if !items.contains(cache) {
-                            items.push(cache.clone());
-                        }
+                        items.insert(cache.clone());
                     }
                 }
-                items
+                Vec::from_iter(items)
             }
             LookupBy::Username(username) if username.contains('#') => {
                 let cache = self.cache().await;
@@ -1083,6 +1098,20 @@ impl IdentityStore {
             .unbounded_send(RootDocumentEvents::Set(document, tx))
             .map_err(anyhow::Error::from)?;
         rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn get_local_dag<D: DeserializeOwned>(&self, path: IpfsPath) -> Result<D, Error> {
+        self.ipfs
+            .dag()
+            .get(path, &[], true)
+            .await
+            .map_err(anyhow::Error::from)
+            .map_err(Error::from)
+            .and_then(|ipld| {
+                from_ipld::<D>(ipld)
+                    .map_err(anyhow::Error::from)
+                    .map_err(Error::from)
+            })
     }
 
     pub async fn get_dag<D: DeserializeOwned>(
