@@ -43,30 +43,6 @@ pub struct ConversationDocument {
     pub signature: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
-pub struct ConversationRecipient {
-    pub date: DateTime<Utc>,
-    pub did: DID,
-}
-
-impl PartialOrd for ConversationRecipient {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.date.partial_cmp(&other.date)
-    }
-}
-
-impl Ord for ConversationRecipient {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.date.cmp(&other.date)
-    }
-}
-
-impl PartialEq for ConversationRecipient {
-    fn eq(&self, other: &Self) -> bool {
-        self.date.eq(&other.date) && self.did.eq(&other.did)
-    }
-}
-
 impl From<Conversation> for ConversationDocument {
     fn from(conversation: Conversation) -> Self {
         ConversationDocument::from(&conversation)
