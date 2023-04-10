@@ -439,6 +439,7 @@ impl IpfsIdentity {
                 config.store_setting.override_ipld,
                 config.store_setting.share_platform,
                 config.store_setting.update_events,
+                config.store_setting.disable_image,
             ),
         )
         .await?;

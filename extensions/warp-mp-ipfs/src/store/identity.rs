@@ -89,6 +89,8 @@ pub struct IdentityStore {
     update_event: UpdateEvents,
 
     friend_store: Arc<tokio::sync::RwLock<Option<FriendsStore>>>,
+
+    disable_image: bool,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -137,12 +139,13 @@ impl IdentityStore {
         tesseract: Tesseract,
         interval: Option<Duration>,
         tx: broadcast::Sender<MultiPassEventKind>,
-        (discovery, relay, override_ipld, share_platform, update_event): (
+        (discovery, relay, override_ipld, share_platform, update_event, disable_image): (
             Discovery,
             Option<Vec<Multiaddr>>,
             bool,
             bool,
             UpdateEvents,
+            bool
         ),
     ) -> Result<Self, Error> {
         if let Some(path) = path.as_ref() {
@@ -182,6 +185,7 @@ impl IdentityStore {
             event,
             friend_store,
             update_event,
+            disable_image,
         };
 
         if store.path.is_some() {
@@ -947,7 +951,7 @@ impl IdentityStore {
         };
 
         let list = futures::stream::FuturesUnordered::from_iter(idents_docs.iter().map(|doc| {
-            doc.resolve(self.ipfs.clone(), Some(Duration::from_secs(60)))
+            doc.resolve(self.ipfs.clone(), Some(Duration::from_secs(60)), self.disable_image)
                 .boxed()
         }))
         .filter_map(|res| async { res.ok() })
