@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
-use futures::channel::oneshot::Sender as OneshotSender;
+use futures::channel::oneshot::{self, Sender as OneshotSender};
 use futures::stream::FuturesUnordered;
 use futures::{SinkExt, Stream, StreamExt};
 use rust_ipfs::libp2p::swarm::dial_opts::DialOpts;
@@ -659,6 +659,7 @@ impl MessageStore {
                 futures::pin_mut!(stream);
                 loop {
                     let (direction, event, ret) = tokio::select! {
+                        biased;
                         event = rx.next() => {
                             let Some((event, ret)) = event else {
                                 continue;
@@ -2211,9 +2212,13 @@ impl MessageStore {
 
         let event = MessagingEvents::New { message };
 
-        tx.send((event.clone(), None))
+        let (one_tx, one_rx) = oneshot::channel();
+
+        tx.send((event.clone(), Some(one_tx)))
             .await
             .map_err(anyhow::Error::from)?;
+
+        one_rx.await.map_err(anyhow::Error::from)??;
 
         self.send_raw_event(conversation_id, Some(message_id), event, true)
             .await
@@ -2272,9 +2277,12 @@ impl MessageStore {
             signature,
         };
 
-        tx.send((event.clone(), None))
+        let (one_tx, one_rx) = oneshot::channel();
+        tx.send((event.clone(), Some(one_tx)))
             .await
             .map_err(anyhow::Error::from)?;
+
+        one_rx.await.map_err(anyhow::Error::from)??;
 
         self.send_raw_event(conversation_id, None, event, true)
             .await
@@ -2336,9 +2344,12 @@ impl MessageStore {
 
         let event = MessagingEvents::New { message };
 
-        tx.send((event.clone(), None))
+        let (one_tx, one_rx) = oneshot::channel();
+        tx.send((event.clone(), Some(one_tx)))
             .await
             .map_err(anyhow::Error::from)?;
+
+        one_rx.await.map_err(anyhow::Error::from)??;
 
         self.send_raw_event(conversation_id, None, event, true)
             .await
@@ -2358,9 +2369,12 @@ impl MessageStore {
             message_id,
         };
 
-        tx.send((event.clone(), None))
+        let (one_tx, one_rx) = oneshot::channel();
+        tx.send((event.clone(), Some(one_tx)))
             .await
             .map_err(anyhow::Error::from)?;
+
+        one_rx.await.map_err(anyhow::Error::from)??;
 
         if broadcast {
             self.send_raw_event(conversation_id, None, event, true)
@@ -2388,9 +2402,11 @@ impl MessageStore {
             state,
         };
 
-        tx.send((event.clone(), None))
+        let (one_tx, one_rx) = oneshot::channel();
+        tx.send((event.clone(), Some(one_tx)))
             .await
             .map_err(anyhow::Error::from)?;
+        one_rx.await.map_err(anyhow::Error::from)??;
 
         self.send_raw_event(conversation_id, None, event, true)
             .await
@@ -2426,9 +2442,11 @@ impl MessageStore {
             emoji,
         };
 
-        tx.send((event.clone(), None))
+        let (one_tx, one_rx) = oneshot::channel();
+        tx.send((event.clone(), Some(one_tx)))
             .await
             .map_err(anyhow::Error::from)?;
+        one_rx.await.map_err(anyhow::Error::from)??;
 
         self.send_raw_event(conversation_id, None, event, true)
             .await
@@ -2617,9 +2635,11 @@ impl MessageStore {
 
         let event = MessagingEvents::New { message };
 
-        tx.send((event.clone(), None))
+        let (one_tx, one_rx) = oneshot::channel();
+        tx.send((event.clone(), Some(one_tx)))
             .await
             .map_err(anyhow::Error::from)?;
+        one_rx.await.map_err(anyhow::Error::from)??;
 
         self.send_raw_event(conversation_id, None, event, true)
             .await
@@ -2823,7 +2843,6 @@ impl MessageStore {
 
         let event = serde_json::to_vec(&event)?;
 
-        //TODO: Send with Payload instead
         let bytes = match conversation.conversation_type {
             ConversationType::Direct => {
                 let recipient = conversation
