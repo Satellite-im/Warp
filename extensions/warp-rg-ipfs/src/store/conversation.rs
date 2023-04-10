@@ -256,7 +256,7 @@ impl ConversationDocument {
     pub async fn messages_length(&self, ipfs: &Ipfs) -> Result<usize, Error> {
         let document = self.get_raw_message_list(ipfs).await?;
         if let Ipld::List(list) = document {
-            return Ok(list.len())
+            return Ok(list.len());
         }
         Err(Error::InvalidDataType)
     }
@@ -517,6 +517,10 @@ impl ConversationDocument {
             None => return Ok(()),
         };
 
+        if ipfs.is_pinned(&cid).await? {
+            ipfs.remove_pin(&cid, false).await?;
+        }
+
         let mut ids = vec![];
 
         for document in messages {
@@ -668,6 +672,8 @@ impl MessageDocument {
         };
 
         let message_cid = data.to_cid(ipfs).await?;
+
+        ipfs.insert_pin(&message_cid, false).await?;
 
         info!("Setting Message to document");
         self.message = message_cid;
