@@ -381,6 +381,14 @@ impl MessageStore {
                                                     continue
                                                 };
 
+                                            if !matches!(
+                                                conversation.conversation_type,
+                                                ConversationType::Group
+                                            ) {
+                                                //Only group conversations support keys
+                                                continue;
+                                            }
+
                                             if !conversation
                                                 .recipients()
                                                 .contains(&payload.sender())
@@ -512,6 +520,14 @@ impl MessageStore {
                                             let Ok(conversation) = store.get_conversation(conversation_id).await else {
                                                     continue
                                                 };
+
+                                            if !matches!(
+                                                conversation.conversation_type,
+                                                ConversationType::Group
+                                            ) {
+                                                //Only group conversations support keys
+                                                continue;
+                                            }
 
                                             if !conversation.recipients().contains(&sender) {
                                                 continue;
