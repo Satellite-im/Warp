@@ -1615,7 +1615,7 @@ impl MessageStore {
         if let Some(old_cid) = old_cid {
             if old_cid != cid {
                 if self.ipfs.is_pinned(&old_cid).await? {
-                    self.ipfs.insert_pin(&old_cid, false).await?;
+                    self.ipfs.remove_pin(&old_cid, false).await?;
                 }
                 if let Err(_e) = self.ipfs.remove_block(old_cid).await {}
             }
