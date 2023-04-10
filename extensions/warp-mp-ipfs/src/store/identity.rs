@@ -597,54 +597,11 @@ impl IdentityStore {
 
                 match document {
                     Some(document) => {
-                        let mut change = false;
-                        if document.username != identity.username {
-                            change = true;
-                        }
-                        if document.profile_picture != identity.profile_picture {
-                            change = true;
-                            if let Err(_e) = self
-                                .request(
-                                    &in_did,
-                                    RequestOption::Image {
-                                        banner: None,
-                                        picture: identity.profile_picture,
-                                    },
-                                )
-                                .await
-                            {}
-                        }
-                        if document.profile_banner != identity.profile_banner {
-                            change = true;
-                            if let Err(_e) = self
-                                .request(
-                                    &in_did,
-                                    RequestOption::Image {
-                                        banner: identity.profile_banner,
-                                        picture: None,
-                                    },
-                                )
-                                .await
-                            {}
-                        }
+                        if document.different(&identity) {
+                            
 
-                        if document.status != identity.status {
-                            change = true;
-                        }
-                        if document.platform != identity.platform {
-                            change = true;
-                        }
-                        if document.status_message != identity.status_message {
-                            change = true;
-                        }
-
-                        if document.signature != identity.signature {
-                            change = true;
-                        }
-
-                        if change {
                             let document_did = identity.did.clone();
-                            cache_documents.replace(identity);
+                            cache_documents.replace(identity.clone());
 
                             let new_cid = self.put_dag(cache_documents).await?;
 
@@ -671,7 +628,37 @@ impl IdentityStore {
                                     }
                                 }
                             }
-
+                            tokio::spawn({
+                                let store = self.clone();
+                                async move {
+                                    if document.profile_picture != identity.profile_picture {
+                                        if let Err(_e) = store
+                                            .request(
+                                                &in_did,
+                                                RequestOption::Image {
+                                                    banner: None,
+                                                    picture: identity.profile_picture,
+                                                },
+                                            )
+                                            .await
+                                        {}
+                                    }
+                                    if document.profile_banner != identity.profile_banner {
+                                        if let Err(_e) = store
+                                            .request(
+                                                &in_did,
+                                                RequestOption::Image {
+                                                    banner: identity.profile_banner,
+                                                    picture: None,
+                                                },
+                                            )
+                                            .await
+                                        {}
+                                    }
+        
+                                }
+                            });
+                            
                             if emit {
                                 let tx = self.event.clone();
                                 let _ = tx

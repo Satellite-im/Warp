@@ -50,6 +50,27 @@ impl Hash for IdentityDocument {
 }
 
 impl IdentityDocument {
+    // Used to tell if another identity document is different but also valid
+    pub fn different(&self, other: &Self) -> bool {
+        if self.ne(other) {
+            return false;
+        }
+
+        if self.username != other.username
+            || self.status_message != other.status_message
+            || self.status != other.status
+            || self.profile_banner != other.profile_banner
+            || self.profile_picture != other.profile_picture
+            || self.platform != other.platform
+        {
+            return other.verify().is_ok();
+        }
+
+        false
+    }
+}
+
+impl IdentityDocument {
     pub async fn resolve(&self, ipfs: &Ipfs, with_image: bool) -> Result<Identity, Error> {
         self.verify()?;
         let mut identity = Identity::default();
