@@ -381,6 +381,7 @@ impl IdentityStore {
         self.push_iter(list).await
     }
 
+    #[tracing::instrument(skip(self))]
     async fn request(&self, out_did: &DID, option: RequestOption) -> Result<(), Error> {
         let pk_did = self.get_keypair_did()?;
 
@@ -406,6 +407,7 @@ impl IdentityStore {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn push(&self, out_did: &DID) -> Result<(), Error> {
         let pk_did = self.get_keypair_did()?;
 
@@ -432,6 +434,8 @@ impl IdentityStore {
                 self.update_event,
                 UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
             ) && is_friend;
+        
+        log::debug!("Including cid in push: {include_pictures}");
 
         identity.profile_picture = if include_pictures {
             profile_picture
@@ -474,6 +478,7 @@ impl IdentityStore {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn push_profile_picture(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
         let pk_did = self.get_keypair_did()?;
 
@@ -513,6 +518,7 @@ impl IdentityStore {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn push_profile_banner(&self, out_did: &DID, cid: Cid) -> Result<(), Error> {
         let pk_did = self.get_keypair_did()?;
 
@@ -552,6 +558,7 @@ impl IdentityStore {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, message))]
     async fn process_message(&mut self, in_did: DID, message: &[u8]) -> anyhow::Result<()> {
         let pk_did = self.get_keypair_did()?;
 
@@ -834,6 +841,7 @@ impl IdentityStore {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn create_identity(&mut self, username: Option<&str>) -> Result<Identity, Error> {
         let raw_kp = self.get_raw_keypair()?;
 
