@@ -4,7 +4,7 @@ use futures::{channel::mpsc, StreamExt};
 use libipld::IpldCodec;
 use rust_ipfs::Ipfs;
 use tokio::{sync::RwLock, task::JoinHandle};
-use tracing::log::error;
+use tracing::log::{self, error};
 use warp::{
     crypto::{
         cipher::Cipher,
@@ -69,11 +69,13 @@ impl Queue {
         queue
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get(&self, did: &DID) -> Option<PayloadEvent> {
         let entry = self.entries.read().await.get(did).cloned()?;
         Some(entry.event())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn insert(&self, did: &DID, payload: PayloadEvent) {
         if let Err(_e) = self.discovery.insert(did).await {}
         self.raw_insert(did, payload).await;
@@ -111,6 +113,7 @@ impl Queue {
         map
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn remove(&self, did: &DID) -> Option<PayloadEvent> {
         let entry = self.entries.write().await.remove(did).clone();
 
@@ -224,11 +227,16 @@ impl QueueEntry {
         let task = tokio::spawn({
             let entry = entry.clone();
             async move {
+                let mut retry = 10;
                 loop {
                     let entry = entry.clone();
                     if let Ok(crate::store::PeerConnectionType::Connected) =
                         connected_to_peer(&entry.ipfs, entry.recipient.clone()).await
                     {
+                        log::info!(
+                            "{} is connected. Attempting to send request",
+                            entry.recipient.clone()
+                        );
                         let entry = entry.clone();
 
                         let recipient = entry.recipient.clone();
@@ -251,15 +259,22 @@ impl QueueEntry {
                             let bytes = serde_json::to_vec(&payload)?;
 
                             let topic = get_inbox_topic(&recipient);
-
+                            log::info!("Sending request to {}", recipient.clone());
                             entry.ipfs.pubsub_publish(topic, bytes).await?;
 
                             Ok::<_, anyhow::Error>(())
                         };
 
-                        if res.await.is_ok() {
-                            let _ = tx.clone().unbounded_send(entry.recipient.clone()).ok();
-                            break;
+                        match res.await {
+                            Ok(_) => {
+                                let _ = tx.clone().unbounded_send(entry.recipient.clone()).ok();
+                                break;
+                            }
+                            Err(e) => {
+                                log::error!("Error sending request: {e}. Retrying in {}s", retry);
+                                tokio::time::sleep(Duration::from_secs(retry)).await;
+                                retry += 5;
+                            }
                         }
                     }
                     tokio::time::sleep(Duration::from_secs(1)).await;
