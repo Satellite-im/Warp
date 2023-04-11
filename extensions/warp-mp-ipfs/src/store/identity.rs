@@ -413,7 +413,7 @@ impl IdentityStore {
 
         let _override_ipld = self.override_ipld.load(Ordering::Relaxed);
 
-        let _is_friend = match self.friend_store().await {
+        let is_friend = match self.friend_store().await {
             Ok(store) => store.is_friend(out_did).await.unwrap_or_default(),
             _ => false,
         };
@@ -424,6 +424,25 @@ impl IdentityStore {
 
         let status = self.online_status.read().await.clone();
 
+        let profile_picture = identity.profile_picture;
+        let profile_banner = identity.profile_banner;
+
+        let include_pictures = matches!(self.update_event, UpdateEvents::Enabled)
+            || matches!(
+                self.update_event,
+                UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
+            ) && is_friend;
+
+        identity.profile_picture = if include_pictures {
+            profile_picture
+        } else {
+            None
+        };
+        identity.profile_banner = if include_pictures {
+            profile_banner
+        } else {
+            None
+        };
         identity.status = status;
         identity.platform = platform;
 
@@ -598,8 +617,6 @@ impl IdentityStore {
                 match document {
                     Some(document) => {
                         if document.different(&identity) {
-                            
-
                             let document_did = identity.did.clone();
                             cache_documents.replace(identity.clone());
 
@@ -655,10 +672,9 @@ impl IdentityStore {
                                             .await
                                         {}
                                     }
-        
                                 }
                             });
-                            
+
                             if emit {
                                 let tx = self.event.clone();
                                 let _ = tx
