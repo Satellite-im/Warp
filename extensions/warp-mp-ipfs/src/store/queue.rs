@@ -271,7 +271,7 @@ impl QueueEntry {
                                 break;
                             }
                             Err(e) => {
-                                log::error!("Error sending request: {e}. Retrying in {}s", retry);
+                                log::error!("Error sending request for {}: {e}. Retrying in {}s", &entry.recipient, retry);
                                 tokio::time::sleep(Duration::from_secs(retry)).await;
                                 retry += 5;
                             }
