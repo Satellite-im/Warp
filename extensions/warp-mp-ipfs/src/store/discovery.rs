@@ -5,7 +5,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Duration,
+    time::Duration, fmt::Debug,
 };
 
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
@@ -111,7 +111,8 @@ impl Discovery {
         self.config.clone()
     }
 
-    pub async fn insert<P: Into<PeerType>>(&self, peer_type: P) -> Result<(), Error> {
+    #[tracing::instrument(skip(self))]
+    pub async fn insert<P: Into<PeerType> + Debug>(&self, peer_type: P) -> Result<(), Error> {
         let (peer_id, did_key) = match &peer_type.into() {
             PeerType::PeerId(peer_id) => (*peer_id, None),
             PeerType::DID(did_key) => {

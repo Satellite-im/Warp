@@ -259,6 +259,7 @@ impl FriendsStore {
     }
 
     //TODO: Implement Errors
+    // #[tracing::instrument(skip(self, data))]
     async fn check_request_message(&mut self, data: Sata) -> anyhow::Result<()> {
         let data = data.decrypt::<PayloadEvent>(&self.did_key)?;
 
@@ -499,6 +500,7 @@ impl FriendsStore {
 }
 
 impl FriendsStore {
+    #[tracing::instrument(skip(self))]
     pub async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
         let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
@@ -541,6 +543,7 @@ impl FriendsStore {
         self.broadcast_request((pubkey, &payload), true, true).await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
@@ -584,6 +587,7 @@ impl FriendsStore {
             .await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn reject_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
@@ -619,6 +623,7 @@ impl FriendsStore {
             .await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
@@ -660,6 +665,7 @@ impl FriendsStore {
             .await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn has_request_from(&self, pubkey: &DID) -> Result<bool, Error> {
         self.list_incoming_request()
             .await
@@ -668,6 +674,7 @@ impl FriendsStore {
 }
 
 impl FriendsStore {
+    #[tracing::instrument(skip(self))]
     pub async fn block_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.blocks {
@@ -696,12 +703,14 @@ impl FriendsStore {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn is_blocked(&self, public_key: &DID) -> Result<bool, Error> {
         self.block_list()
             .await
             .map(|list| list.contains(public_key))
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
@@ -755,6 +764,7 @@ impl FriendsStore {
             .await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
@@ -790,6 +800,7 @@ impl FriendsStore {
 }
 
 impl FriendsStore {
+    
     pub async fn block_by_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.block_by {
@@ -824,6 +835,7 @@ impl FriendsStore {
 }
 
 impl FriendsStore {
+    
     pub async fn friends_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.friends {
@@ -853,6 +865,7 @@ impl FriendsStore {
     }
 
     // Should not be called directly but only after a request is accepted
+    #[tracing::instrument(skip(self))]
     pub async fn add_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
         if self.is_friend(pubkey).await? {
             return Err(Error::FriendExist);
@@ -889,6 +902,7 @@ impl FriendsStore {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, broadcast))]
     pub async fn remove_friend(&mut self, pubkey: &DID, broadcast: bool) -> Result<(), Error> {
         if !self.is_friend(pubkey).await? {
             return Err(Error::FriendDoesntExist);
@@ -930,6 +944,7 @@ impl FriendsStore {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn is_friend(&self, pubkey: &DID) -> Result<bool, Error> {
         self.friends_list().await.map(|list| list.contains(pubkey))
     }
@@ -970,6 +985,7 @@ impl FriendsStore {
             .map(|list| list.iter().any(|request| request.eq(did)))
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
         self.list_all_raw_request().await.map(|list| {
             list.iter()
@@ -982,12 +998,14 @@ impl FriendsStore {
         })
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
         self.list_outgoing_request()
             .await
             .map(|list| list.iter().any(|request| request.eq(did)))
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
         self.list_all_raw_request().await.map(|list| {
             list.iter()
@@ -999,7 +1017,8 @@ impl FriendsStore {
                 .collect::<Vec<_>>()
         })
     }
-
+    
+    #[tracing::instrument(skip(self))]
     pub async fn broadcast_request(
         &mut self,
         (recipient, payload): (&DID, &PayloadEvent),
