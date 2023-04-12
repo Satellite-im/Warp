@@ -1074,6 +1074,10 @@ impl FriendsStore {
 
         let bytes = serde_json::to_vec(&e_payload)?;
 
+        log::trace!("Rquest Payload size: {} bytes", bytes.len());
+
+        log::info!("Sending event to {recipient}");
+
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
         let mut queued = false;
@@ -1101,9 +1105,12 @@ impl FriendsStore {
             self.signal.write().await.remove(recipient);
         }
 
-        if !queued && matches!(payload.event, Event::Request) {
+        if !queued {
             let end = start.elapsed();
             log::trace!("Took {}ms to send event", end.as_millis());
+        }
+
+        if !queued && matches!(payload.event, Event::Request) {
             if let Some(rx) = std::mem::take(&mut rx) {
                 if let Some(timeout) = self.wait_on_response {
                     let start = Instant::now();
