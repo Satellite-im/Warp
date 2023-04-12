@@ -398,7 +398,7 @@ impl IdentityStore {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn request(&self, out_did: &DID, option: RequestOption) -> Result<(), Error> {
+    pub async fn request(&self, out_did: &DID, option: RequestOption) -> Result<(), Error> {
         let pk_did = self.get_keypair_did()?;
 
         let event = IdentityEvent::Request { option };

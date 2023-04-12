@@ -452,6 +452,7 @@ impl FriendsStore {
                 self.set_block_by_list(list).await?;
 
                 if completed {
+                    let _ = self.identity.push(&data.sender).await.ok();
                     if let Err(e) = self
                         .tx
                         .send(MultiPassEventKind::BlockedBy { did: data.sender })
@@ -469,6 +470,7 @@ impl FriendsStore {
                 let completed = list.remove_item(&data.sender);
                 self.set_block_by_list(list).await?;
                 if completed {
+                    let _ = self.identity.push(&data.sender).await.ok();
                     if let Err(e) = self
                         .tx
                         .send(MultiPassEventKind::UnblockedBy { did: data.sender })
