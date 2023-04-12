@@ -406,6 +406,10 @@ impl IdentityStore {
 
         let bytes = ecdh_encrypt(&pk_did, Some(out_did.clone()), payload_bytes)?;
 
+        log::trace!("Payload size: {} bytes", bytes.len());
+
+        log::info!("Sending event to {out_did}");
+
         let topic = format!("/peer/{out_did}/events");
 
         let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
@@ -416,7 +420,11 @@ impl IdentityStore {
             .await?
             .contains(&out_peer_id)
         {
+            let timer = Instant::now();
             self.ipfs.pubsub_publish(topic, bytes).await?;
+            let end = timer.elapsed();
+            log::info!("Event sent to {out_did}");
+            log::trace!("Took {}ms to send event", end.as_millis());
         }
 
         Ok(())
@@ -705,7 +713,7 @@ impl IdentityStore {
                                             "Requesting profile picture from {}",
                                             identity.did
                                         );
-                                        if let Err(_e) = store
+                                        if let Err(e) = store
                                             .request(
                                                 &in_did,
                                                 RequestOption::Image {
@@ -714,7 +722,9 @@ impl IdentityStore {
                                                 },
                                             )
                                             .await
-                                        {}
+                                        {
+                                            error!("Error requesting profile picture from {in_did}: {e}");
+                                        }
                                     }
                                     if document.profile_banner != identity.profile_banner
                                         && identity.profile_banner.is_some()
@@ -723,7 +733,7 @@ impl IdentityStore {
                                             "Requesting profile banner from {}",
                                             identity.did
                                         );
-                                        if let Err(_e) = store
+                                        if let Err(e) = store
                                             .request(
                                                 &in_did,
                                                 RequestOption::Image {
@@ -732,7 +742,9 @@ impl IdentityStore {
                                                 },
                                             )
                                             .await
-                                        {}
+                                        {
+                                            error!("Error requesting profile picture from {in_did}: {e}");
+                                        }
                                     }
                                 }
                             });
