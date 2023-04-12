@@ -689,9 +689,9 @@ impl FriendsStore {
         let old_document = root_document.blocks;
 
         if list.is_empty() {
-            root_document.block_by = None;
+            root_document.blocks = None;
         } else {
-            root_document.block_by = Some(list.to_cid(&self.ipfs).await?);
+            root_document.blocks = Some(list.to_cid(&self.ipfs).await?);
         }
 
         self.identity.set_root_document(root_document).await?;
