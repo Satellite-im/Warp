@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, RwLock};
-use tracing::log::{error, warn, self};
+use tracing::log::{self, error, warn};
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::MultiPassEventKind;
@@ -21,7 +21,7 @@ use crate::config::MpIpfsConfig;
 
 use super::document::utils::GetLocalDag;
 use super::document::ToCid;
-use super::identity::{IdentityStore, LookupBy};
+use super::identity::{IdentityStore, LookupBy, RequestOption};
 use super::phonebook::PhoneBook;
 use super::queue::Queue;
 use super::{did_keypair, did_to_libp2p_pub, discovery, libp2p_pub_to_did, VecExt};
@@ -452,7 +452,15 @@ impl FriendsStore {
                 self.set_block_by_list(list).await?;
 
                 if completed {
-                    let _ = self.identity.push(&data.sender).await.ok();
+                    tokio::spawn({
+                        let store = self.identity.clone();
+                        let sender = data.sender.clone();
+                        async move {
+                            let _ = store.push(&sender).await.ok();
+                            let _ = store.request(&sender, RequestOption::Identity).await.ok();
+                        }
+                    });
+
                     if let Err(e) = self
                         .tx
                         .send(MultiPassEventKind::BlockedBy { did: data.sender })
@@ -470,7 +478,14 @@ impl FriendsStore {
                 let completed = list.remove_item(&data.sender);
                 self.set_block_by_list(list).await?;
                 if completed {
-                    let _ = self.identity.push(&data.sender).await.ok();
+                    tokio::spawn({
+                        let store = self.identity.clone();
+                        let sender = data.sender.clone();
+                        async move {
+                            let _ = store.push(&sender).await.ok();
+                            let _ = store.request(&sender, RequestOption::Identity).await.ok();
+                        }
+                    });
                     if let Err(e) = self
                         .tx
                         .send(MultiPassEventKind::UnblockedBy { did: data.sender })
@@ -803,7 +818,6 @@ impl FriendsStore {
 }
 
 impl FriendsStore {
-    
     pub async fn block_by_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.block_by {
@@ -838,7 +852,6 @@ impl FriendsStore {
 }
 
 impl FriendsStore {
-    
     pub async fn friends_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.friends {
@@ -1020,7 +1033,7 @@ impl FriendsStore {
                 .collect::<Vec<_>>()
         })
     }
-    
+
     //TODO: Replace "Sata" with a light payload
     #[tracing::instrument(skip(self))]
     pub async fn broadcast_request(
@@ -1073,7 +1086,6 @@ impl FriendsStore {
             rx
         });
 
-        
         let start = Instant::now();
         if !peers.contains(&remote_peer_id)
             || (peers.contains(&remote_peer_id)
@@ -1133,7 +1145,14 @@ impl FriendsStore {
                 }
             }
             Event::Block => {
-                let _ = self.identity.push(recipient).await.ok();
+                tokio::spawn({
+                    let store = self.identity.clone();
+                    let recipient = recipient.clone();
+                    async move {
+                        let _ = store.push(&recipient).await.ok();
+                        let _ = store.request(&recipient, RequestOption::Identity).await.ok();
+                    }
+                });
                 if let Err(e) = self.tx.send(MultiPassEventKind::Blocked {
                     did: recipient.clone(),
                 }) {
@@ -1141,7 +1160,14 @@ impl FriendsStore {
                 }
             }
             Event::Unblock => {
-                let _ = self.identity.push(recipient).await.ok();
+                tokio::spawn({
+                    let store = self.identity.clone();
+                    let recipient = recipient.clone();
+                    async move {
+                        let _ = store.push(&recipient).await.ok();
+                        let _ = store.request(&recipient, RequestOption::Identity).await.ok();
+                    }
+                });
                 if let Err(e) = self.tx.send(MultiPassEventKind::Unblocked {
                     did: recipient.clone(),
                 }) {

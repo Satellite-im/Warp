@@ -617,7 +617,7 @@ impl IdentityStore {
 
         Ok(())
     }
-
+    
     #[tracing::instrument(skip(self, message))]
     async fn process_message(&mut self, in_did: DID, message: &[u8]) -> anyhow::Result<()> {
         let pk_did = self.get_keypair_did()?;
