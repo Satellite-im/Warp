@@ -46,6 +46,7 @@ use super::{
     connected_to_peer,
     document::{
         identity::{unixfs_fetch, IdentityDocument},
+        utils::GetLocalDag,
         GetDag, RootDocument, ToCid,
     },
     ecdh_decrypt, ecdh_encrypt,
@@ -341,7 +342,7 @@ impl IdentityStore {
                                 .clone()
                                 .ok_or(Error::IdentityDoesntExist)?;
                             let path = IpfsPath::from(root_cid);
-                            let document: RootDocument = path.get_dag(&ipfs, None).await?;
+                            let document: RootDocument = path.get_local_dag(&ipfs).await?;
                             document.verify(&ipfs).await.map(|_| document)
                         };
                         let _ = res.send(result.await);
@@ -443,33 +444,45 @@ impl IdentityStore {
             _ => false,
         };
 
+        let is_blocked = match self.friend_store().await {
+            Ok(store) => store.is_blocked(out_did).await.unwrap_or_default(),
+            _ => false,
+        };
+
+        let is_blocked_by = match self.friend_store().await {
+            Ok(store) => store.is_blocked_by(out_did).await.unwrap_or_default(),
+            _ => false,
+        };
+
         let share_platform = self.share_platform.load(Ordering::SeqCst);
 
-        let platform = share_platform.then_some(self.own_platform());
+        let platform =
+            (share_platform && (!is_blocked || !is_blocked_by)).then_some(self.own_platform());
 
-        let status = self.online_status.read().await.clone();
+        let status = self
+            .online_status
+            .read()
+            .await
+            .clone()
+            .and_then(|status| (!is_blocked || !is_blocked_by).then_some(status).or(Some(IdentityStatus::Offline)));
 
         let profile_picture = identity.profile_picture;
         let profile_banner = identity.profile_banner;
 
-        let include_pictures = matches!(self.update_event, UpdateEvents::Enabled)
+        let include_pictures = (matches!(self.update_event, UpdateEvents::Enabled)
             || matches!(
                 self.update_event,
                 UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
-            ) && is_friend;
+            ) && is_friend)
+            && (!is_blocked && !is_blocked_by);
 
-        log::debug!("Including cid in push: {include_pictures}");
+        log::trace!("Including cid in push: {include_pictures}");
 
-        identity.profile_picture = if include_pictures {
-            profile_picture
-        } else {
-            None
-        };
-        identity.profile_banner = if include_pictures {
-            profile_banner
-        } else {
-            None
-        };
+        identity.profile_picture =
+            profile_picture.and_then(|picture| include_pictures.then_some(picture));
+        identity.profile_banner =
+            profile_banner.and_then(|banner| include_pictures.then_some(banner));
+
         identity.status = status;
         identity.platform = platform;
 
@@ -1378,7 +1391,7 @@ impl IdentityStore {
                             });
                         }
                     }
-                    log::debug!("{written} bytes written");
+                    log::trace!("{written} bytes written");
                 }
                 ipfs::unixfs::UnixfsStatus::CompletedStatus { path, written, .. } => {
                     log::debug!("Image is written with {written} bytes");
