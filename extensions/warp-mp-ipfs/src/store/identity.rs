@@ -405,7 +405,7 @@ impl IdentityStore {
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&pk_did, Some(out_did.clone()), payload_bytes)?;
+        let bytes = ecdh_encrypt(&pk_did, Some(out_did), payload_bytes)?;
 
         log::trace!("Payload size: {} bytes", bytes.len());
 
@@ -495,7 +495,7 @@ impl IdentityStore {
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&pk_did, Some(out_did.clone()), payload_bytes)?;
+        let bytes = ecdh_encrypt(&pk_did, Some(out_did), payload_bytes)?;
 
         log::trace!("Payload size: {} bytes", bytes.len());
 
@@ -544,7 +544,7 @@ impl IdentityStore {
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&pk_did, Some(out_did.clone()), payload_bytes)?;
+        let bytes = ecdh_encrypt(&pk_did, Some(out_did), payload_bytes)?;
 
         log::trace!("Payload size: {} bytes", bytes.len());
 
@@ -592,7 +592,7 @@ impl IdentityStore {
 
         let payload_bytes = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(&pk_did, Some(out_did.clone()), payload_bytes)?;
+        let bytes = ecdh_encrypt(&pk_did, Some(out_did), payload_bytes)?;
 
         log::trace!("Payload size: {} bytes", bytes.len());
 
@@ -617,12 +617,12 @@ impl IdentityStore {
 
         Ok(())
     }
-    
+
     #[tracing::instrument(skip(self, message))]
     async fn process_message(&mut self, in_did: DID, message: &[u8]) -> anyhow::Result<()> {
         let pk_did = self.get_keypair_did()?;
 
-        let bytes = ecdh_decrypt(&pk_did, Some(in_did.clone()), message)?;
+        let bytes = ecdh_decrypt(&pk_did, Some(&in_did), message)?;
 
         log::info!("Received event from {in_did}");
         let event = serde_json::from_slice::<IdentityEvent>(&bytes)?;
