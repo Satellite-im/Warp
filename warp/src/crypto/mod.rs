@@ -60,7 +60,7 @@ impl AsRef<DIDKey> for DID {
 
 impl std::fmt::Debug for DID {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("DID").field(&self.fingerprint()).finish()
+        write!(f, "{self}")
     }
 }
 
