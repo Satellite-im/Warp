@@ -21,7 +21,7 @@ use std::{
     collections::HashSet,
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use tokio::sync::broadcast;
@@ -136,7 +136,7 @@ pub enum RequestOption {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[allow(clippy::large_enum_variant)]
 pub enum ResponseOption {
@@ -144,6 +144,21 @@ pub enum ResponseOption {
     Identity { identity: IdentityDocument },
     /// Pictures
     Image { cid: Cid, data: Vec<u8> },
+}
+
+impl std::fmt::Debug for ResponseOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResponseOption::Identity { identity } => f
+                .debug_struct("ResponseOption::Identity")
+                .field("identity", &identity.did)
+                .finish(),
+            ResponseOption::Image { cid, .. } => f
+                .debug_struct("ResponseOption::Image")
+                .field("cid", &cid.to_string())
+                .finish(),
+        }
+    }
 }
 
 impl IdentityStore {
@@ -434,7 +449,7 @@ impl IdentityStore {
                 self.update_event,
                 UpdateEvents::FriendsOnly | UpdateEvents::EmitFriendsOnly
             ) && is_friend;
-        
+
         log::debug!("Including cid in push: {include_pictures}");
 
         identity.profile_picture = if include_pictures {
@@ -462,6 +477,10 @@ impl IdentityStore {
 
         let bytes = ecdh_encrypt(&pk_did, Some(out_did.clone()), payload_bytes)?;
 
+        log::trace!("Payload size: {} bytes", bytes.len());
+
+        log::info!("Sending event to {out_did}");
+
         let topic = format!("/peer/{out_did}/events");
 
         let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
@@ -472,7 +491,11 @@ impl IdentityStore {
             .await?
             .contains(&out_peer_id)
         {
+            let timer = Instant::now();
             self.ipfs.pubsub_publish(topic, bytes).await?;
+            let end = timer.elapsed();
+            log::info!("Event sent to {out_did}");
+            log::trace!("Took {}ms to send event", end.as_millis());
         }
 
         Ok(())
@@ -489,6 +512,7 @@ impl IdentityStore {
         };
 
         if cid != picture_cid {
+            log::debug!("Requested profile picture does not match current picture.");
             return Ok(());
         }
 
@@ -502,6 +526,10 @@ impl IdentityStore {
 
         let bytes = ecdh_encrypt(&pk_did, Some(out_did.clone()), payload_bytes)?;
 
+        log::trace!("Payload size: {} bytes", bytes.len());
+
+        log::info!("Sending event to {out_did}");
+
         let topic = format!("/peer/{out_did}/events");
 
         let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
@@ -512,7 +540,11 @@ impl IdentityStore {
             .await?
             .contains(&out_peer_id)
         {
+            let timer = Instant::now();
             self.ipfs.pubsub_publish(topic, bytes).await?;
+            let end = timer.elapsed();
+            log::info!("Event sent to {out_did}");
+            log::trace!("Took {}ms to send event", end.as_millis());
         }
 
         Ok(())
@@ -542,6 +574,10 @@ impl IdentityStore {
 
         let bytes = ecdh_encrypt(&pk_did, Some(out_did.clone()), payload_bytes)?;
 
+        log::trace!("Payload size: {} bytes", bytes.len());
+
+        log::info!("Sending event to {out_did}");
+
         let topic = format!("/peer/{out_did}/events");
 
         let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
@@ -552,7 +588,11 @@ impl IdentityStore {
             .await?
             .contains(&out_peer_id)
         {
+            let timer = Instant::now();
             self.ipfs.pubsub_publish(topic, bytes).await?;
+            let end = timer.elapsed();
+            log::info!("Event sent to {out_did}");
+            log::trace!("Took {}ms to send event", end.as_millis());
         }
 
         Ok(())
@@ -564,8 +604,10 @@ impl IdentityStore {
 
         let bytes = ecdh_decrypt(&pk_did, Some(in_did.clone()), message)?;
 
+        log::info!("Received event from {in_did}");
         let event = serde_json::from_slice::<IdentityEvent>(&bytes)?;
 
+        log::debug!("Event: {event:?}");
         match event {
             IdentityEvent::Request { option } => match option {
                 RequestOption::Identity => self.push(&in_did).await?,
@@ -624,6 +666,7 @@ impl IdentityStore {
                 match document {
                     Some(document) => {
                         if document.different(&identity) {
+                            log::info!("Updating local cache of {}", identity.did);
                             let document_did = identity.did.clone();
                             cache_documents.replace(identity.clone());
 
@@ -655,7 +698,13 @@ impl IdentityStore {
                             tokio::spawn({
                                 let store = self.clone();
                                 async move {
-                                    if document.profile_picture != identity.profile_picture {
+                                    if document.profile_picture != identity.profile_picture
+                                        && identity.profile_picture.is_some()
+                                    {
+                                        log::info!(
+                                            "Requesting profile picture from {}",
+                                            identity.did
+                                        );
                                         if let Err(_e) = store
                                             .request(
                                                 &in_did,
@@ -667,7 +716,13 @@ impl IdentityStore {
                                             .await
                                         {}
                                     }
-                                    if document.profile_banner != identity.profile_banner {
+                                    if document.profile_banner != identity.profile_banner
+                                        && identity.profile_banner.is_some()
+                                    {
+                                        log::info!(
+                                            "Requesting profile banner from {}",
+                                            identity.did
+                                        );
                                         if let Err(_e) = store
                                             .request(
                                                 &in_did,
@@ -683,6 +738,7 @@ impl IdentityStore {
                             });
 
                             if emit {
+                                log::trace!("Emitting identity update event");
                                 let tx = self.event.clone();
                                 let _ = tx
                                     .send(MultiPassEventKind::IdentityUpdate {
@@ -693,6 +749,7 @@ impl IdentityStore {
                         }
                     }
                     None => {
+                        log::info!("Caching {} identity document", identity.did);
                         let document_did = identity.did.clone();
                         cache_documents.insert(identity.clone());
 
@@ -1057,6 +1114,7 @@ impl IdentityStore {
     }
 
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
+    #[tracing::instrument(skip(self))]
     pub async fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
         let own_did = self
             .identity
@@ -1108,6 +1166,7 @@ impl IdentityStore {
             .ok_or(Error::IdentityDoesntExist)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn set_identity_status(&mut self, status: IdentityStatus) -> Result<(), Error> {
         let mut root_document = self.get_root_document().await?;
         root_document.status = Some(status);
@@ -1117,6 +1176,7 @@ impl IdentityStore {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn identity_platform(&self, did: &DID) -> Result<Platform, Error> {
         let own_did = self
             .identity
@@ -1272,6 +1332,7 @@ impl IdentityStore {
     }
 
     pub async fn save_cache_cid(&self, cid: Cid) -> Result<(), Error> {
+        log::trace!("Updating cache");
         *self.cache_cid.write().await = Some(cid);
         if let Some(path) = self.path.as_ref() {
             let cid = cid.to_string();
@@ -1280,6 +1341,7 @@ impl IdentityStore {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, stream))]
     pub async fn store_photo(
         &mut self,
         stream: BoxStream<'static, std::io::Result<Vec<u8>>>,
@@ -1339,6 +1401,7 @@ impl IdentityStore {
         Ok(cid)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn delete_photo(&mut self, cid: Cid) -> Result<(), Error> {
         let ipfs = self.ipfs.clone();
 

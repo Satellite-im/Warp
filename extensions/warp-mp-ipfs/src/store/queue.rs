@@ -257,9 +257,13 @@ impl QueueEntry {
                                 .map_err(anyhow::Error::from)?;
 
                             let bytes = serde_json::to_vec(&payload)?;
+                            
+                            log::trace!("Payload size: {} bytes", bytes.len());
 
                             let topic = get_inbox_topic(&recipient);
-                            log::info!("Sending request to {}", recipient.clone());
+
+                            log::info!("Sending request to {}", recipient);
+
                             entry.ipfs.pubsub_publish(topic, bytes).await?;
 
                             Ok::<_, anyhow::Error>(())

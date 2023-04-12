@@ -259,6 +259,7 @@ impl FriendsStore {
     }
 
     //TODO: Implement Errors
+    //TODO: Uncomment below once sata is nolonger used here
     // #[tracing::instrument(skip(self, data))]
     async fn check_request_message(&mut self, data: Sata) -> anyhow::Result<()> {
         let data = data.decrypt::<PayloadEvent>(&self.did_key)?;
