@@ -1131,6 +1131,7 @@ impl FriendsStore {
                 }
             }
             Event::Block => {
+                let _ = self.identity.push(recipient).await.ok();
                 if let Err(e) = self.tx.send(MultiPassEventKind::Blocked {
                     did: recipient.clone(),
                 }) {
@@ -1138,6 +1139,7 @@ impl FriendsStore {
                 }
             }
             Event::Unblock => {
+                let _ = self.identity.push(recipient).await.ok();
                 if let Err(e) = self.tx.send(MultiPassEventKind::Unblocked {
                     did: recipient.clone(),
                 }) {

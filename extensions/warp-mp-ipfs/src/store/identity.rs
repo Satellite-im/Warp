@@ -47,7 +47,7 @@ use super::{
     document::{
         identity::{unixfs_fetch, IdentityDocument},
         utils::GetLocalDag,
-        GetDag, RootDocument, ToCid,
+        RootDocument, ToCid,
     },
     ecdh_decrypt, ecdh_encrypt,
     friends::{FriendsStore, Request},
@@ -459,12 +459,11 @@ impl IdentityStore {
         let platform =
             (share_platform && (!is_blocked || !is_blocked_by)).then_some(self.own_platform());
 
-        let status = self
-            .online_status
-            .read()
-            .await
-            .clone()
-            .and_then(|status| (!is_blocked || !is_blocked_by).then_some(status).or(Some(IdentityStatus::Offline)));
+        let status = self.online_status.read().await.clone().and_then(|status| {
+            (!is_blocked || !is_blocked_by)
+                .then_some(status)
+                .or(Some(IdentityStatus::Offline))
+        });
 
         let profile_picture = identity.profile_picture;
         let profile_banner = identity.profile_banner;
