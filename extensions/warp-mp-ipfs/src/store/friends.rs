@@ -6,9 +6,9 @@ use libipld::IpldCodec;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, RwLock};
-use tracing::log::{error, warn};
+use tracing::log::{error, warn, self};
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::MultiPassEventKind;
@@ -1019,6 +1019,7 @@ impl FriendsStore {
         })
     }
     
+    //TODO: Replace "Sata" with a light payload
     #[tracing::instrument(skip(self))]
     pub async fn broadcast_request(
         &mut self,
@@ -1070,6 +1071,8 @@ impl FriendsStore {
             rx
         });
 
+        
+        let start = Instant::now();
         if !peers.contains(&remote_peer_id)
             || (peers.contains(&remote_peer_id)
                 && self
@@ -1085,9 +1088,14 @@ impl FriendsStore {
         }
 
         if !queued && matches!(payload.event, Event::Request) {
+            let end = start.elapsed();
+            log::trace!("Took {}ms to send event", end.as_millis());
             if let Some(rx) = std::mem::take(&mut rx) {
                 if let Some(timeout) = self.wait_on_response {
+                    let start = Instant::now();
                     if let Ok(Ok(res)) = tokio::time::timeout(timeout, rx).await {
+                        let end = start.elapsed();
+                        log::trace!("Took {}ms to receive a response", end.as_millis());
                         res?
                     }
                 }
