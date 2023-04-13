@@ -337,12 +337,12 @@ impl IpfsIdentity {
                                 .await
                             {
                                 Ok(addr) => {
-                                    debug!("Listening on {}", addr);
+                                    info!("Listening on {}", addr);
                                     relayed.push(addr);
                                     break;
                                 }
                                 Err(e) => {
-                                    info!(
+                                    error!(
                                         "Error listening on relay {}: {e}",
                                         addr.clone().with(Protocol::P2pCircuit)
                                     );
