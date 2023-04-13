@@ -1986,7 +1986,8 @@ impl MessageStore {
                 maximum: Some(255),
             });
         }
-
+        
+        let _guard = self.conversation_queue(conversation_id).await?;
         let mut conversation = self.get_conversation(conversation_id).await?;
 
         if matches!(conversation.conversation_type, ConversationType::Direct) {
@@ -2034,8 +2035,10 @@ impl MessageStore {
         conversation_id: Uuid,
         did_key: &DID,
     ) -> Result<(), Error> {
-        let mut conversation = self.get_conversation(conversation_id).await?;
+        //Note: The Semaphore is used to "block" the stream while we add a recipient so we could have the next chance of
         let _guard = self.conversation_queue(conversation_id).await?;
+
+        let mut conversation = self.get_conversation(conversation_id).await?;
 
         if matches!(conversation.conversation_type, ConversationType::Direct) {
             return Err(Error::InvalidConversation);
@@ -2066,8 +2069,6 @@ impl MessageStore {
         conversation.recipients.push(did_key.clone());
 
         self.set_conversation(conversation_id, conversation).await?;
-
-        drop(_guard);
 
         let conversation = self.get_conversation(conversation_id).await?;
         let Some(signature) = conversation.signature.clone() else {
@@ -2103,6 +2104,7 @@ impl MessageStore {
             .await?;
 
         if let Err(_e) = self.request_key(conversation_id, did_key).await {}
+        drop(_guard);
         Ok(())
     }
 
