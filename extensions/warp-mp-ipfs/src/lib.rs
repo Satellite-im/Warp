@@ -204,7 +204,7 @@ impl IpfsIdentity {
             bootstrap: config.bootstrap.address(),
             mdns: config.ipfs_setting.mdns.enable,
             listening_addrs: config.listen_on.clone(),
-            dcutr: config.ipfs_setting.relay_client.dcutr,
+            dcutr: config.ipfs_setting.relay_client.enable,
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
             keep_alive: true,
@@ -304,26 +304,6 @@ impl IpfsIdentity {
                         info!("Relay client enabled. Loading relays");
                         let mut relayed = vec![];
 
-                        for addr in config.bootstrap.address() {
-                            match ipfs
-                                .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
-                                .await
-                            {
-                                Ok(addr) => {
-                                    debug!("Listening on {}", addr);
-                                    relayed.push(addr)
-                                }
-                                Err(e) => {
-                                    info!("Error listening on relay via bootstrap: {e}");
-                                    continue;
-                                }
-                            };
-
-                            if config.ipfs_setting.relay_client.single {
-                                break;
-                            }
-                        }
-
                         //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
                         //      anything on this end
                         for addr in config.ipfs_setting.relay_client.relay_address.clone() {
@@ -339,6 +319,7 @@ impl IpfsIdentity {
                                 Ok(addr) => {
                                     debug!("Listening on {}", addr);
                                     relayed.push(addr);
+                                    break;
                                 }
                                 Err(e) => {
                                     info!(
@@ -348,8 +329,25 @@ impl IpfsIdentity {
                                     continue;
                                 }
                             };
-                            if config.ipfs_setting.relay_client.single {
-                                break;
+                        }
+
+                        if relayed.is_empty() {
+                            // If vec is empty, fallback to bootstrap, assuming they support relay
+                            for addr in config.bootstrap.address() {
+                                match ipfs
+                                    .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
+                                    .await
+                                {
+                                    Ok(addr) => {
+                                        debug!("Listening on {}", addr);
+                                        relayed.push(addr);
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        info!("Error listening on relay via bootstrap: {e}");
+                                        continue;
+                                    }
+                                };
                             }
                         }
 
