@@ -155,7 +155,7 @@ fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::
 
 fn ecdh_encrypt<K: AsRef<[u8]>>(
     did: &DID,
-    recipient: Option<DID>,
+    recipient: Option<&DID>,
     data: K,
 ) -> Result<Vec<u8>, Error> {
     let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
@@ -173,7 +173,7 @@ fn ecdh_encrypt<K: AsRef<[u8]>>(
 
 fn ecdh_decrypt<K: AsRef<[u8]>>(
     did: &DID,
-    recipient: Option<DID>,
+    recipient: Option<&DID>,
     data: K,
 ) -> Result<Vec<u8>, Error> {
     let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();

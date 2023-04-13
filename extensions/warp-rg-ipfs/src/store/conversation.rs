@@ -610,7 +610,7 @@ impl MessageDocument {
                 let key = keystore.get_latest(&did, &sender)?;
                 Cipher::direct_encrypt(&bytes, &key)?
             }
-            None => ecdh_encrypt(&did, Some(sender.clone()), &bytes)?,
+            None => ecdh_encrypt(&did, Some(&sender), &bytes)?,
         };
 
         let message = data.to_cid(ipfs).await?;
@@ -668,7 +668,7 @@ impl MessageDocument {
                 let key = keystore.get_latest(did, &message.sender())?;
                 Cipher::direct_encrypt(&bytes, &key)?
             }
-            None => ecdh_encrypt(did, Some(self.sender.to_did()), &bytes)?,
+            None => ecdh_encrypt(did, Some(&self.sender.to_did()), &bytes)?,
         };
 
         let message_cid = data.to_cid(ipfs).await?;
@@ -699,7 +699,7 @@ impl MessageDocument {
         let sender = self.sender.to_did();
         let data = match keystore {
             Some(keystore) => keystore.try_decrypt(did, &sender, &bytes)?,
-            None => ecdh_decrypt(did, Some(sender), &bytes)?,
+            None => ecdh_decrypt(did, Some(&sender), &bytes)?,
         };
 
         let message: Message = serde_json::from_slice(&data)?;

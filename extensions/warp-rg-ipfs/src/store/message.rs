@@ -203,7 +203,7 @@ impl MessageStore {
                         message = stream.next() => {
                             if let Some(message) = message {
                                 if let Ok(payload) = Payload::from_bytes(&message.data) {
-                                    if let Ok(data) = ecdh_decrypt(&store.did, Some(payload.sender()), payload.data()) {
+                                    if let Ok(data) = ecdh_decrypt(&store.did, Some(&payload.sender()), payload.data()) {
                                         if let Ok(events) = serde_json::from_slice::<ConversationEvents>(&data) {
                                             if let Err(e) = store.process_conversation(payload, events).await {
                                                 error!("Error processing conversation: {e}");
@@ -377,7 +377,7 @@ impl MessageStore {
                                             .first()
                                             .cloned()
                                             .ok_or(Error::InvalidConversation)?;
-                                        ecdh_decrypt(own_did, Some(recipient), payload.data())
+                                        ecdh_decrypt(own_did, Some(&recipient), payload.data())
                                     }
                                     ConversationType::Group => {
                                         let keystore =
@@ -444,7 +444,7 @@ impl MessageStore {
 
                 while let Some(stream) = stream.next().await {
                     if let Ok(payload) = Payload::from_bytes(&stream.data) {
-                        if let Ok(data) = ecdh_decrypt(&did, Some(payload.sender()), payload.data())
+                        if let Ok(data) = ecdh_decrypt(&did, Some(&payload.sender()), payload.data())
                         {
                             if let Ok(event) =
                                 serde_json::from_slice::<ConversationRequestResponse>(&data)
@@ -517,7 +517,7 @@ impl MessageStore {
                                             let sender = payload.sender();
                                             let key = match ecdh_encrypt(
                                                 &did,
-                                                Some(sender.clone()),
+                                                Some(&sender),
                                                 raw_key,
                                             ) {
                                                 Ok(key) => key,
@@ -537,7 +537,7 @@ impl MessageStore {
                                                 async move {
                                                     let bytes = ecdh_encrypt(
                                                         &did,
-                                                        Some(sender.clone()),
+                                                        Some(&sender),
                                                         serde_json::to_vec(&response)?,
                                                     )?;
                                                     let signature = sign_serde(&did, &bytes)?;
@@ -624,7 +624,7 @@ impl MessageStore {
                                             };
 
                                             let raw_key =
-                                                match ecdh_decrypt(&did, Some(sender.clone()), key)
+                                                match ecdh_decrypt(&did, Some(&sender), key)
                                                 {
                                                     Ok(key) => key,
                                                     Err(e) => {
@@ -689,7 +689,7 @@ impl MessageStore {
 
         let own_did = &self.did;
 
-        let bytes = ecdh_encrypt(own_did, Some(did.clone()), serde_json::to_vec(&request)?)?;
+        let bytes = ecdh_encrypt(own_did, Some(did), serde_json::to_vec(&request)?)?;
         let signature = sign_serde(own_did, &bytes)?;
 
         let payload = Payload::new(own_did, &bytes, &signature);
@@ -790,7 +790,7 @@ impl MessageStore {
                                         .cloned() else {
                                             continue;
                                         };
-                                    ecdh_decrypt(own_did, Some(recipient), data.data())
+                                    ecdh_decrypt(own_did, Some(&recipient), data.data())
                                 }
                                 ConversationType::Group => {
 
@@ -1130,7 +1130,7 @@ impl MessageStore {
                         if let Ok(peers) = self.ipfs.pubsub_peers(Some(topic.clone())).await {
                             //TODO: Check peer against conversation to see if they are connected
                             if peers.contains(peer) {
-                                if let Err(_e) = ecdh_decrypt(&self.did, Some(did.clone()), &data) {
+                                if let Err(_e) = ecdh_decrypt(&self.did, Some(did), &data) {
                                     //This validates that the data itself was encrypted by the sender
                                     continue;
                                 }
@@ -1254,7 +1254,7 @@ impl MessageStore {
             recipient: own_did.clone(),
         };
 
-        let bytes = ecdh_encrypt(own_did, Some(did_key.clone()), serde_json::to_vec(&event)?)?;
+        let bytes = ecdh_encrypt(own_did, Some(did_key), serde_json::to_vec(&event)?)?;
         let signature = sign_serde(own_did, &bytes)?;
 
         let payload = Payload::new(own_did, &bytes, &signature);
@@ -1398,7 +1398,7 @@ impl MessageStore {
         })?;
 
         for (did, peer_id) in peer_id_list {
-            let bytes = ecdh_encrypt(own_did, Some(did.clone()), &event)?;
+            let bytes = ecdh_encrypt(own_did, Some(&did), &event)?;
             let signature = sign_serde(own_did, &bytes)?;
 
             let payload = Payload::new(own_did, &bytes, &signature);
@@ -1501,7 +1501,7 @@ impl MessageStore {
             })?;
 
             for (recipient, peer_id) in peer_id_list {
-                let bytes = ecdh_encrypt(own_did, Some(recipient.clone()), &event)?;
+                let bytes = ecdh_encrypt(own_did, Some(&recipient), &event)?;
                 let signature = sign_serde(own_did, &bytes)?;
 
                 let payload = Payload::new(own_did, &bytes, &signature);
@@ -1743,7 +1743,7 @@ impl MessageStore {
 
         let event = serde_json::to_vec(&event)?;
 
-        let bytes = ecdh_encrypt(own_did, Some(did_key.clone()), &event)?;
+        let bytes = ecdh_encrypt(own_did, Some(did_key), &event)?;
         let signature = sign_serde(own_did, &bytes)?;
 
         let payload = Payload::new(own_did, &bytes, &signature);
@@ -1986,7 +1986,7 @@ impl MessageStore {
                 maximum: Some(255),
             });
         }
-        
+
         let _guard = self.conversation_queue(conversation_id).await?;
         let mut conversation = self.get_conversation(conversation_id).await?;
 
@@ -2884,7 +2884,7 @@ impl MessageStore {
                     .first()
                     .cloned()
                     .ok_or(Error::InvalidConversation)?;
-                ecdh_encrypt(own_did, Some(recipient), &event)?
+                ecdh_encrypt(own_did, Some(&recipient), &event)?
             }
             ConversationType::Group => {
                 let keystore = self.conversation_keystore(conversation.id()).await?;
@@ -2937,7 +2937,7 @@ impl MessageStore {
                     .first()
                     .cloned()
                     .ok_or(Error::InvalidConversation)?;
-                ecdh_encrypt(own_did, Some(recipient), &event)?
+                ecdh_encrypt(own_did, Some(&recipient), &event)?
             }
             ConversationType::Group => {
                 let keystore = self.conversation_keystore(conversation.id()).await?;
