@@ -9,7 +9,7 @@ use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 use warp::crypto::DID;
 use warp::multipass::identity::{Identifier, IdentityStatus, IdentityUpdate};
-use warp::multipass::{MultiPass, UpdateKind};
+use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
@@ -43,6 +43,8 @@ struct Opt {
     bootstrap: Option<bool>,
     #[clap(long)]
     provide_platform_info: bool,
+    #[clap(long)]
+    autoaccept_friend: bool,
     #[clap(long)]
     wait: Option<u64>,
 }
@@ -155,7 +157,7 @@ async fn main() -> anyhow::Result<()> {
         own_identity.short_id()
     );
     println!("DID: {}", own_identity.did_key());
-    
+
     let (mut rl, mut stdout) = Readline::new(format!(
         "{}#{} >>> ",
         own_identity.username(),
@@ -175,8 +177,11 @@ async fn main() -> anyhow::Result<()> {
                                 .and_then(|list| list.first().cloned())
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
-
-                            writeln!(stdout, "> Pending request from {username}. Do \"request accept {did}\" to accept.")?;
+                            if !opt.autoaccept_friend { 
+                                writeln!(stdout, "> Pending request from {username}. Do \"request accept {did}\" to accept.")?;
+                            } else {
+                                account.accept_request(&did).await?;
+                            }
                         },
                         warp::multipass::MultiPassEventKind::FriendRequestSent { to: did } => {
                             let username = account
@@ -307,21 +312,14 @@ async fn main() -> anyhow::Result<()> {
 
                             writeln!(stdout, "> {username} blocked you")?;
                         },
-                        warp::multipass::MultiPassEventKind::IdentityUpdate { did, kind } => {
+                        warp::multipass::MultiPassEventKind::IdentityUpdate { did } => {
                             let username = account
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
                                 .map(|ident| ident.username())
                                 .unwrap_or_else(|| did.to_string());
-
-                            match kind {
-                                UpdateKind::Username { old, new } => writeln!(stdout, "> {old} username been updated to \"{new}\"")?,
-                                UpdateKind::Status { status } => writeln!(stdout, "> {username} changed to {status} ")?,
-                                UpdateKind::Picture => writeln!(stdout, "> {username} updated their profile picture ")?,
-                                UpdateKind::Banner => writeln!(stdout, "> {username} updated their profile banner ")?,
-                                _ => writeln!(stdout, "> {username} has been updated ")?,
-                            };
+                            writeln!(stdout, "> {username} has been updated ")?;
                         }
                     }
                 }
@@ -726,8 +724,8 @@ async fn main() -> anyhow::Result<()> {
                                     identity.username(),
                                     identity.did_key().to_string(),
                                     identity.status_message().unwrap_or_default(),
-                                    (!identity.graphics().profile_banner().is_empty()).to_string(),
-                                    (!identity.graphics().profile_picture().is_empty()).to_string(),
+                                    (!identity.profile_banner().is_empty()).to_string(),
+                                    (!identity.profile_picture().is_empty()).to_string(),
                                     platform.to_string(),
                                     format!("{status:?}"),
                                 ]);

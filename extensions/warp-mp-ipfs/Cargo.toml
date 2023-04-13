@@ -13,14 +13,14 @@ rust-ipfs.workspace = true
 libipld.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }
 tokio = { workspace = true, features = ["full"] }
-tokio-util = {workspace = true, features = ["full"] }
+tokio-util = { workspace = true, features = ["full"] }
 futures.workspace = true
 async-trait.workspace = true
 async-stream.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-either.workspace = true
+either = { workspace = true, features = ["serde"] }
 bs58 = "0.4"
 
 tracing = "0.1"

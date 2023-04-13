@@ -42,7 +42,6 @@ use warp::multipass::{
 
 use crate::config::Bootstrap;
 use crate::store::discovery::Discovery;
-use crate::store::document::DocumentType;
 
 #[derive(Clone)]
 pub struct IpfsIdentity {
@@ -439,6 +438,7 @@ impl IpfsIdentity {
                 config.store_setting.override_ipld,
                 config.store_setting.share_platform,
                 config.store_setting.update_events,
+                config.store_setting.disable_images,
             ),
         )
         .await?;
@@ -637,7 +637,7 @@ impl MultiPass for IpfsIdentity {
 
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
         let mut store = self.identity_store(true).await?;
-        let mut identity = self.get_own_identity().await?;
+        let mut identity = store.own_identity_document().await?;
 
         let mut old_cid = None;
         match option {
@@ -652,7 +652,7 @@ impl MultiPass for IpfsIdentity {
                     });
                 }
 
-                identity.set_username(&username);
+                identity.username = username;
                 store.identity_update(identity.clone()).await?;
             }
             IdentityUpdate::Picture(data) => {
@@ -675,22 +675,20 @@ impl MultiPass for IpfsIdentity {
                     )
                     .await?;
 
-                let mut root_document = store.get_root_document().await?;
-
-                if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
+                if let Some(picture_cid) = identity.profile_picture {
                     if picture_cid == cid {
                         return Ok(());
                     }
 
-                    if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
+                    if let Some(banner_cid) = identity.profile_banner {
                         if picture_cid != banner_cid {
                             old_cid = Some(picture_cid);
                         }
                     }
                 }
 
-                root_document.picture = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
-                store.set_root_document(root_document).await?;
+                identity.profile_picture = Some(cid);
+                store.identity_update(identity).await?;
             }
             IdentityUpdate::PicturePath(path) => {
                 if !path.is_file() {
@@ -737,29 +735,27 @@ impl MultiPass for IpfsIdentity {
                     .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
                     .await?;
 
-                let mut root_document = store.get_root_document().await?;
-                if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
+                if let Some(picture_cid) = identity.profile_picture {
                     if picture_cid == cid {
                         return Ok(());
                     }
 
-                    if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
+                    if let Some(banner_cid) = identity.profile_banner {
                         if picture_cid != banner_cid {
                             old_cid = Some(picture_cid);
                         }
                     }
                 }
 
-                root_document.picture = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
-                store.set_root_document(root_document).await?;
+                identity.profile_picture = Some(cid);
+                store.identity_update(identity).await?;
             }
             IdentityUpdate::ClearPicture => {
-                let mut root_document = store.get_root_document().await?;
-                let document = root_document.picture.take();
-                if let Some(DocumentType::UnixFS(cid, _)) = document {
+                let document = identity.profile_picture.take();
+                if let Some(cid) = document {
                     old_cid = Some(cid);
                 }
-                store.set_root_document(root_document).await?;
+                store.identity_update(identity).await?;
             }
             IdentityUpdate::Banner(data) => {
                 let len = data.len();
@@ -782,21 +778,20 @@ impl MultiPass for IpfsIdentity {
                     )
                     .await?;
 
-                let mut root_document = store.get_root_document().await?;
-                if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
+                if let Some(banner_cid) = identity.profile_banner {
                     if banner_cid == cid {
                         return Ok(());
                     }
 
-                    if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
+                    if let Some(picture_cid) = identity.profile_picture {
                         if picture_cid != banner_cid {
                             old_cid = Some(banner_cid);
                         }
                     }
                 }
 
-                root_document.banner = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
-                store.set_root_document(root_document).await?;
+                identity.profile_banner = Some(cid);
+                store.identity_update(identity).await?;
             }
             IdentityUpdate::BannerPath(path) => {
                 if !path.is_file() {
@@ -843,29 +838,27 @@ impl MultiPass for IpfsIdentity {
                     .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
                     .await?;
 
-                let mut root_document = store.get_root_document().await?;
-                if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
+                if let Some(banner_cid) = identity.profile_banner {
                     if banner_cid == cid {
                         return Ok(());
                     }
 
-                    if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
+                    if let Some(picture_cid) = identity.profile_picture {
                         if picture_cid != banner_cid {
                             old_cid = Some(banner_cid);
                         }
                     }
                 }
 
-                root_document.banner = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
-                store.set_root_document(root_document).await?;
+                identity.profile_banner = Some(cid);
+                store.identity_update(identity).await?;
             }
             IdentityUpdate::ClearBanner => {
-                let mut root_document = store.get_root_document().await?;
-                let document = root_document.banner.take();
-                if let Some(DocumentType::UnixFS(cid, _)) = document {
+                let document = identity.profile_banner.take();
+                if let Some(cid) = document {
                     old_cid = Some(cid);
                 }
-                store.set_root_document(root_document).await?;
+                store.identity_update(identity).await?;
             }
             IdentityUpdate::StatusMessage(status) => {
                 if let Some(status) = status.clone() {
@@ -879,11 +872,11 @@ impl MultiPass for IpfsIdentity {
                         });
                     }
                 }
-                identity.set_status_message(status);
+                identity.status_message = status;
                 store.identity_update(identity.clone()).await?;
             }
             IdentityUpdate::ClearStatusMessage => {
-                identity.set_status_message(None);
+                identity.status_message = None;
                 store.identity_update(identity.clone()).await?;
             }
         };

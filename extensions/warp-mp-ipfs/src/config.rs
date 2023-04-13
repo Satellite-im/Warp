@@ -228,7 +228,7 @@ pub struct StoreSetting {
     pub sync: Vec<Multiaddr>,
     /// Interval to push or check node
     pub sync_interval: Duration,
-    /// Use objects directly rather than a cid
+    /// TBD
     pub override_ipld: bool,
     /// Enables sharing platform (Desktop, Mobile, Web) information to another user
     pub share_platform: bool,
@@ -240,6 +240,8 @@ pub struct StoreSetting {
     pub friend_request_response_duration: Option<Duration>,
     /// Options to allow emitting identity events to all or just friends
     pub update_events: UpdateEvents,
+    /// Disable providing images for identities
+    pub disable_images: bool,
 }
 
 impl Default for StoreSetting {
@@ -255,6 +257,7 @@ impl Default for StoreSetting {
             friend_request_response_duration: None,
             emit_online_event: false,
             update_events: Default::default(),
+            disable_images: false,
         }
     }
 }

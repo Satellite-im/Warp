@@ -6,9 +6,9 @@ use libipld::IpldCodec;
 use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, RwLock};
-use tracing::log::{error, warn};
+use tracing::log::{self, error, warn};
 use warp::crypto::DID;
 use warp::error::Error;
 use warp::multipass::MultiPassEventKind;
@@ -19,8 +19,9 @@ use warp::tesseract::Tesseract;
 
 use crate::config::MpIpfsConfig;
 
-use super::document::DocumentType;
-use super::identity::{IdentityStore, LookupBy};
+use super::document::utils::GetLocalDag;
+use super::document::ToCid;
+use super::identity::{IdentityStore, LookupBy, RequestOption};
 use super::phonebook::PhoneBook;
 use super::queue::Queue;
 use super::{did_keypair, did_to_libp2p_pub, discovery, libp2p_pub_to_did, VecExt};
@@ -258,6 +259,8 @@ impl FriendsStore {
     }
 
     //TODO: Implement Errors
+    //TODO: Uncomment below once sata is nolonger used here
+    // #[tracing::instrument(skip(self, data))]
     async fn check_request_message(&mut self, data: Sata) -> anyhow::Result<()> {
         let data = data.decrypt::<PayloadEvent>(&self.did_key)?;
 
@@ -449,6 +452,15 @@ impl FriendsStore {
                 self.set_block_by_list(list).await?;
 
                 if completed {
+                    tokio::spawn({
+                        let store = self.identity.clone();
+                        let sender = data.sender.clone();
+                        async move {
+                            let _ = store.push(&sender).await.ok();
+                            let _ = store.request(&sender, RequestOption::Identity).await.ok();
+                        }
+                    });
+
                     if let Err(e) = self
                         .tx
                         .send(MultiPassEventKind::BlockedBy { did: data.sender })
@@ -466,6 +478,14 @@ impl FriendsStore {
                 let completed = list.remove_item(&data.sender);
                 self.set_block_by_list(list).await?;
                 if completed {
+                    tokio::spawn({
+                        let store = self.identity.clone();
+                        let sender = data.sender.clone();
+                        async move {
+                            let _ = store.push(&sender).await.ok();
+                            let _ = store.request(&sender, RequestOption::Identity).await.ok();
+                        }
+                    });
                     if let Err(e) = self
                         .tx
                         .send(MultiPassEventKind::UnblockedBy { did: data.sender })
@@ -498,6 +518,7 @@ impl FriendsStore {
 }
 
 impl FriendsStore {
+    #[tracing::instrument(skip(self))]
     pub async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
         let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
@@ -540,6 +561,7 @@ impl FriendsStore {
         self.broadcast_request((pubkey, &payload), true, true).await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
@@ -583,6 +605,7 @@ impl FriendsStore {
             .await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn reject_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
@@ -618,6 +641,7 @@ impl FriendsStore {
             .await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
@@ -659,6 +683,7 @@ impl FriendsStore {
             .await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn has_request_from(&self, pubkey: &DID) -> Result<bool, Error> {
         self.list_incoming_request()
             .await
@@ -667,26 +692,27 @@ impl FriendsStore {
 }
 
 impl FriendsStore {
+    #[tracing::instrument(skip(self))]
     pub async fn block_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.blocks {
-            Some(object) => object.resolve(self.ipfs.clone(), None).await,
+            Some(object) => object.get_local_dag(&self.ipfs).await,
             None => Ok(Vec::new()),
         }
     }
 
     pub async fn set_block_list(&mut self, list: Vec<DID>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
-        let old_document = root_document.blocks.clone();
-        if matches!(old_document, Some(DocumentType::Object(_)) | None) {
-            root_document.blocks = Some(DocumentType::Object(list));
-        } else if matches!(old_document, Some(DocumentType::Cid(_))) {
-            let new_cid = self.identity.put_dag(list).await?;
-            root_document.blocks = Some(new_cid.into());
+        let old_document = root_document.blocks;
+
+        if list.is_empty() {
+            root_document.blocks = None;
+        } else {
+            root_document.blocks = Some(list.to_cid(&self.ipfs).await?);
         }
 
         self.identity.set_root_document(root_document).await?;
-        if let Some(DocumentType::Cid(cid)) = old_document {
+        if let Some(cid) = old_document {
             if self.ipfs.is_pinned(&cid).await? {
                 self.ipfs.remove_pin(&cid, false).await?;
             }
@@ -695,12 +721,14 @@ impl FriendsStore {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn is_blocked(&self, public_key: &DID) -> Result<bool, Error> {
         self.block_list()
             .await
             .map(|list| list.contains(public_key))
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
@@ -754,6 +782,7 @@ impl FriendsStore {
             .await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
@@ -792,23 +821,23 @@ impl FriendsStore {
     pub async fn block_by_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.block_by {
-            Some(object) => object.resolve(self.ipfs.clone(), None).await,
+            Some(object) => object.get_local_dag(&self.ipfs).await,
             None => Ok(Vec::new()),
         }
     }
 
     pub async fn set_block_by_list(&mut self, list: Vec<DID>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
-        let old_document = root_document.block_by.clone();
-        if matches!(old_document, Some(DocumentType::Object(_)) | None) {
-            root_document.block_by = Some(DocumentType::Object(list));
-        } else if matches!(old_document, Some(DocumentType::Cid(_))) {
-            let new_cid = self.identity.put_dag(list).await?;
-            root_document.block_by = Some(new_cid.into());
+        let old_document = root_document.block_by;
+
+        if list.is_empty() {
+            root_document.block_by = None;
+        } else {
+            root_document.block_by = Some(list.to_cid(&self.ipfs).await?);
         }
 
         self.identity.set_root_document(root_document).await?;
-        if let Some(DocumentType::Cid(cid)) = old_document {
+        if let Some(cid) = old_document {
             if self.ipfs.is_pinned(&cid).await? {
                 self.ipfs.remove_pin(&cid, false).await?;
             }
@@ -826,23 +855,23 @@ impl FriendsStore {
     pub async fn friends_list(&self) -> Result<Vec<DID>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.friends {
-            Some(object) => object.resolve(self.ipfs.clone(), None).await,
+            Some(object) => object.get_local_dag(&self.ipfs).await,
             None => Ok(Vec::new()),
         }
     }
 
     pub async fn set_friends_list(&mut self, list: Vec<DID>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
-        let old_document = root_document.friends.clone();
-        if matches!(old_document, Some(DocumentType::Object(_)) | None) {
-            root_document.friends = Some(DocumentType::Object(list));
-        } else if matches!(old_document, Some(DocumentType::Cid(_))) {
-            let new_cid = self.identity.put_dag(list).await?;
-            root_document.friends = Some(new_cid.into());
+        let old_document = root_document.friends;
+
+        if list.is_empty() {
+            root_document.friends = None;
+        } else {
+            root_document.friends = Some(list.to_cid(&self.ipfs).await?);
         }
 
         self.identity.set_root_document(root_document).await?;
-        if let Some(DocumentType::Cid(cid)) = old_document {
+        if let Some(cid) = old_document {
             if self.ipfs.is_pinned(&cid).await? {
                 self.ipfs.remove_pin(&cid, false).await?;
             }
@@ -852,6 +881,7 @@ impl FriendsStore {
     }
 
     // Should not be called directly but only after a request is accepted
+    #[tracing::instrument(skip(self))]
     pub async fn add_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
         if self.is_friend(pubkey).await? {
             return Err(Error::FriendExist);
@@ -888,6 +918,7 @@ impl FriendsStore {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, broadcast))]
     pub async fn remove_friend(&mut self, pubkey: &DID, broadcast: bool) -> Result<(), Error> {
         if !self.is_friend(pubkey).await? {
             return Err(Error::FriendDoesntExist);
@@ -929,6 +960,7 @@ impl FriendsStore {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn is_friend(&self, pubkey: &DID) -> Result<bool, Error> {
         self.friends_list().await.map(|list| list.contains(pubkey))
     }
@@ -938,29 +970,28 @@ impl FriendsStore {
     pub async fn list_all_raw_request(&self) -> Result<Vec<Request>, Error> {
         let root_document = self.identity.get_root_document().await?;
         match root_document.request {
-            Some(object) => object.resolve(self.ipfs.clone(), None).await,
+            Some(object) => object.get_local_dag(&self.ipfs).await,
             None => Ok(Vec::new()),
         }
     }
 
     pub async fn set_request_list(&mut self, list: Vec<Request>) -> Result<(), Error> {
         let mut root_document = self.identity.get_root_document().await?;
-        let old_document = root_document.request.clone();
-        if matches!(old_document, Some(DocumentType::Object(_)) | None) {
-            root_document.request = Some(DocumentType::Object(list));
-        } else if matches!(old_document, Some(DocumentType::Cid(_))) {
-            let new_cid = self.identity.put_dag(list).await?;
-            root_document.request = Some(new_cid.into());
+        let old_document = root_document.request;
+        if list.is_empty() {
+            root_document.request = None;
+        } else {
+            root_document.request = Some(list.to_cid(&self.ipfs).await?);
         }
 
         self.identity.set_root_document(root_document).await?;
-
-        if let Some(DocumentType::Cid(cid)) = old_document {
+        if let Some(cid) = old_document {
             if self.ipfs.is_pinned(&cid).await? {
                 self.ipfs.remove_pin(&cid, false).await?;
             }
             self.ipfs.remove_block(cid).await?;
         }
+
         Ok(())
     }
 
@@ -970,6 +1001,7 @@ impl FriendsStore {
             .map(|list| list.iter().any(|request| request.eq(did)))
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
         self.list_all_raw_request().await.map(|list| {
             list.iter()
@@ -982,12 +1014,14 @@ impl FriendsStore {
         })
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
         self.list_outgoing_request()
             .await
             .map(|list| list.iter().any(|request| request.eq(did)))
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
         self.list_all_raw_request().await.map(|list| {
             list.iter()
@@ -1000,6 +1034,8 @@ impl FriendsStore {
         })
     }
 
+    //TODO: Replace "Sata" with a light payload
+    #[tracing::instrument(skip(self))]
     pub async fn broadcast_request(
         &mut self,
         (recipient, payload): (&DID, &PayloadEvent),
@@ -1038,6 +1074,10 @@ impl FriendsStore {
 
         let bytes = serde_json::to_vec(&e_payload)?;
 
+        log::trace!("Rquest Payload size: {} bytes", bytes.len());
+
+        log::info!("Sending event to {recipient}");
+
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
         let mut queued = false;
@@ -1050,6 +1090,7 @@ impl FriendsStore {
             rx
         });
 
+        let start = Instant::now();
         if !peers.contains(&remote_peer_id)
             || (peers.contains(&remote_peer_id)
                 && self
@@ -1064,10 +1105,18 @@ impl FriendsStore {
             self.signal.write().await.remove(recipient);
         }
 
+        if !queued {
+            let end = start.elapsed();
+            log::trace!("Took {}ms to send event", end.as_millis());
+        }
+
         if !queued && matches!(payload.event, Event::Request) {
             if let Some(rx) = std::mem::take(&mut rx) {
                 if let Some(timeout) = self.wait_on_response {
+                    let start = Instant::now();
                     if let Ok(Ok(res)) = tokio::time::timeout(timeout, rx).await {
+                        let end = start.elapsed();
+                        log::trace!("Took {}ms to receive a response", end.as_millis());
                         res?
                     }
                 }
@@ -1103,6 +1152,14 @@ impl FriendsStore {
                 }
             }
             Event::Block => {
+                tokio::spawn({
+                    let store = self.identity.clone();
+                    let recipient = recipient.clone();
+                    async move {
+                        let _ = store.push(&recipient).await.ok();
+                        let _ = store.request(&recipient, RequestOption::Identity).await.ok();
+                    }
+                });
                 if let Err(e) = self.tx.send(MultiPassEventKind::Blocked {
                     did: recipient.clone(),
                 }) {
@@ -1110,6 +1167,14 @@ impl FriendsStore {
                 }
             }
             Event::Unblock => {
+                tokio::spawn({
+                    let store = self.identity.clone();
+                    let recipient = recipient.clone();
+                    async move {
+                        let _ = store.push(&recipient).await.ok();
+                        let _ = store.request(&recipient, RequestOption::Identity).await.ok();
+                    }
+                });
                 if let Err(e) = self.tx.send(MultiPassEventKind::Unblocked {
                     did: recipient.clone(),
                 }) {
