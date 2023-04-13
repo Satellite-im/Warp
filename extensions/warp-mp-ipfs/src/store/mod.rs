@@ -11,20 +11,14 @@ use futures::StreamExt;
 use rust_ipfs as ipfs;
 
 use ipfs::{Multiaddr, PeerId, Protocol};
-use serde::{Deserialize, Serialize};
 use warp::{
-    crypto::{
-        did_key::{CoreSign, Generate},
-        DIDKey, Ed25519KeyPair, KeyMaterial, DID,
-    },
+    crypto::{did_key::{Generate, ECDH}, DIDKey, Ed25519KeyPair, KeyMaterial, DID, zeroize::Zeroizing, cipher::Cipher},
     error::Error,
-    multipass::identity::{Identity, IdentityStatus, Platform},
+    multipass::identity::IdentityStatus,
     tesseract::Tesseract,
 };
 
 use crate::config::Discovery;
-
-use self::document::DocumentType;
 
 pub trait VecExt<T: Eq> {
     fn insert_item(&mut self, item: &T) -> bool;
@@ -53,51 +47,6 @@ where
             return true;
         }
         false
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct IdentityPayload {
-    pub did: DID,
-
-    /// Type that represents profile picturec
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub picture: Option<DocumentType<String>>,
-
-    /// Type that represents profile banner
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub banner: Option<DocumentType<String>>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<IdentityStatus>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub platform: Option<Platform>,
-
-    /// Type that represents identity or cid
-    pub payload: DocumentType<Identity>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub signature: Option<Vec<u8>>,
-}
-
-impl IdentityPayload {
-    pub fn sign(mut self, did: &DID) -> Result<IdentityPayload, Error> {
-        let bytes = serde_json::to_vec(&self)?;
-        let signature = did.sign(&bytes);
-        self.signature = Some(signature);
-        Ok(self)
-    }
-
-    pub fn verify(&self) -> Result<(), Error> {
-        let mut payload = self.clone();
-        let signature = std::mem::take(&mut payload.signature).ok_or(Error::InvalidSignature)?;
-
-        let bytes = serde_json::to_vec(&payload)?;
-        self.did
-            .verify(&bytes, &signature)
-            .map_err(|_| Error::InvalidSignature)?;
-        Ok(())
     }
 }
 
@@ -143,6 +92,42 @@ pub async fn discovery<S: AsRef<str>>(ipfs: ipfs::Ipfs, topic: S) -> anyhow::Res
         while let Some(_providers) = stream.next().await {}
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
+}
+
+fn ecdh_encrypt<K: AsRef<[u8]>>(
+    did: &DID,
+    recipient: Option<&DID>,
+    data: K,
+) -> Result<Vec<u8>, Error> {
+    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
+    let did_pubkey = match recipient {
+        Some(did) => did.public_key_bytes(),
+        None => did.public_key_bytes(),
+    };
+
+    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
+    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
+    let data = Cipher::direct_encrypt(data.as_ref(), &prik)?;
+
+    Ok(data)
+}
+
+fn ecdh_decrypt<K: AsRef<[u8]>>(
+    did: &DID,
+    recipient: Option<&DID>,
+    data: K,
+) -> Result<Vec<u8>, Error> {
+    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
+    let did_pubkey = match recipient {
+        Some(did) => did.public_key_bytes(),
+        None => did.public_key_bytes(),
+    };
+
+    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
+    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
+    let data = Cipher::direct_decrypt(data.as_ref(), &prik)?;
+
+    Ok(data)
 }
 
 #[allow(clippy::large_enum_variant)]
