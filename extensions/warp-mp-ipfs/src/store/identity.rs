@@ -177,7 +177,7 @@ impl IdentityStore {
             bool,
             bool,
             UpdateEvents,
-            bool
+            bool,
         ),
     ) -> Result<Self, Error> {
         if let Some(path) = path.as_ref() {
@@ -759,7 +759,7 @@ impl IdentityStore {
                                             )
                                             .await
                                         {
-                                            error!("Error requesting profile picture from {in_did}: {e}");
+                                            error!("Error requesting profile banner from {in_did}: {e}");
                                         }
                                     }
                                 }
