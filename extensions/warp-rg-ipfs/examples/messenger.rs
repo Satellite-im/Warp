@@ -107,7 +107,6 @@ async fn create_account<P: AsRef<Path>>(
     }
     if opt.disable_relay {
         config.ipfs_setting.relay_client.enable = false;
-        config.ipfs_setting.relay_client.dcutr = false;
     }
     if opt.upnp {
         config.ipfs_setting.portmapping = true;

@@ -60,12 +60,8 @@ pub struct Mdns {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelayClient {
-    /// Enables relay client in libp2p
+    /// Enables relay (and dcutr) client in libp2p
     pub enable: bool,
-    /// Enables DCUtR (requires relay to be enabled)
-    pub dcutr: bool,
-    /// Uses a single relay connection
-    pub single: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     /// List of relays to use
     pub relay_address: Vec<Multiaddr>,
@@ -75,8 +71,6 @@ impl Default for RelayClient {
     fn default() -> Self {
         Self {
             enable: false,
-            dcutr: false,
-            single: false,
             relay_address: vec!["/ip4/24.199.86.91/tcp/46315/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap()]
         }
     }
@@ -314,7 +308,6 @@ impl MpIpfsConfig {
                 mdns: Mdns { enable: true },
                 relay_client: RelayClient {
                     enable: true,
-                    dcutr: true,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -336,7 +329,6 @@ impl MpIpfsConfig {
                 bootstrap: false,
                 relay_client: RelayClient {
                     enable: true,
-                    dcutr: true,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -359,7 +351,6 @@ impl MpIpfsConfig {
                 bootstrap: false,
                 relay_client: RelayClient {
                     enable: true,
-                    dcutr: true,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -385,7 +376,6 @@ impl MpIpfsConfig {
                 bootstrap: true,
                 relay_client: RelayClient {
                     enable: true,
-                    dcutr: true,
                     ..Default::default()
                 },
                 ..Default::default()
