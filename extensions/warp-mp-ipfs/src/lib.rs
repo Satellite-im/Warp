@@ -31,7 +31,9 @@ use warp::pocket_dimension::PocketDimension;
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
-use ipfs::{Ipfs, IpfsOptions, Keypair, Multiaddr, Protocol, StoragePath, UninitializedIpfs};
+use ipfs::{
+    Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath, UninitializedIpfs,
+};
 use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity, IdentityUpdate, Relationship};
@@ -296,6 +298,17 @@ impl IpfsIdentity {
         tokio::spawn({
             let ipfs = ipfs.clone();
             let config = config.clone();
+            let peer_id_extract = |addr: &Multiaddr| -> Option<PeerId> {
+                let mut addr = addr.clone();
+                match addr.pop() {
+                    Some(Protocol::P2p(hash)) => match PeerId::from_multihash(hash) {
+                        Ok(id) => Some(id),
+                        _ => None,
+                    },
+                    _ => None,
+                }
+            };
+
             async move {
                 let start_relay_client = || {
                     let ipfs = ipfs.clone();
@@ -307,9 +320,16 @@ impl IpfsIdentity {
                         //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
                         //      anything on this end
                         for addr in config.ipfs_setting.relay_client.relay_address.clone() {
-                            if let Err(e) = ipfs.connect(addr.clone()).await {
-                                error!("Error dialing relay {}: {e}", addr.clone());
-                                continue;
+                            let mut connected = false;
+                            if let Some(peer_id) = peer_id_extract(&addr) {
+                                connected = ipfs.is_connected(peer_id).await.unwrap_or_default();
+                            }
+
+                            if !connected {
+                                if let Err(e) = ipfs.connect(addr.clone()).await {
+                                    error!("Error dialing relay {}: {e}", addr.clone());
+                                    continue;
+                                }
                             }
 
                             match ipfs
@@ -333,6 +353,7 @@ impl IpfsIdentity {
 
                         if relayed.is_empty() {
                             // If vec is empty, fallback to bootstrap, assuming they support relay
+                            // Note: We will assume that the bootstrap nodes are connected if we are able to successfully bootstrap
                             for addr in config.bootstrap.address() {
                                 match ipfs
                                     .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
@@ -384,6 +405,7 @@ impl IpfsIdentity {
                             match public {
                                 true => {
                                     if using_relay {
+                                        //Due to UPnP being enabled with a successful portforwarding, we would disconnect from relays
                                         log::trace!(
                                             "Disabling relays due to being publicly accessible."
                                         );
@@ -394,6 +416,8 @@ impl IpfsIdentity {
                                 }
                                 false => {
                                     if !using_relay {
+                                        //If, for whatever reason, we are no longer publicly accessible due to UPnP (eg router or firewall changed)
+                                        //we would attempt to connect to the relays
                                         log::trace!(
                                             "No longer publicly accessible. Switching to relays"
                                         );
