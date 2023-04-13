@@ -174,7 +174,6 @@ impl IpfsMessaging {
                     config.store_setting.disable_sender_event_emit,
                     config.store_setting.with_friends,
                     config.store_setting.conversation_load_task,
-                    config.store_setting.attach_recipients_on_storing,
                 ),
             )
             .await?,
