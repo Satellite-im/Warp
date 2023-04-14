@@ -1043,8 +1043,27 @@ impl MessageStore {
             ConversationEvents::LeaveConversation {
                 conversation_id,
                 recipient,
+                signature,
             } => {
                 let conversation = self.get_conversation(conversation_id).await?;
+
+                if !matches!(conversation.conversation_type, ConversationType::Group) {
+                    return Err(anyhow::anyhow!("Can only leave from a group conversation"));
+                }
+
+                let Some(creator) = conversation.creator.as_ref() else {
+                    return Err(anyhow::anyhow!(
+                        "Group conversation requires a creator"
+                    ));
+                };
+
+                let own_did = &*self.did;
+
+                // Precaution
+                if recipient.eq(own_did) || recipient.eq(creator) {
+                    return Err(anyhow::anyhow!("Cannot remove the creator of the group"));
+                }
+
                 if !conversation.recipients.contains(&recipient) {
                     return Err(anyhow::anyhow!(
                         "{recipient} does not belong to {conversation_id}"
@@ -1052,8 +1071,27 @@ impl MessageStore {
                 }
 
                 info!("{recipient} is leaving group conversation {conversation_id}");
-                self.remove_recipient(conversation_id, &recipient, false)
-                    .await?;
+
+                if creator.eq(own_did) {
+                    self.remove_recipient(conversation_id, &recipient, false)
+                        .await?;
+                } else {
+                    //We do this so we can grab a permit to mutate the conversation outside of the set task
+                    //so we can exclude the recipient
+                    drop(conversation);
+                    let _guard = self.conversation_queue(conversation_id).await?;
+                    {
+                        let context = format!("exclude {}", recipient);
+                        let signature = bs58::decode(&signature).into_vec()?;
+                        verify_serde_sig(recipient.clone(), &context, &signature)?;
+                    }
+
+                    let mut conversation = self.get_conversation(conversation_id).await?;
+                    if let Entry::Vacant(entry) = conversation.excluded.entry(recipient) {
+                        entry.insert(signature);
+                    }
+                    self.set_conversation(conversation_id, conversation).await?;
+                }
             }
             ConversationEvents::DeleteConversation { conversation_id } => {
                 trace!("Delete conversation event received for {conversation_id}");
@@ -1524,8 +1562,13 @@ impl MessageStore {
 
                 if creator.ne(own_did) {
                     can_broadcast = false;
+                    let recipients = recipients
+                        .iter()
+                        .filter(|did| own_did.ne(did))
+                        .cloned()
+                        .collect::<Vec<_>>();
                     if let Err(e) = self
-                        .leave_group_conversation(creator, conversation_id)
+                        .leave_group_conversation(creator, &recipients, conversation_id)
                         .await
                     {
                         error!("Error leaving conversation: {e}");
@@ -1687,6 +1730,9 @@ impl MessageStore {
                                     cid.get_local_dag(&store.ipfs).await?;
                                 conversation.verify()?;
                                 store.conversation_cid.write().await.insert(id, cid);
+                                let recipients = conversation.recipients();
+
+                                let _ = store.account.get_identity(recipients.into()).await.ok();
 
                                 let stream =
                                     store.ipfs.pubsub_subscribe(conversation.topic()).await?;
@@ -2259,13 +2305,19 @@ impl MessageStore {
     pub async fn leave_group_conversation(
         &mut self,
         creator: &DID,
+        _: &[DID],
         conversation_id: Uuid,
     ) -> Result<(), Error> {
         let own_did = &*self.did;
 
+        let context = format!("exclude {}", own_did);
+        let signature = sign_serde(own_did, &context)?;
+        let signature = bs58::encode(signature).into_string();
+
         let event = ConversationEvents::LeaveConversation {
             conversation_id,
             recipient: own_did.clone(),
+            signature,
         };
 
         self.send_single_conversation_event(creator, conversation_id, event)
@@ -3581,7 +3633,10 @@ impl MessageStore {
                     return Err(Error::IdentityDoesntExist);
                 }
 
+                let _can_emit = document.excluded.contains_key(&recipient);
+
                 document.recipients = list;
+                document.excluded.remove(&recipient);
                 document.signature = Some(signature);
                 self.set_conversation(conversation_id, document).await?;
 

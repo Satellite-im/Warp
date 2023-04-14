@@ -42,6 +42,7 @@ pub enum ConversationEvents {
     LeaveConversation {
         conversation_id: Uuid,
         recipient: DID,
+        signature: String,
     },
     DeleteConversation {
         conversation_id: Uuid,

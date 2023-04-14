@@ -7,7 +7,7 @@ use futures::{
 use libipld::{Cid, Ipld};
 use rust_ipfs::Ipfs;
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use uuid::Uuid;
 use warp::{
@@ -26,6 +26,7 @@ use super::{
     document::{GetIpldDag, GetLocalDag, ToCid},
     ecdh_decrypt,
     keystore::Keystore,
+    verify_serde_sig,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
@@ -37,6 +38,7 @@ pub struct ConversationDocument {
     pub creator: Option<DID>,
     pub conversation_type: ConversationType,
     pub recipients: Vec<DID>,
+    pub excluded: HashMap<DID, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub messages: Option<Cid>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -55,8 +57,10 @@ impl From<&Conversation> for ConversationDocument {
             id: conversation.id(),
             name: conversation.name(),
             creator: conversation.creator(),
+
             conversation_type: conversation.conversation_type(),
             recipients: conversation.recipients(),
+            excluded: Default::default(),
             messages: Default::default(),
             signature: None,
         }
@@ -105,7 +109,17 @@ impl ConversationDocument {
     }
 
     pub fn recipients(&self) -> Vec<DID> {
-        self.recipients.clone()
+        let valid_keys = self
+            .excluded
+            .iter()
+            .filter_map(|(did, signature)| {
+                let context = format!("exclude {}", did);
+                let signature = bs58::decode(signature).into_vec().unwrap_or_default();
+                verify_serde_sig(did.clone(), &context, &signature).map(|_| did).ok()
+            })
+            .collect::<Vec<_>>();
+
+        self.recipients.iter().filter(|recipient| !valid_keys.contains(recipient)).cloned().collect()
     }
 }
 
@@ -130,6 +144,7 @@ impl ConversationDocument {
         }
 
         let messages = None;
+        let excluded = Default::default();
 
         let mut document = Self {
             id,
@@ -137,6 +152,7 @@ impl ConversationDocument {
             recipients,
             creator,
             conversation_type,
+            excluded,
             messages,
             signature,
         };
@@ -550,10 +566,10 @@ impl From<ConversationDocument> for Conversation {
     fn from(document: ConversationDocument) -> Self {
         let mut conversation = Conversation::default();
         conversation.set_id(document.id);
-        conversation.set_name(document.name);
-        conversation.set_creator(document.creator);
+        conversation.set_name(document.name());
+        conversation.set_creator(document.creator.clone());
         conversation.set_conversation_type(document.conversation_type);
-        conversation.set_recipients(document.recipients);
+        conversation.set_recipients(document.recipients());
         conversation
     }
 }
@@ -565,7 +581,7 @@ impl From<&ConversationDocument> for Conversation {
         conversation.set_name(document.name.clone());
         conversation.set_creator(document.creator.clone());
         conversation.set_conversation_type(document.conversation_type);
-        conversation.set_recipients(document.recipients.clone());
+        conversation.set_recipients(document.recipients());
         conversation
     }
 }
