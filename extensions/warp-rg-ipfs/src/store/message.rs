@@ -881,6 +881,16 @@ impl MessageStore {
             {
                 tx.close_channel();
             }
+
+            if let Some(mut tx) = self
+                .conversation_task_tx
+                .write()
+                .await
+                .remove(&conversation_id)
+            {
+                tx.close_channel();
+            }
+
             if let Some(permit) = self
                 .conversation_lock
                 .write()
