@@ -1196,11 +1196,6 @@ impl MessageStore {
                         if let Ok(peers) = self.ipfs.pubsub_peers(Some(topic.clone())).await {
                             //TODO: Check peer against conversation to see if they are connected
                             if peers.contains(peer) {
-                                if let Err(_e) = ecdh_decrypt(&self.did, Some(did), &data) {
-                                    //This validates that the data itself was encrypted by the sender
-                                    continue;
-                                }
-
                                 let signature = match sign_serde(&self.did, &data) {
                                     Ok(sig) => sig,
                                     Err(_e) => {
