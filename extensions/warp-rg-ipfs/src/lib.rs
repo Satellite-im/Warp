@@ -403,7 +403,7 @@ impl RayGunGroupConversation for IpfsMessaging {
 
     async fn remove_recipient(&mut self, conversation_id: Uuid, did_key: &DID) -> Result<()> {
         self.messaging_store()?
-            .remove_recipient(conversation_id, did_key)
+            .remove_recipient(conversation_id, did_key, true)
             .await
     }
 }

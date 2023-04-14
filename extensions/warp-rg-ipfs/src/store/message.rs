@@ -1040,6 +1040,21 @@ impl MessageStore {
                     }
                 });
             }
+            ConversationEvents::LeaveConversation {
+                conversation_id,
+                recipient,
+            } => {
+                let conversation = self.get_conversation(conversation_id).await?;
+                if !conversation.recipients.contains(&recipient) {
+                    return Err(anyhow::anyhow!(
+                        "{recipient} does not belong to {conversation_id}"
+                    ));
+                }
+
+                info!("{recipient} is leaving group conversation {conversation_id}");
+                self.remove_recipient(conversation_id, &recipient, false)
+                    .await?;
+            }
             ConversationEvents::DeleteConversation { conversation_id } => {
                 trace!("Delete conversation event received for {conversation_id}");
                 if !self.exist(conversation_id).await {
@@ -1108,7 +1123,10 @@ impl MessageStore {
                 }
 
                 // Delete a keystore, if any, assigned to the conversation.
-                let _ = self.remove_conversation_keystore(conversation_id).await.ok();
+                let _ = self
+                    .remove_conversation_keystore(conversation_id)
+                    .await
+                    .ok();
 
                 if let Err(e) = self
                     .event
@@ -1495,57 +1513,79 @@ impl MessageStore {
         if broadcast {
             let recipients = document_type.recipients();
 
-            let own_did = &*self.did;
+            let mut can_broadcast = true;
 
-            let peer_id_list = recipients
-                .clone()
-                .iter()
-                .filter(|did| own_did.ne(did))
-                .map(|did| (did.clone(), did))
-                .filter_map(|(a, b)| did_to_libp2p_pub(b).map(|pk| (a, pk)).ok())
-                .map(|(did, pk)| (did, pk.to_peer_id()))
-                .collect::<Vec<_>>();
+            if matches!(document_type.conversation_type, ConversationType::Group) {
+                let own_did = &*self.did;
+                let creator = document_type
+                    .creator
+                    .as_ref()
+                    .ok_or(Error::InvalidConversation)?;
 
-            let event = serde_json::to_vec(&ConversationEvents::DeleteConversation {
-                conversation_id: document_type.id(),
-            })?;
-
-            for (recipient, peer_id) in peer_id_list {
-                let bytes = ecdh_encrypt(own_did, Some(&recipient), &event)?;
-                let signature = sign_serde(own_did, &bytes)?;
-
-                let payload = Payload::new(own_did, &bytes, &signature);
-                let topic = format!("{recipient}/messaging");
-
-                let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
-
-                if !peers.contains(&peer_id)
-                    || (peers.contains(&peer_id)
-                        && self
-                            .ipfs
-                            .pubsub_publish(topic.clone(), payload.to_bytes()?.into())
-                            .await
-                            .is_err())
-                {
-                    warn!("Unable to publish to topic. Queuing event");
-                    //Note: If the error is related to peer not available then we should push this to queue but if
-                    //      its due to the message limit being reached we should probably break up the message to fix into
-                    //      "max_transmit_size" within rust-libp2p gossipsub
-                    //      For now we will queue the message if we hit an error
+                if creator.ne(own_did) {
+                    can_broadcast = false;
                     if let Err(e) = self
-                        .queue_event(
-                            recipient.clone(),
-                            Queue::direct(
-                                document_type.id(),
-                                None,
-                                peer_id,
-                                topic.clone(),
-                                payload.data().to_vec(),
-                            ),
-                        )
+                        .leave_group_conversation(creator, conversation_id)
                         .await
                     {
-                        error!("Error submitting event to queue: {e}");
+                        error!("Error leaving conversation: {e}");
+                    }
+                }
+            }
+
+            let own_did = &*self.did;
+
+            if can_broadcast {
+                let peer_id_list = recipients
+                    .clone()
+                    .iter()
+                    .filter(|did| own_did.ne(did))
+                    .map(|did| (did.clone(), did))
+                    .filter_map(|(a, b)| did_to_libp2p_pub(b).map(|pk| (a, pk)).ok())
+                    .map(|(did, pk)| (did, pk.to_peer_id()))
+                    .collect::<Vec<_>>();
+
+                let event = serde_json::to_vec(&ConversationEvents::DeleteConversation {
+                    conversation_id: document_type.id(),
+                })?;
+
+                for (recipient, peer_id) in peer_id_list {
+                    let bytes = ecdh_encrypt(own_did, Some(&recipient), &event)?;
+                    let signature = sign_serde(own_did, &bytes)?;
+
+                    let payload = Payload::new(own_did, &bytes, &signature);
+                    let topic = format!("{recipient}/messaging");
+
+                    let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
+
+                    if !peers.contains(&peer_id)
+                        || (peers.contains(&peer_id)
+                            && self
+                                .ipfs
+                                .pubsub_publish(topic.clone(), payload.to_bytes()?.into())
+                                .await
+                                .is_err())
+                    {
+                        warn!("Unable to publish to topic. Queuing event");
+                        //Note: If the error is related to peer not available then we should push this to queue but if
+                        //      its due to the message limit being reached we should probably break up the message to fix into
+                        //      "max_transmit_size" within rust-libp2p gossipsub
+                        //      For now we will queue the message if we hit an error
+                        if let Err(e) = self
+                            .queue_event(
+                                recipient.clone(),
+                                Queue::direct(
+                                    document_type.id(),
+                                    None,
+                                    peer_id,
+                                    topic.clone(),
+                                    payload.data().to_vec(),
+                                ),
+                            )
+                            .await
+                        {
+                            error!("Error submitting event to queue: {e}");
+                        }
                     }
                 }
             }
@@ -1565,7 +1605,10 @@ impl MessageStore {
             }
         }
 
-        let _ = self.remove_conversation_keystore(conversation_id).await.ok();
+        let _ = self
+            .remove_conversation_keystore(conversation_id)
+            .await
+            .ok();
 
         if let Err(e) = self
             .event
@@ -2147,6 +2190,7 @@ impl MessageStore {
         &mut self,
         conversation_id: Uuid,
         did_key: &DID,
+        broadcast: bool,
     ) -> Result<(), Error> {
         let _guard = self.conversation_queue(conversation_id).await?;
 
@@ -2201,11 +2245,30 @@ impl MessageStore {
         self.send_raw_event(conversation_id, None, event, true)
             .await?;
 
-        let new_event = ConversationEvents::DeleteConversation {
-            conversation_id: conversation.id(),
+        if broadcast {
+            let new_event = ConversationEvents::DeleteConversation {
+                conversation_id: conversation.id(),
+            };
+
+            self.send_single_conversation_event(did_key, conversation.id(), new_event)
+                .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn leave_group_conversation(
+        &mut self,
+        creator: &DID,
+        conversation_id: Uuid,
+    ) -> Result<(), Error> {
+        let own_did = &*self.did;
+
+        let event = ConversationEvents::LeaveConversation {
+            conversation_id,
+            recipient: own_did.clone(),
         };
 
-        self.send_single_conversation_event(did_key, conversation.id(), new_event)
+        self.send_single_conversation_event(creator, conversation_id, event)
             .await
     }
 
@@ -3529,6 +3592,7 @@ impl MessageStore {
                     error!("Error broadcasting event: {e}");
                 }
             }
+
             MessagingEvents::UpdateConversationName {
                 conversation_id,
                 name,

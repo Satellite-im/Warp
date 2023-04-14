@@ -39,6 +39,10 @@ pub enum ConversationEvents {
         list: Vec<DID>,
         signature: Option<String>,
     },
+    LeaveConversation {
+        conversation_id: Uuid,
+        recipient: DID,
+    },
     DeleteConversation {
         conversation_id: Uuid,
     },
