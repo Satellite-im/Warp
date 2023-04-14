@@ -586,6 +586,9 @@ impl MessageStore {
                                                 error!("Error: {e}");
                                             }
                                         }
+                                        _ => {
+                                            info!("Unimplemented/Unsupported Event");
+                                        }
                                     },
                                     ConversationRequestResponse::Response {
                                         conversation_id,
@@ -654,6 +657,9 @@ impl MessageStore {
                                             {
                                                 error!("Error setting keystore: {e}");
                                             }
+                                        }
+                                        _ => {
+                                            info!("Unimplemented/Unsupported Event");
                                         }
                                     },
                                 }

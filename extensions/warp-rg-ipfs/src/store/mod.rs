@@ -50,6 +50,7 @@ pub enum ConversationEvents {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 #[serde(rename_all = "lowercase", tag = "type")]
 pub enum ConversationRequestResponse {
     Request {
@@ -63,15 +64,27 @@ pub enum ConversationRequestResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(clippy::type_complexity)]
 #[serde(rename_all = "lowercase")]
 pub enum ConversationRequestKind {
     Key,
+    Ping,
+    RetrieveMessages {
+        // start/end
+        range: Option<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)>,
+    },
+    WantMessage {
+        message_id: Uuid,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 #[serde(rename_all = "lowercase")]
 pub enum ConversationResponseKind {
     Key { key: Vec<u8> },
+    Pong,
+    HaveMessages { messages: Vec<Uuid> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
