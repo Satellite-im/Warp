@@ -1098,10 +1098,22 @@ impl MessageStore {
                         ));
                     }
 
-                    if let Entry::Vacant(entry) = conversation.excluded.entry(recipient) {
+                    let mut can_emit = false;
+
+                    if let Entry::Vacant(entry) = conversation.excluded.entry(recipient.clone()) {
                         entry.insert(signature);
+                        can_emit = true;
                     }
                     self.set_conversation(conversation_id, conversation).await?;
+                    if can_emit {
+                        let tx = self.get_conversation_sender(conversation_id).await?;
+                        if let Err(e) = tx.send(MessageEventKind::RecipientRemoved {
+                            conversation_id,
+                            recipient,
+                        }) {
+                            error!("Error broadcasting event: {e}");
+                        }
+                    }
                 }
             }
             ConversationEvents::DeleteConversation { conversation_id } => {
@@ -3659,18 +3671,20 @@ impl MessageStore {
                     return Err(Error::IdentityDoesntExist);
                 }
 
-                let _can_emit = document.excluded.contains_key(&recipient);
+                let can_emit = !document.excluded.contains_key(&recipient);
 
                 document.recipients = list;
                 document.excluded.remove(&recipient);
                 document.signature = Some(signature);
                 self.set_conversation(conversation_id, document).await?;
 
-                if let Err(e) = tx.send(MessageEventKind::RecipientRemoved {
-                    conversation_id,
-                    recipient,
-                }) {
-                    error!("Error broadcasting event: {e}");
+                if can_emit {
+                    if let Err(e) = tx.send(MessageEventKind::RecipientRemoved {
+                        conversation_id,
+                        recipient,
+                    }) {
+                        error!("Error broadcasting event: {e}");
+                    }
                 }
             }
 
