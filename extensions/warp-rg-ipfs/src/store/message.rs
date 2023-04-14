@@ -444,7 +444,8 @@ impl MessageStore {
 
                 while let Some(stream) = stream.next().await {
                     if let Ok(payload) = Payload::from_bytes(&stream.data) {
-                        if let Ok(data) = ecdh_decrypt(&did, Some(&payload.sender()), payload.data())
+                        if let Ok(data) =
+                            ecdh_decrypt(&did, Some(&payload.sender()), payload.data())
                         {
                             if let Ok(event) =
                                 serde_json::from_slice::<ConversationRequestResponse>(&data)
@@ -515,17 +516,14 @@ impl MessageStore {
                                                 }
                                             };
                                             let sender = payload.sender();
-                                            let key = match ecdh_encrypt(
-                                                &did,
-                                                Some(&sender),
-                                                raw_key,
-                                            ) {
-                                                Ok(key) => key,
-                                                Err(e) => {
-                                                    error!("Error: {e}");
-                                                    continue;
-                                                }
-                                            };
+                                            let key =
+                                                match ecdh_encrypt(&did, Some(&sender), raw_key) {
+                                                    Ok(key) => key,
+                                                    Err(e) => {
+                                                        error!("Error: {e}");
+                                                        continue;
+                                                    }
+                                                };
                                             let response = ConversationRequestResponse::Response {
                                                 conversation_id,
                                                 kind: ConversationResponseKind::Key { key },
@@ -624,8 +622,7 @@ impl MessageStore {
                                             };
 
                                             let raw_key =
-                                                match ecdh_decrypt(&did, Some(&sender), key)
-                                                {
+                                                match ecdh_decrypt(&did, Some(&sender), key) {
                                                     Ok(key) => key,
                                                     Err(e) => {
                                                         error!(
@@ -837,6 +834,15 @@ impl MessageStore {
     }
 
     async fn end_task(&self, conversation_id: Uuid) {
+        if let Some(task) = self
+            .stream_conversation_task
+            .write()
+            .await
+            .remove(&conversation_id)
+        {
+            task.abort();
+        }
+
         if let Some(task) = self
             .stream_reqres_task
             .write()
@@ -1101,6 +1107,9 @@ impl MessageStore {
                     }
                 }
 
+                // Delete a keystore, if any, assigned to the conversation.
+                let _ = self.remove_conversation_keystore(conversation_id).await.ok();
+
                 if let Err(e) = self
                     .event
                     .send(RayGunEventKind::ConversationDeleted { conversation_id })
@@ -1112,6 +1121,7 @@ impl MessageStore {
         Ok(())
     }
 
+    //TODO: Replace
     async fn process_queue(&self) -> anyhow::Result<()> {
         let mut list = self.queue.read().await.clone();
         for (did, items) in list.iter_mut() {
@@ -1555,6 +1565,8 @@ impl MessageStore {
             }
         }
 
+        let _ = self.remove_conversation_keystore(conversation_id).await.ok();
+
         if let Err(e) = self
             .event
             .send(RayGunEventKind::ConversationDeleted { conversation_id })
@@ -1727,6 +1739,29 @@ impl MessageStore {
             .await
             {
                 error!("Unable to save info to file: {e}");
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn remove_conversation_keystore(&self, conversation_id: Uuid) -> Result<(), Error> {
+        let mut writer = self.conversation_keystore_cid.write().await;
+        let cid = writer
+            .remove(&conversation_id)
+            .ok_or(Error::InvalidConversation)?;
+        drop(writer);
+
+        if self.ipfs.is_pinned(&cid).await? {
+            self.ipfs.remove_pin(&cid, false).await?;
+        }
+        if let Err(_e) = self.ipfs.remove_block(cid).await {}
+
+        if let Some(path) = self.path.as_ref() {
+            if let Err(e) =
+                tokio::fs::remove_file(path.join(format!("{}.keystore", conversation_id))).await
+            {
+                error!("Unable to remove keystore: {e}");
             }
         }
 
