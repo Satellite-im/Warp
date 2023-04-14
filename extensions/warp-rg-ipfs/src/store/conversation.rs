@@ -226,7 +226,7 @@ impl ConversationDocument {
                 },
                 creator.to_string().as_bytes().to_vec(),
                 Vec::from_iter(
-                    self.recipients()
+                    self.recipients
                         .iter()
                         .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
                 ),
@@ -256,7 +256,7 @@ impl ConversationDocument {
                 },
                 creator.to_string().as_bytes().to_vec(),
                 Vec::from_iter(
-                    self.recipients()
+                    self.recipients
                         .iter()
                         .flat_map(|rec| rec.to_string().as_bytes().to_vec()),
                 ),

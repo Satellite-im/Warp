@@ -1060,7 +1060,7 @@ impl MessageStore {
                 let own_did = &*self.did;
 
                 // Precaution
-                if recipient.eq(own_did) || recipient.eq(creator) {
+                if recipient.eq(creator) {
                     return Err(anyhow::anyhow!("Cannot remove the creator of the group"));
                 }
 
@@ -1079,6 +1079,7 @@ impl MessageStore {
                     //We do this so we can grab a permit to mutate the conversation outside of the set task
                     //so we can exclude the recipient
                     drop(conversation);
+
                     let _guard = self.conversation_queue(conversation_id).await?;
 
                     {
@@ -1570,6 +1571,7 @@ impl MessageStore {
                     let recipients = recipients
                         .iter()
                         .filter(|did| own_did.ne(did))
+                        .filter(|did| creator.ne(did))
                         .cloned()
                         .collect::<Vec<_>>();
                     if let Err(e) = self
@@ -2310,7 +2312,7 @@ impl MessageStore {
     pub async fn leave_group_conversation(
         &mut self,
         creator: &DID,
-        _: &[DID],
+        list: &[DID],
         conversation_id: Uuid,
     ) -> Result<(), Error> {
         let own_did = &*self.did;
@@ -2324,6 +2326,23 @@ impl MessageStore {
             recipient: own_did.clone(),
             signature,
         };
+
+        //We want to send the event to the recipients until the creator can remove them from the conversation directly
+        tokio::spawn({
+            let event = event.clone();
+            let mut store = self.clone();
+            let list = list.to_vec();
+            async move {
+                for did in list.iter() {
+                    if let Err(_e) = store
+                        .send_single_conversation_event(did, conversation_id, event.clone())
+                        .await
+                    {
+                        //
+                    }
+                }
+            }
+        });
 
         self.send_single_conversation_event(creator, conversation_id, event)
             .await
@@ -3148,7 +3167,9 @@ impl MessageStore {
                 .ipfs
                 .pubsub_publish(conversation.topic(), payload.to_bytes()?.into())
                 .await
-            {}
+            {
+                error!("Error publishing: {_e}");
+            }
         }
 
         Ok(())
