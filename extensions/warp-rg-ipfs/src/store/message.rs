@@ -1080,13 +1080,23 @@ impl MessageStore {
                     //so we can exclude the recipient
                     drop(conversation);
                     let _guard = self.conversation_queue(conversation_id).await?;
+
                     {
+                        //Small validation context
                         let context = format!("exclude {}", recipient);
                         let signature = bs58::decode(&signature).into_vec()?;
                         verify_serde_sig(recipient.clone(), &context, &signature)?;
                     }
 
                     let mut conversation = self.get_conversation(conversation_id).await?;
+
+                    //Validate again since we have a permit
+                    if !conversation.recipients.contains(&recipient) {
+                        return Err(anyhow::anyhow!(
+                            "{recipient} does not belong to {conversation_id}"
+                        ));
+                    }
+
                     if let Entry::Vacant(entry) = conversation.excluded.entry(recipient) {
                         entry.insert(signature);
                     }
