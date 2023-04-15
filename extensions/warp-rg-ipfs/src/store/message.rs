@@ -2215,7 +2215,7 @@ impl MessageStore {
             name: name.to_string(),
         });
 
-        self.send_raw_event(conversation_id, None, event, true)
+        self.publish(conversation_id, None, event, true)
             .await
     }
 
@@ -2277,7 +2277,7 @@ impl MessageStore {
             recipient: did_key.clone(),
         });
 
-        self.send_raw_event(conversation_id, None, event, true)
+        self.publish(conversation_id, None, event, true)
             .await?;
 
         let own_did = &*self.did;
@@ -2353,7 +2353,7 @@ impl MessageStore {
             recipient: did_key.clone(),
         });
 
-        self.send_raw_event(conversation_id, None, event, true)
+        self.publish(conversation_id, None, event, true)
             .await?;
 
         if broadcast {
@@ -2482,7 +2482,7 @@ impl MessageStore {
 
         one_rx.await.map_err(anyhow::Error::from)??;
 
-        self.send_raw_event(conversation_id, Some(message_id), event, true)
+        self.publish(conversation_id, Some(message_id), event, true)
             .await
     }
 
@@ -2546,7 +2546,7 @@ impl MessageStore {
 
         one_rx.await.map_err(anyhow::Error::from)??;
 
-        self.send_raw_event(conversation_id, None, event, true)
+        self.publish(conversation_id, None, event, true)
             .await
     }
 
@@ -2613,7 +2613,7 @@ impl MessageStore {
 
         one_rx.await.map_err(anyhow::Error::from)??;
 
-        self.send_raw_event(conversation_id, None, event, true)
+        self.publish(conversation_id, None, event, true)
             .await
     }
 
@@ -2639,7 +2639,7 @@ impl MessageStore {
         one_rx.await.map_err(anyhow::Error::from)??;
 
         if broadcast {
-            self.send_raw_event(conversation_id, None, event, true)
+            self.publish(conversation_id, None, event, true)
                 .await?;
         }
 
@@ -2670,7 +2670,7 @@ impl MessageStore {
             .map_err(anyhow::Error::from)?;
         one_rx.await.map_err(anyhow::Error::from)??;
 
-        self.send_raw_event(conversation_id, None, event, true)
+        self.publish(conversation_id, None, event, true)
             .await
     }
 
@@ -2710,7 +2710,7 @@ impl MessageStore {
             .map_err(anyhow::Error::from)?;
         one_rx.await.map_err(anyhow::Error::from)??;
 
-        self.send_raw_event(conversation_id, None, event, true)
+        self.publish(conversation_id, None, event, true)
             .await
     }
 
@@ -2903,11 +2903,10 @@ impl MessageStore {
             .map_err(anyhow::Error::from)?;
         one_rx.await.map_err(anyhow::Error::from)??;
 
-        self.send_raw_event(conversation_id, None, event, true)
+        self.publish(conversation_id, None, event, true)
             .await
     }
 
-    #[allow(clippy::await_holding_lock)]
     pub async fn download(
         &self,
         conversation: Uuid,
@@ -3145,11 +3144,11 @@ impl MessageStore {
         Ok(())
     }
 
-    pub async fn send_raw_event<S: Serialize + Send + Sync>(
+    pub async fn publish(
         &mut self,
         conversation: Uuid,
         message_id: Option<Uuid>,
-        event: S,
+        event: MessagingEvents,
         queue: bool,
     ) -> Result<(), Error> {
         let conversation = self.get_conversation(conversation).await?;
