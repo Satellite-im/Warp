@@ -6,11 +6,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "1", features = ["full"] }
-futures = "0.3"
-rust-ipfs = "0.3.14"
+async-trait.workspace = true
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, version = "1", features = ["full"] }
+futures.workspace = true
+rust-ipfs.workspace = true
 anyhow = "1"
 clap = { version = "4.1", features = ["derive"] }
-zeroize = "1"
+zeroize.workspace = true
 dotenv = "0.15"
 base64 = "0.21"
+uuid.workspace = true
+bincode.workspace = true
+bytes.workspace = true
