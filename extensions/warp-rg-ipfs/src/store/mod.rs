@@ -5,7 +5,7 @@ pub mod message;
 pub mod payload;
 
 use rust_ipfs as ipfs;
-use std::time::Duration;
+use std::{time::Duration, fmt::Debug};
 
 use chrono::{DateTime, Utc};
 use rust_ipfs::PeerId;
@@ -78,13 +78,19 @@ pub enum ConversationRequestKind {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[allow(clippy::large_enum_variant)]
 #[serde(rename_all = "lowercase")]
 pub enum ConversationResponseKind {
     Key { key: Vec<u8> },
     Pong,
     HaveMessages { messages: Vec<Uuid> },
+}
+
+impl Debug for ConversationResponseKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ConversationRespondKind")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

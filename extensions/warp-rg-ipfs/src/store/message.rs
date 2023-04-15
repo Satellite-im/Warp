@@ -4,7 +4,7 @@ use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use futures::channel::mpsc::{unbounded, Sender, UnboundedSender};
@@ -26,7 +26,7 @@ use warp::constellation::{Constellation, ConstellationProgressStream, Progressio
 use warp::crypto::cipher::Cipher;
 use warp::crypto::{generate, DID};
 use warp::error::Error;
-use warp::logging::tracing::log::{error, info, trace};
+use warp::logging::tracing::log::{debug, error, info, trace};
 use warp::logging::tracing::warn;
 use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
@@ -450,6 +450,7 @@ impl MessageStore {
                             if let Ok(event) =
                                 serde_json::from_slice::<ConversationRequestResponse>(&data)
                             {
+                                debug!("Event: {event:?}");
                                 match event {
                                     ConversationRequestResponse::Request {
                                         conversation_id,
@@ -550,13 +551,19 @@ impl MessageStore {
                                                     let peer_id = did_to_libp2p_pub(&sender)
                                                         .map(|pk| pk.to_peer_id())?;
 
+                                                    let bytes = payload.to_bytes()?;
+
+                                                    trace!("Payload size: {} bytes", bytes.len());
+
+                                                    info!("Responding to {sender}");
+
                                                     if !peers.contains(&peer_id)
                                                         || (peers.contains(&peer_id)
                                                             && store
                                                                 .ipfs
                                                                 .pubsub_publish(
                                                                     topic.clone(),
-                                                                    payload.to_bytes()?.into(),
+                                                                    bytes.into(),
                                                                 )
                                                                 .await
                                                                 .is_err())
@@ -605,6 +612,7 @@ impl MessageStore {
                                                 ConversationType::Group
                                             ) {
                                                 //Only group conversations support keys
+                                                error!("Invalid conversation type");
                                                 continue;
                                             }
 
@@ -1627,6 +1635,7 @@ impl MessageStore {
                     conversation_id: document_type.id(),
                 })?;
 
+                let main_timer = Instant::now();
                 for (recipient, peer_id) in peer_id_list {
                     let bytes = ecdh_encrypt(own_did, Some(&recipient), &event)?;
                     let signature = sign_serde(own_did, &bytes)?;
@@ -1635,7 +1644,8 @@ impl MessageStore {
                     let topic = format!("{recipient}/messaging");
 
                     let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
-
+                    let timer = Instant::now();
+                    let mut time = true;
                     if !peers.contains(&peer_id)
                         || (peers.contains(&peer_id)
                             && self
@@ -1664,8 +1674,20 @@ impl MessageStore {
                         {
                             error!("Error submitting event to queue: {e}");
                         }
+                        time = false;
+                    }
+
+                    if time {
+                        let end = timer.elapsed();
+                        info!("Event sent to {recipient}");
+                        trace!("Took {}ms to send event", end.as_millis());
                     }
                 }
+                let main_timer_end = main_timer.elapsed();
+                trace!(
+                    "Completed processing within {}ms",
+                    main_timer_end.as_millis()
+                );
             }
         }
 
@@ -1911,6 +1933,8 @@ impl MessageStore {
         let topic = format!("{did_key}/messaging");
         let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
 
+        let mut time = true;
+        let timer = Instant::now();
         if !peers.contains(&peer_id)
             || (peers.contains(&peer_id)
                 && self
@@ -1935,6 +1959,12 @@ impl MessageStore {
             {
                 error!("Error submitting event to queue: {e}");
             }
+            time = false;
+        }
+        if time {
+            let end = timer.elapsed();
+            info!("Event sent to {did_key}");
+            trace!("Took {}ms to send event", end.as_millis());
         }
 
         Ok(())
@@ -3191,12 +3221,21 @@ impl MessageStore {
         }
 
         if can_publish {
+            let bytes = payload.to_bytes()?;
+            trace!("Payload size: {} bytes", bytes.len());
+            let timer = Instant::now();
+            let mut time = true;
             if let Err(_e) = self
                 .ipfs
-                .pubsub_publish(conversation.topic(), payload.to_bytes()?.into())
+                .pubsub_publish(conversation.topic(), bytes.into())
                 .await
             {
                 error!("Error publishing: {_e}");
+                time = false;
+            }
+            if time {
+                let end = timer.elapsed();
+                trace!("Took {}ms to send event", end.as_millis());
             }
         }
 
