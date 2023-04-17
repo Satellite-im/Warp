@@ -2215,8 +2215,7 @@ impl MessageStore {
             name: name.to_string(),
         });
 
-        self.publish(conversation_id, None, event, true)
-            .await
+        self.publish(conversation_id, None, event, true).await
     }
 
     pub async fn add_recipient(
@@ -2277,8 +2276,7 @@ impl MessageStore {
             recipient: did_key.clone(),
         });
 
-        self.publish(conversation_id, None, event, true)
-            .await?;
+        self.publish(conversation_id, None, event, true).await?;
 
         let own_did = &*self.did;
         let new_event = ConversationEvents::NewGroupConversation {
@@ -2353,8 +2351,7 @@ impl MessageStore {
             recipient: did_key.clone(),
         });
 
-        self.publish(conversation_id, None, event, true)
-            .await?;
+        self.publish(conversation_id, None, event, true).await?;
 
         if broadcast {
             let new_event = ConversationEvents::DeleteConversation {
@@ -2546,8 +2543,7 @@ impl MessageStore {
 
         one_rx.await.map_err(anyhow::Error::from)??;
 
-        self.publish(conversation_id, None, event, true)
-            .await
+        self.publish(conversation_id, None, event, true).await
     }
 
     pub async fn reply_message(
@@ -2613,8 +2609,7 @@ impl MessageStore {
 
         one_rx.await.map_err(anyhow::Error::from)??;
 
-        self.publish(conversation_id, None, event, true)
-            .await
+        self.publish(conversation_id, None, event, true).await
     }
 
     pub async fn delete_message(
@@ -2639,8 +2634,7 @@ impl MessageStore {
         one_rx.await.map_err(anyhow::Error::from)??;
 
         if broadcast {
-            self.publish(conversation_id, None, event, true)
-                .await?;
+            self.publish(conversation_id, None, event, true).await?;
         }
 
         Ok(())
@@ -2670,8 +2664,7 @@ impl MessageStore {
             .map_err(anyhow::Error::from)?;
         one_rx.await.map_err(anyhow::Error::from)??;
 
-        self.publish(conversation_id, None, event, true)
-            .await
+        self.publish(conversation_id, None, event, true).await
     }
 
     pub async fn embeds(
@@ -2710,8 +2703,7 @@ impl MessageStore {
             .map_err(anyhow::Error::from)?;
         one_rx.await.map_err(anyhow::Error::from)??;
 
-        self.publish(conversation_id, None, event, true)
-            .await
+        self.publish(conversation_id, None, event, true).await
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -2903,8 +2895,7 @@ impl MessageStore {
             .map_err(anyhow::Error::from)?;
         one_rx.await.map_err(anyhow::Error::from)??;
 
-        self.publish(conversation_id, None, event, true)
-            .await
+        self.publish(conversation_id, None, event, true).await
     }
 
     pub async fn download(
@@ -3522,7 +3513,7 @@ impl MessageStore {
                 message_document.remove(self.ipfs.clone()).await?;
                 list.remove(&message_document);
                 document.set_message_list(&self.ipfs, list).await?;
-                
+
                 self.set_conversation(conversation_id, document).await?;
 
                 if let Err(e) = tx.send(MessageEventKind::MessageDeleted {
@@ -3715,7 +3706,6 @@ impl MessageStore {
                         }
                     }
                 });
-                
 
                 if let Err(e) = tx.send(MessageEventKind::RecipientAdded {
                     conversation_id,
