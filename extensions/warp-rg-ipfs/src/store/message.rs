@@ -847,6 +847,513 @@ impl MessageStore {
         self.start_reqres_task(conversation_id).await;
     }
 
+
+    async fn message_event(
+        &mut self,
+        conversation_id: Uuid,
+        events: &MessagingEvents,
+        direction: MessageDirection,
+        opt: EventOpt,
+    ) -> Result<bool, Error> {
+        let _guard = self.conversation_queue(conversation_id).await?;
+        let tx = self.get_conversation_sender(conversation_id).await?;
+
+        let mut document = self.get_conversation(conversation_id).await?;
+
+        let keystore = match document.conversation_type {
+            ConversationType::Direct => None,
+            ConversationType::Group => self.conversation_keystore(conversation_id).await.ok(),
+        };
+
+        match events.clone() {
+            MessagingEvents::New { mut message } => {
+                let mut messages = document.get_message_list(&self.ipfs).await?;
+                if messages
+                    .iter()
+                    .any(|message_document| message_document.id == message.id())
+                {
+                    return Err(Error::MessageFound);
+                }
+
+                if !document.recipients().contains(&message.sender()) {
+                    return Err(Error::IdentityDoesntExist);
+                }
+
+                let lines_value_length: usize = message
+                    .value()
+                    .iter()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.chars().count())
+                    .sum();
+
+                if lines_value_length == 0 && lines_value_length > 4096 {
+                    error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+                    return Err(Error::InvalidLength {
+                        context: "message".into(),
+                        current: lines_value_length,
+                        minimum: Some(1),
+                        maximum: Some(4096),
+                    });
+                }
+
+                {
+                    let signature = message.signature();
+                    let sender = message.sender();
+                    let construct = vec![
+                        message.id().into_bytes().to_vec(),
+                        message.conversation_id().into_bytes().to_vec(),
+                        sender.to_string().as_bytes().to_vec(),
+                        message
+                            .value()
+                            .iter()
+                            .map(|s| s.as_bytes())
+                            .collect::<Vec<_>>()
+                            .concat(),
+                    ]
+                    .concat();
+                    verify_serde_sig(sender, &construct, &signature)?;
+                }
+                spam_check(&mut message, self.spam_filter.clone())?;
+                let conversation_id = message.conversation_id();
+
+                if message.message_type() == MessageType::Attachment
+                    && direction == MessageDirection::In
+                {
+                    if let Some(fs) = self.filesystem.clone() {
+                        let dir = fs.root_directory();
+                        for file in message.attachments() {
+                            let original = file.name();
+                            let mut inc = 0;
+                            loop {
+                                if dir.has_item(&original) {
+                                    if inc >= 20 {
+                                        break;
+                                    }
+                                    inc += 1;
+                                    file.set_name(&format!("{original}-{inc}"));
+                                    continue;
+                                }
+                                break;
+                            }
+                            if let Err(e) = dir.add_file(file) {
+                                error!("Error adding file to constellation: {e}");
+                            }
+                        }
+                    }
+                }
+
+                let message_id = message.id();
+
+                let message_document =
+                    MessageDocument::new(&self.ipfs, self.did.clone(), message, keystore.as_ref())
+                        .await?;
+
+                messages.insert(message_document);
+                document.set_message_list(&self.ipfs, messages).await?;
+                self.set_conversation(conversation_id, document).await?;
+
+                let event = match direction {
+                    MessageDirection::In => MessageEventKind::MessageReceived {
+                        conversation_id,
+                        message_id,
+                    },
+                    MessageDirection::Out => MessageEventKind::MessageSent {
+                        conversation_id,
+                        message_id,
+                    },
+                };
+
+                if let Err(e) = tx.send(event) {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            MessagingEvents::Edit {
+                conversation_id,
+                message_id,
+                modified,
+                lines,
+                signature,
+            } => {
+                let mut list = document.get_message_list(&self.ipfs).await?;
+
+                let mut message_document = list
+                    .iter()
+                    .find(|document| {
+                        document.id == message_id && document.conversation_id == conversation_id
+                    })
+                    .copied()
+                    .ok_or(Error::MessageNotFound)?;
+
+                let mut message = message_document
+                    .resolve(&self.ipfs, &self.did, keystore.as_ref())
+                    .await?;
+
+                let lines_value_length: usize = lines
+                    .iter()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.chars().count())
+                    .sum();
+
+                if lines_value_length == 0 && lines_value_length > 4096 {
+                    error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
+                    return Err(Error::InvalidLength {
+                        context: "message".into(),
+                        current: lines_value_length,
+                        minimum: Some(1),
+                        maximum: Some(4096),
+                    });
+                }
+
+                let sender = message.sender();
+                //Validate the original message
+                {
+                    let signature = message.signature();
+                    let construct = vec![
+                        message.id().into_bytes().to_vec(),
+                        message.conversation_id().into_bytes().to_vec(),
+                        sender.to_string().as_bytes().to_vec(),
+                        message
+                            .value()
+                            .iter()
+                            .map(|s| s.as_bytes())
+                            .collect::<Vec<_>>()
+                            .concat(),
+                    ]
+                    .concat();
+                    verify_serde_sig(sender.clone(), &construct, &signature)?;
+                }
+
+                //Validate the edit message
+                {
+                    let construct = vec![
+                        message.id().into_bytes().to_vec(),
+                        message.conversation_id().into_bytes().to_vec(),
+                        sender.to_string().as_bytes().to_vec(),
+                        lines
+                            .iter()
+                            .map(|s| s.as_bytes())
+                            .collect::<Vec<_>>()
+                            .concat(),
+                    ]
+                    .concat();
+                    verify_serde_sig(sender, &construct, &signature)?;
+                }
+
+                message.set_signature(Some(signature));
+                *message.value_mut() = lines;
+                message.set_modified(modified);
+
+                message_document
+                    .update(&self.ipfs, &self.did, message, keystore.as_ref())
+                    .await?;
+                list.replace(message_document);
+                document.set_message_list(&self.ipfs, list).await?;
+                self.set_conversation(conversation_id, document).await?;
+
+                if let Err(e) = tx.send(MessageEventKind::MessageEdited {
+                    conversation_id,
+                    message_id,
+                }) {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            MessagingEvents::Delete {
+                conversation_id,
+                message_id,
+            } => {
+                if opt.keep_if_owned.load(Ordering::SeqCst) {
+                    let message_document = document.get_message_document(&self.ipfs, message_id).await?;
+
+                    let message = message_document
+                        .resolve(&self.ipfs, &self.did, keystore.as_ref())
+                        .await?;
+
+                    let signature = message.signature();
+                    let sender = message.sender();
+                    let construct = vec![
+                        message.id().into_bytes().to_vec(),
+                        message.conversation_id().into_bytes().to_vec(),
+                        sender.to_string().as_bytes().to_vec(),
+                        message
+                            .value()
+                            .iter()
+                            .map(|s| s.as_bytes())
+                            .collect::<Vec<_>>()
+                            .concat(),
+                    ]
+                    .concat();
+                    verify_serde_sig(sender, &construct, &signature)?;
+                }
+
+                document.delete_message(&self.ipfs, message_id).await?;
+
+                self.set_conversation(conversation_id, document).await?;
+
+                if let Err(e) = tx.send(MessageEventKind::MessageDeleted {
+                    conversation_id,
+                    message_id,
+                }) {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            MessagingEvents::Pin {
+                conversation_id,
+                message_id,
+                state,
+                ..
+            } => {
+                let mut list = document.get_message_list(&self.ipfs).await?;
+
+                let mut message_document = document
+                    .get_message_document(&self.ipfs, message_id)
+                    .await?;
+
+                let mut message = message_document
+                    .resolve(&self.ipfs, &self.did, keystore.as_ref())
+                    .await?;
+
+                let event = match state {
+                    PinState::Pin => {
+                        if message.pinned() {
+                            return Ok(false);
+                        }
+                        *message.pinned_mut() = true;
+                        MessageEventKind::MessagePinned {
+                            conversation_id,
+                            message_id,
+                        }
+                    }
+                    PinState::Unpin => {
+                        if !message.pinned() {
+                            return Ok(false);
+                        }
+                        *message.pinned_mut() = false;
+                        MessageEventKind::MessageUnpinned {
+                            conversation_id,
+                            message_id,
+                        }
+                    }
+                };
+
+                message_document
+                    .update(&self.ipfs, &self.did, message, keystore.as_ref())
+                    .await?;
+
+                list.replace(message_document);
+                document.set_message_list(&self.ipfs, list).await?;
+                self.set_conversation(conversation_id, document).await?;
+
+                if let Err(e) = tx.send(event) {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            MessagingEvents::React {
+                conversation_id,
+                reactor,
+                message_id,
+                state,
+                emoji,
+            } => {
+                let mut list = document.get_message_list(&self.ipfs).await?;
+
+                let mut message_document = list
+                    .iter()
+                    .find(|document| {
+                        document.id == message_id && document.conversation_id == conversation_id
+                    })
+                    .cloned()
+                    .ok_or(Error::MessageNotFound)?;
+
+                let mut message = message_document
+                    .resolve(&self.ipfs, &self.did, keystore.as_ref())
+                    .await?;
+
+                let reactions = message.reactions_mut();
+
+                match state {
+                    ReactionState::Add => {
+                        match reactions
+                            .iter()
+                            .position(|reaction| reaction.emoji().eq(&emoji))
+                            .and_then(|index| reactions.get_mut(index))
+                        {
+                            Some(reaction) => {
+                                reaction.users_mut().push(reactor.clone());
+                            }
+                            None => {
+                                let mut reaction = Reaction::default();
+                                reaction.set_emoji(&emoji);
+                                reaction.set_users(vec![reactor.clone()]);
+                                reactions.push(reaction);
+                            }
+                        };
+
+                        message_document
+                            .update(&self.ipfs, &self.did, message, keystore.as_ref())
+                            .await?;
+
+                        list.replace(message_document);
+                        document.set_message_list(&self.ipfs, list).await?;
+                        self.set_conversation(conversation_id, document).await?;
+
+                        if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
+                            conversation_id,
+                            message_id,
+                            did_key: reactor,
+                            reaction: emoji,
+                        }) {
+                            error!("Error broadcasting event: {e}");
+                        }
+                    }
+                    ReactionState::Remove => {
+                        let index = reactions
+                            .iter()
+                            .position(|reaction| {
+                                reaction.users().contains(&reactor) && reaction.emoji().eq(&emoji)
+                            })
+                            .ok_or(Error::MessageNotFound)?;
+
+                        let reaction = reactions.get_mut(index).ok_or(Error::MessageNotFound)?;
+
+                        let user_index = reaction
+                            .users()
+                            .iter()
+                            .position(|reaction_sender| reaction_sender.eq(&reactor))
+                            .ok_or(Error::MessageNotFound)?;
+
+                        reaction.users_mut().remove(user_index);
+
+                        if reaction.users().is_empty() {
+                            //Since there is no users listed under the emoji, the reaction should be removed from the message
+                            reactions.remove(index);
+                        }
+
+                        message_document
+                            .update(&self.ipfs, &self.did, message, keystore.as_ref())
+                            .await?;
+
+                        list.replace(message_document);
+                        document.set_message_list(&self.ipfs, list).await?;
+                        self.set_conversation(conversation_id, document).await?;
+
+                        if let Err(e) = tx.send(MessageEventKind::MessageReactionRemoved {
+                            conversation_id,
+                            message_id,
+                            did_key: reactor,
+                            reaction: emoji,
+                        }) {
+                            error!("Error broadcasting event: {e}");
+                        }
+                    }
+                }
+            }
+            MessagingEvents::AddRecipient {
+                conversation_id,
+                recipient,
+                list,
+                signature,
+            } => {
+                if document.recipients.contains(&recipient) {
+                    return Err(Error::IdentityExist);
+                }
+
+                // used to kind of bootstrap the connections internally in case the recipient isnt connected
+                tokio::spawn({
+                    let account = self.account.clone();
+                    let recipient = recipient.clone();
+                    async move {
+                        if let Ok(_list) = account.get_identity(Identifier::DID(recipient)).await {}
+                    }
+                });
+
+                document.recipients = list;
+                document.signature = Some(signature);
+                self.set_conversation(conversation_id, document).await?;
+
+                tokio::spawn({
+                    let store = self.clone();
+                    let recipient = recipient.clone();
+                    async move {
+                        if let Err(e) = store.request_key(conversation_id, &recipient).await {
+                            error!("Error requesting key: {e}");
+                        }
+                    }
+                });
+
+                if let Err(e) = tx.send(MessageEventKind::RecipientAdded {
+                    conversation_id,
+                    recipient,
+                }) {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            MessagingEvents::RemoveRecipient {
+                conversation_id,
+                recipient,
+                list,
+                signature,
+            } => {
+                if !document.recipients.contains(&recipient) {
+                    return Err(Error::IdentityDoesntExist);
+                }
+
+                let can_emit = !document.excluded.contains_key(&recipient);
+
+                document.recipients = list;
+                document.excluded.remove(&recipient);
+                document.signature = Some(signature);
+                self.set_conversation(conversation_id, document).await?;
+
+                if can_emit {
+                    if let Err(e) = tx.send(MessageEventKind::RecipientRemoved {
+                        conversation_id,
+                        recipient,
+                    }) {
+                        error!("Error broadcasting event: {e}");
+                    }
+                }
+            }
+
+            MessagingEvents::UpdateConversationName {
+                conversation_id,
+                name,
+                signature,
+            } => {
+                let name_length = name.trim().len();
+
+                if name_length == 0 || name_length > 255 {
+                    return Err(Error::InvalidLength {
+                        context: "name".into(),
+                        current: name_length,
+                        minimum: Some(1),
+                        maximum: Some(255),
+                    });
+                }
+                if let Some(current_name) = document.name() {
+                    if current_name.eq(&name) {
+                        return Ok(false);
+                    }
+                }
+
+                document.name = Some(name.clone());
+                document.signature = Some(signature);
+
+                self.set_conversation(conversation_id, document).await?;
+
+                if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
+                    conversation_id,
+                    name,
+                }) {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+
     async fn end_task(&self, conversation_id: Uuid) {
         if let Some(task) = self
             .stream_conversation_task
@@ -3263,514 +3770,7 @@ impl MessageStore {
 
         Ok(())
     }
-
-    async fn message_event(
-        &mut self,
-        conversation_id: Uuid,
-        events: &MessagingEvents,
-        direction: MessageDirection,
-        opt: EventOpt,
-    ) -> Result<bool, Error> {
-        let _guard = self.conversation_queue(conversation_id).await?;
-        let tx = self.get_conversation_sender(conversation_id).await?;
-
-        let mut document = self.get_conversation(conversation_id).await?;
-
-        let keystore = match document.conversation_type {
-            ConversationType::Direct => None,
-            ConversationType::Group => self.conversation_keystore(conversation_id).await.ok(),
-        };
-
-        match events.clone() {
-            MessagingEvents::New { mut message } => {
-                let mut messages = document.get_message_list(&self.ipfs).await?;
-                if messages
-                    .iter()
-                    .any(|message_document| message_document.id == message.id())
-                {
-                    return Err(Error::MessageFound);
-                }
-
-                if !document.recipients().contains(&message.sender()) {
-                    return Err(Error::IdentityDoesntExist);
-                }
-
-                let lines_value_length: usize = message
-                    .value()
-                    .iter()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.chars().count())
-                    .sum();
-
-                if lines_value_length == 0 && lines_value_length > 4096 {
-                    error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
-                    return Err(Error::InvalidLength {
-                        context: "message".into(),
-                        current: lines_value_length,
-                        minimum: Some(1),
-                        maximum: Some(4096),
-                    });
-                }
-
-                {
-                    let signature = message.signature();
-                    let sender = message.sender();
-                    let construct = vec![
-                        message.id().into_bytes().to_vec(),
-                        message.conversation_id().into_bytes().to_vec(),
-                        sender.to_string().as_bytes().to_vec(),
-                        message
-                            .value()
-                            .iter()
-                            .map(|s| s.as_bytes())
-                            .collect::<Vec<_>>()
-                            .concat(),
-                    ]
-                    .concat();
-                    verify_serde_sig(sender, &construct, &signature)?;
-                }
-                spam_check(&mut message, self.spam_filter.clone())?;
-                let conversation_id = message.conversation_id();
-
-                if message.message_type() == MessageType::Attachment
-                    && direction == MessageDirection::In
-                {
-                    if let Some(fs) = self.filesystem.clone() {
-                        let dir = fs.root_directory();
-                        for file in message.attachments() {
-                            let original = file.name();
-                            let mut inc = 0;
-                            loop {
-                                if dir.has_item(&original) {
-                                    if inc >= 20 {
-                                        break;
-                                    }
-                                    inc += 1;
-                                    file.set_name(&format!("{original}-{inc}"));
-                                    continue;
-                                }
-                                break;
-                            }
-                            if let Err(e) = dir.add_file(file) {
-                                error!("Error adding file to constellation: {e}");
-                            }
-                        }
-                    }
-                }
-
-                let message_id = message.id();
-
-                let message_document =
-                    MessageDocument::new(&self.ipfs, self.did.clone(), message, keystore.as_ref())
-                        .await?;
-
-                messages.insert(message_document);
-                document.set_message_list(&self.ipfs, messages).await?;
-                self.set_conversation(conversation_id, document).await?;
-
-                let event = match direction {
-                    MessageDirection::In => MessageEventKind::MessageReceived {
-                        conversation_id,
-                        message_id,
-                    },
-                    MessageDirection::Out => MessageEventKind::MessageSent {
-                        conversation_id,
-                        message_id,
-                    },
-                };
-
-                if let Err(e) = tx.send(event) {
-                    error!("Error broadcasting event: {e}");
-                }
-            }
-            MessagingEvents::Edit {
-                conversation_id,
-                message_id,
-                modified,
-                lines,
-                signature,
-            } => {
-                let mut list = document.get_message_list(&self.ipfs).await?;
-
-                let mut message_document = list
-                    .iter()
-                    .find(|document| {
-                        document.id == message_id && document.conversation_id == conversation_id
-                    })
-                    .copied()
-                    .ok_or(Error::MessageNotFound)?;
-
-                let mut message = message_document
-                    .resolve(&self.ipfs, &self.did, keystore.as_ref())
-                    .await?;
-
-                let lines_value_length: usize = lines
-                    .iter()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.chars().count())
-                    .sum();
-
-                if lines_value_length == 0 && lines_value_length > 4096 {
-                    error!("Length of message is invalid: Got {lines_value_length}; Expected 4096");
-                    return Err(Error::InvalidLength {
-                        context: "message".into(),
-                        current: lines_value_length,
-                        minimum: Some(1),
-                        maximum: Some(4096),
-                    });
-                }
-
-                let sender = message.sender();
-                //Validate the original message
-                {
-                    let signature = message.signature();
-                    let construct = vec![
-                        message.id().into_bytes().to_vec(),
-                        message.conversation_id().into_bytes().to_vec(),
-                        sender.to_string().as_bytes().to_vec(),
-                        message
-                            .value()
-                            .iter()
-                            .map(|s| s.as_bytes())
-                            .collect::<Vec<_>>()
-                            .concat(),
-                    ]
-                    .concat();
-                    verify_serde_sig(sender.clone(), &construct, &signature)?;
-                }
-
-                //Validate the edit message
-                {
-                    let construct = vec![
-                        message.id().into_bytes().to_vec(),
-                        message.conversation_id().into_bytes().to_vec(),
-                        sender.to_string().as_bytes().to_vec(),
-                        lines
-                            .iter()
-                            .map(|s| s.as_bytes())
-                            .collect::<Vec<_>>()
-                            .concat(),
-                    ]
-                    .concat();
-                    verify_serde_sig(sender, &construct, &signature)?;
-                }
-
-                message.set_signature(Some(signature));
-                *message.value_mut() = lines;
-                message.set_modified(modified);
-
-                message_document
-                    .update(&self.ipfs, &self.did, message, keystore.as_ref())
-                    .await?;
-                list.replace(message_document);
-                document.set_message_list(&self.ipfs, list).await?;
-                self.set_conversation(conversation_id, document).await?;
-
-                if let Err(e) = tx.send(MessageEventKind::MessageEdited {
-                    conversation_id,
-                    message_id,
-                }) {
-                    error!("Error broadcasting event: {e}");
-                }
-            }
-            MessagingEvents::Delete {
-                conversation_id,
-                message_id,
-            } => {
-                if opt.keep_if_owned.load(Ordering::SeqCst) {
-                    let message_document = document.get_message_document(&self.ipfs, message_id).await?;
-
-                    let message = message_document
-                        .resolve(&self.ipfs, &self.did, keystore.as_ref())
-                        .await?;
-
-                    let signature = message.signature();
-                    let sender = message.sender();
-                    let construct = vec![
-                        message.id().into_bytes().to_vec(),
-                        message.conversation_id().into_bytes().to_vec(),
-                        sender.to_string().as_bytes().to_vec(),
-                        message
-                            .value()
-                            .iter()
-                            .map(|s| s.as_bytes())
-                            .collect::<Vec<_>>()
-                            .concat(),
-                    ]
-                    .concat();
-                    verify_serde_sig(sender, &construct, &signature)?;
-                }
-
-                document.delete_message(&self.ipfs, message_id).await?;
-
-                self.set_conversation(conversation_id, document).await?;
-
-                if let Err(e) = tx.send(MessageEventKind::MessageDeleted {
-                    conversation_id,
-                    message_id,
-                }) {
-                    error!("Error broadcasting event: {e}");
-                }
-            }
-            MessagingEvents::Pin {
-                conversation_id,
-                message_id,
-                state,
-                ..
-            } => {
-                let mut list = document.get_message_list(&self.ipfs).await?;
-
-                let mut message_document = document
-                    .get_message_document(&self.ipfs, message_id)
-                    .await?;
-
-                let mut message = message_document
-                    .resolve(&self.ipfs, &self.did, keystore.as_ref())
-                    .await?;
-
-                let event = match state {
-                    PinState::Pin => {
-                        if message.pinned() {
-                            return Ok(false);
-                        }
-                        *message.pinned_mut() = true;
-                        MessageEventKind::MessagePinned {
-                            conversation_id,
-                            message_id,
-                        }
-                    }
-                    PinState::Unpin => {
-                        if !message.pinned() {
-                            return Ok(false);
-                        }
-                        *message.pinned_mut() = false;
-                        MessageEventKind::MessageUnpinned {
-                            conversation_id,
-                            message_id,
-                        }
-                    }
-                };
-
-                message_document
-                    .update(&self.ipfs, &self.did, message, keystore.as_ref())
-                    .await?;
-
-                list.replace(message_document);
-                document.set_message_list(&self.ipfs, list).await?;
-                self.set_conversation(conversation_id, document).await?;
-
-                if let Err(e) = tx.send(event) {
-                    error!("Error broadcasting event: {e}");
-                }
-            }
-            MessagingEvents::React {
-                conversation_id,
-                reactor,
-                message_id,
-                state,
-                emoji,
-            } => {
-                let mut list = document.get_message_list(&self.ipfs).await?;
-
-                let mut message_document = list
-                    .iter()
-                    .find(|document| {
-                        document.id == message_id && document.conversation_id == conversation_id
-                    })
-                    .cloned()
-                    .ok_or(Error::MessageNotFound)?;
-
-                let mut message = message_document
-                    .resolve(&self.ipfs, &self.did, keystore.as_ref())
-                    .await?;
-
-                let reactions = message.reactions_mut();
-
-                match state {
-                    ReactionState::Add => {
-                        match reactions
-                            .iter()
-                            .position(|reaction| reaction.emoji().eq(&emoji))
-                            .and_then(|index| reactions.get_mut(index))
-                        {
-                            Some(reaction) => {
-                                reaction.users_mut().push(reactor.clone());
-                            }
-                            None => {
-                                let mut reaction = Reaction::default();
-                                reaction.set_emoji(&emoji);
-                                reaction.set_users(vec![reactor.clone()]);
-                                reactions.push(reaction);
-                            }
-                        };
-
-                        message_document
-                            .update(&self.ipfs, &self.did, message, keystore.as_ref())
-                            .await?;
-
-                        list.replace(message_document);
-                        document.set_message_list(&self.ipfs, list).await?;
-                        self.set_conversation(conversation_id, document).await?;
-
-                        if let Err(e) = tx.send(MessageEventKind::MessageReactionAdded {
-                            conversation_id,
-                            message_id,
-                            did_key: reactor,
-                            reaction: emoji,
-                        }) {
-                            error!("Error broadcasting event: {e}");
-                        }
-                    }
-                    ReactionState::Remove => {
-                        let index = reactions
-                            .iter()
-                            .position(|reaction| {
-                                reaction.users().contains(&reactor) && reaction.emoji().eq(&emoji)
-                            })
-                            .ok_or(Error::MessageNotFound)?;
-
-                        let reaction = reactions.get_mut(index).ok_or(Error::MessageNotFound)?;
-
-                        let user_index = reaction
-                            .users()
-                            .iter()
-                            .position(|reaction_sender| reaction_sender.eq(&reactor))
-                            .ok_or(Error::MessageNotFound)?;
-
-                        reaction.users_mut().remove(user_index);
-
-                        if reaction.users().is_empty() {
-                            //Since there is no users listed under the emoji, the reaction should be removed from the message
-                            reactions.remove(index);
-                        }
-
-                        message_document
-                            .update(&self.ipfs, &self.did, message, keystore.as_ref())
-                            .await?;
-
-                        list.replace(message_document);
-                        document.set_message_list(&self.ipfs, list).await?;
-                        self.set_conversation(conversation_id, document).await?;
-
-                        if let Err(e) = tx.send(MessageEventKind::MessageReactionRemoved {
-                            conversation_id,
-                            message_id,
-                            did_key: reactor,
-                            reaction: emoji,
-                        }) {
-                            error!("Error broadcasting event: {e}");
-                        }
-                    }
-                }
-            }
-            MessagingEvents::AddRecipient {
-                conversation_id,
-                recipient,
-                list,
-                signature,
-            } => {
-                if document.recipients.contains(&recipient) {
-                    return Err(Error::IdentityExist);
-                }
-
-                // used to kind of bootstrap the connections internally in case the recipient isnt connected
-                tokio::spawn({
-                    let account = self.account.clone();
-                    let recipient = recipient.clone();
-                    async move {
-                        if let Ok(_list) = account.get_identity(Identifier::DID(recipient)).await {}
-                    }
-                });
-
-                document.recipients = list;
-                document.signature = Some(signature);
-                self.set_conversation(conversation_id, document).await?;
-
-                tokio::spawn({
-                    let store = self.clone();
-                    let recipient = recipient.clone();
-                    async move {
-                        if let Err(e) = store.request_key(conversation_id, &recipient).await {
-                            error!("Error requesting key: {e}");
-                        }
-                    }
-                });
-
-                if let Err(e) = tx.send(MessageEventKind::RecipientAdded {
-                    conversation_id,
-                    recipient,
-                }) {
-                    error!("Error broadcasting event: {e}");
-                }
-            }
-            MessagingEvents::RemoveRecipient {
-                conversation_id,
-                recipient,
-                list,
-                signature,
-            } => {
-                if !document.recipients.contains(&recipient) {
-                    return Err(Error::IdentityDoesntExist);
-                }
-
-                let can_emit = !document.excluded.contains_key(&recipient);
-
-                document.recipients = list;
-                document.excluded.remove(&recipient);
-                document.signature = Some(signature);
-                self.set_conversation(conversation_id, document).await?;
-
-                if can_emit {
-                    if let Err(e) = tx.send(MessageEventKind::RecipientRemoved {
-                        conversation_id,
-                        recipient,
-                    }) {
-                        error!("Error broadcasting event: {e}");
-                    }
-                }
-            }
-
-            MessagingEvents::UpdateConversationName {
-                conversation_id,
-                name,
-                signature,
-            } => {
-                let name_length = name.trim().len();
-
-                if name_length == 0 || name_length > 255 {
-                    return Err(Error::InvalidLength {
-                        context: "name".into(),
-                        current: name_length,
-                        minimum: Some(1),
-                        maximum: Some(255),
-                    });
-                }
-                if let Some(current_name) = document.name() {
-                    if current_name.eq(&name) {
-                        return Ok(false);
-                    }
-                }
-
-                document.name = Some(name.clone());
-                document.signature = Some(signature);
-
-                self.set_conversation(conversation_id, document).await?;
-
-                if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
-                    conversation_id,
-                    name,
-                }) {
-                    error!("Error broadcasting event: {e}");
-                }
-            }
-            _ => {}
-        }
-        Ok(false)
-    }
 }
-
 #[derive(Clone, Default)]
 pub struct EventOpt {
     pub keep_if_owned: Arc<AtomicBool>,
