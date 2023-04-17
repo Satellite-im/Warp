@@ -238,11 +238,11 @@ impl ConversationDocument {
 
     pub fn verify(&self) -> Result<(), Error> {
         if matches!(self.conversation_type, ConversationType::Group) {
-            let Some(creator) = self.creator.clone() else {
+            let Some(creator) = &self.creator else {
                 return Err(Error::PublicKeyInvalid)
             };
 
-            let Some(signature) = self.signature.clone() else {
+            let Some(signature) = &self.signature else {
                 return Err(Error::InvalidSignature)
             };
 
