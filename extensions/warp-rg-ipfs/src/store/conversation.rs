@@ -511,7 +511,7 @@ impl ConversationDocument {
 
     pub async fn delete_message(&mut self, ipfs: &Ipfs, message_id: Uuid) -> Result<(), Error> {
         let mut messages = self.get_message_list(ipfs).await?;
-        
+
         let document = messages
             .iter()
             .find(|document| document.id == message_id)
@@ -685,7 +685,9 @@ impl MessageDocument {
 
         let message_cid = data.to_cid(ipfs).await?;
 
-        ipfs.insert_pin(&message_cid, false).await?;
+        if !ipfs.is_pinned(&message_cid).await? {
+            ipfs.insert_pin(&message_cid, false).await?;
+        }
 
         info!("Setting Message to document");
         self.message = message_cid;
