@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use core::hash::Hash;
 use futures::{
     stream::{self, BoxStream, FuturesOrdered},
-    StreamExt,
+    StreamExt, TryFutureExt,
 };
 use libipld::{Cid, Ipld};
 use rust_ipfs::Ipfs;
@@ -115,11 +115,17 @@ impl ConversationDocument {
             .filter_map(|(did, signature)| {
                 let context = format!("exclude {}", did);
                 let signature = bs58::decode(signature).into_vec().unwrap_or_default();
-                verify_serde_sig(did.clone(), &context, &signature).map(|_| did).ok()
+                verify_serde_sig(did.clone(), &context, &signature)
+                    .map(|_| did)
+                    .ok()
             })
             .collect::<Vec<_>>();
 
-        self.recipients.iter().filter(|recipient| !valid_keys.contains(recipient)).cloned().collect()
+        self.recipients
+            .iter()
+            .filter(|recipient| !valid_keys.contains(recipient))
+            .cloned()
+            .collect()
     }
 }
 
@@ -337,10 +343,12 @@ impl ConversationDocument {
         option: MessageOptions,
         keystore: Option<&Keystore>,
     ) -> Result<BoxStream<'a, Message>, Error> {
-        let message_list: BTreeSet<MessageDocument> = match self.messages {
-            Some(cid) => cid.get_local_dag(ipfs).await?,
-            None => return Ok(stream::empty().boxed()),
-        };
+        let message_list = self.get_message_list(ipfs).await?;
+
+        if message_list.is_empty() {
+            return Ok(stream::empty().boxed());
+        }
+
         let keystore = keystore.cloned();
         let mut messages = Vec::from_iter(message_list);
 
@@ -410,16 +418,16 @@ impl ConversationDocument {
         option: MessageOptions,
         keystore: Option<&Keystore>,
     ) -> Result<Messages, Error> {
-        let message_list: BTreeSet<MessageDocument> = match self.messages {
-            Some(cid) => cid.get_local_dag(ipfs).await?,
-            None => {
-                return Ok(Messages::Page {
-                    pages: vec![],
-                    total: 0,
-                })
-            }
-        };
-        let mut messages = Vec::from_iter(message_list);
+        let message_list = self.get_message_list(ipfs).await?;
+
+        if message_list.is_empty() {
+            return Ok(Messages::Page {
+                pages: vec![],
+                total: 0,
+            });
+        }
+
+        let mut messages = Vec::from_iter(message_list.iter());
 
         if option.reverse() {
             messages.reverse()
@@ -481,15 +489,12 @@ impl ConversationDocument {
         ipfs: &Ipfs,
         message_id: Uuid,
     ) -> Result<MessageDocument, Error> {
-        let messages: BTreeSet<MessageDocument> = match self.messages {
-            Some(cid) => cid.get_local_dag(ipfs).await?,
-            None => return Err(Error::MessageNotFound),
-        };
-        messages
-            .iter()
-            .find(|document| document.id == message_id)
-            .copied()
-            .ok_or(Error::MessageNotFound)
+        self.get_message_list(ipfs).await.and_then(|list| {
+            list.iter()
+                .find(|document| document.id == message_id)
+                .copied()
+                .ok_or(Error::MessageNotFound)
+        })
     }
 
     pub async fn get_message(
@@ -499,23 +504,14 @@ impl ConversationDocument {
         message_id: Uuid,
         keystore: Option<&Keystore>,
     ) -> Result<Message, Error> {
-        let messages: BTreeSet<MessageDocument> = match self.messages {
-            Some(cid) => cid.get_local_dag(ipfs).await?,
-            None => return Err(Error::MessageNotFound),
-        };
-        messages
-            .iter()
-            .find(|document| document.id == message_id)
-            .ok_or(Error::MessageNotFound)?
-            .resolve(ipfs, did, keystore)
+        self.get_message_document(ipfs, message_id)
+            .and_then(|doc| async move { doc.resolve(ipfs, did, keystore).await })
             .await
     }
 
     pub async fn delete_message(&mut self, ipfs: &Ipfs, message_id: Uuid) -> Result<(), Error> {
-        let mut messages: BTreeSet<MessageDocument> = match self.messages {
-            Some(cid) => cid.get_local_dag(ipfs).await?,
-            None => return Ok(()),
-        };
+        let mut messages = self.get_message_list(ipfs).await?;
+        
         let document = messages
             .iter()
             .find(|document| document.id == message_id)
