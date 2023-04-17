@@ -3474,7 +3474,7 @@ impl MessageStore {
                     .update(&self.ipfs, &self.did, message, keystore.as_ref())
                     .await?;
                 list.replace(message_document);
-
+                document.set_message_list(&self.ipfs, list).await?;
                 self.set_conversation(conversation_id, document).await?;
 
                 if let Err(e) = tx.send(MessageEventKind::MessageEdited {
@@ -3522,7 +3522,7 @@ impl MessageStore {
                 message_document.remove(self.ipfs.clone()).await?;
                 list.remove(&message_document);
                 document.set_message_list(&self.ipfs, list).await?;
-
+                
                 self.set_conversation(conversation_id, document).await?;
 
                 if let Err(e) = tx.send(MessageEventKind::MessageDeleted {
