@@ -167,6 +167,7 @@ pub struct MessageOptions {
     reverse: bool,
     messages_type: MessagesType,
     keyword: Option<String>,
+    pinned: bool,
     range: Option<Range<usize>>,
     limit: Option<i64>,
     skip: Option<i64>,
@@ -202,6 +203,11 @@ impl MessageOptions {
     pub fn set_last_message(mut self) -> MessageOptions {
         self.first_message = false;
         self.last_message = true;
+        self
+    }
+
+    pub fn set_pinned(mut self) -> MessageOptions {
+        self.pinned = true;
         self
     }
 
@@ -245,6 +251,10 @@ impl MessageOptions {
 
     pub fn last_message(&self) -> bool {
         self.last_message
+    }
+
+    pub fn pinned(&self) -> bool {
+        self.pinned
     }
 
     pub fn messages_type(&self) -> MessagesType {
