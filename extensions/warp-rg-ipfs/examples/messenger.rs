@@ -959,24 +959,12 @@ async fn main() -> anyhow::Result<()> {
                                 Some("add") => ReactionState::Add,
                                 Some("remove") => ReactionState::Remove,
                                 _ => {
-                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    writeln!(stdout, "/react <add | remove> <message-id> <emoji_code>")?;
                                     continue
                                 }
                             };
 
-                            let conversation_id = match cmd_line.next() {
-                                Some(id) => match Uuid::from_str(id) {
-                                    Ok(uuid) => uuid,
-                                    Err(e) => {
-                                        writeln!(stdout, "Error parsing ID: {e}")?;
-                                        continue
-                                    }
-                                },
-                                None => {
-                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
-                                    continue
-                                }
-                            };
+                            let conversation_id = topic.read().clone();
 
                             let message_id = match cmd_line.next() {
                                 Some(id) => match Uuid::from_str(id) {
@@ -987,7 +975,7 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                 },
                                 None => {
-                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    writeln!(stdout, "/react <add | remove> <message-id> <emoji_code>")?;
                                     continue
                                 }
                             };
@@ -995,7 +983,7 @@ async fn main() -> anyhow::Result<()> {
                             let code = match cmd_line.next() {
                                 Some(code) => code.to_string(),
                                 None => {
-                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    writeln!(stdout, "/react <add | remove> <message-id> <emoji_code>")?;
                                     continue
                                 }
                             };
@@ -1063,8 +1051,9 @@ async fn main() -> anyhow::Result<()> {
                                             continue
                                         }
                                     };
-                                    chat.pin(topic, id, PinState::Pin).await?;
-                                    writeln!(stdout, "Pinned {id}")?;
+                                    if let Err(e) = chat.pin(topic, id, PinState::Pin).await {
+                                        writeln!(stdout, "Error pinning message: {e}")?;
+                                    }
                                 },
                                 None => { writeln!(stdout, "/pin <id | all>")? }
                             }
