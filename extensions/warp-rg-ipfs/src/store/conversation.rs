@@ -511,7 +511,7 @@ impl ConversationDocument {
             .await
     }
 
-    pub async fn delete_message(&mut self, ipfs: Ipfs, message_id: Uuid) -> Result<(), Error> {
+    pub async fn delete_message(&mut self, ipfs: &Ipfs, message_id: Uuid) -> Result<(), Error> {
         let mut messages: BTreeSet<MessageDocument> = match self.messages {
             Some(cid) => cid.get_local_dag(&ipfs).await?,
             None => return Ok(()),
@@ -522,7 +522,7 @@ impl ConversationDocument {
             .copied()
             .ok_or(Error::MessageNotFound)?;
         messages.remove(&document);
-        self.set_message_list(&ipfs, messages).await?;
+        self.set_message_list(ipfs, messages).await?;
         document.remove(ipfs).await
     }
 
@@ -648,7 +648,7 @@ impl MessageDocument {
         Ok(document)
     }
 
-    pub async fn remove(&self, ipfs: Ipfs) -> Result<(), Error> {
+    pub async fn remove(&self, ipfs: &Ipfs) -> Result<(), Error> {
         let cid = self.message;
         if ipfs.is_pinned(&cid).await? {
             ipfs.remove_pin(&cid, false).await?;

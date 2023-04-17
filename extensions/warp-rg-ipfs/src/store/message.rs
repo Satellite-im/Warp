@@ -3479,20 +3479,13 @@ impl MessageStore {
                 conversation_id,
                 message_id,
             } => {
-                let mut list = document.get_message_list(&self.ipfs).await?;
-
-                let message_document = list
-                    .iter()
-                    .cloned()
-                    .find(|document| {
-                        document.id == message_id && document.conversation_id == conversation_id
-                    })
-                    .ok_or(Error::MessageNotFound)?;
-
                 if opt.keep_if_owned.load(Ordering::SeqCst) {
+                    let message_document = document.get_message_document(&self.ipfs, message_id).await?;
+
                     let message = message_document
                         .resolve(&self.ipfs, &self.did, keystore.as_ref())
                         .await?;
+
                     let signature = message.signature();
                     let sender = message.sender();
                     let construct = vec![
@@ -3510,9 +3503,7 @@ impl MessageStore {
                     verify_serde_sig(sender, &construct, &signature)?;
                 }
 
-                message_document.remove(self.ipfs.clone()).await?;
-                list.remove(&message_document);
-                document.set_message_list(&self.ipfs, list).await?;
+                document.delete_message(&self.ipfs, message_id).await?;
 
                 self.set_conversation(conversation_id, document).await?;
 
