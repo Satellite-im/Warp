@@ -513,7 +513,7 @@ impl ConversationDocument {
 
     pub async fn delete_message(&mut self, ipfs: &Ipfs, message_id: Uuid) -> Result<(), Error> {
         let mut messages: BTreeSet<MessageDocument> = match self.messages {
-            Some(cid) => cid.get_local_dag(&ipfs).await?,
+            Some(cid) => cid.get_local_dag(ipfs).await?,
             None => return Ok(()),
         };
         let document = messages
