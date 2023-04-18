@@ -1,11 +1,12 @@
 use std::{
     collections::HashSet,
+    fmt::Debug,
     hash::Hash,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Duration, fmt::Debug,
+    time::Duration,
 };
 
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
@@ -290,7 +291,27 @@ impl DiscoveryEntry {
                                 //       Discovery task isnt enabled?
                                 DiscoveryConfig::Provider(_) | DiscoveryConfig::Direct => {}
                                 config::Discovery::None => {
-                                    // Note: This will work if both peers shares the relays used.
+                                    // As a precautionary check, check to determine if we are connected to the relays and if not, establish a connection *just in case*
+                                    for relay in entry.relays.iter() {
+                                        let Some(peer_id) = peer_id_extract(relay) else {
+                                            log::error!("Could not get peer_id from {relay}");
+                                            continue;
+                                        };
+
+                                        if !ipfs.is_connected(peer_id).await.unwrap_or_default() {
+                                            if let Err(e) = ipfs.connect(relay.clone()).await {
+                                                log::error!(
+                                                    "Error while trying to connect to {relay}: {e}"
+                                                );
+                                                continue;
+                                            }
+                                        }
+                                    }
+
+                                    // Note:
+                                    // - This will work if both peers shares the relay(s) used.
+                                    // - We dont know if the peer would be connected to said relays, therefore we would need to
+                                    //   dial them through all relays listed
                                     let opts = DialOpts::peer_id(peer_id)
                                         .addresses(
                                             entry
@@ -366,9 +387,23 @@ impl DiscoveryEntry {
                                 }
                             }
                             config::Discovery::None => {
-                                //TODO: Dial out through common relays
-                                // Note: This will work if both peers shares the relays used.
+                                for relay in entry.relays.iter() {
+                                    let Some(peer_id) = peer_id_extract(relay) else {
+                                        log::error!("Could not get peer_id from {relay}");
+                                        continue;
+                                    };
 
+                                    if !ipfs.is_connected(peer_id).await.unwrap_or_default() {
+                                        if let Err(e) = ipfs.connect(relay.clone()).await {
+                                            log::error!(
+                                                "Error while trying to connect to {relay}: {e}"
+                                            );
+                                            continue;
+                                        }
+                                    }
+                                }
+
+                                // Note: This will work if both peers shares the relays used.
                                 let opts = DialOpts::peer_id(peer_id)
                                     .addresses(
                                         entry
@@ -471,5 +506,16 @@ impl DiscoveryEntry {
                 task.abort();
             }
         }
+    }
+}
+
+fn peer_id_extract(addr: &Multiaddr) -> Option<PeerId> {
+    let mut addr = addr.clone();
+    match addr.pop() {
+        Some(Protocol::P2p(hash)) => match PeerId::from_multihash(hash) {
+            Ok(id) => Some(id),
+            _ => None,
+        },
+        _ => None,
     }
 }
