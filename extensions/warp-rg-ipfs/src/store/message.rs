@@ -1910,6 +1910,15 @@ impl MessageStore {
                 error!("Error broadcasting event: {e}");
             }
         }
+
+        if let Some(path) = self.path.as_ref() {
+            let cid = cid.to_string();
+
+            if let Err(e) = tokio::fs::write(path.join(conversation.id().to_string()), cid).await {
+                error!("Unable to save info to file: {e}");
+            }
+        }
+
         Ok(Conversation::from(&conversation))
     }
 
