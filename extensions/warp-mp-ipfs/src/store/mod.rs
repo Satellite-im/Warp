@@ -10,15 +10,18 @@ use std::time::Duration;
 use futures::StreamExt;
 use rust_ipfs as ipfs;
 
-use ipfs::{Multiaddr, PeerId, Protocol};
+use ipfs::PeerId;
 use warp::{
-    crypto::{did_key::{Generate, ECDH}, DIDKey, Ed25519KeyPair, KeyMaterial, DID, zeroize::Zeroizing, cipher::Cipher},
+    crypto::{
+        cipher::Cipher,
+        did_key::{Generate, ECDH},
+        zeroize::Zeroizing,
+        DIDKey, Ed25519KeyPair, KeyMaterial, DID,
+    },
     error::Error,
     multipass::identity::IdentityStatus,
     tesseract::Tesseract,
 };
-
-use crate::config::Discovery;
 
 pub trait VecExt<T: Eq> {
     fn insert_item(&mut self, item: &T) -> bool;
@@ -191,49 +194,4 @@ pub async fn connected_to_peer<I: Into<PeerType>>(
         true => PeerConnectionType::Connected,
         false => PeerConnectionType::NotConnected,
     })
-}
-
-pub async fn discover_peer(
-    ipfs: &ipfs::Ipfs,
-    did: &DID,
-    discovery: Discovery,
-    relay: Vec<Multiaddr>,
-) -> anyhow::Result<()> {
-    let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
-
-    if matches!(
-        connected_to_peer(ipfs, PeerType::PeerId(peer_id)).await?,
-        PeerConnectionType::Connected,
-    ) {
-        return Ok(());
-    }
-
-    match discovery {
-        // Check over DHT to locate peer
-        Discovery::Provider(_) | Discovery::Direct => loop {
-            if ipfs.identity(Some(peer_id)).await.is_ok() {
-                break;
-            }
-        },
-        Discovery::None => {
-            //Attempt a direct dial via relay
-            for addr in relay.iter() {
-                let addr = addr.clone().with(Protocol::P2p(peer_id.into()));
-                if let Err(_e) = ipfs.connect(addr).await {
-                    continue;
-                }
-                tokio::time::sleep(Duration::from_millis(300)).await;
-            }
-            loop {
-                if connected_to_peer(ipfs, PeerType::PeerId(peer_id)).await?
-                    == PeerConnectionType::Connected
-                {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-        }
-    }
-
-    Ok(())
 }

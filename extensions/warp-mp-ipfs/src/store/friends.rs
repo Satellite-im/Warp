@@ -1157,7 +1157,10 @@ impl FriendsStore {
                     let recipient = recipient.clone();
                     async move {
                         let _ = store.push(&recipient).await.ok();
-                        let _ = store.request(&recipient, RequestOption::Identity).await.ok();
+                        let _ = store
+                            .request(&recipient, RequestOption::Identity)
+                            .await
+                            .ok();
                     }
                 });
                 if let Err(e) = self.tx.send(MultiPassEventKind::Blocked {
@@ -1172,7 +1175,10 @@ impl FriendsStore {
                     let recipient = recipient.clone();
                     async move {
                         let _ = store.push(&recipient).await.ok();
-                        let _ = store.request(&recipient, RequestOption::Identity).await.ok();
+                        let _ = store
+                            .request(&recipient, RequestOption::Identity)
+                            .await
+                            .ok();
                     }
                 });
                 if let Err(e) = self.tx.send(MultiPassEventKind::Unblocked {
