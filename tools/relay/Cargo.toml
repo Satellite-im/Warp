@@ -1,0 +1,16 @@
+[package]
+name = "warp-ipfs-relay"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+rust-ipfs = "0.3.14"
+anyhow = "1"
+clap = { version = "4.1", features = ["derive"] }
+zeroize = "1"
+dotenv = "0.15"
+base64 = "0.21"
