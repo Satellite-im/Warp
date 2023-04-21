@@ -77,6 +77,8 @@ enum Identifier {
 }
 
 struct Request<'a> {
+    // ID assigned to request
+    id: Uuid,
     // Simple identifier on how to handle the request
     identifier: Identifier,
     // namespace under which the request belongs
@@ -101,6 +103,7 @@ enum Status {
 }
 
 struct Response<'a> {
+    id: Uuid,
     status: Status,
     data: Option<Cow<'a, [u8]>>,
     signature: &'a [u8],
