@@ -366,11 +366,12 @@ impl RayGunAttachment for IpfsMessaging {
         &mut self,
         conversation_id: Uuid,
         message_id: Option<Uuid>,
+        location: Location,
         files: Vec<PathBuf>,
         message: Vec<String>,
     ) -> Result<()> {
         self.messaging_store()?
-            .attach(conversation_id, message_id, Location::Disk, files, message)
+            .attach(conversation_id, message_id, location, files, message)
             .await
     }
 

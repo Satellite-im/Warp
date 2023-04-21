@@ -860,7 +860,7 @@ async fn main() -> anyhow::Result<()> {
                                 let mut stdout = stdout.clone();
                                 async move {
                                     writeln!(stdout, "Sending....")?;
-                                    if let Err(e) = chat.attach(conversation_id, None, vec![file], message).await {
+                                    if let Err(e) = chat.attach(conversation_id, None, Default::default(), vec![file], message).await {
                                         writeln!(stdout, "Error: {e}")?;
                                     } else {
                                         writeln!(stdout, "File sent")?

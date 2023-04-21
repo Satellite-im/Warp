@@ -3222,7 +3222,6 @@ impl MessageStore {
         self.publish(conversation_id, None, event, true).await
     }
 
-    #[allow(clippy::await_holding_lock)]
     //TODO: Return a vector of streams for events of progression for uploading (possibly passing it through to raygun events)
     pub async fn attach(
         &mut self,
