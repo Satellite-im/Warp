@@ -373,7 +373,7 @@ mod test {
             }
         })
         .await?;
-        println!("Step");
+
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if let Some(MessageEventKind::RecipientRemoved {
@@ -388,7 +388,7 @@ mod test {
             }
         })
         .await?;
-        println!("Step");
+
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if let Some(MessageEventKind::RecipientRemoved {
@@ -403,7 +403,7 @@ mod test {
             }
         })
         .await?;
-        println!("Step");
+
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if let Some(RayGunEventKind::ConversationDeleted { conversation_id }) =
@@ -415,9 +415,9 @@ mod test {
             }
         })
         .await?;
-        println!("Step");
+
         let conversation = chat_a.get_conversation(id_a).await?;
-        println!("Step end");
+
         assert_eq!(conversation.conversation_type(), ConversationType::Group);
         assert_eq!(conversation.recipients().len(), 3);
         assert!(conversation.recipients().contains(&did_a));
