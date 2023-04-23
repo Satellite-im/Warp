@@ -1,95 +1,14 @@
-use futures::{stream, StreamExt};
-use rust_ipfs::{Ipfs, Multiaddr, PeerId};
 
-async fn node_info(nodes: Vec<Ipfs>) -> Vec<(Ipfs, PeerId, Vec<Multiaddr>)> {
-    stream::iter(nodes)
-        .filter_map(|node| async move {
-            let (peer_id, addrs) = node
-                .identity(None)
-                .await
-                .map(|peer| (peer.peer_id, peer.listen_addrs))
-                .expect("Expect own identity");
-
-            Some((node, peer_id, addrs))
-        })
-        .collect::<Vec<_>>()
-        .await
-}
-
-async fn mesh_connect(nodes: Vec<Ipfs>) -> anyhow::Result<()> {
-    let nodes = node_info(nodes).await;
-    let count = nodes.len();
-
-    for i in 0..count {
-        for (j, (_, _, addrs)) in nodes.iter().enumerate() {
-            if i != j {
-                for addr in addrs {
-                    if let Err(_e) = nodes[i].0.connect(addr.clone()).await {}
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
+pub mod common;
 #[cfg(test)]
 mod test {
     use std::time::Duration;
 
-    use rust_ipfs::Ipfs;
-    use warp::crypto::DID;
-    use warp::multipass::identity::{Identity, IdentityStatus, IdentityUpdate, Platform};
+    use warp::multipass::identity::{IdentityStatus, IdentityUpdate, Platform};
     use warp::multipass::MultiPass;
     use warp::tesseract::Tesseract;
-    use warp_mp_ipfs::config::{Bootstrap, Discovery};
     use warp_mp_ipfs::ipfs_identity_temporary;
-
-    use crate::mesh_connect;
-
-    async fn create_account(
-        username: Option<&str>,
-        passphrase: Option<&str>,
-        context: Option<String>,
-    ) -> anyhow::Result<(Box<dyn MultiPass>, DID, Identity)> {
-        let tesseract = Tesseract::default();
-        tesseract.unlock(b"internal pass").unwrap();
-        let mut config = warp_mp_ipfs::config::MpIpfsConfig::development();
-        config.listen_on = vec!["/ip4/127.0.0.1/tcp/0".parse().unwrap()];
-        config.store_setting.discovery = Discovery::Provider(context);
-        config.store_setting.share_platform = true;
-        config.ipfs_setting.relay_client.relay_address = vec![];
-        config.ipfs_setting.bootstrap = false;
-        config.bootstrap = Bootstrap::None;
-
-        let mut account = ipfs_identity_temporary(Some(config), tesseract, None).await?;
-        let did = account.create_identity(username, passphrase).await?;
-        let identity = account.get_own_identity().await?;
-        Ok((Box::new(account), did, identity))
-    }
-
-    async fn create_accounts(
-        infos: Vec<(Option<&str>, Option<&str>, Option<String>)>,
-    ) -> anyhow::Result<Vec<(Box<dyn MultiPass>, DID, Identity)>> {
-        let mut accounts = vec![];
-        let mut nodes = vec![];
-        for (username, passphrase, context) in infos {
-            let account = create_account(username, passphrase, context).await?;
-            let ipfs = account
-                .0
-                .handle()
-                .expect("Handle accessible")
-                .downcast_ref::<Ipfs>()
-                .cloned()
-                .unwrap();
-            nodes.push(ipfs);
-            accounts.push(account);
-        }
-
-        mesh_connect(nodes).await?;
-
-        Ok(accounts)
-    }
+    use crate::common::{create_accounts, create_account};
 
     #[tokio::test]
     async fn create_identity() -> anyhow::Result<()> {
@@ -359,7 +278,7 @@ mod test {
             ),
         ])
         .await?;
-    
+
         let (account_a, _, _) = accounts.first().unwrap();
 
         let (_account_b, did_b, _) = accounts.last().unwrap();
@@ -368,7 +287,7 @@ mod test {
 
         let platform_b = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                if let Ok(platform) = account_a.identity_platform(&did_b).await {
+                if let Ok(platform) = account_a.identity_platform(did_b).await {
                     break platform;
                 }
             }
