@@ -3,10 +3,10 @@ mod common;
 mod test {
     use std::time::Duration;
 
+    use crate::common::create_accounts_and_chat;
     use futures::StreamExt;
     use warp::raygun::{ConversationType, MessageEventKind, RayGunEventKind};
-    use crate::common::{create_account_and_chat, create_accounts_and_chat};
-    
+
     #[tokio::test]
     async fn create_group_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
@@ -76,10 +76,26 @@ mod test {
     #[tokio::test]
     async fn add_recipient_to_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
-            (None, None, Some("test::add_recipient_to_conversation".into())),
-            (None, None, Some("test::add_recipient_to_conversation".into())),
-            (None, None, Some("test::add_recipient_to_conversation".into())),
-            (None, None, Some("test::add_recipient_to_conversation".into())),
+            (
+                None,
+                None,
+                Some("test::add_recipient_to_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::add_recipient_to_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::add_recipient_to_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::add_recipient_to_conversation".into()),
+            ),
         ])
         .await?;
 
@@ -205,12 +221,27 @@ mod test {
 
     #[tokio::test]
     async fn remove_recipient_from_conversation() -> anyhow::Result<()> {
-
         let accounts = create_accounts_and_chat(vec![
-            (None, None, Some("test::remove_recipient_from_conversation".into())),
-            (None, None, Some("test::remove_recipient_from_conversation".into())),
-            (None, None, Some("test::remove_recipient_from_conversation".into())),
-            (None, None, Some("test::remove_recipient_from_conversation".into())),
+            (
+                None,
+                None,
+                Some("test::remove_recipient_from_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::remove_recipient_from_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::remove_recipient_from_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::remove_recipient_from_conversation".into()),
+            ),
         ])
         .await?;
 
@@ -223,7 +254,6 @@ mod test {
         let mut chat_subscribe_b = chat_b.subscribe().await?;
         let mut chat_subscribe_c = chat_c.subscribe().await?;
         let mut chat_subscribe_d = chat_d.subscribe().await?;
-        
 
         chat_a
             .create_group_conversation(None, vec![did_b.clone(), did_c.clone()])
@@ -343,7 +373,7 @@ mod test {
             }
         })
         .await?;
-    println!("Step");
+        println!("Step");
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if let Some(MessageEventKind::RecipientRemoved {
@@ -358,7 +388,7 @@ mod test {
             }
         })
         .await?;
-    println!("Step");
+        println!("Step");
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if let Some(MessageEventKind::RecipientRemoved {
@@ -373,7 +403,7 @@ mod test {
             }
         })
         .await?;
-    println!("Step");
+        println!("Step");
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if let Some(RayGunEventKind::ConversationDeleted { conversation_id }) =
@@ -385,7 +415,7 @@ mod test {
             }
         })
         .await?;
-    println!("Step");
+        println!("Step");
         let conversation = chat_a.get_conversation(id_a).await?;
         println!("Step end");
         assert_eq!(conversation.conversation_type(), ConversationType::Group);
@@ -400,10 +430,26 @@ mod test {
     #[tokio::test]
     async fn send_message_in_group_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
-            (None, None, Some("test::send_message_in_group_conversation".into())),
-            (None, None, Some("test::send_message_in_group_conversation".into())),
-            (None, None, Some("test::send_message_in_group_conversation".into())),
-            (None, None, Some("test::send_message_in_group_conversation".into())),
+            (
+                None,
+                None,
+                Some("test::send_message_in_group_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::send_message_in_group_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::send_message_in_group_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::send_message_in_group_conversation".into()),
+            ),
         ])
         .await?;
 
