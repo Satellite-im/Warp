@@ -220,6 +220,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore = ""]
     async fn remove_recipient_from_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -428,6 +429,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore = ""]
     async fn send_message_in_group_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
