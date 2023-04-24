@@ -69,6 +69,9 @@ mod test {
 
         let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
 
+        let conversation = chat_a.get_conversation(id_a).await?;
+        assert_eq!(conversation.name(), None);
+
         chat_a.update_conversation_name(id_a, "test").await?;
 
         let name = tokio::time::timeout(Duration::from_secs(5), async {
