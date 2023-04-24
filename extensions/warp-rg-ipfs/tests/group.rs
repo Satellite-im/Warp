@@ -8,6 +8,103 @@ mod test {
     use warp::raygun::{ConversationType, MessageEventKind, RayGunEventKind};
 
     #[tokio::test]
+    async fn create_empty_group_conversation() -> anyhow::Result<()> {
+        let accounts = create_accounts_and_chat(vec![(
+            None,
+            None,
+            Some("test::create_empty_group_conversation".into()),
+        )])
+        .await?;
+
+        let (_account_a, mut chat_a, did_a, _) = accounts[0].clone();
+
+        let mut chat_subscribe_a = chat_a.subscribe().await?;
+
+        chat_a.create_group_conversation(None, vec![]).await?;
+
+        let id_a = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_a.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let conversation = chat_a.get_conversation(id_a).await?;
+        assert_eq!(conversation.conversation_type(), ConversationType::Group);
+        assert_eq!(conversation.recipients().len(), 1);
+        assert!(conversation.recipients().contains(&did_a));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn update_group_conversation_name() -> anyhow::Result<()> {
+        let accounts = create_accounts_and_chat(vec![(
+            None,
+            None,
+            Some("test::update_group_conversation_name".into()),
+        )])
+        .await?;
+
+        let (_account_a, mut chat_a, _, _) = accounts[0].clone();
+
+        let mut chat_subscribe_a = chat_a.subscribe().await?;
+
+        chat_a.create_group_conversation(None, vec![]).await?;
+
+        let id_a = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(RayGunEventKind::ConversationCreated { conversation_id }) =
+                    chat_subscribe_a.next().await
+                {
+                    break conversation_id;
+                }
+            }
+        })
+        .await?;
+
+        let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
+
+        chat_a.update_conversation_name(id_a, "test").await?;
+
+        let name = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(MessageEventKind::ConversationNameUpdated { name, .. }) =
+                    conversation_a.next().await
+                {
+                    break name;
+                }
+            }
+        })
+        .await?;
+
+        let conversation = chat_a.get_conversation(id_a).await?;
+        assert_eq!(conversation.name(), Some(name));
+
+        chat_a.update_conversation_name(id_a, "").await?;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(MessageEventKind::ConversationNameUpdated { .. }) =
+                    conversation_a.next().await
+                {
+                    break;
+                }
+            }
+        })
+        .await?;
+
+        let conversation = chat_a.get_conversation(id_a).await?;
+        assert_eq!(conversation.name(), None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn create_group_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (None, None, Some("test::create_group_conversation".into())),

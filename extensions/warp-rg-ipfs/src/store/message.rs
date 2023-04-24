@@ -1321,13 +1321,14 @@ impl MessageStore {
                 name,
                 signature,
             } => {
-                let name_length = name.trim().len();
+                let name = name.trim();
+                let name_length = name.len();
 
-                if name_length == 0 || name_length > 255 {
+                if name_length > 255 {
                     return Err(Error::InvalidLength {
                         context: "name".into(),
                         current: name_length,
-                        minimum: Some(1),
+                        minimum: None,
                         maximum: Some(255),
                     });
                 }
@@ -1337,14 +1338,14 @@ impl MessageStore {
                     }
                 }
 
-                document.name = Some(name.clone());
+                document.name = (!name.is_empty()).then_some(name.to_string());
                 document.signature = Some(signature);
 
                 self.set_conversation(conversation_id, document).await?;
 
                 if let Err(e) = tx.send(MessageEventKind::ConversationNameUpdated {
                     conversation_id,
-                    name,
+                    name: name.to_string(),
                 }) {
                     error!("Error broadcasting event: {e}");
                 }
@@ -2681,13 +2682,14 @@ impl MessageStore {
         conversation_id: Uuid,
         name: &str,
     ) -> Result<(), Error> {
-        let name_length = name.trim().len();
+        let name = name.trim();
+        let name_length = name.len();
 
-        if name_length == 0 || name_length > 255 {
+        if name_length > 255 {
             return Err(Error::InvalidLength {
                 context: "name".into(),
                 current: name_length,
-                minimum: Some(1),
+                minimum: None,
                 maximum: Some(255),
             });
         }
@@ -2709,7 +2711,7 @@ impl MessageStore {
             return Err(Error::PublicKeyInvalid);
         }
 
-        conversation.name = Some(name.to_string());
+        conversation.name = (!name.is_empty()).then_some(name.to_string());
 
         self.set_conversation(conversation_id, conversation).await?;
 
