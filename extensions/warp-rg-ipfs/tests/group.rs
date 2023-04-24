@@ -296,10 +296,9 @@ mod test {
         let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
         let mut conversation_c = chat_c.get_conversation_stream(id_c).await?;
 
-        
         chat_a.add_recipient(id_a, &did_d).await?;
 
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
 
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -519,10 +518,10 @@ mod test {
         let mut conversation_c = chat_c.get_conversation_stream(id_c).await?;
         let mut conversation_d = chat_d.get_conversation_stream(id_d).await?;
 
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
 
         chat_a.send(id_a, vec!["Hello, World".into()]).await?;
-        
+
         let message_a = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if let Some(MessageEventKind::MessageSent {
