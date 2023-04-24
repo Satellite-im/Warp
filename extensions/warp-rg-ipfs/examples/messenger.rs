@@ -107,7 +107,6 @@ async fn create_account<P: AsRef<Path>>(
     }
     if opt.disable_relay {
         config.ipfs_setting.relay_client.enable = false;
-        config.ipfs_setting.relay_client.dcutr = false;
     }
     if opt.upnp {
         config.ipfs_setting.portmapping = true;
@@ -250,7 +249,7 @@ async fn main() -> anyhow::Result<()> {
         identity.username(),
         identity.short_id()
     );
-    println!("DID: {}", identity.did_key());
+    
     let (mut rl, mut stdout) = Readline::new(format!(
         "{}#{} >>> ",
         identity.username(),
@@ -286,6 +285,7 @@ async fn main() -> anyhow::Result<()> {
     "#;
 
     writeln!(stdout, "{message}")?;
+    writeln!(stdout, "DID: {}", identity.did_key())?;
 
     // loads all conversations into their own task to process events
     for conversation in chat.list_conversations().await.unwrap_or_default() {
@@ -473,11 +473,6 @@ async fn main() -> anyhow::Result<()> {
                                     continue;
                                 };
                                 did_keys.push(did);
-                            }
-
-                            if did_keys.is_empty() || did_keys.len() < 2 {
-                                writeln!(stdout, "Group chat requires 2 did keys")?;
-                                continue
                             }
 
                             if opt.disable_sender_emitter {
@@ -865,7 +860,7 @@ async fn main() -> anyhow::Result<()> {
                                 let mut stdout = stdout.clone();
                                 async move {
                                     writeln!(stdout, "Sending....")?;
-                                    if let Err(e) = chat.attach(conversation_id, None, vec![file], message).await {
+                                    if let Err(e) = chat.attach(conversation_id, None, Default::default(), vec![file], message).await {
                                         writeln!(stdout, "Error: {e}")?;
                                     } else {
                                         writeln!(stdout, "File sent")?
@@ -964,24 +959,12 @@ async fn main() -> anyhow::Result<()> {
                                 Some("add") => ReactionState::Add,
                                 Some("remove") => ReactionState::Remove,
                                 _ => {
-                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    writeln!(stdout, "/react <add | remove> <message-id> <emoji_code>")?;
                                     continue
                                 }
                             };
 
-                            let conversation_id = match cmd_line.next() {
-                                Some(id) => match Uuid::from_str(id) {
-                                    Ok(uuid) => uuid,
-                                    Err(e) => {
-                                        writeln!(stdout, "Error parsing ID: {e}")?;
-                                        continue
-                                    }
-                                },
-                                None => {
-                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
-                                    continue
-                                }
-                            };
+                            let conversation_id = topic.read().clone();
 
                             let message_id = match cmd_line.next() {
                                 Some(id) => match Uuid::from_str(id) {
@@ -992,7 +975,7 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                 },
                                 None => {
-                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    writeln!(stdout, "/react <add | remove> <message-id> <emoji_code>")?;
                                     continue
                                 }
                             };
@@ -1000,7 +983,7 @@ async fn main() -> anyhow::Result<()> {
                             let code = match cmd_line.next() {
                                 Some(code) => code.to_string(),
                                 None => {
-                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    writeln!(stdout, "/react <add | remove> <message-id> <emoji_code>")?;
                                     continue
                                 }
                             };
@@ -1068,8 +1051,9 @@ async fn main() -> anyhow::Result<()> {
                                             continue
                                         }
                                     };
-                                    chat.pin(topic, id, PinState::Pin).await?;
-                                    writeln!(stdout, "Pinned {id}")?;
+                                    if let Err(e) = chat.pin(topic, id, PinState::Pin).await {
+                                        writeln!(stdout, "Error pinning message: {e}")?;
+                                    }
                                 },
                                 None => { writeln!(stdout, "/pin <id | all>")? }
                             }

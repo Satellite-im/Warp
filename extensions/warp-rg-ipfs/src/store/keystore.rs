@@ -10,10 +10,16 @@ use warp::{
     error::Error,
 };
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Eq)]
 pub struct Keystore {
     conversation_id: Uuid,
     recipient_key: HashMap<DID, BTreeSet<KeyEntry>>,
+}
+
+impl PartialEq for Keystore {
+    fn eq(&self, other: &Self) -> bool {
+        self.conversation_id.eq(&other.conversation_id)
+    }
 }
 
 #[allow(dead_code)]
@@ -49,6 +55,10 @@ impl Keystore {
         };
 
         Ok(())
+    }
+
+    pub fn exist(&self, recipient: &DID) -> bool {
+        self.recipient_key.contains_key(recipient)
     }
 
     pub fn get_latest(&self, did: &DID, recipient: &DID) -> Result<Vec<u8>, Error> {
@@ -114,9 +124,7 @@ impl Zeroize for KeyEntry {
 
 impl Debug for KeyEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("KeyEntry")
-            .field("id", &self.id)
-            .finish()
+        f.debug_struct("KeyEntry").field("id", &self.id).finish()
     }
 }
 

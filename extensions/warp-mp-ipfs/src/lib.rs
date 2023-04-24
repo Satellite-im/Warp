@@ -7,7 +7,9 @@ use futures::channel::mpsc::unbounded;
 use futures::{AsyncReadExt, StreamExt};
 use ipfs::libp2p::kad::KademliaBucketInserts;
 use ipfs::libp2p::swarm::SwarmEvent;
-use ipfs::p2p::{ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig};
+use ipfs::p2p::{
+    ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig, UpdateMode,
+};
 use rust_ipfs as ipfs;
 use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,11 +18,11 @@ use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
 use tokio::sync::broadcast;
 use tokio_util::compat::TokioAsyncReadCompatExt;
+use tracing::debug;
 use tracing::log::{self, error, info, trace, warn};
 use warp::crypto::did_key::Generate;
 use warp::crypto::zeroize::Zeroizing;
 use warp::data::DataType;
-use warp::pocket_dimension::query::QueryBuilder;
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -29,7 +31,9 @@ use warp::pocket_dimension::PocketDimension;
 use warp::tesseract::{Tesseract, TesseractEvent};
 use warp::{Extension, SingleHandle};
 
-use ipfs::{Ipfs, IpfsOptions, Keypair, Multiaddr, Protocol, StoragePath, UninitializedIpfs};
+use ipfs::{
+    Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath, UninitializedIpfs,
+};
 use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
 use warp::error::Error;
 use warp::multipass::identity::{Identifier, Identity, IdentityUpdate, Relationship};
@@ -40,7 +44,6 @@ use warp::multipass::{
 
 use crate::config::Bootstrap;
 use crate::store::discovery::Discovery;
-use crate::store::document::DocumentType;
 
 #[derive(Clone)]
 pub struct IpfsIdentity {
@@ -200,11 +203,10 @@ impl IpfsIdentity {
         }
 
         let mut opts = IpfsOptions {
-            keypair,
             bootstrap: config.bootstrap.address(),
             mdns: config.ipfs_setting.mdns.enable,
             listening_addrs: config.listen_on.clone(),
-            dcutr: config.ipfs_setting.relay_client.dcutr,
+            dcutr: config.ipfs_setting.relay_client.enable,
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
             keep_alive: true,
@@ -213,6 +215,7 @@ impl IpfsIdentity {
                     cache: 100,
                     push_update: true,
                     protocol_version: "/satellite/warp/0.1".into(),
+                    initial_delay: Duration::from_secs(0),
                     ..Default::default()
                 };
                 if let Some(agent) = config.ipfs_setting.agent_version.as_ref() {
@@ -232,7 +235,7 @@ impl IpfsIdentity {
             transport_configuration: Some(TransportConfig {
                 yamux_max_buffer_size: 16 * 1024 * 1024,
                 yamux_receive_window_size: 16 * 1024 * 1024,
-                yamux_update_mode: 0,
+                yamux_update_mode: UpdateMode::Read,
                 mplex_max_buffer_size: usize::MAX / 2,
                 enable_quic: false,
                 ..Default::default()
@@ -260,6 +263,7 @@ impl IpfsIdentity {
 
         info!("Starting ipfs");
         let ipfs = UninitializedIpfs::with_opt(opts)
+            .set_keypair(keypair)
             // We check the events from the swarm for autonat
             // So we can determine our nat status when it does change
             .swarm_events({
@@ -284,19 +288,28 @@ impl IpfsIdentity {
             .start()
             .await?;
 
+        if config.ipfs_setting.bootstrap && !empty_bootstrap {
+            //TODO: determine if bootstrap should run in intervals
+            if let Err(e) = ipfs.bootstrap().await {
+                error!("Error bootstrapping: {e}");
+            }
+        }
+
         tokio::spawn({
             let ipfs = ipfs.clone();
             let config = config.clone();
-            async move {
-                if config.ipfs_setting.bootstrap && !empty_bootstrap {
-                    //TODO: run bootstrap in intervals
-                    //Note: If we decided to loop or run it in interval
-                    //      we should join on the returned handle
-                    if let Err(e) = ipfs.bootstrap().await {
-                        error!("Error bootstrapping: {e}");
-                    }
+            let peer_id_extract = |addr: &Multiaddr| -> Option<PeerId> {
+                let mut addr = addr.clone();
+                match addr.pop() {
+                    Some(Protocol::P2p(hash)) => match PeerId::from_multihash(hash) {
+                        Ok(id) => Some(id),
+                        _ => None,
+                    },
+                    _ => None,
                 }
+            };
 
+            async move {
                 let start_relay_client = || {
                     let ipfs = ipfs.clone();
                     let config = config.clone();
@@ -304,49 +317,63 @@ impl IpfsIdentity {
                         info!("Relay client enabled. Loading relays");
                         let mut relayed = vec![];
 
-                        for addr in config.bootstrap.address() {
-                            match ipfs
-                                .add_listening_address(addr.with(Protocol::P2pCircuit))
-                                .await
-                            {
-                                Ok(addr) => relayed.push(addr),
-                                Err(e) => {
-                                    info!("Error listening on relay: {e}");
-                                    continue;
-                                }
-                            };
-                            if config.ipfs_setting.relay_client.single {
-                                break;
-                            }
-                        }
-
                         //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
                         //      anything on this end
                         for addr in config.ipfs_setting.relay_client.relay_address.clone() {
-                            if let Err(e) = ipfs.connect(addr.clone()).await {
-                                error!("Error dialing relay {}: {e}", addr.clone());
-                                continue;
+                            let mut connected = false;
+                            if let Some(peer_id) = peer_id_extract(&addr) {
+                                connected = ipfs.is_connected(peer_id).await.unwrap_or_default();
                             }
 
-                            //Give time for identify to be sent/received
-                            //TODO: Remove on next rust-ipfs update
-                            //TODO: Check for relay protocol from address before attempting to use
-                            //      as a precaution
-                            tokio::time::sleep(Duration::from_millis(500)).await;
+                            if !connected {
+                                if let Err(e) = ipfs.connect(addr.clone()).await {
+                                    error!("Error dialing relay {}: {e}", addr.clone());
+                                    continue;
+                                }
+                            }
 
                             match ipfs
-                                .add_listening_address(addr.with(Protocol::P2pCircuit))
+                                .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
                                 .await
                             {
-                                Ok(addr) => relayed.push(addr),
+                                Ok(addr) => {
+                                    info!("Listening on {}", addr);
+                                    relayed.push(addr);
+                                    break;
+                                }
                                 Err(e) => {
-                                    info!("Error listening on relay: {e}");
+                                    error!(
+                                        "Error listening on relay {}: {e}",
+                                        addr.clone().with(Protocol::P2pCircuit)
+                                    );
                                     continue;
                                 }
                             };
-                            if config.ipfs_setting.relay_client.single {
-                                break;
+                        }
+
+                        if relayed.is_empty() {
+                            // If vec is empty, fallback to bootstrap, assuming they support relay
+                            // Note: We will assume that the bootstrap nodes are connected if we are able to successfully bootstrap
+                            for addr in config.bootstrap.address() {
+                                match ipfs
+                                    .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
+                                    .await
+                                {
+                                    Ok(addr) => {
+                                        debug!("Listening on {}", addr);
+                                        relayed.push(addr);
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        info!("Error listening on relay via bootstrap: {e}");
+                                        continue;
+                                    }
+                                };
                             }
+                        }
+
+                        if relayed.is_empty() {
+                            log::warn!("No relay connection is available");
                         }
 
                         relayed
@@ -378,6 +405,7 @@ impl IpfsIdentity {
                             match public {
                                 true => {
                                     if using_relay {
+                                        //Due to UPnP being enabled with a successful portforwarding, we would disconnect from relays
                                         log::trace!(
                                             "Disabling relays due to being publicly accessible."
                                         );
@@ -388,6 +416,8 @@ impl IpfsIdentity {
                                 }
                                 false => {
                                     if !using_relay {
+                                        //If, for whatever reason, we are no longer publicly accessible due to UPnP (eg router or firewall changed)
+                                        //we would attempt to connect to the relays
                                         log::trace!(
                                             "No longer publicly accessible. Switching to relays"
                                         );
@@ -430,6 +460,7 @@ impl IpfsIdentity {
                 config.store_setting.override_ipld,
                 config.store_setting.share_platform,
                 config.store_setting.update_events,
+                config.store_setting.disable_images,
             ),
         )
         .await?;
@@ -617,74 +648,18 @@ impl MultiPass for IpfsIdentity {
         let store = self.identity_store(true).await?;
 
         let idents = match id {
-            Identifier::DID(pk) => {
-                if let Ok(cache) = self.get_cache() {
-                    let mut query = QueryBuilder::default();
-                    query.r#where("did_key", &pk)?;
-                    if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
-                    {
-                        if !list.is_empty() {
-                            let mut items = vec![];
-                            for object in list {
-                                if let Ok(ident) = object.decode::<Identity>().map_err(Error::from)
-                                {
-                                    items.push(ident);
-                                }
-                            }
-                            return Ok(items);
-                        }
-                    }
-                }
-                store.lookup(LookupBy::DidKey(pk)).await
-            }
-            Identifier::Username(username) => {
-                if let Ok(cache) = self.get_cache() {
-                    let mut query = QueryBuilder::default();
-                    query.r#where("username", &username)?;
-                    if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query))
-                    {
-                        if !list.is_empty() {
-                            let mut items = vec![];
-                            for object in list {
-                                if let Ok(ident) = object.decode::<Identity>().map_err(Error::from)
-                                {
-                                    items.push(ident);
-                                }
-                            }
-                            return Ok(items);
-                        }
-                    }
-                }
-                store.lookup(LookupBy::Username(username)).await
-            }
+            Identifier::DID(pk) => store.lookup(LookupBy::DidKey(pk)).await,
+            Identifier::Username(username) => store.lookup(LookupBy::Username(username)).await,
             Identifier::DIDList(list) => store.lookup(LookupBy::DidKeys(list)).await,
             Identifier::Own => return store.own_identity(true).await.map(|i| vec![i]),
         }?;
-        trace!("Found {} identities", idents.len());
-        // for ident in &idents {
-        //     if let Ok(mut cache) = self.get_cache_mut() {
-        //         let mut query = QueryBuilder::default();
-        //         query.r#where("did_key", &ident.did_key())?;
-        //         if cache
-        //             .has_data(DataType::from(Module::Accounts), &query)
-        //             .is_err()
-        //         {
-        //             let object = Sata::default().encode(
-        //                 warp::sata::libipld::IpldCodec::DagJson,
-        //                 warp::sata::Kind::Reference,
-        //                 ident.clone(),
-        //             )?;
-        //             cache.add_data(DataType::from(Module::Accounts), &object)?;
-        //         }
-        //     }
-        // }
 
         Ok(idents)
     }
 
     async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
         let mut store = self.identity_store(true).await?;
-        let mut identity = self.get_own_identity().await?;
+        let mut identity = store.own_identity_document().await?;
 
         let mut old_cid = None;
         match option {
@@ -699,7 +674,7 @@ impl MultiPass for IpfsIdentity {
                     });
                 }
 
-                identity.set_username(&username);
+                identity.username = username;
                 store.identity_update(identity.clone()).await?;
             }
             IdentityUpdate::Picture(data) => {
@@ -722,22 +697,20 @@ impl MultiPass for IpfsIdentity {
                     )
                     .await?;
 
-                let mut root_document = store.get_root_document().await?;
-
-                if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
+                if let Some(picture_cid) = identity.profile_picture {
                     if picture_cid == cid {
                         return Ok(());
                     }
 
-                    if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
+                    if let Some(banner_cid) = identity.profile_banner {
                         if picture_cid != banner_cid {
                             old_cid = Some(picture_cid);
                         }
                     }
                 }
 
-                root_document.picture = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
-                store.set_root_document(root_document).await?;
+                identity.profile_picture = Some(cid);
+                store.identity_update(identity).await?;
             }
             IdentityUpdate::PicturePath(path) => {
                 if !path.is_file() {
@@ -784,29 +757,27 @@ impl MultiPass for IpfsIdentity {
                     .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
                     .await?;
 
-                let mut root_document = store.get_root_document().await?;
-                if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
+                if let Some(picture_cid) = identity.profile_picture {
                     if picture_cid == cid {
                         return Ok(());
                     }
 
-                    if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
+                    if let Some(banner_cid) = identity.profile_banner {
                         if picture_cid != banner_cid {
                             old_cid = Some(picture_cid);
                         }
                     }
                 }
 
-                root_document.picture = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
-                store.set_root_document(root_document).await?;
+                identity.profile_picture = Some(cid);
+                store.identity_update(identity).await?;
             }
             IdentityUpdate::ClearPicture => {
-                let mut root_document = store.get_root_document().await?;
-                let document = root_document.picture.take();
-                if let Some(DocumentType::UnixFS(cid, _)) = document {
+                let document = identity.profile_picture.take();
+                if let Some(cid) = document {
                     old_cid = Some(cid);
                 }
-                store.set_root_document(root_document).await?;
+                store.identity_update(identity).await?;
             }
             IdentityUpdate::Banner(data) => {
                 let len = data.len();
@@ -829,21 +800,20 @@ impl MultiPass for IpfsIdentity {
                     )
                     .await?;
 
-                let mut root_document = store.get_root_document().await?;
-                if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
+                if let Some(banner_cid) = identity.profile_banner {
                     if banner_cid == cid {
                         return Ok(());
                     }
 
-                    if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
+                    if let Some(picture_cid) = identity.profile_picture {
                         if picture_cid != banner_cid {
                             old_cid = Some(banner_cid);
                         }
                     }
                 }
 
-                root_document.banner = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
-                store.set_root_document(root_document).await?;
+                identity.profile_banner = Some(cid);
+                store.identity_update(identity).await?;
             }
             IdentityUpdate::BannerPath(path) => {
                 if !path.is_file() {
@@ -890,29 +860,27 @@ impl MultiPass for IpfsIdentity {
                     .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
                     .await?;
 
-                let mut root_document = store.get_root_document().await?;
-                if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
+                if let Some(banner_cid) = identity.profile_banner {
                     if banner_cid == cid {
                         return Ok(());
                     }
 
-                    if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
+                    if let Some(picture_cid) = identity.profile_picture {
                         if picture_cid != banner_cid {
                             old_cid = Some(banner_cid);
                         }
                     }
                 }
 
-                root_document.banner = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
-                store.set_root_document(root_document).await?;
+                identity.profile_banner = Some(cid);
+                store.identity_update(identity).await?;
             }
             IdentityUpdate::ClearBanner => {
-                let mut root_document = store.get_root_document().await?;
-                let document = root_document.banner.take();
-                if let Some(DocumentType::UnixFS(cid, _)) = document {
+                let document = identity.profile_banner.take();
+                if let Some(cid) = document {
                     old_cid = Some(cid);
                 }
-                store.set_root_document(root_document).await?;
+                store.identity_update(identity).await?;
             }
             IdentityUpdate::StatusMessage(status) => {
                 if let Some(status) = status.clone() {
@@ -926,11 +894,11 @@ impl MultiPass for IpfsIdentity {
                         });
                     }
                 }
-                identity.set_status_message(status);
+                identity.status_message = status;
                 store.identity_update(identity.clone()).await?;
             }
             IdentityUpdate::ClearStatusMessage => {
-                identity.set_status_message(None);
+                identity.status_message = None;
                 store.identity_update(identity.clone()).await?;
             }
         };

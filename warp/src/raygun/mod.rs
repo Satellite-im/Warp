@@ -167,6 +167,7 @@ pub struct MessageOptions {
     reverse: bool,
     messages_type: MessagesType,
     keyword: Option<String>,
+    pinned: bool,
     range: Option<Range<usize>>,
     limit: Option<i64>,
     skip: Option<i64>,
@@ -202,6 +203,11 @@ impl MessageOptions {
     pub fn set_last_message(mut self) -> MessageOptions {
         self.first_message = false;
         self.last_message = true;
+        self
+    }
+
+    pub fn set_pinned(mut self) -> MessageOptions {
+        self.pinned = true;
         self
     }
 
@@ -245,6 +251,10 @@ impl MessageOptions {
 
     pub fn last_message(&self) -> bool {
         self.last_message
+    }
+
+    pub fn pinned(&self) -> bool {
+        self.pinned
     }
 
     pub fn messages_type(&self) -> MessagesType {
@@ -755,13 +765,14 @@ pub enum EmbedState {
     Disable,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub enum Location {
     /// Use [`Constellation`] to send a file from constellation
     Constellation,
 
     /// Use file from disk
+    #[default]
     Disk,
 }
 
@@ -894,7 +905,7 @@ pub trait RayGunGroupConversation: Sync + Send {
 pub trait RayGunAttachment: Sync + Send {
     /// Send files to a conversation.
     /// If no files is provided in the array, it will throw an error
-    async fn attach(&mut self, _: Uuid, _: Option<Uuid>, _: Vec<PathBuf>, _: Vec<String>) -> Result<(), Error> {
+    async fn attach(&mut self, _: Uuid, _: Option<Uuid>, _: Location, _: Vec<PathBuf>, _: Vec<String>) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 

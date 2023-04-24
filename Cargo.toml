@@ -7,7 +7,7 @@ repository = "https://github.com/Satellite-im/Warp"
 
 
 [workspace]
-members = ["extensions/*", "warp", "warp/warp-derive"]
+members = ["extensions/*", "warp", "warp/warp-derive", "tools/*"]
 exclude = ["deprecated/*"]
 
 [workspace.dependencies]
@@ -18,7 +18,7 @@ async-trait = { version = "0.1" }
 async-stream = "0.3"
 async-broadcast = "0.5"
 tokio = { version = "1" }
-tokio-util = { version = "0.7"}
+tokio-util = { version = "0.7" }
 tokio-stream = { version = "0.1" }
 
 # Crypto crates
@@ -58,6 +58,8 @@ toml = "0.5"
 bs58 = "0.4"
 hex = "0.4"
 libipld = { version = "0.15", features = ["serde-codec"] }
+bytes = "1"
+bincode = "1"
 
 # Misc
 dyn-clone = "1.0"
@@ -72,4 +74,4 @@ getrandom = { version = "0.2" }
 either = "1"
 
 #ipfs dependency
-rust-ipfs = "=0.3.7"
+rust-ipfs = "=0.3.14"

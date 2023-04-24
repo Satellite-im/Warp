@@ -174,7 +174,6 @@ impl IpfsMessaging {
                     config.store_setting.disable_sender_event_emit,
                     config.store_setting.with_friends,
                     config.store_setting.conversation_load_task,
-                    config.store_setting.attach_recipients_on_storing,
                 ),
             )
             .await?,
@@ -240,7 +239,11 @@ impl RayGun for IpfsMessaging {
         self.messaging_store()?.create_conversation(did_key).await
     }
 
-    async fn create_group_conversation(&mut self, name: Option<String>, recipients: Vec<DID>) -> Result<Conversation> {
+    async fn create_group_conversation(
+        &mut self,
+        name: Option<String>,
+        recipients: Vec<DID>,
+    ) -> Result<Conversation> {
         self.messaging_store()?
             .create_group_conversation(name, HashSet::from_iter(recipients))
             .await
@@ -363,11 +366,12 @@ impl RayGunAttachment for IpfsMessaging {
         &mut self,
         conversation_id: Uuid,
         message_id: Option<Uuid>,
+        location: Location,
         files: Vec<PathBuf>,
         message: Vec<String>,
     ) -> Result<()> {
         self.messaging_store()?
-            .attach(conversation_id, message_id, Location::Disk, files, message)
+            .attach(conversation_id, message_id, location, files, message)
             .await
     }
 
@@ -400,7 +404,7 @@ impl RayGunGroupConversation for IpfsMessaging {
 
     async fn remove_recipient(&mut self, conversation_id: Uuid, did_key: &DID) -> Result<()> {
         self.messaging_store()?
-            .remove_recipient(conversation_id, did_key)
+            .remove_recipient(conversation_id, did_key, true)
             .await
     }
 }

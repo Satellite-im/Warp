@@ -8,92 +8,6 @@ use warp_derive::FFIFree;
 
 pub const SHORT_ID_SIZE: usize = 8;
 
-#[derive(
-    Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
-)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct Role {
-    /// Name of the role
-    name: String,
-
-    /// TBD
-    level: u8,
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl Role {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn name(&self) -> String {
-        self.name.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn level(&self) -> u8 {
-        self.level
-    }
-}
-
-#[derive(
-    Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
-)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct Badge {
-    /// TBD
-    name: String,
-
-    /// TBD
-    icon: String,
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl Badge {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn name(&self) -> String {
-        self.name.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn icon(&self) -> String {
-        self.icon.clone()
-    }
-}
-
-#[derive(Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct Graphics {
-    /// Hash to profile picture
-    profile_picture: String,
-
-    /// Hash to profile banner
-    profile_banner: String,
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl Graphics {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_profile_picture(&mut self, picture: &str) {
-        self.profile_picture = picture.to_string();
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_profile_banner(&mut self, banner: &str) {
-        self.profile_banner = banner.to_string();
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl Graphics {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn profile_picture(&self) -> String {
-        self.profile_picture.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn profile_banner(&self) -> String {
-        self.profile_banner.clone()
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display, FFIFree)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
@@ -192,23 +106,14 @@ pub struct Identity {
     /// Public key for the identity
     did_key: DID,
 
-    /// TBD
-    graphics: Graphics,
+    /// Profile picture
+    profile_picture: String,
+
+    /// Profile banner
+    profile_banner: String,
 
     /// Status message
     status_message: Option<String>,
-
-    /// List of roles
-    roles: Vec<Role>,
-
-    /// List of available badges
-    available_badges: Vec<Badge>,
-
-    /// Active badge for identity
-    active_badge: Badge,
-
-    /// TBD
-    // linked_accounts: HashMap<String, String>,
 
     /// Signature of the identity
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -233,8 +138,13 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_graphics(&mut self, graphics: Graphics) {
-        self.graphics = graphics
+    pub fn set_profile_picture(&mut self, picture: &str) {
+        self.profile_picture = picture.to_string();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_profile_banner(&mut self, banner: &str) {
+        self.profile_banner = banner.to_string();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
@@ -246,11 +156,6 @@ impl Identity {
     pub fn set_signature(&mut self, signature: Option<String>) {
         self.signature = signature;
     }
-
-    // pub fn set_roles(&mut self) {}
-    // pub fn set_available_badges(&mut self) {}
-    // pub fn set_active_badge(&mut self) {}
-    // pub fn set_linked_accounts(&mut self) {}
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -271,8 +176,13 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn graphics(&self) -> Graphics {
-        self.graphics.clone()
+    pub fn profile_picture(&self) -> String {
+        self.profile_picture.clone()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn profile_banner(&self) -> String {
+        self.profile_banner.clone()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
@@ -281,43 +191,8 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn active_badge(&self) -> Badge {
-        self.active_badge.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn signature(&self) -> Option<String> {
         self.signature.clone()
-    }
-
-    // #[cfg_attr(target_arch = "wasm32", wasm_bindgen(skip))]
-    // pub fn linked_accounts(&self) -> HashMap<String, String> {
-    //     self.linked_accounts.clone()
-    // }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl Identity {
-    #[wasm_bindgen]
-    pub fn roles(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.roles).unwrap()
-    }
-
-    #[wasm_bindgen]
-    pub fn available_badges(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.available_badges).unwrap()
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl Identity {
-    pub fn roles(&self) -> Vec<Role> {
-        self.roles.clone()
-    }
-
-    pub fn available_badges(&self) -> Vec<Badge> {
-        self.available_badges.clone()
     }
 }
 
@@ -354,9 +229,27 @@ impl From<DID> for Identifier {
     }
 }
 
-impl<S: AsRef<str>> From<S> for Identifier {
-    fn from(username: S) -> Self {
-        Self::Username(username.as_ref().to_string())
+impl From<String> for Identifier {
+    fn from(username: String) -> Self {
+        Self::Username(username)
+    }
+}
+
+impl From<&str> for Identifier {
+    fn from(username: &str) -> Self {
+        Self::Username(username.to_string())
+    }
+}
+
+impl From<Vec<DID>> for Identifier {
+    fn from(list: Vec<DID>) -> Self {
+        Self::DIDList(list)
+    }
+}
+
+impl From<&[DID]> for Identifier {
+    fn from(list: &[DID]) -> Self {
+        Self::DIDList(list.to_vec())
     }
 }
 
@@ -376,83 +269,24 @@ pub enum IdentityUpdate {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::crypto::DID;
-    use crate::multipass::identity::{
-        Badge, FFIVec_Badge, FFIVec_Role, Graphics, Identifier, Identity, IdentityUpdate, Role,
-    };
+    use crate::multipass::identity::{Identifier, Identity, IdentityUpdate};
     use std::ffi::{CStr, CString};
-    use std::os::raw::{c_char, c_void};
+    use std::os::raw::c_char;
 
     use super::Relationship;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_role_name(role: *const Role) -> *mut c_char {
-        if role.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let role = &*role;
-
-        match CString::new(role.name()) {
-            Ok(c) => c.into_raw(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_role_level(role: *const Role) -> u8 {
-        if role.is_null() {
-            return 0;
-        }
-
-        let role = &*role;
-
-        role.level()
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_badge_name(badge: *const Badge) -> *mut c_char {
-        if badge.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let badge = &*badge;
-
-        match CString::new(badge.name()) {
-            Ok(c) => c.into_raw(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_badge_icon(badge: *const Badge) -> *mut c_char {
-        if badge.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let badge = &*badge;
-
-        match CString::new(badge.icon()) {
-            Ok(c) => c.into_raw(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_graphics_profile_picture(
-        graphics: *const Graphics,
+    pub unsafe extern "C" fn multipass_identity_profile_picture(
+        identity: *const Identity,
     ) -> *mut c_char {
-        if graphics.is_null() {
+        if identity.is_null() {
             return std::ptr::null_mut();
         }
 
-        let graphics = &*graphics;
+        let identity = &*identity;
 
-        match CString::new(graphics.profile_picture()) {
+        match CString::new(identity.profile_picture()) {
             Ok(c) => c.into_raw(),
             Err(_) => std::ptr::null_mut(),
         }
@@ -460,16 +294,16 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_graphics_profile_banner(
-        graphics: *const Graphics,
+    pub unsafe extern "C" fn multipass_identity_profile_banner(
+        identity: *const Identity,
     ) -> *mut c_char {
-        if graphics.is_null() {
+        if identity.is_null() {
             return std::ptr::null_mut();
         }
 
-        let graphics = &*graphics;
+        let identity = &*identity;
 
-        match CString::new(graphics.profile_banner()) {
+        match CString::new(identity.profile_banner()) {
             Ok(c) => c.into_raw(),
             Err(_) => std::ptr::null_mut(),
         }
@@ -518,20 +352,6 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_graphics(
-        identity: *const Identity,
-    ) -> *mut Graphics {
-        if identity.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let identity = &*identity;
-
-        Box::into_raw(Box::new(identity.graphics())) as *mut Graphics
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
     pub unsafe extern "C" fn multipass_identity_status_message(
         identity: *const Identity,
     ) -> *mut c_char {
@@ -548,61 +368,6 @@ pub mod ffi {
             },
             None => std::ptr::null_mut(),
         }
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_roles(identity: *mut Identity) -> *mut FFIVec_Role {
-        if identity.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let identity = &*identity;
-
-        let contents = identity.roles();
-        Box::into_raw(Box::new(contents.into())) as *mut _
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_available_badge(
-        identity: *mut Identity,
-    ) -> *mut FFIVec_Badge {
-        if identity.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let identity = &*identity;
-
-        let contents = identity.available_badges();
-        Box::into_raw(Box::new(contents.into())) as *mut _
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_active_badge(
-        identity: *const Identity,
-    ) -> *mut Badge {
-        if identity.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let identity = &*identity;
-        Box::into_raw(Box::new(identity.active_badge())) as *mut Badge
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_linked_accounts(
-        identity: *const Identity,
-    ) -> *mut c_void {
-        if identity.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let _identity = &*identity;
-        //TODO
-        std::ptr::null_mut()
     }
 
     #[allow(clippy::missing_safety_doc)]

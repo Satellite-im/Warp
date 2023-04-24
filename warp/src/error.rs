@@ -145,6 +145,8 @@ pub enum Error {
     MessageFound,
     #[error("Message not found within conversation")]
     MessageNotFound,
+    #[error("Page of messages not found")]
+    PageNotFound,
     #[error("Group could not be created at this time")]
     CannotCreateGroup,
     #[error("Unable to join group")]
@@ -181,6 +183,8 @@ pub enum Error {
     DecryptionStreamError,
     #[error("Public key is invalid")]
     PublicKeyInvalid,
+    #[error("Public key doesnt exist")]
+    PublicKeyDoesntExist,
     #[error("Private key is invalid")]
     PrivateKeyInvalid,
     #[error("Public key length is invalid")]
@@ -236,6 +240,8 @@ pub enum Error {
     SerdeJsonError(#[from] serde_json::Error),
     #[error("{0}")]
     UuidError(#[from] uuid::Error),
+    #[error("{0}")]
+    BincodeError(#[from] bincode::Error),
     #[error("{0}")]
     SerdeYamlError(#[from] serde_yaml::Error),
     #[error("Cannot deserialize: {0}")]
