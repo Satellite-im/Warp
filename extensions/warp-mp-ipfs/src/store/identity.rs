@@ -3,7 +3,7 @@
 #![allow(clippy::clone_on_copy)]
 use crate::{
     config::{Discovery as DiscoveryConfig, UpdateEvents},
-    store::{did_to_libp2p_pub, discovery::Discovery},
+    store::{did_to_libp2p_pub, discovery::Discovery, VecExt},
 };
 use futures::{
     channel::{mpsc, oneshot},
@@ -84,7 +84,8 @@ pub struct IdentityStore {
 
     root_task: Arc<tokio::sync::RwLock<Option<tokio::task::JoinHandle<()>>>>,
 
-    task_send: Arc<tokio::sync::RwLock<Option<mpsc::UnboundedSender<RootDocumentEvents>>>>,
+    pub(crate) task_send:
+        Arc<tokio::sync::RwLock<Option<mpsc::UnboundedSender<RootDocumentEvents>>>>,
 
     event: broadcast::Sender<MultiPassEventKind>,
 
@@ -101,10 +102,16 @@ pub enum RootDocumentEvents {
     Set(RootDocument, oneshot::Sender<Result<(), Error>>),
     AddFriend(DID, oneshot::Sender<Result<(), Error>>),
     RemoveFriend(DID, oneshot::Sender<Result<(), Error>>),
+    GetFriendList(oneshot::Sender<Result<Vec<DID>, Error>>),
     AddRequest(Request, oneshot::Sender<Result<(), Error>>),
     RemoveRequest(Request, oneshot::Sender<Result<(), Error>>),
+    GetRequestList(oneshot::Sender<Result<Vec<Request>, Error>>),
     AddBlock(DID, oneshot::Sender<Result<(), Error>>),
     RemoveBlock(DID, oneshot::Sender<Result<(), Error>>),
+    GetBlockList(oneshot::Sender<Result<Vec<DID>, Error>>),
+    AddBlockBy(DID, oneshot::Sender<Result<(), Error>>),
+    RemoveBlockBy(DID, oneshot::Sender<Result<(), Error>>),
+    GetBlockByList(oneshot::Sender<Result<Vec<DID>, Error>>),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -346,50 +353,390 @@ impl IdentityStore {
         let task = tokio::spawn(async move {
             let root_cid = root_cid.clone();
 
+            async fn get_root_document(
+                ipfs: &Ipfs,
+                root: Arc<tokio::sync::RwLock<Option<Cid>>>,
+            ) -> Result<RootDocument, Error> {
+                let root_cid = root
+                    .read()
+                    .await
+                    .clone()
+                    .ok_or(Error::IdentityDoesntExist)?;
+                let path = IpfsPath::from(root_cid);
+                let document: RootDocument = path.get_local_dag(ipfs).await?;
+                document.verify(ipfs).await.map(|_| document)
+            }
+
+            async fn set_root_document(
+                ipfs: &Ipfs,
+                store: &IdentityStore,
+                root: Arc<tokio::sync::RwLock<Option<Cid>>>,
+                mut document: RootDocument,
+            ) -> Result<(), Error> {
+                let old_cid = root.read().await.clone();
+
+                let did_kp = store.get_keypair_did()?;
+                document.sign(&did_kp)?;
+                document.verify(ipfs).await?;
+
+                let root_cid = document.to_cid(ipfs).await?;
+                if !ipfs.is_pinned(&root_cid).await? {
+                    ipfs.insert_pin(&root_cid, true).await?;
+                }
+                if let Some(old_cid) = old_cid {
+                    if old_cid != root_cid {
+                        if ipfs.is_pinned(&old_cid).await? {
+                            ipfs.remove_pin(&old_cid, true).await?;
+                        }
+                        ipfs.remove_block(old_cid).await?;
+                    }
+                }
+                store.save_cid(root_cid).await
+            }
+
             while let Some(event) = rx.next().await {
                 match event {
                     RootDocumentEvents::Get(res) => {
-                        let root_cid = root_cid.clone();
-                        let ipfs = ipfs.clone();
-                        let result = async move {
-                            let root_cid = root_cid
-                                .read()
-                                .await
-                                .clone()
-                                .ok_or(Error::IdentityDoesntExist)?;
-                            let path = IpfsPath::from(root_cid);
-                            let document: RootDocument = path.get_local_dag(&ipfs).await?;
-                            document.verify(&ipfs).await.map(|_| document)
-                        };
-                        let _ = res.send(result.await);
+                        let _ = res.send(get_root_document(&ipfs, root_cid.clone()).await);
                     }
-                    RootDocumentEvents::Set(mut document, res) => {
-                        let root_cid = root_cid.clone();
+                    RootDocumentEvents::Set(document, res) => {
+                        let _ = res.send(
+                            set_root_document(&ipfs, &store, root_cid.clone(), document).await,
+                        );
+                    }
+                    RootDocumentEvents::AddRequest(request, res) => {
                         let ipfs = ipfs.clone();
                         let store = store.clone();
-                        let result = async move {
-                            let old_cid = root_cid
-                                .read()
-                                .await
-                                .clone()
-                                .ok_or(Error::IdentityDoesntExist)?;
+                        let root_cid = root_cid.clone();
+                        let _ = res.send(
+                            async move {
+                                let mut document =
+                                    get_root_document(&ipfs, root_cid.clone()).await?;
+                                let old_document = document.request;
+                                let mut list: Vec<Request> = match document.request {
+                                    Some(cid) => cid.get_local_dag(&ipfs).await.unwrap_or_default(),
+                                    None => vec![],
+                                };
 
-                            let did_kp = store.get_keypair_did()?;
-                            document.sign(&did_kp)?;
-                            let root_cid = document.to_cid(&ipfs).await?;
-                            if old_cid != root_cid {
-                                if ipfs.is_pinned(&old_cid).await? {
-                                    ipfs.remove_pin(&old_cid, true).await?;
+                                if !list.insert_item(&request) {
+                                    return Err::<_, Error>(Error::FriendRequestExist);
                                 }
-                                ipfs.insert_pin(&root_cid, true).await?;
-                                ipfs.remove_block(old_cid).await?;
+
+                                document.request =
+                                    (!list.is_empty()).then_some(list.to_cid(&ipfs).await?);
+
+                                set_root_document(&ipfs, &store, root_cid, document).await?;
+
+                                if let Some(cid) = old_document {
+                                    if !ipfs.is_pinned(&cid).await? {
+                                        ipfs.remove_block(cid).await?;
+                                    }
+                                }
+                                Ok::<_, Error>(())
                             }
-                            document.verify(&ipfs).await?;
-                            store.save_cid(root_cid).await
-                        };
-                        let _ = res.send(result.await);
+                            .await,
+                        );
                     }
-                    _ => {}
+                    RootDocumentEvents::RemoveRequest(request, res) => {
+                        let ipfs = ipfs.clone();
+                        let store = store.clone();
+                        let root_cid = root_cid.clone();
+                        let _ = res.send(
+                            async move {
+                                let mut document =
+                                    get_root_document(&ipfs, root_cid.clone()).await?;
+                                let old_document = document.request;
+                                let mut list: Vec<Request> = match document.request {
+                                    Some(cid) => cid.get_local_dag(&ipfs).await.unwrap_or_default(),
+                                    None => vec![],
+                                };
+
+                                if !list.remove_item(&request) {
+                                    return Err::<_, Error>(Error::FriendRequestExist);
+                                }
+
+                                document.request =
+                                    (!list.is_empty()).then_some(list.to_cid(&ipfs).await?);
+
+                                set_root_document(&ipfs, &store, root_cid, document).await?;
+
+                                if let Some(cid) = old_document {
+                                    if !ipfs.is_pinned(&cid).await? {
+                                        ipfs.remove_block(cid).await?;
+                                    }
+                                }
+                                Ok::<_, Error>(())
+                            }
+                            .await,
+                        );
+                    }
+                    RootDocumentEvents::AddFriend(did, res) => {
+                        let ipfs = ipfs.clone();
+                        let store = store.clone();
+                        let root_cid = root_cid.clone();
+                        let _ = res.send(
+                            async move {
+                                let mut document =
+                                    get_root_document(&ipfs, root_cid.clone()).await?;
+                                let old_document = document.friends;
+                                let mut list: Vec<DID> = match document.friends {
+                                    Some(cid) => cid.get_local_dag(&ipfs).await.unwrap_or_default(),
+                                    None => vec![],
+                                };
+
+                                if !list.insert_item(&did) {
+                                    return Err::<_, Error>(Error::FriendExist);
+                                }
+
+                                document.friends =
+                                    (!list.is_empty()).then_some(list.to_cid(&ipfs).await?);
+
+                                set_root_document(&ipfs, &store, root_cid, document).await?;
+
+                                if let Some(cid) = old_document {
+                                    if !ipfs.is_pinned(&cid).await? {
+                                        ipfs.remove_block(cid).await?;
+                                    }
+                                }
+                                Ok::<_, Error>(())
+                            }
+                            .await,
+                        );
+                    }
+                    RootDocumentEvents::RemoveFriend(did, res) => {
+                        let ipfs = ipfs.clone();
+                        let store = store.clone();
+                        let root_cid = root_cid.clone();
+                        let _ = res.send(
+                            async move {
+                                let mut document =
+                                    get_root_document(&ipfs, root_cid.clone()).await?;
+                                let old_document = document.friends;
+                                let mut list: Vec<DID> = match document.friends {
+                                    Some(cid) => cid.get_local_dag(&ipfs).await.unwrap_or_default(),
+                                    None => vec![],
+                                };
+
+                                if !list.remove_item(&did) {
+                                    return Err::<_, Error>(Error::FriendDoesntExist);
+                                }
+
+                                document.friends =
+                                    (!list.is_empty()).then_some(list.to_cid(&ipfs).await?);
+
+                                set_root_document(&ipfs, &store, root_cid, document).await?;
+
+                                if let Some(cid) = old_document {
+                                    if !ipfs.is_pinned(&cid).await? {
+                                        ipfs.remove_block(cid).await?;
+                                    }
+                                }
+                                Ok::<_, Error>(())
+                            }
+                            .await,
+                        );
+                    }
+                    RootDocumentEvents::AddBlock(did, res) => {
+                        let ipfs = ipfs.clone();
+                        let store = store.clone();
+                        let root_cid = root_cid.clone();
+                        let _ = res.send(
+                            async move {
+                                let mut document =
+                                    get_root_document(&ipfs, root_cid.clone()).await?;
+                                let old_document = document.blocks;
+                                let mut list: Vec<DID> = match document.blocks {
+                                    Some(cid) => cid.get_local_dag(&ipfs).await.unwrap_or_default(),
+                                    None => vec![],
+                                };
+
+                                if !list.insert_item(&did) {
+                                    return Err::<_, Error>(Error::PublicKeyIsBlocked);
+                                }
+
+                                document.blocks =
+                                    (!list.is_empty()).then_some(list.to_cid(&ipfs).await?);
+
+                                set_root_document(&ipfs, &store, root_cid, document).await?;
+
+                                if let Some(cid) = old_document {
+                                    if !ipfs.is_pinned(&cid).await? {
+                                        ipfs.remove_block(cid).await?;
+                                    }
+                                }
+                                Ok::<_, Error>(())
+                            }
+                            .await,
+                        );
+                    }
+                    RootDocumentEvents::RemoveBlock(did, res) => {
+                        let ipfs = ipfs.clone();
+                        let store = store.clone();
+                        let root_cid = root_cid.clone();
+                        let _ = res.send(
+                            async move {
+                                let mut document =
+                                    get_root_document(&ipfs, root_cid.clone()).await?;
+
+                                let old_document = document.blocks;
+                                let mut list: Vec<DID> = match document.blocks {
+                                    Some(cid) => cid.get_local_dag(&ipfs).await.unwrap_or_default(),
+                                    None => vec![],
+                                };
+
+                                if !list.remove_item(&did) {
+                                    return Err::<_, Error>(Error::PublicKeyIsntBlocked);
+                                }
+
+                                document.blocks =
+                                    (!list.is_empty()).then_some(list.to_cid(&ipfs).await?);
+
+                                set_root_document(&ipfs, &store, root_cid, document).await?;
+
+                                if let Some(cid) = old_document {
+                                    if !ipfs.is_pinned(&cid).await? {
+                                        ipfs.remove_block(cid).await?;
+                                    }
+                                }
+                                Ok::<_, Error>(())
+                            }
+                            .await,
+                        );
+                    }
+                    RootDocumentEvents::AddBlockBy(did, res) => {
+                        let ipfs = ipfs.clone();
+                        let store = store.clone();
+                        let root_cid = root_cid.clone();
+                        let _ = res.send(
+                            async move {
+                                let mut document =
+                                    get_root_document(&ipfs, root_cid.clone()).await?;
+                                let old_document = document.block_by;
+                                let mut list: Vec<DID> = match document.block_by {
+                                    Some(cid) => cid.get_local_dag(&ipfs).await.unwrap_or_default(),
+                                    None => vec![],
+                                };
+
+                                if !list.insert_item(&did) {
+                                    return Err::<_, Error>(Error::PublicKeyIsntBlocked);
+                                }
+
+                                document.block_by =
+                                    (!list.is_empty()).then_some(list.to_cid(&ipfs).await?);
+
+                                set_root_document(&ipfs, &store, root_cid, document).await?;
+
+                                if let Some(cid) = old_document {
+                                    if !ipfs.is_pinned(&cid).await? {
+                                        ipfs.remove_block(cid).await?;
+                                    }
+                                }
+                                Ok::<_, Error>(())
+                            }
+                            .await,
+                        );
+                    }
+                    RootDocumentEvents::RemoveBlockBy(did, res) => {
+                        let ipfs = ipfs.clone();
+                        let store = store.clone();
+                        let root_cid = root_cid.clone();
+                        let _ = res.send(
+                            async move {
+                                let mut document =
+                                    get_root_document(&ipfs, root_cid.clone()).await?;
+                                let old_document = document.block_by;
+                                let mut list: Vec<DID> = match document.block_by {
+                                    Some(cid) => cid.get_local_dag(&ipfs).await.unwrap_or_default(),
+                                    None => vec![],
+                                };
+
+                                if !list.remove_item(&did) {
+                                    return Err::<_, Error>(Error::PublicKeyIsntBlocked);
+                                }
+
+                                document.block_by =
+                                    (!list.is_empty()).then_some(list.to_cid(&ipfs).await?);
+
+                                set_root_document(&ipfs, &store, root_cid, document).await?;
+
+                                if let Some(cid) = old_document {
+                                    if !ipfs.is_pinned(&cid).await? {
+                                        ipfs.remove_block(cid).await?;
+                                    }
+                                }
+                                Ok::<_, Error>(())
+                            }
+                            .await,
+                        );
+                    }
+                    RootDocumentEvents::GetRequestList(res) => {
+                        let ipfs = ipfs.clone();
+                        let root_cid = root_cid.clone();
+                        let _ = res.send(
+                            async move {
+                                let document = get_root_document(&ipfs, root_cid.clone()).await?;
+
+                                let list: Vec<Request> = match document.request {
+                                    Some(cid) => cid.get_local_dag(&ipfs).await?,
+                                    None => vec![],
+                                };
+
+                                Ok::<_, Error>(list)
+                            }
+                            .await,
+                        );
+                    }
+                    RootDocumentEvents::GetFriendList(res) => {
+                        let ipfs = ipfs.clone();
+                        let root_cid = root_cid.clone();
+                        let _ = res.send(
+                            async move {
+                                let document = get_root_document(&ipfs, root_cid.clone()).await?;
+
+                                let list: Vec<DID> = match document.friends {
+                                    Some(cid) => cid.get_local_dag(&ipfs).await?,
+                                    None => vec![],
+                                };
+
+                                Ok::<_, Error>(list)
+                            }
+                            .await,
+                        );
+                    }
+                    RootDocumentEvents::GetBlockList(res) => {
+                        let ipfs = ipfs.clone();
+                        let root_cid = root_cid.clone();
+                        let _ = res.send(
+                            async move {
+                                let document = get_root_document(&ipfs, root_cid.clone()).await?;
+
+                                let list: Vec<DID> = match document.blocks {
+                                    Some(cid) => cid.get_local_dag(&ipfs).await?,
+                                    None => vec![],
+                                };
+
+                                Ok::<_, Error>(list)
+                            }
+                            .await,
+                        );
+                    }
+                    RootDocumentEvents::GetBlockByList(res) => {
+                        let ipfs = ipfs.clone();
+                        let root_cid = root_cid.clone();
+                        let _ = res.send(
+                            async move {
+                                let document = get_root_document(&ipfs, root_cid.clone()).await?;
+
+                                let list: Vec<DID> = match document.block_by {
+                                    Some(cid) => cid.get_local_dag(&ipfs).await?,
+                                    None => vec![],
+                                };
+
+                                Ok::<_, Error>(list)
+                            }
+                            .await,
+                        );
+                    }
                 }
             }
         });
@@ -1286,6 +1633,114 @@ impl IdentityStore {
         let (tx, rx) = oneshot::channel();
         task_tx
             .unbounded_send(RootDocumentEvents::Set(document, tx))
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn root_document_add_friend(&self, did: &DID) -> Result<(), Error> {
+        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
+        let (tx, rx) = oneshot::channel();
+        task_tx
+            .unbounded_send(RootDocumentEvents::AddFriend(did.clone(), tx))
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn root_document_remove_friend(&self, did: &DID) -> Result<(), Error> {
+        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
+        let (tx, rx) = oneshot::channel();
+        task_tx
+            .unbounded_send(RootDocumentEvents::RemoveFriend(did.clone(), tx))
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn root_document_add_block(&self, did: &DID) -> Result<(), Error> {
+        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
+        let (tx, rx) = oneshot::channel();
+        task_tx
+            .unbounded_send(RootDocumentEvents::AddBlock(did.clone(), tx))
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn root_document_remove_block(&self, did: &DID) -> Result<(), Error> {
+        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
+        let (tx, rx) = oneshot::channel();
+        task_tx
+            .unbounded_send(RootDocumentEvents::RemoveBlock(did.clone(), tx))
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn root_document_add_block_by(&self, did: &DID) -> Result<(), Error> {
+        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
+        let (tx, rx) = oneshot::channel();
+        task_tx
+            .unbounded_send(RootDocumentEvents::AddBlockBy(did.clone(), tx))
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn root_document_remove_block_by(&self, did: &DID) -> Result<(), Error> {
+        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
+        let (tx, rx) = oneshot::channel();
+        task_tx
+            .unbounded_send(RootDocumentEvents::RemoveBlockBy(did.clone(), tx))
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn root_document_add_request(&self, did: &Request) -> Result<(), Error> {
+        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
+        let (tx, rx) = oneshot::channel();
+        task_tx
+            .unbounded_send(RootDocumentEvents::AddRequest(did.clone(), tx))
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn root_document_remove_request(&self, did: &Request) -> Result<(), Error> {
+        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
+        let (tx, rx) = oneshot::channel();
+        task_tx
+            .unbounded_send(RootDocumentEvents::RemoveRequest(did.clone(), tx))
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn root_document_get_friends(&self) -> Result<Vec<DID>, Error> {
+        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
+        let (tx, rx) = oneshot::channel();
+        task_tx
+            .unbounded_send(RootDocumentEvents::GetFriendList(tx))
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn root_document_get_requests(&self) -> Result<Vec<Request>, Error> {
+        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
+        let (tx, rx) = oneshot::channel();
+        task_tx
+            .unbounded_send(RootDocumentEvents::GetRequestList(tx))
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn root_document_get_blocks(&self) -> Result<Vec<DID>, Error> {
+        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
+        let (tx, rx) = oneshot::channel();
+        task_tx
+            .unbounded_send(RootDocumentEvents::GetBlockList(tx))
+            .map_err(anyhow::Error::from)?;
+        rx.await.map_err(anyhow::Error::from)?
+    }
+
+    pub async fn root_document_get_block_by(&self) -> Result<Vec<DID>, Error> {
+        let task_tx = self.task_send.read().await.clone().ok_or(Error::Other)?;
+        let (tx, rx) = oneshot::channel();
+        task_tx
+            .unbounded_send(RootDocumentEvents::GetBlockByList(tx))
             .map_err(anyhow::Error::from)?;
         rx.await.map_err(anyhow::Error::from)?
     }
