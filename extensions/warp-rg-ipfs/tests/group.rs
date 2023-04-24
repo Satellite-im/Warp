@@ -1,48 +1,24 @@
+mod common;
 #[cfg(test)]
 mod test {
     use std::time::Duration;
 
+    use crate::common::create_accounts_and_chat;
     use futures::StreamExt;
-    use warp::crypto::DID;
-    use warp::multipass::identity::Identity;
-    use warp::multipass::MultiPass;
-    use warp::raygun::{ConversationType, MessageEventKind, RayGun, RayGunEventKind};
-    use warp::tesseract::Tesseract;
-    use warp_mp_ipfs::config::Discovery;
-    use warp_mp_ipfs::ipfs_identity_temporary;
-    use warp_rg_ipfs::IpfsMessaging;
-
-    async fn create_account_and_chat(
-        username: Option<&str>,
-        passphrase: Option<&str>,
-        context: Option<String>,
-    ) -> anyhow::Result<(Box<dyn MultiPass>, Box<dyn RayGun>, DID, Identity)> {
-        let tesseract = Tesseract::default();
-        tesseract.unlock(b"internal pass").unwrap();
-        let mut config = warp_mp_ipfs::config::MpIpfsConfig::development();
-        config.store_setting.discovery = Discovery::Provider(context);
-
-        let mut account = Box::new(ipfs_identity_temporary(Some(config), tesseract, None).await?)
-            as Box<dyn MultiPass>;
-        let did = account.create_identity(username, passphrase).await?;
-        let identity = account.get_own_identity().await?;
-
-        let raygun =
-            Box::new(IpfsMessaging::new(None, account.clone(), None, None).await?) as Box<_>;
-        Ok((account, raygun, did, identity))
-    }
+    use warp::raygun::{ConversationType, MessageEventKind, RayGunEventKind};
 
     #[tokio::test]
     async fn create_group_conversation() -> anyhow::Result<()> {
-        let (_account_a, mut chat_a, did_a, _) =
-            create_account_and_chat(None, None, Some("test::create_group_conversation".into()))
-                .await?;
-        let (_account_b, mut chat_b, did_b, _) =
-            create_account_and_chat(None, None, Some("test::create_group_conversation".into()))
-                .await?;
-        let (_account_c, mut chat_c, did_c, _) =
-            create_account_and_chat(None, None, Some("test::create_group_conversation".into()))
-                .await?;
+        let accounts = create_accounts_and_chat(vec![
+            (None, None, Some("test::create_group_conversation".into())),
+            (None, None, Some("test::create_group_conversation".into())),
+            (None, None, Some("test::create_group_conversation".into())),
+        ])
+        .await?;
+
+        let (_account_a, mut chat_a, did_a, _) = accounts[0].clone();
+        let (_account_b, mut chat_b, did_b, _) = accounts[1].clone();
+        let (_account_c, mut chat_c, did_c, _) = accounts[2].clone();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
@@ -99,30 +75,34 @@ mod test {
 
     #[tokio::test]
     async fn add_recipient_to_conversation() -> anyhow::Result<()> {
-        let (_account_a, mut chat_a, did_a, _) = create_account_and_chat(
-            None,
-            None,
-            Some("test::add_recipient_to_conversation".into()),
-        )
+        let accounts = create_accounts_and_chat(vec![
+            (
+                None,
+                None,
+                Some("test::add_recipient_to_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::add_recipient_to_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::add_recipient_to_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::add_recipient_to_conversation".into()),
+            ),
+        ])
         .await?;
-        let (_account_b, mut chat_b, did_b, _) = create_account_and_chat(
-            None,
-            None,
-            Some("test::add_recipient_to_conversation".into()),
-        )
-        .await?;
-        let (_account_c, mut chat_c, did_c, _) = create_account_and_chat(
-            None,
-            None,
-            Some("test::add_recipient_to_conversation".into()),
-        )
-        .await?;
-        let (_account_d, mut chat_d, did_d, _) = create_account_and_chat(
-            None,
-            None,
-            Some("test::add_recipient_to_conversation".into()),
-        )
-        .await?;
+
+        let (_account_a, mut chat_a, did_a, _) = accounts[0].clone();
+        let (_account_b, mut chat_b, did_b, _) = accounts[1].clone();
+        let (_account_c, mut chat_c, did_c, _) = accounts[2].clone();
+        let (_account_d, mut chat_d, did_d, _) = accounts[3].clone();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
@@ -241,30 +221,34 @@ mod test {
 
     #[tokio::test]
     async fn remove_recipient_from_conversation() -> anyhow::Result<()> {
-        let (_account_a, mut chat_a, did_a, _) = create_account_and_chat(
-            None,
-            None,
-            Some("test::remove_recipient_from_conversation".into()),
-        )
+        let accounts = create_accounts_and_chat(vec![
+            (
+                None,
+                None,
+                Some("test::remove_recipient_from_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::remove_recipient_from_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::remove_recipient_from_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::remove_recipient_from_conversation".into()),
+            ),
+        ])
         .await?;
-        let (_account_b, mut chat_b, did_b, _) = create_account_and_chat(
-            None,
-            None,
-            Some("test::remove_recipient_from_conversation".into()),
-        )
-        .await?;
-        let (_account_c, mut chat_c, did_c, _) = create_account_and_chat(
-            None,
-            None,
-            Some("test::remove_recipient_from_conversation".into()),
-        )
-        .await?;
-        let (_account_d, mut chat_d, did_d, _) = create_account_and_chat(
-            None,
-            None,
-            Some("test::remove_recipient_from_conversation".into()),
-        )
-        .await?;
+
+        let (_account_a, mut chat_a, did_a, _) = accounts[0].clone();
+        let (_account_b, mut chat_b, did_b, _) = accounts[1].clone();
+        let (_account_c, mut chat_c, did_c, _) = accounts[2].clone();
+        let (_account_d, mut chat_d, did_d, _) = accounts[3].clone();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
@@ -445,30 +429,34 @@ mod test {
 
     #[tokio::test]
     async fn send_message_in_group_conversation() -> anyhow::Result<()> {
-        let (_account_a, mut chat_a, _, _) = create_account_and_chat(
-            None,
-            None,
-            Some("test::send_message_in_group_conversation".into()),
-        )
+        let accounts = create_accounts_and_chat(vec![
+            (
+                None,
+                None,
+                Some("test::send_message_in_group_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::send_message_in_group_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::send_message_in_group_conversation".into()),
+            ),
+            (
+                None,
+                None,
+                Some("test::send_message_in_group_conversation".into()),
+            ),
+        ])
         .await?;
-        let (_account_b, mut chat_b, did_b, _) = create_account_and_chat(
-            None,
-            None,
-            Some("test::send_message_in_group_conversation".into()),
-        )
-        .await?;
-        let (_account_c, mut chat_c, did_c, _) = create_account_and_chat(
-            None,
-            None,
-            Some("test::send_message_in_group_conversation".into()),
-        )
-        .await?;
-        let (_account_d, mut chat_d, did_d, _) = create_account_and_chat(
-            None,
-            None,
-            Some("test::send_message_in_group_conversation".into()),
-        )
-        .await?;
+
+        let (_account_a, mut chat_a, _, _) = accounts[0].clone();
+        let (_account_b, mut chat_b, did_b, _) = accounts[1].clone();
+        let (_account_c, mut chat_c, did_c, _) = accounts[2].clone();
+        let (_account_d, mut chat_d, did_d, _) = accounts[3].clone();
 
         let mut chat_subscribe_a = chat_a.subscribe().await?;
         let mut chat_subscribe_b = chat_b.subscribe().await?;
