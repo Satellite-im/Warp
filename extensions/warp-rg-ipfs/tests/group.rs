@@ -220,7 +220,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[ignore = ""]
     async fn remove_recipient_from_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -297,7 +296,10 @@ mod test {
         let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
         let mut conversation_c = chat_c.get_conversation_stream(id_c).await?;
 
+        
         chat_a.add_recipient(id_a, &did_d).await?;
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
 
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -429,7 +431,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[ignore = ""]
     async fn send_message_in_group_conversation() -> anyhow::Result<()> {
         let accounts = create_accounts_and_chat(vec![
             (
@@ -516,10 +517,12 @@ mod test {
         let mut conversation_a = chat_a.get_conversation_stream(id_a).await?;
         let mut conversation_b = chat_b.get_conversation_stream(id_b).await?;
         let mut conversation_c = chat_c.get_conversation_stream(id_c).await?;
-        let mut conversation_d = chat_c.get_conversation_stream(id_d).await?;
+        let mut conversation_d = chat_d.get_conversation_stream(id_d).await?;
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
 
         chat_a.send(id_a, vec!["Hello, World".into()]).await?;
-
+        
         let message_a = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if let Some(MessageEventKind::MessageSent {
