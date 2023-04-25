@@ -5,20 +5,37 @@ pub mod identity;
 pub mod phonebook;
 pub mod queue;
 
-use std::time::Duration;
+use std::{fmt::Display, time::Duration};
 
 use futures::StreamExt;
 use rust_ipfs as ipfs;
 
 use ipfs::{Multiaddr, PeerId, Protocol};
 use warp::{
-    crypto::{did_key::{Generate, ECDH}, DIDKey, Ed25519KeyPair, KeyMaterial, DID, zeroize::Zeroizing, cipher::Cipher},
+    crypto::{
+        cipher::Cipher,
+        did_key::{Generate, ECDH},
+        zeroize::Zeroizing,
+        DIDKey, Ed25519KeyPair, KeyMaterial, DID,
+    },
     error::Error,
     multipass::identity::IdentityStatus,
     tesseract::Tesseract,
 };
 
 use crate::config::Discovery;
+
+pub trait PeerTopic: Display {
+    fn inbox(&self) -> String {
+        format!("/peer/{self}/inbox")
+    }
+
+    fn events(&self) -> String {
+        format!("/peer/{self}/events")
+    }
+}
+
+impl PeerTopic for DID {}
 
 pub trait VecExt<T: Eq> {
     fn insert_item(&mut self, item: &T) -> bool;
