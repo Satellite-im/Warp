@@ -5,7 +5,7 @@ pub mod message;
 pub mod payload;
 
 use rust_ipfs as ipfs;
-use std::{time::Duration, fmt::Debug};
+use std::fmt::{Debug, Display};
 
 use chrono::{DateTime, Utc};
 use rust_ipfs::PeerId;
@@ -20,9 +20,16 @@ use warp::{
         DIDKey, Ed25519KeyPair, KeyMaterial, DID,
     },
     error::Error,
-    logging::tracing::log::{error, trace},
     raygun::{Message, MessageEvent, PinState, ReactionState},
 };
+
+pub trait PeerTopic: Display {
+    fn messaging(&self) -> String {
+        format!("{self}/messaging")
+    }
+}
+
+impl PeerTopic for DID {}
 
 #[allow(clippy::large_enum_variant)]
 #[allow(clippy::enum_variant_names)]
@@ -267,20 +274,4 @@ pub async fn connected_to_peer<I: Into<PeerType>>(
         true => PeerConnectionType::Connected,
         false => PeerConnectionType::NotConnected,
     })
-}
-
-pub async fn topic_discovery<S: AsRef<str>>(ipfs: ipfs::Ipfs, topic: S) -> anyhow::Result<()> {
-    trace!("Performing topic discovery");
-    let topic = topic.as_ref();
-    let topic_hash = sha256_hash(format!("gossipsub:{topic}").as_bytes(), None);
-    let cid = ipfs.put_dag(libipld::ipld!(topic_hash)).await?;
-    ipfs.provide(cid).await?;
-
-    loop {
-        match ipfs.get_providers(cid).await {
-            Ok(_) => {}
-            Err(e) => error!("Error getting providers: {e}"),
-        };
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
 }
