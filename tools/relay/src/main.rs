@@ -117,9 +117,6 @@ async fn main() -> anyhow::Result<()> {
     
     let ipfs = uninitialized.start().await?;
 
-    ipfs.default_bootstrap().await?;
-    ipfs.bootstrap().await?;
-
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     let PeerInfo {
