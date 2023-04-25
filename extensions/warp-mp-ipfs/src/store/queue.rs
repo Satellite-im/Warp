@@ -16,11 +16,9 @@ use warp::{
     sata::{Kind, Sata},
 };
 
-use super::{
-    connected_to_peer,
-    discovery::Discovery,
-    friends::{get_inbox_topic, PayloadEvent},
-};
+use crate::store::PeerTopic;
+
+use super::{connected_to_peer, discovery::Discovery, friends::PayloadEvent};
 
 pub struct Queue {
     path: Option<PathBuf>,
@@ -257,14 +255,12 @@ impl QueueEntry {
                                 .map_err(anyhow::Error::from)?;
 
                             let bytes = serde_json::to_vec(&payload)?;
-                            
-                            log::trace!("Payload size: {} bytes", bytes.len());
 
-                            let topic = get_inbox_topic(&recipient);
+                            log::trace!("Payload size: {} bytes", bytes.len());
 
                             log::info!("Sending request to {}", recipient);
 
-                            entry.ipfs.pubsub_publish(topic, bytes).await?;
+                            entry.ipfs.pubsub_publish(recipient.inbox(), bytes).await?;
 
                             Ok::<_, anyhow::Error>(())
                         };
@@ -275,7 +271,11 @@ impl QueueEntry {
                                 break;
                             }
                             Err(e) => {
-                                log::error!("Error sending request for {}: {e}. Retrying in {}s", &entry.recipient, retry);
+                                log::error!(
+                                    "Error sending request for {}: {e}. Retrying in {}s",
+                                    &entry.recipient,
+                                    retry
+                                );
                                 tokio::time::sleep(Duration::from_secs(retry)).await;
                                 retry += 5;
                             }

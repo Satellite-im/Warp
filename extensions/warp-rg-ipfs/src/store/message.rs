@@ -40,16 +40,14 @@ use warp::sync::Arc;
 use crate::store::payload::Payload;
 use crate::store::{
     connected_to_peer, ecdh_decrypt, ecdh_encrypt, sign_serde, ConversationRequestKind,
-    ConversationRequestResponse, ConversationResponseKind,
+    ConversationRequestResponse, ConversationResponseKind, PeerTopic,
 };
 use crate::SpamFilter;
 
 use super::conversation::{ConversationDocument, MessageDocument};
 use super::document::{GetLocalDag, ToCid};
 use super::keystore::Keystore;
-use super::{
-    did_to_libp2p_pub, topic_discovery, verify_serde_sig, ConversationEvents, MessagingEvents,
-};
+use super::{did_to_libp2p_pub, verify_serde_sig, ConversationEvents, MessagingEvents};
 
 const PERMIT_AMOUNT: usize = 1;
 
@@ -114,7 +112,7 @@ impl MessageStore {
         path: Option<PathBuf>,
         account: Box<dyn MultiPass>,
         filesystem: Option<Box<dyn Constellation>>,
-        discovery: bool,
+        _: bool,
         interval_ms: u64,
         event: BroadcastSender<RayGunEventKind>,
         (check_spam, disable_sender_event_emit, with_friends, conversation_load_task): (
@@ -191,7 +189,7 @@ impl MessageStore {
                 });
 
                 let did = &*(store.did.clone());
-                let Ok(stream) = store.ipfs.pubsub_subscribe(format!("{did}/messaging")).await else {
+                let Ok(stream) = store.ipfs.pubsub_subscribe(did.messaging()).await else {
                     error!("Unable to create subscription stream. Terminating task");
                     //TODO: Maybe panic? 
                     return;
@@ -222,15 +220,7 @@ impl MessageStore {
                 }
             }
         });
-        if discovery {
-            let ipfs = store.ipfs.clone();
-            let topic = format!("{}/messaging", store.did);
-            tokio::spawn(async move {
-                if let Err(e) = topic_discovery(ipfs, topic).await {
-                    error!("Unable to perform topic discovery: {e}");
-                }
-            });
-        }
+
         tokio::task::yield_now().await;
         Ok(store)
     }
@@ -847,7 +837,6 @@ impl MessageStore {
         self.start_reqres_task(conversation_id).await;
     }
 
-
     async fn message_event(
         &mut self,
         conversation_id: Uuid,
@@ -1064,7 +1053,9 @@ impl MessageStore {
                 message_id,
             } => {
                 if opt.keep_if_owned.load(Ordering::SeqCst) {
-                    let message_document = document.get_message_document(&self.ipfs, message_id).await?;
+                    let message_document = document
+                        .get_message_document(&self.ipfs, message_id)
+                        .await?;
 
                     let message = message_document
                         .resolve(&self.ipfs, &self.did, keystore.as_ref())
@@ -1875,14 +1866,13 @@ impl MessageStore {
 
         let payload = Payload::new(own_did, &bytes, &signature);
 
-        let topic = format!("{did_key}/messaging");
-        let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
+        let peers = self.ipfs.pubsub_peers(Some(did_key.messaging())).await?;
 
         if !peers.contains(&peer_id)
             || (peers.contains(&peer_id)
                 && self
                     .ipfs
-                    .pubsub_publish(topic.clone(), payload.to_bytes()?.into())
+                    .pubsub_publish(did_key.messaging(), payload.to_bytes()?.into())
                     .await
                     .is_err())
         {
@@ -1894,7 +1884,7 @@ impl MessageStore {
                         convo_id,
                         None,
                         peer_id,
-                        topic.clone(),
+                        did_key.messaging(),
                         payload.data().to_vec(),
                     ),
                 )
@@ -2028,25 +2018,24 @@ impl MessageStore {
 
             let payload = Payload::new(own_did, &bytes, &signature);
 
-            let topic = format!("{did}/messaging");
-            let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
+            let peers = self.ipfs.pubsub_peers(Some(did.messaging())).await?;
             if !peers.contains(&peer_id)
                 || (peers.contains(&peer_id)
                     && self
                         .ipfs
-                        .pubsub_publish(topic.clone(), payload.to_bytes()?.into())
+                        .pubsub_publish(did.messaging(), payload.to_bytes()?.into())
                         .await
                         .is_err())
             {
                 warn!("Unable to publish to topic. Queuing event");
                 if let Err(e) = self
                     .queue_event(
-                        did,
+                        did.clone(),
                         Queue::direct(
                             convo_id,
                             None,
                             peer_id,
-                            topic.clone(),
+                            did.messaging(),
                             payload.data().to_vec(),
                         ),
                     )
@@ -2158,16 +2147,15 @@ impl MessageStore {
                     let signature = sign_serde(own_did, &bytes)?;
 
                     let payload = Payload::new(own_did, &bytes, &signature);
-                    let topic = format!("{recipient}/messaging");
 
-                    let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
+                    let peers = self.ipfs.pubsub_peers(Some(recipient.messaging())).await?;
                     let timer = Instant::now();
                     let mut time = true;
                     if !peers.contains(&peer_id)
                         || (peers.contains(&peer_id)
                             && self
                                 .ipfs
-                                .pubsub_publish(topic.clone(), payload.to_bytes()?.into())
+                                .pubsub_publish(recipient.messaging(), payload.to_bytes()?.into())
                                 .await
                                 .is_err())
                     {
@@ -2183,7 +2171,7 @@ impl MessageStore {
                                     document_type.id(),
                                     None,
                                     peer_id,
-                                    topic.clone(),
+                                    recipient.messaging(),
                                     payload.data().to_vec(),
                                 ),
                             )
@@ -2447,8 +2435,7 @@ impl MessageStore {
         let payload = Payload::new(own_did, &bytes, &signature);
 
         let peer_id = did_to_libp2p_pub(did_key)?.to_peer_id();
-        let topic = format!("{did_key}/messaging");
-        let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
+        let peers = self.ipfs.pubsub_peers(Some(did_key.messaging())).await?;
 
         let mut time = true;
         let timer = Instant::now();
@@ -2456,7 +2443,7 @@ impl MessageStore {
             || (peers.contains(&peer_id)
                 && self
                     .ipfs
-                    .pubsub_publish(topic.clone(), payload.to_bytes()?.into())
+                    .pubsub_publish(did_key.messaging(), payload.to_bytes()?.into())
                     .await
                     .is_err())
         {
@@ -2468,7 +2455,7 @@ impl MessageStore {
                         conversation_id,
                         None,
                         peer_id,
-                        topic.clone(),
+                        did_key.messaging(),
                         payload.data().to_vec(),
                     ),
                 )
