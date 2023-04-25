@@ -1,30 +1,14 @@
+
+pub mod common;
 #[cfg(test)]
 mod test {
     use std::time::Duration;
 
-    use warp::crypto::DID;
-    use warp::multipass::identity::{Identity, IdentityStatus, IdentityUpdate, Platform};
+    use warp::multipass::identity::{IdentityStatus, IdentityUpdate, Platform};
     use warp::multipass::MultiPass;
     use warp::tesseract::Tesseract;
-    use warp_mp_ipfs::config::Discovery;
     use warp_mp_ipfs::ipfs_identity_temporary;
-
-    async fn create_account(
-        username: Option<&str>,
-        passphrase: Option<&str>,
-        context: Option<String>,
-    ) -> anyhow::Result<(Box<dyn MultiPass>, DID, Identity)> {
-        let tesseract = Tesseract::default();
-        tesseract.unlock(b"internal pass").unwrap();
-        let mut config = warp_mp_ipfs::config::MpIpfsConfig::development();
-        config.store_setting.discovery = Discovery::Provider(context);
-        config.store_setting.share_platform = true;
-
-        let mut account = ipfs_identity_temporary(Some(config), tesseract, None).await?;
-        let did = account.create_identity(username, passphrase).await?;
-        let identity = account.get_own_identity().await?;
-        Ok((Box::new(account), did, identity))
-    }
+    use crate::common::{create_accounts, create_account};
 
     #[tokio::test]
     async fn create_identity() -> anyhow::Result<()> {
@@ -63,15 +47,17 @@ mod test {
 
     #[tokio::test]
     async fn get_identity() -> anyhow::Result<()> {
-        let (account_a, _, _) = create_account(
+        let accounts =
+            create_accounts(vec![(
             Some("JohnDoe"),
             Some("morning caution dose lab six actress pond humble pause enact virtual train"),
             Some("test::get_identity".into()),
-        )
-        .await?;
+        ), (Some("JaneDoe"), None, Some("test::get_identity".into()))])
+            .await?;
 
-        let (_account_b, did_b, _) =
-            create_account(Some("JaneDoe"), None, Some("test::get_identity".into())).await?;
+        let (account_a, _, _) = accounts.first().expect("Account exist");
+
+        let (_, did_b, _) = accounts.last().expect("Account exist");
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
         let identity_b = tokio::time::timeout(Duration::from_secs(5), async {
@@ -94,19 +80,23 @@ mod test {
 
     #[tokio::test]
     async fn get_identity_by_username() -> anyhow::Result<()> {
-        let (account_a, _, _) = create_account(
-            Some("JohnDoe"),
-            None,
-            Some("test::get_identity_by_username".into()),
-        )
+        let accounts = create_accounts(vec![
+            (
+                Some("JohnDoe"),
+                None,
+                Some("test::get_identity_by_username".into()),
+            ),
+            (
+                Some("JaneDoe"),
+                None,
+                Some("test::get_identity_by_username".into()),
+            ),
+        ])
         .await?;
 
-        let (_account_b, _, _) = create_account(
-            Some("JaneDoe"),
-            None,
-            Some("test::get_identity_by_username".into()),
-        )
-        .await?;
+        let (account_a, _, _) = accounts.first().unwrap();
+
+        let (_account_b, _, _) = accounts.last().unwrap();
 
         //used to wait for the nodes to discover eachother and provide their identity to each other
 
@@ -213,18 +203,23 @@ mod test {
 
     #[tokio::test]
     async fn get_identity_status() -> anyhow::Result<()> {
-        let (account_a, _, _) = create_account(
-            Some("JohnDoe"),
-            None,
-            Some("test::get_identity_status".into()),
-        )
+        let accounts = create_accounts(vec![
+            (
+                Some("JohnDoe"),
+                None,
+                Some("test::get_identity_status".into()),
+            ),
+            (
+                Some("JaneDoe"),
+                None,
+                Some("test::get_identity_status".into()),
+            ),
+        ])
         .await?;
-        let (mut account_b, did_b, _) = create_account(
-            Some("JaneDoe"),
-            None,
-            Some("test::get_identity_status".into()),
-        )
-        .await?;
+
+        let (account_a, _, _) = accounts.first().unwrap();
+
+        let (mut account_b, did_b, _) = accounts.last().cloned().unwrap();
 
         let status_b = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -270,24 +265,29 @@ mod test {
 
     #[tokio::test]
     async fn get_identity_platform() -> anyhow::Result<()> {
-        let (account_a, _, _) = create_account(
-            Some("JohnDoe"),
-            None,
-            Some("test::get_identity_platform".into()),
-        )
+        let accounts = create_accounts(vec![
+            (
+                Some("JohnDoe"),
+                None,
+                Some("test::get_identity_platform".into()),
+            ),
+            (
+                Some("JaneDoe"),
+                None,
+                Some("test::get_identity_platform".into()),
+            ),
+        ])
         .await?;
-        let (_account_b, did_b, _) = create_account(
-            Some("JaneDoe"),
-            None,
-            Some("test::get_identity_platform".into()),
-        )
-        .await?;
+
+        let (account_a, _, _) = accounts.first().unwrap();
+
+        let (_account_b, did_b, _) = accounts.last().unwrap();
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
         let platform_b = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                if let Ok(platform) = account_a.identity_platform(&did_b).await {
+                if let Ok(platform) = account_a.identity_platform(did_b).await {
                     break platform;
                 }
             }
