@@ -3259,7 +3259,7 @@ impl MessageStore {
         }
 
         let mut attachments = vec![];
-
+        let mut total_thumbnail_size = 0;
         for file in files {
             let file = match location {
                 Location::Constellation => {
@@ -3359,6 +3359,13 @@ impl MessageStore {
 
             // We reconstruct it to avoid out any possible metadata that was apart of the `File` structure
             let new_file = warp::constellation::file::File::new(&file.name());
+
+            let thumbnail = file.thumbnail();
+
+            if total_thumbnail_size < 3 * 1024 * 1024 && !thumbnail.is_empty() && thumbnail.len() <= 1024 * 1024 {
+                new_file.set_thumbnail(&thumbnail);
+                total_thumbnail_size += thumbnail.len();
+            }
             new_file.set_size(file.size());
             new_file.set_hash(file.hash());
             new_file.set_reference(&file.reference().unwrap_or_default());
