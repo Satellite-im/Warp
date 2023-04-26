@@ -59,9 +59,7 @@ async fn account_persistent<P: AsRef<Path>>(
     opt: &Opt,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let path = path.as_ref();
-    if !path.is_dir() {
-        tokio::fs::create_dir_all(&path).await?;
-    }
+
     let tesseract = Tesseract::open_or_create(path.join("tdatastore"))?;
 
     tesseract
