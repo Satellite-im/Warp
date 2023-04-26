@@ -354,7 +354,9 @@ impl Constellation for IpfsFileSystem {
             return Err(Error::FileNotFound);
         }
 
-        let ticket = self.thumbnail_store.insert(&path).await?;
+        let (width, height) = self.config.as_ref().map(|c| c.thumbnail_size).unwrap_or((128, 128));
+
+        let ticket = self.thumbnail_store.insert(&path, width, height).await?;
 
         let current_directory = self.current_directory()?;
 

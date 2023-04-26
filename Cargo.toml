@@ -61,6 +61,7 @@ libipld = { version = "0.15", features = ["serde-codec"] }
 bytes = "1"
 bincode = "1"
 image = "0.24"
+mediatype = { version = "0.19", features = ["serde"] }
 
 # Misc
 dyn-clone = "1.0"

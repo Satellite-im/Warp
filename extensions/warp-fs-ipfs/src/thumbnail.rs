@@ -1,16 +1,20 @@
 use std::{
     collections::BTreeMap,
     ffi::OsStr,
+    fmt::Display,
     hash::Hash,
-    io::{self, ErrorKind},
+    io::{self, Cursor, ErrorKind},
     path::Path,
+    str::FromStr,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    time::Instant, fmt::Display,
+    time::Instant,
 };
 
+use image::ImageFormat;
+use mediatype::MediaTypeBuf;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use warp::{constellation::file::FileType, error::Error, logging::tracing::log};
@@ -47,23 +51,38 @@ pub struct ThumbnailGenerator {
     >,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, derive_more::Display)]
 pub enum ThumbnailExtensionType {
+    #[display(fmt = "image/png")]
     PNG,
+    #[display(fmt = "image/jpeg")]
     JPG,
+    #[display(fmt = "image/svg+xml")]
     SVG,
+    #[display(fmt = "image/gif")]
     GIF,
+    #[display(fmt = "image/bmp")]
     BMP,
+    #[display(fmt = "image/vnd.microsoft.icon")]
     ICO,
+    #[display(fmt = "video/mp4")]
     MP4,
+    #[display(fmt = "video/x-msvideo")]
     AVI,
+    #[display(fmt = "video/webm")]
     WEBM,
+    #[display(fmt = "video/x-matroska")]
     MKV,
+    #[display(fmt = "application/pdf")]
     PDF,
+    #[display(fmt = "application/msword")]
     DOC,
+    #[display(fmt = "application/vnd.openxmlformats-officedocument.wordprocessingml.document")]
     DOCX,
+    #[display(fmt = "text/plain")]
     TXT,
-    Invalid,
+    #[display(fmt = "application/octet-stream")]
+    Other,
 }
 
 impl From<&str> for ThumbnailExtensionType {
@@ -80,27 +99,37 @@ impl From<&str> for ThumbnailExtensionType {
             "webm" => Self::WEBM,
             "mkv" => Self::MKV,
             "pdf" => Self::PDF,
-            _ => Self::Invalid,
+            _ => Self::Other,
         }
     }
 }
 
-impl From<ThumbnailExtensionType> for FileType {
-    fn from(ext: ThumbnailExtensionType) -> Self {
-        match ext {
-            ThumbnailExtensionType::PNG
-            | ThumbnailExtensionType::JPG
-            | ThumbnailExtensionType::SVG
-            | ThumbnailExtensionType::BMP
-            | ThumbnailExtensionType::GIF
-            | ThumbnailExtensionType::ICO => FileType::Image,
-            _ => FileType::Other,
+impl TryFrom<ThumbnailExtensionType> for MediaTypeBuf {
+    type Error = Error;
+    fn try_from(ext: ThumbnailExtensionType) -> Result<Self, Self::Error> {
+        let ty = ext.to_string();
+        let media = MediaTypeBuf::from_str(&ty).map_err(anyhow::Error::from)?;
+        Ok(media)
+    }
+}
+
+impl TryFrom<ThumbnailExtensionType> for FileType {
+    type Error = Error;
+    fn try_from(ext: ThumbnailExtensionType) -> Result<Self, Self::Error> {
+        match ext.try_into() {
+            Ok(media) => Ok(FileType::Mime(media)),
+            Err(_) => Ok(FileType::Generic),
         }
     }
 }
 
 impl ThumbnailGenerator {
-    pub async fn insert<P: AsRef<Path>>(&self, path: P) -> Result<ThumbnailId, Error> {
+    pub async fn insert<P: AsRef<Path>>(
+        &self,
+        path: P,
+        width: u32,
+        height: u32,
+    ) -> Result<ThumbnailId, Error> {
         let path = path.as_ref();
         if !path.is_file() {
             return Err(io::Error::from(ErrorKind::NotFound).into());
@@ -116,19 +145,24 @@ impl ThumbnailGenerator {
                 .extension()
                 .and_then(OsStr::to_str)
                 .map(ThumbnailExtensionType::from)
-                .unwrap_or(ThumbnailExtensionType::Invalid);
+                .unwrap_or(ThumbnailExtensionType::Other);
 
-            let result = if matches!(extension.into(), FileType::Image) {
-                tokio::task::spawn_blocking(move || {
-                    let image = image::open(own_path).map_err(anyhow::Error::from)?;
-                    let thumbnail = image.thumbnail(500, 500);
-                    let bytes = thumbnail.as_bytes();
-                    Ok::<_, Error>((extension, bytes.to_vec()))
-                })
-                .await
-                .map_err(anyhow::Error::from)?
-            } else {
-                Err(Error::Other)
+            let result = match extension.try_into() {
+                Ok(FileType::Mime(media)) => match media.ty().as_str() {
+                    "image" => tokio::task::spawn_blocking(move || {
+                        let image = image::open(own_path).map_err(anyhow::Error::from)?;
+                        let thumbnail = image.thumbnail(width, height);
+                        let mut bytes = Cursor::new(vec![]);
+                        thumbnail
+                            .write_to(&mut bytes, ImageFormat::Jpeg)
+                            .map_err(anyhow::Error::from)?;
+                        Ok::<_, Error>((extension, bytes.get_ref().to_vec()))
+                    })
+                    .await
+                    .map_err(anyhow::Error::from)?,
+                    _ => Err(Error::Unimplemented),
+                },
+                _ => Err(Error::Other),
             };
 
             let stop = instance.elapsed();

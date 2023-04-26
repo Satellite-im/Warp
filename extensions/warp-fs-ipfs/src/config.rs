@@ -112,6 +112,7 @@ pub struct FsIpfsConfig {
     pub ipfs_setting: IpfsSetting,
     pub max_storage_size: Option<usize>,
     pub max_file_size: Option<usize>,
+    pub thumbnail_size: (u32, u32),
     pub chunking: Option<usize>,
 }
 
@@ -131,6 +132,7 @@ impl Default for FsIpfsConfig {
             },
             max_storage_size: Some(1024 * 1024 * 1024),
             max_file_size: Some(50 * 1024 * 1024),
+            thumbnail_size: (128, 128),
             chunking: None,
         }
     }
