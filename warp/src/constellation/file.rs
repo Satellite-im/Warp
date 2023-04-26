@@ -24,8 +24,8 @@ pub enum FileType {
     #[display(fmt = "generic")]
     #[default]
     Generic,
-    #[display(fmt = "image/png")]
-    ImagePng,
+    #[display(fmt = "image")]
+    Image,
     #[display(fmt = "archive")]
     Archive,
     #[display(fmt = "other")]

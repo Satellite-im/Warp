@@ -1,4 +1,6 @@
 pub mod config;
+pub mod thumbnail;
+
 use config::FsIpfsConfig;
 use futures::stream::{self, BoxStream};
 use futures::{pin_mut, StreamExt};
@@ -10,6 +12,7 @@ use std::collections::HashSet;
 use std::io::Cursor;
 use std::path::PathBuf;
 use std::time::Duration;
+use thumbnail::ThumbnailGenerator;
 use tokio_util::io::ReaderStream;
 use warp::constellation::{
     ConstellationDataType, ConstellationEvent, ConstellationEventKind, ConstellationEventStream,
@@ -36,6 +39,7 @@ use warp::{Extension, SingleHandle};
 type Result<T> = std::result::Result<T, Error>;
 
 #[allow(clippy::type_complexity)]
+#[derive(Clone)]
 pub struct IpfsFileSystem {
     index: Directory,
     path: Arc<RwLock<PathBuf>>,
@@ -46,22 +50,7 @@ pub struct IpfsFileSystem {
     account: Arc<tokio::sync::RwLock<Option<Box<dyn MultiPass>>>>,
     broadcast: tokio::sync::broadcast::Sender<ConstellationEventKind>,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-}
-
-impl Clone for IpfsFileSystem {
-    fn clone(&self) -> Self {
-        Self {
-            index: self.index.clone(),
-            path: self.path.clone(),
-            modified: self.modified,
-            config: self.config.clone(),
-            ipfs: self.ipfs.clone(),
-            index_cid: self.index_cid.clone(),
-            account: self.account.clone(),
-            broadcast: self.broadcast.clone(),
-            cache: self.cache.clone(),
-        }
-    }
+    thumbnail_store: ThumbnailGenerator,
 }
 
 impl IpfsFileSystem {
@@ -81,6 +70,7 @@ impl IpfsFileSystem {
             ipfs: Default::default(),
             broadcast: tx,
             cache: None,
+            thumbnail_store: ThumbnailGenerator::default(),
         };
 
         *filesystem.account.write().await = Some(account);
@@ -368,6 +358,8 @@ impl Constellation for IpfsFileSystem {
             return Err(Error::FileNotFound);
         }
 
+        let ticket = self.thumbnail_store.insert(&path).await?;
+
         let mut total_written = 0;
         let mut returned_path = None;
 
@@ -393,11 +385,37 @@ impl Constellation for IpfsFileSystem {
         let file = warp::constellation::file::File::new(name);
         file.set_size(total_written);
         file.set_reference(&format!("{ipfs_path}"));
+
         let f = file.clone();
         tokio::task::spawn_blocking(move || f.hash_mut().hash_from_file(&path))
             .await
             .map_err(anyhow::Error::from)??;
-        self.current_directory()?.add_item(file)?;
+        self.current_directory()?.add_item(file.clone())?;
+
+        let task = {
+            let store = self.thumbnail_store.clone();
+            let file = file.clone();
+            async move {
+                match store.get(ticket).await {
+                    Ok((_extension_type, thumbnail)) => {
+                        file.set_thumbnail(&String::from_utf8_lossy(&thumbnail));
+                    },
+                    Err(_e) => {}
+                }
+            }
+        };
+
+        if self
+            .thumbnail_store
+            .is_finished(ticket)
+            .await
+            .unwrap_or_default()
+        {
+            task.await;
+        } else {
+            tokio::spawn(task);
+        }
+
         if let Err(_e) = self.export_index().await {}
 
         let _ = self
