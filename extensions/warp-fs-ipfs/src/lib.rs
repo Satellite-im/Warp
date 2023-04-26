@@ -362,6 +362,9 @@ impl Constellation for IpfsFileSystem {
             return Err(Error::FileExist);
         }
 
+        // Placeholder to fnish thumbnail generation in the background
+        // Will be false for now
+        let background = false;
 
         let name = name.to_string();
         let fs: IpfsFileSystem = self.clone();
@@ -454,36 +457,14 @@ impl Constellation for IpfsFileSystem {
             let file = warp::constellation::file::File::new(&name);
             file.set_size(total_written);
             file.set_reference(&format!("{ipfs_path}"));
-            let f = file.clone();
+            
 
-            if let Ok(Err(_e)) = tokio::task::spawn_blocking(move || f.hash_mut().hash_from_file(&path))
-            .await {}
+            if let Ok(Err(_e)) = tokio::task::spawn_blocking({ 
+                let f = file.clone();
+                move || f.hash_mut().hash_from_file(&path)
+            }).await {}
 
-            let task = {
-                let store = fs.thumbnail_store.clone();
-                let file = file.clone();
-                async move {
-                    match store.get(ticket).await {
-                        Ok((_extension_type, thumbnail)) => {
-                            file.set_thumbnail(&String::from_utf8_lossy(&thumbnail));
-                        }
-                        Err(_e) => {}
-                    }
-                }
-            };
-    
-            if fs
-                .thumbnail_store
-                .is_finished(ticket)
-                .await
-                .unwrap_or_default()
-            {
-                task.await;
-            } else {
-                tokio::spawn(task);
-            }
-    
-            if let Err(e) = current_directory.add_item(file) {
+            if let Err(e) = current_directory.add_item(file.clone()) {
                 yield Progression::ProgressFailed {
                     name,
                     last_size: Some(last_written),
@@ -491,7 +472,31 @@ impl Constellation for IpfsFileSystem {
                 };
                 return;
             }
+
             if let Err(_e) = fs.export_index().await {}
+
+            let task = {
+                let fs = fs.clone();
+                let store = fs.thumbnail_store.clone();
+                let file = file.clone();
+                async move {
+                    match store.get(ticket).await {
+                        Ok((_extension_type, thumbnail)) => {
+                            file.set_thumbnail(&String::from_utf8_lossy(&thumbnail));
+                            //We export again so the thumbnail can be apart of the index
+                            if let Err(_e) = fs.export_index().await {}
+                        }
+                        Err(_e) => {}
+                    }
+                }
+            };
+
+            if !background {
+                task.await;
+            } else {
+                tokio::spawn(task);
+            }
+
             yield Progression::ProgressComplete {
                 name: name.to_string(),
                 total: Some(total_written),
