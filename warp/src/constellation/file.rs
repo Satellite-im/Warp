@@ -18,9 +18,8 @@ use wasm_bindgen::prelude::*;
 /// if we don't have a supported file type, we can just default to generic.
 ///
 /// TODO: Use mime to define the filetype
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display, Default)]
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq, Eq, Display, Default, FFIFree)]
 #[serde(rename_all = "lowercase")]
-#[repr(C)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub enum FileType {
     #[display(fmt = "generic")]

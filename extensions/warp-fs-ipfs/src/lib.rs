@@ -476,7 +476,7 @@ impl Constellation for IpfsFileSystem {
             }
 
             if let Err(_e) = fs.export_index().await {}
-
+            
             let task = {
                 let fs = fs.clone();
                 let store = fs.thumbnail_store.clone();

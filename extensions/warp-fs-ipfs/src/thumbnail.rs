@@ -3,7 +3,7 @@ use std::{
     ffi::OsStr,
     fmt::Display,
     hash::Hash,
-    io::{self, Cursor, ErrorKind},
+    io::{self, ErrorKind},
     path::Path,
     str::FromStr,
     sync::{
@@ -13,7 +13,6 @@ use std::{
     time::Instant,
 };
 
-use image::ImageFormat;
 use mediatype::MediaTypeBuf;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -152,11 +151,7 @@ impl ThumbnailGenerator {
                     "image" => tokio::task::spawn_blocking(move || {
                         let image = image::open(own_path).map_err(anyhow::Error::from)?;
                         let thumbnail = image.thumbnail(width, height);
-                        let mut bytes = Cursor::new(vec![]);
-                        thumbnail
-                            .write_to(&mut bytes, ImageFormat::Jpeg)
-                            .map_err(anyhow::Error::from)?;
-                        Ok::<_, Error>((extension, bytes.get_ref().to_vec()))
+                        Ok::<_, Error>((extension, thumbnail.as_bytes().to_vec()))
                     })
                     .await
                     .map_err(anyhow::Error::from)?,
