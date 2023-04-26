@@ -15,7 +15,7 @@ tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true, features = ["net"] }
 async-trait.workspace = true
-
+futures.workspace = true
 warp = { path = "../../warp" }
 
 anyhow.workspace = true
