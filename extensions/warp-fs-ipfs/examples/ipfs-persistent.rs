@@ -1,11 +1,12 @@
-use std::path::Path;
+use std::{io::ErrorKind, path::Path};
 
 use anyhow::bail;
 use clap::{Parser, Subcommand};
 use comfy_table::Table;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
+use tokio_util::compat::TokioAsyncWriteCompatExt;
 use warp::{
     constellation::{Constellation, Progression},
     multipass::MultiPass,
@@ -134,15 +135,17 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Command::DownloadFile { remote, local } => {
-            let mut stream = filesystem.get_stream(&remote).await?;
+            let stream = filesystem.get_stream(&remote).await?;
 
-            let mut written = 0;
-            let mut file = tokio::fs::File::create(&local).await?;
-            while let Some(Ok(data)) = stream.next().await {
-                file.write_all(&data).await?;
-                written += data.len();
-                file.flush().await?;
-            }
+            let file = tokio::fs::File::create(&local).await?;
+
+            let mut reader = stream
+                .map(|s| s.map_err(|e| std::io::Error::new(ErrorKind::Other, e)))
+                .into_async_read();
+
+            let mut writer = file.compat_write();
+
+            let written = futures::io::copy(&mut reader, &mut writer).await?;
 
             println!(
                 "{local} been downloaded with {} MB written",
