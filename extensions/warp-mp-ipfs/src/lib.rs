@@ -233,8 +233,6 @@ impl IpfsIdentity {
             })),
             swarm_configuration: Some(swarm_configuration),
             transport_configuration: Some(TransportConfig {
-                yamux_max_buffer_size: 16 * 1024 * 1024,
-                yamux_receive_window_size: 16 * 1024 * 1024,
                 yamux_update_mode: UpdateMode::Read,
                 mplex_max_buffer_size: usize::MAX / 2,
                 enable_quic: false,
@@ -254,7 +252,7 @@ impl IpfsIdentity {
 
             if !path.is_dir() {
                 warn!("Path doesnt exist... creating");
-                tokio::fs::create_dir(path).await?;
+                tokio::fs::create_dir_all(path).await?;
             }
             opts.ipfs_path = StoragePath::Disk(path.clone());
         }

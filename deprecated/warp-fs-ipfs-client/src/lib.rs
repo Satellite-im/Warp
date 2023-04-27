@@ -3,7 +3,7 @@ pub mod config;
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use warp::constellation::ConstellationEvent;
+use warp::constellation::{ConstellationEvent, ConstellationProgressStream, Progression};
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 // use warp_common::futures::TryStreamExt;
@@ -11,7 +11,7 @@ use warp::module::Module;
 
 use anyhow::anyhow;
 use chrono::{DateTime, Utc};
-use futures::TryStreamExt;
+use futures::{TryStreamExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio_util::io::StreamReader;
 use warp::constellation::{directory::Directory, Constellation};
@@ -176,7 +176,7 @@ impl Constellation for IpfsFileSystem {
         self.index.clone()
     }
 
-    async fn put(&mut self, name: &str, path: &str) -> Result<()> {
+    async fn put(&mut self, name: &str, path: &str) -> Result<ConstellationProgressStream> {
         //TODO: Implement a remote check along with a check within constellation to determine if the file exist
         if self.root_directory().get_item_by_path(name).is_ok() {
             return Err(warp::error::Error::IoError(std::io::Error::from(
@@ -271,7 +271,18 @@ impl Constellation for IpfsFileSystem {
             hook.trigger("filesystem::new_file", &object)
         }
 
-        Ok(())
+        let name = name[1..].to_string();
+
+        let stream = ConstellationProgressStream(futures::stream::once(
+            async move {
+                Progression::ProgressComplete {
+                    name,
+                    total: Some(size as _),
+                }
+            },
+        ).boxed());
+
+        Ok(stream)
     }
 
     async fn get(&self, name: &str, path: &str) -> Result<()> {

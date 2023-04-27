@@ -15,6 +15,7 @@ use dyn_clone::DynClone;
 use futures::stream::BoxStream;
 use item::Item;
 
+use serde::{Serialize, Deserialize};
 use warp_derive::FFIFree;
 
 #[cfg(target_arch = "wasm32")]
@@ -61,7 +62,7 @@ impl core::ops::DerefMut for ConstellationEventStream {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Progression {
     CurrentProgress {
         /// name of the file
@@ -173,7 +174,7 @@ pub trait Constellation:
     }
 
     /// Used to upload file to the filesystem
-    async fn put(&mut self, _: &str, _: &str) -> Result<(), Error> {
+    async fn put(&mut self, _: &str, _: &str) -> Result<ConstellationProgressStream, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -511,6 +512,8 @@ impl core::ops::DerefMut for ConstellationAdapter {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
 
+    use futures::StreamExt;
+
     use crate::constellation::directory::Directory;
     use crate::constellation::{ConstellationAdapter, ConstellationDataType};
     use crate::error::Error;
@@ -518,6 +521,8 @@ pub mod ffi {
     use crate::runtime_handle;
     use std::ffi::CStr;
     use std::os::raw::c_char;
+
+    use super::ConstellationProgressStream;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -609,17 +614,17 @@ pub mod ffi {
         ctx: *mut ConstellationAdapter,
         remote: *const c_char,
         local: *const c_char,
-    ) -> FFIResult_Null {
+    ) -> FFIResult<ConstellationProgressStream> {
         if ctx.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
         }
 
         if remote.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Remote path cannot be null")));
         }
 
         if local.is_null() {
-            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Local path cannot be null")));
+            return FFIResult::err(Error::Any(anyhow::anyhow!("Local path cannot be null")));
         }
 
         let constellation = &mut *(ctx);
@@ -628,6 +633,25 @@ pub mod ffi {
         let rt = runtime_handle();
         rt.block_on(async { constellation.put(&remote, &local).await })
             .into()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn constellation_progress_stream_next(
+        ctx: *mut ConstellationProgressStream,
+    ) -> FFIResult_String {
+        if ctx.is_null() {
+            return FFIResult_String::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        let stream = &mut *(ctx);
+        let rt = runtime_handle();
+        match rt.block_on(stream.next()) {
+            Some(event) => serde_json::to_string(&event).map_err(Error::from).into(),
+            None => FFIResult_String::err(Error::Any(anyhow::anyhow!(
+                "Error obtaining data from stream"
+            ))),
+        }
     }
 
     #[allow(clippy::await_holding_lock)]

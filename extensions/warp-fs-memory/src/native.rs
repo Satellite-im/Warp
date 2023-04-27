@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use futures::StreamExt;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use warp::data::{DataObject, DataType};
@@ -10,7 +11,10 @@ use warp::sata::Sata;
 use crate::item::Item;
 use crate::{item, MemorySystem, Result};
 use warp::constellation::directory::Directory;
-use warp::constellation::{Constellation, ConstellationEvent};
+use warp::constellation::{
+    Constellation, ConstellationEvent, ConstellationProgressStream,
+    Progression,
+};
 use warp::module::Module;
 
 #[async_trait::async_trait]
@@ -31,7 +35,7 @@ impl Constellation for MemorySystem {
         self.path.clone()
     }
 
-    async fn put(&mut self, name: &str, path: &str) -> Result<()> {
+    async fn put(&mut self, name: &str, path: &str) -> Result<ConstellationProgressStream> {
         let mut internal_file = item::file::File::new(name);
 
         let fs_path = path.to_string();
@@ -64,7 +68,19 @@ impl Constellation for MemorySystem {
             let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
             hook.trigger("filesystem::new_file", &object)
         }
-        Ok(())
+        let name = name.to_string();
+
+        let stream = ConstellationProgressStream(
+            futures::stream::once(async move {
+                Progression::ProgressComplete {
+                    name,
+                    total: Some(bytes as _),
+                }
+            })
+            .boxed(),
+        );
+
+        Ok(stream)
     }
 
     async fn get(&self, name: &str, path: &str) -> Result<()> {
