@@ -1186,7 +1186,7 @@ impl IdentityStore {
             }
             //Used when receiving an image (eg banner, pfp) from a peer
             IdentityEvent::Receive {
-                option: ResponseOption::Image { cid, data },
+                option: ResponseOption::Image { cid, .. },
             } => {
                 let cache_documents = self.cache().await;
                 if let Some(cache) = cache_documents
@@ -1196,17 +1196,25 @@ impl IdentityStore {
                     if cache.profile_picture == Some(cid) || cache.profile_banner == Some(cid) {
                         tokio::spawn({
                             let cid = cid;
-                            let mut store = self.clone();
+                            let store = self.clone();
                             async move {
-                                let added_cid = store
-                                    .store_photo(
-                                        futures::stream::iter(Ok::<_, std::io::Error>(Ok(data)))
-                                            .boxed(),
-                                        Some(2 * 1024 * 1024),
-                                    )
-                                    .await?;
+                                // let added_cid = store
+                                //     .store_photo(
+                                //         futures::stream::iter(Ok::<_, std::io::Error>(Ok(data)))
+                                //             .boxed(),
+                                //         Some(2 * 1024 * 1024),
+                                //     )
+                                //     .await?;
 
-                                debug_assert_eq!(added_cid, cid);
+                                // debug_assert_eq!(added_cid, cid);
+                                let mut stream = store
+                                    .ipfs
+                                    .unixfs()
+                                    .cat(cid, None, &[], false)
+                                    .await
+                                    .map_err(anyhow::Error::from)?
+                                    .boxed();
+                                while let Some(Ok(_)) = stream.next().await {}
                                 let tx = store.event.clone();
                                 let _ = tx.send(MultiPassEventKind::IdentityUpdate {
                                     did: in_did.clone(),

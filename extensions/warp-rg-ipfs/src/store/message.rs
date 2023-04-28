@@ -3399,6 +3399,21 @@ impl MessageStore {
             .map_err(anyhow::Error::from)?;
         one_rx.await.map_err(anyhow::Error::from)??;
 
+        tokio::spawn({
+            let list = conversation.recipients();
+            let ipfs = self.ipfs.clone();
+            async move {
+                for peer_id in list.iter().filter_map(|did| did_to_libp2p_pub(did).map(|pk| pk.to_peer_id()).ok()) {
+                    let Ok(info) = ipfs.identity(Some(peer_id)).await else {
+                        continue;
+                    };
+                    let opts = DialOpts::peer_id(peer_id).addresses(info.listen_addrs).extend_addresses_through_behaviour().build();
+
+                    let _ = ipfs.connect(opts).await.ok();
+                }
+            }
+        });
+
         self.publish(conversation_id, None, event, true).await
     }
 
