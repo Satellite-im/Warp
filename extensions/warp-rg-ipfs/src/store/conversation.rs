@@ -55,11 +55,11 @@ impl From<&Conversation> for ConversationDocument {
     fn from(conversation: &Conversation) -> Self {
         ConversationDocument {
             id: conversation.id(),
-            name: conversation.name(),
-            creator: conversation.creator(),
+            name: conversation.name().map(|s| s.to_string()),
+            creator: conversation.creator().cloned(),
 
             conversation_type: conversation.conversation_type(),
-            recipients: conversation.recipients(),
+            recipients: conversation.recipients().to_owned(),
             excluded: Default::default(),
             messages: Default::default(),
             signature: None,
@@ -115,7 +115,7 @@ impl ConversationDocument {
             .filter_map(|(did, signature)| {
                 let context = format!("exclude {}", did);
                 let signature = bs58::decode(signature).into_vec().unwrap_or_default();
-                verify_serde_sig(did.clone(), &context, &signature)
+                verify_serde_sig(did, &context, &signature)
                     .map(|_| did)
                     .ok()
             })
@@ -619,10 +619,10 @@ impl MessageDocument {
 
         let data = match keystore {
             Some(keystore) => {
-                let key = keystore.get_latest(&did, &sender)?;
+                let key = keystore.get_latest(&did, sender)?;
                 Cipher::direct_encrypt(&bytes, &key)?
             }
-            None => ecdh_encrypt(&did, Some(&sender), &bytes)?,
+            None => ecdh_encrypt(&did, Some(sender), &bytes)?,
         };
 
         let message = data.to_cid(ipfs).await?;
@@ -631,7 +631,7 @@ impl MessageDocument {
             ipfs.insert_pin(&message, false).await?;
         }
 
-        let sender = DIDEd25519Reference::from_did(&sender);
+        let sender = DIDEd25519Reference::from_did(sender);
 
         let document = MessageDocument {
             id,
@@ -677,7 +677,7 @@ impl MessageDocument {
 
         let data = match keystore {
             Some(keystore) => {
-                let key = keystore.get_latest(did, &message.sender())?;
+                let key = keystore.get_latest(did, message.sender())?;
                 Cipher::direct_encrypt(&bytes, &key)?
             }
             None => ecdh_encrypt(did, Some(&self.sender.to_did()), &bytes)?,

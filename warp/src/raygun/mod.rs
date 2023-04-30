@@ -421,20 +421,20 @@ impl Conversation {
         self.id
     }
 
-    pub fn name(&self) -> Option<String> {
-        self.name.clone()
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
     }
 
-    pub fn creator(&self) -> Option<DID> {
-        self.creator.clone()
+    pub fn creator(&self) -> Option<&DID> {
+        self.creator.as_ref()
     }
 
     pub fn conversation_type(&self) -> ConversationType {
         self.conversation_type
     }
 
-    pub fn recipients(&self) -> Vec<DID> {
-        self.recipients.clone()
+    pub fn recipients(&self) -> &[DID] {
+        &self.recipients
     }
 }
 
@@ -576,8 +576,8 @@ impl Message {
         self.conversation_id
     }
 
-    pub fn sender(&self) -> DID {
-        self.sender.clone()
+    pub fn sender(&self) -> &DID {
+        &self.sender
     }
 
     pub fn date(&self) -> DateTime<Utc> {
@@ -592,24 +592,24 @@ impl Message {
         self.pinned
     }
 
-    pub fn reactions(&self) -> Vec<Reaction> {
-        self.reactions.clone()
+    pub fn reactions(&self) -> &[Reaction] {
+        &self.reactions
     }
 
-    pub fn value(&self) -> Vec<String> {
-        self.value.clone()
+    pub fn value(&self) -> &[String] {
+        &self.value
     }
 
-    pub fn attachments(&self) -> Vec<File> {
-        self.attachment.clone()
+    pub fn attachments(&self) -> &[File] {
+        &self.attachment
     }
 
     pub fn signature(&self) -> Vec<u8> {
         self.signature.clone().unwrap_or_default()
     }
 
-    pub fn metadata(&self) -> HashMap<String, String> {
-        self.metadata.clone()
+    pub fn metadata(&self) -> &HashMap<String, String> {
+        &self.metadata
     }
 
     pub fn replied(&self) -> Option<Uuid> {
@@ -702,12 +702,12 @@ pub struct Reaction {
 }
 
 impl Reaction {
-    pub fn emoji(&self) -> String {
-        self.emoji.clone()
+    pub fn emoji(&self) -> &str {
+        &self.emoji
     }
 
-    pub fn users(&self) -> Vec<DID> {
-        self.users.clone()
+    pub fn users(&self) -> &[DID] {
+        &self.users
     }
 }
 
@@ -793,7 +793,11 @@ pub trait RayGun:
         Err(Error::Unimplemented)
     }
 
-    async fn create_group_conversation(&mut self, _: Option<String>, _: Vec<DID>) -> Result<Conversation, Error> {
+    async fn create_group_conversation(
+        &mut self,
+        _: Option<String>,
+        _: Vec<DID>,
+    ) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -905,7 +909,14 @@ pub trait RayGunGroupConversation: Sync + Send {
 pub trait RayGunAttachment: Sync + Send {
     /// Send files to a conversation.
     /// If no files is provided in the array, it will throw an error
-    async fn attach(&mut self, _: Uuid, _: Option<Uuid>, _: Location, _: Vec<PathBuf>, _: Vec<String>) -> Result<(), Error> {
+    async fn attach(
+        &mut self,
+        _: Uuid,
+        _: Option<Uuid>,
+        _: Location,
+        _: Vec<PathBuf>,
+        _: Vec<String>,
+    ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
@@ -1515,7 +1526,7 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
         let adapter = &*ctx;
-        Box::into_raw(Box::new(adapter.sender()))
+        Box::into_raw(Box::new(adapter.sender().clone()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -1548,7 +1559,7 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
         let adapter = &*ctx;
-        Box::into_raw(Box::new(adapter.reactions().into()))
+        Box::into_raw(Box::new(adapter.reactions().to_vec().into()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -1576,7 +1587,7 @@ pub mod ffi {
         let adapter = &*ctx;
         let lines = adapter.value();
 
-        Box::into_raw(Box::new(lines.into()))
+        Box::into_raw(Box::new(lines.to_vec().into()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -1599,7 +1610,7 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
         let adapter = &*ctx;
-        Box::into_raw(Box::new(adapter.users().into()))
+        Box::into_raw(Box::new(adapter.users().to_vec().into()))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -1655,7 +1666,7 @@ pub mod ffi {
         }
 
         Box::into_raw(Box::new(
-            Vec::from_iter(Conversation::recipients(&*conversation)).into(),
+            Conversation::recipients(&*conversation).to_vec().into(),
         ))
     }
 

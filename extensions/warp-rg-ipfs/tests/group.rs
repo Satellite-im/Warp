@@ -79,14 +79,14 @@ mod test {
                 if let Some(MessageEventKind::ConversationNameUpdated { name, .. }) =
                     conversation_a.next().await
                 {
-                    break name;
+                    break Some(name);
                 }
             }
         })
         .await?;
 
         let conversation = chat_a.get_conversation(id_a).await?;
-        assert_eq!(conversation.name(), Some(name));
+        assert_eq!(conversation.name(), name.as_deref());
 
         chat_a.update_conversation_name(id_a, "").await?;
 

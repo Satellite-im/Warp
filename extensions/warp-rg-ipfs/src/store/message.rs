@@ -864,7 +864,7 @@ impl MessageStore {
                     return Err(Error::MessageFound);
                 }
 
-                if !document.recipients().contains(&message.sender()) {
+                if !document.recipients().contains(message.sender()) {
                     return Err(Error::IdentityDoesntExist);
                 }
 
@@ -925,7 +925,7 @@ impl MessageStore {
                                 }
                                 break;
                             }
-                            if let Err(e) = dir.add_file(file) {
+                            if let Err(e) = dir.add_file(file.clone()) {
                                 error!("Error adding file to constellation: {e}");
                             }
                         }
@@ -1011,7 +1011,7 @@ impl MessageStore {
                             .concat(),
                     ]
                     .concat();
-                    verify_serde_sig(sender.clone(), &construct, &signature)?;
+                    verify_serde_sig(sender, &construct, &signature)?;
                 }
 
                 //Validate the edit message
@@ -1609,7 +1609,7 @@ impl MessageStore {
                         //Small validation context
                         let context = format!("exclude {}", recipient);
                         let signature = bs58::decode(&signature).into_vec()?;
-                        verify_serde_sig(recipient.clone(), &context, &signature)?;
+                        verify_serde_sig(&recipient, &context, &signature)?;
                     }
 
                     let mut conversation = self.get_conversation(conversation_id).await?;
@@ -3362,7 +3362,10 @@ impl MessageStore {
 
             let thumbnail = file.thumbnail();
 
-            if total_thumbnail_size < 3 * 1024 * 1024 && !thumbnail.is_empty() && thumbnail.len() <= 1024 * 1024 {
+            if total_thumbnail_size < 3 * 1024 * 1024
+                && !thumbnail.is_empty()
+                && thumbnail.len() <= 1024 * 1024
+            {
                 new_file.set_thumbnail(&thumbnail);
                 total_thumbnail_size += thumbnail.len();
             }
@@ -3458,7 +3461,7 @@ impl MessageStore {
 
                 let did = message.sender();
                 if !did.eq(&own_did) {
-                    if let Ok(peer_id) = did_to_libp2p_pub(&did).map(|pk| pk.to_peer_id()) {
+                    if let Ok(peer_id) = did_to_libp2p_pub(did).map(|pk| pk.to_peer_id()) {
                         match ipfs.identity(Some(peer_id)).await {
                             Ok(info) => {
                                 //This is done to insure we can successfully exchange blocks

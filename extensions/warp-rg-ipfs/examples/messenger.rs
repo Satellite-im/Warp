@@ -249,7 +249,7 @@ async fn main() -> anyhow::Result<()> {
         identity.username(),
         identity.short_id()
     );
-    
+
     let (mut rl, mut stdout) = Readline::new(format!(
         "{}#{} >>> ",
         identity.username(),
@@ -556,10 +556,11 @@ async fn main() -> anyhow::Result<()> {
                             for convo in list.iter() {
                                 let mut recipients = vec![];
                                 for recipient in convo.recipients() {
-                                    let username = get_username(new_account.clone(), recipient.clone()).await.unwrap_or_else(|_| recipient.to_string());
+                                    let username = get_username(new_account.clone(), recipient).await.unwrap_or_else(|_| recipient.to_string());
                                     recipients.push(username);
                                 }
-                                table.add_row(vec![convo.name().unwrap_or_default(), convo.id().to_string(), recipients.join(",").to_string()]);
+                                let id = convo.id();
+                                table.add_row(vec![convo.name().map(|s| s.to_string()).unwrap_or_default(), id.to_string(), recipients.join(",").to_string()]);
                             }
                             writeln!(stdout, "{table}")?;
                         },
@@ -1138,9 +1139,9 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn get_username(account: Box<dyn MultiPass>, did: DID) -> anyhow::Result<String> {
+async fn get_username(account: Box<dyn MultiPass>, did: &DID) -> anyhow::Result<String> {
     let identity = account
-        .get_identity(Identifier::did_key(did))
+        .get_identity(Identifier::did_key(did.clone()))
         .await
         .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
     Ok(format!("{}#{}", identity.username(), identity.short_id()))
@@ -1214,7 +1215,7 @@ async fn message_event_handle(
 
                                 let attachment = message.attachments().first().cloned().unwrap(); //Assume for now
 
-                                if message.sender() == *identity.did_key() {
+                                if message.sender() == identity.did_key() {
                                     writeln!(stdout, ">> File {} attached", attachment.name())?;
                                 } else {
                                     writeln!(
@@ -1276,7 +1277,7 @@ async fn message_event_handle(
                 reaction,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), did_key.clone())
+                    let username = get_username(multipass.clone(), &did_key)
                         .await
                         .unwrap_or_else(|_| did_key.to_string());
                     writeln!(
@@ -1292,7 +1293,7 @@ async fn message_event_handle(
                 reaction,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), did_key.clone())
+                    let username = get_username(multipass.clone(), &did_key)
                         .await
                         .unwrap_or_else(|_| did_key.to_string());
                     writeln!(
@@ -1307,7 +1308,7 @@ async fn message_event_handle(
                 event,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), did_key.clone())
+                    let username = get_username(multipass.clone(), &did_key)
                         .await
                         .unwrap_or_else(|_| did_key.to_string());
                     match event {
@@ -1323,7 +1324,7 @@ async fn message_event_handle(
                 event,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), did_key.clone())
+                    let username = get_username(multipass.clone(), &did_key)
                         .await
                         .unwrap_or_else(|_| did_key.to_string());
 
@@ -1347,7 +1348,7 @@ async fn message_event_handle(
                 recipient,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), recipient.clone())
+                    let username = get_username(multipass.clone(), &recipient)
                         .await
                         .unwrap_or_else(|_| recipient.to_string());
 
@@ -1359,7 +1360,7 @@ async fn message_event_handle(
                 recipient,
             } => {
                 if *topic.read() == conversation_id {
-                    let username = get_username(multipass.clone(), recipient.clone())
+                    let username = get_username(multipass.clone(), &recipient)
                         .await
                         .unwrap_or_else(|_| recipient.to_string());
 
