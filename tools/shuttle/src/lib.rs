@@ -42,7 +42,7 @@ pub(crate) fn decrypt(data: &[u8], key: &[u8]) -> anyhow::Result<Vec<u8>> {
         .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
-pub fn sha256_hash(data: &[u8], salt: &[u8]) -> Vec<u8> {
+fn sha256_hash(data: &[u8], salt: &[u8]) -> Vec<u8> {
     let mut hasher = Sha256::new();
     hasher.update(data);
     hasher.update(salt);
@@ -128,6 +128,43 @@ mod test {
         let plaintext = ecdh_decrypt(&bob, Some(&alice.public()), &cipher)?;
 
         assert_eq!(plaintext, message);
+
+        Ok(())
+    }
+
+    #[test]
+    fn ecdh_invalid_key() -> anyhow::Result<()> {
+        let message = b"Hello, World";
+
+        let alice = Keypair::generate_ed25519();
+        let bob = Keypair::generate_ed25519();
+        let john = Keypair::generate_ed25519();
+
+        let cipher = ecdh_encrypt(&alice, Some(&bob.public()), message)?;
+
+        assert_ne!(&cipher, message);
+
+        let invalid = ecdh_decrypt(&bob, Some(&john.public()), &cipher).is_err();
+
+        assert!(invalid);
+
+        Ok(())
+    }
+
+    #[test]
+    fn error_with_incorrect_key() -> anyhow::Result<()> {
+        let message = b"Hello, World";
+
+        let alice = Keypair::generate_ecdsa();
+        let bob = Keypair::generate_secp256k1();
+
+        let invalid = ecdh_encrypt(&alice, Some(&bob.public()), message).is_err();
+
+        assert!(invalid);
+
+        let invalid = ecdh_decrypt(&bob, Some(&alice.public()), message).is_err();
+
+        assert!(invalid);
 
         Ok(())
     }
