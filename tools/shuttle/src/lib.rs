@@ -107,3 +107,28 @@ pub(crate) fn ecdh_decrypt(keypair: &rust_ipfs::Keypair, public_key: Option<&rus
 
     decrypt(data.as_ref(), shared_key.as_bytes())
 }
+
+#[cfg(test)]
+mod test {
+    use rust_ipfs::Keypair;
+
+    use crate::{ecdh_encrypt, ecdh_decrypt};
+
+    #[test]
+    fn ecdh_encrypt_decrypt() -> anyhow::Result<()> {
+        let message = b"Hello, World";
+
+        let alice = Keypair::generate_ed25519();
+        let bob = Keypair::generate_ed25519();
+
+        let cipher = ecdh_encrypt(&alice, Some(&bob.public()), message)?;
+
+        assert_ne!(&cipher, message);
+
+        let plaintext = ecdh_decrypt(&bob, Some(&alice.public()), &cipher)?;
+
+        assert_eq!(plaintext, message);
+
+        Ok(())
+    }
+}
