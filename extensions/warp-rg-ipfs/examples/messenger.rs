@@ -1214,7 +1214,7 @@ async fn message_event_handle(
 
                                 let attachment = message.attachments().first().cloned().unwrap(); //Assume for now
 
-                                if message.sender() == identity.did_key() {
+                                if message.sender() == *identity.did_key() {
                                     writeln!(stdout, ">> File {} attached", attachment.name())?;
                                 } else {
                                     writeln!(

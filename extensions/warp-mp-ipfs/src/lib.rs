@@ -639,7 +639,7 @@ impl MultiPass for IpfsIdentity {
             )?;
             cache.add_data(DataType::from(Module::Accounts), &object)?;
         }
-        Ok(identity.did_key())
+        Ok(identity.did_key().clone())
     }
 
     async fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {

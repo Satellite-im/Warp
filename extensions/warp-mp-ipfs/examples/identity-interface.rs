@@ -174,7 +174,7 @@ async fn main() -> anyhow::Result<()> {
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_string())
                                 .unwrap_or_else(|| did.to_string());
                             if !opt.autoaccept_friend { 
                                 writeln!(stdout, "> Pending request from {username}. Do \"request accept {did}\" to accept.")?;
@@ -187,7 +187,7 @@ async fn main() -> anyhow::Result<()> {
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_string())
                                 .unwrap_or_else(|| did.to_string());
 
                             writeln!(stdout, "> A request has been sent to {username}. Do \"request close {did}\" to if you wish to close the request")?;
@@ -197,7 +197,7 @@ async fn main() -> anyhow::Result<()> {
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_string())
                                 .unwrap_or_else(|| did.to_string());
 
                             writeln!(stdout, "> You've rejected {username} request")?;
@@ -207,7 +207,7 @@ async fn main() -> anyhow::Result<()> {
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_string())
                                 .unwrap_or_else(|| did.to_string());
 
                             writeln!(stdout, "> {username} rejected your request")?;
@@ -217,7 +217,7 @@ async fn main() -> anyhow::Result<()> {
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_string())
                                 .unwrap_or_else(|| did.to_string());
 
                             writeln!(stdout, "> {username} has retracted their request")?;
@@ -227,7 +227,7 @@ async fn main() -> anyhow::Result<()> {
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_string())
                                 .unwrap_or_else(|| did.to_string());
 
                             writeln!(stdout, "> Request for {username} has been retracted")?;
@@ -237,7 +237,7 @@ async fn main() -> anyhow::Result<()> {
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_string())
                                 .unwrap_or_else(|| did.to_string());
 
                             writeln!(stdout, "> You are now friends with {username}")?;
@@ -247,7 +247,7 @@ async fn main() -> anyhow::Result<()> {
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_string())
                                 .unwrap_or_else(|| did.to_string());
 
                             writeln!(stdout, "> {username} has been removed from friends list")?;
@@ -257,7 +257,7 @@ async fn main() -> anyhow::Result<()> {
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_string())
                                 .unwrap_or_else(|| did.to_string());
 
                             writeln!(stdout, "> {username} has came online")?;
@@ -267,7 +267,7 @@ async fn main() -> anyhow::Result<()> {
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_string())
                                 .unwrap_or_else(|| did.to_string());
 
                             writeln!(stdout, "> {username} went offline")?;
@@ -277,7 +277,7 @@ async fn main() -> anyhow::Result<()> {
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_string())
                                 .unwrap_or_else(|| did.to_string());
 
                             writeln!(stdout, "> {username} was blocked")?;
@@ -287,7 +287,7 @@ async fn main() -> anyhow::Result<()> {
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_string())
                                 .unwrap_or_else(|| did.to_string());
                             writeln!(stdout, "> {username} was unblocked")?;
                         },
@@ -296,7 +296,7 @@ async fn main() -> anyhow::Result<()> {
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_string())
                                 .unwrap_or_else(|| did.to_string());
 
                             writeln!(stdout, "> {username} unblocked you")?;
@@ -306,7 +306,7 @@ async fn main() -> anyhow::Result<()> {
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_string())
                                 .unwrap_or_else(|| did.to_string());
 
                             writeln!(stdout, "> {username} blocked you")?;
@@ -316,7 +316,7 @@ async fn main() -> anyhow::Result<()> {
                                 .get_identity(Identifier::did_key(did.clone())).await
                                 .ok()
                                 .and_then(|list| list.first().cloned())
-                                .map(|ident| ident.username())
+                                .map(|ident| ident.username().to_string())
                                 .unwrap_or_else(|| did.to_string());
                             writeln!(stdout, "> {username} has been updated ")?;
                         }
@@ -340,7 +340,7 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for friend in friends.iter() {
                                 let username = match account.get_identity(Identifier::did_key(friend.clone())).await {
-                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(friend)).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
+                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(friend)).map(|ident| ident.username().to_string()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
@@ -362,7 +362,7 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for item in block_list.iter() {
                                 let username = match account.get_identity(Identifier::did_key(item.clone())).await {
-                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(item)).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
+                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(item)).map(|ident| ident.username().to_string()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
@@ -570,7 +570,7 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for request in list.iter() {
                                 let username = match account.get_identity(Identifier::did_key(request.clone())).await {
-                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(request)).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
+                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(request)).map(|ident| ident.username().to_string()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
@@ -591,7 +591,7 @@ async fn main() -> anyhow::Result<()> {
                             };
                             for request in list.iter() {
                                 let username = match account.get_identity(Identifier::did_key(request.clone())).await {
-                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(request)).map(|ident| ident.username()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
+                                    Ok(idents) => idents.iter().filter(|ident| ident.did_key().eq(request)).map(|ident| ident.username().to_string()).collect::<Vec<_>>().first().cloned().unwrap_or_default(),
                                     Err(_) => String::from("N/A")
                                 };
                                 table.add_row(vec![
@@ -717,12 +717,12 @@ async fn main() -> anyhow::Result<()> {
                             let mut table = Table::new();
                             table.set_header(vec!["Username", "Public Key", "Status Message", "Banner", "Picture", "Platform", "Status"]);
                             for identity in idents {
-                                let status = account.identity_status(&identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
-                                let platform = account.identity_platform(&identity.did_key()).await.unwrap_or_default();
+                                let status = account.identity_status(identity.did_key()).await.unwrap_or(IdentityStatus::Offline);
+                                let platform = account.identity_platform(identity.did_key()).await.unwrap_or_default();
                                 table.add_row(vec![
-                                    identity.username(),
+                                    identity.username().to_string(),
                                     identity.did_key().to_string(),
-                                    identity.status_message().unwrap_or_default(),
+                                    identity.status_message().map(|s| s.to_string()).unwrap_or_default(),
                                     (!identity.profile_banner().is_empty()).to_string(),
                                     (!identity.profile_picture().is_empty()).to_string(),
                                     platform.to_string(),

@@ -994,7 +994,7 @@ impl IdentityStore {
 
                 if let Some(own_id) = self.identity.read().await.clone() {
                     anyhow::ensure!(
-                        own_id.did_key() != identity.did,
+                        identity.did.ne(own_id.did_key()),
                         "Cannot accept own identity"
                     );
                 }
@@ -1326,12 +1326,13 @@ impl IdentityStore {
 
     //Note: We are calling `IdentityStore::cache` multiple times, but shouldnt have any impact on performance.
     pub async fn lookup(&self, lookup: LookupBy) -> Result<Vec<Identity>, Error> {
+        //TODO: Remove this in place of checking key directly
         let own_did = self
             .identity
             .read()
             .await
             .clone()
-            .map(|identity| identity.did_key())
+            .map(|identity| identity.did_key().clone())
             .ok_or_else(|| {
                 Error::OtherWithContext("Identity store may not be initialized".into())
             })?;
@@ -1480,12 +1481,13 @@ impl IdentityStore {
     //TODO: Add a check to check directly through pubsub_peer (maybe even using connected peers) or through a separate server
     #[tracing::instrument(skip(self))]
     pub async fn identity_status(&self, did: &DID) -> Result<IdentityStatus, Error> {
+        //TODO: Remove in place of checking key directly
         let own_did = self
             .identity
             .read()
             .await
             .clone()
-            .map(|identity| identity.did_key())
+            .map(|identity| identity.did_key().clone())
             .ok_or_else(|| {
                 Error::OtherWithContext("Identity store may not be initialized".into())
             })?;
@@ -1542,12 +1544,13 @@ impl IdentityStore {
 
     #[tracing::instrument(skip(self))]
     pub async fn identity_platform(&self, did: &DID) -> Result<Platform, Error> {
+        //TODO: Remove in place of checking key directly
         let own_did = self
             .identity
             .read()
             .await
             .clone()
-            .map(|identity| identity.did_key())
+            .map(|identity| identity.did_key().clone())
             .ok_or_else(|| {
                 Error::OtherWithContext("Identity store may not be initialized".into())
             })?;
@@ -1785,7 +1788,7 @@ impl IdentityStore {
 
         let public_key = identity.did_key();
         let kp_public_key = libp2p_pub_to_did(&self.get_keypair()?.public())?;
-        if public_key != kp_public_key {
+        if kp_public_key.ne(public_key) {
             //Note if we reach this point, the identity would need to be reconstructed
             return Err(Error::IdentityDoesntExist);
         }

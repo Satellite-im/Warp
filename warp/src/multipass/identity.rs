@@ -161,8 +161,8 @@ impl Identity {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Identity {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn username(&self) -> String {
-        self.username.clone()
+    pub fn username(&self) -> &str {
+        &self.username
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
@@ -171,28 +171,28 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn did_key(&self) -> DID {
-        self.did_key.clone()
+    pub fn did_key(&self) -> &DID {
+        &self.did_key
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn profile_picture(&self) -> String {
-        self.profile_picture.clone()
+    pub fn profile_picture(&self) -> &str {
+        &self.profile_picture
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn profile_banner(&self) -> String {
-        self.profile_banner.clone()
+    pub fn profile_banner(&self) -> &str {
+        &self.profile_banner
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn status_message(&self) -> Option<String> {
-        self.status_message.clone()
+    pub fn status_message(&self) -> Option<&str> {
+        self.status_message.as_deref()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn signature(&self) -> Option<String> {
-        self.signature.clone()
+    pub fn signature(&self) -> Option<&str> {
+        self.signature.as_deref()
     }
 }
 
@@ -347,7 +347,7 @@ pub mod ffi {
 
         let identity = &*identity;
 
-        Box::into_raw(Box::new(identity.did_key()))
+        Box::into_raw(Box::new(identity.did_key().clone()))
     }
 
     #[allow(clippy::missing_safety_doc)]
