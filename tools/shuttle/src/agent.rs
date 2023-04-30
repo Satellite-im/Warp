@@ -27,11 +27,12 @@ pub struct Agent {
     addresses: Vec<Multiaddr>,
     priority: AgentPriority,
     status: AgentStatus,
+    ipfs: Ipfs,
 }
 
-impl From<(PublicKey, AgentPriority)> for Agent {
-    fn from((public_key, priority): (PublicKey, AgentPriority)) -> Self {
-        Self::new(public_key, priority)
+impl From<(Ipfs, PublicKey, AgentPriority)> for Agent {
+    fn from((ipfs, public_key, priority): (Ipfs, PublicKey, AgentPriority)) -> Self {
+        Self::new(ipfs, public_key, priority)
     }
 }
 
@@ -56,7 +57,7 @@ impl PartialOrd for Agent {
 impl Eq for Agent {}
 
 impl Agent {
-    pub fn new(public_key: PublicKey, priority: AgentPriority) -> Self {
+    pub fn new(ipfs: Ipfs, public_key: PublicKey, priority: AgentPriority) -> Self {
         let peer_id = public_key.to_peer_id();
         Self {
             name: None,
@@ -65,6 +66,7 @@ impl Agent {
             addresses: vec![],
             priority,
             status: Default::default(),
+            ipfs,
         }
     }
 
@@ -111,13 +113,13 @@ impl Agent {
 }
 
 impl Agent {
-    pub async fn connect(&mut self, ipfs: &Ipfs) -> Result<(), anyhow::Error> {
-        if !ipfs.is_connected(self.peer_id).await? {
+    pub async fn connect(&mut self) -> Result<(), anyhow::Error> {
+        if !self.ipfs.is_connected(self.peer_id).await? {
             let opt = DialOpts::peer_id(self.peer_id)
                 .addresses(self.addresses.clone())
                 .condition(PeerCondition::Disconnected)
                 .build();
-            ipfs.connect(opt).await?;
+            self.ipfs.connect(opt).await?;
         }
 
         if matches!(self.status, AgentStatus::Offline) {

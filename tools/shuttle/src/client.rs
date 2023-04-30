@@ -3,7 +3,9 @@ use std::{collections::HashSet, sync::Arc};
 
 use crate::agent::{Agent, AgentStatus};
 use crate::payload::Payload;
+use crate::request::{Identifier, Request};
 use crate::response::{Response, Status};
+use crate::{ecdh_encrypt, ecdh_decrypt, MAX_TRANSMIT_SIZE};
 use futures::channel::oneshot;
 use futures::StreamExt;
 use rust_ipfs::{Ipfs, PeerId, PublicKey};
@@ -17,15 +19,15 @@ pub enum ClientCommand<'a> {
     Store {
         namespace: Vec<u8>,
         payload: Payload<'a>,
-        response: oneshot::Receiver<ResponseType>,
+        response: oneshot::Sender<anyhow::Result<ResponseType>>,
     },
     Find {
         namespace: Vec<u8>,
-        response: oneshot::Receiver<ResponseType>,
+        response: oneshot::Sender<anyhow::Result<ResponseType>>,
     },
     Delete {
         namespace: Vec<u8>,
-        response: oneshot::Receiver<Status>,
+        response: oneshot::Sender<anyhow::Result<Status>>,
     },
 }
 
@@ -63,7 +65,7 @@ impl ShuttleClient {
         let agents: Arc<RwLock<HashSet<Agent>>> = Default::default();
         let task = Arc::new(tokio::spawn({
             let ipfs = ipfs.clone();
-            let _agents = agents.clone();
+            let agents = agents.clone();
             let mut rx = rx;
             async move {
                 let keypair = ipfs.keypair()?;
@@ -75,7 +77,7 @@ impl ShuttleClient {
 
                 let mut awaiting_response: HashMap<
                     Uuid,
-                    futures::channel::oneshot::Sender<ResponseType>,
+                    futures::channel::oneshot::Sender<anyhow::Result<ResponseType>>,
                 > = HashMap::new();
                 futures::pin_mut!(response);
 
@@ -84,18 +86,72 @@ impl ShuttleClient {
                         biased;
                         Some(command) = rx.next() => {
                             match command {
-                                ClientCommand::Store { .. } => {},
+                                ClientCommand::Store { namespace, payload, response } => {
+
+                                    let agents = Vec::from_iter(agents.read().await.clone());
+                                    if agents.is_empty() {
+                                        let _ = response.send(Err(anyhow::anyhow!("No agents available")));
+                                        continue;
+                                    }
+
+                                    let Ok(bytes) = payload.to_bytes() else {
+                                        continue;
+                                    };
+
+                                    if bytes.len() > MAX_TRANSMIT_SIZE {
+                                        let _ = response.send(Err(anyhow::anyhow!("Payload exceeds max transmission size")));
+                                        continue;
+                                    }
+
+                                    let Ok(signature) = keypair.sign(&bytes) else {
+                                        continue;
+                                    };
+                                    let request = Request::new(Identifier::Store, &namespace, None, Some(payload), &signature);
+
+                                    let request_id = request.id();
+
+                                    let Ok(request_bytes) = request.to_bytes() else {
+                                        continue;
+                                    };
+
+                                    // TODO: Prioritize agents
+                                    for agent in agents {
+
+                                        //TODO: Check agent status
+                                        //TODO: Check and confirm agent is subscribed to topic
+
+                                        let Ok(bytes) = ecdh_encrypt(keypair, Some(agent.public_key()), &request_bytes) else {
+                                            continue;
+                                        };
+
+                                        if ipfs.pubsub_publish(format!("/shuttle/request/{}", agent.peer_id()), bytes).await.is_err() {
+                                            continue;
+                                        };
+
+                                    }
+
+                                    awaiting_response.insert(request_id, response);
+
+                                },
                                 ClientCommand::Find { .. } => {},
                                 ClientCommand::Delete { .. } => {},
                             }
                         },
                         Some(response) = response.next() => {
 
-                            if response.data.len() > 8 * 1024 * 1024 {
+                            if response.data.len() > MAX_TRANSMIT_SIZE {
                                 continue;
                             }
-                            //TODO: Maybe process response here? 
-                            let resp = match Response::from_bytes(&response.data) {
+
+                            let Some(publickey) = agents.read().await.iter().find(|a| response.source == Some(a.peer_id())).map(|a| a.public_key().clone()) else {
+                                continue;
+                            };
+
+                            let Ok(resp_bytes) = ecdh_decrypt(keypair, Some(&publickey), &response.data) else {
+                                continue;
+                            };
+
+                            let resp = match Response::from_bytes(&resp_bytes) {
                                 Ok(res) => res,
                                 Err(_e) => {
                                     continue;
@@ -103,7 +159,7 @@ impl ShuttleClient {
                             };
 
                             if let Some(channel) = awaiting_response.remove(&resp.id()) {
-                                let _ = channel.send(ResponseType::ResponseOwned(response.source, response.data));
+                                let _ = channel.send(Ok(ResponseType::ResponseOwned(response.source, resp_bytes)));
                             }
                         }
                     }
@@ -125,7 +181,7 @@ impl ShuttleClient {
     ) -> Result<(), anyhow::Error> {
         let mut agent = agent.into();
         if !offline {
-            agent.connect(&self.ipfs).await?;
+            agent.connect().await?;
         }
         self.agents.write().await.insert(agent);
 

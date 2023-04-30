@@ -14,6 +14,12 @@ rust-ipfs.workspace = true
 anyhow = "1"
 clap = { version = "4.1", features = ["derive"] }
 zeroize.workspace = true
+x25519-dalek.workspace = true
+ed25519-dalek.workspace = true
+curve25519-dalek.workspace = true
+sha2.workspace = true
+aes-gcm = { workspace = true, features = ["stream"] }
+rand.workspace = true
 dotenv = "0.15"
 base64 = "0.21"
 uuid.workspace = true

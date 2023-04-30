@@ -8,7 +8,7 @@ use crate::payload::Payload;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum Identifier {
+pub enum Identifier {
     Store,
     Replace,
     Find,
@@ -16,7 +16,7 @@ enum Identifier {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Request<'a> {
+pub struct Request<'a> {
     id: Uuid,
     // Simple identifier on how to handle the request
     identifier: Identifier,
