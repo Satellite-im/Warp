@@ -3,6 +3,7 @@ use thiserror::Error;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Error, Debug)]
 pub enum Error {
     //Hook Errors
@@ -56,10 +57,14 @@ pub enum Error {
     //MultiPass Errors
     #[error("MultiPass extension is unavailable")]
     MultiPassExtensionUnavailable,
+    #[error("Identity has not been created")]
+    IdentityNotCreated,
     #[error("Identity exist with the same information")]
     IdentityExist,
     #[error("Identity does not exist")]
     IdentityDoesntExist,
+    #[error("Identity was invalid")]
+    IdentityInvalid,
     #[error("Username cannot be updated for identity")]
     CannotUpdateIdentityUsername,
     #[error("Picture cannot be updated for identity")]
@@ -86,8 +91,10 @@ pub enum Error {
     CannotAcceptSelfAsFriend,
     #[error("You cannot deny yourself as a friend")]
     CannotDenySelfAsFriend,
-    #[error("You cannot block yourself as a friend")]
-    CannotBlockSelfAsFriend,
+    #[error("You cannot block yourself")]
+    CannotBlockOwnKey,
+    #[error("You cannot unblock yourself")]
+    CannotUnblockOwnKey,
     #[error("You cannot remove yourself as a friend")]
     CannotRemoveSelfAsFriend,
     #[error("You cannot use yourself")]
@@ -138,6 +145,8 @@ pub enum Error {
     MessageFound,
     #[error("Message not found within conversation")]
     MessageNotFound,
+    #[error("Page of messages not found")]
+    PageNotFound,
     #[error("Group could not be created at this time")]
     CannotCreateGroup,
     #[error("Unable to join group")]
@@ -147,7 +156,7 @@ pub enum Error {
     #[error("Invalid Group Id")]
     InvalidGroupId,
     #[error("Invalid Group Member")]
-    InvalidGroupMemeber,
+    InvalidGroupMember,
     #[error("Invite is invalid")]
     InvalidInvite,
     #[error("Unable to change group status")]
@@ -174,6 +183,8 @@ pub enum Error {
     DecryptionStreamError,
     #[error("Public key is invalid")]
     PublicKeyInvalid,
+    #[error("Public key doesnt exist")]
+    PublicKeyDoesntExist,
     #[error("Private key is invalid")]
     PrivateKeyInvalid,
     #[error("Public key length is invalid")]
@@ -188,6 +199,8 @@ pub enum Error {
     TesseractUnavailable,
     #[error("Tesseract is locked")]
     TesseractLocked,
+    #[error("Passphrase supplied is invalid")]
+    InvalidPassphrase,
     #[error("One or more items in the datastore are corrupted or invalid")]
     CorruptedDataStore,
     #[error("Unable to save tesseract")]
@@ -238,13 +251,13 @@ pub enum Error {
     #[error("{0}")]
     UuidError(#[from] uuid::Error),
     #[error("{0}")]
+    BincodeError(#[from] bincode::Error),
+    #[error("{0}")]
     SerdeYamlError(#[from] serde_yaml::Error),
     #[error("Cannot deserialize: {0}")]
     TomlDeserializeError(#[from] toml::de::Error),
     #[error("Cannot serialize: {0}")]
     TomlSerializeError(#[from] toml::ser::Error),
-    #[error("{0}")]
-    RegexError(#[from] regex::Error),
     #[error(transparent)]
     SataError(#[from] sata::error::Error),
     #[error(transparent)]
@@ -301,7 +314,6 @@ impl Error {
             Error::SerdeYamlError(_) => String::from("SerdeYamlError"),
             Error::TomlDeserializeError(_) => String::from("TomlDeserializeError"),
             Error::TomlSerializeError(_) => String::from("TomlSerializeError"),
-            Error::RegexError(_) => String::from("RegexError"),
             Error::UuidError(_) => String::from("UuidError"),
             Error::Any(_) => String::from("Any"),
             Error::NullPointerContext { .. } => String::from("NullPointerContext"),

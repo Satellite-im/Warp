@@ -1,18 +1,17 @@
-use std::path::Path;
+use std::{io::ErrorKind, path::Path};
 
 use anyhow::bail;
 use clap::{Parser, Subcommand};
 use comfy_table::Table;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use std::path::PathBuf;
-use tokio::io::AsyncWriteExt;
-use tokio_util::io::ReaderStream;
+use tokio_util::compat::TokioAsyncWriteCompatExt;
 use warp::{
     constellation::{Constellation, Progression},
     multipass::MultiPass,
     tesseract::Tesseract,
 };
-use warp_fs_ipfs::{config::FsIpfsConfig, IpfsFileSystem, Persistent};
+use warp_fs_ipfs::{config::FsIpfsConfig, IpfsFileSystem};
 use warp_mp_ipfs::{config::MpIpfsConfig, ipfs_identity_persistent};
 
 #[derive(Debug, Parser)]
@@ -60,15 +59,8 @@ async fn account_persistent<P: AsRef<Path>>(
     opt: &Opt,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let path = path.as_ref();
-    let tesseract = match Tesseract::from_file(path.join("tdatastore")) {
-        Ok(tess) => tess,
-        Err(_) => {
-            let tess = Tesseract::default();
-            tess.set_file(path.join("tdatastore"));
-            tess.set_autosave();
-            tess
-        }
-    };
+
+    let tesseract = Tesseract::open_or_create(path.join("tdatastore"))?;
 
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
@@ -77,8 +69,8 @@ async fn account_persistent<P: AsRef<Path>>(
 
     config.ipfs_setting.mdns.enable = opt.mdns;
     let mut account = ipfs_identity_persistent(config, tesseract, None).await?;
-    if account.get_own_identity().is_err() {
-        account.create_identity(username, None)?;
+    if account.get_own_identity().await.is_err() {
+        account.create_identity(username, None).await?;
     }
     Ok(Box::new(account))
 }
@@ -91,7 +83,7 @@ async fn main() -> anyhow::Result<()> {
     let account = account_persistent(None, opt.path.clone(), &opt).await?;
 
     let config = FsIpfsConfig::production(opt.path);
-    let mut filesystem = IpfsFileSystem::<Persistent>::new(account.clone(), Some(config)).await?;
+    let mut filesystem = IpfsFileSystem::new(account.clone(), Some(config)).await?;
 
     match opt.command {
         Command::UploadFile { local, remote } => {
@@ -104,17 +96,7 @@ async fn main() -> anyhow::Result<()> {
             let remote =
                 remote.unwrap_or_else(|| file.file_name().unwrap().to_string_lossy().to_string());
 
-            let file = tokio::fs::File::open(&local).await?;
-
-            let size = file.metadata().await?.len() as usize;
-
-            let stream = ReaderStream::new(file)
-                .filter_map(|x| async { x.ok() })
-                .map(|x| x.into());
-
-            let mut event = filesystem
-                .put_stream(&remote, Some(size), stream.boxed())
-                .await?;
+            let mut event = filesystem.put(&remote, &local).await?;
 
             while let Some(event) = event.next().await {
                 match event {
@@ -152,15 +134,17 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Command::DownloadFile { remote, local } => {
-            let mut stream = filesystem.get_stream(&remote).await?;
+            let stream = filesystem.get_stream(&remote).await?;
 
-            let mut written = 0;
-            let mut file = tokio::fs::File::create(&local).await?;
-            while let Some(Ok(data)) = stream.next().await {
-                file.write_all(&data).await?;
-                written += data.len();
-                file.flush().await?;
-            }
+            let file = tokio::fs::File::create(&local).await?;
+
+            let mut reader = stream
+                .map(|s| s.map_err(|e| std::io::Error::new(ErrorKind::Other, e)))
+                .into_async_read();
+
+            let mut writer = file.compat_write();
+
+            let written = futures::io::copy(&mut reader, &mut writer).await?;
 
             println!(
                 "{local} been downloaded with {} MB written",
@@ -246,8 +230,8 @@ async fn main() -> anyhow::Result<()> {
                 .and_then(|item| item.get_file())
             {
                 Ok(file) => match file.reference() {
-                    Some(r) => println!("{} Reference: {r}", remote),
-                    None => println!("{} has no reference", remote),
+                    Some(r) => println!("{remote} Reference: {r}"),
+                    None => println!("{remote} has no reference"),
                 },
                 Err(_) => println!("File doesnt exist"),
             }

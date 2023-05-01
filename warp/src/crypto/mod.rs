@@ -1,9 +1,8 @@
+#![allow(clippy::result_large_err)]
 use std::{fmt::Display, str::FromStr};
 
-pub use aead;
 pub use aes_gcm;
 pub use blake2;
-pub use chacha20poly1305;
 pub use curve25519_dalek;
 pub use did_key::{self, DIDKey, Ed25519KeyPair, Fingerprint, KeyMaterial};
 use did_key::{Generate, P256KeyPair, Secp256k1KeyPair, X25519KeyPair};
@@ -38,7 +37,7 @@ impl FromStr for DID {
     fn from_str(key: &str) -> Result<Self, Self::Err> {
         let key = match key.starts_with("did:key:") {
             true => key.to_string(),
-            false => format!("did:key:{}", key),
+            false => format!("did:key:{key}"),
         };
 
         std::panic::catch_unwind(|| did_key::resolve(&key))
@@ -61,7 +60,7 @@ impl AsRef<DIDKey> for DID {
 
 impl std::fmt::Debug for DID {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("DID").field(&self.fingerprint()).finish()
+        write!(f, "{self}")
     }
 }
 

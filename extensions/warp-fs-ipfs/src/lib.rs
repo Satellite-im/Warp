@@ -1,52 +1,54 @@
 pub mod config;
 use config::FsIpfsConfig;
-use futures::stream::BoxStream;
+use futures::stream::{self, BoxStream};
 use futures::{pin_mut, StreamExt};
-use ipfs::unixfs::ll::file::adder::{Chunker, FileAdderBuilder};
-use libipld::serde::{from_ipld, to_ipld};
+use ipfs::unixfs::{AddOpt, AddOption, UnixfsStatus};
 use libipld::Cid;
+use rust_ipfs as ipfs;
 use std::any::Any;
 use std::collections::HashSet;
 use std::io::Cursor;
 use std::path::PathBuf;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use warp::constellation::{ConstellationDataType, ConstellationProgressStream, Progression};
+use tokio_util::io::ReaderStream;
+use warp::constellation::{
+    ConstellationDataType, ConstellationEvent, ConstellationEventKind, ConstellationEventStream,
+    ConstellationProgressStream, Progression,
+};
+use warp::crypto::cipher::Cipher;
+use warp::crypto::did_key::{Generate, ECDH};
+use warp::crypto::zeroize::Zeroizing;
+use warp::crypto::{Ed25519KeyPair, KeyMaterial, DID};
 use warp::logging::tracing::{debug, error};
 use warp::multipass::MultiPass;
-use warp::sata::{Kind, Sata};
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
-// use warp_common::futures::TryStreamExt;
+
 use warp::module::Module;
 
-use ipfs::{unixfs::ll::file::adder::FileAdder, Block};
-
 use chrono::{DateTime, Utc};
-use ipfs::{Ipfs, IpfsPath, IpfsTypes, TestTypes, Types};
+use ipfs::{Ipfs, IpfsPath};
 
 use warp::constellation::{directory::Directory, Constellation};
 use warp::error::Error;
 use warp::pocket_dimension::PocketDimension;
 use warp::{Extension, SingleHandle};
 
-pub type Temporary = TestTypes;
-pub type Persistent = Types;
-
 type Result<T> = std::result::Result<T, Error>;
 
 #[allow(clippy::type_complexity)]
-pub struct IpfsFileSystem<T: IpfsTypes> {
+pub struct IpfsFileSystem {
     index: Directory,
     path: Arc<RwLock<PathBuf>>,
     modified: DateTime<Utc>,
     config: Option<FsIpfsConfig>,
-    ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
+    ipfs: Arc<RwLock<Option<Ipfs>>>,
     index_cid: Arc<RwLock<Option<Cid>>>,
     account: Arc<tokio::sync::RwLock<Option<Box<dyn MultiPass>>>>,
+    broadcast: tokio::sync::broadcast::Sender<ConstellationEventKind>,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
 }
 
-impl<T: IpfsTypes> Clone for IpfsFileSystem<T> {
+impl Clone for IpfsFileSystem {
     fn clone(&self) -> Self {
         Self {
             index: self.index.clone(),
@@ -56,16 +58,19 @@ impl<T: IpfsTypes> Clone for IpfsFileSystem<T> {
             ipfs: self.ipfs.clone(),
             index_cid: self.index_cid.clone(),
             account: self.account.clone(),
+            broadcast: self.broadcast.clone(),
             cache: self.cache.clone(),
         }
     }
 }
 
-impl<T: IpfsTypes> IpfsFileSystem<T> {
+impl IpfsFileSystem {
     pub async fn new(
         account: Box<dyn MultiPass>,
         config: Option<FsIpfsConfig>,
     ) -> anyhow::Result<Self> {
+        let (tx, _) = tokio::sync::broadcast::channel(1024);
+
         let filesystem = IpfsFileSystem {
             index: Directory::new("root"),
             path: Arc::new(Default::default()),
@@ -74,13 +79,14 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
             index_cid: Default::default(),
             account: Default::default(),
             ipfs: Default::default(),
+            broadcast: tx,
             cache: None,
         };
 
         *filesystem.account.write().await = Some(account);
 
         if let Some(account) = filesystem.account.read().await.clone() {
-            if account.get_own_identity().is_err() {
+            if account.get_own_identity().await.is_err() {
                 debug!("Identity doesnt exist. Waiting for it to load or to be created");
                 let mut filesystem = filesystem.clone();
 
@@ -88,7 +94,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
                     let account = account.clone();
                     async move {
                         loop {
-                            match account.get_own_identity() {
+                            match account.get_own_identity().await {
                                 Ok(_) => break,
                                 _ => {
                                     //TODO: have a flag that would tell is it been an error other than it not being available
@@ -122,19 +128,16 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
             .ok_or(Error::MultiPassExtensionUnavailable)?;
 
         let ipfs_handle = match account.handle() {
-            Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
+            Ok(handle) if handle.is::<Ipfs>() => handle.downcast_ref::<Ipfs>().cloned(),
             _ => None,
         };
 
-        let ipfs = match ipfs_handle {
-            Some(ipfs) => ipfs,
-            None => return Err(Error::ConstellationExtensionUnavailable),
-        };
+        let ipfs = ipfs_handle.ok_or(Error::ConstellationExtensionUnavailable)?;
 
         *self.ipfs.write() = Some(ipfs);
 
         if let Err(_e) = self.import_index().await {
-            //TODO: Log error
+            error!("Error loading index: {_e}");
         }
 
         tokio::spawn({
@@ -143,7 +146,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                     if let Err(_e) = fs.export_index().await {
-                        //Log error
+                        error!("Error exporting index: {_e}");
                     }
                 }
             }
@@ -155,32 +158,90 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
     #[allow(clippy::clone_on_copy)]
     pub async fn export_index(&self) -> Result<()> {
         let ipfs = self.ipfs()?;
-        let mut object = Sata::default();
         let index = self.export(ConstellationDataType::Json)?;
-        let data = match self.account().await {
-            Ok(account) => {
-                let key = account.decrypt_private_key(None)?;
-                object.add_recipient(&key)?;
-                object.encrypt(libipld::IpldCodec::DagJson, &key, Kind::Reference, index)?
-            }
-            _ => object.encode(libipld::IpldCodec::DagJson, Kind::Reference, index)?,
-        };
+        let account = self.account().await?;
 
-        let ipld = to_ipld(data).map_err(anyhow::Error::from)?;
-        let cid = ipfs.put_dag(ipld).await?;
-        let last_cid = self.index_cid.read().clone();
-        *self.index_cid.write() = Some(cid);
-        if let Some(last_cid) = last_cid {
-            if ipfs.is_pinned(&last_cid).await? {
-                ipfs.remove_pin(&last_cid, false).await?;
+        let key = account.decrypt_private_key(None)?;
+        let data = ecdh_encrypt(&key, None, index.as_bytes())?;
+
+        let data_stream = stream::once(async move { Ok::<_, std::io::Error>(data) }).boxed();
+
+        let mut stream = ipfs
+            .unixfs()
+            .add(
+                AddOpt::Stream(data_stream),
+                Some(AddOption {
+                    pin: true,
+                    ..Default::default()
+                }),
+            )
+            .await?;
+
+        let mut ipfs_path = None;
+
+        while let Some(status) = stream.next().await {
+            if let UnixfsStatus::CompletedStatus { path, .. } = status {
+                ipfs_path = Some(path);
             }
-            ipfs.remove_block(last_cid).await?;
+        }
+
+        let path = ipfs_path.ok_or(Error::OtherWithContext("unable to get cid".into()))?;
+
+        let cid = path
+            .root()
+            .cid()
+            .ok_or(Error::OtherWithContext("unable to get cid".into()))?;
+
+        let last_cid = self.index_cid.read().clone();
+
+        *self.index_cid.write() = Some(*cid);
+
+        if let Some(last_cid) = last_cid {
+            if *cid != last_cid {
+                let mut pinned_blocks: HashSet<_> = HashSet::from_iter(
+                    ipfs.list_pins(None)
+                        .await
+                        .filter_map(|r| async move {
+                            match r {
+                                Ok(v) => Some(v.0),
+                                Err(_) => None,
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .await,
+                );
+
+                if ipfs.is_pinned(&last_cid).await? {
+                    ipfs.remove_pin(&last_cid, true).await?;
+                }
+
+                let new_pinned_blocks: HashSet<_> = HashSet::from_iter(
+                    ipfs.list_pins(None)
+                        .await
+                        .filter_map(|r| async move {
+                            match r {
+                                Ok(v) => Some(v.0),
+                                Err(_) => None,
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .await,
+                );
+
+                for s_cid in new_pinned_blocks.iter() {
+                    pinned_blocks.remove(s_cid);
+                }
+
+                for cid in pinned_blocks {
+                    ipfs.remove_block(cid).await?;
+                }
+            }
         }
 
         if let Some(config) = &self.config {
             if let Some(path) = config.path.as_ref() {
                 if let Err(_e) = tokio::fs::write(path.join(".index_id"), cid.to_string()).await {
-                    //Log export?
+                    error!("Error writing index: {_e}");
                 }
             }
         }
@@ -198,24 +259,29 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
                 let cid: Cid = cid_str.parse().map_err(anyhow::Error::from)?;
                 *self.index_cid.write() = Some(cid);
 
-                let ipld = tokio::time::timeout(
-                    std::time::Duration::from_secs(5),
-                    ipfs.get_dag(IpfsPath::from(cid)),
-                )
-                .await
-                .map_err(anyhow::Error::from)??;
+                let mut index_stream = ipfs
+                    .unixfs()
+                    .cat(IpfsPath::from(cid), None, &[], true)
+                    .await
+                    .map_err(anyhow::Error::from)?
+                    .boxed();
 
-                let data: Sata = from_ipld(ipld).map_err(anyhow::Error::from)?;
+                let mut data = vec![];
 
-                let index: String = match self.account().await {
-                    Ok(account) => {
-                        let key = account.decrypt_private_key(None)?;
-                        data.decrypt(&key)?
-                    }
-                    _ => data.decode()?,
-                };
+                while let Some(result) = index_stream.next().await {
+                    let mut bytes = result.map_err(anyhow::Error::from)?;
+                    data.append(&mut bytes);
+                }
+                let account = self.account().await?;
 
-                self.import(ConstellationDataType::Json, index)?;
+                let key = account.decrypt_private_key(None)?;
+
+                let index_bytes = ecdh_decrypt(&key, None, data)?;
+
+                self.import(
+                    ConstellationDataType::Json,
+                    String::from_utf8_lossy(&index_bytes).to_string(),
+                )?;
             }
         }
         Ok(())
@@ -229,7 +295,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
             .ok_or(Error::MultiPassExtensionUnavailable)
     }
 
-    pub fn ipfs(&self) -> Result<Ipfs<T>> {
+    pub fn ipfs(&self) -> Result<Ipfs> {
         self.ipfs
             .read()
             .as_ref()
@@ -258,7 +324,7 @@ impl<T: IpfsTypes> IpfsFileSystem<T> {
     }
 }
 
-impl<T: IpfsTypes> Extension for IpfsFileSystem<T> {
+impl Extension for IpfsFileSystem {
     fn id(&self) -> String {
         String::from("warp-fs-ipfs")
     }
@@ -271,14 +337,14 @@ impl<T: IpfsTypes> Extension for IpfsFileSystem<T> {
     }
 }
 
-impl<T: IpfsTypes> SingleHandle for IpfsFileSystem<T> {
+impl SingleHandle for IpfsFileSystem {
     fn handle(&self) -> Result<Box<dyn Any>> {
         self.ipfs().map(|ipfs| Box::new(ipfs) as Box<dyn Any>)
     }
 }
 
 #[async_trait::async_trait]
-impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
+impl Constellation for IpfsFileSystem {
     fn modified(&self) -> DateTime<Utc> {
         self.modified
     }
@@ -287,71 +353,142 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         self.index.clone()
     }
 
-    async fn put(&mut self, name: &str, path: &str) -> Result<()> {
+    async fn put(&mut self, name: &str, path: &str) -> Result<ConstellationProgressStream> {
         let ipfs = self.ipfs()?;
         //Used to enter the tokio context
         let handle = warp::async_handle();
         let _g = handle.enter();
-
-        if self.current_directory()?.get_item_by_path(name).is_ok() {
-            return Err(Error::DuplicateName);
-        }
 
         let path = PathBuf::from(path);
         if !path.is_file() {
             return Err(Error::FileNotFound);
         }
 
-        let mut adder = FileAdder::default();
-        let file = tokio::fs::File::open(&path).await?;
+        let current_directory = self.current_directory()?;
 
-        //TODO: use a larger buffer(?)
-        let mut reader = BufReader::with_capacity(adder.size_hint(), file);
-        let mut written = 0;
-        let mut last_cid = None;
+        if current_directory.get_item_by_path(name).is_ok() {
+            return Err(Error::FileExist);
+        }
 
-        {
-            let ipfs = ipfs.clone();
-            loop {
-                match reader.fill_buf().await? {
-                    buffer if buffer.is_empty() => {
-                        let blocks = adder.finish();
-                        for (cid, block) in blocks {
-                            let block = Block::new(cid, block)?;
-                            let cid = ipfs.put_block(block).await?;
-                            last_cid = Some(cid);
-                        }
-                        break;
+
+        let name = name.to_string();
+        let fs = self.clone();
+        let progress_stream = async_stream::stream! {
+
+            let mut last_written = 0;
+
+            let mut total_written = 0;
+            let mut returned_path = None;
+
+            let mut stream = match ipfs.add_file_unixfs(&path).await {
+                Ok(ste) => ste,
+                Err(e) => {
+                    yield Progression::ProgressFailed {
+                            name,
+                            last_size: Some(last_written),
+                            error: Some(e.to_string()),
+                    };
+                    return;
+                }
+            };
+
+            while let Some(status) = stream.next().await {
+                let name = name.clone();
+                match status {
+                    UnixfsStatus::CompletedStatus { path, written, total_size } => {
+                        returned_path = Some(path);
+                        total_written = written;
+                        last_written = written;
+                        yield Progression::CurrentProgress {
+                            name,
+                            current: written,
+                            total: total_size,
+                        };
                     }
-                    buffer => {
-                        let mut total = 0;
-
-                        while total < buffer.len() {
-                            let (blocks, consumed) = adder.push(&buffer[total..]);
-                            for (cid, block) in blocks {
-                                let block = Block::new(cid, block)?;
-                                let _cid = ipfs.put_block(block).await?;
-                            }
-                            total += consumed;
-                            written += consumed;
-                        }
-                        reader.consume(total);
+                    UnixfsStatus::FailedStatus {
+                        written, error, ..
+                    } => {
+                        last_written = written;
+                        yield Progression::ProgressFailed {
+                            name,
+                            last_size: Some(last_written),
+                            error: error.map(|e| e.to_string()),
+                        };
+                        return;
+                    }
+                    UnixfsStatus::ProgressStatus { written, total_size } => {
+                        last_written = written;
+                        yield Progression::CurrentProgress {
+                            name,
+                            current: written,
+                            total: total_size,
+                        };
                     }
                 }
             }
-        }
-        let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
-        ipfs.insert_pin(&cid, true).await?;
-        let file = warp::constellation::file::File::new(name);
-        file.set_size(written);
-        file.set_reference(&format!("/ipfs/{cid}"));
-        let f = file.clone();
-        tokio::task::spawn_blocking(move || f.hash_mut().hash_from_file(&path))
-            .await
-            .map_err(anyhow::Error::from)??;
-        self.current_directory()?.add_item(file)?;
-        if let Err(_e) = self.export_index().await {}
-        Ok(())
+            let ipfs_path = match
+                returned_path {
+                    Some(path) => path,
+                    None => {
+                        yield Progression::ProgressFailed {
+                            name,
+                            last_size: Some(last_written),
+                            error: Some("IpfsPath not set".into()),
+                        };
+                        return;
+                    }
+                };
+            let cid = match ipfs_path
+                .root()
+                .cid() {
+                    Some(cid) => cid,
+                    None => {
+                        yield Progression::ProgressFailed {
+                            name,
+                            last_size: Some(last_written),
+                            error: Some("Cid not set".into()),
+                        };
+                        return;
+                    }
+                };
+            if let Err(e) = ipfs.insert_pin(cid, true).await {
+                yield Progression::ProgressFailed {
+                    name,
+                    last_size: Some(last_written),
+                    error: Some(e.to_string()),
+                };
+                return;
+            }
+            let file = warp::constellation::file::File::new(&name);
+            file.set_size(total_written);
+            file.set_reference(&format!("{ipfs_path}"));
+            let f = file.clone();
+
+            if let Ok(Err(_e)) = tokio::task::spawn_blocking(move || f.hash_mut().hash_from_file(&path))
+            .await {}
+
+
+            if let Err(e) = current_directory.add_item(file) {
+                yield Progression::ProgressFailed {
+                    name,
+                    last_size: Some(last_written),
+                    error: Some(e.to_string()),
+                };
+                return;
+            }
+            if let Err(_e) = fs.export_index().await {}
+            yield Progression::ProgressComplete {
+                name: name.to_string(),
+                total: Some(total_written),
+            };
+
+            let _ = fs.broadcast.send(ConstellationEventKind::Uploaded {
+                filename: name.to_string(),
+                size: Some(total_written)
+            }).ok();
+        };
+
+        Ok(ConstellationProgressStream(progress_stream.boxed()))
     }
 
     async fn get(&self, name: &str, path: &str) -> Result<()> {
@@ -359,21 +496,27 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         //Used to enter the tokio context
         let handle = warp::async_handle();
         let _g = handle.enter();
+
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
         let reference = file.reference().ok_or(Error::Other)?; //Reference not found
-        let stream = ipfs
-            .cat_unixfs(reference.parse::<IpfsPath>()?, None)
-            .await
-            .map_err(anyhow::Error::from)?;
-        pin_mut!(stream);
-        let mut file = tokio::fs::File::create(path).await?;
-        while let Some(data) = stream.next().await {
-            let bytes = data.map_err(anyhow::Error::from)?;
-            file.write_all(&bytes).await?;
-            file.flush().await?;
+
+        let mut stream = ipfs
+            .get_unixfs(reference.parse::<IpfsPath>()?, path)
+            .await?;
+
+        while let Some(status) = stream.next().await {
+            if let UnixfsStatus::FailedStatus { error, .. } = status {
+                return Err(error.map(Error::Any).unwrap_or(Error::Other));
+            }
         }
+
         //TODO: Validate file against the hashed reference
+        if let Err(_e) = self.broadcast.send(ConstellationEventKind::Downloaded {
+            filename: file.name(),
+            size: Some(file.size()),
+            location: Some(PathBuf::from(path)),
+        }) {}
         Ok(())
     }
 
@@ -387,53 +530,50 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             return Err(Error::FileExist);
         }
 
-        let mut adder = FileAdder::default();
-        //Maybe write directly to avoid reallocation?
-        let mut reader =
-            BufReader::with_capacity(adder.size_hint(), Cursor::new(buffer.as_slice()));
-        let mut written = 0;
-        let mut last_cid = None;
+        let reader = ReaderStream::new(Cursor::new(buffer.clone()))
+            .map(|result| result.map(|x| x.into()))
+            .boxed();
 
-        {
-            let ipfs = ipfs.clone();
-            loop {
-                match reader.fill_buf().await? {
-                    buffer if buffer.is_empty() => {
-                        let blocks = adder.finish();
-                        for (cid, block) in blocks {
-                            let block = Block::new(cid, block)?;
-                            let cid = ipfs.put_block(block).await?;
-                            last_cid = Some(cid);
-                        }
-                        break;
-                    }
-                    buffer => {
-                        let mut total = 0;
+        let mut total_written = 0;
+        let mut returned_path = None;
 
-                        while total < buffer.len() {
-                            let (blocks, consumed) = adder.push(&buffer[total..]);
-                            for (cid, block) in blocks {
-                                let block = Block::new(cid, block)?;
-                                let _cid = ipfs.put_block(block).await?;
-                            }
-                            total += consumed;
-                            written += consumed;
-                        }
-                        reader.consume(total);
-                    }
+        let mut stream = ipfs.add_unixfs(reader).await?;
+
+        while let Some(status) = stream.next().await {
+            match status {
+                UnixfsStatus::CompletedStatus { path, written, .. } => {
+                    returned_path = Some(path);
+                    total_written = written;
                 }
+                UnixfsStatus::FailedStatus { error, .. } => {
+                    return Err(error.map(Error::Any).unwrap_or(Error::Other))
+                }
+                _ => {}
             }
         }
-        let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
 
-        ipfs.insert_pin(&cid, true).await?;
+        let ipfs_path = returned_path.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
+
+        let cid = ipfs_path
+            .root()
+            .cid()
+            .ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
+
+        ipfs.insert_pin(cid, true).await?;
 
         let file = warp::constellation::file::File::new(name);
-        file.set_size(written);
-        file.set_reference(&format!("/ipfs/{cid}"));
+        file.set_size(total_written);
+        file.set_reference(&format!("{ipfs_path}"));
         file.hash_mut().hash_from_slice(buffer)?;
         self.current_directory()?.add_item(file)?;
         if let Err(_e) = self.export_index().await {}
+        let _ = self
+            .broadcast
+            .send(ConstellationEventKind::Uploaded {
+                filename: name.to_string(),
+                size: Some(total_written),
+            })
+            .ok();
         Ok(())
     }
 
@@ -459,6 +599,14 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         }
 
         //TODO: Validate file against the hashed reference
+        let _ = self
+            .broadcast
+            .send(ConstellationEventKind::Downloaded {
+                filename: file.name(),
+                size: Some(file.size()),
+                location: None,
+            })
+            .ok();
         Ok(buffer)
     }
 
@@ -467,7 +615,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         &mut self,
         name: &str,
         total_size: Option<usize>,
-        mut stream: BoxStream<'static, Vec<u8>>,
+        stream: BoxStream<'static, Vec<u8>>,
     ) -> Result<ConstellationProgressStream> {
         let ipfs = self.ipfs()?;
         //Used to enter the tokio context
@@ -480,85 +628,118 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
             return Err(Error::FileExist);
         }
 
-        let (tx, mut rx) = tokio::sync::broadcast::channel(50000);
-        let config = self.config.clone().unwrap_or_default();
-        tokio::spawn({
-            let name = name.to_string();
-            let fs = self.clone();
-            async move {
-                let mut last_written = 0;
-                let result = {
-                    let mut adder = FileAdderBuilder::default()
-                        .with_chunker(Chunker::Size(config.chunking.unwrap_or(256 * 1024)))
-                        .build();
+        let fs = self.clone();
+        let name = name.to_string();
+        let stream = stream.map(Ok::<_, std::io::Error>).boxed();
+        let progress_stream = async_stream::stream! {
 
-                    let mut written = 0;
-                    let mut last_cid = None;
+            let mut last_written = 0;
 
-                    while let Some(buffer) = stream.next().await {
-                        let mut total = 0;
+            let mut total_written = 0;
+            let mut returned_path = None;
 
-                        while total < buffer.len() {
-                            let (blocks, consumed) = adder.push(&buffer[total..]);
-                            for (cid, block) in blocks {
-                                let block = Block::new(cid, block)?;
-                                let _cid = ipfs.put_block(block).await?;
-                            }
-                            total += consumed;
-                            written += consumed;
-                            last_written += consumed;
-                        }
-                        let _ = tx.send(Progression::CurrentProgress {
-                            name: name.to_string(),
+            let mut stream = match ipfs.add_unixfs(stream).await {
+                Ok(ste) => ste,
+                Err(e) => {
+                    yield Progression::ProgressFailed {
+                            name,
+                            last_size: Some(last_written),
+                            error: Some(e.to_string()),
+                    };
+                    return;
+                }
+            };
+
+            while let Some(status) = stream.next().await {
+                let name = name.clone();
+                match status {
+                    UnixfsStatus::CompletedStatus { path, written, .. } => {
+                        returned_path = Some(path);
+                        total_written = written;
+                        last_written = written;
+                        yield Progression::CurrentProgress {
+                            name,
                             current: written,
                             total: total_size,
-                        });
+                        };
                     }
-
-                    let blocks = adder.finish();
-                    for (cid, block) in blocks {
-                        let block = Block::new(cid, block)?;
-                        let cid = ipfs.put_block(block).await?;
-                        last_cid = Some(cid);
+                    UnixfsStatus::FailedStatus {
+                        written, error, ..
+                    } => {
+                        last_written = written;
+                        yield Progression::ProgressFailed {
+                            name,
+                            last_size: Some(last_written),
+                            error: error.map(|e| e.to_string()),
+                        };
+                        return;
+                        // return Err(error.map(Error::Any).unwrap_or(Error::Other));
                     }
-
-                    let cid = last_cid.ok_or_else(|| anyhow::anyhow!("Cid was never set"))?;
-
-                    ipfs.insert_pin(&cid, true).await?;
-
-                    let file = warp::constellation::file::File::new(&name);
-                    file.set_size(written);
-                    file.set_reference(&format!("/ipfs/{cid}"));
-                    // file.hash_mut().hash_from_slice(buffer)?;
-                    current_directory.add_item(file)?;
-                    if let Err(_e) = fs.export_index().await {}
-
-                    let _ = tx.send(Progression::ProgressComplete {
-                        name: name.to_string(),
-                        total: Some(written),
-                    });
-
-                    Ok::<_, Error>(())
-                };
-                if let Err(e) = result {
-                    let _ = tx.send(Progression::ProgressFailed {
-                        name,
-                        last_size: Some(last_written),
-                        error: Some(e.to_string()),
-                    });
+                    UnixfsStatus::ProgressStatus { written, .. } => {
+                        last_written = written;
+                        yield Progression::CurrentProgress {
+                            name,
+                            current: written,
+                            total: total_size,
+                        };
+                    }
                 }
-                Ok::<_, Error>(())
             }
-        });
-
-        let progress_stream = async_stream::stream! {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => yield event,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    Err(_) => {}
+            let ipfs_path = match
+                returned_path {
+                    Some(path) => path,
+                    None => {
+                        yield Progression::ProgressFailed {
+                            name,
+                            last_size: Some(last_written),
+                            error: Some("IpfsPath not set".into()),
+                        };
+                        return;
+                    }
                 };
+            let cid = match ipfs_path
+                .root()
+                .cid() {
+                    Some(cid) => cid,
+                    None => {
+                        yield Progression::ProgressFailed {
+                            name,
+                            last_size: Some(last_written),
+                            error: Some("Cid not set".into()),
+                        };
+                        return;
+                    }
+                };
+            if let Err(e) = ipfs.insert_pin(cid, true).await {
+                yield Progression::ProgressFailed {
+                    name,
+                    last_size: Some(last_written),
+                    error: Some(e.to_string()),
+                };
+                return;
             }
+            let file = warp::constellation::file::File::new(&name);
+            file.set_size(total_written);
+            file.set_reference(&format!("{ipfs_path}"));
+            // file.hash_mut().hash_from_slice(buffer)?;
+            if let Err(e) = current_directory.add_item(file) {
+                yield Progression::ProgressFailed {
+                    name,
+                    last_size: Some(last_written),
+                    error: Some(e.to_string()),
+                };
+                return;
+            }
+            if let Err(_e) = fs.export_index().await {}
+            yield Progression::ProgressComplete {
+                name: name.to_string(),
+                total: Some(total_written),
+            };
+
+            let _ = fs.broadcast.send(ConstellationEventKind::Uploaded {
+                filename: name.to_string(),
+                size: Some(total_written)
+            }).ok();
         };
 
         Ok(ConstellationProgressStream(progress_stream.boxed()))
@@ -573,7 +754,10 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 
         let item = self.current_directory()?.get_item_by_path(name)?;
         let file = item.get_file()?;
+        let size = file.size();
         let reference = file.reference().ok_or(Error::Other)?; //Reference not found
+
+        let tx = self.broadcast.clone();
 
         let stream = async_stream::stream! {
             let cat_stream = ipfs
@@ -587,6 +771,8 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
                     Err(e) => yield Err(Error::from(anyhow::anyhow!("{e}"))),
                 }
             }
+
+            let _ = tx.send(ConstellationEventKind::Downloaded { filename: file.name(), size: Some(size), location: None }).ok();
         };
 
         //TODO: Validate file against the hashed reference
@@ -657,6 +843,14 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 
         directory.remove_item(&item.name())?;
         if let Err(_e) = self.export_index().await {}
+
+        let _ = self
+            .broadcast
+            .send(ConstellationEventKind::Deleted {
+                item_name: name.to_string(),
+            })
+            .ok();
+
         Ok(())
     }
 
@@ -676,6 +870,13 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
 
         directory.rename_item(current, new)?;
         if let Err(_e) = self.export_index().await {}
+        let _ = self
+            .broadcast
+            .send(ConstellationEventKind::Renamed {
+                old_item_name: current.to_string(),
+                new_item_name: new.to_string(),
+            })
+            .ok();
         Ok(())
     }
 
@@ -722,7 +923,7 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
         pin_mut!(stream);
 
         while let Some(data) = stream.next().await {
-            //This is to make sure there isnt any errors while tranversing the links
+            //This is to make sure there isnt any errors while traversing the links
             //however we do not need to deal with the data itself as the will store
             //it in the blockstore after being found or blocks being exchanged from peer
             //TODO: Should check first chunk and timeout if it exceeds a specific length
@@ -737,18 +938,36 @@ impl<T: IpfsTypes> Constellation for IpfsFileSystem<T> {
     }
 
     fn get_path(&self) -> PathBuf {
-        self.path.read().clone()
+        PathBuf::from(self.path.read().to_string_lossy().replace('\\', "/"))
+    }
+}
+
+#[async_trait::async_trait]
+impl ConstellationEvent for IpfsFileSystem {
+    async fn subscribe(&mut self) -> Result<ConstellationEventStream> {
+        let mut rx = self.broadcast.subscribe();
+
+        let stream = async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => yield event,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(_) => {}
+                };
+            }
+        };
+
+        Ok(ConstellationEventStream(stream.boxed()))
     }
 }
 
 pub mod ffi {
     use crate::config::FsIpfsConfig;
-    use crate::{IpfsFileSystem, Persistent, Temporary};
+    use crate::IpfsFileSystem;
     use warp::constellation::ConstellationAdapter;
     use warp::error::Error;
     use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
-    use warp::sync::{Arc, RwLock};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -762,14 +981,14 @@ pub mod ffi {
                     pointer: "multipass".into(),
                 })
             }
-            false => (*multipass).inner().read().clone(),
+            false => (*multipass).object(),
         };
         let config = match config.is_null() {
             true => None,
             false => Some((*config).clone()),
         };
-        warp::async_on_block(IpfsFileSystem::<Temporary>::new(account, config))
-            .map(|account| ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(account)))))
+        warp::async_on_block(IpfsFileSystem::new(account, config))
+            .map(|fs| ConstellationAdapter::new(Box::new(fs)))
             .map_err(Error::from)
             .into()
     }
@@ -786,16 +1005,44 @@ pub mod ffi {
                     pointer: "multipass".into(),
                 })
             }
-            false => (*multipass).inner().read().clone(),
+            false => (*multipass).object(),
         };
         let config = match config.is_null() {
             true => None,
             false => Some((*config).clone()),
         };
 
-        warp::async_on_block(IpfsFileSystem::<Persistent>::new(account, config))
-            .map(|account| ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(account)))))
+        warp::async_on_block(IpfsFileSystem::new(account, config))
+            .map(|fs| ConstellationAdapter::new(Box::new(fs)))
             .map_err(Error::from)
             .into()
     }
+}
+
+fn ecdh_encrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> Result<Vec<u8>> {
+    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
+    let did_pubkey = match recipient {
+        Some(did) => did.public_key_bytes(),
+        None => did.public_key_bytes(),
+    };
+
+    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
+    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
+    let data = Cipher::direct_encrypt(data.as_ref(), &prik)?;
+
+    Ok(data)
+}
+
+fn ecdh_decrypt<K: AsRef<[u8]>>(did: &DID, recipient: Option<DID>, data: K) -> Result<Vec<u8>> {
+    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
+    let did_pubkey = match recipient {
+        Some(did) => did.public_key_bytes(),
+        None => did.public_key_bytes(),
+    };
+
+    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
+    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
+    let data = Cipher::direct_decrypt(data.as_ref(), &prik)?;
+
+    Ok(data)
 }

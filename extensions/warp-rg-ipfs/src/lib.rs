@@ -4,17 +4,16 @@ mod store;
 
 use crate::spam_filter::SpamFilter;
 use config::RgIpfsConfig;
-use ipfs::IpfsTypes;
-use ipfs::{Ipfs, TestTypes, Types};
+use futures::StreamExt;
+use rust_ipfs::Ipfs;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
-use store::direct::DirectMessageStore;
-use tokio::sync::broadcast;
-#[allow(unused_imports)]
-use tokio::sync::broadcast::{Receiver, Sender};
+use store::message::MessageStore;
+use tokio::sync::broadcast::Sender;
 use uuid::Uuid;
 use warp::constellation::{Constellation, ConstellationProgressStream};
 use warp::crypto::DID;
@@ -24,10 +23,10 @@ use warp::logging::tracing::log::trace;
 use warp::module::Module;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
-use warp::raygun::group::{GroupChat, GroupChatManagement, GroupInvite};
+use warp::raygun::Messages;
 use warp::raygun::{
     Conversation, Location, MessageEvent, MessageEventStream, MessageStatus, RayGunEventStream,
-    RayGunEvents, RayGunStream,
+    RayGunEvents, RayGunGroupConversation, RayGunStream,
 };
 use warp::raygun::{EmbedState, Message, MessageOptions, PinState, RayGun, ReactionState};
 use warp::raygun::{RayGunAttachment, RayGunEventKind};
@@ -38,14 +37,11 @@ use warp::SingleHandle;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub type Temporary = TestTypes;
-pub type Persistent = Types;
-
-pub struct IpfsMessaging<T: IpfsTypes> {
+pub struct IpfsMessaging {
     account: Box<dyn MultiPass>,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-    ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
-    direct_store: Arc<RwLock<Option<DirectMessageStore<T>>>>,
+    ipfs: Arc<RwLock<Option<Ipfs>>>,
+    direct_store: Arc<RwLock<Option<MessageStore>>>,
     config: Option<RgIpfsConfig>,
     constellation: Option<Box<dyn Constellation>>,
     initialize: Arc<AtomicBool>,
@@ -57,7 +53,7 @@ pub struct IpfsMessaging<T: IpfsTypes> {
     //      * TBD
 }
 
-impl<T: IpfsTypes> Clone for IpfsMessaging<T> {
+impl Clone for IpfsMessaging {
     fn clone(&self) -> Self {
         Self {
             account: self.account.clone(),
@@ -72,14 +68,14 @@ impl<T: IpfsTypes> Clone for IpfsMessaging<T> {
     }
 }
 
-impl<T: IpfsTypes> IpfsMessaging<T> {
+impl IpfsMessaging {
     pub async fn new(
         config: Option<RgIpfsConfig>,
         account: Box<dyn MultiPass>,
         constellation: Option<Box<dyn Constellation>>,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     ) -> anyhow::Result<Self> {
-        let (tx, _) = broadcast::channel(1024);
+        let (tx, _) = tokio::sync::broadcast::channel(1024);
         trace!("Initializing Raygun Extension");
         let mut messaging = IpfsMessaging {
             account,
@@ -92,11 +88,11 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
             tx,
         };
 
-        if messaging.account.get_own_identity().is_err() {
+        if messaging.account.get_own_identity().await.is_err() {
             trace!("Identity doesnt exist. Waiting for it to load or to be created");
             let mut messaging = messaging.clone();
             tokio::spawn(async move {
-                while messaging.account.get_own_identity().is_err() {
+                while messaging.account.get_own_identity().await.is_err() {
                     tokio::time::sleep(Duration::from_millis(100)).await
                 }
                 trace!("Identity found. Initializing store");
@@ -117,7 +113,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         let discovery = false;
 
         let ipfs_handle = match self.account.handle() {
-            Ok(handle) if handle.is::<Ipfs<T>>() => handle.downcast_ref::<Ipfs<T>>().cloned(),
+            Ok(handle) if handle.is::<Ipfs>() => handle.downcast_ref::<Ipfs>().cloned(),
             _ => None,
         };
 
@@ -145,7 +141,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
                 //     ..Default::default()
                 // };
 
-                // if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
+                // if std::any::TypeId::of::() == std::any::TypeId::of::<Persistent>() {
                 //     // Create directory if it doesnt exist
                 //     let path = config
                 //         .path
@@ -165,9 +161,9 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         };
 
         *self.direct_store.write() = Some(
-            DirectMessageStore::new(
+            MessageStore::new(
                 ipfs.clone(),
-                config.path.map(|p| p.join("messages")),
+                config.path.map(|path| path.join("messages")),
                 self.account.clone(),
                 self.constellation.clone(),
                 discovery,
@@ -175,9 +171,9 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
                 self.tx.clone(),
                 (
                     config.store_setting.check_spam,
-                    config.store_setting.store_decrypted,
-                    config.store_setting.allow_unsigned_message,
+                    config.store_setting.disable_sender_event_emit,
                     config.store_setting.with_friends,
+                    config.store_setting.conversation_load_task,
                 ),
             )
             .await?,
@@ -210,7 +206,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
         Ok(inner)
     }
 
-    pub fn messaging_store(&self) -> std::result::Result<DirectMessageStore<T>, Error> {
+    pub fn messaging_store(&self) -> std::result::Result<MessageStore, Error> {
         self.direct_store
             .read()
             .clone()
@@ -218,7 +214,7 @@ impl<T: IpfsTypes> IpfsMessaging<T> {
     }
 }
 
-impl<T: IpfsTypes> Extension for IpfsMessaging<T> {
+impl Extension for IpfsMessaging {
     fn id(&self) -> String {
         "warp-rg-ipfs".to_string()
     }
@@ -231,37 +227,49 @@ impl<T: IpfsTypes> Extension for IpfsMessaging<T> {
     }
 }
 
-// pub fn message_task(conversation: Arc<Mutex<Vec<Message>>>) {}
-
-impl<T: IpfsTypes> SingleHandle for IpfsMessaging<T> {
+impl SingleHandle for IpfsMessaging {
     fn handle(&self) -> std::result::Result<Box<dyn core::any::Any>, warp::error::Error> {
         Ok(Box::new(self.ipfs.read().clone()))
     }
 }
 
 #[async_trait::async_trait]
-impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
+impl RayGun for IpfsMessaging {
     async fn create_conversation(&mut self, did_key: &DID) -> Result<Conversation> {
         self.messaging_store()?.create_conversation(did_key).await
+    }
+
+    async fn create_group_conversation(
+        &mut self,
+        name: Option<String>,
+        recipients: Vec<DID>,
+    ) -> Result<Conversation> {
+        self.messaging_store()?
+            .create_group_conversation(name, HashSet::from_iter(recipients))
+            .await
     }
 
     async fn get_conversation(&self, conversation_id: Uuid) -> Result<Conversation> {
         self.messaging_store()?
             .get_conversation(conversation_id)
-            .map(|convo| convo.conversation())
+            .await
+            .map(|convo| convo.into())
     }
 
     async fn list_conversations(&self) -> Result<Vec<Conversation>> {
-        Ok(self.messaging_store()?.list_conversations())
+        self.messaging_store()?.list_conversations().await
     }
 
     async fn get_message_count(&self, conversation_id: Uuid) -> Result<usize> {
-        self.messaging_store()?.messages_count(conversation_id)
+        self.messaging_store()?
+            .messages_count(conversation_id)
+            .await
     }
 
     async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message> {
         self.messaging_store()?
             .get_message(conversation_id, message_id)
+            .await
     }
 
     async fn message_status(
@@ -274,27 +282,25 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
             .await
     }
 
-    async fn get_messages(
-        &self,
-        conversation_id: Uuid,
-        opt: MessageOptions,
-    ) -> Result<Vec<Message>> {
+    async fn get_messages(&self, conversation_id: Uuid, opt: MessageOptions) -> Result<Messages> {
         self.messaging_store()?
             .get_messages(conversation_id, opt)
             .await
     }
 
-    async fn send(
+    async fn send(&mut self, conversation_id: Uuid, value: Vec<String>) -> Result<()> {
+        let mut store = self.messaging_store()?;
+        store.send_message(conversation_id, value).await
+    }
+
+    async fn edit(
         &mut self,
         conversation_id: Uuid,
-        message_id: Option<Uuid>,
+        message_id: Uuid,
         value: Vec<String>,
     ) -> Result<()> {
         let mut store = self.messaging_store()?;
-        match message_id {
-            Some(id) => store.edit_message(conversation_id, id, value).await,
-            None => store.send_message(conversation_id, value).await,
-        }
+        store.edit_message(conversation_id, message_id, value).await
     }
 
     async fn delete(&mut self, conversation_id: Uuid, message_id: Option<Uuid>) -> Result<()> {
@@ -355,15 +361,17 @@ impl<T: IpfsTypes> RayGun for IpfsMessaging<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: IpfsTypes> RayGunAttachment for IpfsMessaging<T> {
+impl RayGunAttachment for IpfsMessaging {
     async fn attach(
         &mut self,
         conversation_id: Uuid,
+        message_id: Option<Uuid>,
+        location: Location,
         files: Vec<PathBuf>,
         message: Vec<String>,
     ) -> Result<()> {
         self.messaging_store()?
-            .attach(conversation_id, Location::Disk, files, message)
+            .attach(conversation_id, message_id, location, files, message)
             .await
     }
 
@@ -381,7 +389,28 @@ impl<T: IpfsTypes> RayGunAttachment for IpfsMessaging<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: IpfsTypes> RayGunStream for IpfsMessaging<T> {
+impl RayGunGroupConversation for IpfsMessaging {
+    async fn update_conversation_name(&mut self, conversation_id: Uuid, name: &str) -> Result<()> {
+        self.messaging_store()?
+            .update_conversation_name(conversation_id, name)
+            .await
+    }
+
+    async fn add_recipient(&mut self, conversation_id: Uuid, did_key: &DID) -> Result<()> {
+        self.messaging_store()?
+            .add_recipient(conversation_id, did_key)
+            .await
+    }
+
+    async fn remove_recipient(&mut self, conversation_id: Uuid, did_key: &DID) -> Result<()> {
+        self.messaging_store()?
+            .remove_recipient(conversation_id, did_key, true)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl RayGunStream for IpfsMessaging {
     async fn subscribe(&mut self) -> Result<RayGunEventStream> {
         let mut rx = self.tx.subscribe();
 
@@ -389,7 +418,7 @@ impl<T: IpfsTypes> RayGunStream for IpfsMessaging<T> {
             loop {
                 match rx.recv().await {
                     Ok(event) => yield event,
-                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     Err(_) => {}
                 };
             }
@@ -402,13 +431,13 @@ impl<T: IpfsTypes> RayGunStream for IpfsMessaging<T> {
         conversation_id: Uuid,
     ) -> Result<MessageEventStream> {
         let store = self.messaging_store()?;
-        let stream = store.get_conversation_stream(conversation_id)?;
-        Ok(MessageEventStream(Box::pin(stream)))
+        let stream = store.get_conversation_stream(conversation_id).await?;
+        Ok(MessageEventStream(stream.boxed()))
     }
 }
 
 #[async_trait::async_trait]
-impl<T: IpfsTypes> RayGunEvents for IpfsMessaging<T> {
+impl RayGunEvents for IpfsMessaging {
     async fn send_event(&mut self, conversation_id: Uuid, event: MessageEvent) -> Result<()> {
         self.messaging_store()?
             .send_event(conversation_id, event)
@@ -422,23 +451,15 @@ impl<T: IpfsTypes> RayGunEvents for IpfsMessaging<T> {
     }
 }
 
-impl<T: IpfsTypes> GroupChat for IpfsMessaging<T> {}
-
-impl<T: IpfsTypes> GroupChatManagement for IpfsMessaging<T> {}
-
-impl<T: IpfsTypes> GroupInvite for IpfsMessaging<T> {}
-
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::{IpfsMessaging, RgIpfsConfig};
-    use crate::{Persistent, Temporary};
     use warp::async_on_block;
     use warp::error::Error;
     use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
     use warp::raygun::RayGunAdapter;
-    use warp::sync::{Arc, RwLock};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -463,13 +484,13 @@ pub mod ffi {
 
         let account = &*account;
 
-        match async_on_block(IpfsMessaging::<Temporary>::new(
+        match async_on_block(IpfsMessaging::new(
             config,
-            account.inner().read().clone(),
+            account.object(),
             None,
             cache.map(|p| p.inner()),
         )) {
-            Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(RwLock::new(Box::new(a))))),
+            Ok(a) => FFIResult::ok(RayGunAdapter::new(Box::new(a))),
             Err(e) => FFIResult::err(Error::from(e)),
         }
     }
@@ -497,13 +518,13 @@ pub mod ffi {
 
         let account = &*account;
 
-        match async_on_block(IpfsMessaging::<Persistent>::new(
+        match async_on_block(IpfsMessaging::new(
             config,
-            account.inner().read().clone(),
+            account.object(),
             None,
             cache.map(|p| p.inner()),
         )) {
-            Ok(a) => FFIResult::ok(RayGunAdapter::new(Arc::new(RwLock::new(Box::new(a))))),
+            Ok(a) => FFIResult::ok(RayGunAdapter::new(Box::new(a))),
             Err(e) => FFIResult::err(Error::from(e)),
         }
     }

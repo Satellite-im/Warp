@@ -2,7 +2,9 @@ use anyhow::{anyhow, bail};
 use aws_endpoint::partition::endpoint;
 use aws_endpoint::{CredentialScope, Partition, PartitionResolver};
 use aws_sdk_s3::presigning::config::PresigningConfig;
+use futures::StreamExt;
 use std::path::PathBuf;
+use warp::constellation::{ConstellationEvent, ConstellationProgressStream, Progression};
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -41,6 +43,7 @@ impl Default for StorjClient {
                 secret_key: None,
                 security_token: None,
                 session_token: None,
+                expiration: None,
             },
         }
     }
@@ -53,6 +56,7 @@ impl StorjClient {
             secret_key: Some(secret_key.as_ref().to_string()),
             security_token: None,
             session_token: None,
+            expiration: None,
         };
         Self { creds, endpoint }
     }
@@ -63,6 +67,7 @@ impl StorjClient {
             secret_key: Some(secret_key.as_ref().to_string()),
             security_token: None,
             session_token: None,
+            expiration: None,
         };
         self.creds = Credentials {
             access_key: Some(access_key.as_ref().to_string()),
@@ -205,7 +210,7 @@ impl Constellation for StorjFilesystem {
     /// Uploads file from path with the name format being `bucket_name://path/to/file`
     /// Note: This only supports uploading of files. This has not implemented creation of
     ///       directories.
-    async fn put(&mut self, name: &str, path: &str) -> Result<()> {
+    async fn put(&mut self, name: &str, path: &str) -> Result<ConstellationProgressStream> {
         let (bucket, name) = split_for(name)?;
 
         let mut fs = tokio::fs::File::open(&path).await?;
@@ -258,7 +263,17 @@ impl Constellation for StorjFilesystem {
             let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
             hook.trigger("filesystem::new_file", &object)
         }
-        Ok(())
+
+        let stream = ConstellationProgressStream(futures::stream::once(
+            async move {
+                Progression::ProgressComplete {
+                    name,
+                    total: Some(size as _),
+                }
+            },
+        ).boxed());
+
+        Ok(stream)
     }
 
     /// Download file to path with the name format being `bucket_name://path/to/file`
@@ -334,10 +349,10 @@ impl Constellation for StorjFilesystem {
             .await
             .map_err(anyhow::Error::from)?;
 
-        if code.1 != 200 {
+        if code.status_code() != 200 {
             return Err(Error::Any(anyhow!(
                 "Error uploading file to storj. Code {}",
-                code.1
+                code.status_code()
             )));
         }
 
@@ -394,7 +409,7 @@ impl Constellation for StorjFilesystem {
             }
         }
 
-        let (buf, code) = self
+        let res = self
             .client
             .bucket(bucket, false)
             .await?
@@ -402,20 +417,20 @@ impl Constellation for StorjFilesystem {
             .await
             .map_err(anyhow::Error::from)?;
 
-        if code != 200 {
+        if res.status_code() != 200 {
             return Err(Error::Any(anyhow!(
                 "Error getting file from storj. Code {}",
-                code
+                res.status_code()
             )));
         }
 
-        Ok(buf)
+        Ok(res.bytes().to_vec())
     }
 
     async fn remove(&mut self, path: &str, _: bool) -> Result<()> {
         let (bucket, name) = split_for(path)?;
 
-        let (_, code) = self
+        let res = self
             .client
             .bucket(bucket, false)
             .await?
@@ -423,26 +438,15 @@ impl Constellation for StorjFilesystem {
             .await
             .map_err(anyhow::Error::from)?;
 
-        if code != 204 {
+        if res.status_code() != 204 {
             return Err(Error::Any(anyhow!(
                 "Error removing data from storj. Code {}",
-                code
+                res.status_code()
             )));
         }
 
-        let item = self.current_directory()?.remove_item(&name)?;
-        if let Some(hook) = &self.hooks {
-            let object = DataObject::new(DataType::from(Module::FileSystem), &item)?;
-            //TODO: Add a proper check
-            let hook_name = if item.is_directory() {
-                "filesystem::remove_directory"
-            } else if item.is_file() {
-                "filesystem::remove_file"
-            } else {
-                "filesystem::unknown_event"
-            };
-            hook.trigger(hook_name, &object);
-        }
+        self.current_directory()?.remove_item(&name)?;
+
         Ok(())
     }
 
@@ -465,6 +469,9 @@ impl Constellation for StorjFilesystem {
         Ok(())
     }
 }
+
+#[async_trait::async_trait]
+impl ConstellationEvent for StorjFilesystem {}
 
 fn split_for<S: AsRef<str>>(name: S) -> anyhow::Result<(String, String)> {
     let name = name.as_ref();
@@ -532,7 +539,6 @@ pub mod ffi {
     use std::os::raw::c_char;
     use warp::constellation::ConstellationAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::sync::{Arc, RwLock};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
@@ -560,9 +566,7 @@ pub mod ffi {
             client.set_cache(pd.inner().clone());
         }
 
-        let obj = Box::new(ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(
-            client,
-        )))));
+        let obj = Box::new(ConstellationAdapter::new(Box::new(client)));
         Box::into_raw(obj) as *mut ConstellationAdapter
     }
 }

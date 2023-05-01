@@ -402,7 +402,7 @@ impl PocketDimension for FlatfileStorage {
                                 };
 
                                 let serialized_data = serde_json::to_string(&data).unwrap();
-                                let mut writer = std::fs::File::create(&new_path)?;
+                                let mut writer = std::fs::File::create(new_path)?;
 
                                 let mut reader = std::io::Cursor::new(serialized_data);
                                 std::io::copy(&mut reader, &mut writer)?;
@@ -423,7 +423,7 @@ impl PocketDimension for FlatfileStorage {
                     };
 
                     let serialized_data = serde_json::to_string(&data).unwrap();
-                    let mut writer = std::fs::File::create(&new_path)?;
+                    let mut writer = std::fs::File::create(new_path)?;
 
                     let mut reader = std::io::Cursor::new(serialized_data);
                     std::io::copy(&mut reader, &mut writer)?;
@@ -442,7 +442,7 @@ impl PocketDimension for FlatfileStorage {
                     };
 
                     let serialized_data = serde_json::to_string(&data).unwrap();
-                    let mut writer = std::fs::File::create(&new_path)?;
+                    let mut writer = std::fs::File::create(new_path)?;
 
                     let mut reader = std::io::Cursor::new(serialized_data);
                     std::io::copy(&mut reader, &mut writer)?;
@@ -461,7 +461,7 @@ impl PocketDimension for FlatfileStorage {
                     };
 
                     let serialized_data = serde_json::to_string(&data).unwrap();
-                    let mut writer = std::fs::File::create(&new_path)?;
+                    let mut writer = std::fs::File::create(new_path)?;
 
                     let mut reader = std::io::Cursor::new(serialized_data);
                     std::io::copy(&mut reader, &mut writer)?;
@@ -479,7 +479,7 @@ impl PocketDimension for FlatfileStorage {
                     };
 
                     let serialized_data = serde_json::to_string(&data).unwrap();
-                    let mut writer = std::fs::File::create(&new_path)?;
+                    let mut writer = std::fs::File::create(new_path)?;
 
                     let mut reader = std::io::Cursor::new(serialized_data);
                     std::io::copy(&mut reader, &mut writer)?;

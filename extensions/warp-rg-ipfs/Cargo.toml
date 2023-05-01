@@ -11,30 +11,28 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 [dependencies]
 warp = { path = "../../warp" }
 
-ipfs = { git = "https://github.com/Satellite-im/rust-ipfs", rev = "5b7f68e975a338b350a6991c1e507f1d5f22a939", features = [
-    "external-gossipsub-stream",
-] }
-libipld = { version = "0.15", features = ["serde-codec"] }
+rust-ipfs.workspace = true
+libipld = { workspace = true, features = ["serde-codec"] }
 
-uuid = { version = "1.0", features = ["serde", "v4"] }
-tokio = { version = "1", features = ["full"] }
-tokio-util = { version = "0.7", features = ["full"] }
-tokio-stream = { version = "0.1", features = ["net"] }
+uuid = { workspace = true, features = ["serde", "v4"] }
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true, features = ["net"] }
 
-futures = { version = "0.3" }
-async-trait = { version = "0.1" }
-async-stream = "0.3"
-anyhow = { version = "1" }
-thiserror = "1.0"
-serde = { version = "1.0", features = ["derive", "rc"] }
-serde_json = { version = "1.0" }
+futures.workspace = true
+async-trait.workspace = true
+async-stream.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bincode.workspace = true
 bs58 = "0.4"
-cfg-if = "1.0"
 
-hex = "0.4"
 bayespam = "1.1.0"
 
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true, features = ["serde"] }
+
+bytes.workspace = true
 
 [dev-dependencies]
 fdlimit = "0.2"
@@ -42,12 +40,12 @@ warp-pd-stretto = { path = "../warp-pd-stretto" }
 warp-pd-flatfile = { path = "../warp-pd-flatfile" }
 warp-mp-ipfs = { path = "../warp-mp-ipfs" }
 warp-fs-ipfs = { path = "../warp-fs-ipfs" }
-rustyline-async = "0.2"
-comfy-table = "6.0"
+rustyline-async = "0.3"
+comfy-table = "6.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
-clap = { version = "3.2", features = ["derive"] }
-rpassword = "7.0"
+clap = { version = "4.0", features = ["derive"] }
+rpassword = "7.2"
 
 [features]
 default = []

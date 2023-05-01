@@ -1,5 +1,0 @@
-[submodule "docs"]
-	path = docs
-	url = https://github.com/Satellite-im/warp-docs
-	ignore = all
-	branch = master

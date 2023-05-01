@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::Duration;
 use tokio::task::JoinHandle;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
@@ -17,28 +18,54 @@ use warp::multipass::identity::Identifier;
 use warp::multipass::MultiPass;
 use warp::pocket_dimension::PocketDimension;
 use warp::raygun::{
-    ConversationType, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions,
-    MessageType, PinState, RayGun, ReactionState,
+    Message, MessageEvent, MessageEventKind, MessageEventStream, MessageOptions, MessageStream,
+    MessageType, Messages, MessagesType, PinState, RayGun, ReactionState,
 };
 use warp::sync::{Arc, RwLock};
 use warp::tesseract::Tesseract;
 use warp_fs_ipfs::config::FsIpfsConfig;
-use warp_fs_ipfs::{IpfsFileSystem, Persistent as FsPersistent, Temporary as FsTemporary};
+use warp_fs_ipfs::IpfsFileSystem;
+use warp_mp_ipfs::config::Discovery;
 use warp_mp_ipfs::{ipfs_identity_persistent, ipfs_identity_temporary};
 use warp_pd_flatfile::FlatfileStorage;
 use warp_pd_stretto::StrettoClient;
 use warp_rg_ipfs::config::RgIpfsConfig;
 use warp_rg_ipfs::IpfsMessaging;
-use warp_rg_ipfs::Persistent;
-use warp_rg_ipfs::Temporary;
+
 #[derive(Debug, Parser)]
-#[clap(name = "")]
+#[clap(name = "messenger")]
 struct Opt {
     #[clap(long)]
     path: Option<PathBuf>,
     #[clap(long)]
     with_key: bool,
+    #[clap(long)]
     experimental_node: bool,
+    #[clap(long)]
+    stdout_log: bool,
+    #[clap(long)]
+    disable_sender_emitter: bool,
+
+    #[clap(long)]
+    context: Option<String>,
+    #[clap(long)]
+    direct: bool,
+    #[clap(long)]
+    disable_relay: bool,
+    #[clap(long)]
+    upnp: bool,
+    #[clap(long)]
+    no_discovery: bool,
+    #[clap(long)]
+    mdns: bool,
+    #[clap(long)]
+    r#override: Option<bool>,
+    #[clap(long)]
+    bootstrap: Option<bool>,
+    #[clap(long)]
+    provide_platform_info: bool,
+    #[clap(long)]
+    wait: Option<u64>,
 }
 
 fn cache_setup(root: Option<PathBuf>) -> anyhow::Result<Arc<RwLock<Box<dyn PocketDimension>>>> {
@@ -55,6 +82,7 @@ async fn create_account<P: AsRef<Path>>(
     cache: Arc<RwLock<Box<dyn PocketDimension>>>,
     passphrase: Zeroizing<String>,
     experimental: bool,
+    opt: &Opt,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let tesseract = match path.as_ref() {
         Some(path) => {
@@ -69,18 +97,49 @@ async fn create_account<P: AsRef<Path>>(
 
     tesseract.unlock(passphrase.as_bytes())?;
 
-    let config = match path.as_ref() {
+    let mut config = match path.as_ref() {
         Some(path) => warp_mp_ipfs::config::MpIpfsConfig::production(path, experimental),
         None => warp_mp_ipfs::config::MpIpfsConfig::testing(experimental),
     };
+
+    if !opt.direct || !opt.no_discovery {
+        config.store_setting.discovery = Discovery::Provider(opt.context.clone());
+    }
+    if opt.disable_relay {
+        config.ipfs_setting.relay_client.enable = false;
+    }
+    if opt.upnp {
+        config.ipfs_setting.portmapping = true;
+    }
+    if opt.direct {
+        config.store_setting.discovery = Discovery::Direct;
+    }
+    if opt.no_discovery {
+        config.store_setting.discovery = Discovery::None;
+        config.ipfs_setting.bootstrap = false;
+    }
+
+    config.store_setting.share_platform = opt.provide_platform_info;
+
+    if let Some(oride) = opt.r#override {
+        config.store_setting.override_ipld = oride;
+    }
+
+    if let Some(bootstrap) = opt.bootstrap {
+        config.ipfs_setting.bootstrap = bootstrap;
+    }
+
+    config.store_setting.friend_request_response_duration = opt.wait.map(Duration::from_millis);
+
+    config.ipfs_setting.mdns.enable = opt.mdns;
 
     let mut account: Box<dyn MultiPass> = match path.is_some() {
         true => Box::new(ipfs_identity_persistent(config, tesseract, Some(cache)).await?),
         false => Box::new(ipfs_identity_temporary(Some(config), tesseract, Some(cache)).await?),
     };
 
-    if account.get_own_identity().is_err() {
-        account.create_identity(None, None)?;
+    if account.get_own_identity().await.is_err() {
+        account.create_identity(None, None).await?;
     }
     Ok(account)
 }
@@ -95,8 +154,8 @@ async fn create_fs<P: AsRef<Path>>(
     };
 
     let filesystem: Box<dyn Constellation> = match path.is_some() {
-        true => Box::new(IpfsFileSystem::<FsPersistent>::new(account, Some(config)).await?),
-        false => Box::new(IpfsFileSystem::<FsTemporary>::new(account, Some(config)).await?),
+        true => Box::new(IpfsFileSystem::new(account, Some(config)).await?),
+        false => Box::new(IpfsFileSystem::new(account, Some(config)).await?),
     };
 
     Ok(filesystem)
@@ -108,19 +167,22 @@ async fn create_rg(
     account: Box<dyn MultiPass>,
     filesystem: Option<Box<dyn Constellation>>,
     cache: Arc<RwLock<Box<dyn PocketDimension>>>,
+    disable_sender_emitter: bool,
 ) -> anyhow::Result<Box<dyn RayGun>> {
+    let mut config = match path.as_ref() {
+        None => RgIpfsConfig::testing(),
+        Some(path) => RgIpfsConfig::production(path),
+    };
+
+    config.store_setting.disable_sender_event_emit = disable_sender_emitter;
+
     let chat = match path.as_ref() {
-        Some(path) => {
-            let config = RgIpfsConfig::production(path);
-            Box::new(
-                IpfsMessaging::<Persistent>::new(Some(config), account, filesystem, Some(cache))
-                    .await?,
-            ) as Box<dyn RayGun>
-        }
-        None => {
-            Box::new(IpfsMessaging::<Temporary>::new(None, account, filesystem, Some(cache)).await?)
+        Some(_) => {
+            Box::new(IpfsMessaging::new(Some(config), account, filesystem, Some(cache)).await?)
                 as Box<dyn RayGun>
         }
+        None => Box::new(IpfsMessaging::new(Some(config), account, filesystem, Some(cache)).await?)
+            as Box<dyn RayGun>,
     };
 
     Ok(chat)
@@ -133,15 +195,22 @@ async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
     if fdlimit::raise_fd_limit().is_none() {}
 
-    let file_appender = tracing_appender::rolling::hourly(
-        opt.path.clone().unwrap_or_else(|| PathBuf::from("./")),
-        "warp_rg_ipfs_messenger.log",
-    );
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    tracing_subscriber::fmt()
-        .with_writer(non_blocking)
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    if !opt.stdout_log {
+        let file_appender = tracing_appender::rolling::hourly(
+            opt.path.clone().unwrap_or_else(|| PathBuf::from("./")),
+            "warp_rg_ipfs_messenger.log",
+        );
+        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+        tracing_subscriber::fmt()
+            .with_writer(non_blocking)
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+    }
 
     let cache = cache_setup(opt.path.as_ref().map(|p| p.join("cache")))?;
     let password = if opt.with_key {
@@ -156,27 +225,31 @@ async fn main() -> anyhow::Result<()> {
         cache.clone(),
         Zeroizing::new(password),
         opt.experimental_node,
+        &opt,
     )
     .await?;
 
+    println!("Initializing Constellation");
     let fs = create_fs(new_account.clone(), opt.path.clone()).await?;
 
+    println!("Initializing RayGun");
     let mut chat = create_rg(
         opt.path.clone(),
         new_account.clone(),
         Some(fs.clone()),
         cache,
+        opt.disable_sender_emitter,
     )
     .await?;
 
     println!("Obtaining identity....");
-    let identity = new_account.get_own_identity()?;
+    let identity = new_account.get_own_identity().await?;
     println!(
         "Registered user {}#{}",
         identity.username(),
         identity.short_id()
     );
-    println!("DID: {}", identity.did_key());
+    
     let (mut rl, mut stdout) = Readline::new(format!(
         "{}#{} >>> ",
         identity.username(),
@@ -212,9 +285,10 @@ async fn main() -> anyhow::Result<()> {
     "#;
 
     writeln!(stdout, "{message}")?;
+    writeln!(stdout, "DID: {}", identity.did_key())?;
 
     // loads all conversations into their own task to process events
-    for conversation in chat.list_conversations().await? {
+    for conversation in chat.list_conversations().await.unwrap_or_default() {
         {
             let topic = topic.clone();
             let id = conversation.id();
@@ -303,40 +377,142 @@ async fn main() -> anyhow::Result<()> {
                                     continue
                                 }
                             };
+                            // Note: This is one way to handle it outside of the event stream
+                            if opt.disable_sender_emitter {
+                                let id = match chat.create_conversation(&did).await {
+                                    Ok(id) => id,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error creating conversation: {e}")?;
+                                        continue
+                                    }
+                                };
 
-                            let id = match chat.create_conversation(&did).await {
-                                Ok(id) => id,
-                                Err(e) => {
-                                    writeln!(stdout, "Error creating conversation: {e}")?;
+                                *topic.write() = id.id();
+                                writeln!(stdout, "Set conversation to {}", topic.read())?;
+                                let mut stdout = stdout.clone();
+                                let account = new_account.clone();
+                                let stream = chat.get_conversation_stream(id.id()).await?;
+                                let chat = chat.clone();
+                                let topic = topic.clone();
+
+                                tokio::spawn(async move {
+                                    if let Err(e) = message_event_handle(
+                                        stdout.clone(),
+                                        account.clone(),
+                                        chat.clone(),
+                                        stream,
+                                        topic.clone(),
+                                    ).await {
+                                        writeln!(stdout, ">> Error processing event task: {e}").unwrap();
+                                    }
+                                });
+                            } else if let Err(e) = chat.create_conversation(&did).await {
+                                writeln!(stdout, "Error creating conversation: {e}")?;
+                                continue
+                            }
+                        },
+                        Some("/add-recipient") => {
+                            let did: DID = match cmd_line.next() {
+                                Some(did) => match DID::try_from(did.to_string()) {
+                                    Ok(did) => did,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing DID Key: {e}")?;
+                                        continue
+                                    }
+                                },
+                                None => {
+                                    writeln!(stdout, "/add-recipient <DID>")?;
+                                    continue
+                                }
+                            };
+                            let local_topic = *topic.read();
+                            if let Err(e) = chat.add_recipient(local_topic, &did).await {
+                                writeln!(stdout, "Error adding recipient: {e}")?;
+                                continue
+                            }
+                            writeln!(stdout, "{did} has been added")?;
+
+                        },
+                        Some("/remove-recipient") => {
+                            let did: DID = match cmd_line.next() {
+                                Some(did) => match DID::try_from(did.to_string()) {
+                                    Ok(did) => did,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing DID Key: {e}")?;
+                                        continue
+                                    }
+                                },
+                                None => {
+                                    writeln!(stdout, "/remove-recipient <DID>")?;
+                                    continue
+                                }
+                            };
+                            let local_topic = *topic.read();
+                            if let Err(e) = chat.remove_recipient(local_topic, &did).await {
+                                writeln!(stdout, "Error removing recipient: {e}")?;
+                                continue
+                            }
+                            writeln!(stdout, "{did} has been removed")?;
+
+                        },
+                        Some("/create-group") => {
+
+                            let mut did_keys = vec![];
+
+                            let name = match cmd_line.next() {
+                                Some(name) => name,
+                                None => {
+                                    writeln!(stdout, "/create-group <name> <DID> ...")?;
                                     continue
                                 }
                             };
 
-                            *topic.write() = id.id();
-                            writeln!(stdout, "Set conversation to {}", topic.read())?;
-                            let mut stdout = stdout.clone();
-                            let account = new_account.clone();
-                            let stream = chat.get_conversation_stream(id.id()).await?;
-                            let chat = chat.clone();
-                            let topic = topic.clone();
 
-                            tokio::spawn(async move {
-                                if let Err(e) = message_event_handle(
-                                    stdout.clone(),
-                                    account.clone(),
-                                    chat.clone(),
-                                    stream,
-                                    topic.clone(),
-                                ).await {
-                                    writeln!(stdout, ">> Error processing event task: {e}").unwrap();
-                                }
-                            });
+                            for item in cmd_line.by_ref() {
+                                let Ok(did) = DID::try_from(item.to_string()) else {
+                                    continue;
+                                };
+                                did_keys.push(did);
+                            }
+
+                            if opt.disable_sender_emitter {
+                                let id = match chat.create_group_conversation(Some(name.to_string()), did_keys).await {
+                                    Ok(id) => id,
+                                    Err(e) => {
+                                        writeln!(stdout, "Error creating conversation: {e}")?;
+                                        continue
+                                    }
+                                };
+
+                                *topic.write() = id.id();
+                                writeln!(stdout, "Set conversation to {}", topic.read())?;
+                                let mut stdout = stdout.clone();
+                                let account = new_account.clone();
+                                let stream = chat.get_conversation_stream(id.id()).await?;
+                                let chat = chat.clone();
+                                let topic = topic.clone();
+
+                                tokio::spawn(async move {
+                                    if let Err(e) = message_event_handle(
+                                        stdout.clone(),
+                                        account.clone(),
+                                        chat.clone(),
+                                        stream,
+                                        topic.clone(),
+                                    ).await {
+                                        writeln!(stdout, ">> Error processing event task: {e}").unwrap();
+                                    }
+                                });
+                            } else if let Err(e) = chat.create_group_conversation(Some(name.to_string()), did_keys).await {
+                                    writeln!(stdout, "Error creating conversation: {e}")?;
+                                    continue
+                            }
                         },
                         Some("/remove-conversation") => {
                             let conversation_id = match cmd_line.next() {
                                 Some(id) => id.parse()?,
                                 None => {
-                                    writeln!(stdout, "/edit <conversation-id> <message-id> <message>")?;
+                                    writeln!(stdout, "/remove-conversation <conversation-id>")?;
                                     continue
                                 }
                             };
@@ -358,57 +534,86 @@ async fn main() -> anyhow::Result<()> {
                             *topic.write() = conversation_id;
                             writeln!(stdout, "Conversation is set to {conversation_id}")?;
                         }
+                        Some("/set-conversation-name") => {
+                            let name = match cmd_line.next() {
+                                Some(name) => name,
+                                None => {
+                                    writeln!(stdout, "/set-conversation-name <name>")?;
+                                    continue
+                                }
+                            };
+                            let topic = *topic.read();
+
+                            if let Err(e) = chat.update_conversation_name(topic, name).await {
+                                writeln!(stdout, "Error updating conversation: {e}")?;
+                                continue
+                            }
+                        }
                         Some("/list-conversations") => {
                             let mut table = Table::new();
-                            table.set_header(vec!["ID", "Recipients"]);
+                            table.set_header(vec!["Name", "ID", "Recipients"]);
                             let list = chat.list_conversations().await?;
                             for convo in list.iter() {
                                 let mut recipients = vec![];
                                 for recipient in convo.recipients() {
-                                    if convo.conversation_type() == ConversationType::Direct && recipient == identity.did_key() {
-                                        continue
-                                    }
-                                    let username = get_username(new_account.clone(), recipient.clone()).unwrap_or_else(|_| recipient.to_string());
+                                    let username = get_username(new_account.clone(), recipient.clone()).await.unwrap_or_else(|_| recipient.to_string());
                                     recipients.push(username);
                                 }
-                                table.add_row(vec![convo.id().to_string(), recipients.join("/").to_string()]);
+                                table.add_row(vec![convo.name().unwrap_or_default(), convo.id().to_string(), recipients.join(",").to_string()]);
                             }
-                            writeln!(stdout, "{}", table)?;
+                            writeln!(stdout, "{table}")?;
                         },
                         Some("/list") => {
-                            let mut table = Table::new();
-                            table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
-                            let local_topic = match cmd_line.next() {
-                                Some(id) => match Uuid::from_str(id) {
-                                    Ok(uuid) => uuid,
+
+                            let local_topic = *topic.read();
+                            let mut lower_range = None;
+                            let mut upper_range = None;
+
+                            if let Some(id) = cmd_line.next() {
+                                match id.parse() {
+                                    Ok(lower) => {
+                                        lower_range = Some(lower);
+                                        if let Some(id) = cmd_line.next() {
+                                            match id.parse() {
+                                                Ok(upper) => {
+                                                    upper_range = Some(upper);
+                                                },
+                                                Err(e) => {
+                                                    writeln!(stdout, "Error parsing upper range: {e}")?;
+                                                    continue
+                                                }
+                                            }
+                                        }
+                                    },
                                     Err(e) => {
-                                        writeln!(stdout, "Error parsing ID: {}", e)?;
+                                        writeln!(stdout, "Error parsing lower range: {e}")?;
                                         continue
                                     }
-                                },
-                                None => *topic.read()
+                                }
                             };
 
-                            let opt = match cmd_line.next() {
-                                Some(id) => match id.parse() {
-                                    Ok(last) => MessageOptions::default().set_range(0..last),
-                                    Err(e) => {
-                                        writeln!(stdout, "Error parsing range: {}", e)?;
-                                        continue
-                                    }
-                                },
-                                None => MessageOptions::default()
-                            };
+                            let mut opt = MessageOptions::default();
+                            if let Some(lower) = lower_range {
+                                if let Some(upper) = upper_range {
+                                    opt = opt.set_range(lower..upper);
+                                } else {
+                                    opt = opt.set_range(0..lower);
+                                }
+                            }
 
-                            let messages = match chat.get_messages(local_topic, opt).await {
+                            let mut messages_stream = match chat.get_messages(local_topic, opt.set_messages_type(MessagesType::Stream)).await.and_then(MessageStream::try_from) {
                                 Ok(list) => list,
                                 Err(e) => {
                                     writeln!(stdout, "Error: {e}")?;
                                     continue;
                                 }
                             };
-                            for message in messages.iter() {
-                                let username = get_username(new_account.clone(), message.sender()).unwrap_or_else(|_| message.sender().to_string());
+
+
+                            let mut table = Table::new();
+                            table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
+                            while let Some(message) = messages_stream.next().await {
+                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
                                 let mut emojis = vec![];
                                 for reaction in message.reactions() {
                                     emojis.push(reaction.emoji());
@@ -425,14 +630,190 @@ async fn main() -> anyhow::Result<()> {
                                     &emojis.join(" ")
                                 ]);
                             }
-                            writeln!(stdout, "{}", table)?;
+                            writeln!(stdout, "{table}")?
+
+
+                        },
+                        Some("/list-pages") => {
+
+                            let local_topic = *topic.read();
+                            let mut page_or_amount: Option<usize> = None;
+                            let mut amount_per_page: Option<usize> = page_or_amount.map(|o| if o == 0 { u8::MAX as _} else { o }).or(Some(10));
+
+                            if let Some(id) = cmd_line.next() {
+                                match id.parse() {
+                                    Ok(a_o_p) => {
+                                        page_or_amount = Some(a_o_p);
+                                    },
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing: {e}")?;
+                                        continue
+                                    }
+                                }
+                            };
+
+                            if let Some(id) = cmd_line.next() {
+                                match id.parse() {
+                                    Ok(amount) => {
+                                        amount_per_page = Some(amount);
+                                    },
+                                    Err(e) => {
+                                        writeln!(stdout, "Error parsing: {e}")?;
+                                        continue
+                                    }
+                                }
+                            };
+
+                            let opt = MessageOptions::default().set_messages_type(MessagesType::Pages { page: page_or_amount, amount_per_page} );
+
+                            let pages = match chat.get_messages(local_topic, opt).await {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    writeln!(stdout, "Error: {e}")?;
+                                    continue;
+                                }
+                            };
+
+                            let mut table = Table::new();
+                            table.set_header(vec!["Page", "Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
+                            if let Messages::Page { pages, total } = pages {
+                                for page in pages {
+                                    let page_id = page.id();
+                                    for message in page.messages() {
+                                        let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                        let mut emojis = vec![];
+                                        for reaction in message.reactions() {
+                                            emojis.push(reaction.emoji());
+                                        }
+                                        table.add_row(vec![
+                                            &format!("{}", page_id),
+                                            &message.id().to_string(),
+                                            &message.message_type().to_string(),
+                                            &message.conversation_id().to_string(),
+                                            &message.date().to_string(),
+                                            &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
+                                            &username,
+                                            &message.value().join("\n"),
+                                            &format!("{}", message.pinned()),
+                                            &emojis.join(" ")
+                                        ]);
+                                    }
+                                }
+
+                                writeln!(stdout, "{table}")?;
+                                writeln!(stdout, "Total Pages: {total}")?
+                            }
+                        },
+                        Some("/get-first") => {
+                            let mut table = Table::new();
+                            table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
+                            let local_topic = *topic.read();
+                            let messages = match chat.get_messages(local_topic, MessageOptions::default().set_first_message()).await.and_then(Vec::<Message>::try_from) {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    writeln!(stdout, "Error: {e}")?;
+                                    continue;
+                                }
+                            };
+                            for message in messages.iter() {
+                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                let mut emojis = vec![];
+                                for reaction in message.reactions() {
+                                    emojis.push(reaction.emoji());
+                                }
+                                table.add_row(vec![
+                                    &message.id().to_string(),
+                                    &message.message_type().to_string(),
+                                    &message.conversation_id().to_string(),
+                                    &message.date().to_string(),
+                                    &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
+                                    &username,
+                                    &message.value().join("\n"),
+                                    &format!("{}", message.pinned()),
+                                    &emojis.join(" ")
+                                ]);
+                            }
+                            writeln!(stdout, "{table}")?;
+                        },
+                        Some("/get-last") => {
+                            let mut table = Table::new();
+                            table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
+                            let local_topic = *topic.read();
+
+                            let messages = match chat.get_messages(local_topic, MessageOptions::default().set_last_message()).await.and_then(Vec::<Message>::try_from) {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    writeln!(stdout, "Error: {e}")?;
+                                    continue;
+                                }
+                            };
+                            for message in messages.iter() {
+                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                let mut emojis = vec![];
+                                for reaction in message.reactions() {
+                                    emojis.push(reaction.emoji());
+                                }
+                                table.add_row(vec![
+                                    &message.id().to_string(),
+                                    &message.message_type().to_string(),
+                                    &message.conversation_id().to_string(),
+                                    &message.date().to_string(),
+                                    &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
+                                    &username,
+                                    &message.value().join("\n"),
+                                    &format!("{}", message.pinned()),
+                                    &emojis.join(" ")
+                                ]);
+                            }
+                            writeln!(stdout, "{table}")?;
+                        },
+                        Some("/search") => {
+                            let mut table = Table::new();
+                            table.set_header(vec!["Message ID", "Type", "Conversation ID", "Date", "Modified", "Sender", "Message", "Pinned", "Reaction"]);
+                            let local_topic = *topic.read();
+
+                            let mut keywords = vec![];
+
+                            for item in cmd_line.by_ref() {
+                                keywords.push(item.to_string());
+                            }
+
+                            let keywords = keywords.join(" ").to_string();
+
+                            let mut messages_stream = match chat.get_messages(local_topic, MessageOptions::default().set_keyword(&keywords).set_messages_type(MessagesType::Stream)).await.and_then(MessageStream::try_from) {
+                                Ok(list) => list,
+                                Err(e) => {
+                                    writeln!(stdout, "Error: {e}")?;
+                                    continue;
+                                }
+                            };
+
+                            while let Some(message) = messages_stream.next().await {
+                                let username = get_username(new_account.clone(), message.sender()).await.unwrap_or_else(|_| message.sender().to_string());
+                                let mut emojis = vec![];
+                                for reaction in message.reactions() {
+                                    emojis.push(reaction.emoji());
+                                }
+                                table.add_row(vec![
+                                    &message.id().to_string(),
+                                    &message.message_type().to_string(),
+                                    &message.conversation_id().to_string(),
+                                    &message.date().to_string(),
+                                    &message.modified().map(|d| d.to_string()).unwrap_or_else(|| "N/A".into()),
+                                    &username,
+                                    &message.value().join("\n"),
+                                    &format!("{}", message.pinned()),
+                                    &emojis.join(" ")
+                                ]);
+                            }
+                            writeln!(stdout, "{table}")?;
                         },
                         Some("/edit") => {
                             let message_id = match cmd_line.next() {
                                 Some(id) => match Uuid::from_str(id) {
                                     Ok(uuid) => uuid,
                                     Err(e) => {
-                                        writeln!(stdout, "Error parsing ID: {}", e)?;
+                                        writeln!(stdout, "Error parsing ID: {e}")?;
                                         continue
                                     }
                                 },
@@ -450,8 +831,8 @@ async fn main() -> anyhow::Result<()> {
 
                             let message = vec![messages.join(" ").to_string()];
                             let conversation_id = topic.read().clone();
-                            if let Err(e) = chat.send(conversation_id, Some(message_id), message).await {
-                                writeln!(stdout, "Error: {}", e)?;
+                            if let Err(e) = chat.edit(conversation_id, message_id, message).await {
+                                writeln!(stdout, "Error: {e}")?;
                                 continue
                             }
                             writeln!(stdout, "Message edited")?;
@@ -479,8 +860,8 @@ async fn main() -> anyhow::Result<()> {
                                 let mut stdout = stdout.clone();
                                 async move {
                                     writeln!(stdout, "Sending....")?;
-                                    if let Err(e) = chat.attach(conversation_id, vec![file], message).await {
-                                        writeln!(stdout, "Error: {}", e)?;
+                                    if let Err(e) = chat.attach(conversation_id, None, Default::default(), vec![file], message).await {
+                                        writeln!(stdout, "Error: {e}")?;
                                     } else {
                                         writeln!(stdout, "File sent")?
                                     }
@@ -494,7 +875,7 @@ async fn main() -> anyhow::Result<()> {
                                 Some(id) => match Uuid::from_str(id) {
                                     Ok(uuid) => uuid,
                                     Err(e) => {
-                                        writeln!(stdout, "Error parsing ID: {}", e)?;
+                                        writeln!(stdout, "Error parsing ID: {e}")?;
                                         continue
                                     }
                                 },
@@ -527,7 +908,7 @@ async fn main() -> anyhow::Result<()> {
                             let mut stream = match chat.download(conversation_id, message_id, file, path).await {
                                 Ok(stream) => stream,
                                 Err(e) => {
-                                    writeln!(stdout, "Error: {}", e)?;
+                                    writeln!(stdout, "Error: {e}")?;
                                     continue;
                                 }
                             };
@@ -578,35 +959,23 @@ async fn main() -> anyhow::Result<()> {
                                 Some("add") => ReactionState::Add,
                                 Some("remove") => ReactionState::Remove,
                                 _ => {
-                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    writeln!(stdout, "/react <add | remove> <message-id> <emoji_code>")?;
                                     continue
                                 }
                             };
 
-                            let conversation_id = match cmd_line.next() {
-                                Some(id) => match Uuid::from_str(id) {
-                                    Ok(uuid) => uuid,
-                                    Err(e) => {
-                                        writeln!(stdout, "Error parsing ID: {}", e)?;
-                                        continue
-                                    }
-                                },
-                                None => {
-                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
-                                    continue
-                                }
-                            };
+                            let conversation_id = topic.read().clone();
 
                             let message_id = match cmd_line.next() {
                                 Some(id) => match Uuid::from_str(id) {
                                     Ok(uuid) => uuid,
                                     Err(e) => {
-                                        writeln!(stdout, "Error parsing ID: {}", e)?;
+                                        writeln!(stdout, "Error parsing ID: {e}")?;
                                         continue
                                     }
                                 },
                                 None => {
-                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    writeln!(stdout, "/react <add | remove> <message-id> <emoji_code>")?;
                                     continue
                                 }
                             };
@@ -614,13 +983,13 @@ async fn main() -> anyhow::Result<()> {
                             let code = match cmd_line.next() {
                                 Some(code) => code.to_string(),
                                 None => {
-                                    writeln!(stdout, "/react <add | remove> <conversation-id> <message-id> <emoji_code>")?;
+                                    writeln!(stdout, "/react <add | remove> <message-id> <emoji_code>")?;
                                     continue
                                 }
                             };
 
                             if let Err(e) = chat.react(conversation_id, message_id, state, code).await {
-                                writeln!(stdout, "Error: {}", e)?;
+                                writeln!(stdout, "Error: {e}")?;
                                 continue;
                             }
                             writeln!(stdout, "Reacted")?
@@ -633,7 +1002,7 @@ async fn main() -> anyhow::Result<()> {
                                     match Uuid::from_str(id) {
                                         Ok(uuid) => uuid,
                                         Err(e) => {
-                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            writeln!(stdout, "Error parsing ID: {e}")?;
                                             continue
                                         }
                                     }
@@ -647,7 +1016,7 @@ async fn main() -> anyhow::Result<()> {
                             let status = match chat.message_status(topic, id).await {
                                 Ok(status) => status,
                                 Err(_e) => {
-                                    writeln!(stdout, "Error getting message status: {}", _e)?;
+                                    writeln!(stdout, "Error getting message status: {_e}")?;
                                     continue
                                 }
                             };
@@ -658,24 +1027,33 @@ async fn main() -> anyhow::Result<()> {
                             let topic = topic.read().clone();
                             match cmd_line.next() {
                                 Some("all") => {
-                                   let messages = chat
-                                       .get_messages(topic, MessageOptions::default())
-                                       .await?;
-                                   for message in messages.iter() {
-                                       chat.pin(topic, message.id(), PinState::Pin).await?;
-                                       writeln!(stdout, "Pinned {}", message.id())?;
-                                   }
+                                    tokio::spawn({
+                                        let mut chat = chat.clone();
+                                        let mut stdout = stdout.clone();
+                                        async move {
+                                            let messages = chat
+                                                .get_messages(topic, MessageOptions::default())
+                                                .await.and_then(Vec::<Message>::try_from).unwrap_or_default();
+                                            for message in messages.iter() {
+                                                match chat.pin(topic, message.id(), PinState::Pin).await {
+                                                    Ok(_) => writeln!(stdout, "Pinned {}", message.id()).is_ok(),
+                                                    Err(e) => writeln!(stdout, "Error Pinning {}: {}", message.id(), e).is_ok()
+                                                };
+                                            }
+                                        }
+                                    });
                                 },
                                 Some(id) => {
                                     let id = match Uuid::from_str(id) {
                                         Ok(uuid) => uuid,
                                         Err(e) => {
-                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            writeln!(stdout, "Error parsing ID: {e}")?;
                                             continue
                                         }
                                     };
-                                    chat.pin(topic, id, PinState::Pin).await?;
-                                    writeln!(stdout, "Pinned {}", id)?;
+                                    if let Err(e) = chat.pin(topic, id, PinState::Pin).await {
+                                        writeln!(stdout, "Error pinning message: {e}")?;
+                                    }
                                 },
                                 None => { writeln!(stdout, "/pin <id | all>")? }
                             }
@@ -683,41 +1061,66 @@ async fn main() -> anyhow::Result<()> {
                         Some("/unpin") => {
                             match cmd_line.next() {
                                 Some("all") => {
-                                   let messages = chat
-                                       .get_messages(*topic.read(), MessageOptions::default())
-                                       .await?;
-                                   for message in messages.iter() {
-                                       chat.pin(*topic.read(), message.id(), PinState::Unpin).await?;
-                                       writeln!(stdout, "Unpinned {}", message.id())?;
-                                   }
+                                    tokio::spawn({
+                                        let mut chat = chat.clone();
+                                        let mut stdout = stdout.clone();
+                                        let topic = topic.read().clone();
+                                        async move {
+                                            let messages = chat
+                                                .get_messages(topic, MessageOptions::default())
+                                                .await.and_then(Vec::<Message>::try_from).unwrap_or_default();
+                                            for message in messages.iter() {
+                                                match chat.pin(topic, message.id(), PinState::Unpin).await {
+                                                    Ok(_) => writeln!(stdout, "Unpinned {}", message.id()).is_ok(),
+                                                    Err(e) => writeln!(stdout, "Error Uninning {}: {}", message.id(), e).is_ok()
+                                                };
+                                            }
+                                        }
+                                    });
                                 },
                                 Some(id) => {
                                     let id = match Uuid::from_str(id) {
                                         Ok(uuid) => uuid,
                                         Err(e) => {
-                                            writeln!(stdout, "Error parsing ID: {}", e)?;
+                                            writeln!(stdout, "Error parsing ID: {e}")?;
                                             continue
                                         }
                                     };
                                     chat.pin(*topic.read(), id, PinState::Unpin).await?;
-                                    writeln!(stdout, "Unpinned {}", id)?;
+                                    writeln!(stdout, "Unpinned {id}")?;
                                 },
                                 None => { writeln!(stdout, "/unpin <id | all>")? }
                             }
                         }
+                        Some("/remove-message") => {
+                            let topic = topic.read().clone();
+                            match cmd_line.next() {
+                                Some(id) => {
+                                    let id = match Uuid::from_str(id) {
+                                        Ok(uuid) => uuid,
+                                        Err(e) => {
+                                            writeln!(stdout, "Error parsing ID: {e}")?;
+                                            continue
+                                        }
+                                    };
+                                    if let Err(_e) = chat.delete(topic, Some(id)).await {
+
+                                    } else {
+                                        writeln!(stdout, "Message {id} removed")?;
+                                    }
+                                },
+                                None => { writeln!(stdout, "/remove-message <id>")? }
+                            }
+                        }
+                        Some("/count") => {
+                            let amount = chat.get_message_count(*topic.read()).await?;
+                            writeln!(stdout, "Conversation contains {amount} messages")?;
+                        }
                         _ => {
                             if !line.is_empty() {
-                                // Since using crossterm would not pick up every expected event here, we will just pretend we are typing
-                                if let Err(_e) = chat.send_event(*topic.read(), MessageEvent::Typing).await {
-                                    //We wont error here although an error such as a conversation not found can easily lead
-                                    //to an error
-                                }
-                                if let Err(e) = chat.send(*topic.read(), None, vec![line.to_string()]).await {
-                                    writeln!(stdout, "Error sending message: {}", e)?;
+                                if let Err(e) = chat.send(*topic.read(), vec![line.to_string()]).await {
+                                    writeln!(stdout, "Error sending message: {e}")?;
                                     continue
-                                }
-                                if let Err(_e) = chat.cancel_event(*topic.read(), MessageEvent::Typing).await {
-                                    //ditto
                                 }
                             }
                        }
@@ -726,7 +1129,7 @@ async fn main() -> anyhow::Result<()> {
                 Err(ReadlineError::Interrupted) => break,
                 Err(ReadlineError::Eof) => break,
                 Err(e) => {
-                    writeln!(stdout, "Error: {}", e)?;
+                    writeln!(stdout, "Error: {e}")?;
                 }
             },
         }
@@ -735,9 +1138,10 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn get_username(account: Box<dyn MultiPass>, did: DID) -> anyhow::Result<String> {
+async fn get_username(account: Box<dyn MultiPass>, did: DID) -> anyhow::Result<String> {
     let identity = account
         .get_identity(Identifier::did_key(did))
+        .await
         .and_then(|list| list.get(0).cloned().ok_or(Error::IdentityDoesntExist))?;
     Ok(format!("{}#{}", identity.username(), identity.short_id()))
 }
@@ -749,7 +1153,7 @@ async fn message_event_handle(
     mut stream: MessageEventStream,
     conversation_id: Arc<RwLock<Uuid>>,
 ) -> anyhow::Result<()> {
-    let identity = multipass.get_own_identity()?;
+    let identity = multipass.get_own_identity().await?;
     let topic = conversation_id.clone();
     while let Some(event) = stream.next().await {
         match event {
@@ -764,6 +1168,7 @@ async fn message_event_handle(
                 if *topic.read() == conversation_id {
                     if let Ok(message) = raygun.get_message(conversation_id, message_id).await {
                         let username = get_username(multipass.clone(), message.sender())
+                            .await
                             .unwrap_or_else(|_| message.sender().to_string());
 
                         match message.message_type() {
@@ -837,7 +1242,7 @@ async fn message_event_handle(
                 message_id,
             } => {
                 if *topic.read() == conversation_id {
-                    writeln!(stdout, "> Message {} has been pinned", message_id)?;
+                    writeln!(stdout, "> Message {message_id} has been pinned")?;
                 }
             }
             MessageEventKind::MessageUnpinned {
@@ -845,7 +1250,7 @@ async fn message_event_handle(
                 message_id,
             } => {
                 if *topic.read() == conversation_id {
-                    writeln!(stdout, "> Message {} has been unpinned", message_id)?;
+                    writeln!(stdout, "> Message {message_id} has been unpinned")?;
                 }
             }
             MessageEventKind::MessageEdited {
@@ -853,7 +1258,7 @@ async fn message_event_handle(
                 message_id,
             } => {
                 if *topic.read() == conversation_id {
-                    writeln!(stdout, "> Message {} has been edited", message_id)?;
+                    writeln!(stdout, "> Message {message_id} has been edited")?;
                 }
             }
             MessageEventKind::MessageDeleted {
@@ -861,7 +1266,7 @@ async fn message_event_handle(
                 message_id,
             } => {
                 if *topic.read() == conversation_id {
-                    writeln!(stdout, "> Message {} has been deleted", message_id)?;
+                    writeln!(stdout, "> Message {message_id} has been deleted")?;
                 }
             }
             MessageEventKind::MessageReactionAdded {
@@ -872,11 +1277,11 @@ async fn message_event_handle(
             } => {
                 if *topic.read() == conversation_id {
                     let username = get_username(multipass.clone(), did_key.clone())
+                        .await
                         .unwrap_or_else(|_| did_key.to_string());
                     writeln!(
                         stdout,
-                        "> {} has reacted to {} with {}",
-                        username, message_id, reaction
+                        "> {username} has reacted to {message_id} with {reaction}"
                     )?;
                 }
             }
@@ -888,11 +1293,11 @@ async fn message_event_handle(
             } => {
                 if *topic.read() == conversation_id {
                     let username = get_username(multipass.clone(), did_key.clone())
+                        .await
                         .unwrap_or_else(|_| did_key.to_string());
                     writeln!(
                         stdout,
-                        "> {} has removed reaction {} from {}",
-                        username, reaction, message_id
+                        "> {username} has removed reaction {reaction} from {message_id}"
                     )?;
                 }
             }
@@ -903,10 +1308,11 @@ async fn message_event_handle(
             } => {
                 if *topic.read() == conversation_id {
                     let username = get_username(multipass.clone(), did_key.clone())
+                        .await
                         .unwrap_or_else(|_| did_key.to_string());
                     match event {
                         MessageEvent::Typing => {
-                            writeln!(stdout, ">>> {} is typing", username,)?;
+                            writeln!(stdout, ">>> {username} is typing",)?;
                         }
                     }
                 }
@@ -918,13 +1324,46 @@ async fn message_event_handle(
             } => {
                 if *topic.read() == conversation_id {
                     let username = get_username(multipass.clone(), did_key.clone())
+                        .await
                         .unwrap_or_else(|_| did_key.to_string());
 
                     match event {
                         MessageEvent::Typing => {
-                            writeln!(stdout, ">>> {} is no longer typing", username,)?;
+                            writeln!(stdout, ">>> {username} is no longer typing",)?;
                         }
                     }
+                }
+            }
+            MessageEventKind::ConversationNameUpdated {
+                conversation_id,
+                name,
+            } => {
+                if *topic.read() == conversation_id {
+                    writeln!(stdout, ">>> Conversation was named to {name}")?;
+                }
+            }
+            MessageEventKind::RecipientAdded {
+                conversation_id,
+                recipient,
+            } => {
+                if *topic.read() == conversation_id {
+                    let username = get_username(multipass.clone(), recipient.clone())
+                        .await
+                        .unwrap_or_else(|_| recipient.to_string());
+
+                    writeln!(stdout, ">>> {username} was added to {conversation_id}")?;
+                }
+            }
+            MessageEventKind::RecipientRemoved {
+                conversation_id,
+                recipient,
+            } => {
+                if *topic.read() == conversation_id {
+                    let username = get_username(multipass.clone(), recipient.clone())
+                        .await
+                        .unwrap_or_else(|_| recipient.to_string());
+
+                    writeln!(stdout, ">>> {username} was removed from {conversation_id}")?;
                 }
             }
         }

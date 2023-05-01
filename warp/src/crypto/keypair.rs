@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 use crate::{error::Error, tesseract::Tesseract};
 use bip39::{Language, Mnemonic, MnemonicType, Seed};
 use derive_more::Display;
@@ -45,20 +46,41 @@ pub fn generate_keypair(
     Ok((mnemonic.into_phrase(), did))
 }
 
-pub fn did_from_mnemonic(mnemonic: &str, passphrase: Option<&str>) -> Result<DID, Error> {
+/// Generate DID from mnemonic phrase, extending compatibility
+pub fn did_from_mnemonic_with_chain(
+    mnemonic: &str,
+    passphrase: Option<&str>,
+) -> Result<(DID, [u8; 32]), Error> {
     let mnemonic = Mnemonic::from_phrase(mnemonic, Language::English)?;
     let seed = Seed::new(&mnemonic, passphrase.unwrap_or_default());
     let mut mac = HmacSha512::new_from_slice(ED25519_BIP32_NAME.as_ref()).unwrap();
     mac.update(seed.as_bytes());
     let bytes = mac.finalize().into_bytes();
     let secret = SecretKey::from_bytes(&bytes[..32])?;
-    Ok(secret.into())
+    // Note: This will allow extending to `ed25519-dalek-bip32` for path derivation, with this being the root of the `ExtendedSecretKey` in the following format
+    /*
+       ExtendedSecretKey {
+           depth: 0,
+           child_index: ChildIndex::Normal(0),
+           secret_key,
+           chain_code
+       }
+    */
+    let mut chain_code = [0; 32];
+    chain_code.copy_from_slice(&bytes[32..]);
+    Ok((secret.into(), chain_code))
+}
+
+/// Generate DID from mnemonic phrase
+pub fn did_from_mnemonic(mnemonic: &str, passphrase: Option<&str>) -> Result<DID, Error> {
+    did_from_mnemonic_with_chain(mnemonic, passphrase).map(|(did, _)| did)
 }
 
 pub fn mnemonic_into_tesseract(
     tesseract: &mut Tesseract,
     mnemonic: &str,
     passphrase: Option<&str>,
+    save_mnemonic: bool,
 ) -> Result<(), Error> {
     if !tesseract.is_unlock() {
         return Err(Error::TesseractLocked);
@@ -68,7 +90,7 @@ pub fn mnemonic_into_tesseract(
         return Err(Error::Any(anyhow::anyhow!("Keypair already exist")));
     }
 
-    let did = did_from_mnemonic(mnemonic, passphrase)?;
+    let (did, chain) = did_from_mnemonic_with_chain(mnemonic, passphrase)?;
 
     let bytes = Zeroizing::new(did.as_ref().private_key_bytes());
     let secret_key = SecretKey::from_bytes(&bytes)?;
@@ -84,6 +106,11 @@ pub fn mnemonic_into_tesseract(
 
     tesseract.set("keypair", &encoded)?;
 
+    if save_mnemonic {
+        let encoded_chain = Zeroizing::new(bs58::encode(&chain).into_string());
+        tesseract.set("chain", &encoded_chain)?;
+        tesseract.set("mnemonic", mnemonic)?;
+    }
     Ok(())
 }
 
@@ -128,6 +155,7 @@ pub mod ffi {
     pub unsafe extern "C" fn mnemonic_into_tesseract(
         tesseract: *mut Tesseract,
         phrase: *const c_char,
+        save: bool,
     ) -> FFIResult_Null {
         if tesseract.is_null() {
             return FFIResult_Null::err(Error::from(anyhow::anyhow!("Tesseract cannot be null")));
@@ -139,7 +167,7 @@ pub mod ffi {
 
         let phrase = CStr::from_ptr(phrase).to_string_lossy().to_string();
 
-        super::mnemonic_into_tesseract(&mut *tesseract, &phrase, None).into()
+        super::mnemonic_into_tesseract(&mut *tesseract, &phrase, None, save).into()
     }
 }
 

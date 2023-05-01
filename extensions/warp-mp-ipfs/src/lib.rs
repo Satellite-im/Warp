@@ -2,82 +2,66 @@ pub mod config;
 pub mod store;
 
 use config::MpIpfsConfig;
-use futures::StreamExt;
-use ipfs::libp2p::kad::protocol::DEFAULT_PROTO_NAME;
-use ipfs::libp2p::mplex::MplexConfig;
-use ipfs::libp2p::swarm::ConnectionLimits;
-use ipfs::libp2p::yamux::{WindowUpdateMode, YamuxConfig};
-use ipfs::p2p::{IdentifyConfiguration, TransportConfig};
+use either::Either;
+use futures::channel::mpsc::unbounded;
+use futures::{AsyncReadExt, StreamExt};
+use ipfs::libp2p::kad::KademliaBucketInserts;
+use ipfs::libp2p::swarm::SwarmEvent;
+use ipfs::p2p::{
+    ConnectionLimits, IdentifyConfiguration, PubsubConfig, TransportConfig, UpdateMode,
+};
+use rust_ipfs as ipfs;
 use std::any::Any;
-use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use store::friends::FriendsStore;
 use store::identity::{IdentityStore, LookupBy};
 use tokio::sync::broadcast;
-use tracing::log::{error, info, trace, warn};
+use tokio_util::compat::TokioAsyncReadCompatExt;
+use tracing::debug;
+use tracing::log::{self, error, info, trace, warn};
 use warp::crypto::did_key::Generate;
+use warp::crypto::zeroize::Zeroizing;
 use warp::data::DataType;
-use warp::hooks::Hooks;
-use warp::pocket_dimension::query::QueryBuilder;
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use warp::module::Module;
 use warp::pocket_dimension::PocketDimension;
-use warp::tesseract::Tesseract;
-use warp::{async_block_in_place_uncheck, Extension, SingleHandle};
+use warp::tesseract::{Tesseract, TesseractEvent};
+use warp::{Extension, SingleHandle};
 
-use ipfs::{Ipfs, IpfsOptions, IpfsTypes, Keypair, Protocol, TestTypes, Types, UninitializedIpfs};
+use ipfs::{
+    Ipfs, IpfsOptions, Keypair, Multiaddr, PeerId, Protocol, StoragePath, UninitializedIpfs,
+};
 use warp::crypto::{DIDKey, Ed25519KeyPair, DID};
 use warp::error::Error;
-use warp::multipass::identity::{
-    FriendRequest, Identifier, Identity, IdentityUpdate, Relationship,
-};
+use warp::multipass::identity::{Identifier, Identity, IdentityUpdate, Relationship};
 use warp::multipass::{
     identity, Friends, FriendsEvent, IdentityInformation, MultiPass, MultiPassEventKind,
     MultiPassEventStream,
 };
 
 use crate::config::Bootstrap;
-use crate::store::document::DocumentType;
+use crate::store::discovery::Discovery;
 
-pub type Temporary = TestTypes;
-pub type Persistent = Types;
-
-pub struct IpfsIdentity<T: IpfsTypes> {
+#[derive(Clone)]
+pub struct IpfsIdentity {
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
     config: MpIpfsConfig,
-    hooks: Option<Hooks>,
-    ipfs: Arc<RwLock<Option<Ipfs<T>>>>,
+    ipfs: Arc<RwLock<Option<Ipfs>>>,
     tesseract: Tesseract,
-    friend_store: Arc<RwLock<Option<FriendsStore<T>>>>,
-    identity_store: Arc<RwLock<Option<IdentityStore<T>>>>,
+    friend_store: Arc<RwLock<Option<FriendsStore>>>,
+    identity_store: Arc<RwLock<Option<IdentityStore>>>,
     initialized: Arc<AtomicBool>,
     tx: broadcast::Sender<MultiPassEventKind>,
-}
-
-impl<T: IpfsTypes> Clone for IpfsIdentity<T> {
-    fn clone(&self) -> Self {
-        Self {
-            cache: self.cache.clone(),
-            config: self.config.clone(),
-            hooks: self.hooks.clone(),
-            ipfs: self.ipfs.clone(),
-            tesseract: self.tesseract.clone(),
-            friend_store: self.friend_store.clone(),
-            identity_store: self.identity_store.clone(),
-            initialized: self.initialized.clone(),
-            tx: self.tx.clone(),
-        }
-    }
 }
 
 pub async fn ipfs_identity_persistent(
     config: MpIpfsConfig,
     tesseract: Tesseract,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-) -> anyhow::Result<IpfsIdentity<Persistent>> {
+) -> anyhow::Result<IpfsIdentity> {
     if config.path.is_none() {
         anyhow::bail!("Path is required for identity to be persistent")
     }
@@ -87,7 +71,7 @@ pub async fn ipfs_identity_temporary(
     config: Option<MpIpfsConfig>,
     tesseract: Tesseract,
     cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-) -> anyhow::Result<IpfsIdentity<Temporary>> {
+) -> anyhow::Result<IpfsIdentity> {
     if let Some(config) = &config {
         if config.path.is_some() {
             anyhow::bail!("Path cannot be set")
@@ -96,20 +80,18 @@ pub async fn ipfs_identity_temporary(
     IpfsIdentity::new(config.unwrap_or_default(), tesseract, cache).await
 }
 
-impl<T: IpfsTypes> IpfsIdentity<T> {
+impl IpfsIdentity {
     pub async fn new(
         config: MpIpfsConfig,
         tesseract: Tesseract,
         cache: Option<Arc<RwLock<Box<dyn PocketDimension>>>>,
-    ) -> anyhow::Result<IpfsIdentity<T>> {
+    ) -> anyhow::Result<IpfsIdentity> {
         let (tx, _) = broadcast::channel(1024);
         trace!("Initializing Multipass");
-        let hooks = None;
 
         let mut identity = IpfsIdentity {
             cache,
             config,
-            hooks,
             tesseract,
             ipfs: Default::default(),
             friend_store: Default::default(),
@@ -121,8 +103,11 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         if !identity.tesseract.is_unlock() {
             let mut inner = identity.clone();
             tokio::spawn(async move {
-                while !inner.tesseract.is_unlock() {
-                    tokio::time::sleep(Duration::from_nanos(50)).await
+                let mut stream = inner.tesseract.subscribe();
+                while let Some(event) = stream.next().await {
+                    if matches!(event, TesseractEvent::Unlocked) {
+                        break;
+                    }
                 }
                 if let Err(_e) = inner.initialize_store(false).await {}
             });
@@ -145,10 +130,11 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         let keypair = match (init, tesseract.exist("keypair")) {
             (true, false) => {
                 info!("Keypair doesnt exist. Generating keypair....");
-                if let Keypair::Ed25519(kp) = Keypair::generate_ed25519() {
-                    let encoded_kp = bs58::encode(&kp.encode()).into_string();
+                if let Ok(kp) = Keypair::generate_ed25519().try_into_ed25519() {
+                    let encoded_kp = bs58::encode(&kp.to_bytes()).into_string();
                     tesseract.set("keypair", &encoded_kp)?;
-                    Keypair::Ed25519(kp)
+                    let bytes = Zeroizing::new(kp.secret().as_ref().to_vec());
+                    Keypair::ed25519_from_bytes(bytes)?
                 } else {
                     error!("Unreachable. Report this as a bug");
                     anyhow::bail!("Unreachable")
@@ -157,14 +143,11 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
             (false, true) | (true, true) => {
                 info!("Fetching keypair from tesseract");
                 let keypair = tesseract.retrieve("keypair")?;
-                let kp = bs58::decode(keypair).into_vec()?;
+                let kp = Zeroizing::new(bs58::decode(keypair).into_vec()?);
                 let id_kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
-                let secret = ipfs::libp2p::identity::ed25519::SecretKey::from_bytes(
-                    id_kp.secret.to_bytes(),
-                )?;
-                Keypair::Ed25519(secret.into())
+                Keypair::ed25519_from_bytes(id_kp.secret.to_bytes())?
             }
-            _ => anyhow::bail!("Unable to initalize store"),
+            _ => anyhow::bail!("Unable to initialize store"),
         };
 
         info!(
@@ -220,117 +203,234 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         }
 
         let mut opts = IpfsOptions {
-            keypair,
             bootstrap: config.bootstrap.address(),
             mdns: config.ipfs_setting.mdns.enable,
             listening_addrs: config.listen_on.clone(),
-            dcutr: config.ipfs_setting.relay_client.dcutr,
+            dcutr: config.ipfs_setting.relay_client.enable,
             relay: config.ipfs_setting.relay_client.enable,
             relay_server: config.ipfs_setting.relay_server.enable,
             keep_alive: true,
-            identify_configuration: Some(IdentifyConfiguration {
-                cache: 100,
-                push_update: true,
-                ..Default::default()
+            identify_configuration: Some({
+                let mut idconfig = IdentifyConfiguration {
+                    cache: 100,
+                    push_update: true,
+                    protocol_version: "/satellite/warp/0.1".into(),
+                    initial_delay: Duration::from_secs(0),
+                    ..Default::default()
+                };
+                if let Some(agent) = config.ipfs_setting.agent_version.as_ref() {
+                    idconfig.agent_version = agent.clone();
+                }
+                idconfig
             }),
-            kad_configuration: Some({
+            kad_configuration: Some(Either::Right({
                 let mut conf = ipfs::libp2p::kad::KademliaConfig::default();
-                conf.disjoint_query_paths(true);
                 conf.set_query_timeout(std::time::Duration::from_secs(60));
-                conf.set_protocol_names(vec![
-                    Cow::Borrowed(DEFAULT_PROTO_NAME),
-                    Cow::Borrowed(b"/warp/sync/0.0.1"),
-                ]);
-
+                conf.set_publication_interval(Some(Duration::from_secs(30 * 60)));
+                conf.set_provider_record_ttl(Some(Duration::from_secs(60 * 60)));
+                conf.set_kbucket_inserts(KademliaBucketInserts::Manual);
                 conf
-            }),
+            })),
             swarm_configuration: Some(swarm_configuration),
             transport_configuration: Some(TransportConfig {
-                yamux_config: {
-                    let mut config = YamuxConfig::default();
-                    config.set_max_buffer_size(16 * 1024 * 1024);
-                    config.set_receive_window_size(16 * 1024 * 1024);
-                    config.set_window_update_mode(WindowUpdateMode::on_receive());
-                    config
-                },
-                mplex_config: {
-                    let mut config = MplexConfig::default();
-                    config.set_max_buffer_size(usize::MAX);
-                    config
-                },
+                yamux_update_mode: UpdateMode::Read,
+                mplex_max_buffer_size: usize::MAX / 2,
+                enable_quic: false,
                 ..Default::default()
             }),
+            pubsub_config: Some(PubsubConfig {
+                max_transmit_size: config.ipfs_setting.pubsub.max_transmit_size,
+                ..Default::default()
+            }),
+            port_mapping: config.ipfs_setting.portmapping,
             ..Default::default()
         };
 
-        trace!("Ipfs Opt: {opts:?}");
-
-        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
+        if let Some(path) = self.config.path.as_ref() {
             info!("Instance will be persistent");
-            // Create directory if it doesnt exist
-            let path = self
-                .config
-                .path
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("\"path\" must be set"))?;
-
             info!("Path set: {}", path.display());
-            opts.ipfs_path = path.clone();
-            if !opts.ipfs_path.exists() {
+
+            if !path.is_dir() {
                 warn!("Path doesnt exist... creating");
-                tokio::fs::create_dir(path).await?;
+                tokio::fs::create_dir_all(path).await?;
             }
+            opts.ipfs_path = StoragePath::Disk(path.clone());
         }
 
-        info!("Starting ipfs");
-        let (ipfs, fut) = UninitializedIpfs::<T>::new(opts).start().await?;
+        let (nat_channel_tx, mut nat_channel_rx) = unbounded();
 
-        info!("passing future into tokio task");
-        tokio::spawn(fut);
+        info!("Starting ipfs");
+        let ipfs = UninitializedIpfs::with_opt(opts)
+            .set_keypair(keypair)
+            // We check the events from the swarm for autonat
+            // So we can determine our nat status when it does change
+            .swarm_events({
+                move |_, event| {
+                    //Note: This will be used
+                    if let SwarmEvent::Behaviour(ipfs::BehaviourEvent::Autonat(
+                        ipfs::libp2p::autonat::Event::StatusChanged { new, .. },
+                    )) = event
+                    {
+                        match new {
+                            ipfs::libp2p::autonat::NatStatus::Public(_) => {
+                                let _ = nat_channel_tx.unbounded_send(true);
+                            }
+                            ipfs::libp2p::autonat::NatStatus::Private
+                            | ipfs::libp2p::autonat::NatStatus::Unknown => {
+                                let _ = nat_channel_tx.unbounded_send(false);
+                            }
+                        }
+                    }
+                }
+            })
+            .start()
+            .await?;
+
+        if config.ipfs_setting.bootstrap && !empty_bootstrap {
+            //TODO: determine if bootstrap should run in intervals
+            if let Err(e) = ipfs.bootstrap().await {
+                error!("Error bootstrapping: {e}");
+            }
+        }
 
         tokio::spawn({
             let ipfs = ipfs.clone();
             let config = config.clone();
-            async move {
-                if config.ipfs_setting.relay_client.enable {
-                    info!("Relay client enabled. Loading relays");
-                    for addr in config.bootstrap.address() {
-                        if let Err(e) = ipfs.swarm_listen_on(addr.with(Protocol::P2pCircuit)).await
-                        {
-                            info!("Error listening on relay: {e}");
-                            continue;
-                        }
-                        tokio::time::sleep(Duration::from_millis(400)).await;
-                        if config.ipfs_setting.relay_client.single {
-                            break;
-                        }
-                    }
-
-                    //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
-                    //      anything on this end
-                    for addr in config.ipfs_setting.relay_client.relay_address.iter() {
-                        if let Err(e) = ipfs.dial(addr.clone()).await {
-                            error!("Error dialing relay {}: {e}", addr.clone());
-                        }
-
-                        if let Err(e) = ipfs
-                            .swarm_listen_on(addr.clone().with(Protocol::P2pCircuit))
-                            .await
-                        {
-                            info!("Error listening on relay: {e}");
-                            continue;
-                        }
-                        tokio::time::sleep(Duration::from_millis(400)).await;
-                        if config.ipfs_setting.relay_client.single {
-                            break;
-                        }
-                    }
+            let peer_id_extract = |addr: &Multiaddr| -> Option<PeerId> {
+                let mut addr = addr.clone();
+                match addr.pop() {
+                    Some(Protocol::P2p(hash)) => match PeerId::from_multihash(hash) {
+                        Ok(id) => Some(id),
+                        _ => None,
+                    },
+                    _ => None,
                 }
-                if config.ipfs_setting.bootstrap && !empty_bootstrap {
-                    //TODO: run bootstrap in intervals
-                    if let Err(e) = ipfs.direct_bootstrap().await {
-                        error!("Error bootstrapping: {e}");
+            };
+
+            async move {
+                let start_relay_client = || {
+                    let ipfs = ipfs.clone();
+                    let config = config.clone();
+                    async move {
+                        info!("Relay client enabled. Loading relays");
+                        let mut relayed = vec![];
+
+                        //TODO: Replace this with (soon to be implemented) relay functions so we dont have to assume
+                        //      anything on this end
+                        for addr in config.ipfs_setting.relay_client.relay_address.clone() {
+                            let mut connected = false;
+                            if let Some(peer_id) = peer_id_extract(&addr) {
+                                connected = ipfs.is_connected(peer_id).await.unwrap_or_default();
+                            }
+
+                            if !connected {
+                                if let Err(e) = ipfs.connect(addr.clone()).await {
+                                    error!("Error dialing relay {}: {e}", addr.clone());
+                                    continue;
+                                }
+                            }
+
+                            match ipfs
+                                .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
+                                .await
+                            {
+                                Ok(addr) => {
+                                    info!("Listening on {}", addr);
+                                    relayed.push(addr);
+                                    break;
+                                }
+                                Err(e) => {
+                                    error!(
+                                        "Error listening on relay {}: {e}",
+                                        addr.clone().with(Protocol::P2pCircuit)
+                                    );
+                                    continue;
+                                }
+                            };
+                        }
+
+                        if relayed.is_empty() {
+                            // If vec is empty, fallback to bootstrap, assuming they support relay
+                            // Note: We will assume that the bootstrap nodes are connected if we are able to successfully bootstrap
+                            for addr in config.bootstrap.address() {
+                                match ipfs
+                                    .add_listening_address(addr.clone().with(Protocol::P2pCircuit))
+                                    .await
+                                {
+                                    Ok(addr) => {
+                                        debug!("Listening on {}", addr);
+                                        relayed.push(addr);
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        info!("Error listening on relay via bootstrap: {e}");
+                                        continue;
+                                    }
+                                };
+                            }
+                        }
+
+                        if relayed.is_empty() {
+                            log::warn!("No relay connection is available");
+                        }
+
+                        relayed
                     }
+                };
+
+                let stop_relay_client = |relays: Vec<Multiaddr>| {
+                    let ipfs = ipfs.clone();
+                    async move {
+                        info!("Disconnecting from relays");
+                        for addr in relays {
+                            if let Err(e) = ipfs.remove_listening_address(addr).await {
+                                info!("Error removing relay: {e}");
+                                continue;
+                            }
+                        }
+                    }
+                };
+
+                match (
+                    config.ipfs_setting.portmapping,
+                    config.ipfs_setting.relay_client.enable,
+                ) {
+                    (true, true) => {
+                        //Start using relays right away rather than waiting for nat status
+                        let mut addrs = start_relay_client().await;
+                        let mut using_relay = true;
+                        while let Some(public) = nat_channel_rx.next().await {
+                            match public {
+                                true => {
+                                    if using_relay {
+                                        //Due to UPnP being enabled with a successful portforwarding, we would disconnect from relays
+                                        log::trace!(
+                                            "Disabling relays due to being publicly accessible."
+                                        );
+                                        let addrs = addrs.drain(..).collect::<Vec<_>>();
+                                        stop_relay_client(addrs).await;
+                                        using_relay = false;
+                                    }
+                                }
+                                false => {
+                                    if !using_relay {
+                                        //If, for whatever reason, we are no longer publicly accessible due to UPnP (eg router or firewall changed)
+                                        //we would attempt to connect to the relays
+                                        log::trace!(
+                                            "No longer publicly accessible. Switching to relays"
+                                        );
+                                        addrs = start_relay_client().await;
+                                        using_relay = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    (false, true) => {
+                        // We dont need the addresses of the circuit relays
+                        start_relay_client().await;
+                    }
+                    (true, false) | (false, false) => {}
                 }
             }
         });
@@ -344,16 +444,21 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
                 .collect()
         });
 
+        let discovery = Discovery::new(ipfs.clone(), config.store_setting.discovery.clone());
+
         let identity_store = IdentityStore::new(
             ipfs.clone(),
             config.path.clone(),
             tesseract.clone(),
-            config.store_setting.broadcast_interval,
+            config.store_setting.auto_push,
             self.tx.clone(),
             (
-                config.store_setting.discovery,
+                discovery.clone(),
                 relays,
                 config.store_setting.override_ipld,
+                config.store_setting.share_platform,
+                config.store_setting.update_events,
+                config.store_setting.disable_images,
             ),
         )
         .await?;
@@ -362,13 +467,15 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         let friend_store = FriendsStore::new(
             ipfs.clone(),
             identity_store.clone(),
-            config.path,
+            discovery,
+            config.clone(),
             tesseract.clone(),
-            config.store_setting.broadcast_interval,
-            (self.tx.clone(), config.store_setting.override_ipld),
+            self.tx.clone(),
         )
         .await?;
         info!("friends store initialized");
+
+        identity_store.set_friend_store(friend_store.clone()).await;
 
         *self.identity_store.write() = Some(identity_store);
         *self.friend_store.write() = Some(friend_store);
@@ -379,21 +486,36 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         Ok(())
     }
 
-    pub fn friend_store(&self) -> Result<FriendsStore<T>, Error> {
+    pub async fn friend_store(&self) -> Result<FriendsStore, Error> {
+        self.identity_store(true).await?;
         self.friend_store
             .read()
             .clone()
             .ok_or(Error::MultiPassExtensionUnavailable)
     }
 
-    pub fn identity_store(&self) -> Result<IdentityStore<T>, Error> {
+    pub async fn identity_store(&self, created: bool) -> Result<IdentityStore, Error> {
+        let store = self.identity_store_sync()?;
+        if created && !store.local_id_created().await {
+            return Err(Error::IdentityNotCreated);
+        }
+        Ok(store)
+    }
+
+    pub fn identity_store_sync(&self) -> Result<IdentityStore, Error> {
+        if !self.tesseract.is_unlock() {
+            return Err(Error::TesseractLocked);
+        }
+        if !self.tesseract.exist("keypair") {
+            return Err(Error::IdentityNotCreated);
+        }
         self.identity_store
             .read()
             .clone()
             .ok_or(Error::MultiPassExtensionUnavailable)
     }
 
-    pub fn ipfs(&self) -> Result<Ipfs<T>, Error> {
+    pub fn ipfs(&self) -> Result<Ipfs, Error> {
         self.ipfs
             .read()
             .clone()
@@ -420,12 +542,6 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         Ok(inner)
     }
 
-    pub fn get_hooks(&self) -> anyhow::Result<&Hooks> {
-        let hooks = self.hooks.as_ref().ok_or(Error::Other)?;
-
-        Ok(hooks)
-    }
-
     async fn is_store_initialized(&self) -> bool {
         if !self.initialized.load(Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -435,9 +551,14 @@ impl<T: IpfsTypes> IpfsIdentity<T> {
         }
         true
     }
+
+    pub(crate) async fn is_blocked_by(&self, pubkey: &DID) -> Result<bool, Error> {
+        let friends = self.friend_store().await?;
+        friends.is_blocked_by(pubkey).await
+    }
 }
 
-impl<T: IpfsTypes> Extension for IpfsIdentity<T> {
+impl Extension for IpfsIdentity {
     fn id(&self) -> String {
         "warp-mp-ipfs".to_string()
     }
@@ -450,390 +571,445 @@ impl<T: IpfsTypes> Extension for IpfsIdentity<T> {
     }
 }
 
-impl<T: IpfsTypes> SingleHandle for IpfsIdentity<T> {
+impl SingleHandle for IpfsIdentity {
     fn handle(&self) -> Result<Box<dyn Any>, Error> {
         self.ipfs().map(|ipfs| Box::new(ipfs) as Box<dyn Any>)
     }
 }
 
-impl<T: IpfsTypes> MultiPass for IpfsIdentity<T> {
-    fn create_identity(
+#[async_trait::async_trait]
+impl MultiPass for IpfsIdentity {
+    async fn create_identity(
         &mut self,
         username: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<DID, Error> {
-        async_block_in_place_uncheck(async {
-            info!(
-                "create_identity with username: {username:?} and containing passphrase: {}",
-                passphrase.is_some()
-            );
+        info!(
+            "create_identity with username: {username:?} and containing passphrase: {}",
+            passphrase.is_some()
+        );
 
-            if self.is_store_initialized().await {
-                info!("Store is initialized with existing identity");
-                return Err(Error::IdentityExist);
+        if self.is_store_initialized().await {
+            info!("Store is initialized with existing identity");
+            return Err(Error::IdentityExist);
+        }
+
+        if let Some(u) = username.map(|u| u.trim()) {
+            let username_len = u.len();
+
+            if !(4..=64).contains(&username_len) {
+                return Err(Error::InvalidLength {
+                    context: "username".into(),
+                    current: username_len,
+                    minimum: Some(4),
+                    maximum: Some(64),
+                });
             }
+        }
 
-            if let Some(u) = username.map(|u| u.trim()) {
-                let username_len = u.len();
+        if let Some(phrase) = passphrase {
+            info!("Passphrase exist");
+            let mut tesseract = self.tesseract.clone();
+            if !tesseract.exist("keypair") {
+                warn!("Loading keypair generated from mnemonic phrase into tesseract");
+                warp::crypto::keypair::mnemonic_into_tesseract(
+                    &mut tesseract,
+                    phrase,
+                    None,
+                    self.config.save_phrase,
+                )?;
+            }
+        }
 
-                if !(4..=64).contains(&username_len) {
+        info!("Initializing stores");
+        self.initialize_store(true).await?;
+        info!("Stores initialized. Creating identity");
+        let identity = self
+            .identity_store(false)
+            .await?
+            .create_identity(username)
+            .await?;
+        info!("Identity with {} has been created", identity.did_key());
+
+        if let Ok(mut cache) = self.get_cache_mut() {
+            let object = Sata::default().encode(
+                warp::sata::libipld::IpldCodec::DagCbor,
+                warp::sata::Kind::Reference,
+                identity.clone(),
+            )?;
+            cache.add_data(DataType::from(Module::Accounts), &object)?;
+        }
+        Ok(identity.did_key())
+    }
+
+    async fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
+        let store = self.identity_store(true).await?;
+
+        let idents = match id {
+            Identifier::DID(pk) => store.lookup(LookupBy::DidKey(pk)).await,
+            Identifier::Username(username) => store.lookup(LookupBy::Username(username)).await,
+            Identifier::DIDList(list) => store.lookup(LookupBy::DidKeys(list)).await,
+            Identifier::Own => return store.own_identity(true).await.map(|i| vec![i]),
+        }?;
+
+        Ok(idents)
+    }
+
+    async fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
+        let mut store = self.identity_store(true).await?;
+        let mut identity = store.own_identity_document().await?;
+
+        let mut old_cid = None;
+        match option {
+            IdentityUpdate::Username(username) => {
+                let len = username.chars().count();
+                if !(4..=64).contains(&len) {
                     return Err(Error::InvalidLength {
                         context: "username".into(),
-                        current: username_len,
+                        current: len,
                         minimum: Some(4),
                         maximum: Some(64),
                     });
                 }
-            }
 
-            if let Some(phrase) = passphrase {
-                info!("Passphrase exist");
-                let mut tesseract = self.tesseract.clone();
-                if !tesseract.exist("keypair") {
-                    warn!("Loading keypair generated from mnemonic phrase into tesseract");
-                    warp::crypto::keypair::mnemonic_into_tesseract(&mut tesseract, phrase, None)?;
+                identity.username = username;
+                store.identity_update(identity.clone()).await?;
+            }
+            IdentityUpdate::Picture(data) => {
+                let len = data.len();
+                if len == 0 || len > 2 * 1024 * 1024 {
+                    return Err(Error::InvalidLength {
+                        context: "profile picture".into(),
+                        current: len,
+                        minimum: Some(1),
+                        maximum: Some(2 * 1024 * 1024),
+                    });
                 }
-            }
+                let cid = store
+                    .store_photo(
+                        futures::stream::iter(Ok::<_, std::io::Error>(Ok(serde_json::to_vec(
+                            &data,
+                        )?)))
+                        .boxed(),
+                        Some(2 * 1024 * 1024),
+                    )
+                    .await?;
 
-            info!("Initializing stores");
-            self.initialize_store(true).await?;
-            info!("Stores initialized. Creating identity");
-            let identity = self.identity_store()?.create_identity(username).await?;
-            info!("Identity with {} has been created", identity.did_key());
+                if let Some(picture_cid) = identity.profile_picture {
+                    if picture_cid == cid {
+                        return Ok(());
+                    }
 
-            if let Ok(mut cache) = self.get_cache_mut() {
-                let object = Sata::default().encode(
-                    warp::sata::libipld::IpldCodec::DagCbor,
-                    warp::sata::Kind::Reference,
-                    identity.clone(),
-                )?;
-                cache.add_data(DataType::from(Module::Accounts), &object)?;
-            }
-            Ok(identity.did_key())
-        })
-    }
+                    if let Some(banner_cid) = identity.profile_banner {
+                        if picture_cid != banner_cid {
+                            old_cid = Some(picture_cid);
+                        }
+                    }
+                }
 
-    fn get_identity(&self, id: Identifier) -> Result<Vec<Identity>, Error> {
-        async_block_in_place_uncheck(async {
-            if !self.is_store_initialized().await {
-                error!("Store is not initialized. Either tesseract is not unlocked or an identity has not been created");
-                return Err(Error::MultiPassExtensionUnavailable);
+                identity.profile_picture = Some(cid);
+                store.identity_update(identity).await?;
             }
-            let store = self.identity_store()?;
-            let idents = match id.get_inner() {
-                (Some(pk), None, false) => {
-                    if let Ok(cache) = self.get_cache() {
-                        let mut query = QueryBuilder::default();
-                        query.r#where("did_key", &pk)?;
-                        if let Ok(list) =
-                            cache.get_data(DataType::from(Module::Accounts), Some(&query))
-                        {
-                            if !list.is_empty() {
-                                let mut items = vec![];
-                                for object in list {
-                                    if let Ok(ident) =
-                                        object.decode::<Identity>().map_err(Error::from)
-                                    {
-                                        items.push(ident);
-                                    }
-                                }
-                                return Ok(items);
+            IdentityUpdate::PicturePath(path) => {
+                if !path.is_file() {
+                    return Err(Error::IoError(std::io::Error::from(
+                        std::io::ErrorKind::NotFound,
+                    )));
+                }
+
+                let file = tokio::fs::File::open(path).await?;
+
+                let metadata = file.metadata().await?;
+
+                let len = metadata.len() as _;
+
+                if len == 0 || len > 2 * 1024 * 1024 {
+                    return Err(Error::InvalidLength {
+                        context: "profile picture".into(),
+                        current: len,
+                        minimum: Some(1),
+                        maximum: Some(2 * 1024 * 1024),
+                    });
+                }
+
+                let stream = async_stream::stream! {
+                    let mut reader = file.compat();
+                    let mut buffer = vec![0u8; 512];
+                    loop {
+                        match reader.read(&mut buffer).await {
+                            Ok(512) => yield Ok(buffer.clone()),
+                            Ok(_n) => {
+                                yield Ok(buffer.clone());
+                                break;
+                            },
+                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                            Err(e) => {
+                                yield Err(e);
+                                break;
                             }
                         }
                     }
-                    store.lookup(LookupBy::DidKey(pk)).await
+                };
+
+                let cid = store
+                    .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
+                    .await?;
+
+                if let Some(picture_cid) = identity.profile_picture {
+                    if picture_cid == cid {
+                        return Ok(());
+                    }
+
+                    if let Some(banner_cid) = identity.profile_banner {
+                        if picture_cid != banner_cid {
+                            old_cid = Some(picture_cid);
+                        }
+                    }
                 }
-                (None, Some(username), false) => {
-                    if let Ok(cache) = self.get_cache() {
-                        let mut query = QueryBuilder::default();
-                        query.r#where("username", &username)?;
-                        if let Ok(list) =
-                            cache.get_data(DataType::from(Module::Accounts), Some(&query))
-                        {
-                            if !list.is_empty() {
-                                let mut items = vec![];
-                                for object in list {
-                                    if let Ok(ident) =
-                                        object.decode::<Identity>().map_err(Error::from)
-                                    {
-                                        items.push(ident);
-                                    }
-                                }
-                                return Ok(items);
+
+                identity.profile_picture = Some(cid);
+                store.identity_update(identity).await?;
+            }
+            IdentityUpdate::ClearPicture => {
+                let document = identity.profile_picture.take();
+                if let Some(cid) = document {
+                    old_cid = Some(cid);
+                }
+                store.identity_update(identity).await?;
+            }
+            IdentityUpdate::Banner(data) => {
+                let len = data.len();
+                if len == 0 || len > 2 * 1024 * 1024 {
+                    return Err(Error::InvalidLength {
+                        context: "profile banner".into(),
+                        current: len,
+                        minimum: Some(1),
+                        maximum: Some(2 * 1024 * 1024),
+                    });
+                }
+
+                let cid = store
+                    .store_photo(
+                        futures::stream::iter(Ok::<_, std::io::Error>(Ok(serde_json::to_vec(
+                            &data,
+                        )?)))
+                        .boxed(),
+                        Some(2 * 1024 * 1024),
+                    )
+                    .await?;
+
+                if let Some(banner_cid) = identity.profile_banner {
+                    if banner_cid == cid {
+                        return Ok(());
+                    }
+
+                    if let Some(picture_cid) = identity.profile_picture {
+                        if picture_cid != banner_cid {
+                            old_cid = Some(banner_cid);
+                        }
+                    }
+                }
+
+                identity.profile_banner = Some(cid);
+                store.identity_update(identity).await?;
+            }
+            IdentityUpdate::BannerPath(path) => {
+                if !path.is_file() {
+                    return Err(Error::IoError(std::io::Error::from(
+                        std::io::ErrorKind::NotFound,
+                    )));
+                }
+
+                let file = tokio::fs::File::open(path).await?;
+
+                let metadata = file.metadata().await?;
+
+                let len = metadata.len() as _;
+
+                if len == 0 || len > 2 * 1024 * 1024 {
+                    return Err(Error::InvalidLength {
+                        context: "profile banner".into(),
+                        current: len,
+                        minimum: Some(1),
+                        maximum: Some(2 * 1024 * 1024),
+                    });
+                }
+
+                let stream = async_stream::stream! {
+                    let mut reader = file.compat();
+                    let mut buffer = vec![0u8; 512];
+                    loop {
+                        match reader.read(&mut buffer).await {
+                            Ok(512) => yield Ok(buffer.clone()),
+                            Ok(_n) => {
+                                yield Ok(buffer.clone());
+                                break;
+                            },
+                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                            Err(e) => {
+                                yield Err(e);
+                                break;
                             }
                         }
                     }
-                    store.lookup(LookupBy::Username(username)).await
-                }
-                (None, None, true) => return store.own_identity().await.map(|i| vec![i]),
-                _ => Err(Error::InvalidIdentifierCondition),
-            }?;
-            trace!("Found {} identities", idents.len());
-            for ident in &idents {
-                if let Ok(mut cache) = self.get_cache_mut() {
-                    let mut query = QueryBuilder::default();
-                    query.r#where("did_key", &ident.did_key())?;
-                    if cache
-                        .has_data(DataType::from(Module::Accounts), &query)
-                        .is_err()
-                    {
-                        let object = Sata::default().encode(
-                            warp::sata::libipld::IpldCodec::DagJson,
-                            warp::sata::Kind::Reference,
-                            ident.clone(),
-                        )?;
-                        cache.add_data(DataType::from(Module::Accounts), &object)?;
+                };
+
+                let cid = store
+                    .store_photo(stream.boxed(), Some(2 * 1024 * 1024))
+                    .await?;
+
+                if let Some(banner_cid) = identity.profile_banner {
+                    if banner_cid == cid {
+                        return Ok(());
+                    }
+
+                    if let Some(picture_cid) = identity.profile_picture {
+                        if picture_cid != banner_cid {
+                            old_cid = Some(banner_cid);
+                        }
                     }
                 }
+
+                identity.profile_banner = Some(cid);
+                store.identity_update(identity).await?;
             }
-
-            Ok(idents)
-        })
-    }
-
-    fn update_identity(&mut self, option: IdentityUpdate) -> Result<(), Error> {
-        async_block_in_place_uncheck(async {
-            let mut store = self.identity_store()?;
-            let mut identity = self.get_own_identity()?;
-            let old_identity = identity.clone();
-            match (
-                option.username(),
-                option.graphics_picture(),
-                option.graphics_banner(),
-                option.status_message(),
-            ) {
-                (Some(username), None, None, None) => {
-                    let len = username.chars().count();
-                    if !(4..=64).contains(&len) {
+            IdentityUpdate::ClearBanner => {
+                let document = identity.profile_banner.take();
+                if let Some(cid) = document {
+                    old_cid = Some(cid);
+                }
+                store.identity_update(identity).await?;
+            }
+            IdentityUpdate::StatusMessage(status) => {
+                if let Some(status) = status.clone() {
+                    let len = status.chars().count();
+                    if len == 0 || len > 512 {
                         return Err(Error::InvalidLength {
-                            context: "username".into(),
+                            context: "status".into(),
                             current: len,
-                            minimum: Some(4),
-                            maximum: Some(64),
+                            minimum: Some(1),
+                            maximum: Some(512),
                         });
                     }
-
-                    identity.set_username(&username);
                 }
-                (None, Some(data), None, None) => {
-                    let len = data.len();
-                    if len > 2 * 1024 * 1024 {
-                        return Err(Error::InvalidLength {
-                            context: "profile picture".into(),
-                            current: len,
-                            minimum: None,
-                            maximum: Some(2 * 1024 * 1024),
-                        });
-                    }
-                    let cid = store
-                        .store_photo(
-                            futures::stream::once(async move {
-                                serde_json::to_vec(&data).unwrap_or_default()
-                            })
-                            .boxed(),
-                            Some(2 * 1024 * 1024),
-                        )
-                        .await?;
-
-                    let mut root_document = store.get_root_document().await?;
-
-                    if let Some(DocumentType::UnixFS(picture_cid, _)) = root_document.picture {
-                        if picture_cid == cid {
-                            return Err(Error::CannotUpdateIdentityPicture);
-                        }
-                        if let Err(e) = store.delete_photo(picture_cid).await {
-                            error!("Error deleting picture: {e}");
-                        }
-                    }
-
-                    root_document.picture = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
-                    store.set_root_document(root_document).await?;
-                }
-                (None, None, Some(data), None) => {
-                    let len = data.len();
-                    if len > 2 * 1024 * 1024 {
-                        return Err(Error::InvalidLength {
-                            context: "profile banner".into(),
-                            current: len,
-                            minimum: None,
-                            maximum: Some(2 * 1024 * 1024),
-                        });
-                    }
-
-                    let cid = store
-                        .store_photo(
-                            futures::stream::once(async move {
-                                serde_json::to_vec(&data).unwrap_or_default()
-                            })
-                            .boxed(),
-                            Some(2 * 1024 * 1024),
-                        )
-                        .await?;
-
-                    let mut root_document = store.get_root_document().await?;
-                    if let Some(DocumentType::UnixFS(banner_cid, _)) = root_document.banner {
-                        if banner_cid == cid {
-                            return Err(Error::CannotUpdateIdentityBanner);
-                        }
-                        if let Err(e) = store.delete_photo(banner_cid).await {
-                            error!("Error deleting banner: {e}");
-                        }
-                    }
-
-                    root_document.banner = Some(DocumentType::UnixFS(cid, Some(2 * 1024 * 1024)));
-                    store.set_root_document(root_document).await?;
-                }
-                (None, None, None, Some(status)) => {
-                    if let Some(status) = status.clone() {
-                        let len = status.chars().count();
-                        if len >= 512 {
-                            return Err(Error::InvalidLength {
-                                context: "status".into(),
-                                current: len,
-                                minimum: None,
-                                maximum: Some(512),
-                            });
-                        }
-                    }
-                    identity.set_status_message(status);
-                }
-                _ => return Err(Error::CannotUpdateIdentity),
+                identity.status_message = status;
+                store.identity_update(identity.clone()).await?;
             }
-            store.identity_update(identity.clone()).await?;
-
-            if let Ok(mut cache) = self.get_cache_mut() {
-                let mut query = QueryBuilder::default();
-                //TODO: Query by public key to tie/assiociate the username to identity in the event of dup
-                query.r#where("username", &old_identity.username())?;
-                if let Ok(list) = cache.get_data(DataType::from(Module::Accounts), Some(&query)) {
-                    //get last
-                    if !list.is_empty() {
-                        // let mut obj = list.last().unwrap().clone();
-                        let mut object = Sata::default();
-                        object.set_version(list.len() as _);
-                        let obj = object.encode(
-                            warp::sata::libipld::IpldCodec::DagJson,
-                            warp::sata::Kind::Reference,
-                            identity.clone(),
-                        )?;
-                        cache.add_data(DataType::from(Module::Accounts), &obj)?;
-                    }
-                } else {
-                    let object = Sata::default().encode(
-                        warp::sata::libipld::IpldCodec::DagJson,
-                        warp::sata::Kind::Reference,
-                        identity.clone(),
-                    )?;
-                    cache.add_data(DataType::from(Module::Accounts), &object)?;
-                }
+            IdentityUpdate::ClearStatusMessage => {
+                identity.status_message = None;
+                store.identity_update(identity.clone()).await?;
             }
+        };
 
-            info!("Update identity store");
-            store.update_identity().await?;
+        if let Some(cid) = old_cid {
+            if let Err(e) = store.delete_photo(cid).await {
+                error!("Error deleting picture: {e}");
+            }
+        }
 
-            Ok(())
-        })
+        info!("Update identity store");
+        store.update_identity().await?;
+        store.push_to_all().await;
+
+        Ok(())
     }
 
     fn decrypt_private_key(&self, _: Option<&str>) -> Result<DID, Error> {
-        let store = self.identity_store()?;
-        let kp = store.get_raw_keypair()?.encode();
+        let store = self.identity_store_sync()?;
+        let kp = store.get_raw_keypair()?.to_bytes();
         let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
         let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
         Ok(did.into())
     }
 
     fn refresh_cache(&mut self) -> Result<(), Error> {
-        let mut store = self.identity_store()?;
+        let mut store = self.identity_store_sync()?;
         store.clear_internal_cache();
         self.get_cache_mut()?.empty(DataType::from(self.module()))
     }
 }
 
-impl<T: IpfsTypes> Friends for IpfsIdentity<T> {
-    fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.send_request(pubkey))
+#[async_trait::async_trait]
+impl Friends for IpfsIdentity {
+    async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let mut store = self.friend_store().await?;
+        store.send_request(pubkey).await
     }
 
-    fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.accept_request(pubkey))
+    async fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let mut store = self.friend_store().await?;
+        store.accept_request(pubkey).await
     }
 
-    fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.reject_request(pubkey))
+    async fn deny_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let mut store = self.friend_store().await?;
+        store.reject_request(pubkey).await
     }
 
-    fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.close_request(pubkey))
+    async fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let mut store = self.friend_store().await?;
+        store.close_request(pubkey).await
     }
 
-    fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        let store = self.friend_store()?;
-        async_block_in_place_uncheck(store.list_incoming_request())
+    async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
+        let store = self.friend_store().await?;
+        store.list_incoming_request().await
     }
 
-    fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        let store = self.friend_store()?;
-        async_block_in_place_uncheck(store.list_outgoing_request())
+    async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
+        let store = self.friend_store().await?;
+        store.list_outgoing_request().await
     }
 
-    fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
-        let store = self.friend_store()?;
-        async_block_in_place_uncheck(store.received_friend_request_from(did))
+    async fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
+        let store = self.friend_store().await?;
+        store.received_friend_request_from(did).await
     }
 
-    fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
-        let store = self.friend_store()?;
-        async_block_in_place_uncheck(store.sent_friend_request_to(did))
+    async fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
+        let store = self.friend_store().await?;
+        store.sent_friend_request_to(did).await
     }
 
-    fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        let store = self.friend_store()?;
-        async_block_in_place_uncheck(store.list_all_request())
+    async fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let mut store = self.friend_store().await?;
+        store.remove_friend(pubkey, true).await
     }
 
-    fn remove_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.remove_friend(pubkey, true, true))
+    async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let mut store = self.friend_store().await?;
+        store.block(pubkey).await
     }
 
-    fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.block(pubkey))
+    async fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
+        let store = self.friend_store().await?;
+        store.is_blocked(did).await
     }
 
-    fn is_blocked(&self, did: &DID) -> Result<bool, Error> {
-        let store = self.friend_store()?;
-        async_block_in_place_uncheck(store.is_blocked(did))
+    async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let mut store = self.friend_store().await?;
+        store.unblock(pubkey).await
     }
 
-    fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
-        let mut store = self.friend_store()?;
-        async_block_in_place_uncheck(store.unblock(pubkey))
+    async fn block_list(&self) -> Result<Vec<DID>, Error> {
+        let store = self.friend_store().await?;
+        store.block_list().await.map(Vec::from_iter)
     }
 
-    fn block_list(&self) -> Result<Vec<DID>, Error> {
-        let store = self.friend_store()?;
-        async_block_in_place_uncheck(store.block_list()).map(Vec::from_iter)
+    async fn list_friends(&self) -> Result<Vec<DID>, Error> {
+        let store = self.friend_store().await?;
+        store.friends_list().await.map(Vec::from_iter)
     }
 
-    fn list_friends(&self) -> Result<Vec<DID>, Error> {
-        let store = self.friend_store()?;
-        async_block_in_place_uncheck(store.friends_list()).map(Vec::from_iter)
-    }
-
-    fn has_friend(&self, pubkey: &DID) -> Result<(), Error> {
-        let store = self.friend_store()?;
-        async_block_in_place_uncheck(store.is_friend(pubkey))
+    async fn has_friend(&self, pubkey: &DID) -> Result<bool, Error> {
+        let store = self.friend_store().await?;
+        store.is_friend(pubkey).await
     }
 }
 
-impl<T: IpfsTypes> FriendsEvent for IpfsIdentity<T> {
-    fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
+#[async_trait::async_trait]
+impl FriendsEvent for IpfsIdentity {
+    async fn subscribe(&mut self) -> Result<MultiPassEventStream, Error> {
         let mut rx = self.tx.subscribe();
 
         let stream = async_stream::stream! {
@@ -850,26 +1026,40 @@ impl<T: IpfsTypes> FriendsEvent for IpfsIdentity<T> {
     }
 }
 
-impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
-    fn identity_status(&self, did: &DID) -> Result<identity::IdentityStatus, Error> {
-        let store = self.identity_store()?;
-        async_block_in_place_uncheck(store.identity_status(did))
+#[async_trait::async_trait]
+impl IdentityInformation for IpfsIdentity {
+    async fn identity_status(&self, did: &DID) -> Result<identity::IdentityStatus, Error> {
+        let store = self.identity_store(true).await?;
+        store.identity_status(did).await
     }
 
-    fn identity_relationship(&self, did: &DID) -> Result<identity::Relationship, Error> {
-        self.get_identity(Identifier::did_key(did.clone()))?
+    async fn set_identity_status(&mut self, status: identity::IdentityStatus) -> Result<(), Error> {
+        let mut store = self.identity_store(true).await?;
+        store.set_identity_status(status).await
+    }
+
+    async fn identity_platform(&self, did: &DID) -> Result<identity::Platform, Error> {
+        let store = self.identity_store(true).await?;
+        store.identity_platform(did).await
+    }
+
+    async fn identity_relationship(&self, did: &DID) -> Result<identity::Relationship, Error> {
+        self.get_identity(Identifier::did_key(did.clone()))
+            .await?
             .first()
             .ok_or(Error::IdentityDoesntExist)?;
-        let friends = self.has_friend(did).is_ok();
-        let received_friend_request = self.received_friend_request_from(did)?;
-        let sent_friend_request = self.sent_friend_request_to(did)?;
-        let blocked = self.is_blocked(did)?;
+        let friends = self.has_friend(did).await?;
+        let received_friend_request = self.received_friend_request_from(did).await?;
+        let sent_friend_request = self.sent_friend_request_to(did).await?;
+        let blocked = self.is_blocked(did).await?;
+        let blocked_by = self.is_blocked_by(did).await?;
 
         let mut relationship = Relationship::default();
         relationship.set_friends(friends);
         relationship.set_received_friend_request(received_friend_request);
         relationship.set_sent_friend_request(sent_friend_request);
         relationship.set_blocked(blocked);
+        relationship.set_blocked_by(blocked_by);
 
         Ok(relationship)
     }
@@ -877,13 +1067,12 @@ impl<T: IpfsTypes> IdentityInformation for IpfsIdentity<T> {
 
 pub mod ffi {
     use crate::config::MpIpfsConfig;
-    use crate::{IpfsIdentity, Persistent, Temporary};
+    use crate::IpfsIdentity;
     use warp::async_on_block;
     use warp::error::Error;
     use warp::ffi::FFIResult;
     use warp::multipass::MultiPassAdapter;
     use warp::pocket_dimension::PocketDimensionAdapter;
-    use warp::sync::{Arc, RwLock};
     use warp::tesseract::Tesseract;
 
     #[allow(clippy::missing_safety_doc)]
@@ -901,28 +1090,27 @@ pub mod ffi {
             true => Tesseract::default(),
         };
 
-        let config = match config.is_null() {
+        let mut config = match config.is_null() {
             true => MpIpfsConfig::testing(true),
             false => (*config).clone(),
         };
+
+        config.path = None;
 
         let cache = match pocketdimension.is_null() {
             true => None,
             false => Some(&*pocketdimension),
         };
 
-        let future = async move {
-            IpfsIdentity::<Temporary>::new(config, tesseract, cache.map(|c| c.inner())).await
-        };
+        let future =
+            async move { IpfsIdentity::new(config, tesseract, cache.map(|c| c.inner())).await };
 
         let account = match async_on_block(future) {
             Ok(identity) => identity,
             Err(e) => return FFIResult::err(Error::from(e)),
         };
 
-        FFIResult::ok(MultiPassAdapter::new(Arc::new(RwLock::new(Box::new(
-            account,
-        )))))
+        FFIResult::ok(MultiPassAdapter::new(Box::new(account)))
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -952,7 +1140,7 @@ pub mod ffi {
             false => Some(&*pocketdimension),
         };
 
-        let account = match async_on_block(IpfsIdentity::<Persistent>::new(
+        let account = match async_on_block(IpfsIdentity::new(
             config,
             tesseract,
             cache.map(|c| c.inner()),
@@ -961,8 +1149,6 @@ pub mod ffi {
             Err(e) => return FFIResult::err(Error::from(e)),
         };
 
-        FFIResult::ok(MultiPassAdapter::new(Arc::new(RwLock::new(Box::new(
-            account,
-        )))))
+        FFIResult::ok(MultiPassAdapter::new(Box::new(account)))
     }
 }

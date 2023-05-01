@@ -1,4 +1,4 @@
-use ipfs::Multiaddr;
+use rust_ipfs::Multiaddr;
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
@@ -160,8 +160,8 @@ impl FsIpfsConfig {
         }
     }
 
-    /// Minimial production configuration
-    pub fn minimial_testing() -> FsIpfsConfig {
+    /// Minimal production configuration
+    pub fn minimal_testing() -> FsIpfsConfig {
         FsIpfsConfig {
             bootstrap: Bootstrap::Ipfs,
             ipfs_setting: IpfsSetting {
@@ -178,8 +178,8 @@ impl FsIpfsConfig {
         }
     }
 
-    /// Minimial production configuration
-    pub fn minimial<P: AsRef<std::path::Path>>(path: P) -> FsIpfsConfig {
+    /// Minimal production configuration
+    pub fn minimal<P: AsRef<std::path::Path>>(path: P) -> FsIpfsConfig {
         FsIpfsConfig {
             bootstrap: Bootstrap::Ipfs,
             path: Some(path.as_ref().to_path_buf()),
@@ -337,7 +337,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn fs_ipfs_config_minimial(
+    pub unsafe extern "C" fn fs_ipfs_config_minimal(
         path: *const c_char,
     ) -> FFIResult<FsIpfsConfig> {
         if path.is_null() {
@@ -346,6 +346,6 @@ pub mod ffi {
 
         let path = CStr::from_ptr(path).to_string_lossy().to_string();
 
-        FFIResult::ok(FsIpfsConfig::minimial(path))
+        FFIResult::ok(FsIpfsConfig::minimal(path))
     }
 }

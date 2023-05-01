@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 use blake2::Blake2s256;
 use digest::Digest;
 use sha1::Sha1;
@@ -170,7 +171,7 @@ mod test {
         let hash = sha1_hash(b"Hello, World!", None);
 
         assert_eq!(
-            hex::encode(&hash),
+            hex::encode(hash),
             String::from("0a0a9f2a6772942557ab5355d76af442f8f65e01")
         );
         Ok(())
@@ -181,7 +182,7 @@ mod test {
         let hash = sha1_hash(b"Invalid Hash", None);
 
         assert_ne!(
-            hex::encode(&hash),
+            hex::encode(hash),
             String::from("0a0a9f2a6772942557ab5355d76af442f8f65e01")
         );
         Ok(())
@@ -192,7 +193,7 @@ mod test {
         let hash = sha256_hash(b"Hello, World!", None);
 
         assert_eq!(
-            hex::encode(&hash),
+            hex::encode(hash),
             String::from("dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f")
         );
         Ok(())
@@ -203,7 +204,7 @@ mod test {
         let hash = sha256_hash(b"Invalid hash", None);
 
         assert_ne!(
-            hex::encode(&hash),
+            hex::encode(hash),
             String::from("dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f")
         );
         Ok(())

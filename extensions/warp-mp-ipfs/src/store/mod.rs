@@ -1,104 +1,83 @@
-use std::time::Duration;
+pub mod discovery;
+pub mod document;
+pub mod friends;
+pub mod identity;
+pub mod phonebook;
+pub mod queue;
 
-use ipfs::{IpfsTypes, Multiaddr, PeerId, Protocol};
-use serde::{Deserialize, Serialize};
-use tracing::log::error;
+use std::{fmt::Display, time::Duration};
+
+use futures::StreamExt;
+use rust_ipfs as ipfs;
+
+use ipfs::{Multiaddr, PeerId, Protocol};
 use warp::{
     crypto::{
-        did_key::{CoreSign, Generate},
+        cipher::Cipher,
+        did_key::{Generate, ECDH},
+        zeroize::Zeroizing,
         DIDKey, Ed25519KeyPair, KeyMaterial, DID,
     },
     error::Error,
-    multipass::identity::{Identity, IdentityStatus},
+    multipass::identity::IdentityStatus,
     tesseract::Tesseract,
 };
 
 use crate::config::Discovery;
 
-use self::{document::DocumentType, friends::InternalRequest};
+pub trait PeerTopic: Display {
+    fn inbox(&self) -> String {
+        format!("/peer/{self}/inbox")
+    }
 
-pub mod document;
-pub mod friends;
-pub mod identity;
-pub mod phonebook;
-
-pub const IDENTITY_BROADCAST: &str = "identity/broadcast";
-pub const FRIENDS_BROADCAST: &str = "friends/broadcast";
-pub const SYNC_BROADCAST: &str = "/identity/sync/broadcast";
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase", tag = "type")]
-pub enum PayloadEvent {
-    Received(Payload),
-    Sent(Payload),
+    fn events(&self) -> String {
+        format!("/peer/{self}/events")
+    }
 }
 
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase", tag = "type")]
-pub enum Payload {
-    Identity {
-        identity: Identity,
-        signature: Vec<u8>,
-    },
-    Friends {
-        identity_did: DID,
-        list: Vec<DID>,
-        signature: Vec<u8>,
-    },
-    Request {
-        identity_did: DID,
-        list: Vec<InternalRequest>,
-        signature: Vec<u8>,
-    },
-    Block {
-        identity_did: DID,
-        list: Vec<DID>,
-        signature: Vec<u8>,
-    },
-    Package {
-        total_size: usize,
-        parts: usize,
-        parts_size: usize,
-        signature: Vec<u8>,
-    },
-    PackageStreamStart,
-    PackageStreamData {
-        part: usize,
-        data: Vec<u8>,
-        signature: Vec<u8>,
-    },
-    PackageStreamEnd,
+impl PeerTopic for DID {}
+
+pub trait VecExt<T: Eq> {
+    fn insert_item(&mut self, item: &T) -> bool;
+    fn remove_item(&mut self, item: &T) -> bool;
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct IdentityPayload {
-    /// Not required but would be used to cross check the identity did, sender (if sent directly)
-    pub did: DID,
+impl<T> VecExt<T> for Vec<T>
+where
+    T: Eq + Clone,
+{
+    fn insert_item(&mut self, item: &T) -> bool {
+        if self.contains(item) {
+            return false;
+        }
 
-    /// Type that represents profile picture
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub picture: Option<DocumentType<String>>,
+        self.push(item.clone());
+        true
+    }
 
-    /// Type that represents profile banner
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub banner: Option<DocumentType<String>>,
-
-    /// Type that represents identity or cid
-    pub payload: DocumentType<Identity>,
+    fn remove_item(&mut self, item: &T) -> bool {
+        if !self.contains(item) {
+            return false;
+        }
+        if let Some(index) = self.iter().position(|el| item.eq(el)) {
+            self.remove(index);
+            return true;
+        }
+        false
+    }
 }
 
+#[allow(deprecated)]
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity::PublicKey> {
-    let pk = ipfs::libp2p::identity::PublicKey::Ed25519(
-        ipfs::libp2p::identity::ed25519::PublicKey::decode(&public_key.public_key_bytes())?,
-    );
-    Ok(pk)
+    let pub_key =
+        ipfs::libp2p::identity::ed25519::PublicKey::decode(&public_key.public_key_bytes())?;
+    Ok(ipfs::libp2p::identity::PublicKey::Ed25519(pub_key))
 }
 
 fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::Result<DID> {
-    let pk = match public_key {
-        ipfs::libp2p::identity::PublicKey::Ed25519(pk) => {
-            let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.encode()).into();
+    let pk = match public_key.clone().try_into_ed25519() {
+        Ok(pk) => {
+            let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.to_bytes()).into();
             did.try_into()?
         }
         _ => anyhow::bail!(Error::PublicKeyInvalid),
@@ -114,49 +93,70 @@ fn did_keypair(tesseract: &Tesseract) -> anyhow::Result<DID> {
     Ok(did.into())
 }
 
-// Note that this are temporary
-fn sign_serde<D: Serialize>(tesseract: &Tesseract, data: &D) -> anyhow::Result<Vec<u8>> {
-    let did = did_keypair(tesseract)?;
-    let bytes = serde_json::to_vec(data)?;
-    Ok(did.as_ref().sign(&bytes))
-}
-
-// Note that this are temporary
-fn verify_serde_sig<D: Serialize>(pk: DID, data: &D, signature: &[u8]) -> anyhow::Result<()> {
-    let bytes = serde_json::to_vec(data)?;
-    pk.as_ref()
-        .verify(&bytes, signature)
-        .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-    Ok(())
-}
-
 // This function stores the topic as a dag in a "discovery:<topic>" format and provide the cid over DHT and obtain the providers of the same cid
 // who are providing and connect to them.
 // Note that there is usually a delay in `ipfs.provide`.
 // TODO: Investigate the delay in providing the CID
-pub async fn discovery<T: IpfsTypes, S: AsRef<str>>(
-    ipfs: ipfs::Ipfs<T>,
-    topic: S,
-) -> anyhow::Result<()> {
+pub async fn discovery<S: AsRef<str>>(ipfs: ipfs::Ipfs, topic: S) -> anyhow::Result<()> {
     let topic = topic.as_ref();
     let cid = ipfs
-        .put_dag(libipld::ipld!(format!("discovery:{}", topic)))
+        .put_dag(libipld::ipld!(format!("discovery:{topic}")))
         .await?;
     ipfs.provide(cid).await?;
 
     loop {
-        match ipfs.get_providers(cid).await {
-            Ok(_) => {}
-            Err(e) => error!("Error getting providers: {e}"),
-        };
+        let mut stream = ipfs.get_providers(cid).await?;
+        while let Some(_providers) = stream.next().await {}
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
+}
+
+fn ecdh_encrypt<K: AsRef<[u8]>>(
+    did: &DID,
+    recipient: Option<&DID>,
+    data: K,
+) -> Result<Vec<u8>, Error> {
+    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
+    let did_pubkey = match recipient {
+        Some(did) => did.public_key_bytes(),
+        None => did.public_key_bytes(),
+    };
+
+    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
+    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
+    let data = Cipher::direct_encrypt(data.as_ref(), &prik)?;
+
+    Ok(data)
+}
+
+fn ecdh_decrypt<K: AsRef<[u8]>>(
+    did: &DID,
+    recipient: Option<&DID>,
+    data: K,
+) -> Result<Vec<u8>, Error> {
+    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
+    let did_pubkey = match recipient {
+        Some(did) => did.public_key_bytes(),
+        None => did.public_key_bytes(),
+    };
+
+    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
+    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
+    let data = Cipher::direct_decrypt(data.as_ref(), &prik)?;
+
+    Ok(data)
 }
 
 #[allow(clippy::large_enum_variant)]
 pub enum PeerType {
     PeerId(PeerId),
     DID(DID),
+}
+
+impl From<&DID> for PeerType {
+    fn from(did: &DID) -> Self {
+        PeerType::DID(did.clone())
+    }
 }
 
 impl From<DID> for PeerType {
@@ -171,9 +171,16 @@ impl From<PeerId> for PeerType {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+impl From<&PeerId> for PeerType {
+    fn from(peer_id: &PeerId) -> Self {
+        PeerType::PeerId(*peer_id)
+    }
+}
+
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PeerConnectionType {
     Connected,
+    #[default]
     NotConnected,
 }
 
@@ -186,8 +193,8 @@ impl From<PeerConnectionType> for IdentityStatus {
     }
 }
 
-pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
-    ipfs: ipfs::Ipfs<T>,
+pub async fn connected_to_peer<I: Into<PeerType>>(
+    ipfs: &ipfs::Ipfs,
     pkey: I,
 ) -> anyhow::Result<PeerConnectionType> {
     let peer_id = match pkey.into() {
@@ -195,7 +202,7 @@ pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
         PeerType::PeerId(peer) => peer,
     };
 
-    let connected_peer = ipfs.connected().await?.iter().any(|peer| *peer == peer_id);
+    let connected_peer = ipfs.is_connected(peer_id).await?;
 
     Ok(match connected_peer {
         true => PeerConnectionType::Connected,
@@ -203,41 +210,39 @@ pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
     })
 }
 
-pub async fn discover_peer<T: IpfsTypes>(
-    ipfs: ipfs::Ipfs<T>,
+pub async fn discover_peer(
+    ipfs: &ipfs::Ipfs,
     did: &DID,
     discovery: Discovery,
     relay: Vec<Multiaddr>,
 ) -> anyhow::Result<()> {
     let peer_id = did_to_libp2p_pub(did)?.to_peer_id();
 
-    if connected_to_peer(ipfs.clone(), PeerType::PeerId(peer_id)).await?
-        != PeerConnectionType::NotConnected
-    {
+    if matches!(
+        connected_to_peer(ipfs, PeerType::PeerId(peer_id)).await?,
+        PeerConnectionType::Connected,
+    ) {
         return Ok(());
     }
 
     match discovery {
-        //Since we are using PROVIDER, there is no need to do anything here
-        Discovery::Provider(_) => {}
-        //We are checking DHT for the peerid
-        Discovery::Direct => loop {
-            if ipfs.find_peer_info(peer_id).await.is_ok() {
+        // Check over DHT to locate peer
+        Discovery::Provider(_) | Discovery::Direct => loop {
+            if ipfs.identity(Some(peer_id)).await.is_ok() {
                 break;
             }
-            tokio::time::sleep(Duration::from_secs(1)).await;
         },
         Discovery::None => {
             //Attempt a direct dial via relay
             for addr in relay.iter() {
                 let addr = addr.clone().with(Protocol::P2p(peer_id.into()));
-                if let Err(_e) = ipfs.dial(addr).await {
+                if let Err(_e) = ipfs.connect(addr).await {
                     continue;
                 }
                 tokio::time::sleep(Duration::from_millis(300)).await;
             }
             loop {
-                if connected_to_peer(ipfs.clone(), PeerType::PeerId(peer_id)).await?
+                if connected_to_peer(ipfs, PeerType::PeerId(peer_id)).await?
                     == PeerConnectionType::Connected
                 {
                     break;

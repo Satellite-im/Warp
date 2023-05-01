@@ -1,41 +1,158 @@
-pub mod direct;
+pub mod conversation;
+pub mod document;
+pub mod keystore;
+pub mod message;
+pub mod payload;
 
-use std::time::Duration;
+use rust_ipfs as ipfs;
+use std::fmt::{Debug, Display};
 
 use chrono::{DateTime, Utc};
-use ipfs::{IpfsTypes, PeerId};
+use rust_ipfs::PeerId;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp::{
     crypto::{
+        cipher::Cipher,
         did_key::{CoreSign, Generate, ECDH},
         hash::sha256_hash,
+        zeroize::Zeroizing,
         DIDKey, Ed25519KeyPair, KeyMaterial, DID,
     },
     error::Error,
-    logging::tracing::log::{error, trace},
     raygun::{Message, MessageEvent, PinState, ReactionState},
 };
 
-pub const DIRECT_BROADCAST: &str = "direct/broadcast";
-#[allow(dead_code)]
-pub const GROUP_BROADCAST: &str = "group/broadcast";
+pub trait PeerTopic: Display {
+    fn messaging(&self) -> String {
+        format!("{self}/messaging")
+    }
+}
+
+impl PeerTopic for DID {}
 
 #[allow(clippy::large_enum_variant)]
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase", tag = "type")]
 pub enum ConversationEvents {
-    NewConversation(DID),
-    DeleteConversation(Uuid),
+    NewConversation {
+        recipient: DID,
+    },
+    NewGroupConversation {
+        creator: DID,
+        name: Option<String>,
+        conversation_id: Uuid,
+        list: Vec<DID>,
+        signature: Option<String>,
+    },
+    LeaveConversation {
+        conversation_id: Uuid,
+        recipient: DID,
+        signature: String,
+    },
+    DeleteConversation {
+        conversation_id: Uuid,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
+#[serde(rename_all = "lowercase", tag = "type")]
+pub enum ConversationRequestResponse {
+    Request {
+        conversation_id: Uuid,
+        kind: ConversationRequestKind,
+    },
+    Response {
+        conversation_id: Uuid,
+        kind: ConversationResponseKind,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(clippy::type_complexity)]
+#[serde(rename_all = "lowercase")]
+pub enum ConversationRequestKind {
+    Key,
+    Ping,
+    RetrieveMessages {
+        // start/end
+        range: Option<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)>,
+    },
+    WantMessage {
+        message_id: Uuid,
+    },
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
+#[serde(rename_all = "lowercase")]
+pub enum ConversationResponseKind {
+    Key { key: Vec<u8> },
+    Pong,
+    HaveMessages { messages: Vec<Uuid> },
+}
+
+impl Debug for ConversationResponseKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ConversationRespondKind")
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum MessagingEvents {
-    New(Message),
-    Edit(Uuid, Uuid, DateTime<Utc>, Vec<String>, Vec<u8>),
-    Delete(Uuid, Uuid),
-    Pin(Uuid, DID, Uuid, PinState),
-    React(Uuid, DID, Uuid, ReactionState, String),
-    Event(Uuid, DID, MessageEvent, bool),
+    New {
+        message: Message,
+    },
+    Edit {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        modified: DateTime<Utc>,
+        lines: Vec<String>,
+        signature: Vec<u8>,
+    },
+    Delete {
+        conversation_id: Uuid,
+        message_id: Uuid,
+    },
+    Pin {
+        conversation_id: Uuid,
+        member: DID,
+        message_id: Uuid,
+        state: PinState,
+    },
+    React {
+        conversation_id: Uuid,
+        reactor: DID,
+        message_id: Uuid,
+        state: ReactionState,
+        emoji: String,
+    },
+    UpdateConversationName {
+        conversation_id: Uuid,
+        name: String,
+        signature: String,
+    },
+    AddRecipient {
+        conversation_id: Uuid,
+        recipient: DID,
+        list: Vec<DID>,
+        signature: String,
+    },
+    RemoveRecipient {
+        conversation_id: Uuid,
+        recipient: DID,
+        list: Vec<DID>,
+        signature: String,
+    },
+    Event {
+        conversation_id: Uuid,
+        member: DID,
+        event: MessageEvent,
+        cancelled: bool,
+    },
 }
 
 pub fn generate_shared_topic(did_a: &DID, did_b: &DID, seed: Option<&str>) -> anyhow::Result<Uuid> {
@@ -47,6 +164,7 @@ pub fn generate_shared_topic(did_a: &DID, did_b: &DID, seed: Option<&str>) -> an
     Uuid::from_slice(&topic_hash[..topic_hash.len() / 2]).map_err(anyhow::Error::from)
 }
 
+#[allow(deprecated)]
 fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity::PublicKey> {
     let pk = ipfs::libp2p::identity::PublicKey::Ed25519(
         ipfs::libp2p::identity::ed25519::PublicKey::decode(&public_key.public_key_bytes())?,
@@ -56,14 +174,50 @@ fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity:
 
 #[allow(dead_code)]
 fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::Result<DID> {
-    let pk = match public_key {
-        ipfs::libp2p::identity::PublicKey::Ed25519(pk) => {
-            let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.encode()).into();
+    let pk = match public_key.clone().try_into_ed25519() {
+        Ok(pk) => {
+            let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.to_bytes()).into();
             did.try_into()?
         }
         _ => anyhow::bail!(Error::PublicKeyInvalid),
     };
     Ok(pk)
+}
+
+fn ecdh_encrypt<K: AsRef<[u8]>>(
+    did: &DID,
+    recipient: Option<&DID>,
+    data: K,
+) -> Result<Vec<u8>, Error> {
+    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
+    let did_pubkey = match recipient {
+        Some(did) => did.public_key_bytes(),
+        None => did.public_key_bytes(),
+    };
+
+    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
+    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
+    let data = Cipher::direct_encrypt(data.as_ref(), &prik)?;
+
+    Ok(data)
+}
+
+fn ecdh_decrypt<K: AsRef<[u8]>>(
+    did: &DID,
+    recipient: Option<&DID>,
+    data: K,
+) -> Result<Vec<u8>, Error> {
+    let prikey = Ed25519KeyPair::from_secret_key(&did.private_key_bytes()).get_x25519();
+    let did_pubkey = match recipient {
+        Some(did) => did.public_key_bytes(),
+        None => did.public_key_bytes(),
+    };
+
+    let pubkey = Ed25519KeyPair::from_public_key(&did_pubkey).get_x25519();
+    let prik = Zeroizing::new(prikey.key_exchange(&pubkey));
+    let data = Cipher::direct_decrypt(data.as_ref(), &prik)?;
+
+    Ok(data)
 }
 
 // Note that this are temporary
@@ -105,8 +259,8 @@ pub enum PeerConnectionType {
     NotConnected,
 }
 
-pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
-    ipfs: ipfs::Ipfs<T>,
+pub async fn connected_to_peer<I: Into<PeerType>>(
+    ipfs: ipfs::Ipfs,
     pkey: I,
 ) -> anyhow::Result<PeerConnectionType> {
     let peer_id = match pkey.into() {
@@ -120,23 +274,4 @@ pub async fn connected_to_peer<T: IpfsTypes, I: Into<PeerType>>(
         true => PeerConnectionType::Connected,
         false => PeerConnectionType::NotConnected,
     })
-}
-
-pub async fn topic_discovery<T: IpfsTypes, S: AsRef<str>>(
-    ipfs: ipfs::Ipfs<T>,
-    topic: S,
-) -> anyhow::Result<()> {
-    trace!("Performing topic discovery");
-    let topic = topic.as_ref();
-    let topic_hash = sha256_hash(format!("gossipsub:{}", topic).as_bytes(), None);
-    let cid = ipfs.put_dag(libipld::ipld!(topic_hash)).await?;
-    ipfs.provide(cid).await?;
-
-    loop {
-        match ipfs.get_providers(cid).await {
-            Ok(_) => {}
-            Err(e) => error!("Error getting providers: {e}"),
-        };
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
 }

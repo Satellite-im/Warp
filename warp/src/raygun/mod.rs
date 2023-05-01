@@ -4,7 +4,6 @@ use crate::constellation::file::File;
 use crate::constellation::ConstellationProgressStream;
 use crate::crypto::DID;
 use crate::error::Error;
-use crate::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::{Extension, SingleHandle};
 
 use derive_more::Display;
@@ -18,6 +17,7 @@ use chrono::{DateTime, Utc};
 use core::ops::Range;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -86,6 +86,18 @@ pub enum MessageEventKind {
         did_key: DID,
         reaction: String,
     },
+    ConversationNameUpdated {
+        conversation_id: Uuid,
+        name: String,
+    },
+    RecipientAdded {
+        conversation_id: Uuid,
+        recipient: DID,
+    },
+    RecipientRemoved {
+        conversation_id: Uuid,
+        recipient: DID,
+    },
     EventReceived {
         conversation_id: Uuid,
         did_key: DID,
@@ -125,10 +137,37 @@ impl core::ops::DerefMut for MessageEventStream {
     }
 }
 
+#[derive(FFIFree)]
+pub struct MessageStream(pub BoxStream<'static, Message>);
+
+impl Debug for MessageStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MessageStream")
+    }
+}
+
+impl core::ops::Deref for MessageStream {
+    type Target = BoxStream<'static, Message>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for MessageStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct MessageOptions {
-    smart: Option<bool>,
     date_range: Option<Range<DateTime<Utc>>>,
+    first_message: bool,
+    last_message: bool,
+    reverse: bool,
+    messages_type: MessagesType,
+    keyword: Option<String>,
+    pinned: bool,
     range: Option<Range<usize>>,
     limit: Option<i64>,
     skip: Option<i64>,
@@ -149,6 +188,38 @@ impl MessageOptions {
         self.limit = Some(limit);
         self
     }
+
+    pub fn set_keyword(mut self, keyword: &str) -> MessageOptions {
+        self.keyword = Some(keyword.to_string());
+        self
+    }
+
+    pub fn set_first_message(mut self) -> MessageOptions {
+        self.first_message = true;
+        self.last_message = false;
+        self
+    }
+
+    pub fn set_last_message(mut self) -> MessageOptions {
+        self.first_message = false;
+        self.last_message = true;
+        self
+    }
+
+    pub fn set_pinned(mut self) -> MessageOptions {
+        self.pinned = true;
+        self
+    }
+
+    pub fn set_reverse(mut self) -> MessageOptions {
+        self.reverse = true;
+        self
+    }
+
+    pub fn set_messages_type(mut self, r#type: MessagesType) -> MessageOptions {
+        self.messages_type = r#type;
+        self
+    }
 }
 
 impl MessageOptions {
@@ -162,16 +233,137 @@ impl MessageOptions {
 }
 
 impl MessageOptions {
-    pub fn smart(&self) -> Option<bool> {
-        self.smart
-    }
-
     pub fn limit(&self) -> Option<i64> {
         self.limit
     }
 
     pub fn skip(&self) -> Option<i64> {
         self.skip
+    }
+
+    pub fn keyword(&self) -> Option<String> {
+        self.keyword.clone()
+    }
+
+    pub fn first_message(&self) -> bool {
+        self.first_message
+    }
+
+    pub fn last_message(&self) -> bool {
+        self.last_message
+    }
+
+    pub fn pinned(&self) -> bool {
+        self.pinned
+    }
+
+    pub fn messages_type(&self) -> MessagesType {
+        self.messages_type
+    }
+
+    pub fn reverse(&self) -> bool {
+        self.reverse
+    }
+}
+
+#[derive(Default, Debug, Hash, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
+#[serde(rename_all = "lowercase")]
+pub enum MessagesType {
+    /// Stream type
+    #[display(fmt = "stream")]
+    Stream,
+    /// List type
+    #[default]
+    #[display(fmt = "list")]
+    List,
+    /// Page type
+    #[display(fmt = "pages")]
+    Pages {
+        /// Page to select
+        page: Option<usize>,
+
+        /// Amount of messages per page
+        amount_per_page: Option<usize>,
+    },
+}
+
+#[derive(Debug)]
+pub enum Messages {
+    /// List of messages
+    List(Vec<Message>),
+
+    /// Stream of messages
+    Stream(MessageStream),
+
+    /// Pages of messages
+    Page {
+        /// List if pages
+        pages: Vec<MessagePage>,
+        /// Amount of pages
+        total: usize,
+    },
+}
+
+impl TryFrom<Messages> for Vec<Message> {
+    type Error = Error;
+    fn try_from(value: Messages) -> Result<Self, Self::Error> {
+        match value {
+            Messages::List(list) => Ok(list),
+            _ => Err(Error::Unimplemented),
+        }
+    }
+}
+
+impl TryFrom<Messages> for MessageStream {
+    type Error = Error;
+    fn try_from(value: Messages) -> Result<Self, Self::Error> {
+        match value {
+            Messages::Stream(stream) => Ok(stream),
+            _ => Err(Error::Unimplemented),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree)]
+pub struct MessagePage {
+    id: usize,
+    messages: Vec<Message>,
+    total: usize,
+}
+
+impl MessagePage {
+    pub fn new(id: usize, messages: Vec<Message>, total: usize) -> MessagePage {
+        Self {
+            id,
+            messages,
+            total,
+        }
+    }
+}
+
+impl MessagePage {
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
+    pub fn messages(&self) -> &[Message] {
+        &self.messages
+    }
+
+    pub fn total(&self) -> usize {
+        self.total
+    }
+}
+
+impl PartialOrd for MessagePage {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        self.id.partial_cmp(&other.id)
+    }
+}
+
+impl Ord for MessagePage {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.id.cmp(&other.id)
     }
 }
 
@@ -185,26 +377,39 @@ pub enum ConversationType {
     Group,
 }
 
-#[derive(
-    Debug, Hash, Clone, Serialize, Deserialize, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, warp_derive::FFIVec, FFIFree)]
 pub struct Conversation {
     id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
+    creator: Option<DID>,
     conversation_type: ConversationType,
     recipients: Vec<DID>,
+}
+
+impl core::hash::Hash for Conversation {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl PartialEq for Conversation {
+    fn eq(&self, other: &Self) -> bool {
+        self.id.eq(&other.id)
+    }
 }
 
 impl Default for Conversation {
     fn default() -> Self {
         let id = Uuid::new_v4();
         let name = None;
+        let creator = None;
         let conversation_type = ConversationType::Direct;
         let recipients = Vec::new();
         Self {
             id,
             name,
+            creator,
             conversation_type,
             recipients,
         }
@@ -218,6 +423,10 @@ impl Conversation {
 
     pub fn name(&self) -> Option<String> {
         self.name.clone()
+    }
+
+    pub fn creator(&self) -> Option<DID> {
+        self.creator.clone()
     }
 
     pub fn conversation_type(&self) -> ConversationType {
@@ -236,6 +445,10 @@ impl Conversation {
 
     pub fn set_name(&mut self, name: Option<String>) {
         self.name = name;
+    }
+
+    pub fn set_creator(&mut self, creator: Option<DID>) {
+        self.creator = creator;
     }
 
     pub fn set_conversation_type(&mut self, conversation_type: ConversationType) {
@@ -552,22 +765,39 @@ pub enum EmbedState {
     Disable,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub enum Location {
     /// Use [`Constellation`] to send a file from constellation
     Constellation,
 
     /// Use file from disk
+    #[default]
     Disk,
 }
 
 #[async_trait::async_trait]
 pub trait RayGun:
-    RayGunStream + RayGunAttachment + RayGunEvents + Extension + Sync + Send + SingleHandle + DynClone
+    RayGunStream
+    + RayGunGroupConversation
+    + RayGunAttachment
+    + RayGunEvents
+    + Extension
+    + Sync
+    + Send
+    + SingleHandle
+    + DynClone
 {
     // Start a new conversation.
     async fn create_conversation(&mut self, _: &DID) -> Result<Conversation, Error> {
+        Err(Error::Unimplemented)
+    }
+
+    async fn create_group_conversation(
+        &mut self,
+        _: Option<String>,
+        _: Vec<DID>,
+    ) -> Result<Conversation, Error> {
         Err(Error::Unimplemented)
     }
 
@@ -601,13 +831,16 @@ pub trait RayGun:
         &self,
         conversation_id: Uuid,
         options: MessageOptions,
-    ) -> Result<Vec<Message>, Error>;
+    ) -> Result<Messages, Error>;
 
-    /// Sends a message to a conversation. If `message_id` is provided, it will override the selected message
-    async fn send(
+    /// Sends a message to a conversation.
+    async fn send(&mut self, conversation_id: Uuid, message: Vec<String>) -> Result<(), Error>;
+
+    /// Edit an existing message in a conversation.
+    async fn edit(
         &mut self,
         conversation_id: Uuid,
-        message_id: Option<Uuid>,
+        message_id: Uuid,
         message: Vec<String>,
     ) -> Result<(), Error>;
 
@@ -654,15 +887,41 @@ pub trait RayGun:
 dyn_clone::clone_trait_object!(RayGun);
 
 #[async_trait::async_trait]
+pub trait RayGunGroupConversation: Sync + Send {
+    /// Update conversation name
+    /// Note: This will only update the group conversation name
+    async fn update_conversation_name(&mut self, _: Uuid, _: &str) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Add a recipient to the conversation
+    async fn add_recipient(&mut self, _: Uuid, _: &DID) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+
+    /// Remove a recipient from the conversation
+    async fn remove_recipient(&mut self, _: Uuid, _: &DID) -> Result<(), Error> {
+        Err(Error::Unimplemented)
+    }
+}
+
+#[async_trait::async_trait]
 pub trait RayGunAttachment: Sync + Send {
     /// Send files to a conversation.
     /// If no files is provided in the array, it will throw an error
-    async fn attach(&mut self, _: Uuid, _: Vec<PathBuf>, _: Vec<String>) -> Result<(), Error> {
+    async fn attach(
+        &mut self,
+        _: Uuid,
+        _: Option<Uuid>,
+        _: Location,
+        _: Vec<PathBuf>,
+        _: Vec<String>,
+    ) -> Result<(), Error> {
         Err(Error::Unimplemented)
     }
 
     /// Downloads a file that been attached to a message
-    /// Note: Must use the filename assiocated when downloading
+    /// Note: Must use the filename associated when downloading
     async fn download(
         &self,
         _: Uuid,
@@ -700,198 +959,28 @@ pub trait RayGunEvents: Sync + Send {
     }
 }
 
-#[allow(clippy::await_holding_lock)]
-#[async_trait::async_trait]
-impl<T: ?Sized> RayGun for Arc<RwLock<Box<T>>>
-where
-    T: RayGun,
-{
-    // Start a new conversation.
-    async fn create_conversation(&mut self, key: &DID) -> Result<Conversation, Error> {
-        self.write().create_conversation(key).await
-    }
-
-    // List all active conversations
-    async fn list_conversations(&self) -> Result<Vec<Conversation>, Error> {
-        self.read().list_conversations().await
-    }
-
-    /// Retrieve all messages from a conversation
-    async fn get_message(&self, conversation_id: Uuid, message_id: Uuid) -> Result<Message, Error> {
-        self.read().get_message(conversation_id, message_id).await
-    }
-
-    /// Retrieve all messages from a conversation
-    async fn get_messages(
-        &self,
-        conversation_id: Uuid,
-        options: MessageOptions,
-    ) -> Result<Vec<Message>, Error> {
-        self.read().get_messages(conversation_id, options).await
-    }
-
-    /// Sends a message to a conversation. If `message_id` is provided, it will override the selected message
-    async fn send(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Option<Uuid>,
-        message: Vec<String>,
-    ) -> Result<(), Error> {
-        self.write()
-            .send(conversation_id, message_id, message)
-            .await
-    }
-
-    /// Delete message from a conversation
-    async fn delete(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Option<Uuid>,
-    ) -> Result<(), Error> {
-        self.write().delete(conversation_id, message_id).await
-    }
-
-    /// React to a message
-    async fn react(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: ReactionState,
-        emoji: String,
-    ) -> Result<(), Error> {
-        self.write()
-            .react(conversation_id, message_id, state, emoji)
-            .await
-    }
-
-    /// Pin a message within a conversation
-    async fn pin(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: PinState,
-    ) -> Result<(), Error> {
-        self.write().pin(conversation_id, message_id, state).await
-    }
-
-    /// Reply to a message within a conversation
-    async fn reply(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        message: Vec<String>,
-    ) -> Result<(), Error> {
-        self.write()
-            .reply(conversation_id, message_id, message)
-            .await
-    }
-
-    async fn embeds(
-        &mut self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        state: EmbedState,
-    ) -> Result<(), Error> {
-        self.write()
-            .embeds(conversation_id, message_id, state)
-            .await
-    }
-}
-
-#[allow(clippy::await_holding_lock)]
-#[async_trait::async_trait]
-impl<T: ?Sized> RayGunAttachment for Arc<RwLock<Box<T>>>
-where
-    T: RayGunAttachment,
-{
-    async fn attach(
-        &mut self,
-        conversation_id: Uuid,
-        files: Vec<PathBuf>,
-        message: Vec<String>,
-    ) -> Result<(), Error> {
-        self.write().attach(conversation_id, files, message).await
-    }
-
-    async fn download(
-        &self,
-        conversation_id: Uuid,
-        message_id: Uuid,
-        file: String,
-        path: PathBuf,
-    ) -> Result<ConstellationProgressStream, Error> {
-        self.read()
-            .download(conversation_id, message_id, file, path)
-            .await
-    }
-}
-
-#[allow(clippy::await_holding_lock)]
-#[async_trait::async_trait]
-impl<T: ?Sized> RayGunStream for Arc<RwLock<Box<T>>>
-where
-    T: RayGunStream,
-{
-    async fn subscribe(&mut self) -> Result<RayGunEventStream, Error> {
-        self.write().subscribe().await
-    }
-
-    async fn get_conversation_stream(
-        &mut self,
-        conversation_id: Uuid,
-    ) -> Result<MessageEventStream, Error> {
-        self.write().get_conversation_stream(conversation_id).await
-    }
-}
-
-#[allow(clippy::await_holding_lock)]
-#[async_trait::async_trait]
-impl<T: ?Sized> RayGunEvents for Arc<RwLock<Box<T>>>
-where
-    T: RayGunEvents,
-{
-    /// Send an event to a conversation
-    async fn send_event(
-        &mut self,
-        conversation_id: Uuid,
-        event: MessageEvent,
-    ) -> Result<(), Error> {
-        self.write().send_event(conversation_id, event).await
-    }
-
-    /// Cancel event that was sent, if any.
-    /// Note: This would only send the cancel event
-    ///       Unless an event is continuious internally until it times out
-    async fn cancel_event(
-        &mut self,
-        conversation_id: Uuid,
-        event: MessageEvent,
-    ) -> Result<(), Error> {
-        self.write().cancel_event(conversation_id, event).await
-    }
-}
-
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[derive(FFIFree)]
 pub struct RayGunAdapter {
-    object: Arc<RwLock<Box<dyn RayGun>>>,
+    object: Box<dyn RayGun>,
 }
 
 impl RayGunAdapter {
-    pub fn new(object: Arc<RwLock<Box<dyn RayGun>>>) -> Self {
+    pub fn new(object: Box<dyn RayGun>) -> Self {
         RayGunAdapter { object }
     }
+}
 
-    pub fn inner(&self) -> Arc<RwLock<Box<dyn RayGun>>> {
-        self.object.clone()
+impl core::ops::Deref for RayGunAdapter {
+    type Target = Box<dyn RayGun>;
+    fn deref(&self) -> &Self::Target {
+        &self.object
     }
+}
 
-    pub fn read_guard(&self) -> RwLockReadGuard<Box<dyn RayGun>> {
-        self.object.read()
-    }
-
-    pub fn write_guard(&mut self) -> RwLockWriteGuard<Box<dyn RayGun>> {
-        self.object.write()
+impl core::ops::DerefMut for RayGunAdapter {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.object
     }
 }
 
@@ -933,7 +1022,7 @@ pub mod ffi {
 
         let adapter = &mut *ctx;
 
-        async_on_block(adapter.write_guard().create_conversation(&*did_key)).into()
+        async_on_block(adapter.create_conversation(&*did_key)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -950,7 +1039,7 @@ pub mod ffi {
 
         let adapter = &*ctx;
 
-        async_on_block(adapter.read_guard().list_conversations()).into()
+        async_on_block(adapter.list_conversations()).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -988,7 +1077,7 @@ pub mod ffi {
         };
 
         let adapter = &*ctx;
-        async_on_block(adapter.read_guard().get_message(convo_id, message_id)).into()
+        async_on_block(adapter.get_message(convo_id, message_id)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1022,7 +1111,9 @@ pub mod ffi {
         };
 
         let adapter = &*ctx;
-        async_on_block(adapter.read_guard().get_messages(convo_id, option)).into()
+        async_on_block(adapter.get_messages(convo_id, option))
+            .and_then(Vec::<Message>::try_from)
+            .into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1031,7 +1122,6 @@ pub mod ffi {
     pub unsafe extern "C" fn raygun_send(
         ctx: *mut RayGunAdapter,
         convo_id: *const c_char,
-        message_id: *const c_char,
         messages: *const *const c_char,
         lines: usize,
     ) -> FFIResult_Null {
@@ -1062,12 +1152,61 @@ pub mod ffi {
             Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
-        let msg_id = match message_id.is_null() {
-            false => match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy()) {
-                Ok(uuid) => Some(uuid),
-                Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
-            },
-            true => None,
+        let messages = match pointer_to_vec(messages, lines) {
+            Ok(messages) => messages,
+            Err(e) => return FFIResult_Null::err(Error::Any(anyhow::anyhow!(e))),
+        };
+
+        let adapter = &mut *ctx;
+        async_on_block(adapter.send(convo_id, messages)).into()
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[allow(clippy::missing_safety_doc)]
+    #[no_mangle]
+    pub unsafe extern "C" fn raygun_edit(
+        ctx: *mut RayGunAdapter,
+        convo_id: *const c_char,
+        message_id: *const c_char,
+        messages: *const *const c_char,
+        lines: usize,
+    ) -> FFIResult_Null {
+        if ctx.is_null() {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!("Context cannot be null")));
+        }
+
+        if convo_id.is_null() {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
+                "Conversation ID cannot be null"
+            )));
+        }
+
+        if message_id.is_null() {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
+                "Conversation ID cannot be null"
+            )));
+        }
+
+        if messages.is_null() {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
+                "Message array cannot be null"
+            )));
+        }
+
+        if lines == 0 {
+            return FFIResult_Null::err(Error::Any(anyhow::anyhow!(
+                "Lines has to be more than zero"
+            )));
+        }
+
+        let convo_id = match Uuid::from_str(&CStr::from_ptr(convo_id).to_string_lossy()) {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
+        };
+
+        let msg_id = match Uuid::from_str(&CStr::from_ptr(message_id).to_string_lossy()) {
+            Ok(uuid) => uuid,
+            Err(e) => return FFIResult_Null::err(Error::UuidError(e)),
         };
 
         let messages = match pointer_to_vec(messages, lines) {
@@ -1076,7 +1215,7 @@ pub mod ffi {
         };
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().send(convo_id, msg_id, messages)).into()
+        async_on_block(adapter.edit(convo_id, msg_id, messages)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1111,7 +1250,7 @@ pub mod ffi {
         };
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().delete(convo_id, msg_id)).into()
+        async_on_block(adapter.delete(convo_id, msg_id)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1155,7 +1294,7 @@ pub mod ffi {
         let emoji = CStr::from_ptr(emoji).to_string_lossy().to_string();
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().react(convo_id, msg_id, state, emoji)).into()
+        async_on_block(adapter.react(convo_id, msg_id, state, emoji)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1192,7 +1331,7 @@ pub mod ffi {
         };
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().pin(convo_id, msg_id, state)).into()
+        async_on_block(adapter.pin(convo_id, msg_id, state)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1239,7 +1378,7 @@ pub mod ffi {
         };
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().reply(convo_id, msg_id, messages)).into()
+        async_on_block(adapter.reply(convo_id, msg_id, messages)).into()
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1276,7 +1415,7 @@ pub mod ffi {
         };
 
         let adapter = &mut *ctx;
-        async_on_block(adapter.write_guard().embeds(convo_id, msg_id, state)).into()
+        async_on_block(adapter.embeds(convo_id, msg_id, state)).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -1290,7 +1429,7 @@ pub mod ffi {
 
         let rg = &mut *(ctx);
 
-        async_on_block(rg.write_guard().subscribe()).into()
+        async_on_block(rg.subscribe()).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -1334,7 +1473,7 @@ pub mod ffi {
 
         let rg = &mut *(ctx);
 
-        async_on_block(rg.write_guard().get_conversation_stream(conversation_id)).into()
+        async_on_block(rg.get_conversation_stream(conversation_id)).into()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -1526,13 +1665,15 @@ pub mod ffi {
             return std::ptr::null_mut();
         }
 
-        Box::into_raw(Box::new(Conversation::recipients(&*conversation).into()))
+        Box::into_raw(Box::new(
+            Vec::from_iter(Conversation::recipients(&*conversation)).into(),
+        ))
     }
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn messageoptions_new() -> *mut MessageOptions {
-        Box::into_raw(Box::new(MessageOptions::default()))
+        Box::into_raw(Box::default())
     }
 
     #[allow(clippy::missing_safety_doc)]

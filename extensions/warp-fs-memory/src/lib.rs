@@ -133,14 +133,11 @@ impl Extension for MemorySystem {
 pub mod ffi {
     use crate::MemorySystem;
     use warp::constellation::ConstellationAdapter;
-    use warp::sync::{Arc, RwLock};
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
     pub unsafe extern "C" fn constellation_fs_memory_create_context() -> *mut ConstellationAdapter {
-        let obj = Box::new(ConstellationAdapter::new(Arc::new(RwLock::new(Box::new(
-            MemorySystem::new(),
-        )))));
+        let obj = Box::new(ConstellationAdapter::new(Box::new(MemorySystem::new())));
         Box::into_raw(obj) as *mut ConstellationAdapter
     }
 }

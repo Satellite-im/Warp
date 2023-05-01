@@ -1,4 +1,4 @@
-use ipfs::Multiaddr;
+use rust_ipfs::Multiaddr;
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, str::FromStr};
 
@@ -76,17 +76,34 @@ pub struct IpfsSetting {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
+    /// Allow only interactions with `MultiPass` friends
+    /// Note: This is ignored when it comes to chating between group chat recipients
     pub with_friends: bool,
-    pub store_decrypted: bool,
     pub broadcast_interval: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Placeholder
     pub discovery_name: Option<String>,
+    /// Placeholder
     pub discovery: bool,
+    /// TBD
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sync: Vec<Multiaddr>,
+    /// TBD
     pub sync_interval: u64,
+
+    /// Enables spam check
     pub check_spam: bool,
-    pub allow_unsigned_message: bool,
+
+    /// Load conversation in a separate task
+    /// Note: While this is loaded in a separate task, not all conversations will be made available up front.
+    ///       If any conversations are corrupted for whatever reason they will not be made available
+    pub conversation_load_task: bool,
+
+    /// Attaches recipients to the local message block
+    pub attach_recipients_on_storing: bool,
+
+    /// Disables emitting an event on stream for creating a conversation
+    pub disable_sender_event_emit: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,8 +155,6 @@ impl Default for RgIpfsConfig {
                 discovery: true,
                 check_spam: true,
                 with_friends: false,
-                store_decrypted: false,
-                allow_unsigned_message: false,
                 ..Default::default()
             },
             debug: false,
@@ -334,7 +349,7 @@ pub mod ffi {
             Err(e) => return FFIResult_Null::err(Error::from(e)),
         };
 
-        std::fs::write(file, &config).map_err(Error::from).into()
+        std::fs::write(file, config).map_err(Error::from).into()
     }
 
     #[allow(clippy::missing_safety_doc)]

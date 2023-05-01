@@ -1,286 +1,234 @@
 #![allow(clippy::await_holding_lock)]
+use futures::channel::oneshot;
 use futures::StreamExt;
-use ipfs::libp2p::gossipsub::GossipsubMessage;
-use ipfs::{Ipfs, IpfsTypes, PeerId};
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::ops::Deref;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
-use tokio::sync::broadcast;
-use tokio::sync::RwLock as AsyncRwLock;
-use tracing::log::{error, warn};
-use warp::crypto::cipher::Cipher;
-use warp::crypto::did_key::Generate;
-use warp::crypto::zeroize::Zeroizing;
-
+use ipfs::{Ipfs, PeerId};
 use libipld::IpldCodec;
+use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
-use warp::crypto::{Ed25519KeyPair, KeyMaterial, DID};
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+use tokio::sync::{broadcast, RwLock};
+use tracing::log::{self, error, warn};
+use warp::crypto::DID;
 use warp::error::Error;
-use warp::multipass::identity::{FriendRequest, FriendRequestStatus};
 use warp::multipass::MultiPassEventKind;
 use warp::sata::{Kind, Sata};
 use warp::sync::Arc;
 
 use warp::tesseract::Tesseract;
 
-use crate::config::Discovery;
-use crate::store::{connected_to_peer, verify_serde_sig};
-use crate::Persistent;
+use crate::config::MpIpfsConfig;
+use crate::store::PeerTopic;
 
-use super::document::DocumentType;
-use super::identity::IdentityStore;
+use super::identity::{IdentityStore, LookupBy, RequestOption};
 use super::phonebook::PhoneBook;
-use super::{
-    did_keypair, did_to_libp2p_pub, libp2p_pub_to_did, sign_serde, PeerConnectionType,
-    FRIENDS_BROADCAST,
-};
+use super::queue::Queue;
+use super::{did_keypair, did_to_libp2p_pub, discovery, libp2p_pub_to_did};
 
-pub struct FriendsStore<T: IpfsTypes> {
-    ipfs: Ipfs<T>,
+#[allow(clippy::type_complexity)]
+#[derive(Clone)]
+pub struct FriendsStore {
+    ipfs: Ipfs,
 
     // Identity Store
-    identity: IdentityStore<T>,
+    identity: IdentityStore,
+
+    discovery: discovery::Discovery,
 
     // keypair
     did_key: Arc<DID>,
 
-    // path to where things are stored
-    path: Option<PathBuf>,
+    // Queue to handle sending friend request
+    queue: Queue,
 
-    // Would be used to stop the look in the tokio task
-    end_event: Arc<AtomicBool>,
+    phonebook: Option<PhoneBook>,
 
-    override_ipld: Arc<AtomicBool>,
+    wait_on_response: Option<Duration>,
 
-    // Used to broadcast request
-    queue: Arc<AsyncRwLock<HashMap<DID, VecDeque<InternalRequest>>>>,
-
-    // Tesseract
-    tesseract: Tesseract,
-
-    phonebook: PhoneBook<T>,
+    signal: Arc<RwLock<HashMap<DID, oneshot::Sender<Result<(), Error>>>>>,
 
     tx: broadcast::Sender<MultiPassEventKind>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Request {
+    In(DID),
+    Out(DID),
+}
+
+impl From<Request> for RequestType {
+    fn from(request: Request) -> Self {
+        RequestType::from(&request)
+    }
+}
+
+impl From<&Request> for RequestType {
+    fn from(request: &Request) -> Self {
+        match request {
+            Request::In(_) => RequestType::Incoming,
+            Request::Out(_) => RequestType::Outgoing,
+        }
+    }
+}
+
+impl Request {
+    pub fn r#type(&self) -> RequestType {
+        self.into()
+    }
+
+    pub fn did(&self) -> &DID {
+        match self {
+            Request::In(did) => did,
+            Request::Out(did) => did,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Hash, Eq)]
 #[serde(rename_all = "lowercase", tag = "type")]
-pub enum InternalRequest {
-    In(FriendRequest),
-    Out(FriendRequest),
+pub enum Event {
+    /// Event indicating a friend request
+    Request,
+    /// Event accepting the request
+    Accept,
+    /// Remove identity as a friend
+    Remove,
+    /// Reject friend request, if any
+    Reject,
+    /// Retract a sent friend request
+    Retract,
+    /// Block user
+    Block,
+    /// Unblock user
+    Unblock,
+    /// Indiciation of a response to a request
+    Response,
 }
 
-impl Deref for InternalRequest {
-    type Target = FriendRequest;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            InternalRequest::In(req) => req,
-            InternalRequest::Out(req) => req,
-        }
-    }
-}
-
-impl InternalRequest {
-    pub fn request_type(&self) -> InternalRequestType {
-        match self {
-            InternalRequest::In(_) => InternalRequestType::Incoming,
-            InternalRequest::Out(_) => InternalRequestType::Outgoing,
-        }
-    }
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Eq)]
+pub struct PayloadEvent {
+    pub sender: DID,
+    pub event: Event,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InternalRequestType {
+pub enum RequestType {
     Incoming,
     Outgoing,
 }
 
-impl InternalRequest {
-    pub fn valid(&self) -> Result<(), Error> {
-        let mut request = FriendRequest::default();
-        request.set_from(self.from());
-        request.set_to(self.to());
-        request.set_status(self.status());
-        request.set_date(self.date());
-
-        let signature = match self.signature() {
-            Some(s) => bs58::decode(s).into_vec()?,
-            None => return Err(Error::InvalidSignature),
-        };
-
-        verify_serde_sig(self.from(), &request, &signature)?;
-
-        Ok(())
-    }
-}
-
-impl<T: IpfsTypes> Clone for FriendsStore<T> {
-    fn clone(&self) -> Self {
-        Self {
-            ipfs: self.ipfs.clone(),
-            identity: self.identity.clone(),
-            did_key: self.did_key.clone(),
-            path: self.path.clone(),
-            override_ipld: self.override_ipld.clone(),
-            end_event: self.end_event.clone(),
-            queue: self.queue.clone(),
-            tesseract: self.tesseract.clone(),
-            phonebook: self.phonebook.clone(),
-            tx: self.tx.clone(),
-        }
-    }
-}
-
-impl<T: IpfsTypes> FriendsStore<T> {
+impl FriendsStore {
     pub async fn new(
-        ipfs: Ipfs<T>,
-        identity: IdentityStore<T>,
-        path: Option<PathBuf>,
+        ipfs: Ipfs,
+        identity: IdentityStore,
+        discovery: discovery::Discovery,
+        config: MpIpfsConfig,
         tesseract: Tesseract,
-        interval: u64,
-        (tx, override_ipld): (broadcast::Sender<MultiPassEventKind>, bool),
+        tx: broadcast::Sender<MultiPassEventKind>,
     ) -> anyhow::Result<Self> {
-        let path = match std::any::TypeId::of::<T>() == std::any::TypeId::of::<Persistent>() {
-            true => path,
-            false => None,
-        };
-
-        let end_event = Arc::new(AtomicBool::new(false));
-        let queue = Arc::new(Default::default());
         let did_key = Arc::new(did_keypair(&tesseract)?);
-        let override_ipld = Arc::new(AtomicBool::new(override_ipld));
 
-        let (phonebook, fut) = PhoneBook::new(ipfs.clone(), tx.clone());
-        tokio::spawn(fut);
+        let queue = Queue::new(
+            ipfs.clone(),
+            did_key.clone(),
+            config.path.clone(),
+            discovery.clone(),
+        );
 
+        let phonebook = config.store_setting.use_phonebook.then_some(PhoneBook::new(
+            ipfs.clone(),
+            discovery.clone(),
+            tx.clone(),
+            config.store_setting.emit_online_event,
+        ));
+
+        let signal = Default::default();
+        let wait_on_response = config.store_setting.friend_request_response_duration;
         let store = Self {
             ipfs,
             identity,
+            discovery,
             did_key,
-            path,
-            end_event,
             queue,
-            tesseract,
             phonebook,
             tx,
-            override_ipld,
+            signal,
+            wait_on_response,
         };
-
-        let store_inner = store.clone();
 
         let stream = store
             .ipfs
-            .pubsub_subscribe(FRIENDS_BROADCAST.into())
+            .pubsub_subscribe(store.did_key.inbox())
             .await?;
 
-        let (local_ipfs_public_key, _) = store.local().await?;
+        tokio::spawn({
+            let mut store = store.clone();
+            async move {
+                tokio::spawn({
+                    let store = store.clone();
+                    async move { if let Err(_e) = store.queue.load().await {} }
+                });
 
-        let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
+                if let Some(phonebook) = store.phonebook.as_ref() {
+                    for addr in store.identity.relays() {
+                        if let Err(_e) = phonebook.add_relay(addr).await {}
+                    }
 
-        tokio::spawn(async move {
-            let mut store = store_inner;
-
-            let discovery = store.identity.discovery_type();
-
-            if let Err(_e) = store.phonebook.set_discovery(discovery).await {}
-
-            for addr in store.identity.relays() {
-                if let Err(_e) = store.phonebook.add_relay(addr).await {}
-            }
-
-            if let Err(e) = store.load_queue().await {
-                error!("Error loading queue: {e}");
-            }
-
-            if let Ok(friends) = store.friends_list().await {
-                if let Err(_e) = store.phonebook.add_friend_list(friends).await {
-                    error!("Error adding friends in phonebook: {_e}");
-                }
-            }
-
-            // autoban the blocklist
-            match store.block_list().await {
-                Ok(list) => {
-                    for pubkey in list {
-                        if let Ok(peer_id) = did_to_libp2p_pub(&pubkey).map(|p| p.to_peer_id()) {
-                            if let Err(e) = store.ipfs.ban_peer(peer_id).await {
-                                error!("Error banning peer: {e}");
-                            }
+                    if let Ok(friends) = store.friends_list().await {
+                        if let Err(_e) = phonebook.add_friend_list(friends).await {
+                            error!("Error adding friends in phonebook: {_e}");
                         }
                     }
                 }
-                Err(e) => {
-                    error!("Error loading block list: {e}");
-                }
-            };
 
-            // scan through friends list to see if there is any incoming request or outgoing request matching
-            // and clear them out of the request list as a precautionary measure
-            tokio::spawn({
-                let mut store = store.clone();
-                async move {
-                    let friends = match store.friends_list().await {
-                        Ok(list) => list,
-                        _ => return,
+                // autoban the blocklist
+                // match store.block_list().await {
+                //     Ok(list) => {
+                //         for pubkey in list {
+                //             if let Ok(peer_id) = did_to_libp2p_pub(&pubkey).map(|p| p.to_peer_id())
+                //             {
+                //                 if let Err(e) = store.ipfs.ban_peer(peer_id).await {
+                //                     error!("Error banning peer: {e}");
+                //                 }
+                //             }
+                //         }
+                //     }
+                //     Err(e) => {
+                //         error!("Error loading block list: {e}");
+                //     }
+                // };
+
+                // scan through friends list to see if there is any incoming request or outgoing request matching
+                // and clear them out of the request list as a precautionary measure
+                tokio::spawn({
+                    let store = store.clone();
+                    async move {
+                        let friends = match store.friends_list().await {
+                            Ok(list) => list,
+                            _ => return,
+                        };
+
+                        for friend in friends.iter() {
+                            let list = store.list_all_raw_request().await.unwrap_or_default();
+
+                            // cleanup outgoing
+                            for req in list.iter().filter(|req| req.did().eq(friend)) {
+                                let _ = store.identity.root_document_remove_request(req).await.ok();
+                            }
+                        }
+                    }
+                });
+                tokio::task::yield_now().await;
+
+                futures::pin_mut!(stream);
+
+                while let Some(message) = stream.next().await {
+                    let Ok(data) = serde_json::from_slice::<Sata>(&message.data) else {
+                        continue;
                     };
 
-                    for friend in friends.iter() {
-                        let mut list = store.list_all_raw_request().await.unwrap_or_default();
-                        // cleanup outgoing
-                        if let Some(req) = list
-                            .iter()
-                            .find(|request| {
-                                request.request_type() == InternalRequestType::Outgoing
-                                    && request.to() == friend.clone()
-                                    && request.status() == FriendRequestStatus::Pending
-                            })
-                            .cloned()
-                        {
-                            list.remove(&req);
-                        }
-
-                        // cleanup incoming
-                        if let Some(req) = list
-                            .iter()
-                            .find(|request| {
-                                request.request_type() == InternalRequestType::Incoming
-                                    && request.from() == friend.clone()
-                                    && request.status() == FriendRequestStatus::Pending
-                            })
-                            .cloned()
-                        {
-                            list.remove(&req);
-                        }
-
-                        if let Err(_e) = store.set_request_list(list).await {}
-                    }
-                }
-            });
-            tokio::task::yield_now().await;
-
-            futures::pin_mut!(stream);
-            let mut broadcast_interval = tokio::time::interval(Duration::from_millis(interval));
-
-            loop {
-                if store.end_event.load(Ordering::SeqCst) {
-                    break;
-                }
-                tokio::select! {
-                    message = stream.next() => {
-                        if let Some(message) = message {
-                            if let Err(e) = store.check_request_message(&local_public_key, message).await {
-                                error!("Error: {e}");
-                            }
-                        }
-                    }
-                    _ = broadcast_interval.tick() => {
-                        if let Err(e) = store.check_queue().await {
-                            error!("Error: {e}");
-                        }
+                    if let Err(e) = store.check_request_message(data).await {
+                        error!("Error: {e}");
                     }
                 }
             }
@@ -290,228 +238,277 @@ impl<T: IpfsTypes> FriendsStore<T> {
     }
 
     //TODO: Implement Errors
-    async fn check_request_message(
-        &mut self,
-        local_public_key: &DID,
-        message: Arc<GossipsubMessage>,
-    ) -> anyhow::Result<()> {
-        if let Ok(data) = serde_json::from_slice::<Sata>(&message.data) {
-            let data = data.decrypt::<FriendRequest>(&self.did_key)?;
+    //TODO: Uncomment below once sata is nolonger used here
+    // #[tracing::instrument(skip(self, data))]
+    async fn check_request_message(&mut self, data: Sata) -> anyhow::Result<()> {
+        let data = data.decrypt::<PayloadEvent>(&self.did_key)?;
 
-            if data.to().ne(local_public_key) {
-                warn!("Request is not meant for identity. Skipping");
-                return Ok(());
-            }
+        if self
+            .list_incoming_request()
+            .await
+            .unwrap_or_default()
+            .contains(&data.sender)
+            && data.event == Event::Request
+        {
+            warn!("Request exist locally. Skipping");
+            return Ok(());
+        }
 
-            if self
-                .list_outgoing_request()
-                .await
-                .unwrap_or_default()
-                .contains(&data)
-                || self
-                    .list_incoming_request()
-                    .await
-                    .unwrap_or_default()
-                    .contains(&data)
-            {
-                warn!("Request exist locally. Skipping");
-                return Ok(());
-            }
+        let mut signal = self.signal.write().await.remove(&data.sender);
 
-            // Before we validate the request, we should check to see if the key is blocked
-            // If it is, skip the request so we dont wait resources storing it.
-            if self.is_blocked(&data.from()).await? {
-                return Ok(());
-            }
+        // Before we validate the request, we should check to see if the key is blocked
+        // If it is, skip the request so we dont wait resources storing it.
+        if self.is_blocked(&data.sender).await? && !matches!(data.event, Event::Block) {
+            let payload = PayloadEvent {
+                sender: (*self.did_key).clone(),
+                event: Event::Block,
+            };
 
-            //first verify the request before processing it
-            validate_request(&data)?;
+            self.broadcast_request((&data.sender, &payload), false, true)
+                .await?;
 
-            match data.status() {
-                FriendRequestStatus::Accepted => {
-                    let mut list = self.list_all_raw_request().await?;
-                    let internal_request = list
-                        .iter()
-                        .find(|request| {
-                            request.request_type() == InternalRequestType::Outgoing
-                                && request.to() == data.from()
-                                && request.status() == FriendRequestStatus::Pending
-                        })
-                        .cloned()
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
+            return Ok(());
+        }
+
+        match data.event {
+            Event::Accept => {
+                let list = self.list_all_raw_request().await?;
+
+                let Some(item) = list.iter().filter(|req| req.r#type() == RequestType::Outgoing).find(|req| data.sender.eq(req.did())).cloned() else {
+                        anyhow::bail!(
                             "Unable to locate pending request. Already been accepted or rejected?"
                         )
-                        })?;
+                    };
 
-                    list.remove(&internal_request);
-                    self.set_request_list(list).await?;
-
-                    self.add_friend(&data.from()).await?;
+                // Maybe just try the function instead and have it be a hard error?
+                if self
+                    .identity
+                    .root_document_remove_request(&item)
+                    .await
+                    .is_err()
+                {
+                    anyhow::bail!(
+                        "Unable to locate pending request. Already been accepted or rejected?"
+                    )
                 }
-                FriendRequestStatus::Pending => {
-                    if self.is_friend(&data.from()).await.is_ok() {
-                        error!("Friend already exist");
-                        anyhow::bail!(Error::FriendExist);
-                    }
 
-                    let mut list = self.list_all_raw_request().await?;
+                self.add_friend(item.did()).await?;
+            }
+            Event::Request => {
+                if self.is_friend(&data.sender).await? {
+                    error!("Friend already exist");
+                    anyhow::bail!(Error::FriendExist);
+                }
 
-                    if let Some(inner_req) = list
-                        .iter()
-                        .find(|request| {
-                            request.request_type() == InternalRequestType::Outgoing
-                                && request.to() == data.from()
-                                && request.status() == FriendRequestStatus::Pending
-                        })
-                        .cloned()
-                    {
-                        //Because there is also a corresponding outgoing request for the incoming request
-                        //we can automatically add them
-                        list.remove(&inner_req);
-                        self.set_request_list(list).await?;
+                let list = self.list_all_raw_request().await?;
 
-                        self.add_friend(&data.from()).await?;
-                    } else {
-                        //TODO: Perform check to see if request already exist
-                        list.insert(InternalRequest::In(data.clone()));
+                if let Some(inner_req) = list
+                    .iter()
+                    .find(|request| {
+                        request.r#type() == RequestType::Outgoing && data.sender.eq(request.did())
+                    })
+                    .cloned()
+                {
+                    //Because there is also a corresponding outgoing request for the incoming request
+                    //we can automatically add them
+                    self.identity
+                        .root_document_remove_request(&inner_req)
+                        .await?;
+                    self.add_friend(inner_req.did()).await?;
+                } else {
+                    self.identity
+                        .root_document_add_request(&Request::In(data.sender.clone()))
+                        .await?;
 
-                        self.set_request_list(list).await?;
+                    tokio::spawn({
+                        let tx = self.tx.clone();
+                        let store = self.identity.clone();
+                        let from = data.sender.clone();
+                        async move {
+                            let _ = tokio::time::timeout(Duration::from_secs(10), async {
+                                loop {
+                                    if let Ok(list) =
+                                        store.lookup(LookupBy::DidKey(from.clone())).await
+                                    {
+                                        if !list.is_empty() {
+                                            break;
+                                        }
+                                    }
+                                    tokio::time::sleep(Duration::from_secs(1)).await;
+                                }
+                            })
+                            .await
+                            .ok();
 
-                        if let Err(e) = self
-                            .tx
-                            .send(MultiPassEventKind::FriendRequestReceived { from: data.from() })
-                        {
-                            error!("Error broadcasting event: {e}");
+                            if let Err(e) =
+                                tx.send(MultiPassEventKind::FriendRequestReceived { from })
+                            {
+                                error!("Error broadcasting event: {e}");
+                            }
                         }
-                    }
+                    });
                 }
-                FriendRequestStatus::Denied => {
-                    let mut list = self.list_all_raw_request().await?;
-                    let internal_request = list
-                        .iter()
-                        .find(|request| {
-                            request.request_type() == InternalRequestType::Outgoing
-                                && request.to() == data.from()
-                                && request.status() == FriendRequestStatus::Pending
+                let payload = PayloadEvent {
+                    sender: (*self.did_key).clone(),
+                    event: Event::Response,
+                };
+
+                self.broadcast_request((&data.sender, &payload), false, false)
+                    .await?;
+            }
+            Event::Reject => {
+                let list = self.list_all_raw_request().await?;
+                let internal_request = list
+                    .iter()
+                    .find(|request| {
+                        request.r#type() == RequestType::Outgoing && data.sender.eq(request.did())
+                    })
+                    .cloned()
+                    .ok_or(Error::FriendRequestDoesntExist)?;
+
+                self.identity
+                    .root_document_remove_request(&internal_request)
+                    .await?;
+
+                if let Err(e) = self
+                    .tx
+                    .send(MultiPassEventKind::OutgoingFriendRequestRejected { did: data.sender })
+                {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            Event::Remove => {
+                if self.is_friend(&data.sender).await? {
+                    self.remove_friend(&data.sender, false).await?;
+                }
+            }
+            Event::Retract => {
+                let list = self.list_all_raw_request().await?;
+                let internal_request = list
+                    .iter()
+                    .find(|request| {
+                        request.r#type() == RequestType::Incoming && data.sender.eq(request.did())
+                    })
+                    .cloned()
+                    .ok_or(Error::FriendRequestDoesntExist)?;
+
+                self.identity
+                    .root_document_remove_request(&internal_request)
+                    .await?;
+
+                if let Err(e) = self
+                    .tx
+                    .send(MultiPassEventKind::IncomingFriendRequestClosed { did: data.sender })
+                {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            Event::Block => {
+                if self.has_request_from(&data.sender).await? {
+                    if let Err(e) = self
+                        .tx
+                        .send(MultiPassEventKind::IncomingFriendRequestClosed {
+                            did: data.sender.clone(),
                         })
-                        .cloned()
-                        .ok_or(Error::FriendRequestDoesntExist)?;
-
-                    list.remove(&internal_request);
-                    self.set_request_list(list).await?;
-
+                    {
+                        error!("Error broadcasting event: {e}");
+                    }
+                } else if self.sent_friend_request_to(&data.sender).await? {
                     if let Err(e) =
                         self.tx
                             .send(MultiPassEventKind::OutgoingFriendRequestRejected {
-                                did: data.from(),
+                                did: data.sender.clone(),
                             })
                     {
                         error!("Error broadcasting event: {e}");
                     }
                 }
-                FriendRequestStatus::FriendRemoved => {
-                    self.is_friend(&data.from()).await?;
-                    self.remove_friend(&data.from(), false, false).await?;
+
+                let list = self.list_all_raw_request().await?;
+                for req in list.iter().filter(|req| req.did().eq(&data.sender)) {
+                    self.identity.root_document_remove_request(req).await?;
                 }
-                FriendRequestStatus::RequestRemoved => {
-                    let mut list = self.list_all_raw_request().await?;
-                    let internal_request = list
-                        .iter()
-                        .find(|request| {
-                            request.request_type() == InternalRequestType::Incoming
-                                && request.to() == data.to()
-                                && request.status() == FriendRequestStatus::Pending
-                        })
-                        .cloned()
-                        .ok_or(Error::FriendRequestDoesntExist)?;
 
-                    list.remove(&internal_request);
+                if self.is_friend(&data.sender).await? {
+                    self.remove_friend(&data.sender, false).await?;
+                }
 
-                    self.set_request_list(list).await?;
+                let completed = self
+                    .identity
+                    .root_document_add_block_by(&data.sender)
+                    .await
+                    .is_ok();
+                if completed {
+                    tokio::spawn({
+                        let store = self.identity.clone();
+                        let sender = data.sender.clone();
+                        async move {
+                            let _ = store.push(&sender).await.ok();
+                            let _ = store.request(&sender, RequestOption::Identity).await.ok();
+                        }
+                    });
 
                     if let Err(e) = self
                         .tx
-                        .send(MultiPassEventKind::IncomingFriendRequestClosed { did: data.from() })
+                        .send(MultiPassEventKind::BlockedBy { did: data.sender })
                     {
                         error!("Error broadcasting event: {e}");
                     }
                 }
-                _ => {}
-            };
-        }
-        Ok(())
-    }
 
-    //TODO: Implement checks to determine if request been accepted, etc.
-    async fn check_queue(&self) -> anyhow::Result<()> {
-        let list = self.queue.read().await.clone();
-        for (did, requests) in list.iter() {
-            if let Ok(crate::store::PeerConnectionType::Connected) =
-                connected_to_peer(self.ipfs.clone(), did.clone()).await
-            {
-                for (index, request) in requests.iter().enumerate() {
-                    let mut data = Sata::default();
-                    data.add_recipient(&request.to())
-                        .map_err(anyhow::Error::from)?;
-
-                    let kp = &*self.did_key;
-                    let payload = data
-                        .encrypt(
-                            IpldCodec::DagJson,
-                            kp.as_ref(),
-                            Kind::Reference,
-                            request.clone(),
-                        )
-                        .map_err(anyhow::Error::from)?;
-
-                    let bytes = serde_json::to_vec(&payload)?;
-
-                    if self
-                        .ipfs
-                        .pubsub_publish(FRIENDS_BROADCAST.into(), bytes)
-                        .await
-                        .is_err()
-                    {
-                        //Because we are unable to send a single request for whatever reason, kill the iteration
-                        //and proceed to the next item in line
-                        break;
-                    }
-
-                    if let Entry::Occupied(mut entry) = self.queue.write().await.entry(did.clone())
-                    {
-                        let _ = entry.get_mut().remove(index);
-                        if entry.get().is_empty() {
-                            entry.remove();
-                        }
-                    }
-
-                    self.save_queue().await;
+                if let Some(tx) = std::mem::take(&mut signal) {
+                    let _ = tx.send(Err(Error::BlockedByUser));
                 }
-
-                if let Entry::Occupied(entry) = self.queue.write().await.entry(did.clone()) {
-                    if entry.get().is_empty() {
-                        entry.remove();
-                    }
-                }
-
-                self.save_queue().await;
             }
+            Event::Unblock => {
+                let completed = self
+                    .identity
+                    .root_document_remove_block_by(&data.sender)
+                    .await
+                    .is_ok();
+
+                if completed {
+                    tokio::spawn({
+                        let store = self.identity.clone();
+                        let sender = data.sender.clone();
+                        async move {
+                            let _ = store.push(&sender).await.ok();
+                            let _ = store.request(&sender, RequestOption::Identity).await.ok();
+                        }
+                    });
+                    if let Err(e) = self
+                        .tx
+                        .send(MultiPassEventKind::UnblockedBy { did: data.sender })
+                    {
+                        error!("Error broadcasting event: {e}");
+                    }
+                }
+            }
+            Event::Response => {
+                if let Some(tx) = std::mem::take(&mut signal) {
+                    let _ = tx.send(Ok(()));
+                }
+            }
+        };
+        if let Some(tx) = std::mem::take(&mut signal) {
+            let _ = tx.send(Ok(()));
         }
+
         Ok(())
     }
 
     async fn local(&self) -> anyhow::Result<(ipfs::libp2p::identity::PublicKey, PeerId)> {
         let (local_ipfs_public_key, local_peer_id) = self
             .ipfs
-            .identity()
+            .identity(None)
             .await
-            .map(|(p, _)| (p.clone(), p.to_peer_id()))?;
+            .map(|info| (info.public_key.clone(), info.peer_id))?;
         Ok((local_ipfs_public_key, local_peer_id))
     }
 }
 
-impl<T: IpfsTypes> FriendsStore<T> {
+impl FriendsStore {
+    #[tracing::instrument(skip(self))]
     pub async fn send_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
         let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
@@ -520,8 +517,12 @@ impl<T: IpfsTypes> FriendsStore<T> {
             return Err(Error::CannotSendSelfFriendRequest);
         }
 
-        if self.is_friend(pubkey).await.is_ok() {
+        if self.is_friend(pubkey).await? {
             return Err(Error::FriendExist);
+        }
+
+        if self.is_blocked_by(pubkey).await? {
+            return Err(Error::BlockedByUser);
         }
 
         if self.is_blocked(pubkey).await? {
@@ -534,30 +535,23 @@ impl<T: IpfsTypes> FriendsStore<T> {
 
         let list = self.list_all_raw_request().await?;
 
-        //TODO: Use the iterator instead
-        for request in list.iter() {
-            // checking the from and status is just a precaution and not required
-            if request.request_type() == InternalRequestType::Outgoing
-                && request.from() == local_public_key
-                && request.to().eq(pubkey)
-                && request.status() == FriendRequestStatus::Pending
-            {
-                // since the request has already been sent, we should not be sending it again
-                return Err(Error::FriendRequestExist);
-            }
+        if list
+            .iter()
+            .any(|request| request.r#type() == RequestType::Outgoing && request.did().eq(pubkey))
+        {
+            // since the request has already been sent, we should not be sending it again
+            return Err(Error::FriendRequestExist);
         }
 
-        let mut request = FriendRequest::default();
-        request.set_from(local_public_key);
-        request.set_to(pubkey.clone());
-        request.set_status(FriendRequestStatus::Pending);
-        let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
+        let payload = PayloadEvent {
+            sender: local_public_key,
+            event: Event::Request,
+        };
 
-        request.set_signature(signature);
-
-        self.broadcast_request(&request, true, true).await
+        self.broadcast_request((pubkey, &payload), true, true).await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn accept_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
@@ -571,50 +565,40 @@ impl<T: IpfsTypes> FriendsStore<T> {
             return Err(Error::FriendRequestDoesntExist);
         }
 
-        let mut list = self.list_all_raw_request().await?;
+        let list = self.list_all_raw_request().await?;
 
-        // Although the request been validated before storing, we should validate again just to be safe
         let internal_request = list
             .iter()
-            .find(|request| {
-                request.request_type() == InternalRequestType::Incoming
-                    && request.from().eq(pubkey)
-                    && request.to() == local_public_key
-                    && request.status() == FriendRequestStatus::Pending
-            })
+            .find(|request| request.r#type() == RequestType::Incoming && request.did().eq(pubkey))
             .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        if let Err(e) = internal_request.valid() {
-            list.remove(&internal_request);
-            self.set_request_list(list).await?;
-            return Err(e);
-        }
-
-        if self.is_friend(pubkey).await.is_ok() {
+        if self.is_friend(pubkey).await? {
             warn!("Already friends. Removing request");
-            list.remove(&internal_request);
-            self.set_request_list(list).await?;
+
+            self.identity
+                .root_document_remove_request(&internal_request)
+                .await?;
+
             return Ok(());
         }
 
-        let mut request = FriendRequest::default();
-        request.set_from(local_public_key);
-        request.set_to(pubkey.clone());
-        request.set_status(FriendRequestStatus::Accepted);
-
-        let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
-        request.set_signature(signature);
+        let payload = PayloadEvent {
+            event: Event::Accept,
+            sender: local_public_key,
+        };
 
         self.add_friend(pubkey).await?;
 
-        list.remove(&internal_request);
+        self.identity
+            .root_document_remove_request(&internal_request)
+            .await?;
 
-        self.set_request_list(list).await?;
-
-        self.broadcast_request(&request, false, true).await
+        self.broadcast_request((pubkey, &payload), false, true)
+            .await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn reject_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
@@ -628,134 +612,117 @@ impl<T: IpfsTypes> FriendsStore<T> {
             return Err(Error::FriendRequestDoesntExist);
         }
 
-        let mut list = self.list_all_raw_request().await?;
+        let list = self.list_all_raw_request().await?;
 
         // Although the request been validated before storing, we should validate again just to be safe
         let internal_request = list
             .iter()
-            .find(|request| {
-                request.request_type() == InternalRequestType::Incoming
-                    && request.from().eq(pubkey)
-                    && request.to() == local_public_key
-                    && request.status() == FriendRequestStatus::Pending
-            })
+            .find(|request| request.r#type() == RequestType::Incoming && request.did().eq(pubkey))
             .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        if let Err(e) = internal_request.valid() {
-            list.remove(&internal_request);
-            self.set_request_list(list).await?;
-            return Err(e);
-        }
+        let payload = PayloadEvent {
+            sender: local_public_key,
+            event: Event::Reject,
+        };
 
-        let mut request = FriendRequest::default();
-        request.set_from(local_public_key);
-        request.set_to(pubkey.clone());
-        request.set_status(FriendRequestStatus::Denied);
+        self.identity
+            .root_document_remove_request(&internal_request)
+            .await?;
 
-        let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
-        request.set_signature(signature);
-
-        list.remove(&internal_request);
-
-        self.set_request_list(list).await?;
-
-        self.broadcast_request(&request, false, true).await
+        self.broadcast_request((pubkey, &payload), false, true)
+            .await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn close_request(&mut self, pubkey: &DID) -> Result<(), Error> {
         let (local_ipfs_public_key, _) = self.local().await?;
 
         let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
 
-        let mut list = self.list_all_raw_request().await?;
+        let list = self.list_all_raw_request().await?;
 
         let internal_request = list
             .iter()
-            .find(|request| {
-                request.request_type() == InternalRequestType::Outgoing
-                    && request.to().eq(pubkey)
-                    && request.from().eq(&local_public_key)
-                    && request.status() == FriendRequestStatus::Pending
-            })
+            .find(|request| request.r#type() == RequestType::Outgoing && request.did().eq(pubkey))
             .cloned()
             .ok_or(Error::CannotFindFriendRequest)?;
 
-        let mut request = FriendRequest::default();
-        request.set_from(local_public_key);
-        request.set_to(pubkey.clone());
-        request.set_status(FriendRequestStatus::RequestRemoved);
+        let payload = PayloadEvent {
+            sender: local_public_key,
+            event: Event::Retract,
+        };
 
-        let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
-        request.set_signature(signature);
+        self.identity
+            .root_document_remove_request(&internal_request)
+            .await?;
 
-        list.remove(&internal_request);
+        if let Some(entry) = self.queue.get(pubkey).await {
+            if entry.event == Event::Request {
+                self.queue.remove(pubkey).await;
+                if let Err(e) = self
+                    .tx
+                    .send(MultiPassEventKind::OutgoingFriendRequestClosed {
+                        did: pubkey.clone(),
+                    })
+                {
+                    error!("Error broadcasting event: {e}");
+                }
+                return Ok(());
+            }
+        }
 
-        self.set_request_list(list).await?;
-
-        self.broadcast_request(&request, false, true).await
+        self.broadcast_request((pubkey, &payload), false, true)
+            .await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn has_request_from(&self, pubkey: &DID) -> Result<bool, Error> {
-        self.list_incoming_request().await.map(|list| {
-            list.iter()
-                .filter(|request| {
-                    request.from().eq(pubkey) && request.status() == FriendRequestStatus::Pending
-                })
-                .count()
-                != 0
-        })
+        self.list_incoming_request()
+            .await
+            .map(|list| list.contains(pubkey))
     }
 }
 
-impl<T: IpfsTypes> FriendsStore<T> {
-    pub async fn block_list(&self) -> Result<HashSet<DID>, Error> {
-        let root_document = self.identity.get_root_document().await?;
-        match root_document.blocks {
-            Some(object) => object.resolve(self.ipfs.clone(), None).await,
-            None => Ok(HashSet::new()),
-        }
+impl FriendsStore {
+    #[tracing::instrument(skip(self))]
+    pub async fn block_list(&self) -> Result<Vec<DID>, Error> {
+        self.identity.root_document_get_blocks().await
     }
 
-    pub async fn set_block_list(&mut self, list: HashSet<DID>) -> Result<(), Error> {
-        let mut root_document = self.identity.get_root_document().await?;
-        let old_document = root_document.blocks.clone();
-        if matches!(old_document, Some(DocumentType::Object(_)) | None) {
-            root_document.blocks = Some(DocumentType::Object(list));
-        } else if matches!(old_document, Some(DocumentType::Cid(_))) {
-            let new_cid = self.identity.put_dag(list).await?;
-            root_document.blocks = Some(new_cid.into());
-        }
-
-        self.identity.set_root_document(root_document).await?;
-        if let Some(DocumentType::Cid(cid)) = old_document {
-            if self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_pin(&cid, false).await?;
-            }
-            self.ipfs.remove_block(cid).await?;
-        }
-        Ok(())
-    }
-
+    #[tracing::instrument(skip(self))]
     pub async fn is_blocked(&self, public_key: &DID) -> Result<bool, Error> {
         self.block_list()
             .await
             .map(|list| list.contains(public_key))
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn block(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let (local_ipfs_public_key, _) = self.local().await?;
+
+        let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
+
+        if local_public_key.eq(pubkey) {
+            return Err(Error::CannotBlockOwnKey);
+        }
+
         if self.is_blocked(pubkey).await? {
             return Err(Error::PublicKeyIsBlocked);
         }
 
-        let mut list = self.block_list().await?;
+        self.identity.root_document_add_block(pubkey).await?;
 
-        if list.insert(pubkey.clone()) {
-            self.set_block_list(list).await?;
+        // Remove anything from queue related to the key
+        self.queue.remove(pubkey).await;
+
+        let list = self.list_all_raw_request().await?;
+        for req in list.iter().filter(|req| req.did().eq(pubkey)) {
+            self.identity.root_document_remove_request(req).await?;
         }
 
-        if self.is_friend(pubkey).await.is_ok() {
-            if let Err(e) = self.remove_friend(pubkey, true, false).await {
+        if self.is_friend(pubkey).await? {
+            if let Err(e) = self.remove_friend(pubkey, false).await {
                 error!("Error removing item from friend list: {e}");
             }
         }
@@ -768,58 +735,63 @@ impl<T: IpfsTypes> FriendsStore<T> {
         // let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
 
         // self.ipfs.ban_peer(peer_id).await?;
-        Ok(())
+        let payload = PayloadEvent {
+            sender: local_public_key,
+            event: Event::Block,
+        };
+
+        self.broadcast_request((pubkey, &payload), false, true)
+            .await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn unblock(&mut self, pubkey: &DID) -> Result<(), Error> {
+        let (local_ipfs_public_key, _) = self.local().await?;
+
+        let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
+
+        if local_public_key.eq(pubkey) {
+            return Err(Error::CannotUnblockOwnKey);
+        }
+
         if !self.is_blocked(pubkey).await? {
             return Err(Error::PublicKeyIsntBlocked);
         }
 
-        let mut list = self.block_list().await?;
-
-        if list.remove(pubkey) {
-            self.set_block_list(list).await?;
-        }
+        self.identity.root_document_remove_block(pubkey).await?;
 
         let peer_id = did_to_libp2p_pub(pubkey)?.to_peer_id();
         self.ipfs.unban_peer(peer_id).await?;
-        Ok(())
+
+        let payload = PayloadEvent {
+            sender: local_public_key,
+            event: Event::Unblock,
+        };
+
+        self.broadcast_request((pubkey, &payload), false, true)
+            .await
     }
 }
 
-impl<T: IpfsTypes> FriendsStore<T> {
-    pub async fn friends_list(&self) -> Result<HashSet<DID>, Error> {
-        let root_document = self.identity.get_root_document().await?;
-        match root_document.friends {
-            Some(object) => object.resolve(self.ipfs.clone(), None).await,
-            None => Ok(HashSet::new()),
-        }
+impl FriendsStore {
+    pub async fn block_by_list(&self) -> Result<Vec<DID>, Error> {
+        self.identity.root_document_get_block_by().await
     }
 
-    pub async fn set_friends_list(&mut self, list: HashSet<DID>) -> Result<(), Error> {
-        let mut root_document = self.identity.get_root_document().await?;
-        let old_document = root_document.friends.clone();
-        if matches!(old_document, Some(DocumentType::Object(_)) | None) {
-            root_document.friends = Some(DocumentType::Object(list));
-        } else if matches!(old_document, Some(DocumentType::Cid(_))) {
-            let new_cid = self.identity.put_dag(list).await?;
-            root_document.friends = Some(new_cid.into());
-        }
+    pub async fn is_blocked_by(&self, pubkey: &DID) -> Result<bool, Error> {
+        self.block_by_list().await.map(|list| list.contains(pubkey))
+    }
+}
 
-        self.identity.set_root_document(root_document).await?;
-        if let Some(DocumentType::Cid(cid)) = old_document {
-            if self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_pin(&cid, false).await?;
-            }
-            self.ipfs.remove_block(cid).await?;
-        }
-        Ok(())
+impl FriendsStore {
+    pub async fn friends_list(&self) -> Result<Vec<DID>, Error> {
+        self.identity.root_document_get_friends().await
     }
 
     // Should not be called directly but only after a request is accepted
+    #[tracing::instrument(skip(self))]
     pub async fn add_friend(&mut self, pubkey: &DID) -> Result<(), Error> {
-        if self.is_friend(pubkey).await.is_ok() {
+        if self.is_friend(pubkey).await? {
             return Err(Error::FriendExist);
         }
 
@@ -827,15 +799,17 @@ impl<T: IpfsTypes> FriendsStore<T> {
             return Err(Error::PublicKeyIsBlocked);
         }
 
-        let mut list = self.friends_list().await?;
+        self.identity.root_document_add_friend(pubkey).await?;
 
-        if list.insert(pubkey.clone()) {
-            self.set_friends_list(list).await?;
+        if let Some(phonebook) = self.phonebook.as_ref() {
+            if let Err(_e) = phonebook.add_friend(pubkey).await {
+                error!("Error: {_e}");
+            }
         }
 
-        if let Err(_e) = self.phonebook.add_friend(pubkey).await {
-            error!("Error: {_e}");
-        }
+        // Push to give an update in the event any wasnt transmitted during the initial push
+        // We dont care if this errors or not.
+        let _ = self.identity.push(pubkey).await.ok();
 
         if let Err(e) = self.tx.send(MultiPassEventKind::FriendAdded {
             did: pubkey.clone(),
@@ -846,37 +820,31 @@ impl<T: IpfsTypes> FriendsStore<T> {
         Ok(())
     }
 
-    pub async fn remove_friend(
-        &mut self,
-        pubkey: &DID,
-        broadcast: bool,
-        save: bool,
-    ) -> Result<(), Error> {
-        self.is_friend(pubkey).await?;
-
-        let mut list = self.friends_list().await?;
-
-        if list.remove(pubkey) {
-            self.set_friends_list(list).await?;
+    #[tracing::instrument(skip(self, broadcast))]
+    pub async fn remove_friend(&mut self, pubkey: &DID, broadcast: bool) -> Result<(), Error> {
+        if !self.is_friend(pubkey).await? {
+            return Err(Error::FriendDoesntExist);
         }
 
-        if let Err(_e) = self.phonebook.remove_friend(pubkey).await {
-            error!("Error: {_e}");
+        self.identity.root_document_remove_friend(pubkey).await?;
+
+        if let Some(phonebook) = self.phonebook.as_ref() {
+            if let Err(_e) = phonebook.remove_friend(pubkey).await {
+                error!("Error: {_e}");
+            }
         }
 
         if broadcast {
             let (local_ipfs_public_key, _) = self.local().await?;
-
             let local_public_key = libp2p_pub_to_did(&local_ipfs_public_key)?;
-            let mut request = FriendRequest::default();
-            request.set_from(local_public_key);
-            request.set_to(pubkey.clone());
-            request.set_status(FriendRequestStatus::FriendRemoved);
-            let signature = bs58::encode(sign_serde(&self.tesseract, &request)?).into_string();
 
-            request.set_signature(signature);
+            let payload = PayloadEvent {
+                sender: local_public_key,
+                event: Event::Remove,
+            };
 
-            self.broadcast_request(&request, save, save).await?;
+            self.broadcast_request((pubkey, &payload), false, true)
+                .await?;
         }
 
         if let Err(e) = self.tx.send(MultiPassEventKind::FriendRemoved {
@@ -888,222 +856,205 @@ impl<T: IpfsTypes> FriendsStore<T> {
         Ok(())
     }
 
-    pub async fn is_friend(&self, pubkey: &DID) -> Result<(), Error> {
-        let has = self.friends_list().await?.contains(pubkey);
-        match has {
-            true => Ok(()),
-            false => Err(Error::FriendDoesntExist),
-        }
+    #[tracing::instrument(skip(self))]
+    pub async fn is_friend(&self, pubkey: &DID) -> Result<bool, Error> {
+        self.friends_list().await.map(|list| list.contains(pubkey))
     }
 }
 
-impl<T: IpfsTypes> FriendsStore<T> {
-    pub async fn list_all_raw_request(&self) -> Result<HashSet<InternalRequest>, Error> {
-        let root_document = self.identity.get_root_document().await?;
-        match root_document.request {
-            Some(object) => object.resolve(self.ipfs.clone(), None).await,
-            None => Ok(HashSet::new()),
-        }
-    }
-
-    pub async fn set_request_list(&mut self, list: HashSet<InternalRequest>) -> Result<(), Error> {
-        let mut root_document = self.identity.get_root_document().await?;
-        let old_document = root_document.request.clone();
-        if matches!(old_document, Some(DocumentType::Object(_)) | None) {
-            root_document.request = Some(DocumentType::Object(list));
-        } else if matches!(old_document, Some(DocumentType::Cid(_))) {
-            let new_cid = self.identity.put_dag(list).await?;
-            root_document.request = Some(new_cid.into());
-        }
-
-        self.identity.set_root_document(root_document).await?;
-
-        if let Some(DocumentType::Cid(cid)) = old_document {
-            if self.ipfs.is_pinned(&cid).await? {
-                self.ipfs.remove_pin(&cid, false).await?;
-            }
-            self.ipfs.remove_block(cid).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn list_all_request(&self) -> Result<Vec<FriendRequest>, Error> {
-        self.list_all_raw_request().await.map(|list| {
-            list.iter()
-                .map(|request| match request {
-                    InternalRequest::In(request) | InternalRequest::Out(request) => request,
-                })
-                .cloned()
-                .collect()
-        })
+impl FriendsStore {
+    pub async fn list_all_raw_request(&self) -> Result<Vec<Request>, Error> {
+        self.identity.root_document_get_requests().await
     }
 
     pub async fn received_friend_request_from(&self, did: &DID) -> Result<bool, Error> {
         self.list_incoming_request()
             .await
-            .map(|list| list.iter().any(|request| request.from().eq(did)))
+            .map(|list| list.iter().any(|request| request.eq(did)))
     }
 
-    pub async fn list_incoming_request(&self) -> Result<Vec<FriendRequest>, Error> {
+    #[tracing::instrument(skip(self))]
+    pub async fn list_incoming_request(&self) -> Result<Vec<DID>, Error> {
         self.list_all_raw_request().await.map(|list| {
             list.iter()
                 .filter_map(|request| match request {
-                    InternalRequest::In(request) => Some(request),
+                    Request::In(request) => Some(request),
                     _ => None,
                 })
-                .filter(|request| request.status() == FriendRequestStatus::Pending)
                 .cloned()
                 .collect::<Vec<_>>()
         })
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn sent_friend_request_to(&self, did: &DID) -> Result<bool, Error> {
         self.list_outgoing_request()
             .await
-            .map(|list| list.iter().any(|request| request.to().eq(did)))
+            .map(|list| list.iter().any(|request| request.eq(did)))
     }
 
-    pub async fn list_outgoing_request(&self) -> Result<Vec<FriendRequest>, Error> {
+    #[tracing::instrument(skip(self))]
+    pub async fn list_outgoing_request(&self) -> Result<Vec<DID>, Error> {
         self.list_all_raw_request().await.map(|list| {
             list.iter()
                 .filter_map(|request| match request {
-                    InternalRequest::Out(request) => Some(request),
+                    Request::Out(request) => Some(request),
                     _ => None,
                 })
-                .filter(|request| request.status() == FriendRequestStatus::Pending)
                 .cloned()
                 .collect::<Vec<_>>()
         })
     }
 
+    //TODO: Replace "Sata" with a light payload
+    #[tracing::instrument(skip(self))]
     pub async fn broadcast_request(
         &mut self,
-        request: &FriendRequest,
+        (recipient, payload): (&DID, &PayloadEvent),
         store_request: bool,
-        _save_to_disk: bool,
+        queue_broadcast: bool,
     ) -> Result<(), Error> {
-        let remote_peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
+        let remote_peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
 
-        if matches!(
-            self.identity.discovery_type(),
-            Discovery::Direct | Discovery::None
-        ) {
-            let peer_id = did_to_libp2p_pub(&request.to())?.to_peer_id();
-
-            let connected = super::connected_to_peer(self.ipfs.clone(), remote_peer_id).await?;
-
-            if connected != PeerConnectionType::Connected {
-                let res = match tokio::time::timeout(
-                    Duration::from_secs(2),
-                    self.ipfs.find_peer_info(peer_id),
-                )
-                .await
-                {
-                    Ok(res) => res,
-                    Err(e) => Err(anyhow::anyhow!("{}", e.to_string())),
-                };
-
-                if let Err(_e) = res {
-                    let ipfs = self.ipfs.clone();
-                    let pubkey = request.to();
-                    let relay = self.identity.relays();
-                    let discovery = self.identity.discovery_type();
-                    tokio::spawn(async move {
-                        if let Err(e) = super::discover_peer(ipfs, &pubkey, discovery, relay).await
-                        {
-                            error!("Error discoverying peer: {e}");
-                        }
-                    });
-                    tokio::task::yield_now().await;
-                }
-            }
+        if !self.discovery.contains(recipient).await {
+            self.discovery.insert(recipient).await?;
         }
 
         if store_request {
-            let outgoing_request = InternalRequest::Out(request.clone());
-            let mut list = self.list_all_raw_request().await?;
+            let outgoing_request = Request::Out(recipient.clone());
+            let list = self.list_all_raw_request().await?;
             if !list.contains(&outgoing_request) {
-                list.insert(outgoing_request);
-                self.set_request_list(list).await?;
+                self.identity
+                    .root_document_add_request(&outgoing_request)
+                    .await?;
             }
         }
 
         let mut data = Sata::default();
-        data.add_recipient(&request.to())
-            .map_err(anyhow::Error::from)?;
+        data.add_recipient(recipient).map_err(anyhow::Error::from)?;
+
         let kp = &*self.did_key;
-        let payload = data
+        let e_payload = data
             .encrypt(
                 IpldCodec::DagJson,
                 kp.as_ref(),
                 Kind::Static,
-                request.clone(),
+                payload.clone(),
             )
             .map_err(anyhow::Error::from)?;
 
-        let bytes = serde_json::to_vec(&payload)?;
+        let bytes = serde_json::to_vec(&e_payload)?;
 
-        //Check to make sure the payload itself doesnt exceed 256kb
-        if bytes.len() >= 256 * 1024 {
-            return Err(Error::InvalidLength {
-                context: "payload".into(),
-                current: bytes.len(),
-                minimum: Some(1),
-                maximum: Some(256 * 1024),
-            });
-        }
+        log::trace!("Rquest Payload size: {} bytes", bytes.len());
 
-        let peers = self
-            .ipfs
-            .pubsub_peers(Some(FRIENDS_BROADCAST.into()))
-            .await?;
+        log::info!("Sending event to {recipient}");
 
-        if !peers.contains(&remote_peer_id) {
-            self.queue
-                .write()
-                .await
-                .entry(request.to())
-                .or_default()
-                .push_back(InternalRequest::Out(request.clone()));
+        let peers = self.ipfs.pubsub_peers(Some(recipient.inbox())).await?;
 
-            self.save_queue().await;
-        } else if let Err(_e) = self
-            .ipfs
-            .pubsub_publish(FRIENDS_BROADCAST.into(), bytes)
-            .await
+        let mut queued = false;
+
+        let wait = self.wait_on_response.is_some();
+
+        let mut rx = (matches!(payload.event, Event::Request) && wait).then_some({
+            let (tx, rx) = oneshot::channel();
+            self.signal.write().await.insert(recipient.clone(), tx);
+            rx
+        });
+
+        let start = Instant::now();
+        if !peers.contains(&remote_peer_id)
+            || (peers.contains(&remote_peer_id)
+                && self
+                    .ipfs
+                    .pubsub_publish(recipient.inbox(), bytes)
+                    .await
+                    .is_err())
+                && queue_broadcast
         {
-            self.queue
-                .write()
-                .await
-                .entry(request.to())
-                .or_default()
-                .push_back(InternalRequest::Out(request.clone()));
-
-            self.save_queue().await;
+            self.queue.insert(recipient, payload.clone()).await;
+            queued = true;
+            self.signal.write().await.remove(recipient);
         }
 
-        match request.status() {
-            FriendRequestStatus::Pending => {
+        if !queued {
+            let end = start.elapsed();
+            log::trace!("Took {}ms to send event", end.as_millis());
+        }
+
+        if !queued && matches!(payload.event, Event::Request) {
+            if let Some(rx) = std::mem::take(&mut rx) {
+                if let Some(timeout) = self.wait_on_response {
+                    let start = Instant::now();
+                    if let Ok(Ok(res)) = tokio::time::timeout(timeout, rx).await {
+                        let end = start.elapsed();
+                        log::trace!("Took {}ms to receive a response", end.as_millis());
+                        res?
+                    }
+                }
+            }
+        }
+
+        match payload.event {
+            Event::Request => {
+                if let Err(e) = self.tx.send(MultiPassEventKind::FriendRequestSent {
+                    to: recipient.clone(),
+                }) {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            Event::Retract => {
                 if let Err(e) = self
                     .tx
-                    .send(MultiPassEventKind::FriendRequestSent { to: request.to() })
+                    .send(MultiPassEventKind::OutgoingFriendRequestClosed {
+                        did: recipient.clone(),
+                    })
                 {
                     error!("Error broadcasting event: {e}");
                 }
             }
-            FriendRequestStatus::RequestRemoved => {
+            Event::Reject => {
                 if let Err(e) = self
                     .tx
-                    .send(MultiPassEventKind::OutgoingFriendRequestClosed { did: request.to() })
+                    .send(MultiPassEventKind::IncomingFriendRequestRejected {
+                        did: recipient.clone(),
+                    })
                 {
                     error!("Error broadcasting event: {e}");
                 }
             }
-            FriendRequestStatus::Denied => {
-                if let Err(e) = self
-                    .tx
-                    .send(MultiPassEventKind::IncomingFriendRequestRejected { did: request.to() })
-                {
+            Event::Block => {
+                tokio::spawn({
+                    let store = self.identity.clone();
+                    let recipient = recipient.clone();
+                    async move {
+                        let _ = store.push(&recipient).await.ok();
+                        let _ = store
+                            .request(&recipient, RequestOption::Identity)
+                            .await
+                            .ok();
+                    }
+                });
+                if let Err(e) = self.tx.send(MultiPassEventKind::Blocked {
+                    did: recipient.clone(),
+                }) {
+                    error!("Error broadcasting event: {e}");
+                }
+            }
+            Event::Unblock => {
+                tokio::spawn({
+                    let store = self.identity.clone();
+                    let recipient = recipient.clone();
+                    async move {
+                        let _ = store.push(&recipient).await.ok();
+                        let _ = store
+                            .request(&recipient, RequestOption::Identity)
+                            .await
+                            .ok();
+                    }
+                });
+                if let Err(e) = self.tx.send(MultiPassEventKind::Unblocked {
+                    did: recipient.clone(),
+                }) {
                     error!("Error broadcasting event: {e}");
                 }
             }
@@ -1111,88 +1062,4 @@ impl<T: IpfsTypes> FriendsStore<T> {
         };
         Ok(())
     }
-
-    async fn save_queue(&self) {
-        use warp::crypto::did_key::ECDH;
-        if let Some(path) = self.path.as_ref() {
-            let bytes = match serde_json::to_vec(&*self.queue.read().await) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    error!("Error serializing queue list into bytes: {e}");
-                    return;
-                }
-            };
-
-            let prikey =
-                Ed25519KeyPair::from_secret_key(&self.did_key.private_key_bytes()).get_x25519();
-            let pubkey =
-                Ed25519KeyPair::from_public_key(&self.did_key.public_key_bytes()).get_x25519();
-
-            let prik = match std::panic::catch_unwind(|| prikey.key_exchange(&pubkey)) {
-                Ok(pri) => Zeroizing::new(pri),
-                Err(e) => {
-                    error!("Error generating key: {e:?}");
-                    return;
-                }
-            };
-
-            let data = match Cipher::direct_encrypt(
-                warp::crypto::cipher::CipherType::Aes256Gcm,
-                &bytes,
-                &prik,
-            ) {
-                Ok(d) => d,
-                Err(e) => {
-                    error!("Error encrypting queue: {e}");
-                    return;
-                }
-            };
-
-            if let Err(e) = tokio::fs::write(path.join(".request_queue"), data).await {
-                error!("Error saving queue: {e}");
-            }
-        }
-    }
-
-    async fn load_queue(&self) -> anyhow::Result<()> {
-        use warp::crypto::did_key::ECDH;
-        if let Some(path) = self.path.as_ref() {
-            let data = tokio::fs::read(path.join(".request_queue")).await?;
-
-            let prikey =
-                Ed25519KeyPair::from_secret_key(&self.did_key.private_key_bytes()).get_x25519();
-            let pubkey =
-                Ed25519KeyPair::from_public_key(&self.did_key.public_key_bytes()).get_x25519();
-
-            let prik = std::panic::catch_unwind(|| prikey.key_exchange(&pubkey))
-                .map(Zeroizing::new)
-                .map_err(|_| anyhow::anyhow!("Error performing key exchange"))?;
-
-            let data =
-                Cipher::direct_decrypt(warp::crypto::cipher::CipherType::Aes256Gcm, &data, &prik)?;
-
-            *self.queue.write().await = serde_json::from_slice(&data)?;
-        }
-
-        Ok(())
-    }
 }
-
-fn validate_request(real_request: &FriendRequest) -> Result<(), Error> {
-    let mut request = FriendRequest::default();
-    request.set_from(real_request.from());
-    request.set_to(real_request.to());
-    request.set_status(real_request.status());
-    request.set_date(real_request.date());
-
-    let signature = match real_request.signature() {
-        Some(s) => bs58::decode(s).into_vec()?,
-        None => return Err(Error::InvalidSignature),
-    };
-
-    verify_serde_sig(real_request.from(), &request, &signature)?;
-    Ok(())
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-struct Queue(PeerId, Sata);

@@ -1,8 +1,10 @@
 use ipfs::Multiaddr;
+use rust_ipfs as ipfs;
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
     str::FromStr,
+    time::Duration,
 };
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -15,7 +17,7 @@ pub enum Bootstrap {
     None,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Discovery {
     /// Uses DHT PROVIDER to find and connect to peers using the same context
@@ -23,13 +25,8 @@ pub enum Discovery {
     /// Dials out to peers directly. Using this will only work with the DID til that connection is made
     Direct,
     /// Disables Discovery over DHT or Directly (which relays on direct connection via multiaddr)
+    #[default]
     None,
-}
-
-impl Default for Discovery {
-    fn default() -> Self {
-        Discovery::None
-    }
 }
 
 impl Bootstrap {
@@ -45,7 +42,7 @@ impl Bootstrap {
             .iter()
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),
-            Bootstrap::Experimental => vec!["/ip4/67.205.175.147/tcp/5000/p2p/12D3KooWDC7igsZ9Yaheip77ejALmjG6AZm2auuVmMDj1AkC2o7B"]
+            Bootstrap::Experimental => vec!["/ip4/137.184.70.241/tcp/4894/p2p/12D3KooWP5aD68wq8eDqMtbcMgAzzhUJt8Y3n2g5vzAA1Lo7uVgY"]
             .iter()
             .filter_map(|s| Multiaddr::from_str(s).ok())
             .collect::<Vec<_>>(),
@@ -61,17 +58,22 @@ pub struct Mdns {
     pub enable: bool,
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelayClient {
-    /// Enables relay client in libp2p
+    /// Enables relay (and dcutr) client in libp2p
     pub enable: bool,
-    /// Enables DCUtR (requires relay to be enabled)
-    pub dcutr: bool,
-    /// Uses a single relay connection
-    pub single: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     /// List of relays to use
     pub relay_address: Vec<Multiaddr>,
+}
+
+impl Default for RelayClient {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            relay_address: vec!["/ip4/24.199.86.91/tcp/46315/p2p/12D3KooWQcyxuNXxpiM7xyoXRZC7Vhfbh2yCtRg272CerbpFkhE6".parse().unwrap()]
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,14 +96,6 @@ impl Default for Swarm {
     }
 }
 
-/*
-    experimental connection limits:
-                max_pending_incoming: Some(512),
-                max_pending_outgoing: Some(512),
-                max_established_incoming: Some(512),
-                max_established_outgoing: Some(512),
-*/
-
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionLimit {
     pub max_pending_incoming: Option<u32>,
@@ -113,13 +107,56 @@ pub struct ConnectionLimit {
 }
 
 impl ConnectionLimit {
-    //Note: Further testing needs to be done for connection limits and impact on hole punching
-    pub fn production() -> Self {
+    pub fn testing() -> Self {
+        Self {
+            max_pending_incoming: Some(10),
+            max_pending_outgoing: Some(10),
+            max_established_incoming: Some(32),
+            max_established_outgoing: Some(32),
+            max_established: None,
+            max_established_per_peer: None,
+        }
+    }
+
+    pub fn minimal() -> Self {
+        Self {
+            max_pending_incoming: Some(128),
+            max_pending_outgoing: Some(128),
+            max_established_incoming: Some(128),
+            max_established_outgoing: Some(128),
+            max_established: None,
+            max_established_per_peer: None,
+        }
+    }
+
+    pub fn recommended() -> Self {
         Self {
             max_pending_incoming: Some(512),
             max_pending_outgoing: Some(512),
             max_established_incoming: Some(512),
             max_established_outgoing: Some(512),
+            max_established: None,
+            max_established_per_peer: None,
+        }
+    }
+
+    pub fn maximum() -> Self {
+        Self {
+            max_pending_incoming: Some(512),
+            max_pending_outgoing: Some(512),
+            max_established_incoming: Some(1024),
+            max_established_outgoing: Some(1024),
+            max_established: None,
+            max_established_per_peer: None,
+        }
+    }
+
+    pub fn unrestricted() -> Self {
+        Self {
+            max_pending_incoming: None,
+            max_pending_outgoing: None,
+            max_established_incoming: None,
+            max_established_outgoing: None,
             max_established: None,
             max_established_per_peer: None,
         }
@@ -132,38 +169,89 @@ pub struct RelayServer {
     pub enable: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Pubsub {
+    pub max_transmit_size: usize,
+}
+
+impl Default for Pubsub {
+    fn default() -> Self {
+        Self {
+            max_transmit_size: 8 * 1024 * 1024,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct IpfsSetting {
     pub mdns: Mdns,
     pub relay_client: RelayClient,
     pub relay_server: RelayServer,
+    pub pubsub: Pubsub,
     pub swarm: Swarm,
     pub bootstrap: bool,
+    pub portmapping: bool,
+    pub agent_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub enum UpdateEvents {
+    /// Emit events for all identity updates
+    Enabled,
+    /// Emit events for identity updates from friends
+    FriendsOnly,
+    /// Send events for all identity updates, but only emit with friends
+    #[default]
+    EmitFriendsOnly,
+    /// Disable events
+    Disable,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreSetting {
-    /// Interval for broadcasting out identity or checking queue (queue will be moved into its own system in the future)
-    pub broadcast_interval: u64,
+    /// Interval for broadcasting out identity (cannot be less than 3 minutes)
+    /// Note:
+    ///     - If `None`, this will be disabled
+    ///     - Will default to 3 minutes if less than
+    ///     - This may be removed in the future
+    pub auto_push: Option<Duration>,
     /// Discovery type
     pub discovery: Discovery,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     /// Placeholder for a offline agents to obtain information regarding one own identity
     pub sync: Vec<Multiaddr>,
     /// Interval to push or check node
-    pub sync_interval: u64,
-    /// Use objects directly rather than a cid
+    pub sync_interval: Duration,
+    /// TBD
     pub override_ipld: bool,
+    /// Enables sharing platform (Desktop, Mobile, Web) information to another user
+    pub share_platform: bool,
+    /// Enables phonebook service
+    pub use_phonebook: bool,
+    /// Emit event for when a friend comes online or offline
+    pub emit_online_event: bool,
+    /// Waits for a response from peer for a specific duration
+    pub friend_request_response_duration: Option<Duration>,
+    /// Options to allow emitting identity events to all or just friends
+    pub update_events: UpdateEvents,
+    /// Disable providing images for identities
+    pub disable_images: bool,
 }
 
 impl Default for StoreSetting {
     fn default() -> Self {
         Self {
-            broadcast_interval: 1000,
+            auto_push: None,
             discovery: Discovery::Provider(None),
             sync: Vec::new(),
-            sync_interval: 100,
+            sync_interval: Duration::from_millis(1000),
             override_ipld: true,
+            share_platform: false,
+            use_phonebook: true,
+            friend_request_response_duration: None,
+            emit_online_event: false,
+            update_events: Default::default(),
+            disable_images: false,
         }
     }
 }
@@ -178,6 +266,7 @@ pub struct MpIpfsConfig {
     pub ipfs_setting: IpfsSetting,
     pub store_setting: StoreSetting,
     pub debug: bool,
+    pub save_phrase: bool,
 }
 
 impl Default for MpIpfsConfig {
@@ -196,6 +285,7 @@ impl Default for MpIpfsConfig {
             },
             store_setting: Default::default(),
             debug: false,
+            save_phrase: false,
         }
     }
 }
@@ -218,7 +308,6 @@ impl MpIpfsConfig {
                 mdns: Mdns { enable: true },
                 relay_client: RelayClient {
                     enable: true,
-                    dcutr: true,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -231,8 +320,8 @@ impl MpIpfsConfig {
         }
     }
 
-    /// Minimial production configuration
-    pub fn minimial_testing() -> MpIpfsConfig {
+    /// Minimal production configuration
+    pub fn minimal_testing() -> MpIpfsConfig {
         MpIpfsConfig {
             bootstrap: Bootstrap::Ipfs,
             ipfs_setting: IpfsSetting {
@@ -240,7 +329,6 @@ impl MpIpfsConfig {
                 bootstrap: false,
                 relay_client: RelayClient {
                     enable: true,
-                    dcutr: true,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -253,8 +341,8 @@ impl MpIpfsConfig {
         }
     }
 
-    /// Minimial production configuration
-    pub fn minimial<P: AsRef<std::path::Path>>(path: P) -> MpIpfsConfig {
+    /// Minimal production configuration
+    pub fn minimal<P: AsRef<std::path::Path>>(path: P) -> MpIpfsConfig {
         MpIpfsConfig {
             bootstrap: Bootstrap::Ipfs,
             path: Some(path.as_ref().to_path_buf()),
@@ -263,7 +351,6 @@ impl MpIpfsConfig {
                 bootstrap: false,
                 relay_client: RelayClient {
                     enable: true,
-                    dcutr: true,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -289,7 +376,6 @@ impl MpIpfsConfig {
                 bootstrap: true,
                 relay_client: RelayClient {
                     enable: true,
-                    dcutr: true,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -424,7 +510,7 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn mp_ipfs_config_minimial(
+    pub unsafe extern "C" fn mp_ipfs_config_minimal(
         path: *const c_char,
     ) -> FFIResult<MpIpfsConfig> {
         if path.is_null() {
@@ -433,6 +519,6 @@ pub mod ffi {
 
         let path = CStr::from_ptr(path).to_string_lossy().to_string();
 
-        FFIResult::ok(MpIpfsConfig::minimial(path))
+        FFIResult::ok(MpIpfsConfig::minimal(path))
     }
 }

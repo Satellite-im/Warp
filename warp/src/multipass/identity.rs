@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -9,92 +8,6 @@ use warp_derive::FFIFree;
 
 pub const SHORT_ID_SIZE: usize = 8;
 
-#[derive(
-    Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
-)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct Role {
-    /// Name of the role
-    name: String,
-
-    /// TBD
-    level: u8,
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl Role {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn name(&self) -> String {
-        self.name.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn level(&self) -> u8 {
-        self.level
-    }
-}
-
-#[derive(
-    Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
-)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct Badge {
-    /// TBD
-    name: String,
-
-    /// TBD
-    icon: String,
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl Badge {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn name(&self) -> String {
-        self.name.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn icon(&self) -> String {
-        self.icon.clone()
-    }
-}
-
-#[derive(Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct Graphics {
-    /// Hash to profile picture
-    profile_picture: String,
-
-    /// Hash to profile banner
-    profile_banner: String,
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl Graphics {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_profile_picture(&mut self, picture: &str) {
-        self.profile_picture = picture.to_string();
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_profile_banner(&mut self, banner: &str) {
-        self.profile_banner = banner.to_string();
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl Graphics {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn profile_picture(&self) -> String {
-        self.profile_picture.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn profile_banner(&self) -> String {
-        self.profile_banner.clone()
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display, FFIFree)]
 #[serde(rename_all = "lowercase")]
 #[repr(C)]
@@ -102,8 +15,28 @@ impl Graphics {
 pub enum IdentityStatus {
     #[display(fmt = "online")]
     Online,
+    #[display(fmt = "away")]
+    Away,
+    #[display(fmt = "busy")]
+    Busy,
     #[display(fmt = "offline")]
     Offline,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone, Copy, PartialEq, Eq, Display, FFIFree)]
+#[serde(rename_all = "lowercase")]
+#[repr(C)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub enum Platform {
+    #[display(fmt = "desktop")]
+    Desktop,
+    #[display(fmt = "mobile")]
+    Mobile,
+    #[display(fmt = "web")]
+    Web,
+    #[display(fmt = "unknown")]
+    #[default]
+    Unknown,
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, FFIFree)]
@@ -113,6 +46,7 @@ pub struct Relationship {
     received_friend_request: bool,
     sent_friend_request: bool,
     blocked: bool,
+    blocked_by: bool,
 }
 
 impl Relationship {
@@ -130,6 +64,10 @@ impl Relationship {
 
     pub fn set_blocked(&mut self, val: bool) {
         self.blocked = val;
+    }
+
+    pub fn set_blocked_by(&mut self, val: bool) {
+        self.blocked_by = val;
     }
 }
 
@@ -149,6 +87,10 @@ impl Relationship {
     pub fn blocked(&self) -> bool {
         self.blocked
     }
+
+    pub fn blocked_by(&self) -> bool {
+        self.blocked_by
+    }
 }
 #[derive(
     Default, Hash, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
@@ -164,23 +106,14 @@ pub struct Identity {
     /// Public key for the identity
     did_key: DID,
 
-    /// TBD
-    graphics: Graphics,
+    /// Profile picture
+    profile_picture: String,
+
+    /// Profile banner
+    profile_banner: String,
 
     /// Status message
     status_message: Option<String>,
-
-    /// List of roles
-    roles: Vec<Role>,
-
-    /// List of available badges
-    available_badges: Vec<Badge>,
-
-    /// Active badge for identity
-    active_badge: Badge,
-
-    /// TBD
-    // linked_accounts: HashMap<String, String>,
 
     /// Signature of the identity
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -205,8 +138,13 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_graphics(&mut self, graphics: Graphics) {
-        self.graphics = graphics
+    pub fn set_profile_picture(&mut self, picture: &str) {
+        self.profile_picture = picture.to_string();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
+    pub fn set_profile_banner(&mut self, banner: &str) {
+        self.profile_banner = banner.to_string();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
@@ -218,11 +156,6 @@ impl Identity {
     pub fn set_signature(&mut self, signature: Option<String>) {
         self.signature = signature;
     }
-
-    // pub fn set_roles(&mut self) {}
-    // pub fn set_available_badges(&mut self) {}
-    // pub fn set_active_badge(&mut self) {}
-    // pub fn set_linked_accounts(&mut self) {}
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
@@ -243,8 +176,13 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn graphics(&self) -> Graphics {
-        self.graphics.clone()
+    pub fn profile_picture(&self) -> String {
+        self.profile_picture.clone()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
+    pub fn profile_banner(&self) -> String {
+        self.profile_banner.clone()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
@@ -253,413 +191,102 @@ impl Identity {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn active_badge(&self) -> Badge {
-        self.active_badge.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn signature(&self) -> Option<String> {
-        self.signature.clone()
-    }
-
-    // #[cfg_attr(target_arch = "wasm32", wasm_bindgen(skip))]
-    // pub fn linked_accounts(&self) -> HashMap<String, String> {
-    //     self.linked_accounts.clone()
-    // }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl Identity {
-    #[wasm_bindgen]
-    pub fn roles(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.roles).unwrap()
-    }
-
-    #[wasm_bindgen]
-    pub fn available_badges(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.available_badges).unwrap()
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl Identity {
-    pub fn roles(&self) -> Vec<Role> {
-        self.roles.clone()
-    }
-
-    pub fn available_badges(&self) -> Vec<Badge> {
-        self.available_badges.clone()
-    }
-}
-
-#[derive(
-    Serialize, Deserialize, Debug, Clone, Hash, PartialEq, Eq, warp_derive::FFIVec, FFIFree,
-)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct FriendRequest {
-    /// The account where the request came from
-    from: DID,
-
-    /// The account where the request was sent to
-    to: DID,
-
-    /// Status of the request
-    status: FriendRequestStatus,
-
-    /// Date of the request
-    date: DateTime<Utc>,
-
-    /// Signature of request
-    #[serde(skip_serializing_if = "Option::is_none")]
-    signature: Option<String>,
-}
-
-impl Default for FriendRequest {
-    fn default() -> Self {
-        Self {
-            from: Default::default(),
-            to: Default::default(),
-            status: Default::default(),
-            date: Utc::now(),
-            signature: None,
-        }
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl FriendRequest {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_from(&mut self, key: DID) {
-        self.from = key
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_to(&mut self, key: DID) {
-        self.to = key
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_status(&mut self, status: FriendRequestStatus) {
-        self.status = status
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(setter))]
-    pub fn set_signature(&mut self, signature: String) {
-        self.signature = Some(signature);
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl FriendRequest {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn from(&self) -> DID {
-        self.from.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn to(&self) -> DID {
-        self.to.clone()
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
-    pub fn status(&self) -> FriendRequestStatus {
-        self.status
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter))]
     pub fn signature(&self) -> Option<String> {
         self.signature.clone()
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-impl FriendRequest {
-    pub fn set_date(&mut self, date: DateTime<Utc>) {
-        self.date = date
-    }
-
-    pub fn date(&self) -> DateTime<Utc> {
-        self.date
-    }
+#[derive(Debug, Clone, FFIFree)]
+#[allow(clippy::large_enum_variant)]
+pub enum Identifier {
+    DID(DID),
+    DIDList(Vec<DID>),
+    Username(String),
+    Own,
 }
 
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl FriendRequest {
-    #[wasm_bindgen]
-    pub fn set_date(&mut self) {
-        //TODO: Use timestamp and convert it to Datetime
-        self.date = Utc::now()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn date(&self) -> i64 {
-        self.date.timestamp()
-    }
-}
-
-#[derive(Hash, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display)]
-#[repr(C)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub enum FriendRequestStatus {
-    #[display(fmt = "uninitialized")]
-    Uninitialized,
-    #[display(fmt = "pending")]
-    Pending,
-    #[display(fmt = "accepted")]
-    Accepted,
-    #[display(fmt = "denied")]
-    Denied,
-    #[display(fmt = "friend removed")]
-    FriendRemoved,
-    #[display(fmt = "request removed")]
-    RequestRemoved,
-}
-
-impl Default for FriendRequestStatus {
-    fn default() -> Self {
-        Self::Uninitialized
-    }
-}
-
-#[derive(Default, Debug, Clone, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct Identifier {
-    /// Select identity based on DID Key
-    did_key: Option<DID>,
-    /// Select identity based on Username (eg `Username#0000`)
-    user_name: Option<String>,
-    /// Select own identity.
-    own: bool,
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl Identifier {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn user_name(name: &str) -> Self {
-        Identifier {
-            user_name: Some(name.to_string()),
-            ..Default::default()
-        }
+        Self::Username(name.to_string())
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
     pub fn did_key(key: DID) -> Self {
-        Identifier {
-            did_key: Some(key),
-            ..Default::default()
-        }
+        Self::DID(key)
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+    pub fn did_keys(keys: Vec<DID>) -> Self {
+        Self::DIDList(keys)
+    }
+
     pub fn own() -> Self {
-        Identifier {
-            own: true,
-            ..Default::default()
-        }
-    }
-}
-
-impl Identifier {
-    pub fn get_inner(&self) -> (Option<DID>, Option<String>, bool) {
-        (self.did_key.clone(), self.user_name.clone(), self.own)
+        Self::Own
     }
 }
 
 impl From<DID> for Identifier {
     fn from(did_key: DID) -> Self {
-        Identifier {
-            did_key: Some(did_key),
-            ..Default::default()
-        }
+        Self::DID(did_key)
     }
 }
 
-impl<S: AsRef<str>> From<S> for Identifier {
-    fn from(username: S) -> Self {
-        Identifier {
-            user_name: Some(username.as_ref().to_string()),
-            ..Default::default()
-        }
+impl From<String> for Identifier {
+    fn from(username: String) -> Self {
+        Self::Username(username)
     }
 }
 
-#[derive(Debug, Clone, Default, FFIFree)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub struct IdentityUpdate {
-    /// Setting Username
-    username: Option<String>,
-
-    /// Path of picture
-    graphics_picture: Option<String>,
-
-    /// Path of banner
-    graphics_banner: Option<String>,
-
-    /// Setting Status Message
-    status_message: Option<Option<String>>,
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-impl IdentityUpdate {
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn set_username(username: String) -> IdentityUpdate {
-        IdentityUpdate {
-            username: Some(username),
-            ..Default::default()
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn set_graphics_picture(graphics: String) -> IdentityUpdate {
-        IdentityUpdate {
-            graphics_picture: Some(graphics),
-            ..Default::default()
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn set_graphics_banner(graphics: String) -> IdentityUpdate {
-        IdentityUpdate {
-            graphics_banner: Some(graphics),
-            ..Default::default()
-        }
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-    pub fn set_status_message(status_message: Option<String>) -> IdentityUpdate {
-        IdentityUpdate {
-            status_message: Some(status_message),
-            ..Default::default()
-        }
+impl From<&str> for Identifier {
+    fn from(username: &str) -> Self {
+        Self::Username(username.to_string())
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-impl IdentityUpdate {
-    pub fn username(&self) -> Option<String> {
-        self.username.clone()
-    }
-
-    pub fn graphics_picture(&self) -> Option<String> {
-        self.graphics_picture.clone()
-    }
-
-    pub fn graphics_banner(&self) -> Option<String> {
-        self.graphics_banner.clone()
-    }
-
-    pub fn status_message(&self) -> Option<Option<String>> {
-        self.status_message.clone()
+impl From<Vec<DID>> for Identifier {
+    fn from(list: Vec<DID>) -> Self {
+        Self::DIDList(list)
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-impl IdentityUpdate {
-    #[wasm_bindgen(getter)]
-    pub fn username(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.username).unwrap()
+impl From<&[DID]> for Identifier {
+    fn from(list: &[DID]) -> Self {
+        Self::DIDList(list.to_vec())
     }
+}
 
-    #[wasm_bindgen(getter)]
-    pub fn graphics_picture(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.graphics_picture).unwrap()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn graphics_banner(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.graphics_banner).unwrap()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn status_message(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.status_message).unwrap()
-    }
+#[derive(Debug, Clone, FFIFree)]
+pub enum IdentityUpdate {
+    Username(String),
+    Picture(String),
+    PicturePath(std::path::PathBuf),
+    ClearPicture,
+    Banner(String),
+    BannerPath(std::path::PathBuf),
+    ClearBanner,
+    StatusMessage(Option<String>),
+    ClearStatusMessage,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi {
     use crate::crypto::DID;
-    use crate::multipass::identity::{
-        Badge, FFIVec_Badge, FFIVec_Role, FriendRequest, FriendRequestStatus, Graphics, Identifier,
-        Identity, IdentityUpdate, Role,
-    };
+    use crate::multipass::identity::{Identifier, Identity, IdentityUpdate};
     use std::ffi::{CStr, CString};
-    use std::os::raw::{c_char, c_void};
+    use std::os::raw::c_char;
 
     use super::Relationship;
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_role_name(role: *const Role) -> *mut c_char {
-        if role.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let role = &*role;
-
-        match CString::new(role.name()) {
-            Ok(c) => c.into_raw(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_role_level(role: *const Role) -> u8 {
-        if role.is_null() {
-            return 0;
-        }
-
-        let role = &*role;
-
-        role.level()
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_badge_name(badge: *const Badge) -> *mut c_char {
-        if badge.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let badge = &*badge;
-
-        match CString::new(badge.name()) {
-            Ok(c) => c.into_raw(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_badge_icon(badge: *const Badge) -> *mut c_char {
-        if badge.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let badge = &*badge;
-
-        match CString::new(badge.icon()) {
-            Ok(c) => c.into_raw(),
-            Err(_) => std::ptr::null_mut(),
-        }
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_graphics_profile_picture(
-        graphics: *const Graphics,
+    pub unsafe extern "C" fn multipass_identity_profile_picture(
+        identity: *const Identity,
     ) -> *mut c_char {
-        if graphics.is_null() {
+        if identity.is_null() {
             return std::ptr::null_mut();
         }
 
-        let graphics = &*graphics;
+        let identity = &*identity;
 
-        match CString::new(graphics.profile_picture()) {
+        match CString::new(identity.profile_picture()) {
             Ok(c) => c.into_raw(),
             Err(_) => std::ptr::null_mut(),
         }
@@ -667,16 +294,16 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_graphics_profile_banner(
-        graphics: *const Graphics,
+    pub unsafe extern "C" fn multipass_identity_profile_banner(
+        identity: *const Identity,
     ) -> *mut c_char {
-        if graphics.is_null() {
+        if identity.is_null() {
             return std::ptr::null_mut();
         }
 
-        let graphics = &*graphics;
+        let identity = &*identity;
 
-        match CString::new(graphics.profile_banner()) {
+        match CString::new(identity.profile_banner()) {
             Ok(c) => c.into_raw(),
             Err(_) => std::ptr::null_mut(),
         }
@@ -725,20 +352,6 @@ pub mod ffi {
 
     #[allow(clippy::missing_safety_doc)]
     #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_graphics(
-        identity: *const Identity,
-    ) -> *mut Graphics {
-        if identity.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let identity = &*identity;
-
-        Box::into_raw(Box::new(identity.graphics())) as *mut Graphics
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
     pub unsafe extern "C" fn multipass_identity_status_message(
         identity: *const Identity,
     ) -> *mut c_char {
@@ -755,100 +368,6 @@ pub mod ffi {
             },
             None => std::ptr::null_mut(),
         }
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_roles(identity: *mut Identity) -> *mut FFIVec_Role {
-        if identity.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let identity = &*identity;
-
-        let contents = identity.roles();
-        Box::into_raw(Box::new(contents.into())) as *mut _
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_available_badge(
-        identity: *mut Identity,
-    ) -> *mut FFIVec_Badge {
-        if identity.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let identity = &*identity;
-
-        let contents = identity.available_badges();
-        Box::into_raw(Box::new(contents.into())) as *mut _
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_active_badge(
-        identity: *const Identity,
-    ) -> *mut Badge {
-        if identity.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let identity = &*identity;
-        Box::into_raw(Box::new(identity.active_badge())) as *mut Badge
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_identity_linked_accounts(
-        identity: *const Identity,
-    ) -> *mut c_void {
-        if identity.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let _identity = &*identity;
-        //TODO
-        std::ptr::null_mut()
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_friend_request_from(
-        request: *const FriendRequest,
-    ) -> *mut DID {
-        if request.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let request = &*request;
-        Box::into_raw(Box::new(request.from()))
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_friend_request_to(
-        request: *const FriendRequest,
-    ) -> *mut DID {
-        if request.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        let request = &*request;
-        Box::into_raw(Box::new(request.to()))
-    }
-
-    #[allow(clippy::missing_safety_doc)]
-    #[no_mangle]
-    pub unsafe extern "C" fn multipass_friend_request_status(
-        request: *const FriendRequest,
-    ) -> FriendRequestStatus {
-        if request.is_null() {
-            return FriendRequestStatus::Uninitialized;
-        }
-
-        let request = &*request;
-        request.status()
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -894,7 +413,7 @@ pub mod ffi {
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::set_username(name))) as *mut IdentityUpdate
+        Box::into_raw(Box::new(IdentityUpdate::Username(name))) as *mut IdentityUpdate
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -908,7 +427,7 @@ pub mod ffi {
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::set_graphics_picture(name))) as *mut IdentityUpdate
+        Box::into_raw(Box::new(IdentityUpdate::Picture(name))) as *mut IdentityUpdate
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -922,7 +441,7 @@ pub mod ffi {
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-        Box::into_raw(Box::new(IdentityUpdate::set_graphics_banner(name))) as *mut IdentityUpdate
+        Box::into_raw(Box::new(IdentityUpdate::Banner(name))) as *mut IdentityUpdate
     }
 
     #[allow(clippy::missing_safety_doc)]
@@ -932,9 +451,9 @@ pub mod ffi {
     ) -> *mut IdentityUpdate {
         let update = if !name.is_null() {
             let name = CStr::from_ptr(name).to_string_lossy().to_string();
-            IdentityUpdate::set_status_message(Some(name))
+            IdentityUpdate::StatusMessage(Some(name))
         } else {
-            IdentityUpdate::set_status_message(None)
+            IdentityUpdate::StatusMessage(None)
         };
 
         Box::into_raw(Box::new(update)) as *mut IdentityUpdate
@@ -951,12 +470,12 @@ pub mod ffi {
 
         let update = &*update;
 
-        match update.username() {
-            Some(data) => match CString::new(data) {
+        match update {
+            IdentityUpdate::Username(data) => match CString::new(data.clone()) {
                 Ok(data) => data.into_raw(),
                 Err(_) => std::ptr::null_mut(),
             },
-            None => std::ptr::null_mut(),
+            _ => std::ptr::null_mut(),
         }
     }
 
@@ -971,12 +490,12 @@ pub mod ffi {
 
         let update = &*update;
 
-        match update.graphics_picture() {
-            Some(data) => match CString::new(data) {
+        match update {
+            IdentityUpdate::Picture(data) => match CString::new(data.clone()) {
                 Ok(data) => data.into_raw(),
                 Err(_) => std::ptr::null_mut(),
             },
-            None => std::ptr::null_mut(),
+            _ => std::ptr::null_mut(),
         }
     }
 
@@ -991,12 +510,12 @@ pub mod ffi {
 
         let update = &*update;
 
-        match update.graphics_banner() {
-            Some(data) => match CString::new(data) {
+        match update {
+            IdentityUpdate::Banner(data) => match CString::new(data.clone()) {
                 Ok(data) => data.into_raw(),
                 Err(_) => std::ptr::null_mut(),
             },
-            None => std::ptr::null_mut(),
+            _ => std::ptr::null_mut(),
         }
     }
 
@@ -1011,8 +530,8 @@ pub mod ffi {
 
         let update = &*update;
 
-        if let Some(Some(inner)) = update.status_message() {
-            if let Ok(data) = CString::new(inner) {
+        if let IdentityUpdate::StatusMessage(Some(inner)) = update {
+            if let Ok(data) = CString::new(inner.clone()) {
                 return data.into_raw();
             }
         }

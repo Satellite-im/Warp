@@ -1,3 +1,5 @@
+//TODO: Possibly reduce and simplify 
+#![allow(clippy::result_large_err)]
 use multihash::{
     derive::Multihash, Blake2b256, Blake2b512, Blake2s128, Blake2s256, Blake3_256, Hasher,
     Identity256, Keccak224, Keccak256, Keccak384, Keccak512, MultihashDigest, Sha1, Sha2_256,
