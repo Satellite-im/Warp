@@ -3,7 +3,7 @@
 #![allow(clippy::clone_on_copy)]
 use crate::{
     config::{Discovery as DiscoveryConfig, UpdateEvents},
-    store::{did_to_libp2p_pub, discovery::Discovery, VecExt},
+    store::{did_to_libp2p_pub, discovery::Discovery, PeerTopic, VecExt},
 };
 use futures::{
     channel::{mpsc, oneshot},
@@ -255,10 +255,7 @@ impl IdentityStore {
 
         let did = store.get_keypair_did()?;
 
-        let event_stream = store
-            .ipfs
-            .pubsub_subscribe(format!("/peer/{did}/events"))
-            .await?;
+        let event_stream = store.ipfs.pubsub_subscribe(did.events()).await?;
 
         tokio::spawn({
             let mut store = store.clone();
@@ -774,18 +771,16 @@ impl IdentityStore {
 
         log::info!("Sending event to {out_did}");
 
-        let topic = format!("/peer/{out_did}/events");
-
         let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
 
         if self
             .ipfs
-            .pubsub_peers(Some(topic.clone()))
+            .pubsub_peers(Some(out_did.events()))
             .await?
             .contains(&out_peer_id)
         {
             let timer = Instant::now();
-            self.ipfs.pubsub_publish(topic, bytes).await?;
+            self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
             let end = timer.elapsed();
             log::info!("Event sent to {out_did}");
             log::trace!("Took {}ms to send event", end.as_millis());
@@ -864,18 +859,16 @@ impl IdentityStore {
 
         log::info!("Sending event to {out_did}");
 
-        let topic = format!("/peer/{out_did}/events");
-
         let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
 
         if self
             .ipfs
-            .pubsub_peers(Some(topic.clone()))
+            .pubsub_peers(Some(out_did.events()))
             .await?
             .contains(&out_peer_id)
         {
             let timer = Instant::now();
-            self.ipfs.pubsub_publish(topic, bytes).await?;
+            self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
             let end = timer.elapsed();
             log::info!("Event sent to {out_did}");
             log::trace!("Took {}ms to send event", end.as_millis());
@@ -913,18 +906,16 @@ impl IdentityStore {
 
         log::info!("Sending event to {out_did}");
 
-        let topic = format!("/peer/{out_did}/events");
-
         let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
 
         if self
             .ipfs
-            .pubsub_peers(Some(topic.clone()))
+            .pubsub_peers(Some(out_did.events()))
             .await?
             .contains(&out_peer_id)
         {
             let timer = Instant::now();
-            self.ipfs.pubsub_publish(topic, bytes).await?;
+            self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
             let end = timer.elapsed();
             log::info!("Event sent to {out_did}");
             log::trace!("Took {}ms to send event", end.as_millis());
@@ -961,18 +952,16 @@ impl IdentityStore {
 
         log::info!("Sending event to {out_did}");
 
-        let topic = format!("/peer/{out_did}/events");
-
         let out_peer_id = did_to_libp2p_pub(out_did)?.to_peer_id();
 
         if self
             .ipfs
-            .pubsub_peers(Some(topic.clone()))
+            .pubsub_peers(Some(out_did.events()))
             .await?
             .contains(&out_peer_id)
         {
             let timer = Instant::now();
-            self.ipfs.pubsub_publish(topic, bytes).await?;
+            self.ipfs.pubsub_publish(out_did.events(), bytes).await?;
             let end = timer.elapsed();
             log::info!("Event sent to {out_did}");
             log::trace!("Took {}ms to send event", end.as_millis());
@@ -1294,7 +1283,7 @@ impl IdentityStore {
         }
 
         let public_key =
-            DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().encode()));
+            DIDKey::Ed25519(Ed25519KeyPair::from_public_key(&raw_kp.public().to_bytes()));
 
         let username = username
             .map(str::to_string)
@@ -1606,17 +1595,16 @@ impl IdentityStore {
     }
 
     pub fn get_keypair_did(&self) -> anyhow::Result<DID> {
-        let kp = Zeroizing::new(self.get_raw_keypair()?.encode());
+        let kp = Zeroizing::new(self.get_raw_keypair()?.to_bytes());
         let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&*kp)?;
         let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
         Ok(did.into())
     }
 
     pub fn get_raw_keypair(&self) -> anyhow::Result<ipfs::libp2p::identity::ed25519::Keypair> {
-        match self.get_keypair()?.into_ed25519() {
-            Some(kp) => Ok(kp),
-            _ => anyhow::bail!("Unsupported keypair"),
-        }
+        self.get_keypair()?
+            .try_into_ed25519()
+            .map_err(anyhow::Error::from)
     }
 
     pub async fn get_root_document(&self) -> Result<RootDocument, Error> {

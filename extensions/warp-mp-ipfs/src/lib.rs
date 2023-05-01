@@ -130,8 +130,8 @@ impl IpfsIdentity {
         let keypair = match (init, tesseract.exist("keypair")) {
             (true, false) => {
                 info!("Keypair doesnt exist. Generating keypair....");
-                if let Some(kp) = Keypair::generate_ed25519().into_ed25519() {
-                    let encoded_kp = bs58::encode(&kp.encode()).into_string();
+                if let Ok(kp) = Keypair::generate_ed25519().try_into_ed25519() {
+                    let encoded_kp = bs58::encode(&kp.to_bytes()).into_string();
                     tesseract.set("keypair", &encoded_kp)?;
                     let bytes = Zeroizing::new(kp.secret().as_ref().to_vec());
                     Keypair::ed25519_from_bytes(bytes)?
@@ -233,8 +233,6 @@ impl IpfsIdentity {
             })),
             swarm_configuration: Some(swarm_configuration),
             transport_configuration: Some(TransportConfig {
-                yamux_max_buffer_size: 16 * 1024 * 1024,
-                yamux_receive_window_size: 16 * 1024 * 1024,
                 yamux_update_mode: UpdateMode::Read,
                 mplex_max_buffer_size: usize::MAX / 2,
                 enable_quic: false,
@@ -254,7 +252,7 @@ impl IpfsIdentity {
 
             if !path.is_dir() {
                 warn!("Path doesnt exist... creating");
-                tokio::fs::create_dir(path).await?;
+                tokio::fs::create_dir_all(path).await?;
             }
             opts.ipfs_path = StoragePath::Disk(path.clone());
         }
@@ -918,7 +916,7 @@ impl MultiPass for IpfsIdentity {
 
     fn decrypt_private_key(&self, _: Option<&str>) -> Result<DID, Error> {
         let store = self.identity_store_sync()?;
-        let kp = store.get_raw_keypair()?.encode();
+        let kp = store.get_raw_keypair()?.to_bytes();
         let kp = warp::crypto::ed25519_dalek::Keypair::from_bytes(&kp)?;
         let did = DIDKey::Ed25519(Ed25519KeyPair::from_secret_key(kp.secret.as_bytes()));
         Ok(did.into())

@@ -18,6 +18,7 @@ use warp::sync::Arc;
 use warp::tesseract::Tesseract;
 
 use crate::config::MpIpfsConfig;
+use crate::store::PeerTopic;
 
 use super::identity::{IdentityStore, LookupBy, RequestOption};
 use super::phonebook::PhoneBook;
@@ -157,7 +158,7 @@ impl FriendsStore {
 
         let stream = store
             .ipfs
-            .pubsub_subscribe(get_inbox_topic(store.did_key.as_ref()))
+            .pubsub_subscribe(store.did_key.inbox())
             .await?;
 
         tokio::spawn({
@@ -915,8 +916,6 @@ impl FriendsStore {
     ) -> Result<(), Error> {
         let remote_peer_id = did_to_libp2p_pub(recipient)?.to_peer_id();
 
-        let topic = get_inbox_topic(recipient);
-
         if !self.discovery.contains(recipient).await {
             self.discovery.insert(recipient).await?;
         }
@@ -950,7 +949,7 @@ impl FriendsStore {
 
         log::info!("Sending event to {recipient}");
 
-        let peers = self.ipfs.pubsub_peers(Some(topic.clone())).await?;
+        let peers = self.ipfs.pubsub_peers(Some(recipient.inbox())).await?;
 
         let mut queued = false;
 
@@ -967,7 +966,7 @@ impl FriendsStore {
             || (peers.contains(&remote_peer_id)
                 && self
                     .ipfs
-                    .pubsub_publish(topic.clone(), bytes)
+                    .pubsub_publish(recipient.inbox(), bytes)
                     .await
                     .is_err())
                 && queue_broadcast
@@ -1063,8 +1062,4 @@ impl FriendsStore {
         };
         Ok(())
     }
-}
-
-pub fn get_inbox_topic(did: &DID) -> String {
-    format!("/peer/{did}/inbox")
 }

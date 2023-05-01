@@ -5,12 +5,13 @@ pub mod identity;
 pub mod phonebook;
 pub mod queue;
 
-use std::time::Duration;
+use std::{fmt::Display, time::Duration};
 
 use futures::StreamExt;
+use libipld::Multihash;
 use rust_ipfs as ipfs;
 
-use ipfs::PeerId;
+use ipfs::{PeerId, PublicKey};
 use warp::{
     crypto::{
         cipher::Cipher,
@@ -22,6 +23,33 @@ use warp::{
     multipass::identity::IdentityStatus,
     tesseract::Tesseract,
 };
+
+pub trait PeerTopic: Display {
+    fn inbox(&self) -> String {
+        format!("/peer/{self}/inbox")
+    }
+
+    fn events(&self) -> String {
+        format!("/peer/{self}/events")
+    }
+}
+
+impl PeerTopic for DID {}
+
+pub trait PeerIdExt {
+    fn to_did(&self) -> Result<DID, anyhow::Error>;
+}
+
+impl PeerIdExt for PeerId {
+    fn to_did(&self) -> Result<DID, anyhow::Error> {
+        let multihash: Multihash = (*self).into();
+        if multihash.code() != 0 {
+            anyhow::bail!("PeerId does not contain inline public key");
+        }
+        let public_key = PublicKey::try_decode_protobuf(multihash.digest())?;
+        libp2p_pub_to_did(&public_key)
+    }
+}
 
 pub trait VecExt<T: Eq> {
     fn insert_item(&mut self, item: &T) -> bool;
@@ -61,9 +89,9 @@ fn did_to_libp2p_pub(public_key: &DID) -> anyhow::Result<ipfs::libp2p::identity:
 }
 
 fn libp2p_pub_to_did(public_key: &ipfs::libp2p::identity::PublicKey) -> anyhow::Result<DID> {
-    let pk = match public_key.clone().into_ed25519() {
-        Some(pk) => {
-            let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.encode()).into();
+    let pk = match public_key.clone().try_into_ed25519() {
+        Ok(pk) => {
+            let did: DIDKey = Ed25519KeyPair::from_public_key(&pk.to_bytes()).into();
             did.try_into()?
         }
         _ => anyhow::bail!(Error::PublicKeyInvalid),
@@ -194,4 +222,36 @@ pub async fn connected_to_peer<I: Into<PeerType>>(
         true => PeerConnectionType::Connected,
         false => PeerConnectionType::NotConnected,
     })
+}
+
+#[cfg(test)]
+mod test {
+    use rust_ipfs::Keypair;
+    use warp::crypto::DID;
+
+    use crate::store::did_to_libp2p_pub;
+
+    use super::PeerIdExt;
+
+    #[test]
+    fn peer_id_to_did() -> anyhow::Result<()> {
+        let peer_id = generate_ed25519_keypair(0).public().to_peer_id();
+        assert!(peer_id.to_did().is_ok());
+
+        let random_did = DID::default();
+        let public_key = did_to_libp2p_pub(&random_did)?;
+
+        let peer_id = public_key.to_peer_id();
+
+        let same_did = peer_id.to_did()?;
+        assert_eq!(same_did, random_did);
+
+        Ok(())
+    }
+
+    fn generate_ed25519_keypair(seed: u8) -> Keypair {
+        let mut buffer = [0u8; 32];
+        buffer[0] = seed;
+        Keypair::ed25519_from_bytes(buffer).expect("valid keypair")
+    }
 }

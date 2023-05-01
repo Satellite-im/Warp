@@ -1,12 +1,11 @@
-use std::path::Path;
+use std::{io::ErrorKind, path::Path};
 
 use anyhow::bail;
 use clap::{Parser, Subcommand};
 use comfy_table::Table;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use std::path::PathBuf;
-use tokio::io::AsyncWriteExt;
-use tokio_util::io::ReaderStream;
+use tokio_util::compat::TokioAsyncWriteCompatExt;
 use warp::{
     constellation::{Constellation, Progression},
     multipass::MultiPass,
@@ -60,15 +59,8 @@ async fn account_persistent<P: AsRef<Path>>(
     opt: &Opt,
 ) -> anyhow::Result<Box<dyn MultiPass>> {
     let path = path.as_ref();
-    let tesseract = match Tesseract::from_file(path.join("tdatastore")) {
-        Ok(tess) => tess,
-        Err(_) => {
-            let tess = Tesseract::default();
-            tess.set_file(path.join("tdatastore"));
-            tess.set_autosave();
-            tess
-        }
-    };
+
+    let tesseract = Tesseract::open_or_create(path.join("tdatastore"))?;
 
     tesseract
         .unlock(b"this is my totally secured password that should nnever be embedded in code")?;
@@ -104,17 +96,7 @@ async fn main() -> anyhow::Result<()> {
             let remote =
                 remote.unwrap_or_else(|| file.file_name().unwrap().to_string_lossy().to_string());
 
-            let file = tokio::fs::File::open(&local).await?;
-
-            let size = file.metadata().await?.len() as usize;
-
-            let stream = ReaderStream::new(file)
-                .filter_map(|x| async { x.ok() })
-                .map(|x| x.into());
-
-            let mut event = filesystem
-                .put_stream(&remote, Some(size), stream.boxed())
-                .await?;
+            let mut event = filesystem.put(&remote, &local).await?;
 
             while let Some(event) = event.next().await {
                 match event {
@@ -152,15 +134,17 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Command::DownloadFile { remote, local } => {
-            let mut stream = filesystem.get_stream(&remote).await?;
+            let stream = filesystem.get_stream(&remote).await?;
 
-            let mut written = 0;
-            let mut file = tokio::fs::File::create(&local).await?;
-            while let Some(Ok(data)) = stream.next().await {
-                file.write_all(&data).await?;
-                written += data.len();
-                file.flush().await?;
-            }
+            let file = tokio::fs::File::create(&local).await?;
+
+            let mut reader = stream
+                .map(|s| s.map_err(|e| std::io::Error::new(ErrorKind::Other, e)))
+                .into_async_read();
+
+            let mut writer = file.compat_write();
+
+            let written = futures::io::copy(&mut reader, &mut writer).await?;
 
             println!(
                 "{local} been downloaded with {} MB written",

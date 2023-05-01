@@ -2,8 +2,9 @@ use anyhow::{anyhow, bail};
 use aws_endpoint::partition::endpoint;
 use aws_endpoint::{CredentialScope, Partition, PartitionResolver};
 use aws_sdk_s3::presigning::config::PresigningConfig;
+use futures::StreamExt;
 use std::path::PathBuf;
-use warp::constellation::ConstellationEvent;
+use warp::constellation::{ConstellationEvent, ConstellationProgressStream, Progression};
 use warp::sata::Sata;
 use warp::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -42,7 +43,7 @@ impl Default for StorjClient {
                 secret_key: None,
                 security_token: None,
                 session_token: None,
-                expiration: None
+                expiration: None,
             },
         }
     }
@@ -55,7 +56,7 @@ impl StorjClient {
             secret_key: Some(secret_key.as_ref().to_string()),
             security_token: None,
             session_token: None,
-            expiration: None
+            expiration: None,
         };
         Self { creds, endpoint }
     }
@@ -66,7 +67,7 @@ impl StorjClient {
             secret_key: Some(secret_key.as_ref().to_string()),
             security_token: None,
             session_token: None,
-            expiration: None
+            expiration: None,
         };
         self.creds = Credentials {
             access_key: Some(access_key.as_ref().to_string()),
@@ -209,7 +210,7 @@ impl Constellation for StorjFilesystem {
     /// Uploads file from path with the name format being `bucket_name://path/to/file`
     /// Note: This only supports uploading of files. This has not implemented creation of
     ///       directories.
-    async fn put(&mut self, name: &str, path: &str) -> Result<()> {
+    async fn put(&mut self, name: &str, path: &str) -> Result<ConstellationProgressStream> {
         let (bucket, name) = split_for(name)?;
 
         let mut fs = tokio::fs::File::open(&path).await?;
@@ -262,7 +263,17 @@ impl Constellation for StorjFilesystem {
             let object = DataObject::new(DataType::from(Module::FileSystem), file)?;
             hook.trigger("filesystem::new_file", &object)
         }
-        Ok(())
+
+        let stream = ConstellationProgressStream(futures::stream::once(
+            async move {
+                Progression::ProgressComplete {
+                    name,
+                    total: Some(size as _),
+                }
+            },
+        ).boxed());
+
+        Ok(stream)
     }
 
     /// Download file to path with the name format being `bucket_name://path/to/file`
@@ -419,7 +430,7 @@ impl Constellation for StorjFilesystem {
     async fn remove(&mut self, path: &str, _: bool) -> Result<()> {
         let (bucket, name) = split_for(path)?;
 
-        let res= self
+        let res = self
             .client
             .bucket(bucket, false)
             .await?

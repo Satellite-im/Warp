@@ -67,8 +67,8 @@ paste.workspace = true
 libc.workspace = true
 warp-derive = { path = "./warp-derive" }
 sata.workspace = true
-tracing = { default-features = false, features = ["log"], workspace = true }
-tracing-futures = { default-features = false, features = [
+tracing = {  features = ["log"], workspace = true }
+tracing-futures = { features = [
     "std-future",
     "std",
     "futures-03",
