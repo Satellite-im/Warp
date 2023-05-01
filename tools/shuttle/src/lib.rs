@@ -49,6 +49,14 @@ fn sha256_hash(data: &[u8], salt: &[u8]) -> Vec<u8> {
     hasher.finalize().to_vec()
 }
 
+fn sha256_iter<'a>(iter: impl Iterator<Item = Option<&'a [u8]>>) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    for data in iter.flatten() {
+        hasher.update(data);
+    }
+    hasher.finalize().to_vec()
+}
+
 fn generate_nonce() -> Vec<u8> {
     let mut buf = vec![0u8; 12];
     let mut rng = rand::thread_rng();
@@ -62,7 +70,9 @@ fn extract_data_slice(data: &[u8], size: usize) -> (&[u8], &[u8]) {
     (extracted, payload)
 }
 
-fn convert_ed25519_to_x25519_priv(secret: &rust_ipfs::libp2p::identity::ed25519::SecretKey) -> StaticSecret {
+fn convert_ed25519_to_x25519_priv(
+    secret: &rust_ipfs::libp2p::identity::ed25519::SecretKey,
+) -> StaticSecret {
     let mut hasher: Sha512 = Sha512::new();
     hasher.update(secret);
     let hash = hasher.finalize().to_vec();
@@ -74,20 +84,30 @@ fn convert_ed25519_to_x25519_priv(secret: &rust_ipfs::libp2p::identity::ed25519:
 fn convert_ed25519_to_x25519_pub(
     publickey: &rust_ipfs::PublicKey,
 ) -> anyhow::Result<x25519_dalek::PublicKey> {
-    let ed25519_pubkey = publickey.clone().into_ed25519().ok_or(anyhow::anyhow!("Ed25519 is only supported"))?;
+    let ed25519_pubkey = publickey
+        .clone()
+        .into_ed25519()
+        .ok_or(anyhow::anyhow!("Ed25519 is only supported"))?;
     let ep = CompressedEdwardsY(ed25519_pubkey.encode())
         .decompress()
-        .ok_or(anyhow::anyhow!("Unsupported"))?; 
+        .ok_or(anyhow::anyhow!("Unsupported"))?;
     let mon = ep.to_montgomery();
     Ok(x25519_dalek::PublicKey::from(mon.0))
 }
 
-pub(crate) fn ecdh_encrypt(keypair: &rust_ipfs::Keypair, public_key: Option<&rust_ipfs::PublicKey>, data: impl AsRef<[u8]>) -> anyhow::Result<Vec<u8>> {
-    let ed25519_keypair = keypair.clone().into_ed25519().ok_or(anyhow::anyhow!("Ed25519 is only supported"))?;
+pub(crate) fn ecdh_encrypt(
+    keypair: &rust_ipfs::Keypair,
+    public_key: Option<&rust_ipfs::PublicKey>,
+    data: impl AsRef<[u8]>,
+) -> anyhow::Result<Vec<u8>> {
+    let ed25519_keypair = keypair
+        .clone()
+        .into_ed25519()
+        .ok_or(anyhow::anyhow!("Ed25519 is only supported"))?;
     let xpriv = convert_ed25519_to_x25519_priv(&ed25519_keypair.secret());
     let xpub = match public_key {
         Some(pubkey) => convert_ed25519_to_x25519_pub(pubkey)?,
-        None => x25519_dalek::PublicKey::from(&xpriv)
+        None => x25519_dalek::PublicKey::from(&xpriv),
     };
 
     let shared_key = xpriv.diffie_hellman(&xpub);
@@ -95,12 +115,19 @@ pub(crate) fn ecdh_encrypt(keypair: &rust_ipfs::Keypair, public_key: Option<&rus
     encrypt(data.as_ref(), shared_key.as_bytes())
 }
 
-pub(crate) fn ecdh_decrypt(keypair: &rust_ipfs::Keypair, public_key: Option<&rust_ipfs::PublicKey>, data: impl AsRef<[u8]>) -> anyhow::Result<Vec<u8>> {
-    let ed25519_keypair = keypair.clone().into_ed25519().ok_or(anyhow::anyhow!("Ed25519 is only supported"))?;
+pub(crate) fn ecdh_decrypt(
+    keypair: &rust_ipfs::Keypair,
+    public_key: Option<&rust_ipfs::PublicKey>,
+    data: impl AsRef<[u8]>,
+) -> anyhow::Result<Vec<u8>> {
+    let ed25519_keypair = keypair
+        .clone()
+        .into_ed25519()
+        .ok_or(anyhow::anyhow!("Ed25519 is only supported"))?;
     let xpriv = convert_ed25519_to_x25519_priv(&ed25519_keypair.secret());
     let xpub = match public_key {
         Some(pubkey) => convert_ed25519_to_x25519_pub(pubkey)?,
-        None => x25519_dalek::PublicKey::from(&xpriv)
+        None => x25519_dalek::PublicKey::from(&xpriv),
     };
 
     let shared_key = xpriv.diffie_hellman(&xpub);
@@ -112,7 +139,7 @@ pub(crate) fn ecdh_decrypt(keypair: &rust_ipfs::Keypair, public_key: Option<&rus
 mod test {
     use rust_ipfs::Keypair;
 
-    use crate::{ecdh_encrypt, ecdh_decrypt};
+    use crate::{ecdh_decrypt, ecdh_encrypt};
 
     #[test]
     fn ecdh_encrypt_decrypt() -> anyhow::Result<()> {

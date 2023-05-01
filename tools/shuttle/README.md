@@ -55,11 +55,11 @@ struct Payload<'a> {
     // Intended recipient of the payload
     recipient: PublicKey, // Should be Ed25519, not to exceed 256 bits
     // Header that contains data used by the sender or receipient to identify the payload on the agent
-    metadata: &'a [u8], // Should not exceed 1KB
+    metadata: Cow<'a, [u8]>, // Should not exceed 1KB
     // Encrypted message
-    data: &'a [u8], // Should not exceed 8MB (within margin)
+    data: Cow<'a, [u8]>, // Should not exceed 8MB (within margin)
     // Signature. 
-    signature: &'a [u8] // Should not exceed 512 bits
+    signature: Cow<'a, [u8]> // Should not exceed 512 bits
 }
 ```
 
@@ -85,13 +85,13 @@ struct Request<'a> {
     // Simple identifier on how to handle the request
     identifier: Identifier,
     // namespace under which the request belongs
-    namespace: &'a [u8],
+    namespace: Cow<'a, [u8]>,
     // optional key for a key/value lookup
     key: Option<Cow<'a, [u8]>>,
     // Can only be used if Identifier is `Replace` or `Store` 
     payload: Option<Payload<'a>>,
     // signature of the request
-    signature: &'a [u8]
+    signature: Cow<'a, [u8]>
 }
 ```
 
@@ -109,7 +109,7 @@ struct Response<'a> {
     id: Uuid,
     status: Status,
     data: Option<Cow<'a, [u8]>>,
-    signature: &'a [u8],
+    signature: Cow<'a, [u8]>,
 }
 ```
 

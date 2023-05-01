@@ -106,7 +106,8 @@ impl ShuttleClient {
                                     let Ok(signature) = keypair.sign(&bytes) else {
                                         continue;
                                     };
-                                    let request = Request::new(Identifier::Store, &namespace, None, Some(payload), &signature);
+                                    
+                                    let request = Request::new(Identifier::Store, namespace.into(), None, Some(payload), signature.into());
 
                                     let request_id = request.id();
 
