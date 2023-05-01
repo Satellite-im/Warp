@@ -39,6 +39,9 @@ This service will be helpful because within warp (or at least its ipfs component
   - An agent may restrict data even further but cannot restrict it below 2MB
   - A client may restrict data under a given namespace (eg in warp, friend requests or operations should not exceed 10KB, although its not enforced at this time)
 
+### Signature
+- Signature should constructed by a SHA256 digest, which is then signed by the keypair 
+
 ### Wire format 
 
 **Note: Data should be serialized with a binary serializer such as bincode, protobuf, etc. This would allow utilizing zero-copy more effectively so we can reduce allocation** 
